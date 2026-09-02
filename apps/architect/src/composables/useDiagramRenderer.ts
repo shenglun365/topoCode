@@ -7,6 +7,7 @@ mermaid/plantuml 渲染统一经 @topo/web-core/composables/useTopoRender：
 */
 
 import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
+import { normalizeMermaidCode } from '@topo/web-core/services/diagram-normalize'
 
 export type DiagramLang = 'mermaid' | 'plantuml'
 
@@ -20,12 +21,9 @@ export async function renderPlantuml(code: string): Promise<string> {
   return renderDiagram('plantuml', code)
 }
 
+/** 清理规则单一源见 @topo/web-core/services/diagram-normalize（F2 修正，原此处有一份拷贝） */
 export function normalizeMermaid(code: string): string {
-  return code
-    .replace(/\b([A-Za-z_]\w*)\s+\[/g, '$1[')
-    .replace(/\[([^[\]]*?)\(([^()]*)\)([^[\]]*?)\]/g, '[$1$2$3]')
-    .replace(/^\s*style\s+.*$/gm, '')
-    .replace(/[ \t]+$/gm, '')
+  return normalizeMermaidCode(code)
 }
 
 /** 各渲染器的关系边数上限(不扩容：仅用于超限时给出友好提示，引导缩小数据范围)。 */

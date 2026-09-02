@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDiagram } from '../../src/topoOne/core/DiagramView';
-import { createZoomPanPlugin } from '../../src/topoOne/plugins/zoom-pan';
-import type { SharedInteractionState } from '../../src/topoOne/plugins/types';
+import { createDiagram } from '../../src/core/DiagramView';
+import { createZoomPanPlugin } from '../../src/plugins/zoom-pan';
+import type { SharedInteractionState } from '../../src/plugins/types';
 
 function makeContainer(w: number, h: number): HTMLElement {
   const el = document.createElement('div');

@@ -152,6 +152,14 @@ export interface SemanticGraphEdge {
   semantic?: string
   /** 证据式关系描述(edge_notes 生成；优先于 type/semantic 作边标签)。 */
   desc?: string
+  /** 派生边证据：发生处(文件:行) 与解析置信度。 */
+  line?: number | null
+  file?: string
+  confidence?: string
+  resolvedBy?: string
+  /** 间接边(1 跳中转)：via 为中转符号名。 */
+  indirect?: boolean
+  via?: string
 }
 
 export interface SemanticGraphAnchor {
@@ -380,13 +388,14 @@ export const semanticAssetService = {
   },
 
   /** 语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。 */
-  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number }): Promise<SemanticGraphResult> {
+  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number; includeIndirect?: boolean }): Promise<SemanticGraphResult> {
     const parts: string[] = []
     if (kind) parts.push(`kind=${encodeURIComponent(kind)}`)
     if (level) parts.push(`level=${encodeURIComponent(level)}`)
     if (scope?.length) parts.push(`scope=${encodeURIComponent(scope.join(','))}`)
     if (opts?.focus) parts.push(`focus=${encodeURIComponent(opts.focus)}`)
     if (opts?.hops) parts.push(`hops=${opts.hops}`)
+    if (opts?.includeIndirect) parts.push('include_indirect=true')
     parts.push('limit=2000')
     return apiGet<SemanticGraphResult>(`/kb/semantic/graph${qsWith(parts.join('&'))}`)
   },

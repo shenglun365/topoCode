@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PlantUmlEngine } from '../../src/topoOne/engines/plantuml/plantuml';
+import { PlantUmlEngine } from '../../src/engines/plantuml/plantuml';
 
 const SVG_OK =
   '<svg xmlns="http://www.w3.org/2000/svg"><g id="part1" data-entity-uid="part1" data-source-line="1"><title>Alice</title></g></svg>';

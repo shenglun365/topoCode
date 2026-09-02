@@ -19,9 +19,6 @@ def collect_methods() -> list[str]:
     对外方法契约对等，基线采集从「核心单进程」升级为「核心 + docs 服务」并集
     （report.* 保留核心，无需并入；docs 仅贡献 render.*）。
     """
-    if os.environ.get("TOPO_MODE") is None:
-        os.environ["TOPO_MODE"] = "monolith"
-
     from topoone.engine.app import BackendApp  # noqa: E402  (topoone editable 安装)
 
     tmp_dir = tempfile.mkdtemp(prefix="topo-rpc-baseline-")

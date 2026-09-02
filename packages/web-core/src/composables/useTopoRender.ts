@@ -9,9 +9,9 @@
 */
 
 import { ref, watch, type Ref, onUnmounted } from 'vue'
-import { MermaidEngine } from '../topoOne/engines/mermaid/mermaid'
-import { PlantUmlEngine } from '../topoOne/engines/plantuml/plantuml'
-import { themeVariablesFor } from '../topoOne/vue/themes'
+import { MermaidEngine } from '@topo/graph-kernel/engines/mermaid/mermaid.ts'
+import { PlantUmlEngine } from '@topo/graph-kernel/engines/plantuml/plantuml.ts'
+import { themeVariablesFor } from '@topo/graph-kernel/vue/themes.ts'
 import { authHeaders } from '../services/api'
 
 export type TopoRenderLang = 'mermaid' | 'plantuml'

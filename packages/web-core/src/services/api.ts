@@ -1,28 +1,10 @@
 import type { Project, Task, ChatSession, ChatMessage, ModelConfig, Draft, GraphNode, GraphEdge, CommunityDoc, CommunityChild } from '../types/domain'
+import { authHeaders } from './token'
+
+// token 逻辑单一源见 ./token（F2 修正）；此处再导出保持既有消费者 surface 不变。
+export { authHeaders }
 
 const API_BASE = ''
-
-const TOKEN_KEY = 'topocode:token'
-
-/** 读取 token：URL hash `#token=xxx`（首次粘贴）优先，其次 localStorage */
-function readToken(): string {
-  if (typeof window === 'undefined') return ''
-  try {
-    const m = window.location.hash.match(/token=([A-Za-z0-9]+)/)
-    if (m && m[1]) {
-      localStorage.setItem(TOKEN_KEY, m[1])
-      window.history.replaceState(null, '', window.location.pathname + window.location.search)
-      return m[1]
-    }
-  } catch {}
-  return localStorage.getItem(TOKEN_KEY) || ''
-}
-
-/** 鉴权头（裸 fetch 场景复用，token 逻辑唯一源，见 CONV-02 §4） */
-export function authHeaders(): Record<string, string> {
-  const tok = readToken()
-  return tok ? { Authorization: `Bearer ${tok}` } : {}
-}
 
 async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
   const url = new URL(path, window.location.origin)

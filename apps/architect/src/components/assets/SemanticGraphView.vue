@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from './GraphMatrixWindow.vue'
-import TopoDiagram from '@topo/web-core/topoOne/vue/TopoDiagram.vue'
-import { makeButton } from '@topo/web-core/topoOne/plugins/ui.ts'
-import type { NodeClickEvent } from '@topo/web-core/topoOne/plugins/types.ts'
-import { themeVariablesFor } from '@topo/web-core/topoOne/vue/themes.ts'
+import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
+import { makeButton } from '@topo/graph-kernel/plugins/ui.ts'
+import type { NodeClickEvent } from '@topo/graph-kernel/plugins/types.ts'
+import { themeVariablesFor } from '@topo/graph-kernel/vue/themes.ts'
 import { semanticGraphViewDiagrams, semanticViewClickIds, recommendedSemanticView, semanticNodeLabelText, supportedViewsFor, viewUnavailableReasons } from '@/utils/diagram-gen'
 import { useArchSettingsStore } from '@/stores/settings-store'
 import type { SemanticGraphViewId } from '@/utils/diagram-gen'
@@ -42,6 +42,34 @@ const focusMode = ref(false)
 const focusHops = ref(2)
 /** 关系矩阵浮窗(独立全局浮窗，数据跟随当前图谱口径)。 */
 const matrixOpen = ref(false)
+/** 边图例浮层开关。 */
+const edgeLegendOpen = ref(false)
+/** 边图例浮层：Teleport 到 body + fixed 定位，避免被工具栏 overflow 裁剪或撑开。 */
+const legendBtnRef = ref<HTMLElement | null>(null)
+const legendPos = ref({ top: 0, left: 0 })
+const LEGEND_W = 176 // w-44
+function toggleEdgeLegend() {
+  if (!edgeLegendOpen.value && legendBtnRef.value) {
+    const r = legendBtnRef.value.getBoundingClientRect()
+    let left = r.right - LEGEND_W
+    if (left < 8) left = 8
+    if (left + LEGEND_W > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - LEGEND_W)
+    legendPos.value = { top: r.bottom + 4, left }
+  }
+  edgeLegendOpen.value = !edgeLegendOpen.value
+}
+function onLegendDocClick(e: MouseEvent) {
+  const t = e.target
+  if (!(t instanceof Node)) return
+  if (legendBtnRef.value?.contains(t)) return
+  if (document.querySelector('[data-edge-legend]')?.contains(t)) return
+  edgeLegendOpen.value = false
+}
+watch(edgeLegendOpen, (open) => {
+  if (open) setTimeout(() => document.addEventListener('click', onLegendDocClick, true), 0)
+  else document.removeEventListener('click', onLegendDocClick, true)
+})
+onBeforeUnmount(() => document.removeEventListener('click', onLegendDocClick, true))
 function onMatrixSelect(id: string) {
   if (id && id !== selId.value) selId.value = id   // 图谱高亮 + 资产卡 + 源码 tab 全联动
 }
@@ -303,8 +331,51 @@ const scopedNodes = computed(() => kindNodes.value.filter((n) =>
 
 const scopedEdges = computed(() => {
   const ids = new Set(scopedNodes.value.map((n) => n.id))
-  return (graph.value?.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to))
+  return (graph.value?.edges ?? []).filter((e) =>
+    ids.has(e.from) && ids.has(e.to) && !edgeTypeOff.value.has(e.type || ''))
 })
+
+/** 间接边开关(默认关：1 跳中转关系虚线补充，变更后重查)。 */
+const includeIndirect = ref(false)
+watch(includeIndirect, () => load())
+/** 关闭显示的边类型集合(图例点击切换；空=全显示)。 */
+const edgeTypeOff = ref<Set<string>>(new Set())
+function toggleEdgeType(k: string) {
+  const next = new Set(edgeTypeOff.value)
+  if (next.has(k)) next.delete(k)
+  else next.add(k)
+  edgeTypeOff.value = next
+}
+/** 当前图谱内边类型 → 数量(图例)。 */
+const edgeTypeCounts = computed(() => {
+  const ids = new Set(scopedNodes.value.map((n) => n.id))
+  const cnt = new Map<string, number>()
+  for (const e of graph.value?.edges ?? []) {
+    if (!ids.has(e.from) || !ids.has(e.to)) continue
+    const k = e.type || ''
+    cnt.set(k, (cnt.get(k) || 0) + 1)
+  }
+  return [...cnt.entries()].sort((a, b) => b[1] - a[1])
+})
+const EDGE_TYPE_TEXT: Record<string, string> = {
+  calls: '调用', references: '引用', imports: '导入', contains: '包含',
+  extends: '继承', implements: '实现', instantiates: '实例化',
+  assigns: '赋值', passes: '传参', type_of: '类型', returns: '返回',
+  overrides: '重写', decorates: '装饰', callback: '回调',
+}
+function edgeTypeLabel(k: string) {
+  return EDGE_TYPE_TEXT[k] || k || '关系'
+}
+const EDGE_TYPE_COLOR: Record<string, string> = {
+  calls: 'text-ctp-red', references: 'text-ctp-blue', imports: 'text-ctp-yellow',
+  contains: 'text-ctp-green', extends: 'text-ctp-mauve', implements: 'text-ctp-mauve',
+  instantiates: 'text-ctp-peach', assigns: 'text-ctp-teal', passes: 'text-ctp-sky',
+  type_of: 'text-ctp-lavender', returns: 'text-ctp-flamingo', overrides: 'text-ctp-mauve',
+  decorates: 'text-ctp-pink', callback: 'text-ctp-rosewater',
+}
+function edgeTypeColor(k: string) {
+  return EDGE_TYPE_COLOR[k] || 'text-ctp-overlay1'
+}
 
 /** 图类型：手动选择优先，否则按数据区间自动推荐第一个支持的。 */
 const viewOptions = computed<{ value: SemanticGraphViewId; label: string }[]>(() => {
@@ -376,7 +447,7 @@ async function load(reset = false) {
     } else if (props.tab.kind === 'asset') {
       focus = props.tab.assetId
     }
-    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops })
+    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value })
     if (reset) {
       // 打开/切换 tab：类型重置为全部；粒度默认=组件级取该组件最高可用层级，其余取全部。
       kindFilter.value = ''
@@ -1140,13 +1211,23 @@ function applyNodeTooltips() {
   const labelToDesc = new Map<string, string>()
   const puText = (s: string) => (s || '').replace(/[;|\r\n]+/g, ' ').replace(/-->/g, '->').trim()
   for (const e of scopedEdges.value) {
-    const tip = (e.desc || e.semantic || e.type || '').trim()
+    // 悬停 = 关系描述 + 证据(文件:行/解析方式/置信度/间接中转)
+    const ev: string[] = []
+    if (e.indirect && e.via) ev.push(`间接 ⇝ ${e.via}`)
+    if (e.file) ev.push(`${e.file}${e.line ? `:${e.line}` : ''}`)
+    if (e.resolvedBy) ev.push(e.resolvedBy + (e.confidence ? ` (${e.confidence})` : ''))
+    const tip = [(e.desc || e.semantic || e.type || '').trim(), ...ev].filter(Boolean).join('\n')
     if (!tip) continue
     const bases = new Set<string>([
       (e.desc || e.type || e.semantic || '').trim(),
       (e.desc || e.type || '').trim(),
       (e.type || '').trim(),
       (e.semantic || '').trim(),
+      // 间接边标签含 ⇝via 后缀(_semEdgeLabel 口径)
+      ...((e.indirect && e.via)
+        ? [(e.desc || e.type || e.semantic || 'rel').trim(), (e.desc || e.type || '').trim()]
+            .filter(Boolean).map((b) => `${b}⇝${e.via!.slice(0, 10)}`)
+        : []),
     ].filter(Boolean))
     for (const b of bases) {
       for (const len of [10, 12, 14, 16, 20, 24, 26]) {
@@ -1440,7 +1521,7 @@ onMounted(async () => {
 <template>
   <div class="h-full flex flex-col min-h-0">
     <!-- 工具栏(单行)：粒度 + 图类型 + 视图上下文(单资产焦点/关联级别) + 统计 + 操作 -->
-    <div class="shrink-0 flex items-center gap-1.5 px-1 pt-1 pb-1 border-b border-ctp-surface0 overflow-x-auto">
+    <div class="shrink-0 flex items-center gap-1 px-1 pt-1 pb-1 border-b border-ctp-surface0 overflow-x-auto">
       <select
         v-model="kindFilter"
         class="input !py-0.5 !px-2 !text-[11px] w-auto shrink-0"
@@ -1473,18 +1554,18 @@ onMounted(async () => {
       </select>
       <span
         v-if="hiddenViewHints.length"
-        class="shrink-0 text-[10px] text-ctp-overlay1 cursor-help"
+        class="shrink-0 text-[11px] text-ctp-overlay1 cursor-help px-0.5"
         :title="hiddenViewHints.join('\n')"
-      >ⓘ {{ t('assetMgmt.graph.unavailableHint') }}</span>
+      >ⓘ</span>
       <!-- 邻域聚焦：只渲染选中资产周围 N 跳子图(缓解大图拥挤/过宽/过长) -->
       <div class="w-px h-4 bg-ctp-surface1 shrink-0" />
       <button
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center gap-1"
+        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
         :class="focusMode ? 'btn-primary' : ''"
         :title="t('assetMgmt.graph.focusHint')"
         @click="focusMode = !focusMode"
       >
-        <ViewfinderCircleIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.focusLabel') }}
+        <ViewfinderCircleIcon class="w-3.5 h-3.5" />
       </button>
       <select
         v-if="focusMode"
@@ -1496,13 +1577,13 @@ onMounted(async () => {
       </select>
       <!-- 拓展关联：基于选中节点扩展 1 跳关联(增量合并，可累积)；无未拓展关联时置灰 -->
       <button
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center gap-1"
+        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
         :class="expandable ? '' : 'opacity-50 cursor-not-allowed'"
         :disabled="!expandable || expanding"
         :title="expandable ? t('assetMgmt.graph.expandHint') : t('assetMgmt.graph.expandDisabledHint')"
         @click="expandSelected"
       >
-        <PlusCircleIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.expandLabel') }}
+        <PlusCircleIcon class="w-3.5 h-3.5" />
       </button>
       <span
         v-if="expandFeedback"
@@ -1510,13 +1591,54 @@ onMounted(async () => {
       >{{ expandFeedback }}</span>
       <!-- 关系矩阵浮窗：文件×文件密度 + 节点级非对称全矩阵，数据跟随当前图谱口径 -->
       <button
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center gap-1"
+        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
         :class="matrixOpen ? 'btn-primary' : ''"
         :title="t('assetMgmt.matrix.title')"
         @click="matrixOpen = !matrixOpen"
       >
-        <TableCellsIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.matrix.openLabel') }}
+        <TableCellsIcon class="w-3.5 h-3.5" />
       </button>
+      <!-- 边类型图例 + 显隐过滤；间接边开关(浮层 Teleport 到 body，不撑开工具栏) -->
+      <button
+        ref="legendBtnRef"
+        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
+        :class="edgeTypeOff.size ? 'btn-primary' : ''"
+        :title="t('assetMgmt.graph.edgeLegend')"
+        @click="toggleEdgeLegend"
+      >
+        <AdjustmentsHorizontalIcon class="w-3.5 h-3.5" />
+      </button>
+      <Teleport to="body">
+        <div
+          v-if="edgeLegendOpen"
+          data-edge-legend
+          class="fixed z-50 w-44 rounded-lg border border-ctp-surface1 bg-ctp-mantle shadow-lg p-2 space-y-0.5"
+          :style="{ top: legendPos.top + 'px', left: legendPos.left + 'px' }"
+        >
+          <label
+            v-for="[k, n] in edgeTypeCounts"
+            :key="k"
+            class="flex items-center gap-1.5 px-1 py-0.5 rounded cursor-pointer hover:bg-ctp-surface0 text-[11px]"
+          >
+            <input
+              type="checkbox"
+              class="accent-ctp-mauve"
+              :checked="!edgeTypeOff.has(k)"
+              @change="toggleEdgeType(k)"
+            >
+            <span :class="edgeTypeColor(k)">{{ edgeTypeLabel(k) }}</span>
+            <span class="ml-auto text-ctp-overlay0">{{ n }}</span>
+          </label>
+          <label class="flex items-center gap-1.5 px-1 py-0.5 rounded cursor-pointer hover:bg-ctp-surface0 text-[11px] border-t border-ctp-surface0 mt-1 pt-1.5">
+            <input
+              v-model="includeIndirect"
+              type="checkbox"
+              class="accent-ctp-teal"
+            >
+            <span class="text-ctp-subtext0">{{ t('assetMgmt.graph.indirectEdges') }}</span>
+          </label>
+        </div>
+      </Teleport>
       <!-- 单资产视图上下文：聚焦资产(1 跳) -->
       <template v-if="props.tab.kind === 'asset' && sel">
         <div class="w-px h-4 bg-ctp-surface1 shrink-0" />
@@ -1540,7 +1662,7 @@ onMounted(async () => {
         <button
           v-for="l in diagramLangs"
           :key="l.id"
-          class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer"
+          class="px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer"
           :class="cardLang === l.id
             ? 'bg-ctp-blue/15 text-ctp-blue ring-1 ring-ctp-blue/30'
             : 'text-ctp-subtext0 hover:bg-ctp-surface0'"
@@ -1576,9 +1698,7 @@ onMounted(async () => {
         <SparklesIcon
           class="w-3 h-3"
           :class="enhanceRunning ? 'animate-spin' : ''"
-        />{{ enhanceRunning
-          ? `${enhanceProgress.done}/${enhanceProgress.total}`
-          : t('assetMgmt.graph.enhanceDesc') }}
+        />{{ enhanceRunning ? `${enhanceProgress.done}/${enhanceProgress.total}` : '' }}
       </button>
       <button
         class="btn btn-xs btn-ghost"
@@ -1660,9 +1780,9 @@ onMounted(async () => {
         ]"
         :style="{
           width: cardSize.w + 'px',
-          // 卡片非代码文字随 codeFontSize 等比(基准=默认字号 16 时的代码字号 15px)，
-          // 使卡片内文字与代码保持恒定比例(见 scoped .card-root 覆盖)。
-          '--card-scale': String(codeFontSize / 15),
+          // 卡片非代码文字随全局 UI 字号等比(--card-scale = 全局字号/16，与 --ui-scale 同步缩放)，
+          // 基准字号在 scoped .card-root 覆盖中已整体放大两号；代码(pre/code)仍用 codeFontSize。
+          '--card-scale': String((Number(settings.fontSize) || 16) / 16),
           ...(cardSize.h ? { height: cardSize.h + 'px' } : {}),
           ...(cardPos ? { left: cardPos.x + 'px', top: cardPos.y + 'px' } : {}),
         }"
@@ -2094,10 +2214,11 @@ onMounted(async () => {
 }
 .card-edge-w { left: 0; }
 .card-edge-e { right: 0; }
-/* 资产卡：非代码文字随 codeFontSize 等比(--card-scale = codeFontSize/15)，
-   与代码保持恒定比例；特异性高于 global.css 的 --ui-scale 覆盖，卡片内优先生效。 */
-.card-root .text-\[8px\],  .card-root .\!text-\[8px\]  { font-size: calc(8px  * var(--card-scale, 1)) !important; }
-.card-root .text-\[9px\],  .card-root .\!text-\[9px\]  { font-size: calc(9px  * var(--card-scale, 1)) !important; }
-.card-root .text-\[10px\], .card-root .\!text-\[10px\] { font-size: calc(10px * var(--card-scale, 1)) !important; }
-.card-root .text-\[11px\], .card-root .\!text-\[11px\] { font-size: calc(11px * var(--card-scale, 1)) !important; }
+/* 资产卡：非代码文字在基准上整体放大两号(8→10 / 9→11 / 10→12 / 11→13)，
+   并随全局 UI 字号等比(--card-scale = 全局字号/16，与 --ui-scale 同步缩放)；
+   代码(pre/code)仍用 codeFontSize，不在此列。特异性高于 global.css 的 --ui-scale 覆盖，卡片内优先生效。 */
+.card-root .text-\[8px\],  .card-root .\!text-\[8px\]  { font-size: calc(10px * var(--card-scale, 1)) !important; }
+.card-root .text-\[9px\],  .card-root .\!text-\[9px\]  { font-size: calc(11px * var(--card-scale, 1)) !important; }
+.card-root .text-\[10px\], .card-root .\!text-\[10px\] { font-size: calc(12px * var(--card-scale, 1)) !important; }
+.card-root .text-\[11px\], .card-root .\!text-\[11px\] { font-size: calc(13px * var(--card-scale, 1)) !important; }
 </style>

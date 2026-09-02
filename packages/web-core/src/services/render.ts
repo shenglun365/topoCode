@@ -1,33 +1,42 @@
-import { Marked } from 'marked'
-import { markedHighlight } from 'marked-highlight'
+/**
+ * 渲染工具集（markdown → HTML + 代码/图通用工具）。
+ *
+ * 20c：mermaid 单例合一 —— ensureMermaid/mermaidParseErrorDetail 唯一实现在
+ * graph-kernel engines/mermaid（此处仅 re-export，原私有 mermaidApi 单例已删除）。
+ * 20d：markdown 引擎二选一 —— marked → markdown-it（与 workbench/architect 同栈），
+ * 配置 html:true 保持与 marked 一致的原始 HTML 直通（chat 批注 <!-- ann:slot -->
+ * 标记依赖它存活于渲染输出；安全面与既有 app 级实践一致）。
+ */
+import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
-const marked = new Marked(
-  markedHighlight({
-    langPrefix: 'hljs language-',
-    highlight(code: string, lang: string) {
-      if (lang === 'mermaid' || lang === 'plantuml') return code
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(code, { language: lang }).value
-      }
-      return code
-    },
-  })
-)
+export { ensureMermaid, mermaidParseErrorDetail } from '@topo/graph-kernel/engines/mermaid/mermaid.ts'
+export { normalizeMermaidCode } from './diagram-normalize'
 
-marked.setOptions({
-  gfm: true,
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
   breaks: true,
+  langPrefix: 'hljs language-', // 兼容原 marked langPrefix 与既有 CSS/后处理选择器
+  highlight(code: string, lang: string): string {
+    if (lang === 'mermaid' || lang === 'plantuml') return md.utils.escapeHtml(code)
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return hljs.highlight(code, { language: lang }).value
+      } catch { /* fallthrough */ }
+    }
+    return '' // 空串 = markdown-it 自行 escape
+  },
 })
 
 export function renderMarkdown(text: string): string {
   if (!text) return ''
-  const result = marked.parse(text) as string
+  const result = md.render(text)
   return result.replace(
     /<pre><code(?: class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g,
     (_, codeContent) => {
-      return `<div class="code-block-wrap"><button class="code-fs-btn" title="全屏查看"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button><pre><code>${codeContent}</code></pre></div>`
+      return `<div class="code-block-wrap"><button class="code-fs-btn" title="全屏查看"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2 2h3"/></svg></button><pre><code>${codeContent}</code></pre></div>`
     }
   )
 }
@@ -188,22 +197,6 @@ export function normalizeDiagram(
   }
 
   return { code: s, errors }
-}
-
-// ── 共享 mermaid 实例（所有组件共用） ──
-let mermaidApi: any = null
-
-export async function ensureMermaid() {
-  if (mermaidApi) return mermaidApi
-  const mod = await import('mermaid')
-  mermaidApi = mod.default
-  mermaidApi.initialize({ startOnLoad: false, securityLevel: 'antiscript', theme: 'default' })
-  return mermaidApi
-}
-
-export function mermaidParseErrorDetail(e: any): string {
-  const raw = e && (e.message || e.str || e.hash || String(e))
-  return (raw && String(raw).trim()) || '图解法错误'
 }
 
 // ── 渲染队列（串行化避免并发卡顿） ──

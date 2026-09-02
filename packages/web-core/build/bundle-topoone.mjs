@@ -8,7 +8,7 @@ import esbuild from 'esbuild'
 import { resolve } from 'path'
 import { mkdirSync } from 'fs'
 
-const entry = resolve('src/topoOne/index.ts')
+const entry = resolve('../graph-kernel/src/index.ts')
 const outfile = resolve('dist-topoone/topo-one.js')
 
 async function main() {

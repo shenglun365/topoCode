@@ -5,6 +5,7 @@ import * as api from '@topo/web-core/services/api'
 import { renderMarkdown, renderDocMarkdown, codeFullscreen } from '@topo/web-core/services/render'
 import { diagramStateStore, type DiagramViewState } from '@topo/web-core/services/diagramStateStore'
 import { parseDocContent } from '@topo/web-core/services/parseContent'
+import { consumeChatSse } from '@topo/web-core/services/chat-stream'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
 import { AppToolbar, ModelSettingsDropdown } from '@topo/web-core/shell'
@@ -13,11 +14,13 @@ import ChatMessage from '@/components/ChatMessage.vue'
 import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 import RenameDialog from '@/components/RenameDialog.vue'
 import SaveAsDocDialog from '@/components/SaveAsDocDialog.vue'
+import { useI18n } from 'vue-i18n'
 import { useToast } from '@topo/web-core/composables/useToast'
 import { useDialog } from '@topo/web-core/composables/useDialog'
 import AppDialog from '@topo/web-core/components/AppDialog.vue'
 import type { ChatSession, ChatMessage as ChatMsg, ModelConfig } from '@topo/web-core/types/domain'
 
+const { t } = useI18n()
 const { toast } = useToast()
 const { dialog, confirm, prompt, alert, close: closeDialog } = useDialog()
 
@@ -165,13 +168,13 @@ function checkStorage() {
   if (total > WARN_AT) {
     const usedMB = (total / MB).toFixed(1)
     setTimeout(() => {
-      if (confirm(`存储空间不足 (已用 ${usedMB}MB / 5MB)。是否清除缓存？`)) {
+      if (confirm(t('storage.full', { used: usedMB }))) {
         const keys: string[] = []
         for (const k in localStorage) {
           if (localStorage.hasOwnProperty(k) && k.indexOf('topo_') === 0) keys.push(k)
         }
         keys.forEach(k => localStorage.removeItem(k))
-        toast('缓存已清除')
+        toast(t('storage.cleared'))
       }
     }, 2000)
   }
@@ -191,14 +194,14 @@ const loadPendingDrafts = () => {
 function buildRefsPrompt(refs: any[], userText: string): string {
   const refBlocks = (refs || []).map((r: any, i: number) => {
     const source = [r.projectName, r.componentId].filter(Boolean).join(' / ')
-    const label = r.label || r.text?.slice(0, 60) || `引用 ${i+1}`
+    const label = r.label || r.text?.slice(0, 60) || t('prompt.refN', { n: i+1 })
     const text = r.text || ''
-    return `【引用 ${i+1}】${label}${source ? '\n来源：' + source : ''}${text ? '\n' + text : ''}`
+    return t('prompt.refBlock', { n: i+1, label }) + (source ? '\n' + t('prompt.from') + source : '') + (text ? '\n' + text : '')
   }).join('\n\n')
   if (!refBlocks) return userText || ''
   return userText
-    ? `${userText}\n\n参考材料：\n${refBlocks}`
-    : `请分析以下材料：\n${refBlocks}`
+    ? `${userText}\n\n${t('prompt.refsSection')}\n${refBlocks}`
+    : t('prompt.analyze', { refs: refBlocks })
 }
 function scrollToBottom() {
   nextTick(() => { if (msgArea.value) msgArea.value.scrollTop = msgArea.value.scrollHeight })
@@ -252,12 +255,12 @@ async function loadSessions() {
 
 async function createSession() {
   try {
-    const s = await api.createSession('新对话', currentModel.value || undefined)
+    const s = await api.createSession(t('common.newChat'), currentModel.value || undefined)
     sessions.value.unshift(s)
     currentId.value = s.id
     messages.value = []
     scrollToBottom()
-  } catch (_) { toast('创建失败') }
+  } catch (_) { toast(t('error.create')) }
 }
 
 async function switchSession(id: string) {
@@ -271,7 +274,7 @@ async function switchSession(id: string) {
 }
 
 async function deleteSession(id: string) {
-  const ok = await confirm('确定删除此会话？')
+  const ok = await confirm(t('session.confirmDelete'))
   if (!ok) return
   try {
     await api.deleteSession(id)
@@ -281,7 +284,7 @@ async function deleteSession(id: string) {
       currentId.value = sessions.value[0]?.id || ''
       if (currentId.value) await loadMessages(); else messages.value = []
     }
-  } catch (_) { toast('删除失败') }
+  } catch (_) { toast(t('error.delete')) }
 }
 
 function openRename(s: ChatSession) {
@@ -297,7 +300,7 @@ async function submitRename() {
     await api.updateSession(s.id, { title: renameText.value.trim() } as any)
     s.title = renameText.value.trim()
     renameDialog.value = null
-  } catch (_) { toast('重命名失败') }
+  } catch (_) { toast(t('error.rename')) }
 }
 
 async function aiRename() {
@@ -313,9 +316,9 @@ async function aiRename() {
       renameDialog.value = null
       await loadSessions()
     } else {
-      toast(data.title ? '标题未变化，请检查模型配置' : 'AI 生成失败')
+      toast(data.title ? t('rename.unchanged') : t('rename.aiFailed'))
     }
-  } catch (_) { toast('AI 生成失败') }
+  } catch (_) { toast(t('rename.aiFailed')) }
   finally { renameGenerating.value = false }
 }
 
@@ -421,53 +424,34 @@ async function send() {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...api.authHeaders() }, body: JSON.stringify(body),
     })
     if (!resp.ok) { const errBody = await resp.text().catch(() => ''); throw new Error(errBody || `API ${resp.status}`) }
-    const reader = resp.body?.getReader()
-    if (!reader) throw new Error('No reader')
 
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let chatFinished = false
-    while (true) {
-      if (chatFinished) break
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            if (data.type === 'chunk' && data.text) { msg.content += data.text; contentChunks++; scrollToBottom() }
-            else if (data.type === 'done') {
-              msg.isStreaming = false
-              if (data.quality === 'low') msg.qualityLow = true
-              if (data.content) msg.content = data.content
-              if (data.reasoning) msg.reasoning = (msg.reasoning || '') + data.reasoning
-              console.log(`[sse done] contentLen=${(msg.content||'').length} reasoningLen=${(msg.reasoning||'').length} toolCalls=${(msg.toolCalls||[]).length}`)
-              scrollToBottom()
-              streaming.value = false
-              chatFinished = true
-              break
-            }
-            else if (data.type === 'error') { msg.isStreaming = false; msg.role = 'error'; msg.content = data.message || '请求失败'; scrollToBottom(); streaming.value = false; chatFinished = true; break }
-            else if (data.type === 'reasoning' && data.text) {
-              msg.reasoning = (msg.reasoning || '') + data.text
-            }
-            else if (data.type === 'tool_call') {
-              if (!msg.toolCalls) msg.toolCalls = []
-              msg.toolCalls.push({ id: data.id, name: data.name, arguments: data.arguments || {} })
-            }
-            else if (data.type === 'tool_result') {
-              const tc = msg.toolCalls?.find(t => t.id === data.id)
-              if (tc) tc.result = typeof data.result === 'string' ? data.result.slice(0, 500) : JSON.stringify(data.result).slice(0, 500)
-            }
-          } catch (_) {}
-        }
-      }
-    }
+    // SSE 循环已抽为 web-core 共享助手（R2 修正，原此处内联 ReadableStream 循环）
+    await consumeChatSse(resp, {
+      onChunk: (text) => { msg.content += text; contentChunks++; scrollToBottom() },
+      onReasoning: (text) => { msg.reasoning = (msg.reasoning || '') + text },
+      onToolCall: (call) => {
+        if (!msg.toolCalls) msg.toolCalls = []
+        msg.toolCalls.push({ id: call.id, name: call.name, arguments: call.arguments })
+      },
+      onToolResult: (id, result) => {
+        const tc = msg.toolCalls?.find(x => x.id === id)
+        if (tc) tc.result = result
+      },
+      onDone: (data) => {
+        msg.isStreaming = false
+        if (data.quality === 'low') msg.qualityLow = true
+        if (data.content) msg.content = data.content
+        if (data.reasoning) msg.reasoning = (msg.reasoning || '') + data.reasoning
+        scrollToBottom()
+        streaming.value = false
+      },
+      onError: (message) => {
+        msg.isStreaming = false; msg.role = 'error'; msg.content = message || t('error.request')
+        scrollToBottom(); streaming.value = false
+      },
+    })
   } catch (e: any) {
-    asstMsg.isStreaming = false; asstMsg.role = 'error'; asstMsg.content = e.message || '请求失败'
+    asstMsg.isStreaming = false; asstMsg.role = 'error'; asstMsg.content = e.message || t('error.request')
   } finally {
     streaming.value = false; scrollToBottom()
   }
@@ -520,7 +504,7 @@ async function deleteSingle(id: string) {
   if (!currentId.value) return
   const dm = displayMessages.value.find(m => m._mergedIds?.includes(id))
   const ids = dm?._mergedIds ? dm._mergedIds.join(',') : id
-  try { await api.deleteMessages(currentId.value, ids); (dm?._mergedIds || [id]).forEach(mid => diagramStateStore.removeAll(mid)); await loadMessages() } catch (_) { toast('删除失败') }
+  try { await api.deleteMessages(currentId.value, ids); (dm?._mergedIds || [id]).forEach(mid => diagramStateStore.removeAll(mid)); await loadMessages() } catch (_) { toast(t('error.delete')) }
 }
 
 async function deleteSelected() {
@@ -531,17 +515,17 @@ async function deleteSelected() {
       dm._mergedIds.forEach(id => allIds.add(id))
   })
   const ids = Array.from(allIds).join(',')
-  try { await api.deleteMessages(currentId.value, ids); allIds.forEach(id => diagramStateStore.removeAll(id)); selectedIds.value = new Set(); await loadMessages() } catch (_) { toast('删除失败') }
+  try { await api.deleteMessages(currentId.value, ids); allIds.forEach(id => diagramStateStore.removeAll(id)); selectedIds.value = new Set(); await loadMessages() } catch (_) { toast(t('error.delete')) }
 }
 
 function copyMessage(m: ChatMessage) {
-  const prefix = m.role === 'user' ? '用户: ' : 'AI: '
+  const prefix = m.role === 'user' ? t('msg.copyPrefixUser') : t('msg.copyPrefixAI')
   copyToClipboard(prefix + m.content.slice(0, 4000))
 }
 
 function copyToClipboard(text: string) {
   if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(() => toast('已复制')).catch(() => fallbackCopy(text))
+    navigator.clipboard.writeText(text).then(() => toast(t('common.copied'))).catch(() => fallbackCopy(text))
   } else {
     fallbackCopy(text)
   }
@@ -553,18 +537,18 @@ function fallbackCopy(text: string) {
   ta.style.position = 'fixed'; ta.style.opacity = '0'
   document.body.appendChild(ta)
   ta.select()
-  try { document.execCommand('copy'); toast('已复制') } catch (_) {}
+  try { document.execCommand('copy'); toast(t('common.copied')) } catch (_) {}
   document.body.removeChild(ta)
 }
 
 function quoteMessage(m: ChatMessage) {
-  const prefix = m.role === 'user' ? '用户说' : 'AI说'
+  const prefix = m.role === 'user' ? t('msg.quoteUser') : t('msg.quoteAI')
   input.value = `> ${prefix}:\n> ${m.content.slice(0, 200)}\n\n` + input.value
 }
 
 async function continueAssistant(m: ChatMessage) {
   if (streaming.value) return
-  input.value = '请继续...'
+  input.value = t('msg.continue')
   if (!currentId.value) { await createSession() }
   await send()
 }
@@ -588,7 +572,7 @@ async function handleSaveAsNote(opts: { mode: 'single' | 'session'; target: 'new
     // 完整对话：拼接所有非 system/tool 消息的 content，略过 reasoning/toolCalls
     content = messages.value
       .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => `**${m.role === 'user' ? '用户' : 'AI'}**:\n${m.content}`)
+      .map(m => `**${m.role === 'user' ? t('common.roleUser') : t('common.roleAI')}**:\n${m.content}`)
       .join('\n\n---\n\n')
   }
   // 保护代码围栏：替换 fence 内容为占位符，避免 ann:slot 注入到代码块中
@@ -611,7 +595,7 @@ async function handleSaveAsNote(opts: { mode: 'single' | 'session'; target: 'new
       const appended = (existing.content || '') + '\n\n---\n\n' + content
       await api.put(`/api/notes/${opts.noteId}`, { content: appended })
     }
-    toast('已保存为笔记')
+    toast(t('saveAs.saved'))
     await loadNotes()
     if (noteId) {
       try {
@@ -620,7 +604,7 @@ async function handleSaveAsNote(opts: { mode: 'single' | 'session'; target: 'new
         tab.value = 'notes'
       } catch (_) {}
     }
-  } catch (_) { toast('保存失败') }
+  } catch (_) { toast(t('error.save')) }
 }
 
 async function deleteDraft(id: string) {
@@ -640,12 +624,12 @@ async function deleteDraft(id: string) {
     return
   }
   console.log(`[drafts] deleteDraft DELETE api id=${id}`)
-  try { await api.deleteDraft(id); drafts.value = drafts.value.filter(n => n.id !== id); viewDraftData.value = null } catch (_) { toast('删除失败') }
+  try { await api.deleteDraft(id); drafts.value = drafts.value.filter(n => n.id !== id); viewDraftData.value = null } catch (_) { toast(t('error.delete')) }
 }
 
 async function executeDraft(draft: any) {
   const content = draft.content || draft.userText || ''
-  if (!draft.refs?.length && !content) { toast('便签无引用内容'); return }
+  if (!draft.refs?.length && !content) { toast(t('drafts.noRefs')); return }
   executingDraft.value = draft
   execSelectedSessionId.value = currentId.value || ''
   execSessionSelectorVisible.value = true
@@ -663,7 +647,7 @@ async function execConfirmSession() {
   if (!targetId) return
 
   if (targetId === '__new__') {
-    const s = await api.createSession('便签执行', currentModel.value || undefined)
+    const s = await api.createSession(t('drafts.execTitle'), currentModel.value || undefined)
     sessions.value.unshift(s)
     console.log(`[execDialog] created new session id=${s.id}`)
     await execAfterSwitch(s.id, draft)
@@ -709,7 +693,7 @@ async function loadNotes() {
 }
 
 async function viewNote(d: any) {
-  try { const data = await api.get(`/api/notes/${d.id}`); viewingNote.value = data; tab.value = 'notes'; syncUrl() } catch (_) { toast('加载失败') }
+  try { const data = await api.get(`/api/notes/${d.id}`); viewingNote.value = data; tab.value = 'notes'; syncUrl() } catch (_) { toast(t('error.load')) }
 }
 
 function openNoteEditor() {
@@ -727,8 +711,8 @@ async function saveNote() {
     viewingNote.value.title = noteEditTitle.value
     viewingNote.value.content = noteEditContent.value
     showNoteEditor.value = false
-    toast('已保存')
-  } catch (_) { toast('保存失败') }
+    toast(t('common.saved'))
+  } catch (_) { toast(t('error.save')) }
 }
 
 // ── 全文 MD 编辑模式 ──
@@ -743,8 +727,8 @@ async function saveNoteEdit() {
     await api.put(`/api/notes/${viewingNote.value.id}`, { content: noteEditDraft.value })
     viewingNote.value.content = noteEditDraft.value
     noteEditing.value = false
-    toast('已保存')
-  } catch (_) { toast('保存失败') }
+    toast(t('common.saved'))
+  } catch (_) { toast(t('error.save')) }
 }
 function cancelNoteEdit() {
   noteEditing.value = false
@@ -753,15 +737,15 @@ function cancelNoteEdit() {
 watch(viewingNote, () => { noteEditing.value = false })
 
 async function deleteNote(id: string) {
-  const ok = await confirm('确定删除此笔记？')
+  const ok = await confirm(t('note.confirmDelete'))
   if (!ok) return
   try {
     await api.del(`/api/notes/${id}`)
     notes.value = notes.value.filter((d: any) => d.id !== id)
     if (viewingNote.value?.id === id) viewingNote.value = null
     diagramStateStore.removeAll(id)
-    toast('已删除')
-  } catch (_) { toast('删除失败') }
+    toast(t('common.deleted'))
+  } catch (_) { toast(t('error.delete')) }
 }
 
 // ── Archives ──
@@ -770,10 +754,10 @@ async function loadArchives() {
 }
 
 async function deleteArchive(id: string) {
-  const ok = await confirm('确定删除此归档？')
+  const ok = await confirm(t('archive.confirmDelete'))
   if (!ok) return
-  try { await api.deleteArchive(id); archives.value = archives.value.filter((a: any) => a.id !== id); toast('已删除') }
-  catch (_) { toast('删除失败') }
+  try { await api.deleteArchive(id); archives.value = archives.value.filter((a: any) => a.id !== id); toast(t('common.deleted')) }
+  catch (_) { toast(t('error.delete')) }
 }
 
 // ── Storage event listener (cross-tab note sync) ──
@@ -803,7 +787,7 @@ function getAnnotationBlocks(html: string): string {
   let r = html.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
     (_, id, text) => `<div class="note-annotation" data-anno-id="${id}"><div class="note-anno-marker"></div><div class="note-anno-body">${renderMarkdown(text.trim())}</div></div>`)
   r = r.replace(/<!--\s*ann:slot\s*-->/g,
-    () => '<div class="note-annotation note-annotation-slot" data-anno-slot><div class="note-anno-marker" style="opacity:.3"></div><div class="note-anno-body" style="color:var(--text-muted);font-style:italic;font-size:12px">+ 添加批注</div></div>')
+    () => `<div class="note-annotation note-annotation-slot" data-anno-slot><div class="note-anno-marker" style="opacity:.3"></div><div class="note-anno-body" style="color:var(--text-muted);font-style:italic;font-size:12px">+${t('anno.addSlot')}</div></div>`)
   return r
 }
 function onDocAnnoClick(e: MouseEvent) {
@@ -836,12 +820,12 @@ function saveAnnotation() {
   } else {
     viewingNote.value.content = viewingNote.value.content.replace(new RegExp(`<!--\\s*annotation:${id}\\s*-->[\\s\\S]*?<!--\\s*/annotation\\s*-->`, 'g'), `<!-- annotation:${id} -->${text.trim()}<!-- /annotation -->`)
   }
-  editAnnoData.value = null; toast('批注已保存')
+  editAnnoData.value = null; toast(t('anno.saved'))
 }
 function deleteAnnotation() {
   if (!editAnnoData.value?.id || !viewingNote.value) return
   viewingNote.value.content = viewingNote.value.content.replace(new RegExp(`<!--\\s*annotation:${editAnnoData.value.id}\\s*-->[\\s\\S]*?<!--\\s*/annotation\\s*-->\\n?`, 'g'), '')
-  editAnnoData.value = null; toast('批注已删除')
+  editAnnoData.value = null; toast(t('anno.deleted'))
 }
 
 // ── Tabs ──
@@ -1050,8 +1034,8 @@ async function saveDiagState() {
     }
     for (const { id: mid } of toSave) diagramStateStore.removeAll(mid)
     document.dispatchEvent(new CustomEvent('diagram-state-changed'))
-    toast('图状态已保存')
-  } catch (_) { toast('保存失败') }
+    toast(t('diagram.saved'))
+  } catch (_) { toast(t('error.save')) }
 }
 
 /** 笔记视图中的图重建确认 — 直接更新 viewingNote.content 并保存 */
@@ -1090,8 +1074,8 @@ async function saveViewingDocDiagState() {
     await api.put(`/api/notes/${note.id}`, { content: note.content } as any)
     diagramStateStore.removeAll(note.id)
     document.dispatchEvent(new CustomEvent('diagram-state-changed'))
-    toast('笔记图状态已保存')
-  } catch (_) { toast('保存失败') }
+    toast(t('diagram.noteSaved'))
+  } catch (_) { toast(t('error.save')) }
 }
 
 onMounted(async () => {
@@ -1187,18 +1171,18 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       <!-- 执行便签 - 选择会话 -->
       <div v-if="execSessionSelectorVisible" class="dialog-overlay" @click.self="execSessionSelectorVisible = false; executingDraft = null">
         <div class="dialog-box" style="width:420px">
-          <h3>选择会话执行便签</h3>
+          <h3>{{ $t('exec.selectTitle') }}</h3>
           <div class="exec-session-list">
             <div class="exec-session-item"
               :class="{ active: execSelectedSessionId === currentId }"
               @click="console.log('[execDialog] select currentSession'); execSelectedSessionId = currentId">
-              <span class="exec-session-name">当前会话</span>
+              <span class="exec-session-name">{{ $t('exec.current') }}</span>
               <span class="exec-session-title">{{ currentTitle }}</span>
             </div>
             <div class="exec-session-item"
               :class="{ active: execSelectedSessionId === '__new__' }"
               @click="console.log('[execDialog] select newSession'); execSelectedSessionId = '__new__'">
-              <span class="exec-session-name">＋ 新建空白会话</span>
+              <span class="exec-session-name">{{ $t('exec.newSession') }}</span>
             </div>
             <div v-for="s in sessions" :key="s.id"
               class="exec-session-item"
@@ -1208,8 +1192,8 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
             </div>
           </div>
           <div class="dialog-actions">
-            <button class="dialog-btn" @click="execSessionSelectorVisible = false; executingDraft = null">取消</button>
-            <button class="dialog-btn primary" @click="execConfirmSession">确认</button>
+            <button class="dialog-btn" @click="execSessionSelectorVisible = false; executingDraft = null">{{ $t('common.cancel') }}</button>
+            <button class="dialog-btn primary" @click="execConfirmSession">{{ $t('common.confirm') }}</button>
           </div>
         </div>
       </div>
@@ -1217,19 +1201,19 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       <!-- Doc Editor Dialog -->
       <div v-if="showNoteEditor" class="dialog-overlay" @click.self="showNoteEditor = false">
         <div class="dialog-box" style="width:700px;max-width:95vw">
-          <h3><input v-model="noteEditTitle" class="dialog-input" style="margin-bottom:8px" placeholder="笔记标题" /></h3>
+          <h3><input v-model="noteEditTitle" class="dialog-input" style="margin-bottom:8px" :placeholder="$t('note.titlePlaceholder')" /></h3>
           <div style="display:flex;gap:8px;margin-bottom:8px">
             <label class="toggle-switch">
               <input type="checkbox" v-model="notePreview" /><span class="toggle-slider"></span>
             </label>
-            <span style="font-size:12px;color:var(--text-muted)">{{ notePreview ? '预览' : '编辑' }}</span>
+            <span style="font-size:12px;color:var(--text-muted)">{{ notePreview ? $t('note.preview') : $t('note.edit') }}</span>
           </div>
           <textarea v-if="!notePreview" v-model="noteEditContent" style="width:100%;min-height:400px;font-family:var(--font-mono);font-size:13px;padding:12px;border:1px solid var(--border);border-radius:8px;resize:vertical;background:var(--bg-code);color:var(--code-text,#d4d4d4);outline:none" spellcheck="false"></textarea>
           <div v-else class="note-render" style="min-height:400px;padding:12px;border:1px solid var(--border);border-radius:8px;overflow:auto;font-size:var(--content-font-size)" v-html="renderDocMarkdown(noteEditContent)"></div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">使用 &lt;!-- annotation:id --&gt;批注文字&lt;!-- /annotation --&gt; 添加批注</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">{{ $t('note.annotationHint') }}</div>
           <div class="dialog-actions" style="margin-top:8px">
-            <button class="dialog-btn" @click="showNoteEditor = false">取消</button>
-            <button class="dialog-btn primary" @click="saveNote">保存</button>
+            <button class="dialog-btn" @click="showNoteEditor = false">{{ $t('common.cancel') }}</button>
+            <button class="dialog-btn primary" @click="saveNote">{{ $t('common.save') }}</button>
           </div>
         </div>
       </div>
@@ -1237,29 +1221,29 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       <!-- 待处理便签弹窗 -->
       <div v-if="draftsDialogVisible" class="dialog-overlay" @click.self="draftsDialogVisible = false">
         <div class="dialog-box" style="width:480px;max-height:70vh;display:flex;flex-direction:column">
-          <h3>待处理便签 ({{ pendingDrafts.length }})</h3>
+          <h3>{{ $t('drafts.title', { n: pendingDrafts.length }) }}</h3>
           <div class="drafts-dialog-list" style="flex:1;overflow-y:auto;margin:8px 0">
             <div v-for="d in pendingDrafts" :key="d.id" class="drafts-dialog-card">
               <div class="drafts-dialog-card-header">
                 <span class="title" :title="d.userText">{{ d.userText?.slice(0,30) || `#${d.seq}` }}</span>
-                <span class="ref-badge">{{ d.refs?.length || 0 }} 项引用</span>
+                <span class="ref-badge">{{ $t('drafts.refCount', { n: d.refs?.length || 0 }) }}</span>
               </div>
               <div class="drafts-dialog-card-body">
                 <div v-for="(r, i) in d.refs?.slice(0,5)" :key="i" class="drafts-dialog-ref">
                   <div class="ref-source">{{ [r.projectName, r.componentId].filter(Boolean).join(' / ') }}</div>
                   <div class="ref-text">{{ (r.text || r.label || '').slice(0, 100) }}</div>
                 </div>
-                <div v-if="d.refs?.length > 5" class="ref-more">还有 {{ d.refs.length - 5 }} 项...</div>
+                <div v-if="d.refs?.length > 5" class="ref-more">{{ $t('drafts.more', { n: d.refs.length - 5 }) }}</div>
               </div>
               <div class="drafts-dialog-card-actions">
-                <button class="exec-btn" @click="executeDraft(d); draftsDialogVisible = false">执行</button>
-                <button class="del-btn" @click="deleteDraft(d.id)">删除</button>
+                <button class="exec-btn" @click="executeDraft(d); draftsDialogVisible = false">{{ $t('common.execute') }}</button>
+                <button class="del-btn" @click="deleteDraft(d.id)">{{ $t('common.delete') }}</button>
               </div>
             </div>
           </div>
-          <div v-if="!pendingDrafts.length" class="drafts-dialog-empty" style="padding:24px;text-align:center;color:var(--text-muted)">暂无待处理便签</div>
+          <div v-if="!pendingDrafts.length" class="drafts-dialog-empty" style="padding:24px;text-align:center;color:var(--text-muted)">{{ $t('drafts.empty') }}</div>
           <div class="dialog-actions">
-            <button class="dialog-btn" @click="draftsDialogVisible = false">关闭</button>
+            <button class="dialog-btn" @click="draftsDialogVisible = false">{{ $t('common.close') }}</button>
           </div>
         </div>
       </div>
@@ -1272,15 +1256,15 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       >
         <template #title>
           <template v-if="viewingNote">
-            <span class="topbar-badge badge-note">笔记</span>
-            <span class="chat-title note-title-clickable" @click="openNoteEditor" title="编辑笔记">
-              {{ viewingNote?.title || '无标题' }}<svg class="edit-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <span class="topbar-badge badge-note">{{ $t('note.badge') }}</span>
+            <span class="chat-title note-title-clickable" @click="openNoteEditor" :title="$t('note.editTitle')">
+              {{ viewingNote?.title || $t('common.untitled') }}<svg class="edit-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </span>
           </template>
           <span v-else class="chat-title">{{ currentTitle }}</span>
         </template>
         <template #tools>
-          <button class="drafts-topbar-btn" :class="{ 'has-dot': pendingDrafts.length > 0 }" @click="draftsDialogVisible = true" title="待处理便签">
+          <button class="drafts-topbar-btn" :class="{ 'has-dot': pendingDrafts.length > 0 }" @click="draftsDialogVisible = true" :title="$t('drafts.tip')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             <span v-if="pendingDrafts.length > 0" class="drafts-dot"></span>
           </button>
@@ -1293,9 +1277,9 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
             @context="contextLimit = $event"
           />
           <template v-if="viewingNote">
-            <button class="note-topbar-btn" :class="{ active: showAnnotations }" @click="toggleAnnotations" title="切换批注显示"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
-            <button class="note-topbar-btn" @click="addNewAnnotation" title="添加批注"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
-            <button class="note-topbar-btn" @click="startNoteEdit" title="全文编辑 (Markdown)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+            <button class="note-topbar-btn" :class="{ active: showAnnotations }" @click="toggleAnnotations" :title="$t('anno.toggle')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
+            <button class="note-topbar-btn" @click="addNewAnnotation" :title="$t('anno.add')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+            <button class="note-topbar-btn" @click="startNoteEdit" :title="$t('note.editMd')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
           </template>
         </template>
       </AppToolbar>
@@ -1305,8 +1289,8 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         <template v-if="noteEditing">
           <textarea v-model="noteEditDraft" class="note-md-editor" spellcheck="false"></textarea>
           <div class="note-edit-actions">
-            <button class="dialog-btn" @click="cancelNoteEdit">取消</button>
-            <button class="dialog-btn primary" @click="saveNoteEdit">保存</button>
+            <button class="dialog-btn" @click="cancelNoteEdit">{{ $t('common.cancel') }}</button>
+            <button class="dialog-btn primary" @click="saveNoteEdit">{{ $t('common.save') }}</button>
           </div>
         </template>
         <div v-else class="note-view-body" @click="onDocAnnoClick">
@@ -1339,26 +1323,26 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       <!-- Annotation Editor Dialog -->
       <div v-if="editAnnoData" class="dialog-overlay" @click.self="editAnnoData = null">
         <div class="dialog-box" style="width:500px">
-          <h3>{{ editAnnoData.isNew ? '添加批注' : '编辑批注' }}</h3>
-          <textarea v-model="editAnnoData.text" class="dialog-input" style="min-height:100px;resize:vertical" placeholder="批注内容..."></textarea>
+          <h3>{{ editAnnoData.isNew ? $t('anno.add') : $t('anno.edit') }}</h3>
+          <textarea v-model="editAnnoData.text" class="dialog-input" style="min-height:100px;resize:vertical" :placeholder="$t('anno.placeholder')"></textarea>
           <div class="dialog-actions">
-            <button v-if="!editAnnoData.isNew" class="dialog-btn" style="color:#ef4444" @click="deleteAnnotation">删除</button>
-            <button class="dialog-btn" @click="editAnnoData = null">取消</button>
-            <button class="dialog-btn primary" @click="saveAnnotation">保存</button>
+            <button v-if="!editAnnoData.isNew" class="dialog-btn" style="color:#ef4444" @click="deleteAnnotation">{{ $t('common.delete') }}</button>
+            <button class="dialog-btn" @click="editAnnoData = null">{{ $t('common.cancel') }}</button>
+            <button class="dialog-btn primary" @click="saveAnnotation">{{ $t('common.save') }}</button>
           </div>
         </div>
       </div>
 
       <!-- Docs empty state -->
       <div v-if="tab === 'notes' && !viewingNote" class="notes-empty-state">
-        <p>请从左侧选择一个笔记</p>
+        <p>{{ $t('note.empty') }}</p>
       </div>
 
       <!-- Messages -->
       <div v-if="tab === 'chat' && !viewingNote" class="messages" ref="msgArea" :class="{ 'delete-mode': deleteMode }">
         <div v-if="hasMore" class="load-more-bar" @click="loadMoreMessages">
-          <span v-if="isLoadingMore">加载中…</span>
-          <span v-else>↑ 点击加载更早消息</span>
+          <span v-if="isLoadingMore">{{ $t('common.loading') }}</span>
+          <span v-else>{{ $t('msg.loadEarlier') }}</span>
         </div>
         <ChatMessage
           v-for="(m, i) in displayMessages"
@@ -1384,14 +1368,14 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       </div>
 
       <div v-if="tab === 'chat' && !currentId" class="empty-state">
-        <p>选择或创建一个对话开始</p><button class="start-btn" @click="createSession">新对话</button>
+        <p>{{ $t('session.empty') }}</p><button class="start-btn" @click="createSession">{{ $t('common.newChat') }}</button>
       </div>
 
       <div v-if="deleteMode && selectedIds.size > 0" class="delete-bar">
-        <span>已选 {{ selectedIds.size }} 条</span>
-        <button class="tb-btn" @click="selectAll">{{ allSelected ? '取消全选' : '全选' }}</button>
-        <button class="tb-btn" style="background:#ef4444;color:#fff;border-color:#ef4444" @click="deleteSelected">删除 {{ selectedIds.size }}</button>
-        <button class="tb-btn" @click="toggleDeleteMode">取消</button>
+        <span>{{ $t('delete.selected', { n: selectedIds.size }) }}</span>
+        <button class="tb-btn" @click="selectAll">{{ allSelected ? $t('delete.deselectAll') : $t('delete.selectAll') }}</button>
+        <button class="tb-btn" style="background:#ef4444;color:#fff;border-color:#ef4444" @click="deleteSelected">{{ $t('delete.n', { n: selectedIds.size }) }}</button>
+        <button class="tb-btn" @click="toggleDeleteMode">{{ $t('common.cancel') }}</button>
       </div>
 
       <ChatInput v-if="tab === 'chat'" :streaming="streaming" v-model="input" :diagram-enabled="diagramEnabled" @send="onSend" @abort-stream="abortStream" @toggle-diagram="onToggleDiagram" />

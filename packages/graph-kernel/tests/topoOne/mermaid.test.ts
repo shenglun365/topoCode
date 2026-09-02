@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import mermaid from 'mermaid';
-import { MermaidEngine } from '../../src/topoOne/engines/mermaid/mermaid';
+import { MermaidEngine } from '../../src/engines/mermaid/mermaid';
 
 describe('MermaidEngine (jsdom)', () => {
   it('renders a flowchart to svg', async () => {

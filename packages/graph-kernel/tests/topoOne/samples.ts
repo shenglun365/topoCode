@@ -1,4 +1,4 @@
-import type { DiagramSchema } from '../../src/topoOne/core/types';
+import type { DiagramSchema } from '../../src/core/types';
 
 export const samples: Record<string, DiagramSchema> = {
   flowchart: {

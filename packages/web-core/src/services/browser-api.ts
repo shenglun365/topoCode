@@ -14,19 +14,8 @@
   * `topocode:token` 并清理 URL；之后所有请求自动携带 Bearer，WS 自动携带 ?token=。
   */
 
-/** 读取 token：URL hash `#token=xxx`（首次粘贴）优先，其次 localStorage */
-function readToken(): string {
-  if (typeof window === 'undefined') return ''
-  try {
-    const m = window.location.hash.match(/token=([A-Za-z0-9]+)/)
-    if (m && m[1]) {
-      localStorage.setItem('topocode:token', m[1])
-      window.history.replaceState(null, '', window.location.pathname + window.location.search)
-      return m[1]
-    }
-  } catch {}
-  return localStorage.getItem('topocode:token') || ''
-}
+/** 读取 token：单一源 ./token（F2 修正，原此处有一份逐字拷贝） */
+import { readToken } from './token'
 
 function getToken(): string {
   return readToken()

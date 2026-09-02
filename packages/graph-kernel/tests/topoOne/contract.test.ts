@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import schema from '../../src/topoOne/schema_data/diagram.schema.json';
+import schema from '../../src/schema_data/diagram.schema.json';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const typesSrc = readFileSync(resolve(here, '../../src/topoOne/core/types.ts'), 'utf8');
+const typesSrc = readFileSync(resolve(here, '../../src/core/types.ts'), 'utf8');
 
 /**
  * Contract guard: schema/diagram.schema.json is the single source of truth.

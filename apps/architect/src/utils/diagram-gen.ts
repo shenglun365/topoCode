@@ -283,7 +283,9 @@ function _semNodeId(idx: number): string {
 }
 
 function _semLabel(s: string, max = 26): string {
-  const t = (s || '').replace(/\[|\]|\{|\}|\(|\)/g, ' ').replace(/"/g, "'").replace(/\\/g, '').trim()
+  // mermaid flowchart 边标签 |...| 遇 @ | " 等字符直接 Parse error(实测 v11)，统一置换；
+  // 空白折叠防止 desc 内换行把一条边拆成两行。
+  const t = (s || '').replace(/\[|\]|\{|\}|\(|\)|\||@/g, ' ').replace(/"/g, "'").replace(/\\/g, '').replace(/\s+/g, ' ').trim()
   return t.length > max ? `${t.slice(0, max)}…` : (t || '?')
 }
 
@@ -305,7 +307,7 @@ function _semNodeLabel(n: { name: string; id: string }, max = 26): string {
 /** 语义资产图谱 → Mermaid flowchart(按粒度 high→medium→low 分 subgraph 表达层级)。 */
 export function semanticGraphToMermaid(
   nodes: { id: string; kind: string; level?: string; name: string; status?: string; needsUpdate?: number }[],
-  edges: { from: string; to: string; type?: string; semantic?: string; desc?: string }[],
+  edges: SemGraphViewEdge[],
 ): string {
   const P = currentDiagramPalette()
   const lines = ['flowchart TD']
@@ -352,7 +354,7 @@ export function semanticGraphToMermaid(
     if (seen.has(key)) continue
     seen.add(key)
     const label = (e.desc || e.type || e.semantic || '').trim()
-    lines.push(`  ${a} -->${label ? `|${_semLabel(label, 14)}|` : ''} ${b}`)
+    lines.push(`  ${a} ${_mmdArrow(e)}${label || e.indirect ? `|${_semEdgeLabel(e, 14)}|` : ''} ${b}`)
   }
   // 显式加粗可见连线(深色背景下保证线/字可读，不依赖全局主题)。
   lines.push(`  linkStyle default stroke:${P.line},color:${P.text},stroke-width:1.5px`)
@@ -362,7 +364,7 @@ export function semanticGraphToMermaid(
 /** 语义资产图谱 → PlantUML component 图(按粒度 package 分组表达层级)。 */
 export function semanticGraphToPlantUml(
   nodes: { id: string; kind: string; level?: string; name: string; status?: string; needsUpdate?: number }[],
-  edges: { from: string; to: string; type?: string; semantic?: string; desc?: string }[],
+  edges: SemGraphViewEdge[],
 ): string {
   const P = currentDiagramPalette()
   const lines = ['@startuml', 'skinparam componentStyle rectangle', `skinparam backgroundColor ${P.bg}`,
@@ -400,7 +402,7 @@ export function semanticGraphToPlantUml(
     if (seen.has(key)) continue
     seen.add(key)
     const label = (e.desc || e.type || e.semantic || '').trim()
-    lines.push(`${a} --> ${b}${label ? ` : ${_semLabel(label, 18)}` : ''}`)
+    lines.push(`${a} ${_puArrow(e)} ${b}${label || e.indirect ? ` : ${_semEdgeLabel(e, 18)}` : ''}`)
   }
   lines.push('@enduml')
   return lines.join('\n')
@@ -440,10 +442,38 @@ export interface SemGraphViewEdge {
   semantic?: string
   /** 证据式关系描述(edge_notes 生成；优先于 type/semantic 作边标签)。 */
   desc?: string
+  /** 间接边(1 跳中转)：虚线渲染 + via 中转名。 */
+  indirect?: boolean
+  via?: string
+  /** 派生边证据(发生处文件:行)。 */
+  line?: number | null
+  file?: string
+  confidence?: string
+  resolvedBy?: string
 }
 
 type _Node = SemGraphViewNode
 type _Edge = SemGraphViewEdge
+
+/** 边标签：desc 优先，间接边附 ⇝中转 提示。 */
+function _semEdgeLabel(e: _Edge, max = 14, fallback = ''): string {
+  // desc 常带 @L{行}: 证据前缀(edge_notes LLM 惯例)：证据已在边悬停/矩阵详情呈现，
+  // 标签里去掉以省出 14 字预算给真实内容(且 @ 会破坏 mermaid 边标签解析)。
+  let base = (e.desc || e.type || e.semantic || fallback).trim()
+  base = base.replace(/^@L\d+\s*[:：]\s*/, '')
+  if (e.indirect && e.via) return `${_semLabel(base || 'rel', max)}⇝${_semLabel(e.via, 10)}`
+  return _semLabel(base, max)
+}
+
+/** 间接边 → mermaid 虚线箭头。 */
+function _mmdArrow(e: _Edge, solid = '-->'): string {
+  return e.indirect ? '-.->' : solid
+}
+
+/** 间接边 → plantuml 虚线箭头。 */
+function _puArrow(e: _Edge, solid = '-->'): string {
+  return e.indirect ? '..>' : solid
+}
 
 /** mermaid/plantuml 安全的资产 id(去特殊字符、避免数字开头)；规避 JS 原型链同名(mermaid 按名做对象索引)。 */
 function _safeSemId(id: string): string {
@@ -615,14 +645,16 @@ export function semanticClassDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
     const b = safe.get(e.to)
     if (!a || !b || a === b) continue
     const t = (e.type || '').toLowerCase()
-    let arrow = '-->'
-    if (t.includes('extends')) arrow = '<|--'
+    let arrow = _mmdArrow(e)
+    if (e.indirect) arrow = '..>'
+    else if (t.includes('extends')) arrow = '<|--'
     else if (t.includes('implements')) arrow = '<|..'
     else if (t.includes('contains') || t.includes('instantiates')) arrow = '*--'
     const key = `${a}${arrow}${b}`
     if (seen.has(key)) continue
     seen.add(key)
-    lines.push(`  ${a} ${arrow} ${b}${(e.desc || e.type) ? ` : ${_semLabel(e.desc || e.type, 12)}` : ''}`)
+    // classDiagram 边标签在首个半角冒号处截断(实测 v11)，标签内冒号置换为全角
+    lines.push(`  ${a} ${arrow} ${b}${(e.desc || e.type) ? ` : ${_semEdgeLabel(e, 12).replace(/:/g, '：')}` : ''}`)
   }
   for (const n of classes) lines.push(`  class ${safe.get(n.id)} ${n.status === 'stale' ? 'stale' : n.kind}`)
   return lines.join('\n')
@@ -648,14 +680,15 @@ export function semanticClassDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): 
     const b = safe.get(e.to)
     if (!a || !b || a === b) continue
     const t = (e.type || '').toLowerCase()
-    let arrow = '-->'
-    if (t.includes('extends')) arrow = '<|--'
+    let arrow = _puArrow(e)
+    if (e.indirect) arrow = '..>'
+    else if (t.includes('extends')) arrow = '<|--'
     else if (t.includes('implements')) arrow = '<|..'
     else if (t.includes('contains') || t.includes('instantiates')) arrow = '*--'
     const key = `${a}${arrow}${b}`
     if (seen.has(key)) continue
     seen.add(key)
-    lines.push(`${a} ${arrow} ${b}${(e.desc || e.type) ? ` : ${_semLabel(e.desc || e.type, 14)}` : ''}`)
+    lines.push(`${a} ${arrow} ${b}${(e.desc || e.type) ? ` : ${_semEdgeLabel(e, 14)}` : ''}`)
   }
   lines.push('@enduml')
   return lines.join('\n')
@@ -695,7 +728,7 @@ export function semanticErDiagramToMermaid(nodes: _Node[], edges: _Edge[]): stri
     const key = `${a}|${b}`
     if (seen.has(key)) continue
     seen.add(key)
-    lines.push(`  ${a} ${_erRelationArrow(e.type || '')} ${b} : "${_puText(_semLabel(e.desc || e.type || 'has', 16))}"`)
+    lines.push(`  ${a} ${_erRelationArrow(e.type || '')} ${b} : "${_puText(_semEdgeLabel(e, 16, 'has'))}"`)
   }
   return lines.join('\n')
 }
@@ -722,7 +755,7 @@ export function semanticErDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): str
     const key = `${a}|${b}`
     if (seen.has(key)) continue
     seen.add(key)
-    lines.push(`${a} ${_erRelationArrow(e.type || '')} ${b} : ${_puText(_semLabel(e.desc || e.type || 'has', 16))}`)
+    lines.push(`${a} ${_erRelationArrow(e.type || '')} ${b} : ${_puText(_semEdgeLabel(e, 16, 'has'))}`)
   }
   lines.push('@enduml')
   return lines.join('\n')
@@ -754,7 +787,7 @@ export function semanticSequenceDiagramToMermaid(nodes: _Node[], edges: _Edge[])
     seen.add(key)
     const t = (e.type || '').toLowerCase()
     if (t.includes('references')) continue
-    lines.push(`  ${safe.get(e.from)}->>${safe.get(e.to)}: ${_semLabel(e.desc || e.type || '交互', 24)}`)
+    lines.push(`  ${safe.get(e.from)}->>${safe.get(e.to)}: ${_semEdgeLabel(e, 24, '交互')}`)
   }
   return lines.join('\n')
 }
@@ -787,7 +820,7 @@ export function semanticSequenceDiagramToPlantUml(nodes: _Node[], edges: _Edge[]
     seen.add(key)
     const t = (e.type || '').toLowerCase()
     if (t.includes('references')) continue
-    lines.push(`${safe.get(e.from)} -> ${safe.get(e.to)} : ${_semLabel(e.desc || e.type || '交互', 24)}`)
+    lines.push(`${safe.get(e.from)} -> ${safe.get(e.to)} : ${_semEdgeLabel(e, 24, '交互')}`)
   }
   lines.push('@enduml')
   return lines.join('\n')
@@ -849,7 +882,7 @@ export function semanticStateDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
     const key = `${a}|${b}`
     if (seen.has(key)) continue
     seen.add(key)
-    lines.push(`  ${a} --> ${b} : ${_semLabel(e.desc || e.type || '转移', 14)}`)
+    lines.push(`  ${a} --> ${b} : ${_semEdgeLabel(e, 14, '转移')}`)
   }
   return lines.join('\n')
 }
@@ -906,7 +939,7 @@ export function semanticStateDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): 
     const key = `${a}|${b}`
     if (seen.has(key)) continue
     seen.add(key)
-    lines.push(`${a} --> ${b} : ${lbl(e.desc || e.type || '转移', 14)}`)
+    lines.push(`${a} --> ${b} : ${lbl(_semEdgeLabel(e, 14, '转移'), 30)}`)
   }
   lines.push('@enduml')
   return lines.join('\n')
@@ -942,6 +975,11 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
   lines.push(`  classDef contract fill:${P.fill},stroke:#f9e2af,stroke-width:2px,color:${P.text}`)
   lines.push(`  classDef asset fill:${P.fill},stroke:#cba6f7,stroke-width:2px,color:${P.text}`)
   lines.push(`  classDef stale fill:${P.staleFill},stroke:#f38ba8,stroke-width:2px,color:${P.staleText}`)
+  // mermaid flowchart 边数硬上限 500(超出抛 "Edge limit exceeded" 整图崩溃)；
+  // 预留余量，预算耗尽即停(退化为部分流程，不崩图)。
+  const EDGE_BUDGET = 450
+  let edgeCount = 0
+  const overBudget = () => edgeCount >= EDGE_BUDGET
   if (!_hasActivityDetail(nodes)) {
     // 退化：无 steps/branches/trigger → 按 scopeKey 泳道分组展示
     const byScope = new Map<string, _Node[]>()
@@ -962,13 +1000,15 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
     }
     const seen = new Set<string>()
     for (const e of edges) {
+      if (overBudget()) break
       const a = safe.get(e.from)
       const b = safe.get(e.to)
       if (!a || !b || a === b) continue
       const key = `${a}->${b}`
       if (seen.has(key)) continue
       seen.add(key)
-      lines.push(`  ${a} -->${(e.desc || e.type) ? `|${_semLabel(e.desc || e.type, 12)}|` : ''} ${b}`)
+      edgeCount++
+      lines.push(`  ${a} ${_mmdArrow(e)}${(e.desc || e.type || e.indirect) ? `|${_semEdgeLabel(e, 12)}|` : ''} ${b}`)
     }
     lines.push(`  linkStyle default stroke:${P.line},color:${P.text},stroke-width:1.5px`)
     return lines.join('\n')
@@ -981,10 +1021,12 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
     lines.push(`  ${id}["${_semLabel(label, 30)}"]${style ? `:::${style}` : ''}`)
     return id
   }
-  const link = (a?: string, b?: string) => { if (a && b && a !== b) lines.push(`  ${a} --> ${b}`) }
+  const link = (a?: string, b?: string) => { if (a && b && a !== b && !overBudget()) { edgeCount++; lines.push(`  ${a} --> ${b}`) } }
+  const labeledLink = (a: string, b: string, text: string) => { if (!overBudget()) { edgeCount++; lines.push(`  ${a} -- ${text} --> ${b}`) } }
   const entry = new Map<string, string>()
   const exit = new Map<string, string>()
   for (const n of _activityOrder(nodes)) {
+    if (overBudget()) break   // 预算耗尽：后续资产不再展开(其跨资产边也因 entry/exit 缺失自动跳过)
     const style = kindStyle(n.kind)
     let first: string | undefined
     let last: string | undefined
@@ -1002,8 +1044,8 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
         if (!first) first = cond
         if (last) link(last, cond)
         last = cond
-        lines.push(`  ${cond} -- 成立 --> ${t}`)
-        lines.push(`  ${cond} -- 不成立 --> ${e}`)
+        labeledLink(cond, t, '成立')
+        labeledLink(cond, e, '不成立')
         link(t, join)
         link(e, join)
       }
@@ -1020,7 +1062,7 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
           if (!first) first = c
           if (last) link(last, c)
           last = c
-          lines.push(`  ${c} -- 成立 --> ${act}`)
+          labeledLink(c, act, '成立')
           last = act
         } else {
           const act = addNode(txt, style)
@@ -1040,12 +1082,14 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
   }
   const seen = new Set<string>()
   for (const e of edges) {
+    if (overBudget()) break
     const a = exit.get(e.from)
     const b = entry.get(e.to)
     if (!a || !b || a === b) continue
     const key = `${a}|${b}`
     if (seen.has(key)) continue
     seen.add(key)
+    edgeCount++
     lines.push(`  ${a} -->|${_semLabel(e.type || '', 12)}| ${b}`)
   }
   lines.push(`  linkStyle default stroke:${P.line},color:${P.text},stroke-width:1.5px`)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MermaidEngine } from '../../src/topoOne/engines/mermaid/mermaid';
+import { MermaidEngine } from '../../src/engines/mermaid/mermaid';
 import {
   resolveAdapter,
   mermaidSequenceAdapter,
@@ -7,8 +7,8 @@ import {
   mermaidGanttAdapter,
   mermaidGenericAdapter,
   plantumlGenericAdapter,
-} from '../../src/topoOne/animation/adapters';
-import { guessType } from '../../src/topoOne/animation/guessType';
+} from '../../src/animation/adapters';
+import { guessType } from '../../src/animation/guessType';
 
 async function renderMermaid(code: string): Promise<SVGSVGElement> {
   const el = document.createElement('div');

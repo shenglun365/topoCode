@@ -243,7 +243,11 @@ function cellTitle(from: string, to: string): string {
   if (!es.length) return ''
   const fromName = props.nodes.find((n) => n.id === from)?.name ?? from
   const toName = props.nodes.find((n) => n.id === to)?.name ?? to
-  const lines = es.map((e) => `· ${e.type || '—'}${e.desc ? ` — ${e.desc}` : ''}`)
+  const lines = es.map((e) => {
+    const ev = [e.indirect ? `⇝${e.via || ''}` : '', e.file ? `${e.file}${e.line ? `:${e.line}` : ''}` : '']
+      .filter(Boolean).join(' · ')
+    return `· ${e.type || '—'}${e.desc ? ` — ${e.desc}` : ''}${ev ? `  (${ev})` : ''}`
+  })
   return `${fromName} → ${toName}\n${t('assetMgmt.matrix.edgesCount', { n: es.length })}\n${lines.join('\n')}`
 }
 function fileCellTitle(fa: string, fb: string): string {
@@ -435,10 +439,13 @@ const selName = computed(() => props.nodes.find((n) => n.id === props.selId)?.na
       </div>
       <div v-for="(e, i) in detail.edges" :key="i" class="pl-1 py-0.5 text-[10px] leading-relaxed">
         <span class="font-mono text-ctp-overlay1">{{ e.type || '—' }}</span>
+        <span v-if="e.indirect" class="text-ctp-teal" :title="e.via"> ⇝{{ t('assetMgmt.matrix.indirect') }}</span>
         <span v-if="e.desc" class="text-ctp-subtext0"> — {{ e.desc }}</span>
+        <span v-if="e.file" class="ml-1 font-mono text-[9px] text-ctp-overlay0">{{ e.file }}{{ e.line ? `:${e.line}` : '' }}</span>
+        <span v-if="e.resolvedBy" class="ml-1 text-[9px] text-ctp-overlay0">{{ e.resolvedBy }}{{ e.confidence ? ` (${e.confidence})` : '' }}</span>
         <button class="ml-1 text-ctp-sky hover:underline" @click="selectAsset(detail!.from)">{{ nameOf(detail.from) }}</button>
         <span class="text-ctp-overlay0"> → </span>
-        <button class="text-ctp-sky hover:underline" @click="selectAsset(detail!.to)">{{ nameOf(detail.to) }}</button>
+        <button class="ml-1 text-ctp-sky hover:underline" @click="selectAsset(detail!.to)">{{ nameOf(detail.to) }}</button>
       </div>
     </div>
 

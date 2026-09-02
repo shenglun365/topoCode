@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, ref, toValue, watch, type Ref } from 'vue';
-import { authHeaders } from '../../services/api';
+import { kernelAuthHeaders } from '../core/auth';
 import { createDiagram, type DiagramView } from '../core/DiagramView';
 import type { DiagramSchema } from '../core/types';
 import type { DegradeWarning, ThemeName } from '../engines/types';
@@ -97,7 +97,7 @@ export function useTopoDiagram(opts: UseTopoDiagramOptions): TopoDiagramApi {
       themeVariables: opts.themeVariables,
       interactions,
       animation: opts.animation,
-      engineOptions: { baseUrl: opts.plantUmlBaseUrl ?? '/api/topo', headers: authHeaders() },
+      engineOptions: { baseUrl: opts.plantUmlBaseUrl ?? '/api/topo', headers: kernelAuthHeaders() },
       onReady: (v) => {
         ready.value = true;
         opts.onReady?.(v);

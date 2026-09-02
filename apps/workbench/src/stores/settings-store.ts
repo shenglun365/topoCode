@@ -58,7 +58,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const pythonMemoryLimit = ref(4096)
   const memoryLimitPending = ref(false)
   const zmqDealerPort = ref(5671)
-  const zmqPubPort = ref(5680)
+  const zmqPubPort = ref(5681)  // C4: 与 config.KB_PUB_PORT 默认一致
   const dealerPortStatus = ref<'available' | 'in-use' | null>(null)
   const pubPortStatus = ref<'available' | 'in-use' | null>(null)
 

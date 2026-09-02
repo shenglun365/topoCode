@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // @ts-nocheck — M12 迁移：既有代码（web/ 历史未严格类型门禁），保行为先跳过类型检查，清理留后续。
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   streaming: boolean
@@ -15,21 +16,22 @@ const emit = defineEmits<{
   toggleDiagram: [enabled: boolean]
 }>()
 
+const { t } = useI18n()
 const textareaRef = ref<HTMLElement>()
 
 const autoCompleteItems = ref<any[]>([])
 const autoCompleteVisible = ref(false)
 const autoCompleteIdx = ref(-1)
 const AC_COMMANDS = [
-  { trigger: '/compress', hint: '压缩当前会话' },
-  { trigger: '/help', hint: '显示帮助' },
+  { trigger: '/compress', hintKey: 'input.hintCompress' },
+  { trigger: '/help', hintKey: 'input.hintHelp' },
 ]
 const AC_REF_TYPES = [
-  { trigger: '@community:', hint: '社区ID' },
-  { trigger: '@project:', hint: '项目ID' },
-  { trigger: '@file:', hint: '文件路径' },
-  { trigger: '@symbol:', hint: '符号名称' },
-  { trigger: '@session:', hint: '会话ID' },
+  { trigger: '@community:', hintKey: 'input.hintCommunity' },
+  { trigger: '@project:', hintKey: 'input.hintProject' },
+  { trigger: '@file:', hintKey: 'input.hintFile' },
+  { trigger: '@symbol:', hintKey: 'input.hintSymbol' },
+  { trigger: '@session:', hintKey: 'input.hintSession' },
 ]
 
 function onInputChange(e: Event) {
@@ -118,14 +120,14 @@ function onEnter(e: KeyboardEvent) {
             @input="onInputChange"
             @keydown.enter.exact="onEnter"
             @keydown="onInputKeydown"
-            :placeholder="streaming ? 'AI 正在回复...' : '输入消息...'"
+            :placeholder="streaming ? t('input.streaming') : t('input.placeholder')"
             rows="3"
             :disabled="streaming"
           />
           <div v-if="autoCompleteVisible" class="autocomplete-panel open">
             <div v-for="(item, idx) in autoCompleteItems" :key="idx" class="ac-item" :class="{ active: idx === autoCompleteIdx }" @mousedown.prevent="">
               <span class="ac-trigger">{{ item.trigger }}</span>
-              <span class="ac-hint">{{ item.hint }}</span>
+              <span class="ac-hint">{{ t(item.hintKey) }}</span>
             </div>
           </div>
         </div>
@@ -134,7 +136,7 @@ function onEnter(e: KeyboardEvent) {
             class="btn-diagram-toggle"
             :class="{ active: diagramEnabled }"
             @click="emit('toggleDiagram', !diagramEnabled)"
-            :title="(diagramEnabled ? '关闭' : '开启') + ' AI 绘图增强'"
+            :title="diagramEnabled ? t('input.diagramOff') : t('input.diagramOn')"
           >📐</button>
           <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && !modelValue.trim()" @click="streaming ? emit('abortStream') : send()">
             <svg v-if="!streaming" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>

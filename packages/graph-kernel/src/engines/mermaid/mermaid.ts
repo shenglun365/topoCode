@@ -39,3 +39,21 @@ export class MermaidEngine implements DiagramEngine {
     return { svg: result.svg };
   }
 }
+
+// ── 共享 mermaid 访问（20c 合一：原 web-core services/render.ts 内私有单例删除） ──
+// mermaid 模块本身即单例；此处只统一「首次 initialize」。渲染路径（render()）
+// 仍按 ctx 每次覆盖配置；预览/解析等旁路经此拿到 antiscript 基线配置的 API。
+let _ensureDone = false;
+
+export async function ensureMermaid() {
+  if (!_ensureDone) {
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'antiscript', theme: 'default' });
+    _ensureDone = true;
+  }
+  return mermaid;
+}
+
+export function mermaidParseErrorDetail(e: any): string {
+  const raw = e && (e.message || e.str || e.hash || String(e));
+  return (raw && String(raw).trim()) || '图解法错误';
+}

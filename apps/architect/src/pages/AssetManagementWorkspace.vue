@@ -278,9 +278,8 @@ function clearScope() {
   scopeSel.value = []
 }
 
-/** 范围筛选变化 → 回到第 1 页并按选中组件重新查询(服务端 scope 过滤)。 */
+/** 范围筛选变化 → 按选中组件重新查询(服务端 scope 过滤)。 */
 watch(scopeSel, () => {
-  page.value = 1
   batchAction.value = ''
   batchPreview.value = null
   if (tab.value === 'semantic') loadSemantic()
@@ -383,9 +382,10 @@ function scopeParams(): string[] | undefined {
 async function loadSemantic() {
   loading.value = true
   try {
-    const r = await semanticAssetService.searchPage(q.value, kind.value || undefined, { limit: PAGE_SIZE, offset: (page.value - 1) * PAGE_SIZE, scope: scopeParams(), level: level.value || undefined })
+    // 树形分组视图(按组件逐层展开)必须全量加载——分页会把组内条目截断到单页，
+    // 组头计数与低序组件组显示错误(后端 _grouped_search_items 本就全量排序后返回)。
+    const r = await semanticAssetService.searchPage(q.value, kind.value || undefined, { limit: 2000, offset: 0, scope: scopeParams(), level: level.value || undefined })
     items.value = r.items
-    total.value = r.total
   } finally {
     loading.value = false
   }
@@ -869,22 +869,11 @@ function onSearch() {
     loadOverview()
     loadCoverage()
   } else {
-    page.value = 1
     loadSemantic()
   }
 }
 
-// ---- 分页(数据资产每页 ≤100，超出翻页) ----
-const PAGE_SIZE = 100
-const page = ref(1)
-const total = ref(0)
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
-
-function gotoPage(p: number) {
-  if (p < 1 || p > totalPages.value) return
-  page.value = p
-  loadSemantic()
-}
+// 分页已移除：语义资产为树形分组视图，全量加载(loadSemantic limit=2000)。
 
 onMounted(async () => {
   await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage()])
@@ -1808,30 +1797,6 @@ onMounted(async () => {
           </template>
 
           <!-- 组件资产：按 KB 组件树文件目录树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
-        </div>
-
-        <!-- 分页：数据资产每页 ≤100，超出翻页 -->
-        <div
-          v-if="tab === 'semantic' && totalPages > 1"
-          class="shrink-0 border-t border-ctp-surface0 flex items-center justify-between px-2 py-1.5"
-        >
-          <span class="text-[10px] text-ctp-overlay1 font-mono">{{ page }} / {{ totalPages }} · {{ total }}</span>
-          <div class="flex items-center gap-1">
-            <button
-              class="btn btn-xs"
-              :disabled="page <= 1"
-              @click="gotoPage(page - 1)"
-            >
-              {{ t('assetMgmt.prevPage') }}
-            </button>
-            <button
-              class="btn btn-xs"
-              :disabled="page >= totalPages"
-              @click="gotoPage(page + 1)"
-            >
-              {{ t('assetMgmt.nextPage') }}
-            </button>
-          </div>
         </div>
       </div>
 

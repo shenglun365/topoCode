@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { compileSchemaAnimation } from '../../src/topoOne/animation/compile';
-import { createDiagram } from '../../src/topoOne/core/DiagramView';
-import type { DiagramSchema } from '../../src/topoOne/core/types';
-import { validateSemantics } from '../../src/topoOne/core/validate';
+import { compileSchemaAnimation } from '../../src/animation/compile';
+import { createDiagram } from '../../src/core/DiagramView';
+import type { DiagramSchema } from '../../src/core/types';
+import { validateSemantics } from '../../src/core/validate';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

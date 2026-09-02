@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createExportPlugin, serializeSvg, svgToDataUrl } from '../../src/topoOne/plugins/export';
-import type { PluginContext } from '../../src/topoOne/plugins/types';
+import { createExportPlugin, serializeSvg, svgToDataUrl } from '../../src/plugins/export';
+import type { PluginContext } from '../../src/plugins/types';
 
 const SVG_HTML =
   '<svg xmlns="http://www.w3.org/2000/svg" style="transform: scale(2)" viewBox="0 0 100 50"><rect width="100" height="50"></rect></svg>';

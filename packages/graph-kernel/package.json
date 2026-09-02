@@ -1,0 +1,33 @@
+{
+  "name": "@topo/graph-kernel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TopoCode 图内核（topoOne）：文本图 mermaid/plantuml + schema 图渲染，web-core 与 architect 共同依赖（F3/A5 修正：由 web-core/src/topoOne 抽出，停止单向内嵌）",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "dompurify": "^3.4.0",
+    "mermaid": "^11.17.0",
+    "plantuml-encoder": "^1.4.0"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.4",
+    "typescript": "5.9.3",
+    "vue": "3.5.13",
+    "vue-tsc": "2.2.12",
+    "vitest": "4.1.5",
+    "jsdom": "^29.1.1"
+  }
+}

@@ -71,7 +71,12 @@ export function createZoomPanPlugin(opts?: ZoomPanOptions): DiagramPlugin & { ap
 
   const naturalSize = (): { w: number; h: number } | null => {
     if (!svg) return null;
-    return parseViewBox(svg) ?? (svg.clientWidth ? { w: svg.clientWidth, h: svg.clientHeight } : null);
+    // transform 作用在元素的 CSS 盒上：mermaid useMaxWidth 下 svg 为 width:100%+max-width，
+    // 布局盒远小于 viewBox——fit 若按 viewBox 计算，居中位移为负且把整个盒推出画布
+    // (overflow:hidden)→ 大图渲染空白。优先取实际布局盒(clientWidth 不受 transform 影响)，
+    // 仅在尚未布局时回退 viewBox。
+    if (svg.clientWidth > 0 && svg.clientHeight > 0) return { w: svg.clientWidth, h: svg.clientHeight };
+    return parseViewBox(svg);
   };
 
   const fit = () => {

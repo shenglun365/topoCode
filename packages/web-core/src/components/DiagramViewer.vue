@@ -3,9 +3,9 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { normalizeDiagram, enqueueRender, fitScale, mermaidParseErrorDetail } from '../services/render'
 import { diagramStateStore, type DiagramViewState } from '../services/diagramStateStore'
 import DiagramRebuildDialog from './DiagramRebuildDialog.vue'
-import { MermaidEngine } from '../topoOne/engines/mermaid/mermaid'
-import { PlantUmlEngine } from '../topoOne/engines/plantuml/plantuml'
-import { themeVariablesFor } from '../topoOne/vue/themes'
+import { MermaidEngine } from '@topo/graph-kernel/engines/mermaid/mermaid.ts'
+import { PlantUmlEngine } from '@topo/graph-kernel/engines/plantuml/plantuml.ts'
+import { themeVariablesFor } from '@topo/graph-kernel/vue/themes.ts'
 import { authHeaders } from '../services/api'
 
 function stripHtml(s: string) { return s.replace(/<!--[\s\S]*?-->/g, '') }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateDiagram, validateSchema } from '../../src/topoOne/core/validate';
+import { validateDiagram, validateSchema } from '../../src/core/validate';
 
 const validSequence = {
   version: 1,

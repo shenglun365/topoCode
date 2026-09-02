@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAnimationController } from '../../src/topoOne/animation/controller';
-import type { AnimationPlan } from '../../src/topoOne/animation/types';
+import { createAnimationController } from '../../src/animation/controller';
+import type { AnimationPlan } from '../../src/animation/types';
 
 function makeEls(n: number): Element[] {
   const out: Element[] = [];

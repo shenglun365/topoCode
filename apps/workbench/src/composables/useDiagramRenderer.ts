@@ -8,6 +8,7 @@
 
 import { ref } from 'vue'
 import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
+import { normalizeMermaidCode } from '@topo/web-core/services/diagram-normalize'
 
 export interface DiagramBlock {
   id: string
@@ -46,17 +47,9 @@ function injectDiagram(block: DiagramBlock) {
   }
 }
 
+/** 清理规则单一源见 @topo/web-core/services/diagram-normalize（F2 修正，原此处有一份拷贝） */
 function normalizeDiagramCode(lang: string, code: string): string {
-  if (lang === 'mermaid') {
-    code = code.replace(/\b([A-Za-z_]\w*)\s+\[/g, '$1[')
-    code = code.replace(/(\bsubgraph\s+\w+(?:\.\w+)*)\s+(\[)/g, '$1$2')
-    code = code.replace(/\[([^\]\[]*?)\(([^()]*)\)([^\]\[]*?)\]/g, '[$1$2$3]')
-    code = code.replace(/^\s*style\s+.*$/gm, '')
-    code = code.replace(/<br\s*\/?>/gi, ' ')
-    code = code.replace(/:::\w+/g, '')
-    code = code.replace(/[ \t]+$/gm, '')
-    return code
-  }
+  if (lang === 'mermaid') return normalizeMermaidCode(code)
   return code
 }
 

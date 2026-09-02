@@ -3,9 +3,10 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "TopoCode - 源码架构分析与学习工具",
+  "description": "TopoCode - \u6e90\u7801\u67b6\u6784\u5206\u6790\u4e0e\u5b66\u4e60\u5de5\u5177",
   "workspaces": [
     "packages/web-core",
+    "packages/graph-kernel",
     "apps/workbench",
     "apps/docs",
     "apps/chat",

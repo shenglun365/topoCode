@@ -3,8 +3,8 @@ import { computed } from 'vue'
 import { parseMessageBlocks } from '@/services/parse-message-blocks'
 import MarkdownView from '@/components/MarkdownView.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
-import TopoDiagram from '@topo/web-core/topoOne/vue/TopoDiagram.vue'
-import { themeVariablesFor } from '@topo/web-core/topoOne/vue/themes.ts'
+import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
+import { themeVariablesFor } from '@topo/graph-kernel/vue/themes.ts'
 import type { DiagramLang } from '@/composables/useDiagramRenderer'
 
 const props = defineProps<{ content: string }>()

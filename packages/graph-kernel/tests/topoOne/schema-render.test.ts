@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createDiagram } from '../../src/topoOne/core/DiagramView';
-import { pickEngine } from '../../src/topoOne/core/capabilities';
+import { createDiagram } from '../../src/core/DiagramView';
+import { pickEngine } from '../../src/core/capabilities';
 import { samples } from './samples';
 
 describe('createDiagram with schema source (full pipeline)', () => {

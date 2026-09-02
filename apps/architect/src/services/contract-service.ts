@@ -1,6 +1,6 @@
 import { apiDelete, apiGet, apiPost, apiPut } from './api-client'
 import { currentProjectParams } from './project-service'
-import type { DiagramSchema } from '@topo/web-core/topoOne/core/types.ts'
+import type { DiagramSchema } from '@topo/graph-kernel/core/types.ts'
 
 /**
  * 契约条目 / 契约包 / 验收 适配接口 —— architect 自持（plan-C-M0 §2/§6.7/§7）。

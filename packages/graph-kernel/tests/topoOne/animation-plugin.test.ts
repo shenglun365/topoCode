@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDiagram } from '../../src/topoOne/core/DiagramView';
+import { createDiagram } from '../../src/core/DiagramView';
 
 const SEQUENCE = 'sequenceDiagram\n  Alice->>Bob: hello\n  Bob-->>Alice: hi';
 

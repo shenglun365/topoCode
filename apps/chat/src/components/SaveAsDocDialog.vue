@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // @ts-nocheck — M12 迁移：既有代码（web/ 历史未严格类型门禁），保行为先跳过类型检查，清理留后续。
 import { ref, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as api from '@topo/web-core/services/api'
 
 const props = defineProps<{
@@ -14,6 +15,7 @@ const emit = defineEmits<{
   save: [opts: { mode: 'single' | 'session'; target: 'new' | 'existing'; title: string; noteId?: string }]
 }>()
 
+const { t } = useI18n()
 const mode = ref<'single' | 'session'>('single')
 const target = ref<'new' | 'existing'>('new')
 const title = ref('')
@@ -47,7 +49,7 @@ function confirm() {
   emit('save', {
     mode: mode.value,
     target: target.value,
-    title: title.value || (mode.value === 'single' ? '消息' : '对话') + ' ' + new Date().toLocaleString(),
+    title: title.value || (mode.value === 'single' ? t('saveAs.defaultSingle') : t('saveAs.defaultSession')) + ' ' + new Date().toLocaleString(),
     noteId: target.value === 'existing' ? selectedNoteId.value : undefined,
   })
 }
@@ -56,47 +58,47 @@ function confirm() {
 <template>
   <div v-if="visible" class="dialog-overlay" @click.self="emit('close')">
     <div class="dialog-box" style="width:460px">
-      <h3>保存为笔记</h3>
+      <h3>{{ $t('saveAs.title') }}</h3>
 
       <div class="form-group">
-        <label class="form-label">保存范围</label>
+        <label class="form-label">{{ $t('saveAs.scope') }}</label>
         <div class="radio-group">
           <label class="radio-item" :class="{ active: mode === 'single' }">
             <input type="radio" v-model="mode" value="single" />
-            <span>单条消息</span>
+            <span>{{ $t('saveAs.single') }}</span>
           </label>
           <label class="radio-item" :class="{ active: mode === 'session' }">
             <input type="radio" v-model="mode" value="session" />
-            <span>完整对话</span>
+            <span>{{ $t('saveAs.session') }}</span>
           </label>
         </div>
-        <div v-if="mode === 'session'" class="form-hint">不包含思考过程和工具调用信息</div>
+        <div v-if="mode === 'session'" class="form-hint">{{ $t('saveAs.hint') }}</div>
       </div>
 
       <div class="form-group">
-        <label class="form-label">保存到</label>
+        <label class="form-label">{{ $t('saveAs.target') }}</label>
         <div class="radio-group">
           <label class="radio-item" :class="{ active: target === 'new' }">
             <input type="radio" v-model="target" value="new" />
-            <span>新建笔记</span>
+            <span>{{ $t('saveAs.newNote') }}</span>
           </label>
           <label class="radio-item" :class="{ active: target === 'existing' }">
             <input type="radio" v-model="target" value="existing" />
-            <span>已有笔记</span>
+            <span>{{ $t('saveAs.existingNote') }}</span>
           </label>
         </div>
       </div>
 
       <div v-if="target === 'new'" class="form-group">
-        <label class="form-label">笔记标题</label>
-        <input v-model="title" class="dialog-input" placeholder="输入笔记标题（可选）" />
+        <label class="form-label">{{ $t('saveAs.noteTitle') }}</label>
+        <input v-model="title" class="dialog-input" :placeholder="$t('saveAs.titlePlaceholder')" />
       </div>
 
       <div v-if="target === 'existing'" class="form-group">
-        <label class="form-label">选择笔记</label>
-        <input v-model="noteSearch" class="dialog-input" placeholder="搜索笔记标题..." @input="loadNotes" />
-        <div v-if="loading" class="note-list-loading">加载中...</div>
-        <div v-else-if="filteredNotes.length === 0" class="note-list-empty">暂无匹配笔记</div>
+        <label class="form-label">{{ $t('saveAs.pickNote') }}</label>
+        <input v-model="noteSearch" class="dialog-input" :placeholder="$t('saveAs.searchPlaceholder')" @input="loadNotes" />
+        <div v-if="loading" class="note-list-loading">{{ $t('saveAs.loading') }}</div>
+        <div v-else-if="filteredNotes.length === 0" class="note-list-empty">{{ $t('saveAs.noMatch') }}</div>
         <div v-else class="note-list">
           <div
             v-for="d in filteredNotes"
@@ -105,14 +107,14 @@ function confirm() {
             :class="{ selected: selectedNoteId === d.id }"
             @click="selectNote(d.id)"
           >
-            <div class="note-item-title">{{ d.title || '无标题' }}</div>
+            <div class="note-item-title">{{ d.title || $t('common.untitled') }}</div>
           </div>
         </div>
       </div>
 
       <div class="dialog-actions">
-        <button class="dialog-btn" @click="emit('close')">取消</button>
-        <button class="dialog-btn primary" @click="confirm" :disabled="target === 'existing' && !selectedNoteId">保存</button>
+        <button class="dialog-btn" @click="emit('close')">{{ $t('common.cancel') }}</button>
+        <button class="dialog-btn primary" @click="confirm" :disabled="target === 'existing' && !selectedNoteId">{{ $t('common.save') }}</button>
       </div>
     </div>
   </div>

@@ -24,7 +24,6 @@ export const PROVIDER_NAMES: Record<string, string> = {
 
 export const CDN_URLS = {
   D3: 'https://cdn.jsdelivr.net/npm/d3@7',
-  TOPO_ANIMATION: 'https://cdn.jsdelivr.net/npm/@topocode/topo-animation@latest/dist/index.umd.js',
   PLANTUML_RENDER: 'http://www.plantuml.com/plantuml',
 }
 

@@ -5,7 +5,6 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     environment: 'jsdom',
-    include: ['tests/**/*.test.ts'],
-    setupFiles: ['./tests/topoOne/setup.ts'],
+    include: ['tests/*.test.ts'],
   },
 })

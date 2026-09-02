@@ -17,10 +17,5 @@
     "cytoscape": "^3.34.0",
     "cytoscape-cose-bilkent": "^4.1.0"
   },
-  "devDependencies": {
-    "vite": "5.4.21",
-    "@vitejs/plugin-vue": "5.2.4",
-    "vue-tsc": "2.2.12",
-    "typescript": "5.9.3"
-  }
+  "devDependencies": {}
 }

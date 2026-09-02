@@ -9,7 +9,23 @@ _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
 import topoone_app_architect.arch_routes.ctx as C
+_SEM_MODULE_NAMES = ("taxonomy", "paths", "codegraph", "scope", "incremental", "context", "anchors", "engine")
+
+
+def _patch_all(monkeypatch, name, value):
+    """A1 拆分后名字可能绑定在 facade 或任一 sem 模块 —— 全部绑定位统一 patch。"""
+    import importlib
+    import topoone_app_architect.arch_routes.semantic_assets as _sa
+    if hasattr(_sa, name):
+        monkeypatch.setattr(_sa, name, value)
+    for _mn in _SEM_MODULE_NAMES:
+        _mod = importlib.import_module(f"topoone_app_architect.arch_routes.sem.{_mn}")
+        if hasattr(_mod, name):
+            monkeypatch.setattr(_mod, name, value)
+
+
 from topoone_app_architect.arch_routes import semantic_assets as S
+from topoone_app_architect.arch_routes.sem import context as _sem_context
 from topoone_app_architect.arch_routes import asset_framework as F
 from topoone_app_architect.arch_routes.req_agent import (
     tool_asset_semantic_save, tool_code_read_symbols)
@@ -45,7 +61,7 @@ def _fake_collect(monkeypatch, root):
                 "edges": [], "text": "", "srcHash": "h1", "source": "live",
                 "implDetails": {}, "calleeNames": {}}
 
-    monkeypatch.setattr(S, "collect_context", _collect)
+    _patch_all(monkeypatch, "collect_context", _collect)
 
 
 def _asset(name="创建订单", kind="process", symbol="create_order"):

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createNodeClickPlugin } from '../../src/topoOne/plugins/node-click';
-import type { NodeClickEvent, PluginContext } from '../../src/topoOne/plugins/types';
+import { createNodeClickPlugin } from '../../src/plugins/node-click';
+import type { NodeClickEvent, PluginContext } from '../../src/plugins/types';
 
 function ctxWith(engineName: string, svg: SVGSVGElement, onNodeClick?: (e: NodeClickEvent) => void): PluginContext {
   const container = document.createElement('div');

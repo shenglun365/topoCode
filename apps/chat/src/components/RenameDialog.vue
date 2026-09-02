@@ -22,19 +22,19 @@ watch(() => props.visible, (v) => { if (v) nextTick(() => renameInput.value?.foc
 <template>
   <div v-if="visible" class="dialog-overlay" @click.self="emit('close')">
     <div class="dialog-box" style="width:360px">
-      <h3>重命名会话</h3>
+      <h3>{{ $t('session.rename') }}</h3>
       <input
         ref="renameInput"
         :value="title"
         @input="emit('update:title', ($event.target as HTMLInputElement).value)"
         class="dialog-input"
-        placeholder="输入新标题"
+        :placeholder="$t('session.renamePlaceholder')"
         @keydown.enter="emit('submit')"
       />
       <div class="dialog-actions">
-        <button class="dialog-btn" @click="emit('close')">取消</button>
-        <button class="dialog-btn" :disabled="generating" @click="emit('aiRename')">{{ generating ? '生成中...' : 'AI 生成' }}</button>
-        <button class="dialog-btn primary" @click="emit('submit')">确认</button>
+        <button class="dialog-btn" @click="emit('close')">{{ $t('common.cancel') }}</button>
+        <button class="dialog-btn" :disabled="generating" @click="emit('aiRename')">{{ generating ? $t('session.generating') : $t('session.aiGenerate') }}</button>
+        <button class="dialog-btn primary" @click="emit('submit')">{{ $t('common.confirm') }}</button>
       </div>
     </div>
   </div>

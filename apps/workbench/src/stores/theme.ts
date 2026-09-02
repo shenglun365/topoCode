@@ -2,6 +2,10 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { ThemeType, CustomTheme, ThemeColors, ThemeFonts } from '@/types'
 
+// 边界说明（R4）：本 store = workbench 专属「自定义主题管理器」（创建/导入/导出 CSS 变量主题），
+// 与 web-core composables/useTheme.ts 的「明暗轻量切换」（docs/chat 用）是不同功能层级，
+// 二者仅在 data-theme 落点相交，非拷贝关系；勿互相合并。
+
 /** CSS 变量映射表 */
 const CSS_VAR_MAP: Record<keyof ThemeColors, string> = {
   bgPrimary: '--bg-primary',

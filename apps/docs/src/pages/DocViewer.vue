@@ -222,57 +222,8 @@ function showSelBar(sel: Selection) {
 
 
 
-// ── i18n helper ──
-function _(key: string): string {
-  const locale = navigator.language.startsWith('zh') ? 'zh-CN' : 'en-US'
-  const dict: Record<string, Record<string, string>> = {
-    'zh-CN': {
-      'title': 'TopoCode 文档浏览',
-      'fontSize': '字号',
-      'notes': '便签',
-      'docPanel': '文档面板',
-      'graphPanel': '图谱面板',
-      'aiAssistant': 'AI',
-      'back': '返回',
-      'graphOps': '图谱操作',
-      'follow': '跟随',
-      'locked': '锁定',
-      'edges': '连线',
-      'component': '组件',
-      'file': '文件',
-      'graph': '图谱',
-      'heatmap': '热图',
-      'filter': '筛选',
-      'reset': '重置',
-      'searchNode': '搜索节点...',
-      'loading': '加载中...',
-      'noData': '暂无数据',
-    },
-    'en-US': {
-      'title': 'TopoCode Doc Viewer',
-      'fontSize': 'Font Size',
-      'notes': 'Notes',
-      'docPanel': 'Doc Panel',
-      'graphPanel': 'Graph Panel',
-      'aiAssistant': 'AI',
-      'back': 'Back',
-      'graphOps': 'Graph',
-      'follow': 'Follow',
-      'locked': 'Locked',
-      'edges': 'Edges',
-      'component': 'Component',
-      'file': 'File',
-      'graph': 'Graph',
-      'heatmap': 'Heatmap',
-      'filter': 'Filter',
-      'reset': 'Reset',
-      'searchNode': 'Search nodes...',
-      'loading': 'Loading...',
-      'noData': 'No data',
-    },
-  }
-  return dict[locale]?.[key] || dict['zh-CN'][key] || key
-}
+// i18n helper 已移除（R3 核验：原内联 `_()` 字典 0 调用 = 死代码；
+// 页面文案当前为硬编码中文，docs 全页 i18n 属后续批次）。
 
 // ── Heading anchors (exact legacy logic) ──
 function attachHeadingButtons() {

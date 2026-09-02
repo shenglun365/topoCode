@@ -8,7 +8,7 @@
  *   - diagram  : ```diagram 围栏内 JSON(DiagramSchema IR)，由前端动画层转成 mermaid/plantuml
  * 流式输出中未闭合的围栏按文本处理，待围栏闭合后重新解析即成为图表块。
  */
-import type { DiagramSchema } from '@topo/web-core/topoOne/core/types.ts'
+import type { DiagramSchema } from '@topo/graph-kernel/core/types.ts'
 
 export type ChatMessageBlock =
   | { type: 'text'; text: string }

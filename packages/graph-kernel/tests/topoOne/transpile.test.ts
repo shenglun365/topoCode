@@ -3,10 +3,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import mermaid from 'mermaid';
 import { describe, expect, it } from 'vitest';
-import { CAPABILITIES, supportsType } from '../../src/topoOne/core/capabilities';
-import { TranspileError, toMermaid, toPlantUml } from '../../src/topoOne/core/transpile';
-import type { DiagramSchema } from '../../src/topoOne/core/types';
-import { DIAGRAM_TYPES } from '../../src/topoOne/core/types';
+import { CAPABILITIES, supportsType } from '../../src/core/capabilities';
+import { TranspileError, toMermaid, toPlantUml } from '../../src/core/transpile';
+import type { DiagramSchema } from '../../src/core/types';
+import { DIAGRAM_TYPES } from '../../src/core/types';
 import { samples } from './samples';
 
 const here = dirname(fileURLToPath(import.meta.url));

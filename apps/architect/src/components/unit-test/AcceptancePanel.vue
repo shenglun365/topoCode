@@ -15,7 +15,7 @@ import {
 import { namingService } from '@/services/naming-service'
 import { useArchUnitTestStore } from '@/stores/unit-test-store'
 import { XMarkIcon, BeakerIcon } from '@heroicons/vue/24/outline'
-import { toMermaid } from '@topo/web-core/topoOne'
+import { toMermaid } from '@topo/graph-kernel'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 
 const { t } = useI18n()

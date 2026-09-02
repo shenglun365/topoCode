@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp, h, type App } from 'vue';
-import TopoDiagram from '../../src/topoOne/vue/TopoDiagram.vue';
+import TopoDiagram from '../../src/vue/TopoDiagram.vue';
 
 const FLOWCHART_SCHEMA = {
   version: 1,

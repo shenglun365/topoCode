@@ -1,6 +1,8 @@
 # 子项目：Agent Bus Broker（P3，kind=service，独立进程 :3486）
-# agent 间持久化消息总线 broker：轮询 arch_bus_messages(全局主库表)分发 + WS 推送。
-# 代码在 architect 包(topoone_app_architect.agent_bus)，共享 architect.db(经 --data-dir)。
+# agent 间持久化消息总线 broker：轮询 arch_bus_messages 分发 + WS 推送。
+# 数据归属（C7 修正）：表在 **architect.db**（非项目路由的全局单表），broker
+# 经 ctx.setup 共享该库，读写边界 = 仅 arch_bus_messages（create/mark/pending/list）。
+# 代码在 architect 包(topoone_app_architect.agent_bus)。
 # 前端(监控页，P3.3)经 gateway 反代 /api/agent-bus 访问。
 [app]
 name = "agent-bus"
