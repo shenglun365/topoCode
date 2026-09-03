@@ -208,7 +208,37 @@ function onDiagramReady() {
   }
   tryWatch()
 }
-/** 联动选中 → 节点居中：反查 clickIds 找 svg 节点元素，bbox 中心交 zoom-pan centerOn。 */
+/** 节点是否已在可视区域内：节点屏幕 bbox 外扩 margin 逆映射到根用户空间后
+ *  完全落在 svg 元素可视范围内(对 zoom-pan 的 transform/viewBox 实现均成立)。
+ *  在视口内则跳过居中，避免点选时图谱频繁跳动(用户反馈)。 */
+function nodeVisibleInViewport(svg: SVGSVGElement, el: SVGGElement): boolean {
+  try {
+    const sctm = svg.getScreenCTM()
+    const svgRect = svg.getBoundingClientRect()
+    if (!sctm || !svgRect.width || !svgRect.height) return false
+    const inv = sctm.inverse()
+    const p1 = new DOMPoint(svgRect.left, svgRect.top).matrixTransform(inv)
+    const p2 = new DOMPoint(svgRect.right, svgRect.bottom).matrixTransform(inv)
+    const vx = Math.min(p1.x, p2.x)
+    const vy = Math.min(p1.y, p2.y)
+    const vw = Math.abs(p2.x - p1.x)
+    const vh = Math.abs(p2.y - p1.y)
+    const r = el.getBoundingClientRect()
+    if (!r.width || !r.height) return false
+    const a = new DOMPoint(r.left, r.top).matrixTransform(inv)
+    const b = new DOMPoint(r.right, r.bottom).matrixTransform(inv)
+    const M = 24 // 外扩余量：贴边节点也算完整可见
+    const nx = Math.min(a.x, b.x) - M
+    const ny = Math.min(a.y, b.y) - M
+    const nw = Math.abs(b.x - a.x) + 2 * M
+    const nh = Math.abs(b.y - a.y) + 2 * M
+    return nx >= vx && ny >= vy && nx + nw <= vx + vw && ny + nh <= vy + vh
+  } catch {
+    return false
+  }
+}
+/** 联动选中 → 节点居中：反查 clickIds 找 svg 节点元素，bbox 中心交 zoom-pan centerOn。
+ *  节点已在可视区域内时不平移(避免频繁跳动)；仅视口外节点才居中。 */
 function centerSelectedNode() {
   void nextTick(() => {
     const svg = diagRef.value?.getSvg()
@@ -226,6 +256,7 @@ function centerSelectedNode() {
     }
     if (!el) return
     try {
+      if (nodeVisibleInViewport(svg, el)) return
       // getBBox 是元素局部坐标系(祖先 transform 会偏移)；用屏幕 rect + getScreenCTM 逆映射回根 viewBox 空间
       const r = el.getBoundingClientRect()
       const sctm = svg.getScreenCTM()
@@ -2341,9 +2372,10 @@ onMounted(async () => {
 .icon-pulse {
   animation: icon-pulse-kf 1s ease-in-out 3;
 }
-/* 图节点选中态：桃色光晕描边，绑定节点 DOM 切换 */
+/* 图节点选中态：桃色强对比(浓光晕 + 加粗描边 + 半透明填充覆盖 + 文字加重)，
+   绑定节点 DOM 切换；与未选节点的主题底色拉开层次，缩放后仍可一眼定位 */
 :deep(.td-node-selected) {
-  filter: drop-shadow(0 0 4px rgba(250, 179, 135, 0.95)) drop-shadow(0 0 10px rgba(250, 179, 135, 0.45));
+  filter: drop-shadow(0 0 6px rgba(250, 179, 135, 1)) drop-shadow(0 0 14px rgba(250, 179, 135, 0.6));
 }
 :deep(.td-node-selected) path,
 :deep(.td-node-selected) rect,
@@ -2351,11 +2383,19 @@ onMounted(async () => {
 :deep(.td-node-selected) circle,
 :deep(.td-node-selected) ellipse {
   stroke: #fab387 !important;
-  stroke-width: 2px !important;
+  stroke-width: 3px !important;
+}
+/* 主体形状(rect/polygon/ellipse/circle)叠加半透明桃色填充，与底色形成面级对比；
+   path 仅描边(shape 边缘)，覆盖 fill 会使连线误染，故排除 */
+:deep(.td-node-selected) rect,
+:deep(.td-node-selected) polygon,
+:deep(.td-node-selected) ellipse,
+:deep(.td-node-selected) circle {
+  fill: rgba(250, 179, 135, 0.16) !important;
 }
 :deep(.td-node-selected) text {
   fill: #fab387 !important;
-  font-weight: 600;
+  font-weight: 700;
 }
 /* 资产卡四边独立拉伸把手(上下左右)：透明热区，hover 显提示条 */
 .card-edge {
