@@ -759,6 +759,17 @@ class TreeSitterWalker:
         is_static = bool(ex.is_static and ex.is_static(node))
         doc = _prev_docstring(node, self.source)
 
+        # C/C++/Rust 字段名类型(field_identifier/property_identifier)及指针/数组声明器解包
+        ident_types = ("identifier", "field_identifier", "property_identifier")
+
+        def _decl_ident(c):
+            while c is not None and c.type in ("pointer_declarator", "array_declarator"):
+                inner = _child_by_field(c, "declarator") or c.named_child(0)
+                if inner is None:
+                    return None
+                c = inner
+            return c if (c is not None and c.type in ident_types) else None
+
         declarators = [c for c in node.named_children if c.type == "variable_declarator"]
         if not declarators:
             # C# wrapper
@@ -767,7 +778,7 @@ class TreeSitterWalker:
                 declarators = [c for c in var_dec.named_children if c.type == "variable_declarator"]
 
         for decl in declarators:
-            name_node = _child_by_field(decl, "name") or next((c for c in decl.named_children if c.type == "identifier"), None)
+            name_node = _child_by_field(decl, "name") or _decl_ident(decl)
             if name_node:
                 name = _node_text(name_node, self.source)
                 f = self._create_node(NodeKind.FIELD, name, decl, visibility=vis, is_static=is_static, docstring=doc)
@@ -776,7 +787,12 @@ class TreeSitterWalker:
                     self._extract_type_annotations(node, f.id)
 
         if not declarators:
-            name_node = _child_by_field(node, "name") or next((c for c in node.named_children if c.type == "identifier"), None)
+            name_node = _child_by_field(node, "name")
+            if not name_node:
+                for c in node.named_children:
+                    name_node = _decl_ident(c)
+                    if name_node:
+                        break
             if name_node:
                 self._create_node(NodeKind.FIELD, _node_text(name_node, self.source), node,
                                   visibility=vis, is_static=is_static, docstring=doc)
