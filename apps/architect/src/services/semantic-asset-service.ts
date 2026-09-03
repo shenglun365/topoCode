@@ -214,6 +214,17 @@ export interface CodegraphStatus {
   }
 }
 
+/** 基线(lastHead) → 工作区 变更文件集（三视图 diff 数据源）。 */
+export interface BaselineDiff {
+  head: string
+  lastHead: string
+  stale: boolean
+  aligned: boolean
+  dirty: number
+  files: { added: string[]; modified: string[]; deleted: string[] }
+  counts: { added: number; modified: number; deleted: number }
+}
+
 export const semanticAssetService = {
   /** codegraph 符号源开关：状态查询 / 三档切换(on|off|auto，KV 持久化)。 */
   async codegraphStatus(): Promise<CodegraphStatus | undefined> {
@@ -230,6 +241,12 @@ export const semanticAssetService = {
   async symbolSync(): Promise<{ requested: boolean; requestId?: string; corePid: string; head: string; message?: string } | undefined> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/symbol-sync', { root, project })
+  },
+
+  /** 基线(lastHead) → 工作区 变更文件集（三视图 diff 数据源）。 */
+  async baselineDiff(): Promise<BaselineDiff | undefined> {
+    const c = ctx()
+    return await apiGet<BaselineDiff>(`/kb/semantic/baseline-diff${c ? `?${c}` : ''}`)
   },
 
   /** 检索已提取的语义资产。 */

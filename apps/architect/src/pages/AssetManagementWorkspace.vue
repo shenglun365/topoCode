@@ -5,7 +5,7 @@ import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
-  ChartBarSquareIcon, StopIcon, XMarkIcon,
+  ChartBarSquareIcon, StopIcon, XMarkIcon, ArrowsRightLeftIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
@@ -13,7 +13,7 @@ import SemanticGraphView, { type GraphTabDef } from '@/components/assets/Semanti
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
-import { semanticAssetService, type CoverageInfo, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
+import { semanticAssetService, type BaselineDiff, type CoverageInfo, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
 import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
 import { namingService, type NamingConvention } from '@/services/naming-service'
@@ -399,6 +399,61 @@ async function loadOverview() {
     overviewStats.value = null
   }
 }
+
+// ---- 基线对比模式（三视图 diff：基线 lastHead → 工作区 变更文件集）----
+const diffMode = ref(false)
+const diffLoading = ref(false)
+const baselineDiffData = ref<BaselineDiff | null>(null)
+
+async function loadBaselineDiff() {
+  diffLoading.value = true
+  try {
+    baselineDiffData.value = await semanticAssetService.baselineDiff()
+  } catch {
+    baselineDiffData.value = null
+  } finally {
+    diffLoading.value = false
+  }
+}
+
+function toggleDiffMode() {
+  diffMode.value = !diffMode.value
+  if (diffMode.value) loadBaselineDiff()
+}
+
+/** 变更文件 → 类别 快查表（语义行徽标 / 图谱节点着色用）。 */
+const changedFileMap = computed<Map<string, 'added' | 'modified' | 'deleted'>>(() => {
+  const m = new Map<string, 'added' | 'modified' | 'deleted'>()
+  const d = baselineDiffData.value
+  if (!d) return m
+  for (const p of d.files.added) m.set(p, 'added')
+  for (const p of d.files.modified) m.set(p, 'modified')
+  for (const p of d.files.deleted) m.set(p, 'deleted')
+  return m
+})
+
+/** 资产变更标记：任一 astRef 文件 ∈ 变更集 → 返回类别（工作区态优先）。 */
+function assetChangeMark(a: SemanticAsset): 'added' | 'modified' | 'deleted' | '' {
+  if (!diffMode.value) return ''
+  const files = a.astRefs?.map((r) => r.file) ?? []
+  let mark: 'added' | 'modified' | 'deleted' | '' = ''
+  for (const f of files) {
+    const c = changedFileMap.value.get(f)
+    if (c === 'added') return 'added'
+    if (c === 'deleted') { mark = 'deleted'; continue }
+    if (c === 'modified') { if (mark !== 'deleted') mark = 'modified' }
+  }
+  return mark
+}
+
+/** 图谱节点变更标记（按节点锚点文件）。SemanticGraphView 节点含 anchor 文件。 */
+const changedFilesForGraph = computed<Set<string>>(() => new Set(changedFileMap.value.keys()))
+
+/** 变更文件总数（工具栏徽标）。 */
+const totalChanged = computed(() => {
+  const c = baselineDiffData.value?.counts
+  return c ? c.added + c.modified + c.deleted : 0
+})
 
 /** 清理确认弹窗状态(先 dry-run 展示影响范围，确认后再真正删除)。 */
 const purgeOpen = ref(false)
@@ -900,6 +955,20 @@ onMounted(async () => {
           </button>
         </div>
         <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">{{ statusText }}</span>
+        <button
+          class="btn btn-xs"
+          :class="diffMode ? 'btn-blue' : 'btn-ghost'"
+          :title="t('assetMgmt.diff.hint')"
+          @click="toggleDiffMode"
+        >
+          <ArrowsRightLeftIcon class="w-3.5 h-3.5" :class="diffLoading ? 'animate-spin' : ''" />
+          {{ t('assetMgmt.diff.toggle') }}
+        </button>
+        <span v-if="diffMode && baselineDiffData" class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">
+          <template v-if="baselineDiffData.aligned">{{ t('assetMgmt.diff.aligned') }}</template>
+          <template v-else-if="baselineDiffData.stale">{{ t('assetMgmt.diff.stale', { n: totalChanged }) }}</template>
+          <template v-else>{{ t('assetMgmt.diff.noBaseline') }}</template>
+        </span>
         <div class="flex-1" />
         <button
           class="btn btn-sm btn-ghost"
@@ -1238,6 +1307,7 @@ onMounted(async () => {
                 v-show="activeGraphTab === gt.id"
                 :key="gt.id"
                 :tab="gt"
+                :diff-files="changedFilesForGraph"
                 @close="closeGraphTab"
               />
             </div>
@@ -1467,6 +1537,43 @@ onMounted(async () => {
                 </p>
               </div>
             </div>
+
+            <!-- 基线变更（三视图 diff · 概览：变更文件清单） -->
+            <div v-if="diffMode" class="panel overflow-hidden">
+              <div class="panel-header">
+                <span class="flex items-center gap-2">
+                  <ArrowsRightLeftIcon class="w-4 h-4 text-ctp-blue" />{{ t('assetMgmt.diff.title') }}
+                </span>
+                <span class="flex items-center gap-1">
+                  <span v-if="baselineDiffData?.aligned" class="chip bg-ctp-green/15 text-ctp-green">{{ t('assetMgmt.diff.aligned') }}</span>
+                  <span v-else-if="baselineDiffData?.stale" class="chip bg-ctp-yellow/15 text-ctp-yellow">{{ t('assetMgmt.diff.stale', { n: totalChanged }) }}</span>
+                  <span v-else class="chip bg-ctp-surface0 text-ctp-subtext0">{{ t('assetMgmt.diff.noBaseline') }}</span>
+                </span>
+              </div>
+              <div v-if="diffLoading" class="p-3 text-[10px] text-ctp-overlay0">{{ t('assetMgmt.reconciling') }}</div>
+              <div v-else-if="!baselineDiffData" class="p-3 text-[10px] text-ctp-overlay0">—</div>
+              <div v-else-if="!totalChanged" class="p-3 text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.noChanges') }}</div>
+              <div v-else class="p-3 grid grid-cols-3 gap-3">
+                <div v-for="col in [
+                  { key: 'added' as const, label: t('assetMgmt.diff.added'), tone: 'text-ctp-green', files: baselineDiffData.files.added },
+                  { key: 'modified' as const, label: t('assetMgmt.diff.modified'), tone: 'text-ctp-yellow', files: baselineDiffData.files.modified },
+                  { key: 'deleted' as const, label: t('assetMgmt.diff.deleted'), tone: 'text-ctp-red', files: baselineDiffData.files.deleted },
+                ]" :key="col.key" class="min-w-0">
+                  <div class="flex items-center gap-1 mb-1">
+                    <span class="text-[10px] font-semibold" :class="col.tone">{{ col.label }}</span>
+                    <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ col.files.length }}</span>
+                  </div>
+                  <div class="space-y-0.5 max-h-40 overflow-y-auto">
+                    <div v-for="f in col.files.slice(0, 30)" :key="f" class="font-mono text-[9px] text-ctp-subtext0 truncate" :title="f">{{ f }}</div>
+                    <div v-if="col.files.length > 30" class="text-[9px] text-ctp-overlay0">+{{ col.files.length - 30 }}</div>
+                    <div v-if="!col.files.length" class="text-[9px] text-ctp-overlay0">—</div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="baselineDiffData && baselineDiffData.dirty" class="px-3 pb-2 text-[9px] text-ctp-overlay0">
+                {{ t('assetMgmt.diff.dirty') }}: {{ baselineDiffData.dirty }}
+              </div>
+            </div>
           </template>
 
           <!-- 语义资产：按组件树文件树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
@@ -1575,6 +1682,15 @@ onMounted(async () => {
                     v-else-if="a.change === 'modified'"
                     class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
                   >{{ t('assetMgmt.modified') }}</span>
+                  <span
+                    v-if="diffMode && assetChangeMark(a)"
+                    class="chip !text-[9px] shrink-0"
+                    :class="assetChangeMark(a) === 'added' ? 'bg-ctp-green/15 text-ctp-green' : assetChangeMark(a) === 'deleted' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-yellow/15 text-ctp-yellow'"
+                    :title="t(`assetMgmt.diff.mark${assetChangeMark(a) === 'added' ? 'Added' : assetChangeMark(a) === 'deleted' ? 'Deleted' : 'Modified'}`)"
+                  >
+                    <ArrowsRightLeftIcon class="w-2.5 h-2.5 inline -mt-0.5" />
+                    {{ t(`assetMgmt.diff.mark${assetChangeMark(a) === 'added' ? 'Added' : assetChangeMark(a) === 'deleted' ? 'Deleted' : 'Modified'}`) }}
+                  </span>
                   <span class="flex-1" />
                   <span
                     class="text-[9px] text-ctp-overlay0 font-mono"

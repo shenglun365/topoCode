@@ -25,6 +25,7 @@ from .codegraph import effective_mode, logger
 _native_cache = {}   # core_pid -> (conn, ts)
 _state_cache = {}    # root -> (state, ts)
 _core_pid_cache = {} # root -> (core_pid|None, ts)
+_diff_cache = {}     # root -> (diff, ts)
 _NATIVE_TTL = 300.0
 _STATE_TTL = 60.0
 _PID_TTL = 300.0
@@ -231,6 +232,100 @@ def record_sync(core_pid: str, head: str) -> None:
     """基线同步完成后记录跟踪状态（head 对齐）。"""
     _write_state_kv(core_pid, head)
     invalidate_native_cache()
+    _diff_cache.clear()
+
+
+def _git_name_status(root: str, base: str) -> dict:
+    """git diff --name-status base..HEAD → {added,modified,deleted}（已提交漂移）。"""
+    res = {'added': [], 'modified': [], 'deleted': []}
+    out = _git(root, ['diff', '--name-status', f'{base}..HEAD', '--'])
+    if not out:
+        return res
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split('\t', 1)
+        if len(parts) < 2:
+            continue
+        st, path = parts[0].strip(), parts[1].strip()
+        if st.startswith('A'):
+            res['added'].append(path)
+        elif st.startswith('D'):
+            res['deleted'].append(path)
+        elif st[:1] in ('M', 'R', 'C', 'T'):
+            res['modified'].append(path)
+    return res
+
+
+def _git_porcelain_status(root: str) -> dict:
+    """git status --porcelain → {added,modified,deleted}（工作区未提交）。"""
+    res = {'added': [], 'modified': [], 'deleted': []}
+    out = _git(root, ['status', '--porcelain'])
+    if not out:
+        return res
+    for line in out.splitlines():
+        if len(line) < 4:
+            continue
+        x, y, path = line[0], line[1], line[3:].strip()
+        if ' -> ' in path:
+            path = path.split(' -> ')[-1].strip()
+        if x == '?' and y == '?':
+            res['added'].append(path)
+            continue
+        st = x if x not in (' ',) else y
+        if st == 'A':
+            res['added'].append(path)
+        elif st == 'D':
+            res['deleted'].append(path)
+        elif st in ('M', 'R', 'C', 'T'):
+            res['modified'].append(path)
+    return res
+
+
+def baseline_diff(root: Optional[str], project: Optional[str] = None,
+                  cap: int = 500) -> dict:
+    """基线(lastHead) → 工作区 的变更文件集（分类 added/modified/deleted）。TTL 60s。
+
+    三视图 diff 数据源：files = 已提交漂移(lastHead..HEAD) ∪ 工作区未提交，
+    按路径去重、工作区态优先。core 侧图谱/语义资产无版本快照，故 diff 以
+    「变更文件集 × 当前资产/节点文件引用」叠加，而非历史版本对比。
+    返回 {head,lastHead,stale,aligned,dirty,files:{added,modified,deleted},counts}。
+    """
+    now = time.time()
+    ck = root or ''
+    hit = _diff_cache.get(ck)
+    if hit and now - hit[1] < _STATE_TTL:
+        return hit[0]
+    head_out = _git(root, ['rev-parse', 'HEAD']) if root else None
+    head = head_out.strip() if head_out else ''
+    pid = _resolve_core_pid(root)
+    last_head = ((_read_state_kv(pid) or {}).get('lastHead') or '') if pid else ''
+    if root and last_head and last_head != head:
+        committed = _git_name_status(root, last_head)
+    else:
+        committed = {'added': [], 'modified': [], 'deleted': []}
+    worktree = _git_porcelain_status(root) if root else {'added': [], 'modified': [], 'deleted': []}
+    cat = {}  # path -> 类别（工作区覆盖已提交）
+    for src in (committed, worktree):
+        for k in ('added', 'modified', 'deleted'):
+            for p in src[k]:
+                cat[p] = k
+    files = {'added': [], 'modified': [], 'deleted': []}
+    for p, c in cat.items():
+        if len(files[c]) < cap:
+            files[c].append(p)
+    for k in files:
+        files[k].sort()
+    diff = {
+        'head': head, 'lastHead': last_head,
+        'stale': bool(last_head) and last_head != head,
+        'aligned': bool(last_head) and last_head == head,
+        'dirty': sum(len(v) for v in worktree.values()),
+        'files': files,
+        'counts': {k: len(files[k]) for k in files},
+    }
+    _diff_cache[ck] = (diff, now)
+    return diff
 
 
 def open_symbol_conn(root: Optional[str], project: Optional[str]

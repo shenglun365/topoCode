@@ -4306,8 +4306,24 @@ async def api_symbol_sync(body: dict = None):
         return err(503, "KB 服务不可达，请稍后重试")
     record_sync(pid, head)
     return ok({"requested": True, "requestId": (res or {}).get('requestId'),
-               "corePid": pid, "head": head,
-               "message": "已在 KB 知识库管理创建待确认的基线变更请求"})
+                "corePid": pid, "head": head,
+                "message": "已在 KB 知识库管理创建待确认的基线变更请求"})
+
+
+@router.get("/kb/semantic/baseline-diff")
+async def api_baseline_diff(root: Optional[str] = None, project: Optional[str] = None):
+    """基线(lastHead) → 工作区 变更文件集（三视图 diff 数据源）。
+
+    core 侧图谱/语义资产无版本快照，diff 以「变更文件集 × 当前资产/节点文件引用」
+    叠加到三视图（概览文件清单 / 语义资产行级徽标 / 图谱节点着色）。
+    """
+    from .. import ctx
+    from .symbols import baseline_diff
+    _root = (root or '').strip()
+    if not _root:
+        _pid_ctx = project or ctx.get_project()
+        _root = (store.ProjectsStore.get(_pid_ctx) or {}).get('rootPath', '') if _pid_ctx else ''
+    return ok(baseline_diff(_root or None, project or ctx.get_project()))
 
 
 @router.get("/kb/semantic/mappings")

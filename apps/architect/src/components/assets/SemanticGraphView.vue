@@ -26,7 +26,7 @@ export interface GraphTabDef {
   assetId?: string
 }
 
-const props = defineProps<{ tab: GraphTabDef }>()
+const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string> }>()
 const emit = defineEmits<{ close: [id: string] }>()
 
 const level = ref<SemanticAssetLevel | ''>('')
@@ -35,6 +35,21 @@ const kindFilter = ref<SemanticAssetKind | ''>('')
 /** 图类型视图(空=按数据区间自动推荐)。 */
 const view = ref<SemanticGraphViewId | ''>('')
 const graph = ref<SemanticGraphResult | null>(null)
+
+/** 基线 diff：节点(任一锚点文件 ∈ diffFiles)集合 + 计数，供图例/详情徽标。 */
+const diffNodeIds = computed<Set<string>>(() => {
+  const s = new Set<string>()
+  const df = props.diffFiles
+  if (!df || !df.size) return s
+  for (const a of graph.value?.anchors ?? []) {
+    if (df.has(a.file)) s.add(a.assetId)
+  }
+  return s
+})
+const diffNodeCount = computed(() => diffNodeIds.value.size)
+function isDiffNode(id: string): boolean {
+  return props.diffFiles ? diffNodeIds.value.has(id) : false
+}
 const loading = ref(false)
 const selId = ref('')
 const selDetail = ref<SemanticAsset | null>(null)
@@ -1789,6 +1804,11 @@ onMounted(async () => {
         v-if="graph"
         class="text-[10px] text-ctp-overlay0 font-mono shrink-0"
       >{{ scopedNodes.length }} {{ t('assetMgmt.graph.nodes') }} · {{ scopedEdges.length }} {{ t('assetMgmt.graph.edges') }}</span>
+      <span
+        v-if="graph && props.diffFiles && diffNodeCount"
+        class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0"
+        :title="t('assetMgmt.diff.hint')"
+      >{{ diffNodeCount }} {{ t('assetMgmt.graph.nodes') }} · diff</span>
       <div
         v-if="graph"
         class="flex items-center gap-0.5 shrink-0"
@@ -1939,11 +1959,16 @@ onMounted(async () => {
               'bg-ctp-blue/15 text-ctp-blue': sel.kind === 'process',
               'bg-ctp-green/15 text-ctp-green': sel.kind === 'decision',
             }"
-          >{{ t(`assetMgmt.kind.${sel.kind}`) }}</span>
-          <span class="flex-1" />
-          <button
-            class="btn btn-ghost !py-0 !px-1.5 !text-[9px] shrink-0"
-            :class="fullCode ? '!text-ctp-sky' : ''"
+           >{{ t(`assetMgmt.kind.${sel.kind}`) }}</span>
+           <span
+             v-if="isDiffNode(sel.id)"
+             class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+             :title="t('assetMgmt.diff.hint')"
+           >{{ t('assetMgmt.diff.modified') }}</span>
+           <span class="flex-1" />
+           <button
+             class="btn btn-ghost !py-0 !px-1.5 !text-[9px] shrink-0"
+             :class="fullCode ? '!text-ctp-sky' : ''"
             :disabled="fullCodeLoading"
             :title="t('assetMgmt.graph.fullCode')"
             @click="toggleFullCode"

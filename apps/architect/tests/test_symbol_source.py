@@ -161,6 +161,82 @@ def test_symbol_sync_endpoint_no_core_project(tmp_path, monkeypatch):
     assert body["code"] != 0
 
 
+def _mk_git_repo_diff(tmp_path, root_name: str):
+    """建含 基线commit + 已提交漂移(改/删) + 工作区未提交(新/改) 的仓库。"""
+    root = tmp_path / root_name
+    root.mkdir()
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    def sh(*args):
+        p = subprocess.run(["git", "-C", str(root)] + list(args), check=True,
+                           capture_output=True, text=True, env=env)
+        return p.stdout.strip()
+    sh("init", "-q", "-b", "main")
+    # 基线：a.py(改) b.py(删) c.py(留)
+    (root / "a.py").write_text("a1\n"); (root / "b.py").write_text("b1\n")
+    (root / "c.py").write_text("c1\n")
+    sh("add", "."); sh("commit", "-q", "-m", "base")
+    base = sh("rev-parse", "HEAD")
+    # 已提交漂移：改 a.py、删 b.py
+    (root / "a.py").write_text("a2\n")
+    sh("rm", "-q", "b.py"); sh("add", "."); sh("commit", "-q", "-m", "drift")
+    head = sh("rev-parse", "HEAD")
+    # 工作区未提交：新增 d.py、改 c.py
+    (root / "d.py").write_text("d1\n")
+    (root / "c.py").write_text("c2\n")
+    return str(root), base, head
+
+
+def test_baseline_diff_committed_and_worktree(tmp_path, monkeypatch):
+    root, base, head = _mk_git_repo_diff(tmp_path, "repo-diff")
+    data = _mk_core_env(tmp_path, root, "proj-d", with_db=False)
+    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
+    _sym.invalidate_native_cache()
+    _sym.record_sync("proj-d", base)  # 基线对齐到 base
+    d = _sym.baseline_diff(root, None)
+    # 已提交：a.py 改 / b.py 删；工作区：d.py 新 / c.py 改
+    assert d["lastHead"] == base and d["head"] == head
+    assert d["stale"] is True and d["aligned"] is False
+    assert d["files"]["modified"] == ["a.py", "c.py"]
+    assert d["files"]["deleted"] == ["b.py"]
+    assert d["files"]["added"] == ["d.py"]
+    assert d["counts"] == {"added": 1, "modified": 2, "deleted": 1}
+    # 重新对齐到 HEAD：已提交漂移消失，仅剩工作区
+    _sym.record_sync("proj-d", head)
+    _sym.invalidate_native_cache()
+    d2 = _sym.baseline_diff(root, None)
+    assert d2["aligned"] is True and d2["stale"] is False
+    assert d2["files"]["added"] == ["d.py"] and d2["files"]["modified"] == ["c.py"]
+    assert d2["files"]["deleted"] == []
+
+
+def test_baseline_diff_no_baseline(tmp_path, monkeypatch):
+    """无 lastHead（从未同步）：stale/aligned 均 False，仅工作区变更。"""
+    root, base, _ = _mk_git_repo_diff(tmp_path, "repo-nobase")
+    data = _mk_core_env(tmp_path, root, "proj-nb", with_db=False)
+    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
+    _sym.invalidate_native_cache()
+    d = _sym.baseline_diff(root, None)
+    assert d["lastHead"] == "" and d["stale"] is False and d["aligned"] is False
+    # 工作区 d.py 新 / c.py 改
+    assert d["files"]["added"] == ["d.py"] and d["files"]["modified"] == ["c.py"]
+
+
+def test_baseline_diff_endpoint(tmp_path, monkeypatch):
+    root, base, _ = _mk_git_repo_diff(tmp_path, "repo-diff-ep")
+    data = _mk_core_env(tmp_path, root, "proj-de", with_db=False)
+    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
+    _sym.invalidate_native_cache()
+    _sym.record_sync("proj-de", base)
+    c = _client()
+    r = c.get(f"/api/architect/kb/semantic/baseline-diff?root={root}")
+    assert r.status_code == 200
+    body = r.json()["data"]
+    assert body["stale"] is True
+    assert body["files"]["deleted"] == ["b.py"]
+    assert body["counts"]["added"] == 1
+
+
 def test_symbol_sync_endpoint_initiates_pull_request(tmp_path, monkeypatch):
     """职责划分：architect 仅发起基线变更请求(knowledge.pullRequest)，执行在 KB 管理。"""
     root, _ = _mk_git_repo(tmp_path, "repo-sync")
