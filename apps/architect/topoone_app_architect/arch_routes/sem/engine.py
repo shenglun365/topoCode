@@ -23,6 +23,8 @@ from .. import store
 from ..common import _ts, err, ok  # noqa: F401
 from . import router
 from .anchors import _attach_step_refs, _node_to_ref, logger, resolve_ast_refs
+from fastapi import Request
+
 from .codegraph import ensure_synced, logger
 from .symbols import open_symbol_conn
 from .context import _kb_parse_file, _norm_cache_symbol, _rebuild_edges_from_refs, collect_context, logger
