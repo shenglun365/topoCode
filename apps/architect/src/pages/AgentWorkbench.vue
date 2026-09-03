@@ -14,6 +14,7 @@ import { busService, type NeedsInputItem } from '@/services/bus-service'
 import { useArchTaskStore } from '@/stores/task-store'
 import { readModelPref } from '@topo/web-core/shell'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
+import { useChatProgress } from '@/composables/useChatProgress'
 import type { ConversationDetail, ReqLifecycle, ReqSession, ReqSessionGroups } from '@/types'
 
 /**
@@ -39,8 +40,8 @@ const chatConvId = ref('')
 const chatAbort = ref<AbortController | null>(null)
 function stopChat() { chatAbort.value?.abort() }
 const finalizing = ref(false)
-/** P3.5: 工具轮次实时进度(「知识库检索中…」动态化)。 */
-const toolStatus = ref('')
+// 对话等待期进度反馈（动态忙碌文案 + 工具轨迹浮层；替代原 toolStatus 单行）。
+const { busyLabel: toolStatus, toolTrail, begin: beginProgress, onChatEvent: onProgressEvent } = useChatProgress()
 
 // P3.2: 指派 subagent 弹窗
 const assignFor = ref<ReqSession | null>(null)
@@ -161,6 +162,7 @@ async function sendViaChat(text: string) {
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
+  beginProgress()
   const ac = new AbortController(); chatAbort.value = ac
   try {
     const msgs = turns.value.slice(0, -1).map((m) => ({ role: m.role, content: m.content }))
@@ -177,13 +179,9 @@ async function sendViaChat(text: string) {
         chatConvId.value = ev.conversationId
         req.conversationId = ev.conversationId
       }
+      onProgressEvent(ev)
       if (ev.type === 'chat_start') {
-        toolStatus.value = ''
         if (ev.userMessageId && idx >= 1) turns.value[idx - 1].id = ev.userMessageId
-      } else if (ev.type === 'tool_call') {
-        toolStatus.value = `${t('workbench.toolCalling')}: ${ev.tool ?? ''}`
-      } else if (ev.type === 'tool_result') {
-        toolStatus.value = `${ev.ok === false ? '✗' : '✓'} ${ev.tool ?? ''}`
       } else if (ev.type === 'chunk') {
         turns.value[idx].content += ev.delta ?? ''
       } else if (ev.type === 'reasoning') {
@@ -191,7 +189,6 @@ async function sendViaChat(text: string) {
       } else if (ev.type === 'done') {
         turns.value[idx].content = ev.content ?? turns.value[idx].content
         if (ev.messageId) turns.value[idx].id = ev.messageId
-        toolStatus.value = ''
         void loadSessions()
       } else if (ev.type === 'chat_fallback') {
         turns.value[idx].content = t('requirement.chat.fallback')
@@ -492,6 +489,7 @@ onUnmounted(() => {
             :turns="turns"
             :busy="busy"
             :busy-label="toolStatus"
+            :tool-trail="toolTrail"
             :title="selected.title || t('workbench.sessions.defaultTitle')"
             :diagram-skill="diagramSkill"
             @send="onSend"

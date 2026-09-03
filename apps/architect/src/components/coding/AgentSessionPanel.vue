@@ -27,6 +27,8 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
 /** 对话发送中(用于显示停止按钮, 可中止在途请求)。 */
 const sending = ref(false)
+/** 对话处理相位(''=空闲)：后端 status 事件驱动(chat=问答处理中)。 */
+const chatPhase = ref('')
 
 const execTask = computed(() => task.findExecution(props.session.taskId))
 const title = computed(() => {
@@ -114,14 +116,16 @@ async function send() {
   if (!input.value.trim() || sending.value) return
   const text = input.value.trim()
   sending.value = true
+  chatPhase.value = 'chat'
   try {
-    await agent.send(props.session.id, text)
+    await agent.send(props.session.id, text, { onStatus: (p) => { chatPhase.value = p } })
     if (/^(?:追加|append)\s*[：:]/.test(text)) {
       const appended = task.addConversationalAmendment(props.session.taskId, text)
       if (appended) agent.noteAppended(props.session.id, appended.title)
     }
   } finally {
     sending.value = false
+    chatPhase.value = ''
   }
   input.value = ''
   resetInputHeight()
@@ -270,6 +274,14 @@ function answer(interactionId: string) {
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- 问答处理中(后端 status 相位驱动，降级长等待不再零反馈) -->
+    <div
+      v-if="sending"
+      class="shrink-0 flex items-center gap-2 px-3 py-1 text-xs text-ctp-blue animate-pulse border-t border-ctp-surface0"
+    >
+      <ArrowPathIcon class="w-3.5 h-3.5 animate-spin" />{{ t('coding.thinking') }}
     </div>
 
     <!-- 输入区 + 停止 -->

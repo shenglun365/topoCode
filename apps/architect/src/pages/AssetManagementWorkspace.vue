@@ -19,6 +19,7 @@ import { requirementService } from '@/services/requirement-service'
 import { namingService, type NamingConvention } from '@/services/naming-service'
 import { useSplitPane } from '@/composables/useSplitPane'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
+import { useChatProgress } from '@/composables/useChatProgress'
 import { readModelPref } from '@topo/web-core/shell'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import type { AssetDetail, AssetDiagramItem, ConversationDetail, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
@@ -36,6 +37,8 @@ const chatAbort = ref<AbortController | null>(null)
 function stopChat() { chatAbort.value?.abort() }
 const historyOpen = ref(false)
 const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
+// 对话等待期进度反馈（动态忙碌文案 + 工具轨迹；详见 useChatProgress）
+const { busyLabel, toolTrail, begin: beginProgress, onChatEvent: onProgressEvent } = useChatProgress()
 
 /** 从历史会话消息恢复 turns；返回 true 表示有可导入内容。 */
 function applyConversation(conv: ConversationDetail): boolean {
@@ -694,6 +697,7 @@ function askAgent(text: string) {
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
+  beginProgress()
   const ac = new AbortController(); chatAbort.value = ac
   chatStream([{ role: 'user', content: text }], {
     conversationId: chatConvId.value || undefined,
@@ -704,6 +708,7 @@ function askAgent(text: string) {
     skillScenarios: ['extract'],
     signal: ac.signal,
   }, (ev) => {
+    onProgressEvent(ev)
     if (ev.conversationId) chatConvId.value = ev.conversationId
     if (ev.type === 'chunk') {
       turns.value[idx].content += ev.delta ?? ''
@@ -729,6 +734,7 @@ async function onSend(text: string) {
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
+  beginProgress()
   const ac = new AbortController(); chatAbort.value = ac
   try {
     const msgs = turns.value.slice(0, -1).map((t) => ({ role: t.role, content: t.content }))
@@ -742,6 +748,7 @@ async function onSend(text: string) {
         skillScenarios: ['extract'],
         signal: ac.signal,
       }, (ev) => {
+      onProgressEvent(ev)
       if (ev.conversationId) chatConvId.value = ev.conversationId
       if (ev.type === 'chat_start') {
         if (ev.userMessageId) turns.value[idx - 1].id = ev.userMessageId
@@ -1953,6 +1960,8 @@ onMounted(async () => {
           class="flex-1 min-h-0"
           :turns="turns"
           :busy="busy"
+          :busy-label="busyLabel"
+          :tool-trail="toolTrail"
           :title="t('assetMgmt.chatTitle')"
           :diagram-skill="diagramSkill"
           @send="onSend"

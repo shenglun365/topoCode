@@ -65,6 +65,8 @@ def test_stale_conversation_falls_back_to_fresh(tmp_path, monkeypatch):
             # 回归断言：不再报 "conversation not found"，正常收尾
             assert done["type"] == "done", (seen, done)
             assert "conversation not found" not in str(seen)
+            # 进度反馈：降级路径必须先推 status(sync) 相变事件(此前全程零反馈)
+            assert "status" in seen, seen
             new_id = done.get("conversationId") or ""
             assert new_id and new_id != "cv-stale-id"
             # 新会话已落库，用户/助手消息均持久化

@@ -69,7 +69,7 @@ export interface RequirementAnalysisAgent {
 /** 自由对话流式事件(阶段A)：逐字增量 + 推理内容 + 回合结束。 */
 export interface ChatStreamEvent {
   type: 'chunk' | 'reasoning' | 'done' | 'error' | 'chat_fallback' | 'chat_start'
-    | 'tool_call' | 'tool_result'
+    | 'tool_call' | 'tool_result' | 'status'
   delta?: string
   content?: string
   message?: string
@@ -84,6 +84,12 @@ export interface ChatStreamEvent {
   ok?: boolean
   /** 工具进度(tool_result)：结果摘要(截断)。 */
   summary?: string
+  /** 相位事件(status)：sync=降级同步通道 / sync_llm=降级通道 LLM 第 N 轮 /
+   *  sync_tool=降级通道执行工具 / llm_round=工具回喂后再生成。 */
+  phase?: string
+  round?: number
+  idx?: number
+  total?: number
 }
 
 export interface ChatStreamOptions {
@@ -165,6 +171,13 @@ export async function chatStream(
     ws.on('tool_result', (ev: any) => {
       onEvent({
         type: 'tool_result', tool: ev?.tool, ok: ev?.ok, summary: ev?.summary,
+        conversationId: ev?.conversationId,
+      })
+    })
+    ws.on('status', (ev: any) => {
+      onEvent({
+        type: 'status', phase: ev?.phase, round: ev?.round,
+        tool: ev?.tool, idx: ev?.idx, total: ev?.total, message: ev?.message,
         conversationId: ev?.conversationId,
       })
     })

@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import type { SemanticAsset } from '@/types'
+import type { ToolTrailItem } from '@/composables/useChatProgress'
 
 const props = defineProps<{
   turns: KbAnalysisTurn[]
   busy: boolean
   /** 忙碌态动态文案(如「正在调用工具 kb.asset.search…」)；缺省用静态「知识库检索中…」。 */
   busyLabel?: string
+  /** 本轮工具轨迹(tool_call/tool_result 驱动，useChatProgress 维护)；浮层展示。 */
+  toolTrail?: ToolTrailItem[]
   /** 对话标题(缺省「需求分析对话」；资产管理等复用场景可覆盖)。 */
   title?: string
   /** 绘图增强(IR→代码)：开启后 agent 经 diagram.build 工具生成语法正确的图。 */
@@ -43,6 +46,10 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const input = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
+
+// ---- 工具轨迹浮层（防信息过载：默认收起，点击展开；回合结束/busy 清空自动关闭）----
+const trailOpen = ref(false)
+watch(() => props.busy, (b) => { if (!b) trailOpen.value = false })
 const scrollRef = ref<HTMLElement | null>(null)
 const answers = reactive<Record<string, string>>({})
 
@@ -853,6 +860,15 @@ onUnmounted(() => {
         class="flex items-center gap-2 text-xs text-ctp-blue animate-pulse"
       >
         <ArrowPathIcon class="w-3.5 h-3.5 animate-spin" />{{ props.busyLabel || t('requirement.chat.thinking') }}
+        <button
+          v-if="toolTrail && toolTrail.length"
+          class="chip bg-ctp-surface0 text-ctp-subtext0 !text-[10px] shrink-0 animate-none cursor-pointer"
+          :title="t('requirement.chat.trail')"
+          @click="trailOpen = true"
+        >
+          <WrenchScrewdriverIcon class="w-3 h-3 inline -mt-0.5" />
+          {{ t('requirement.chat.trail') }} ×{{ toolTrail.length }}
+        </button>
       </div>
     </div>
 
@@ -971,5 +987,68 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 工具轨迹浮层：防信息过载，默认收起；Teleport+fixed 避免被对话区 overflow 裁剪 -->
+    <Teleport to="body">
+      <div
+        v-if="trailOpen"
+        class="fixed inset-0 z-50 bg-black/40"
+        @click="trailOpen = false"
+      >
+        <div
+          class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(520px,92vw)] max-h-[70vh] flex flex-col rounded-xl bg-ctp-base border border-ctp-surface1 shadow-2xl overflow-hidden"
+          @click.stop
+        >
+          <div class="flex items-center gap-2 px-4 py-3 border-b border-ctp-surface0 shrink-0">
+            <WrenchScrewdriverIcon class="w-4 h-4 text-ctp-blue" />
+            <span class="text-sm font-semibold text-ctp-text">{{ t('requirement.chat.trail') }}</span>
+            <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">{{ toolTrail?.length ?? 0 }}</span>
+            <span class="flex-1" />
+            <button
+              class="text-ctp-overlay0 hover:text-ctp-text p-0.5"
+              @click="trailOpen = false"
+            >
+              <XMarkIcon class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="p-3 space-y-1 overflow-y-auto">
+            <div
+              v-for="(it, i) in toolTrail"
+              :key="`${it.tool}-${i}`"
+              class="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-ctp-mantle"
+            >
+              <span class="shrink-0 mt-0.5">
+                <CheckIcon
+                  v-if="it.ok === true"
+                  class="w-3.5 h-3.5 text-ctp-green"
+                />
+                <XMarkIcon
+                  v-else-if="it.ok === false"
+                  class="w-3.5 h-3.5 text-ctp-red"
+                />
+                <ArrowPathIcon
+                  v-else
+                  class="w-3.5 h-3.5 text-ctp-yellow animate-spin"
+                />
+              </span>
+              <span class="min-w-0">
+                <span class="font-mono text-[11px] text-ctp-text">{{ it.tool }}</span>
+                <span
+                  v-if="it.summary"
+                  class="block text-[10px] text-ctp-subtext0 truncate"
+                  :title="it.summary"
+                >{{ it.summary }}</span>
+              </span>
+            </div>
+            <div
+              v-if="!toolTrail || !toolTrail.length"
+              class="text-[11px] text-ctp-overlay0 px-2 py-3"
+            >
+              {{ t('requirement.chat.trailEmpty') }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

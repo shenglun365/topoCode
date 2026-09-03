@@ -15,6 +15,7 @@ import { validateForm } from '@/services/asset-validator'
 import { commitBatch } from '@/services/execution-batch'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
+import { useChatProgress } from '@/composables/useChatProgress'
 import { useContractSkill } from '@/composables/useContractSkill'
 import { contractService, type AcceptanceReportDetail, type ContractItem } from '@/services/contract-service'
 import { readModelPref } from '@topo/web-core/shell'
@@ -64,6 +65,8 @@ provide('requirement-form', form)
 
 // ---- 左右栏分割(表单 | 对话) ----
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane()
+// 对话等待期进度反馈（动态忙碌文案 + 工具轨迹；详见 useChatProgress）
+const { busyLabel, toolTrail, begin: beginProgress, onChatEvent: onProgressEvent } = useChatProgress()
 const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const draft = ref<FormDraft | null>(null)
@@ -377,6 +380,7 @@ async function onSend(text: string) {
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   if (contractSkill.value) void seedContractIds()
   busy.value = true
+  beginProgress()
   const ac = new AbortController(); chatAbort.value = ac
   try {
     const msgs = turns.value.slice(0, -1).map((t) => ({ role: t.role, content: t.content }))
@@ -390,6 +394,7 @@ async function onSend(text: string) {
       skillScenarios: contractSkill.value ? ['contract'] : [],
       signal: ac.signal,
     }, (ev) => {
+      onProgressEvent(ev)
       if (ev.conversationId) chatConvId.value = ev.conversationId
       if (ev.type === 'chat_start') {
         if (ev.userMessageId) turns.value[idx - 1].id = ev.userMessageId
@@ -835,6 +840,8 @@ function backToList() {
           class="flex-1 min-h-0"
           :turns="turns"
           :busy="busy"
+          :busy-label="busyLabel"
+          :tool-trail="toolTrail"
           :diagram-skill="diagramSkill"
           :contract-skill="contractSkill"
           show-contract-skill

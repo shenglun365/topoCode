@@ -76,12 +76,12 @@ export const useArchAgentStore = defineStore('arch-agent', {
     select(sessionId: string) {
       this.activeSessionId = sessionId
     },
-    async send(sessionId: string, content: string) {
+    async send(sessionId: string, content: string, opts?: { onStatus?: (phase: string) => void }) {
       const s = this.sessions.find((x) => x.id === sessionId)
       if (!s) return
       chatAbort = new AbortController()
       try {
-        await agentService.sendMessage(s, content, { signal: chatAbort.signal })
+        await agentService.sendMessage(s, content, { signal: chatAbort.signal, onStatus: opts?.onStatus })
       } finally {
         chatAbort = null
       }

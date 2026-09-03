@@ -148,16 +148,30 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     assistant_text = ""
     tool_round = 0
     loop_fell_back = False
+    chat_start_sent = False
+
+    async def _ensure_chat_start() -> None:
+        """chat_start 幂等补发：流式路径正常发；降级路径(llm.sync)原样不发会让
+        前端整段等待拿不到 conversationId/userMessageId——补发保证会话早绑定。"""
+        nonlocal chat_start_sent
+        if chat_start_sent:
+            return
+        await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
+                                   "requestId": request_id or "", "userMessageId": last_user_msg_id})
+        chat_start_sent = True
+
     while tool_round <= _MAX_TOOL_ROUNDS:
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
             loop_fell_back = True
-            assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
+            await _ensure_chat_start()
+            assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
             break
         request_id = rid
         await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
                                    "requestId": rid, "userMessageId": last_user_msg_id})
+        chat_start_sent = True
         round_text = ""
         round_ok = True
         async for event_type, payload in _iter_llm_events(rid, idle_timeout=_STREAM_IDLE_TIMEOUT_S):
@@ -185,7 +199,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         if not round_ok:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
-            assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
+            await _ensure_chat_start()
+            assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
             break
 
         # 本轮工具调用解析并在 architect 侧执行
@@ -204,7 +219,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                     msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                     msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
                 loop_fell_back = True
-                assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
+                await _ensure_chat_start()
+                assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
                 break
             tool_round += 1
             results: List[Dict[str, str]] = []
@@ -219,6 +235,9 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                 msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+            # 工具结果回喂后的再生成无任何信号会让前端进度条「卡死」观感——显式报相
+            await websocket.send_json({"type": "status", "phase": "llm_round",
+                                       "round": tool_round + 1})
             continue
 
         # 无工具调用 → 本轮即最终答案
@@ -234,7 +253,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     elif not loop_fell_back:
         # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
         # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
-        assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
+        await _ensure_chat_start()
+        assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
         if assistant_text:
             CHUNK_SIZE = 24
             for i in range(0, len(assistant_text), CHUNK_SIZE):
@@ -255,15 +275,35 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                                    "content": assistant_text, "messageId": assistant_msg_id})
 
 
-async def _sync_with_tools(msgs, root, project, model_id, max_rounds: int = 4) -> str:
+async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds: int = 4) -> str:
     """llm.sync 降级通道：走统一工具调用循环(req_agent.run_tools_loop)，
     避免「LLM 输出 [TOOL_CALL] 后无结果」。返回最终纯文本。
+
+    ⚠️ 降级通道原本全程零事件(用户数分钟零反馈)；现先发 status:sync 声明相变，
+    再经 on_progress 把循环内 llm/tool 进度 marshal 回事件循环推送
+    (run_tools_loop 在工作线程同步执行，websocket.send_json 非线程安全，
+    必须 run_coroutine_threadsafe；连接已断时 send 抛异常需吞掉)。
     """
     from . import req_agent
+    loop = asyncio.get_running_loop()
+
+    def on_progress(event: str, detail: dict) -> None:
+        payload = {"type": "status", "phase": f"sync_{event}"}
+        payload.update(detail or {})
+        try:
+            asyncio.run_coroutine_threadsafe(websocket.send_json(payload), loop)
+        except Exception:
+            pass
+
+    try:
+        await websocket.send_json({"type": "status", "phase": "sync"})
+    except Exception:
+        pass
     res = await asyncio.to_thread(
         req_agent.run_tools_loop, msgs,
         root=root, project=project, model_id=model_id,
         mode="chat", max_tokens=_chat_max_tokens(), max_rounds=max_rounds,
+        on_progress=on_progress,
     )
     return res.get("content", "") if isinstance(res, dict) else ""
 
@@ -395,7 +435,18 @@ async def coding_agent_ws(websocket: WebSocket):
                 store.AgentSessionsStore.update(session_id, {"updatedAt": _ts()})
                 # A7：tAgent 代码问答(替换 opencode 直连)。KB/LLM 不可达 → reply=None，仅落库回显用户消息。
                 if content:
+                    # tAgent 问答是同步长调用(工具循环多轮)，先声明相变避免前端零反馈
+                    try:
+                        await websocket.send_json({"type": "status", "sessionId": session_id,
+                                                   "phase": "chat"})
+                    except Exception:
+                        pass
                     reply = await _agent_chat_reply(session, content)
+                    try:
+                        await websocket.send_json({"type": "status", "sessionId": session_id,
+                                                   "phase": "idle"})
+                    except Exception:
+                        pass
                     if reply:
                         m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(), "content": reply}
                         store.AgentSessionsStore.append_message({**m, "sessionId": session_id})

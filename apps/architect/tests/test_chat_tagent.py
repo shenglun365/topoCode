@@ -84,8 +84,10 @@ def test_ws_chat_flow(client, monkeypatch):
         assert not ev["session"].get("opencodeSessionId"), ev
 
         ws.send_json({"type": "session.message", "sessionId": sid, "content": "订单服务做什么?"})
-        # 第一个 message = assistant(tAgent 回复)
+        # 第一个 message = assistant(tAgent 回复)；status(chat/idle) 相变事件先行，跳过
         ev1 = ws.receive_json()
+        while ev1["type"] == "status":
+            ev1 = ws.receive_json()
         assert ev1["type"] == "message" and ev1["role"] == "assistant", ev1
         assert ev1["content"] == "订单服务负责创建订单", ev1
         # 第二个 message = user 回显
@@ -103,6 +105,8 @@ def test_ws_chat_degrade_no_kb(client, monkeypatch):
         sid = ev["session"]["id"]
         ws.send_json({"type": "session.message", "sessionId": sid, "content": "你好"})
         ev1 = ws.receive_json()
+        while ev1["type"] == "status":  # 进度相变事件(chat/idle)先于消息回显，跳过
+            ev1 = ws.receive_json()
         assert ev1["type"] == "message" and ev1["role"] == "user", ev1
         assert ev1["content"] == "你好", ev1
 

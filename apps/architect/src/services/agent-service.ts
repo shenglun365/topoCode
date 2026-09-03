@@ -12,7 +12,7 @@ import { currentProjectParams } from './project-service'
 
 export interface AgentAdapter {
   createSession(opts: { exec: ExecutionTask; planTitle: string; keepContext?: boolean }): Promise<AgentSession>
-  sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean; signal?: AbortSignal }): Promise<AgentMessage>
+  sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean; signal?: AbortSignal; onStatus?: (phase: string) => void }): Promise<AgentMessage>
   terminate(sessionId: string): Promise<void>
 }
 
@@ -32,12 +32,14 @@ class HttpAgentAdapter implements AgentAdapter {
     return res.session as AgentSession
   }
 
-  async sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean; signal?: AbortSignal }): Promise<AgentMessage> {
+  async sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean; signal?: AbortSignal; onStatus?: (phase: string) => void }): Promise<AgentMessage> {
     const userMsg: AgentMessage = { id: `m-${Date.now()}`, role: 'user', time: Date.now(), content }
     session.messages.push(userMsg)
     const ws = new ArchWs('ws/coding-agent')
     const signal = opts?.signal
     await ws.ready()
+    // 后端 status 相位(chat=问答处理中/idle=结束)：降级通道长等待的进度感知
+    if (opts?.onStatus) ws.on('status', (ev: any) => opts.onStatus?.(ev?.phase || ''))
     const replyP = ws.once<any>('message', 15000)
     replyP.catch(() => {}) // 防 abort 后 replyP 的 reject 成 unhandled rejection
     ws.send('session.message', { sessionId: session.id, content })

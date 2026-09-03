@@ -989,14 +989,18 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                    max_tokens: Optional[int] = None,
                    max_rounds: int = 4,
                    allowed: Optional[List[str]] = None,
-                   on_error: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+                   on_error: Optional[Callable[[str], None]] = None,
+                   on_progress: Optional[Callable[[str, Dict[str, Any]], None]] = None) -> Dict[str, Any]:
     """统一工具调用循环(同步通道)：解析模型输出的 `[TOOL_CALL]` 块 → 逐个执行 →
     回喂结果 → 再次询问，直至得到不含工具块的最终内容。供 harness(clarify/collect)
     与 WS 降级通道共用，杜绝「裸 [TOOL_CALL] 中断」。
 
     allowed: 工具白名单(如逐行解读等受限任务)；非 None 时白名单外的工具调用不执行，
-    回喂拒绝提示让模型改用允许工具或直接作答。默认 None=不限制(原行为)。
+    回喂拒绝提示让模型改用允许的工具或直接作答。默认 None=不限制(原行为)。
     on_error: 透传给 llm_sync 的失败原因回调(见其 docstring)。
+    on_progress: 进度回调(event, detail)，event ∈ 'llm'(detail.round=本轮轮次) |
+    'tool'(detail.tool/idx/total)；在同步线程内同步调用，WS 层负责 marshal 到事件循环，
+    让降级通道也有实时进度(否则用户整段等待零反馈)。
 
     返回 {'content': str, 'output': Any|None}；content 已剥离所有工具块。
     LLM 失败导致无内容时额外带 'error'(最近一次失败原因文本，空串=不可达/超时)。
@@ -1013,7 +1017,15 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
             except Exception:
                 pass
 
+    def _prog(event: str, **detail: Any) -> None:
+        if on_progress:
+            try:
+                on_progress(event, detail)
+            except Exception:
+                pass
+
     for _round in range(max_rounds + 1):
+        _prog("llm", round=_round + 1)
         res = llm_sync(work, mode=mode, output_schema=output_schema,
                        max_tokens=max_tokens, model_id=model_id, on_error=_err)
         content = (res or {}).get("content", "") if res else ""
@@ -1026,9 +1038,10 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                 "output": (res or {}).get("output") if res else None,
             }
         results: List[Dict[str, str]] = []
-        for c in calls:
+        for ci, c in enumerate(calls):
             name = c.get("tool", "")
             args = c.get("arguments", {})
+            _prog("tool", tool=name, idx=ci + 1, total=len(calls))
             if allowed and name not in allowed:
                 results.append({"name": name,
                                 "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
