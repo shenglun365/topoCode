@@ -70,6 +70,13 @@ watch(edgeLegendOpen, (open) => {
   else document.removeEventListener('click', onLegendDocClick, true)
 })
 onBeforeUnmount(() => document.removeEventListener('click', onLegendDocClick, true))
+/** 工具栏开关矩阵浮窗：打开时强制还原展开态（最小化持久化会让重开只剩停靠小图标，形同"无弹窗"）。 */
+function toggleMatrix() {
+  matrixOpen.value = !matrixOpen.value
+  if (matrixOpen.value) {
+    try { localStorage.setItem('arch.matrixWin.minimized', '0') } catch { /* ignore */ }
+  }
+}
 function onMatrixSelect(id: string) {
   if (id && id !== selId.value) selId.value = id   // 图谱高亮 + 资产卡 + 源码 tab 全联动
 }
@@ -1594,7 +1601,7 @@ onMounted(async () => {
         class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
         :class="matrixOpen ? 'btn-primary' : ''"
         :title="t('assetMgmt.matrix.title')"
-        @click="matrixOpen = !matrixOpen"
+        @click="toggleMatrix"
       >
         <TableCellsIcon class="w-3.5 h-3.5" />
       </button>
