@@ -126,6 +126,47 @@ def test_native_conn_rows_dict_queryable(tmp_path, monkeypatch):
     assert {"id", "kind", "name", "file_path", "start_line"} <= set(rows[0].keys())
 
 
+def test_close_symbol_conn_keeps_cached_alive(tmp_path, monkeypatch):
+    """回归(graph 端点 500)：调用方 close 缓存(native)连接会毒化缓存——
+    后续使用者拿到已关闭连接 + 跨线程 close 抛 ProgrammingError。
+    close_symbol_conn 对缓存连接必须跳过。"""
+    root = tmp_path / "repo-close"
+    root.mkdir(parents=True)
+    data = _mk_core_env(tmp_path, root, "proj-cl")
+    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
+    _sym.invalidate_native_cache()
+    c1 = _sym.open_symbol_conn(str(root), None)[0]
+    _sym.close_symbol_conn(c1)  # 调用方按协议关闭
+    # 缓存内连接仍可用（未被关闭）
+    assert c1.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 3
+    c2 = _sym.open_symbol_conn(str(root), None)[0]
+    assert c2 is c1  # 命中同一缓存连接且可继续查询
+    assert c2.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 3
+
+
+def test_native_conn_cross_thread(tmp_path, monkeypatch):
+    """回归(graph 端点 500)：缓存连接被不同请求线程使用（uvicorn 线程池），
+    check_same_thread=False 才不抛 ProgrammingError。"""
+    import threading
+    root = tmp_path / "repo-thread"
+    root.mkdir(parents=True)
+    data = _mk_core_env(tmp_path, root, "proj-th")
+    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
+    _sym.invalidate_native_cache()
+    conn = _sym.open_symbol_conn(str(root), None)[0]
+    errs = []
+
+    def other_thread():
+        try:
+            conn.execute("SELECT COUNT(*) FROM nodes").fetchone()
+        except Exception as e:  # pragma: no cover
+            errs.append(e)
+    t = threading.Thread(target=other_thread)
+    t.start()
+    t.join(5)
+    assert not errs, errs
+
+
 def _mk_git_repo(tmp_path, root_name: str):
     root = tmp_path / root_name
     root.mkdir()

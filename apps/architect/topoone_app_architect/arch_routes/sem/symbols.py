@@ -103,12 +103,17 @@ def _open_core_conn(core_pid: str):
     if not os.path.isfile(db):
         return None
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10,
+                               check_same_thread=False)
         # ⚠️ 必须 row_factory=Row：下游 _query_nodes/_query_edges 走 dict(r)。
         # 缺失时返回裸元组 → dict() 抛 ValueError → 被吞成 [] → native 符号源
         # 永远 0 节点 → 提取零产出降级 heuristic(P1 实测回归：COUNT(*) 索引访问
         # 测不出此坑，只有 dict 化查询路径才会触发)。
         conn.row_factory = sqlite3.Row
+        # ⚠️ check_same_thread=False：连接按 core_pid 缓存(TTL 300s)跨请求复用，
+        # uvicorn 线程池下后续请求可能落在不同线程；缺省 True 会抛
+        # "SQLite objects created in a thread can only be used in that same thread"
+        # (graph 端点 500 实测回归)。共享并发安全依赖"串行复用"假设，与既有设计一致。
         conn.execute("CREATE TEMP VIEW IF NOT EXISTS nodes AS SELECT "
                      "id, kind, name, qualified_name, file_path, "
                      "start_line, end_line, start_col AS start_column, end_col AS end_column, "
@@ -160,6 +165,26 @@ def invalidate_native_cache() -> None:
     _native_cache.clear()
     _core_pid_cache.clear()
     _state_cache.clear()
+    _diff_cache.clear()
+
+
+def close_symbol_conn(conn: Optional[sqlite3.Connection]) -> None:
+    """关闭符号连接（调用方统一出口，勿直接 conn.close()）。
+
+    open_symbol_conn 返回的 codegraph 连接是每次新建 → 直接关；
+    native 连接按 core_pid 缓存(TTL 300s) → 关闭会毒化缓存
+    （后续使用者拿到已关闭连接 + 跨线程 close 抛 ProgrammingError，
+    graph 端点 500 实测回归）→ 跳过，交给 invalidate_native_cache/TTL 管理。
+    """
+    if conn is None:
+        return
+    for cached, _ts in _native_cache.values():
+        if cached is conn:
+            return
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def _read_state_kv(core_pid: str) -> dict:

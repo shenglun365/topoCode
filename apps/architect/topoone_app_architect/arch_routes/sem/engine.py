@@ -25,7 +25,7 @@ from .anchors import _attach_step_refs, _node_to_ref, logger, resolve_ast_refs
 from fastapi import Request
 
 from .codegraph import ensure_synced, logger
-from .symbols import open_symbol_conn
+from .symbols import open_symbol_conn, close_symbol_conn
 from .context import _kb_parse_file, _norm_cache_symbol, _rebuild_edges_from_refs, collect_context, logger
 from .incremental import _anchor_hashes, _cache_content_hash, _canonical_key, _file_md5, logger
 from .paths import _norm_path, logger, project_id_for, resolve_root
@@ -117,7 +117,7 @@ def _component_order_map(root: Optional[str], project: Optional[str]):
     order: Dict[str, int] = {}
     file_to_comp: Dict[str, str] = {}
     try:
-        from .common import build_component_catalog
+        from ..common import build_component_catalog  # sem/ 下无 common(实测回归：ModuleNotFoundError 致组件排序失效)
         comps = (build_component_catalog(root, project) or {}).get("components") or []
     except Exception as e:
         logger.warning("[semantic] component order map failed: %s", e)
@@ -1941,7 +1941,7 @@ def _derive_project_edges(root: Optional[str], project: Optional[str],
         logger.warning("[semantic] derive project edges failed: %s", e, exc_info=True)
         return []
     finally:
-        conn.close()
+        close_symbol_conn(conn)  # 缓存(native)连接不关，勿直接 conn.close()
 
 
 def _derive_project_edges_kb(root: Optional[str], project: Optional[str],
@@ -2139,7 +2139,7 @@ def _derive_indirect_edges(root: Optional[str], project: Optional[str],
         logger.warning("[semantic] derive indirect edges failed: %s", e, exc_info=True)
         return []
     finally:
-        conn.close()
+        close_symbol_conn(conn)  # 缓存(native)连接不关，勿直接 conn.close()
 
 
 def _cached_derived_edges(root: Optional[str], project: Optional[str],
@@ -3757,7 +3757,7 @@ def probe_impact(root: str, project: Optional[str],
         except Exception as e:
             logger.warning("[semantic] codegraph probe failed: %s", e)
         finally:
-            conn.close()
+            close_symbol_conn(conn)  # 缓存(native)连接不关
     else:
         # 缓存反向索引兜底
         pid = project_id_for(root, project)
@@ -4061,7 +4061,7 @@ async def api_source_snippet(root: Optional[str] = None, project: Optional[str] 
                         "WHERE file_path = ? AND (name = ? OR qualified_name = ?) "
                         "AND start_line > 0 AND end_line > 0",
                         (rel, symbol, symbol)).fetchall()
-                    conn.close()
+                    close_symbol_conn(conn)  # 缓存(native)连接不关
                 span = next(((s_, e_) for s_, e_ in rows if s_ <= anchor <= e_), None)
                 if span is None and rows:
                     span = (rows[0][0], rows[0][1])

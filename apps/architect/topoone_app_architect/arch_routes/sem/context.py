@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 from .paths import project_id_for
 from .codegraph import _query_edges, _query_nodes
-from .symbols import open_symbol_conn
+from .symbols import open_symbol_conn, close_symbol_conn
 from .scope import resolve_scope_files
 from .incremental import _cache_content_hash
 
@@ -632,7 +632,7 @@ def collect_context(root: str, scope_type: str, scope_key: str,
                     callee_names[r["id"]] = r["name"] or ""
             except Exception as e:
                 logger.warning("[semantic] callee 名称补全失败: %s", e)
-        conn.close()
+        close_symbol_conn(conn)  # 缓存(native)连接不关，勿直接 conn.close()
         # codegraph 无实现级数据 → KB parseFileAst(implDetails) 补取(缓存 arch_ast_cache)
         if files:
             impl_by_file = _collect_impl_details(root, project, files)
