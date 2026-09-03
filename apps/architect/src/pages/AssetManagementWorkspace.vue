@@ -432,7 +432,9 @@ const changedFileMap = computed<Map<string, 'added' | 'modified' | 'deleted'>>((
   return m
 })
 
-/** 资产变更标记：任一 astRef 文件 ∈ 变更集 → 返回类别（工作区态优先）。 */
+/** 资产变更标记：任一 astRef 文件 ∈ 变更集 → 返回类别（工作区态优先）。
+ *  ⚠️ 模板勿直接调用本函数：它遍历 astRefs，行内多次调用会重复求值；
+ *  请用下方 changeMarkById（每资产仅算一次）。 */
 function assetChangeMark(a: SemanticAsset): 'added' | 'modified' | 'deleted' | '' {
   if (!diffMode.value) return ''
   const files = a.astRefs?.map((r) => r.file) ?? []
@@ -444,6 +446,23 @@ function assetChangeMark(a: SemanticAsset): 'added' | 'modified' | 'deleted' | '
     if (c === 'modified') { if (mark !== 'deleted') mark = 'modified' }
   }
   return mark
+}
+
+/** 资产 id → 变更类别（语义行徽标渲染入口：diffMode/变更集变化时统一重算一次）。 */
+const changeMarkById = computed<Map<string, 'added' | 'modified' | 'deleted'>>(() => {
+  const m = new Map<string, 'added' | 'modified' | 'deleted'>()
+  if (!diffMode.value) return m
+  for (const a of items.value) {
+    const mark = assetChangeMark(a)
+    if (mark) m.set(a.id, mark)
+  }
+  return m
+})
+
+/** diff 徽标文案（markAdded/markModified/markDeleted）；空 mark 返回空串。 */
+function diffMarkLabel(mark?: 'added' | 'modified' | 'deleted'): string {
+  if (!mark) return ''
+  return t(`assetMgmt.diff.mark${mark[0].toUpperCase()}${mark.slice(1)}`)
 }
 
 /** 图谱节点变更标记（按节点锚点文件）。SemanticGraphView 节点含 anchor 文件。 */
@@ -1683,13 +1702,13 @@ onMounted(async () => {
                     class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
                   >{{ t('assetMgmt.modified') }}</span>
                   <span
-                    v-if="diffMode && assetChangeMark(a)"
+                    v-if="diffMode && changeMarkById.get(a.id)"
                     class="chip !text-[9px] shrink-0"
-                    :class="assetChangeMark(a) === 'added' ? 'bg-ctp-green/15 text-ctp-green' : assetChangeMark(a) === 'deleted' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-yellow/15 text-ctp-yellow'"
-                    :title="t(`assetMgmt.diff.mark${assetChangeMark(a) === 'added' ? 'Added' : assetChangeMark(a) === 'deleted' ? 'Deleted' : 'Modified'}`)"
+                    :class="changeMarkById.get(a.id) === 'added' ? 'bg-ctp-green/15 text-ctp-green' : changeMarkById.get(a.id) === 'deleted' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-yellow/15 text-ctp-yellow'"
+                    :title="diffMarkLabel(changeMarkById.get(a.id))"
                   >
                     <ArrowsRightLeftIcon class="w-2.5 h-2.5 inline -mt-0.5" />
-                    {{ t(`assetMgmt.diff.mark${assetChangeMark(a) === 'added' ? 'Added' : assetChangeMark(a) === 'deleted' ? 'Deleted' : 'Modified'}`) }}
+                    {{ diffMarkLabel(changeMarkById.get(a.id)) }}
                   </span>
                   <span class="flex-1" />
                   <span

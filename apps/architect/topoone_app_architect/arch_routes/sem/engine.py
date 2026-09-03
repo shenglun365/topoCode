@@ -14,7 +14,6 @@ import logging
 import os
 import re
 import sqlite3
-import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -4277,10 +4276,14 @@ async def api_symbol_sync(body: dict = None):
     调 KB knowledge.pullRequest 写入待更新标记(pending)，由 KB 知识库管理界面
     确认后执行 updateConfirm(拉取/预览) + version.sync(增量分析+社区重划分) +
     cleanup(物理清除腐烂旧基线数据)。请求成功后记录跟踪状态 head。
+
+    ⚠️ 双模式（勿"统一"，决策见 api_cold_start docstring）：仓库已有 core 项目
+    → 走本端点（发起-确认-执行，防误同步）；仅冷启动(无项目、KB 管理无入口
+    可承接确认流)才由 api_cold_start 直接编排执行。
     """
     from .. import ctx
     from ..kb_gateway import call_kb
-    from .symbols import _resolve_core_pid, record_sync
+    from .symbols import _resolve_core_pid, record_sync, _git
     body = body or {}
     proj = body.get('project') or ctx.get_project()
     root = resolve_root(body.get('root') or None, proj)
@@ -4289,12 +4292,7 @@ async def api_symbol_sync(body: dict = None):
     pid = _resolve_core_pid(root)
     if not pid:
         return err(400, "KB 注册表无此仓库对应项目，请先在 KB 知识库管理中建项/建基线")
-    try:
-        p = subprocess.run(['git', '-C', root, 'rev-parse', 'HEAD'],
-                           capture_output=True, text=True, timeout=15)
-        head = p.stdout.strip() if p.returncode == 0 else ''
-    except Exception:
-        head = ''
+    head = (_git(root, ['rev-parse', 'HEAD'], timeout=15) or '').strip()
     if not head:
         return err(400, "无法获取仓库 HEAD commit")
     try:
@@ -4331,6 +4329,15 @@ def api_cold_start(body: dict = None):
     """冷启动：未注册仓库 → core 建项(project.import，含初始基线) + 全量分析
     (analysis.createTask+runTask)。决策①「冷启动自动触发+全仓库」；职责划分：
     architect 发起，core 执行。完成后记录跟踪状态(lastHead=HEAD)使符号源对齐。
+
+    ⚠️ 双模式决策依据（勿与 api_symbol_sync "统一"，两者刻意不同）：
+    - 本端点「直接编排执行」仅适用于冷启动——仓库尚无 core 项目，KB 知识库
+      管理界面没有可承接确认流的入口，走 pullRequest 会死锁（无项目可挂请求）。
+      自举一次性操作，且 import 天然是"建基线"语义，无覆盖风险。
+    - 仓库已有项目 → 必须走 api_symbol_sync 的「发起 knowledge.pullRequest →
+      KB 管理确认 → version.sync 执行」确认流（决策④），防止未确认就重分析。
+    同步 def：内含轮询 sleep(≤180s)，FastAPI 丢线程池执行，勿改回 async def
+    （call_kb 为阻塞 urllib，async 下会卡事件循环）。
     """
     from .. import ctx
     from ..kb_gateway import call_kb

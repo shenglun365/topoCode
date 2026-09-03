@@ -93,7 +93,7 @@ async function runCleanup(keep: number) {
   cleanupResult.value = null
   try {
     const res = await ipc.version.cleanup(projectId.value, { keepVersions: keep })
-    cleanupResult.value = (res as any).deleted || {}
+    cleanupResult.value = res.deleted || {}
   } catch (e: any) {
     errMsg.value = e?.message || t('knowledge.baseline.err')
   } finally {
@@ -185,7 +185,7 @@ onMounted(load)
           {{ t('knowledge.baseline.deleted') }} {{ syncResult.delta?.deleted.length || 0 }}
           · archived {{ syncResult.archivedRows || 0 }}
         </template>
-        <template v-else>{{ (syncResult as any).message || 'no changes' }}</template>
+        <template v-else>{{ syncResult.message || 'no changes' }}</template>
       </div>
 
       <!-- 清除结果 -->

@@ -1018,6 +1018,10 @@ export interface VersionSyncResult {
   changed: boolean
   projectId: string
   version?: ProjectVersion
+  /** changed=false 且未 force 时：core 返回的 "no code changes detected" 提示。 */
+  message?: string
+  /** changed=false 时的当前版本 id。 */
+  versionId?: string
   delta?: { added: string[]; modified: string[]; deleted: string[] }
   archivedRows?: number
   stagePlan?: VersionPreview
