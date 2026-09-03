@@ -249,6 +249,12 @@ export const semanticAssetService = {
     return await apiGet<BaselineDiff>(`/kb/semantic/baseline-diff${c ? `?${c}` : ''}`)
   },
 
+  /** 冷启动：未注册仓库 → core 建项(含初始基线) + 全量分析发起。 */
+  async coldStart(): Promise<{ started: boolean; projectId?: string; taskId?: string; requestId?: string; head?: string; message?: string } | undefined> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/cold-start', { root, project })
+  },
+
   /** 检索已提取的语义资产。 */
   async search(query: string, kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel): Promise<SemanticAsset[]> {
     const r = await this.searchPage(query, kind, { limit: 100, offset: 0, scope, level })

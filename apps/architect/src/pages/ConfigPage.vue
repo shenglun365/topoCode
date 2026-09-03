@@ -196,6 +196,21 @@ async function runCgSync() {
     cgSyncing.value = false
   }
 }
+const cgColdStarting = ref(false)
+const cgColdStartMsg = ref('')
+async function runCgColdStart() {
+  cgColdStarting.value = true
+  cgColdStartMsg.value = ''
+  try {
+    const r = await semanticAssetService.coldStart()
+    cgColdStartMsg.value = r?.message || ''
+    void loadCgStatus()
+  } catch (e: any) {
+    cgColdStartMsg.value = e?.message || String(e)
+  } finally {
+    cgColdStarting.value = false
+  }
+}
 async function setCgMode(m: 'on' | 'off' | 'auto') {
   cgSaving.value = true
   try {
@@ -488,6 +503,15 @@ onMounted(() => { void loadCgStatus() })
           @click="runCgSync"
         >{{ cgSyncing ? t('config.cg.syncing') : t('config.cg.syncNow') }}</button>
       </div>
+      <div v-if="cgStatus && !cgStatus.corePid" class="px-4 py-2 flex items-center gap-2 text-[11px] border-t border-ctp-surface0">
+        <span class="text-ctp-peach">{{ t('config.cg.noCoreProject') }}</span>
+        <button
+          class="btn !py-1 !px-3 !text-xs ml-auto"
+          :disabled="cgColdStarting"
+          @click="runCgColdStart"
+        >{{ cgColdStarting ? t('config.cg.coldStarting') : t('config.cg.coldStart') }}</button>
+      </div>
+      <p v-if="cgColdStartMsg" class="px-4 pb-2 text-[10px] text-ctp-overlay0 leading-relaxed">{{ cgColdStartMsg }}</p>
       <p v-if="cgStatus?.state?.stale" class="px-4 pb-2 text-[10px] text-ctp-overlay0 leading-relaxed">
         {{ t('config.cg.syncHint') }}
       </p>

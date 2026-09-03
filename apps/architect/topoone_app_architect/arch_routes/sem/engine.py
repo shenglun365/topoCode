@@ -4326,6 +4326,67 @@ async def api_baseline_diff(root: Optional[str] = None, project: Optional[str] =
     return ok(baseline_diff(_root or None, project or ctx.get_project()))
 
 
+@router.post("/kb/semantic/cold-start")
+def api_cold_start(body: dict = None):
+    """冷启动：未注册仓库 → core 建项(project.import，含初始基线) + 全量分析
+    (analysis.createTask+runTask)。决策①「冷启动自动触发+全仓库」；职责划分：
+    architect 发起，core 执行。完成后记录跟踪状态(lastHead=HEAD)使符号源对齐。
+    """
+    from .. import ctx
+    from ..kb_gateway import call_kb
+    from .symbols import _resolve_core_pid, record_sync, invalidate_native_cache, _git
+    import time as _time
+    body = body or {}
+    proj = body.get('project') or ctx.get_project()
+    root = resolve_root(body.get('root') or None, proj)
+    root = (root or '').strip()
+    if not root:
+        return err(400, "项目 root 解析失败")
+    if _resolve_core_pid(root):
+        return err(400, "仓库已在 KB 注册，无需冷启动；如基线过期请用「发起基线变更」")
+    head = (_git(root, ['rev-parse', 'HEAD']) or '').strip()
+    if not head:
+        return err(400, "非 git 仓库或无法获取 HEAD，无法冷启动")
+    # ① 建项 + 初始基线（异步 → 轮询 importStatus）
+    try:
+        imp = call_kb('project.import', path=root, mode="static", timeout=60)
+    except Exception as e:
+        return err(500, f"建项请求失败: {e}")
+    if not imp or not imp.get('requestId'):
+        return err(503, "KB 服务不可达，冷启动失败")
+    request_id = imp['requestId']
+    pid = None
+    deadline = _time.time() + 180
+    while _time.time() < deadline:
+        _time.sleep(2)
+        st = call_kb('project.importStatus', requestId=request_id, timeout=30)
+        if not st:
+            return err(503, "KB 服务不可达，建项状态查询失败")
+        if st.get('status') == 'done':
+            pid = st.get('projectId') or ''
+            break
+        if st.get('status') in ('error', 'unknown'):
+            return err(500, f"建项失败: {st.get('error') or st.get('status')}")
+    if not pid:
+        return ok({"started": False, "requestId": request_id,
+                   "message": "建项进行中（文件扫描），请稍后在 KB 知识库管理查看/继续全量分析"})
+    invalidate_native_cache()
+    # ② 全量分析（异步，fire-and-forget；不阻塞等待，分析在 core 后台跑）
+    task_id = ''
+    try:
+        task = call_kb('analysis.createTask', project_id=pid, type="full",
+                       name="cold-start", timeout=30)
+        if task and task.get('id'):
+            task_id = task['id']
+            call_kb('analysis.runTask', task_id=task_id, timeout=30)
+    except Exception as e:
+        logger.warning("[semantic] 冷启动全量分析发起失败: %s", e)
+    # ③ 记录跟踪状态（符号源对齐 HEAD）
+    record_sync(pid, head)
+    return ok({"started": True, "projectId": pid, "taskId": task_id, "head": head,
+               "message": "冷启动完成：项目已建项+初始基线，全量分析进行中（图谱/社区完成后符号源即生效）"})
+
+
 @router.get("/kb/semantic/mappings")
 async def api_mappings(root: Optional[str] = None, project: Optional[str] = None,
                        asset_ids: str = ""):
