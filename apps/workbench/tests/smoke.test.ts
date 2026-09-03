@@ -13,7 +13,7 @@ describe('project smoke test', () => {
   it('ES module imports resolve @ alias and @topo/web-core package', async () => {
     const { flattenTree } = await import('@/utils/flattenTree')
     expect(typeof flattenTree).toBe('function')
-    const { formatFileSize } = await import('@topo/web-core/utils/time')
-    expect(formatFileSize(1024)).toBe('1.0 KB')
+    const { commonZh } = await import('@topo/web-core/i18n/common')
+    expect(commonZh.loading.length).toBeGreaterThan(0)
   })
 })

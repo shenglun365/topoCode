@@ -1,3 +1,4 @@
+import { commonZh, commonEn } from '../i18n/common'
 /**
  * 门户 i18n（基础服务）：用户中心所需词表。
  * 词表自 workbench i18n 迁入（auth / resource 全量 + settings/common/nav 所需键）。
@@ -42,17 +43,7 @@ const zhCN = {
       },
     },
   },
-  common: {
-    loading: '加载中...',
-    confirm: '确认',
-    cancel: '取消',
-    save: '保存',
-    edit: '编辑',
-    close: '关闭',
-    refresh: '刷新',
-    gotIt: '知道了',
-    sendFailed: '发送失败',
-  },
+  common: { ...commonZh },
   settings: {
     profile: '个人资料',
     resourceCenter: '资源中心',
@@ -152,17 +143,7 @@ const enUS = {
       },
     },
   },
-  common: {
-    loading: 'Loading...',
-    confirm: 'Confirm',
-    cancel: 'Cancel',
-    save: 'Save',
-    edit: 'Edit',
-    close: 'Close',
-    refresh: 'Refresh',
-    gotIt: 'Got it',
-    sendFailed: 'Send failed',
-  },
+  common: { ...commonEn },
   settings: {
     profile: 'Profile',
     resourceCenter: 'Resource Center',
