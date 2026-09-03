@@ -31,9 +31,11 @@ export interface SemanticExtractScope {
 
 export interface SemanticExtractResult {
   assets: SemanticAsset[]
-  source?: 'codegraph' | 'live' | 'kb'
+  source?: 'codegraph' | 'native' | 'live' | 'kb'
   degraded?: boolean
-  /** 降级归因(index_missing=代码索引缺失/llm_disabled=显式关 LLM/heuristic_fallback=旧启发式兜底)。 */
+  /** 符号源后端：codegraph(外部) | native(自身 project.db AST，质量持平)。 */
+  symbolSource?: 'codegraph' | 'native'
+  /** 降级归因(index_missing/codegraph_missing=CLI 缺失/heuristic_fallback=旧启发式兜底)。 */
   reason?: string
   count: number
   error?: string

@@ -23,7 +23,8 @@ from .. import store
 from ..common import _ts, err, ok  # noqa: F401
 from . import router
 from .anchors import _attach_step_refs, _node_to_ref, logger, resolve_ast_refs
-from .codegraph import _open_cg, ensure_synced, logger
+from .codegraph import ensure_synced, logger
+from .symbols import open_symbol_conn
 from .context import _kb_parse_file, _norm_cache_symbol, _rebuild_edges_from_refs, collect_context, logger
 from .incremental import _anchor_hashes, _cache_content_hash, _canonical_key, _file_md5, logger
 from .paths import _norm_path, logger, project_id_for, resolve_root
@@ -1142,7 +1143,8 @@ def extract_scope(root: Optional[str], project: Optional[str],
     pid = project_id_for(root, project)
     # degraded 归因：index_missing=代码图谱索引缺失(与 LLM 无关)；llm_disabled=显式关 LLM；
     # heuristic_fallback=定向管线零产出走旧启发式。供前端按真实原因提示。
-    degraded = ctx.get("source") != "codegraph"
+    _src = ctx.get("source") or "live"
+    degraded = _src not in ("codegraph", "native")   # native 质量持平 → 非降级
     reason = "index_missing" if degraded else ""
     logger.info(
         "[semantic] extract_scope 范围 %s(%s) level=%s kinds=%s files=%d symbols=%d "
@@ -1192,7 +1194,8 @@ def extract_scope(root: Optional[str], project: Optional[str],
                 logger.info("[semantic] node briefs 生成 %d/%d", nb, len(saved))
     except Exception as e:
         logger.warning("[semantic] node briefs after extract failed: %s", e)
-    return {"assets": saved, "source": ctx.get("source"), "degraded": degraded,
+    return {"assets": saved, "source": ctx.get("source"),
+            "symbolSource": _src, "degraded": degraded,
             "reason": reason, "count": len(saved)}
 
 
@@ -1868,7 +1871,7 @@ def _derive_project_edges(root: Optional[str], project: Optional[str],
     if not assets:
         return []
     root = resolve_root(root, project)
-    conn = _open_cg(root) if root else None
+    conn, _cg_src = open_symbol_conn(root, project)
     if conn is None:
         return []
     try:
@@ -2054,7 +2057,7 @@ def _derive_indirect_edges(root: Optional[str], project: Optional[str],
     if not assets:
         return []
     root = resolve_root(root, project)
-    conn = _open_cg(root) if root else None
+    conn, _cg_src = open_symbol_conn(root, project)
     if conn is None:
         return []
     try:
@@ -3719,7 +3722,7 @@ def probe_impact(root: str, project: Optional[str],
     if not files:
         return {"dependents": [], "deps": [], "affectedFiles": []}
     dependents, deps = set(), set()
-    conn = _open_cg(root)
+    conn, _cg_src = open_symbol_conn(root, project)
     if conn is not None:
         try:
             new_ids = _node_ids_for_files(conn, files)
@@ -4038,7 +4041,7 @@ async def api_source_snippet(root: Optional[str] = None, project: Optional[str] 
             # 优先取包含锚点行的符号体，否则取同名首个有行段的符号。
             try:
                 rows: List[tuple] = []
-                conn = _open_cg(root)
+                conn, _cg_src = open_symbol_conn(root, project)
                 if conn is not None:
                     rel = _norm_path(file)
                     rows = conn.execute(
@@ -4206,6 +4209,41 @@ async def api_purge_semantic(request: Request):
 
 
 # ── 动态路由置底注册（A1-T2：避免 {asset_id} 遮蔽静态路径）──
+@router.get("/kb/semantic/codegraph")
+async def api_codegraph_status():
+    from .codegraph import codegraph_status, effective_mode, kv_mode
+    mode = effective_mode()
+    st = codegraph_status()
+    return ok({"mode": mode, "env": os.environ.get("ARCH_CODEGRAPH", "").strip().lower(),
+               "cli": st["cli"], "cliPath": st["cliPath"],
+               "kv": kv_mode(), "source": "env" if os.environ.get("ARCH_CODEGRAPH") else ("kv" if kv_mode() else "default"),
+               "native": _native_index_stats()})
+
+
+@router.post("/kb/semantic/codegraph")
+async def api_codegraph_set(body: dict = None):
+    from .codegraph import set_kv_mode
+    body = body or {}
+    mode = str(body.get("mode") or "")
+    if not set_kv_mode(mode):
+        return err("mode 必须为 on/off/auto")
+    return ok({"mode": mode})
+
+
+def _native_index_stats() -> dict:
+    try:
+        from .. import ctx
+        from ..store.base import _resolve_pid
+        pid = _resolve_pid(None)
+        pdb = ctx.project_db(pid, create=False) if pid else None
+        if pdb is None:
+            return {}
+        row = pdb.fetchone("SELECT COUNT(*) AS c FROM graph_node")
+        return {"nodes": int((row or {}).get("c") or 0)}
+    except Exception:
+        return {}
+
+
 @router.get("/kb/semantic/mappings")
 async def api_mappings(root: Optional[str] = None, project: Optional[str] = None,
                        asset_ids: str = ""):

@@ -21,7 +21,8 @@ from ..common import _ts, err, ok  # noqa: F401
 logger = logging.getLogger(__name__)
 
 from .paths import project_id_for
-from .codegraph import _open_cg, _query_edges, _query_nodes
+from .codegraph import _query_edges, _query_nodes
+from .symbols import open_symbol_conn
 from .scope import resolve_scope_files
 from .incremental import _cache_content_hash
 
@@ -610,10 +611,10 @@ def collect_context(root: str, scope_type: str, scope_key: str,
     source = "live"
     impl_by_file: Dict[str, dict] = {}
     callee_names: Dict[str, str] = {}
-    conn = _open_cg(root)
+    conn, _cg_src = open_symbol_conn(root, project)
     cross = ""
     if conn is not None:
-        source = "codegraph"
+        source = "codegraph" if _cg_src == "codegraph" else "native"
         nodes = _query_nodes(conn, files=files, symbols=syms)
         edges = _query_edges(conn, [n["id"] for n in nodes]) if nodes else []
         cross = _cross_file_edges_text(conn, [n["id"] for n in nodes])

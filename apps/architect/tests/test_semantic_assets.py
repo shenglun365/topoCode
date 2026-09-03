@@ -2668,3 +2668,29 @@ def test_source_snippet_codegraph_fallback(tmp_path, monkeypatch):
     assert d["highlight"] == [12, 13, 14, 15, 16]
     assert d["lines"][0]["line"] == 2     # anchor-10
     assert d["lines"][-1]["line"] == 26   # symbolEnd+10
+
+
+def test_codegraph_switch_off_short_circuits(monkeypatch):
+    """off 模式：ensure_synced 零 subprocess 且 effective_mode 如实。"""
+    calls = {"n": 0}
+    monkeypatch.setenv("ARCH_CODEGRAPH", "off")
+    monkeypatch.setattr(_sem_codegraph, "_mode_cache", None)   # 套件内 30s 缓存污染防护
+    monkeypatch.setattr(_sem_codegraph, "_cli_cache", ("", 0.0))
+    import subprocess as _sp
+    monkeypatch.setattr(_sem_codegraph.subprocess, "run", lambda *a, **k: calls.__setitem__("n", calls["n"] + 1))
+    assert _sem_codegraph.effective_mode() == "off"
+    assert _sem_codegraph.ensure_synced("/tmp/whatever") is False
+    assert calls["n"] == 0
+    monkeypatch.delenv("ARCH_CODEGRAPH")
+    monkeypatch.setattr(_sem_codegraph, "_mode_cache", None)
+
+
+def test_codegraph_cli_missing_cached(monkeypatch):
+    """CLI 缺失：识别缓存生效，auto 下 ensure_synced 直接 False 不探测。"""
+    monkeypatch.delenv("ARCH_CODEGRAPH", raising=False)
+    monkeypatch.setattr(_sem_codegraph, "_mode_cache", None)
+    monkeypatch.setattr(_sem_codegraph, "_cli_cache", (None, __import__("time").time()))
+    called = {"n": 0}
+    monkeypatch.setattr(_sem_codegraph.shutil, "which", lambda *a: called.__setitem__("n", called["n"] + 1))
+    assert _sem_codegraph.ensure_synced("/tmp/x") is False
+    assert called["n"] == 0, "CLI 识别应命中缓存不再 which"

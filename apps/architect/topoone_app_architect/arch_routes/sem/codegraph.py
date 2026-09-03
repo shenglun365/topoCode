@@ -11,11 +11,13 @@ import logging
 import os
 import re
 import sqlite3
+import shutil
 import subprocess
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import store
+from .. import ctx
 from ..common import _ts, err, ok  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -36,12 +38,82 @@ def cg_dir(root: str) -> Optional[str]:
     return None
 
 
+# ── 识别 + 手动开关（env ARCH_CODEGRAPH > main_db KV > auto） ─────────
+_KV_KEY = 'arch.codegraph.mode'
+_cli_cache = None      # (path|None, ts)
+_mode_cache = None     # (mode, ts)
+
+
+def codegraph_cli():
+    """codegraph CLI 可用性识别(进程级缓存 TTL 300s，避免反复探测)。"""
+    global _cli_cache
+    now = time.time()
+    if _cli_cache and now - _cli_cache[1] < 300:
+        return _cli_cache[0]
+    p = shutil.which('codegraph')
+    _cli_cache = (p, now)
+    return p
+
+
+def codegraph_status() -> dict:
+    p = codegraph_cli()
+    return {'cli': bool(p), 'cliPath': p or ''}
+
+
+def ensure_arch_settings_table() -> None:
+    ctx.db().execute("CREATE TABLE IF NOT EXISTS arch_settings("
+                     "key TEXT PRIMARY KEY, value TEXT)")
+
+
+def kv_mode():
+    try:
+        row = ctx.db().fetchone("SELECT value FROM arch_settings WHERE key=?", (_KV_KEY,))
+        v = (row or {}).get('value')
+        return v if v in ('on', 'off', 'auto') else None
+    except Exception:
+        return None
+
+
+def set_kv_mode(mode: str) -> bool:
+    if mode not in ('on', 'off', 'auto'):
+        return False
+    ensure_arch_settings_table()
+    d = ctx.db()
+    d.execute("INSERT INTO arch_settings(key, value) VALUES(?,?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (_KV_KEY, mode))
+    try:
+        d.conn.commit()
+    except Exception:
+        pass
+    global _mode_cache
+    _mode_cache = None
+    return True
+
+
+def effective_mode() -> str:
+    global _mode_cache
+    now = time.time()
+    if _mode_cache and now - _mode_cache[1] < 30:
+        return _mode_cache[0]
+    env = os.environ.get('ARCH_CODEGRAPH', '').strip().lower()
+    mode = env if env in ('on', 'off', 'auto') else (kv_mode() or 'auto')
+    _mode_cache = (mode, now)
+    return mode
+
+
 def ensure_synced(root: str, timeout: int = 90) -> bool:
     """确保 codegraph 索引存在且保鲜。
 
     未初始化时自动 `codegraph init`(init 自带首建索引，给更长超时)；
     仍失败 → 返回 False(调用方降级 AST 缓存/live 扫描，不阻塞提取)。
     """
+    mode = effective_mode()
+    if mode == 'off':
+        return False                      # 手动关闭：零 subprocess，不触碰用户项目目录
+    if codegraph_cli() is None:
+        if mode == 'on':
+            logger.warning("[semantic] codegraph 显式开启但 CLI 缺失: %s", root)
+        return False                      # CLI 缺失：缓存期内不再反复探测
     if not root or not os.path.isdir(root):
         return False
 
