@@ -1196,9 +1196,20 @@ def extract_scope(root: Optional[str], project: Optional[str],
                 logger.info("[semantic] node briefs 生成 %d/%d", nb, len(saved))
     except Exception as e:
         logger.warning("[semantic] node briefs after extract failed: %s", e)
+    _stale = {}
+    if _src == 'native':
+        try:
+            from .symbols import symbol_source_state
+            _ns = symbol_source_state(root, project)
+            if _ns.get('stale'):
+                _stale = {"indexStale": True, "staleCount": len(_ns.get('staleFiles') or []),
+                          "lastHead": (_ns.get('lastHead') or '')[:12],
+                          "head": (_ns.get('head') or '')[:12]}
+        except Exception:
+            pass
     return {"assets": saved, "source": ctx.get("source"),
             "symbolSource": _src, "degraded": degraded,
-            "reason": reason, "count": len(saved)}
+            "reason": reason, "count": len(saved), **_stale}
 
 
 def _resolve_extract_levels(level: str) -> Tuple[str, ...]:
@@ -4212,14 +4223,41 @@ async def api_purge_semantic(request: Request):
 
 # ── 动态路由置底注册（A1-T2：避免 {asset_id} 遮蔽静态路径）──
 @router.get("/kb/semantic/codegraph")
-async def api_codegraph_status():
+async def api_codegraph_status(root: Optional[str] = None, project: Optional[str] = None):
+    from .. import ctx
     from .codegraph import codegraph_status, effective_mode, kv_mode
+    from .symbols import symbol_source_state, _resolve_core_pid, _open_core_conn
     mode = effective_mode()
     st = codegraph_status()
+    # root 解析：显式参数 > 请求上下文(注册项目 rootPath)
+    _root = (root or '').strip()
+    if not _root:
+        _pid_ctx = ctx.get_project()
+        _root = (store.ProjectsStore.get(_pid_ctx) or {}).get('rootPath', '') if _pid_ctx else ''
+    _root = _root or ''
+    # native 统计（root 优先于 codegraph_status 内部上下文解析）
+    _core_pid = _resolve_core_pid(_root)
+    if _core_pid:
+        _conn = _open_core_conn(_core_pid)
+        if _conn is not None:
+            try:
+                st['corePid'] = _core_pid
+                st['nativeNodes'] = _conn.execute("SELECT COUNT(*) FROM graph_node").fetchone()[0]
+                st['nativeEdges'] = _conn.execute("SELECT COUNT(*) FROM graph_edge").fetchone()[0]
+            except Exception:
+                st['nativeNodes'] = st['nativeEdges'] = 0
+        else:
+            st['corePid'] = _core_pid
+            st['nativeNodes'] = st['nativeEdges'] = 0
+    ns = symbol_source_state(_root, project or ctx.get_project())
     return ok({"mode": mode, "env": os.environ.get("ARCH_CODEGRAPH", "").strip().lower(),
                "cli": st["cli"], "cliPath": st["cliPath"],
                "kv": kv_mode(), "source": "env" if os.environ.get("ARCH_CODEGRAPH") else ("kv" if kv_mode() else "default"),
-               "native": _native_index_stats()})
+               "corePid": st.get('corePid', ''),
+               "native": {"nodes": st.get('nativeNodes', 0), "edges": st.get('nativeEdges', 0)},
+               "state": {"head": ns['head'], "lastHead": ns['lastHead'],
+                         "dirty": ns['dirty'], "stale": ns['stale'],
+                         "staleCount": len(ns['staleFiles'])}})
 
 
 @router.post("/kb/semantic/codegraph")
@@ -4228,22 +4266,42 @@ async def api_codegraph_set(body: dict = None):
     body = body or {}
     mode = str(body.get("mode") or "")
     if not set_kv_mode(mode):
-        return err("mode 必须为 on/off/auto")
+        return err(400, "mode 必须为 on/off/auto")
     return ok({"mode": mode})
 
 
-def _native_index_stats() -> dict:
+@router.post("/kb/semantic/symbol-sync")
+async def api_symbol_sync(body: dict = None):
+    """手动基线同步（决策：系统仅提示，用户手动触发解析）：调 KB version.sync
+    将 core 基线对齐当前 HEAD（per-file 增量），完成后刷新跟踪状态。"""
+    from .. import ctx
+    from ..kb_gateway import call_kb
+    from .symbols import _resolve_core_pid, record_sync
+    body = body or {}
+    proj = body.get('project') or ctx.get_project()
+    root = resolve_root(body.get('root') or None, proj)
+    if not root:
+        return err(400, "项目 root 解析失败")
+    pid = _resolve_core_pid(root)
+    if not pid:
+        return err(400, "KB 注册表无此仓库对应项目，请先在 KB 知识库管理中建项/建基线")
     try:
-        from .. import ctx
-        from ..store.base import _resolve_pid
-        pid = _resolve_pid(None)
-        pdb = ctx.project_db(pid, create=False) if pid else None
-        if pdb is None:
-            return {}
-        row = pdb.fetchone("SELECT COUNT(*) AS c FROM graph_node")
-        return {"nodes": int((row or {}).get("c") or 0)}
+        p = subprocess.run(['git', '-C', root, 'rev-parse', 'HEAD'],
+                           capture_output=True, text=True, timeout=15)
+        head = p.stdout.strip() if p.returncode == 0 else ''
     except Exception:
-        return {}
+        head = ''
+    if not head:
+        return err(400, "无法获取仓库 HEAD commit")
+    try:
+        res = call_kb('version.sync', project_id=pid, head=head,
+                      label='architect-manual-sync')
+    except Exception as e:
+        return err(f"基线同步请求失败: {e}")
+    if res is None:
+        return err(503, "KB 服务不可达，请稍后重试")
+    record_sync(pid, head)
+    return ok({"synced": True, "corePid": pid, "head": head, "result": res})
 
 
 @router.get("/kb/semantic/mappings")

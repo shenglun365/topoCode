@@ -183,8 +183,18 @@ loadLlm()
 // ── 符号源(CodeGraph)开关：三档 + 状态(KV 持久化) ──
 const cgStatus = ref<CodegraphStatus | null>(null)
 const cgSaving = ref(false)
+const cgSyncing = ref(false)
 async function loadCgStatus() {
   cgStatus.value = await semanticAssetService.codegraphStatus() ?? null
+}
+async function runCgSync() {
+  cgSyncing.value = true
+  try {
+    await semanticAssetService.symbolSync()
+    void loadCgStatus()
+  } catch { /* 失败提示由 api 层处理 */ } finally {
+    cgSyncing.value = false
+  }
 }
 async function setCgMode(m: 'on' | 'off' | 'auto') {
   cgSaving.value = true
@@ -460,7 +470,23 @@ onMounted(() => { void loadCgStatus() })
           <span class="mx-1 text-ctp-overlay0">·</span>
           <span class="text-ctp-overlay0">{{ { env: t('config.cg.srcEnv'), kv: t('config.cg.srcKv'), default: t('config.cg.srcDefault') }[cgStatus.source] }}</span>
           <span v-if="cgStatus.native?.nodes" class="text-ctp-overlay0"> · {{ t('config.cg.nativeNodes') }}: {{ cgStatus.native.nodes.toLocaleString() }}</span>
+          <span v-if="cgStatus.state?.stale" class="text-ctp-yellow"> · {{ t('config.cg.stale') }} ({{ cgStatus.state.staleCount }})</span>
         </span>
+      </div>
+      <div v-if="cgStatus?.state" class="px-4 py-2 flex items-center gap-2 text-[11px] border-t border-ctp-surface0">
+        <span v-if="!cgStatus.state.lastHead" class="text-ctp-overlay0">{{ t('config.cg.baselineNone') }}</span>
+        <span v-else-if="cgStatus.state.stale" class="text-ctp-yellow">
+          {{ t('config.cg.baselineStale') }} <span class="font-mono">{{ cgStatus.state.lastHead.slice(0, 8) }}</span> → <span class="font-mono">{{ cgStatus.state.head.slice(0, 8) }}</span>
+          <span v-if="cgStatus.state.staleCount"> ({{ t('config.cg.baselineFiles') }} {{ cgStatus.state.staleCount }})</span>
+        </span>
+        <span v-else class="text-ctp-green">{{ t('config.cg.baselineFresh') }} <span class="font-mono">{{ cgStatus.state.head.slice(0, 8) }}</span></span>
+        <span v-if="cgStatus.state.dirty" class="text-ctp-overlay0"> · {{ t('config.cg.dirty') }} {{ cgStatus.state.dirty }}</span>
+        <button
+          v-if="cgStatus.state.lastHead && cgStatus.state.stale"
+          class="btn !py-1 !px-3 !text-xs ml-auto"
+          :disabled="cgSyncing"
+          @click="runCgSync"
+        >{{ cgSyncing ? t('config.cg.syncing') : t('config.cg.syncNow') }}</button>
       </div>
       <div class="px-4 py-3 flex items-center gap-2">
         <button

@@ -203,18 +203,33 @@ export interface CodegraphStatus {
   cliPath: string
   kv?: string | null
   source: 'env' | 'kv' | 'default'
-  native?: { nodes?: number }
+  corePid?: string
+  native?: { nodes?: number; edges?: number }
+  state?: {
+    head: string
+    lastHead: string
+    dirty: number
+    stale: boolean
+    staleCount: number
+  }
 }
 
 export const semanticAssetService = {
   /** codegraph 符号源开关：状态查询 / 三档切换(on|off|auto，KV 持久化)。 */
   async codegraphStatus(): Promise<CodegraphStatus | undefined> {
-    return await apiGet<CodegraphStatus>('/kb/semantic/codegraph')
+    const c = ctx()
+    return await apiGet<CodegraphStatus>(`/kb/semantic/codegraph${c ? `?${c}` : ''}`)
   },
 
   async setCodegraphMode(mode: 'on' | 'off' | 'auto'): Promise<boolean> {
     await apiPost<unknown>('/kb/semantic/codegraph', { mode })
     return true
+  },
+
+  /** 手动基线同步（系统仅提示、用户手动触发）：KB version.sync 对齐 core 基线至 HEAD。 */
+  async symbolSync(): Promise<{ synced: boolean; corePid: string; head: string } | undefined> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/symbol-sync', { root, project })
   },
 
   /** 检索已提取的语义资产。 */
