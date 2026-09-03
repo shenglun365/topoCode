@@ -105,8 +105,18 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     else:
         conv = store.ConversationsStore.get(conv_id)
         if not conv:
-            await websocket.send_json({"type": "error", "message": "conversation not found"})
-            return
+            # 自愈降级（勿改回直接报 "conversation not found" 后 return）：
+            # 浏览器 tab 内存里保留的 chatConvId 可能指向已不存在的会话
+            # （服务重启/数据目录迁移/多实例并存导致库漂移）；若在此报错返回，
+            # 前端不清 convId，该 tab 之后每条消息都会永远失败。
+            # 历史消息全量在 payload.messages，新建会话零丢失；chat_start 会把
+            # 新 conv_id 回传，前端 chatConvId 自动跟进。
+            logger.warning("[kb-chat] conversation %s not found → fallback to fresh conversation", conv_id)
+            conv = store.ConversationsStore.create({
+                "kind": kind, "projectId": project, "reqId": data.get("reqId") or "",
+                "title": title, "status": "active", "meta": {"title": title},
+            })
+            conv_id = conv["id"]
     # 请求级会话上下文(供 contract.propose 工具回填 origin.convId 证据链)
     try:
         _ctx.set_conv(conv_id)
