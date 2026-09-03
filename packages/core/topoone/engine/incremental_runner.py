@@ -233,12 +233,19 @@ def _inc_graph(multi_db: MultiDBManager, project_db: SQLiteContext,
         a_store.bulk_insert_edges(kept_rows)
     if resolved:
         emitter.write_edges(resolved)
+    # 变更文件的新 contains 边：keep_edges 只保旧边、resolved 只含解析边——
+    # 变更文件的归属链必须从新表补写(否则增量后 contains 渐进丢失)。
+    contains_written = 0
+    for t in changed_tables.values():
+        if t.edges:
+            contains_written += emitter.write_edges(t.edges)
 
     project_db.conn.commit()
-    total = len(kept_rows) + len(resolved)
-    logger.info(f"[inc.graph] task={task_id} kept={len(keep_edges)} resolved={len(resolved)} total={total}")
+    total = len(kept_rows) + len(resolved) + contains_written
+    logger.info(f"[inc.graph] task={task_id} kept={len(keep_edges)} resolved={len(resolved)} "
+                f"contains={contains_written} total={total}")
     return {"status": "done", "keptEdges": len(keep_edges), "newEdges": len(resolved),
-            "totalEdges": total}
+            "containsEdges": contains_written, "totalEdges": total}
 
 
 def _planned(status: str = "planned") -> dict:

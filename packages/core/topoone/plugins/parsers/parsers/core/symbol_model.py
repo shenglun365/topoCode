@@ -76,6 +76,7 @@ class FileSymbolTable:
     unresolved_refs: list[UnresolvedReference] = field(default_factory=list)
     imports: list[str] = field(default_factory=list)       # 模块名列表
     exports: list[str] = field(default_factory=list)       # 导出符号名列表
+    edges: list["Edge"] = field(default_factory=list)      # parser 阶段 contains 边(walker 生成)
 
     def add_node(self, node: Node):
         self.nodes.append(node)

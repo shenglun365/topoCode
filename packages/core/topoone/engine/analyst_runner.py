@@ -712,8 +712,16 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
     # 批量写入所有节点的 graph_node（移出线程池，减少 SQLite 锁竞争）
     if ctx.all_tables:
         ctx.log(f"Writing parse results for {len(ctx.all_tables)} files to graph_node ...")
+        contains_total = 0
         for table in ctx.all_tables:
             ctx.emitter.write_nodes(table)
+            # ⚠️ contains 边必须在 step1 落库——walker 在 _create_node 时生成
+            # (class/interface/file 含 method/property/field)，此前只写 nodes 导致
+            # graph_edge 中 contains 恒为 0（语义图谱归属链断裂，实测回归）。
+            if table.edges:
+                contains_total += ctx.emitter.write_edges(table.edges)
+        if contains_total:
+            ctx.log(f"Wrote {contains_total} parser contains edges")
 
     ctx.log(f"AST parsing complete - processed {ctx.processed} files, skipped {ctx.skipped}")
     ctx.report_progress(65)

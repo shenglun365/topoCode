@@ -37,6 +37,7 @@ class ResolutionEngine:
         self._qualified_index: dict[str, Node] = {}                       # qualifiedName → Node
         self._export_index: dict[str, set[str]] = defaultdict(set)        # file → exported names
         self._node_by_id: dict[str, Node] = {}
+        self._var_type_cache: dict[str, dict[str, Optional[Node]]] = {}   # file → {var名: 类型节点}
 
         # 优化索引 (Phase D): 加速跨文件查找
         self._suffix_index: dict[str, str] = {}      # 路径去扩展名后缀 → file_path (O(1) 查找)
@@ -181,6 +182,13 @@ class ResolutionEngine:
                     if result:
                         target = result
 
+                # 策略 2.5: 实例方法推断 — `recv.method()` / `this.method()` →
+                # receiver 类型作用域内的方法(对齐 codegraph instance-method 策略族)。
+                # 此前 member 调用只能整串 qualified/name 匹配，TS 前端大量
+                # `adapter.build()` 形态全部 unresolved(实测 calls 解析率 4%)。
+                if not target and "." in ref.reference_name:
+                    target = self._resolve_instance_method(ref, table)
+
                 # 策略 3: qualified name 匹配
                 if not target:
                     target = self._qualified_index.get(ref.reference_name)
@@ -269,6 +277,68 @@ class ResolutionEngine:
         return edges
 
     # ── 策略实现 ─────────────────────────────────────────
+
+    def _resolve_instance_method(self, ref: UnresolvedReference,
+                                 table: FileSymbolTable) -> Optional[Node]:
+        """实例方法推断：`recv.method` → receiver 类型作用域内的 method/property。
+
+        - this/self/cls/super：caller 的类 scope 链（qualified_name 前缀）内匹配
+        - 变量 receiver：本文件同名 variable/constant 发出的 type_of/returns
+          类型引用 → 类型节点 → 其 scope 内方法匹配
+
+        返回 None = 无法推断（调用方继续后续策略/落 unresolved）。
+        """
+        name = ref.reference_name
+        recv, meth = name.rsplit(".", 1)
+        caller = self._node_by_id.get(ref.from_node_id)
+        if not caller:
+            return None
+
+        type_node: Optional[Node] = None
+        if recv in ("this", "self", "cls", "super"):
+            # caller 的 qualified_name 前缀即类链：Cls → Cls::method。取最近的类层。
+            parts = caller.qualified_name.split("::")
+            for i in range(len(parts) - 1, 0, -1):
+                cls_name = parts[i - 1]
+                for n in self._file_node_index.get(table.file_path, {}).get(cls_name, []):
+                    if n.kind.value in ("class", "interface", "struct"):
+                        type_node = n
+                        break
+                if type_node:
+                    break
+        else:
+            # 本文件 receiver 变量 → 其 type_of/returns 类型引用 → 类型节点
+            var_ids = {n.id for n in self._file_node_index.get(table.file_path, {}).get(recv, [])
+                       if n.kind.value in ("variable", "constant", "property")}
+            if var_ids:
+                # 缓存：文件 → {var名: 类型节点}（同文件多 ref 复用，免重复扫描）
+                cache = self._var_type_cache.setdefault(table.file_path, {})
+                type_node = cache.get(recv)
+                if type_node is None and recv not in cache:
+                    for t in table.unresolved_refs:
+                        if t.from_node_id in var_ids and \
+                                t.reference_kind.value in ("type_of", "returns"):
+                            tname = t.reference_name.split(".")[-1]
+                            for n in (self._file_node_index.get(table.file_path, {}).get(tname, [])
+                                      + self._name_index.get(tname, [])):
+                                if n.kind.value in ("class", "interface", "struct"):
+                                    type_node = n
+                                    break
+                        if type_node:
+                            break
+                    cache[recv] = type_node  # None 也缓存(负缓存)，避免重复扫描
+
+        if type_node is None:
+            return None
+
+        # 类型作用域内匹配方法：qualified 前缀 `Cls::` 下同名 method/function/property
+        prefix = type_node.qualified_name + "::"
+        for n in (self._file_node_index.get(type_node.file_path, {}).get(meth, [])
+                  + self._name_index.get(meth, [])):
+            if n.kind.value in ("method", "function", "property") and \
+                    (n.qualified_name == prefix + meth or n.qualified_name.startswith(prefix)):
+                return n
+        return None
 
     def _resolve_local(self, ref: UnresolvedReference, table: FileSymbolTable) -> Optional[Node]:
         """文件内按 scope 链向上查找（使用 _file_node_index O(1) 查找）"""

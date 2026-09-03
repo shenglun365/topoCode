@@ -259,6 +259,7 @@ class TreeSitterWalker:
             language=self.language,
             nodes=self.nodes,
             unresolved_refs=self.unresolved_refs,
+            edges=self.edges,
         )
         for n in self.nodes:
             if n.is_exported:
@@ -371,6 +372,19 @@ class TreeSitterWalker:
         # 14. Rust impl
         if node_type == "impl_item":
             self._extract_rust_impl(node)
+            return False
+
+        # 14.5 对象字面量键值方法(JS/TS 等): pair { key: function|arrow } → 函数节点。
+        #  前端 adapter/controller/service 大量 `const x = { build() {...} }` /
+        #  `{ build: () => {...} }` 形态——此前不建节点、体内调用全部漏抓
+        #  (实测 topoOne-animation: method 32%/function 39% of codegraph)。
+        if node_type in ("pair", "property_entry"):
+            value = _child_by_field(node, "value")
+            if value is not None and value.type in ex.function_types:
+                key = _child_by_field(node, "key")
+                name = _node_text(key, self.source).strip("'\"") if key is not None else ""
+                self._extract_function(value, name_override=name or None)
+                return True
             return False
 
         # 15. 标识符使用(引用/赋值/传参)——通用叶子收集，flush 期统一过滤
