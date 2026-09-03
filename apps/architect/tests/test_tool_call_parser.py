@@ -62,3 +62,56 @@ class TestStripToolBlocks:
         t = '前言\n\n```TOOL_CALL]{"tool":"project.ctx","arguments":{}}[/TOOL_CALL]\n```'
         assert "TOOL_CALL" not in strip_tool_blocks(t)
         assert "前言" in strip_tool_blocks(t)
+
+
+class TestUnclosedBlocks:
+    """生产实测回归：部分模型省略闭合标签，裸 [TOOL_CALL]{...} 直接跟 JSON。
+    旧解析器 0 解析 → 工具不执行、裸块透传上屏(资产管理「提取全部组件」)。"""
+
+    def test_single_unclosed_block(self):
+        t = '[TOOL_CALL]{"tool":"a","arguments":{"k":1}}'
+        assert extract_tool_calls(t) == [{"tool": "a", "arguments": {"k": 1}}]
+
+    def test_multiple_unclosed_blocks_with_extra_field(self):
+        # 用户实测形态：连续 4 个未闭合块，各带额外 message 字段(应忽略)
+        t = "\n".join(
+            f'[TOOL_CALL]{{"tool":"asset.semantic.extract",'
+            f'"arguments":{{"scope":{{"type":"comm","key":"comm-{i}"}},"kinds":["entity"]}},'
+            f'"message":"正在提取组件 {i}..."}}'
+            for i in range(4))
+        calls = extract_tool_calls(t)
+        assert len(calls) == 4
+        assert all(c["tool"] == "asset.semantic.extract" for c in calls)
+        assert calls[0]["arguments"]["scope"]["key"] == "comm-0"
+        assert calls[3]["arguments"]["scope"]["key"] == "comm-3"
+
+    def test_unclosed_multiline_json(self):
+        t = ('[TOOL_CALL]{\n  "tool": "a",\n  "arguments": {\n    "k": "v"\n  }\n}'
+             '\n后续说明')
+        assert extract_tool_calls(t) == [{"tool": "a", "arguments": {"k": "v"}}]
+
+    def test_mixed_closed_and_unclosed(self):
+        t = ('[TOOL_CALL]{"tool":"a","arguments":{}}[/TOOL_CALL]\n'
+             '[TOOL_CALL]{"tool":"b","arguments":{}}')
+        assert [c["tool"] for c in extract_tool_calls(t)] == ["a", "b"]
+
+    def test_unclosed_block_with_braces_in_string(self):
+        # 字符串内含 '{'/'}' 不得破坏配对
+        t = '[TOOL_CALL]{"tool":"a","arguments":{"tpl":"{x} {y}"}}'
+        assert extract_tool_calls(t) == [{"tool": "a", "arguments": {"tpl": "{x} {y}"}}]
+
+    def test_prose_mention_not_treated_as_block(self):
+        # 无 JSON 的裸提及不当块处理(不误删正文)
+        t = '格式参考：TOOL_CALL] 后跟 JSON 即可触发工具。'
+        assert extract_tool_calls(t) == []
+        assert strip_tool_blocks(t) == t.strip()
+
+    def test_unclosed_stripped(self):
+        t = '前言\n[TOOL_CALL]{"tool":"a","arguments":{}}\n后记'
+        out = strip_tool_blocks(t)
+        assert "TOOL_CALL" not in out
+        assert "前言" in out and "后记" in out
+
+    def test_multiple_unclosed_stripped(self):
+        t = "\n".join(f'[TOOL_CALL]{{"tool":"t{i}","arguments":{{}}}}' for i in range(3))
+        assert "TOOL_CALL" not in strip_tool_blocks(t)

@@ -96,7 +96,7 @@ def test_resolve_core_pid_root_path_lookup(tmp_path, monkeypatch):
 def test_open_core_conn_temp_views(tmp_path, monkeypatch):
     root = tmp_path / "repo-conn"
     root.mkdir(parents=True)
-    data = _mk_core_env(tmp_path, str(root), "proj-conn")
+    data = _mk_core_env(tmp_path, root, "proj-conn")
     monkeypatch.setenv("TOPOCODE_DB_DIR", data)
     conn = _sym._open_core_conn("proj-conn")
     assert conn is not None
@@ -105,7 +105,25 @@ def test_open_core_conn_temp_views(tmp_path, monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 2
     assert conn.execute("SELECT COUNT(*) FROM edges_contains").fetchone()[0] == 1
     row = conn.execute("SELECT qualified_name, file_path, start_line FROM nodes WHERE id='m1'").fetchone()
-    assert row == ("a::Foo::bar", "a.py", 2)
+    # row_factory=Row：按列名/索引访问（Row 不与 tuple 相等比较）
+    assert (row["qualified_name"], row["file_path"], row["start_line"]) == ("a::Foo::bar", "a.py", 2)
+
+
+def test_native_conn_rows_dict_queryable(tmp_path, monkeypatch):
+    """native 桥接连接必须 row_factory=Row：下游 _query_nodes/_query_edges 走
+    dict(r)，裸元组会抛 ValueError 被吞成 [] → native 恒 0 节点 → 提取零产出
+    降级 heuristic(COUNT(*) 索引访问测不出，只有 dict 化查询路径才触发)。"""
+    root = tmp_path / "repo-native-q"
+    root.mkdir(parents=True)
+    data = _mk_core_env(tmp_path, root, "proj-nq")
+    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
+    _sym.invalidate_native_cache()
+    from topoone_app_architect.arch_routes.sem.codegraph import _query_nodes
+    conn = _sym._open_core_conn("proj-nq")
+    rows = _query_nodes(conn, files=["a.py"])
+    assert len(rows) == 3
+    assert rows[0]["qualified_name"] == "a::Foo"
+    assert {"id", "kind", "name", "file_path", "start_line"} <= set(rows[0].keys())
 
 
 def _mk_git_repo(tmp_path, root_name: str):

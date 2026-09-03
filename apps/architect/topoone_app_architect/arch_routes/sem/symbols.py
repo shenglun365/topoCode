@@ -104,6 +104,11 @@ def _open_core_conn(core_pid: str):
         return None
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+        # ⚠️ 必须 row_factory=Row：下游 _query_nodes/_query_edges 走 dict(r)。
+        # 缺失时返回裸元组 → dict() 抛 ValueError → 被吞成 [] → native 符号源
+        # 永远 0 节点 → 提取零产出降级 heuristic(P1 实测回归：COUNT(*) 索引访问
+        # 测不出此坑，只有 dict 化查询路径才会触发)。
+        conn.row_factory = sqlite3.Row
         conn.execute("CREATE TEMP VIEW IF NOT EXISTS nodes AS SELECT "
                      "id, kind, name, qualified_name, file_path, "
                      "start_line, end_line, start_col AS start_column, end_col AS end_column, "
