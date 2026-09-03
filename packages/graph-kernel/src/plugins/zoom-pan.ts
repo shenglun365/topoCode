@@ -6,11 +6,15 @@ export interface ZoomPanApi {
   resetView(): void;
   zoomIn(): void;
   zoomOut(): void;
+  /** 将 SVG viewBox 坐标点平移到容器可视中心(保持当前缩放)。 */
+  centerOn(vbX: number, vbY: number): void;
 }
 
 export interface ZoomPanOptions {
   /** 自动适配(fit/reset)的最小缩放下限(默认 0.1)；避免宽/大图被整体适配缩到不可读。手动缩放仍受 MIN_SCALE 约束。 */
   minFitScale?: number;
+  /** 最大缩放上限(默认 8)；组件级复杂关系图可调大以便看清局部。 */
+  maxScale?: number;
 }
 
 interface ViewTransform {
@@ -42,6 +46,7 @@ function parseViewBox(svg: SVGSVGElement): { w: number; h: number } | null {
  */
 export function createZoomPanPlugin(opts?: ZoomPanOptions): DiagramPlugin & { api: ZoomPanApi } {
   const minFitScale = opts?.minFitScale ?? MIN_SCALE;
+  const maxScale = opts?.maxScale ?? MAX_SCALE;
   let container: HTMLElement | null = null;
   let svg: SVGSVGElement | null = null;
   let shared: SharedInteractionState | null = null;
@@ -92,11 +97,11 @@ export function createZoomPanPlugin(opts?: ZoomPanOptions): DiagramPlugin & { ap
     let x: number;
     let y: number;
     if (wide) {
-      s = clamp((cw / size.w) * 0.96, minFitScale, MAX_SCALE);
+      s = clamp((cw / size.w) * 0.96, minFitScale, maxScale);
       x = (cw - size.w * s) / 2;
       y = 0;
     } else {
-      s = clamp(Math.min(cw / size.w, ch / size.h) * 0.96, minFitScale, MAX_SCALE);
+      s = clamp(Math.min(cw / size.w, ch / size.h) * 0.96, minFitScale, maxScale);
       x = (cw - size.w * s) / 2;
       y = (ch - size.h * s) / 2;
     }
@@ -105,7 +110,7 @@ export function createZoomPanPlugin(opts?: ZoomPanOptions): DiagramPlugin & { ap
   };
 
   const zoomAt = (cx: number, cy: number, factor: number) => {
-    const s2 = clamp(t.s * factor, MIN_SCALE, MAX_SCALE);
+    const s2 = clamp(t.s * factor, MIN_SCALE, maxScale);
     const k = s2 / t.s;
     t = { s: s2, x: cx - (cx - t.x) * k, y: cy - (cy - t.y) * k };
     apply();
@@ -151,11 +156,23 @@ export function createZoomPanPlugin(opts?: ZoomPanOptions): DiagramPlugin & { ap
     zoomAt(e.clientX - rect.left, e.clientY - rect.top, 1.5);
   };
 
+  const centerOn = (vbX: number, vbY: number) => {
+    if (!svg || !container) return;
+    // viewBox 坐标 → CSS 盒坐标(transform 作用在 CSS 盒上，mermaid useMaxWidth 下两者比例 ≠ 1)
+    const vb = parseViewBox(svg);
+    const k = vb && svg.clientWidth > 0 ? svg.clientWidth / vb.w : 1;
+    const px = vbX * k;
+    const py = vbY * k;
+    t = { s: t.s, x: container.clientWidth / 2 - px * t.s, y: container.clientHeight / 2 - py * t.s };
+    apply();
+  };
+
   const api: ZoomPanApi = {
     zoomToFit: fit,
     resetView: fit,
     zoomIn: () => zoomCenter(ZOOM_STEP),
     zoomOut: () => zoomCenter(1 / ZOOM_STEP),
+    centerOn,
   };
 
   return {

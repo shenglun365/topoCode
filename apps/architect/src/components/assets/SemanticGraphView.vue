@@ -152,6 +152,35 @@ function onDiagramReady() {
   }
   tryWatch()
 }
+/** 联动选中 → 节点居中：反查 clickIds 找 svg 节点元素，bbox 中心交 zoom-pan centerOn。 */
+function centerSelectedNode() {
+  void nextTick(() => {
+    const svg = diagRef.value?.getSvg()
+    const cmap = clickIds.value
+    if (!svg || !selId.value || !cmap.size) return
+    const rev = new Map<string, string>()
+    cmap.forEach((aid, key) => { if (!rev.has(aid)) rev.set(aid, key) })
+    const key = rev.get(selId.value)
+    if (!key) return
+    let el: SVGGElement | null = null
+    for (const g of Array.from(svg.querySelectorAll<SVGGElement>('g.node'))) {
+      const mid = g.id.match(/flowchart-(.+?)-\d+$/)?.[1] ?? g.id
+      const txt = (g.textContent ?? '').trim()
+      if (mid === key || txt === key) { el = g; break }
+    }
+    if (!el) return
+    try {
+      // getBBox 是元素局部坐标系(祖先 transform 会偏移)；用屏幕 rect + getScreenCTM 逆映射回根 viewBox 空间
+      const r = el.getBoundingClientRect()
+      const sctm = svg.getScreenCTM()
+      if (!sctm || !r.width) return
+      const c = new DOMPoint(r.left + r.width / 2, r.top + r.height / 2).matrixTransform(sctm.inverse())
+      diagRef.value?.centerOn(c.x, c.y)
+    } catch { /* 未渲染时可能抛错，忽略 */ }
+  })
+}
+watch(selId, () => centerSelectedNode())
+
 /** 主题跟随 data-theme(catppuccin 变量随主题切换)。 */
 const themeMode = computed<'dark' | 'light'>(() =>
   (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light') ? 'light' : 'dark')
@@ -1772,6 +1801,7 @@ onMounted(async () => {
           :theme-variables="themeVars"
           security-level="loose"
           :zoom-fit-min-scale="0.3"
+          :zoom-max-scale="24"
           :auto-play="animating"
           @ready="onDiagramReady"
           @node-click="onNodeClick"

@@ -49,6 +49,7 @@ export interface TopoDiagramApi {
   getAnimation(): AnimationController | null;
   getSvg(): SVGSVGElement | null;
   zoomToFit(): void;
+  centerOn(vbX: number, vbY: number): void;
   resetView(): void;
   zoomIn(): void;
   zoomOut(): void;
@@ -130,6 +131,7 @@ export function useTopoDiagram(opts: UseTopoDiagramOptions): TopoDiagramApi {
     getAnimation: () => view?.getAnimation() ?? null,
     getSvg: () => view?.getSvg() ?? null,
     zoomToFit: () => view?.zoomToFit(),
+    centerOn: (vbX, vbY) => view?.centerOn(vbX, vbY),
     resetView: () => view?.resetView(),
     zoomIn: () => view?.zoomIn(),
     zoomOut: () => view?.zoomOut(),

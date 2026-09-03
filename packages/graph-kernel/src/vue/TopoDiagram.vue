@@ -26,6 +26,8 @@ const props = withDefaults(
     interactions?: boolean;
     /** 自动适配(fit/reset)最小缩放下限(默认 0.1)；语义图谱传 ~0.3 避免宽/大图缩到不可读。 */
     zoomFitMinScale?: number;
+    /** 最大缩放上限(默认 8)；语义图谱等组件级复杂关系图可调大。 */
+    zoomMaxScale?: number;
     /** Custom playback: steps (CSS selectors per step) and/or a plan factory. */
     animation?: {
       steps?: { label: string; selectors: string[] }[];
@@ -59,7 +61,9 @@ const api = useTopoDiagram({
   securityLevel: props.securityLevel,
   themeVariables: props.themeVariables,
   interactions: props.interactions ? undefined : false,
-  zoomPanOptions: props.zoomFitMinScale != null ? { minFitScale: props.zoomFitMinScale } : undefined,
+  zoomPanOptions: props.zoomFitMinScale != null || props.zoomMaxScale != null
+    ? { ...(props.zoomFitMinScale != null ? { minFitScale: props.zoomFitMinScale } : {}), ...(props.zoomMaxScale != null ? { maxScale: props.zoomMaxScale } : {}) }
+    : undefined,
   animation:
     props.autoPlay || props.animation
       ? { enabled: true, autoPlay: props.autoPlay, ...props.animation }

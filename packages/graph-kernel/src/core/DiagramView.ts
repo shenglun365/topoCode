@@ -43,6 +43,7 @@ export interface DiagramView {
   setTheme(theme: ThemeName): Promise<void>;
   destroy(): void;
   zoomToFit(): void;
+  centerOn(vbX: number, vbY: number): void;
   resetView(): void;
   zoomIn(): void;
   zoomOut(): void;
@@ -219,6 +220,7 @@ export function createDiagram(container: HTMLElement, opts: DiagramOptions): Dia
       container.innerHTML = '';
     },
     zoomToFit: () => pluginSet.zoomPan?.zoomToFit(),
+    centerOn: (vbX, vbY) => pluginSet.zoomPan?.centerOn(vbX, vbY),
     resetView: () => pluginSet.zoomPan?.resetView(),
     zoomIn: () => pluginSet.zoomPan?.zoomIn(),
     zoomOut: () => pluginSet.zoomPan?.zoomOut(),
