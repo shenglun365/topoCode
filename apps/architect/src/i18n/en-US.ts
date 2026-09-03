@@ -828,6 +828,22 @@ export default {
     sync: { idle: 'Idle', syncing: 'Syncing', done: 'Synced' },
   },
   config: {
+    cg: {
+      title: 'Symbol Source (CodeGraph)',
+      modeOn: 'On',
+      modeAuto: 'Auto',
+      modeOff: 'Off',
+      cliOk: 'CLI available',
+      cliMissing: 'CLI missing',
+      nativeNodes: 'Native symbol index',
+      srcEnv: 'env override',
+      srcKv: 'saved',
+      srcDefault: 'default',
+      envLocked: 'env override active, KV changes ignored',
+      hintOff: 'Off: extraction uses topocode native AST symbols (quality parity); never touches the project dir or auto-inits.',
+      hintAuto: 'Auto: use codegraph CLI when available, else native symbol source.',
+      hintOn: 'On: codegraph only; missing CLI degrades extraction with explicit reason.',
+    },
     title: 'System Management',
     desc: 'View and manage system-level configuration, including external coding agent adapters and model config imported from KB.',
     roles: {

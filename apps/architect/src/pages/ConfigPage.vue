@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
@@ -9,6 +9,7 @@ import { useArchCollabStore } from '@/stores/collaboration-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
+import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t } = useI18n()
@@ -179,6 +180,21 @@ async function removeManualModel(id: string) {
 }
 
 loadLlm()
+// ── 符号源(CodeGraph)开关：三档 + 状态(KV 持久化) ──
+const cgStatus = ref<CodegraphStatus | null>(null)
+const cgSaving = ref(false)
+async function loadCgStatus() {
+  cgStatus.value = await semanticAssetService.codegraphStatus() ?? null
+}
+async function setCgMode(m: 'on' | 'off' | 'auto') {
+  cgSaving.value = true
+  try {
+    if (await semanticAssetService.setCodegraphMode(m)) void loadCgStatus()
+  } finally {
+    cgSaving.value = false
+  }
+}
+onMounted(() => { void loadCgStatus() })
 </script>
 
 <template>
@@ -429,6 +445,35 @@ loadLlm()
       </div>
       <p class="px-4 pb-3 text-[10px] text-ctp-overlay0 leading-relaxed">
         {{ t('config.roles.hint') }}
+      </p>
+    </div>
+
+    <!-- 符号源(CodeGraph)开关：语义提取的符号数据来源 -->
+    <div class="panel overflow-hidden">
+      <div class="panel-header">
+        <span class="flex items-center gap-2">
+          <AdjustmentsHorizontalIcon class="w-4 h-4 text-ctp-teal" />{{ t('config.cg.title') }}
+        </span>
+        <span v-if="cgStatus" class="text-[11px] text-ctp-overlay1">
+          <span :class="cgStatus.cli ? 'text-ctp-green' : 'text-ctp-peach'">{{ cgStatus.cli ? t('config.cg.cliOk') : t('config.cg.cliMissing') }}</span>
+          <span v-if="cgStatus.cliPath" class="font-mono" :title="cgStatus.cliPath"> · {{ cgStatus.cliPath.split('/').slice(-1)[0] }}</span>
+          <span class="mx-1 text-ctp-overlay0">·</span>
+          <span class="text-ctp-overlay0">{{ { env: t('config.cg.srcEnv'), kv: t('config.cg.srcKv'), default: t('config.cg.srcDefault') }[cgStatus.source] }}</span>
+          <span v-if="cgStatus.native?.nodes" class="text-ctp-overlay0"> · {{ t('config.cg.nativeNodes') }}: {{ cgStatus.native.nodes.toLocaleString() }}</span>
+        </span>
+      </div>
+      <div class="px-4 py-3 flex items-center gap-2">
+        <button
+          v-for="m in (['on', 'auto', 'off'] as const)" :key="m"
+          class="btn !py-1 !px-3 !text-xs"
+          :class="cgStatus?.mode === m ? 'btn-primary' : 'btn-ghost'"
+          :disabled="cgSaving || cgStatus?.source === 'env'"
+          @click="setCgMode(m)"
+        >{{ t(`config.cg.mode${m[0].toUpperCase()}${m.slice(1)}`) }}</button>
+        <span v-if="cgStatus?.source === 'env'" class="text-[10px] text-ctp-peach">{{ t('config.cg.envLocked') }}</span>
+      </div>
+      <p class="px-4 pb-3 text-[10px] text-ctp-overlay0 leading-relaxed">
+        {{ cgStatus?.mode === 'off' ? t('config.cg.hintOff') : cgStatus?.mode === 'on' ? t('config.cg.hintOn') : t('config.cg.hintAuto') }}
       </p>
     </div>
   </div>

@@ -854,6 +854,22 @@ export default {
     sync: { idle: '待同步', syncing: '同步中', done: '已同步' },
   },
   config: {
+    cg: {
+      title: '符号源 (CodeGraph)',
+      modeOn: '开启',
+      modeAuto: '自动',
+      modeOff: '关闭',
+      cliOk: 'CLI 可用',
+      cliMissing: 'CLI 缺失',
+      nativeNodes: '原生符号索引',
+      srcEnv: '环境变量覆盖',
+      srcKv: '已保存',
+      srcDefault: '默认',
+      envLocked: '环境变量覆盖中，修改 KV 无效',
+      hintOff: '关闭后提取走 topocode 自身 AST 符号源(质量持平)：不触碰项目目录、不自动 init。',
+      hintAuto: '自动：检测到 codegraph CLI 即用之；否则用自身符号源。',
+      hintOn: '开启：仅用 codegraph，CLI 缺失时提取降级并如实提示。',
+    },
     title: '系统管理',
     desc: '系统级配置的查看与管理，包括外接 coding agent 适配器与从 KB 导入的模型配置。',
     roles: {
