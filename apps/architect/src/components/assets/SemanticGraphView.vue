@@ -77,8 +77,19 @@ function toggleMatrix() {
     try { localStorage.setItem('arch.matrixWin.minimized', '0') } catch { /* ignore */ }
   }
 }
+/** 矩阵(含下钻行首/列头)选资产：与图谱节点点击同轨 — 切选后锚点滚动闪烁；同资产重复点回主锚点并闪烁。 */
 function onMatrixSelect(id: string) {
-  if (id && id !== selId.value) selId.value = id   // 图谱高亮 + 资产卡 + 源码 tab 全联动
+  if (!id) return
+  if (id === selId.value) {
+    const home = selAnchors.value[0]?.file
+    if (home && activeFileTab.value !== home) activeFileTab.value = home
+    void nextTick(() => flashAnchor(0))
+    return
+  }
+  flashOnNext = true
+  flashSeg = 0
+  selId.value = id
+  return
 }
 /** 当前渲染语言(默认 mermaid)。 */
 const cardLang = ref<'mermaid' | 'plantuml'>('mermaid')

@@ -70,25 +70,51 @@ function endDrag() {
   dragging = false
   window.removeEventListener('mousemove', onDrag)
 }
+// 四边拉伸(与资产卡一致)：n/s/e/w 边缘拖拽；n/w 边反向改变宽高并同步移动位置
+type MatrixResizeEdge = 'n' | 's' | 'e' | 'w'
+let resizeEdge: MatrixResizeEdge = 's'
 let resizing = false
-let rsStart = { x: 0, y: 0, w: 0, h: 0 }
-function beginResize(e: MouseEvent) {
+let rsStart = { x: 0, y: 0, w: 0, h: 0, px: 0, py: 0 }
+function startResize(e: MouseEvent, edge: MatrixResizeEdge) {
   if (e.button !== 0) return
+  e.preventDefault()
   e.stopPropagation()
   const rect = el.value?.getBoundingClientRect()
   if (!rect) return
-  if (!pos.value) pos.value = { x: rect.left, y: rect.top }
+  // 隐式定位(right/top 锚定) → 首次拉伸转为显式坐标
+  const px = pos.value?.x ?? rect.left
+  const py = pos.value?.y ?? rect.top
+  if (!pos.value) pos.value = { x: px, y: py }
+  resizeEdge = edge
   resizing = true
-  rsStart = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height }
+  rsStart = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height, px, py }
   window.addEventListener('mousemove', onResize)
   window.addEventListener('mouseup', endResize, { once: true })
 }
 function onResize(e: MouseEvent) {
   if (!resizing) return
-  size.value = {
-    w: Math.min(1600, Math.max(420, rsStart.w + (e.clientX - rsStart.x))),
-    h: Math.min(window.innerHeight - 40, Math.max(260, rsStart.h + (e.clientY - rsStart.y))),
+  const maxW = Math.min(1600, window.innerWidth - 16)
+  const maxH = window.innerHeight - 40
+  const dx = e.clientX - rsStart.x
+  const dy = e.clientY - rsStart.y
+  let w = rsStart.w
+  let h = rsStart.h
+  let px = rsStart.px
+  let py = rsStart.py
+  if (resizeEdge === 'e') {
+    w = Math.min(maxW, Math.max(420, w + dx))
+  } else if (resizeEdge === 'w') {
+    w = Math.min(maxW, Math.max(420, w - dx))
+    px += rsStart.w - w
   }
+  if (resizeEdge === 's') {
+    h = Math.min(maxH, Math.max(260, h + dy))
+  } else if (resizeEdge === 'n') {
+    h = Math.min(maxH, Math.max(260, h - dy))
+    py += rsStart.h - h
+  }
+  size.value = { w, h }
+  pos.value = { x: px, y: py }
 }
 function endResize() {
   resizing = false
@@ -449,15 +475,39 @@ const selName = computed(() => props.nodes.find((n) => n.id === props.selId)?.na
       </div>
     </div>
 
-    <!-- 右下角拉伸把手 -->
-    <div
-      class="absolute right-0 bottom-0 w-3.5 h-3.5 cursor-nwse-resize"
-      title=""
-      @mousedown="beginResize"
-    >
-      <svg viewBox="0 0 10 10" class="w-full h-full text-ctp-overlay0">
-        <path d="M9 1 1 9M9 5 5 9" stroke="currentColor" stroke-width="1.2" fill="none" />
-      </svg>
-    </div>
+    <!-- 四边拉伸(与资产卡一致) -->
+    <div class="mx-edge mx-edge-n" @mousedown="startResize($event, 'n')" @dblclick.stop />
+    <div class="mx-edge mx-edge-s" @mousedown="startResize($event, 's')" @dblclick.stop />
+    <div class="mx-edge mx-edge-e" @mousedown="startResize($event, 'e')" @dblclick.stop />
+    <div class="mx-edge mx-edge-w" @mousedown="startResize($event, 'w')" @dblclick.stop />
   </div>
 </template>
+
+<style scoped>
+.mx-edge {
+  position: absolute;
+  z-index: 10;
+  transition: background-color 0.15s;
+}
+.mx-edge:hover {
+  background-color: rgba(136, 137, 163, 0.35);
+}
+.mx-edge-n,
+.mx-edge-s {
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+.mx-edge-n { top: 0; }
+.mx-edge-s { bottom: 0; }
+.mx-edge-e,
+.mx-edge-w {
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.mx-edge-w { left: 0; }
+.mx-edge-e { right: 0; }
+</style>
