@@ -5,7 +5,7 @@ import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
-  ChartBarSquareIcon, StopIcon, XMarkIcon, ArrowsRightLeftIcon,
+  ChartBarSquareIcon, StopIcon, XMarkIcon, ArrowsRightLeftIcon, ChatBubbleLeftRightIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
@@ -938,6 +938,50 @@ function compMetaText(compId: string): string {
   return parts.join(' · ')
 }
 
+// ---- 组件「拷贝/引用 名称+ID」快捷操作（与 KB 组件目录严格同名同 ID，供对话精准对接）----
+/** 统一引用格式：`名称 (comm-…)`——agent 工具按名称/ID 双向可解析。 */
+function compRefText(name: string, id: string): string {
+  return `${name} (${id})`
+}
+
+const copiedKey = ref('')
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+async function copyCompRef(key: string, name: string, id: string) {
+  const text = compRefText(name, id)
+  let ok = false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      ok = true
+    }
+  } catch { /* fallthrough */ }
+  if (!ok) {
+    // 非安全上下文(LAN http) clipboard API 不可用 → execCommand 降级
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+    } catch { ok = false }
+  }
+  if (ok) {
+    copiedKey.value = key
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => { copiedKey.value = '' }, 1500)
+  }
+}
+
+/** 引用组件到对话输入框（预填不发送，用户可补充问题）。 */
+const chatDraft = ref<{ text: string; nonce: number } | null>(null)
+let draftNonce = 0
+function referenceComp(name: string, id: string) {
+  chatDraft.value = { text: compRefText(name, id), nonce: ++draftNonce }
+}
+
 function referenceAsset(a: SemanticAsset) {
   const anchor = a.astRefs?.[0]
   const pos = anchor ? `${anchor.file}:L${anchor.startLine}-L${anchor.endLine}` : ''
@@ -1643,6 +1687,36 @@ onMounted(async () => {
                   class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0 font-mono"
                 >{{ g.hierLevel }}</span>
                 <span class="text-[10px] font-semibold text-ctp-subtext1 truncate" :title="compMetaText(g.key) || undefined">{{ g.name }}</span>
+                <!-- KB 降级提示：组件树来自本地快照/资产 scopeKey，名称可能与 KB 目录不一致 -->
+                <span
+                  v-if="!compCatalog.length && g.key !== OTHER_KEY"
+                  class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                  :title="t('assetMgmt.localSnapshotHint')"
+                >{{ t('assetMgmt.localSnapshot') }}</span>
+                <!-- 拷贝/引用 名称+ID：与 KB 组件目录严格同名同 ID，供资产管理对话精准对接 -->
+                <template v-if="g.key !== OTHER_KEY">
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-green p-0.5 shrink-0"
+                    :title="t('assetMgmt.compCopy')"
+                    @click="copyCompRef(g.key, g.name, g.key)"
+                  >
+                    <CheckIcon
+                      v-if="copiedKey === g.key"
+                      class="w-3 h-3 text-ctp-green"
+                    />
+                    <ClipboardDocumentIcon
+                      v-else
+                      class="w-3 h-3"
+                    />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-blue p-0.5 shrink-0"
+                    :title="t('assetMgmt.compRef')"
+                    @click="referenceComp(g.name, g.key)"
+                  >
+                    <ChatBubbleLeftRightIcon class="w-3 h-3" />
+                  </button>
+                </template>
                 <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ g.assets.length }}</span>
                 <template v-if="g.key !== OTHER_KEY">
                   <span
@@ -1962,6 +2036,7 @@ onMounted(async () => {
           :busy="busy"
           :busy-label="busyLabel"
           :tool-trail="toolTrail"
+          :insert-draft="chatDraft"
           :title="t('assetMgmt.chatTitle')"
           :diagram-skill="diagramSkill"
           @send="onSend"

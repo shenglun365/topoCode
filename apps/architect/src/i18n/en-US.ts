@@ -1402,6 +1402,10 @@ export default {
       cancel: 'Cancel',
       deleting: 'Purging…',
     },
+    compCopy: 'Copy component name + ID (strictly matches KB catalog; paste into chat to reference)',
+    compRef: 'Reference component name + ID into chat input',
+    localSnapshot: 'local snapshot',
+    localSnapshotHint: 'KB component catalog unavailable — tree built from local snapshot/asset anchors; names may differ from KB. Restore KB connection for authoritative names',
     renamed: 'renamed from',
     canonicalHint: 'Anchor-stable identity (scope+anchor fingerprint): id reused while anchors persist, refs never break.',
     graph: {

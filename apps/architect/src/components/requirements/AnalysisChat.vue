@@ -16,6 +16,8 @@ const props = defineProps<{
   busyLabel?: string
   /** 本轮工具轨迹(tool_call/tool_result 驱动，useChatProgress 维护)；浮层展示。 */
   toolTrail?: ToolTrailItem[]
+  /** 外部引用预填(组件「引用名称+ID」快捷按钮)：nonce 变化即把 text 追加进输入框。 */
+  insertDraft?: { text: string; nonce: number } | null
   /** 对话标题(缺省「需求分析对话」；资产管理等复用场景可覆盖)。 */
   title?: string
   /** 绘图增强(IR→代码)：开启后 agent 经 diagram.build 工具生成语法正确的图。 */
@@ -50,6 +52,20 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 // ---- 工具轨迹浮层（防信息过载：默认收起，点击展开；回合结束/busy 清空自动关闭）----
 const trailOpen = ref(false)
 watch(() => props.busy, (b) => { if (!b) trailOpen.value = false })
+
+// ---- 外部引用预填：nonce 变化 → 追加进输入框并聚焦(用户可补充问题后再发送) ----
+watch(() => props.insertDraft?.nonce ?? 0, (n) => {
+  if (!n) return
+  const text = props.insertDraft?.text ?? ''
+  if (!text) return
+  input.value = input.value ? `${input.value} ${text}` : text
+  void nextTick(() => {
+    inputRef.value?.focus()
+    autoResize()
+    const el = inputRef.value
+    if (el) el.selectionStart = el.selectionEnd = el.value.length
+  })
+})
 const scrollRef = ref<HTMLElement | null>(null)
 const answers = reactive<Record<string, string>>({})
 

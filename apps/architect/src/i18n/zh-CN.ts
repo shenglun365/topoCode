@@ -1427,6 +1427,10 @@ export default {
       cancel: '取消',
       deleting: '清理中…',
     },
+    compCopy: '拷贝组件名称+ID（与 KB 目录严格一致，可粘贴到对话引用）',
+    compRef: '引用组件名称+ID 到对话输入框',
+    localSnapshot: '本地快照',
+    localSnapshotHint: 'KB 组件目录不可用，组件树来自本地快照/资产锚点——名称可能与 KB 不一致，建议恢复 KB 连接后使用',
     renamed: '改名自',
     canonicalHint: '锚点稳定标识(scope+锚点指纹)：锚点不变则 id 复用，引用不断链。',
     graph: {
