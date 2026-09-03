@@ -1469,6 +1469,18 @@ export default {
       steps: '步骤',
       states: '状态',
     },
+    index: {
+      title: '资产索引',
+      search: '搜索名称/文件',
+      groupBy: '分组',
+      sortBy: '排序',
+      byKind: '按类型',
+      byLevel: '按层级',
+      byFile: '按文件',
+      byName: '按名称',
+      byDegree: '按关系数',
+      noMatch: '无匹配资产',
+    },
     matrix: {
       title: '关系矩阵',
       openLabel: '矩阵',

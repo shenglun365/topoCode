@@ -1444,6 +1444,18 @@ export default {
       steps: 'Steps',
       states: 'States',
     },
+    index: {
+      title: 'Asset Index',
+      search: 'Search name/file',
+      groupBy: 'Group',
+      sortBy: 'Sort',
+      byKind: 'By kind',
+      byLevel: 'By level',
+      byFile: 'By file',
+      byName: 'By name',
+      byDegree: 'By degree',
+      noMatch: 'No matching assets',
+    },
     matrix: {
       title: 'Relation Matrix',
       openLabel: 'Matrix',

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from './GraphMatrixWindow.vue'
+import AssetIndexWindow from './AssetIndexWindow.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
 import { makeButton } from '@topo/graph-kernel/plugins/ui.ts'
 import type { NodeClickEvent } from '@topo/graph-kernel/plugins/types.ts'
@@ -75,6 +76,14 @@ function toggleMatrix() {
   matrixOpen.value = !matrixOpen.value
   if (matrixOpen.value) {
     try { localStorage.setItem('arch.matrixWin.minimized', '0') } catch { /* ignore */ }
+  }
+}
+/** 资产节点索引浮窗(左停靠)：开关逻辑与矩阵同款。 */
+const indexOpen = ref(false)
+function toggleIndex() {
+  indexOpen.value = !indexOpen.value
+  if (indexOpen.value) {
+    try { localStorage.setItem('arch.indexWin.minimized', '0') } catch { /* ignore */ }
   }
 }
 /** 矩阵(含下钻行首/列头)选资产：与图谱节点点击同轨 — 切选后锚点滚动闪烁；同资产重复点回主锚点并闪烁。 */
@@ -1645,6 +1654,14 @@ onMounted(async () => {
       >
         <TableCellsIcon class="w-3.5 h-3.5" />
       </button>
+      <button
+        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
+        :class="indexOpen ? 'btn-primary' : ''"
+        :title="t('assetMgmt.index.title')"
+        @click="toggleIndex"
+      >
+        <ListBulletIcon class="w-3.5 h-3.5" />
+      </button>
       <!-- 边类型图例 + 显隐过滤；间接边开关(浮层 Teleport 到 body，不撑开工具栏) -->
       <button
         ref="legendBtnRef"
@@ -2198,6 +2215,16 @@ onMounted(async () => {
         :sel-id="selId"
         @select="onMatrixSelect"
         @close="matrixOpen = false"
+      />
+      <!-- 资产节点索引浮窗：按索引探索图谱，点击行与图谱/资产卡/锚点全联动 -->
+      <AssetIndexWindow
+        v-if="indexOpen"
+        :nodes="scopedNodes"
+        :edges="scopedEdges"
+        :anchors="graph?.anchors ?? []"
+        :sel-id="selId"
+        @select="onMatrixSelect"
+        @close="indexOpen = false"
       />
     </div>
   </div>
