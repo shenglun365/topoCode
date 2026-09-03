@@ -506,6 +506,7 @@ export interface IPCAPI {
     sync: (projectId: string, opts?: { branch?: string; head?: string; label?: string; stages?: Record<string, boolean>; force?: boolean; requestId?: string }) => Promise<VersionSyncResult>
     diff: (projectId: string, fromId: string, toId: string) => Promise<VersionDiff>
     materialize: (projectId: string, versionId: string) => Promise<Array<Record<string, any>>>
+    cleanup: (projectId: string, opts?: { keepVersions?: number }) => Promise<{ projectId: string; keepVersions: number; deleted: Record<string, number> }>
   }
 
   // 分组管理

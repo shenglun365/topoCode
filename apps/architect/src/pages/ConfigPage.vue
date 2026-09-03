@@ -488,6 +488,9 @@ onMounted(() => { void loadCgStatus() })
           @click="runCgSync"
         >{{ cgSyncing ? t('config.cg.syncing') : t('config.cg.syncNow') }}</button>
       </div>
+      <p v-if="cgStatus?.state?.stale" class="px-4 pb-2 text-[10px] text-ctp-overlay0 leading-relaxed">
+        {{ t('config.cg.syncHint') }}
+      </p>
       <div class="px-4 py-3 flex items-center gap-2">
         <button
           v-for="m in (['on', 'auto', 'off'] as const)" :key="m"

@@ -10,11 +10,13 @@ import {
   ChevronRightIcon,
   XMarkIcon,
   PlusIcon,
+  Squares2X2Icon,
 } from '@heroicons/vue/24/outline'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import KnowledgeGraph from '@/components/knowledge/KnowledgeGraph.vue'
 import CategoryManager from '@/components/knowledge/CategoryManager.vue'
+import BaselinePanel from '@/components/knowledge/BaselinePanel.vue'
 import KnowledgeDocCard from '@/components/knowledge/KnowledgeDocCard.vue'
 import KnowledgeDocEditor from '@/components/knowledge/KnowledgeDocEditor.vue'
 import { knowledgeDimensions } from '@/utils/mock'
@@ -126,6 +128,13 @@ function handleSave(docId: string, content: string) {
           <span>{{ t('knowledge.documents') }}</span>
         </div>
         <div
+          class="kb-tab"
+          :class="{ active: knowledgeStore.activeTab === 'baseline' }"
+          @click="knowledgeStore.setActiveTab('baseline')"
+        >
+          <Squares2X2Icon class="w-4 h-4" />
+          <span>{{ t('knowledge.baseline.title') }}</span>
+        </div>
         <div style="flex:1;" />
         <div style="display:flex; gap:calc(4px * var(--ui-scale, 1)); align-items:center;">
           <button class="btn btn-ghost btn-sm">
@@ -146,6 +155,12 @@ function handleSave(docId: string, content: string) {
 
         <!-- Tab 2: 分类管理 -->
         <CategoryManager v-else-if="knowledgeStore.activeTab === 'categories'" />
+
+        <!-- Tab: 基线管理 (KB) -->
+        <div v-else-if="knowledgeStore.activeTab === 'baseline'"
+             style="width:100%; height:100%; overflow:auto; padding:calc(16px * var(--ui-scale, 1));">
+          <BaselinePanel />
+        </div>
 
         <!-- Tab 3: 知识点列表 -->
         <div

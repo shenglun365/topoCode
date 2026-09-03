@@ -568,6 +568,77 @@ def preview(multi_db: MultiDBManager, project_id: str, *,
     return plan
 
 
+def cleanup(multi_db: MultiDBManager, project_id: str, *, keep_versions: int = 0) -> dict:
+    """物理清除腐烂旧基线数据（基线对齐纪律：旧基线数据不保留）。
+
+    - *_history 归档表：仅保留最近 keep_versions 个基线的归档行
+      （keep_versions=0 → 全部清除）。version.diff 不受影响（基于
+      project_version_files 逐版本 delta，非历史表）；materialize 仅对
+      保留窗口内的基线可用。
+    - 孤儿符号/边：最新分析任务中 file_path 已不在 source_files 活表的
+      graph_node/graph_edge（增量同步漏删的兜底）。
+    """
+    main_db = multi_db.main_db
+    project = main_db.fetchone("SELECT id FROM projects WHERE id = ?", (project_id,))
+    if not project:
+        raise ValueError(f"Project not found: {project_id}")
+    project_db = multi_db.get_project_db(project_id)
+
+    keep_ids: set = set()
+    if keep_versions and keep_versions > 0:
+        rows = main_db.fetchall(
+            "SELECT id FROM project_versions WHERE project_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (project_id, keep_versions))
+        keep_ids = {r["id"] for r in rows}
+
+    deleted: dict = {}
+    hist_tables = [r["name"] for r in project_db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_history'").fetchall()]
+    for t in hist_tables:
+        cols = [r["name"] for r in project_db.execute(f'PRAGMA table_info("{t}")').fetchall()]
+        if "version_to" in cols and keep_ids:
+            ph = ",".join("?" * len(keep_ids))
+            cur = project_db.execute(
+                f'DELETE FROM "{t}" WHERE version_to IS NOT NULL AND version_to NOT IN ({ph})',
+                tuple(keep_ids))
+        elif "version_to" in cols:
+            # 无保留窗口：清掉已闭合归档行(version_to 非空)；未闭合行(仍在活表)保留
+            cur = project_db.execute(f'DELETE FROM "{t}" WHERE version_to IS NOT NULL')
+        else:
+            cur = project_db.execute(f'DELETE FROM "{t}"')
+        deleted[t] = cur.rowcount if cur else 0
+    project_db.conn.commit()
+
+    # 孤儿符号/边（最新任务范围内，file_path 已不在活表）
+    orphan_nodes = 0
+    orphan_edges = 0
+    try:
+        task = _latest_done_task(main_db, project_id)
+        if task:
+            tid = task["id"] if isinstance(task, dict) else task
+            cur = project_db.execute(
+                "DELETE FROM graph_node WHERE task_id = ? AND file_path IS NOT NULL "
+                "AND file_path NOT IN (SELECT file_path FROM source_files)", (tid,))
+            orphan_nodes = cur.rowcount if cur else 0
+            if orphan_nodes:
+                cur = project_db.execute(
+                    "DELETE FROM graph_edge WHERE task_id = ? AND "
+                    "(source_id NOT IN (SELECT id FROM graph_node WHERE task_id = ?) "
+                    "OR target_id NOT IN (SELECT id FROM graph_node WHERE task_id = ?))",
+                    (tid, tid, tid))
+                orphan_edges = cur.rowcount if cur else 0
+                project_db.conn.commit()
+    except Exception as e:
+        logger.warning(f"[version.cleanup] 孤儿符号/边清除失败: {e}")
+
+    deleted["graph_node_orphans"] = orphan_nodes
+    deleted["graph_edge_orphans"] = orphan_edges
+    logger.info(f"[version.cleanup] {project_id} keep_versions={keep_versions} "
+                f"deleted={deleted}")
+    return {"projectId": project_id, "keepVersions": keep_versions, "deleted": deleted}
+
+
 def list_versions(multi_db: MultiDBManager, project_id: str) -> list:
     main_db = multi_db.main_db
     rows = main_db.fetchall(

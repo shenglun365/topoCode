@@ -269,8 +269,33 @@ def apply_incremental(multi_db: MultiDBManager, project_id: str, task_id: str,
     if do_ps:
         results["presummary"] = _planned()
     if do_comm:
-        results["community"] = _planned()
+        results["community"] = _inc_community(multi_db, project_db, task_id)
     if do_llm:
         results["llm"] = _planned()
 
     return results
+
+
+def _inc_community(multi_db: MultiDBManager, project_db: SQLiteContext,
+                   task_id: str) -> dict:
+    """社区重划分：基线更新(ast/graph 已增量应用)后对更新图重跑社区检测。
+
+    全量重算 INCLUDE + CALL 两类边上的社区（图已变，增量社区无现成契约，
+    全量重算正确且幂等——analyze_communities 先清旧社区再写）。
+    """
+    from topoone.engine.store.analysis_store import AnalysisStore
+    from topoone.plugins.community.community_analysis import analyze_communities
+    try:
+        a_store = AnalysisStore(project_db)
+        inc = analyze_communities(task_id, a_store, "INCLUDE")
+        call = analyze_communities(task_id, a_store, "CALL")
+        return {
+            "status": "done",
+            "include": inc,
+            "call": call,
+            "community_count": max(inc.get("community_count", 0),
+                                   call.get("community_count", 0)),
+        }
+    except Exception as e:
+        logger.warning(f"[incremental] community 重划分失败: {e}")
+        return {"status": "error", "error": str(e)}

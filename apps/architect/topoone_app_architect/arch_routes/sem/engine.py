@@ -4272,8 +4272,12 @@ async def api_codegraph_set(body: dict = None):
 
 @router.post("/kb/semantic/symbol-sync")
 async def api_symbol_sync(body: dict = None):
-    """手动基线同步（决策：系统仅提示，用户手动触发解析）：调 KB version.sync
-    将 core 基线对齐当前 HEAD（per-file 增量），完成后刷新跟踪状态。"""
+    """发起基线变更请求（职责划分：architect 仅发起，执行在 KB 知识库管理）。
+
+    调 KB knowledge.pullRequest 写入待更新标记(pending)，由 KB 知识库管理界面
+    确认后执行 updateConfirm(拉取/预览) + version.sync(增量分析+社区重划分) +
+    cleanup(物理清除腐烂旧基线数据)。请求成功后记录跟踪状态 head。
+    """
     from .. import ctx
     from ..kb_gateway import call_kb
     from .symbols import _resolve_core_pid, record_sync
@@ -4294,14 +4298,16 @@ async def api_symbol_sync(body: dict = None):
     if not head:
         return err(400, "无法获取仓库 HEAD commit")
     try:
-        res = call_kb('version.sync', project_id=pid, head=head,
-                      label='architect-manual-sync')
+        res = call_kb('knowledge.pullRequest', project_id=pid, head=head,
+                      note='architect-manual-baseline-request')
     except Exception as e:
-        return err(f"基线同步请求失败: {e}")
+        return err(500, f"基线变更请求失败: {e}")
     if res is None:
         return err(503, "KB 服务不可达，请稍后重试")
     record_sync(pid, head)
-    return ok({"synced": True, "corePid": pid, "head": head, "result": res})
+    return ok({"requested": True, "requestId": (res or {}).get('requestId'),
+               "corePid": pid, "head": head,
+               "message": "已在 KB 知识库管理创建待确认的基线变更请求"})
 
 
 @router.get("/kb/semantic/mappings")

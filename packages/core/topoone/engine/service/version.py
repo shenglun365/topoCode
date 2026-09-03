@@ -49,6 +49,12 @@ def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
                             projectId: str = None, versionId: str = None):
         return vss.materialize(multi_db, project_id or projectId, version_id or versionId)
 
+    @server.register("version.cleanup")
+    def version_cleanup(project_id: str = None, keep_versions: int = 0,
+                        projectId: str = None, keepVersions: int = None):
+        kv = keepVersions if keepVersions is not None else keep_versions
+        return vss.cleanup(multi_db, project_id or projectId, keep_versions=kv)
+
     @server.register("knowledge.pullRequest")
     def knowledge_pull_request(project_id: str = None, repo_url: str = "",
                                local_repo_path: str = "", branch: str = "",

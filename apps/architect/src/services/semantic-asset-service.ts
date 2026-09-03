@@ -226,8 +226,8 @@ export const semanticAssetService = {
     return true
   },
 
-  /** 手动基线同步（系统仅提示、用户手动触发）：KB version.sync 对齐 core 基线至 HEAD。 */
-  async symbolSync(): Promise<{ synced: boolean; corePid: string; head: string } | undefined> {
+  /** 发起基线变更请求（职责划分：architect 仅发起，KB 知识库管理确认执行）。 */
+  async symbolSync(): Promise<{ requested: boolean; requestId?: string; corePid: string; head: string; message?: string } | undefined> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/symbol-sync', { root, project })
   },

@@ -90,7 +90,7 @@ export function createBrowserAPI(): any {
     checkImportStatus: (params: any) => callRpc('project.checkImportStatus', params || {}),
   }
   const version = makeGroup('version', [
-    'list', 'get', 'preview', 'sync', 'diff', 'materialize', 'getDiffStats', 'checkout',
+    'list', 'get', 'preview', 'sync', 'diff', 'materialize', 'cleanup', 'getDiffStats', 'checkout',
   ])
   const group = {
     list: () => callRpc('group.list', {}),

@@ -200,6 +200,9 @@ function createRealIPC() {
       materialize: async (projectId: string, versionId: string) => {
         return await api.call('version.materialize', { projectId, versionId })
       },
+      cleanup: async (projectId: string, opts?: { keepVersions?: number }) => {
+        return await api.call('version.cleanup', { projectId, ...(opts || {}) })
+      },
     },
 
     // ==================== 分组管理 ====================

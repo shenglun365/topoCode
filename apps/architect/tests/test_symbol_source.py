@@ -161,7 +161,8 @@ def test_symbol_sync_endpoint_no_core_project(tmp_path, monkeypatch):
     assert body["code"] != 0
 
 
-def test_symbol_sync_endpoint_calls_version_sync(tmp_path, monkeypatch):
+def test_symbol_sync_endpoint_initiates_pull_request(tmp_path, monkeypatch):
+    """职责划分：architect 仅发起基线变更请求(knowledge.pullRequest)，执行在 KB 管理。"""
     root, _ = _mk_git_repo(tmp_path, "repo-sync")
     data = _mk_core_env(tmp_path, str(root), "proj-sync", with_db=True)
     monkeypatch.setenv("TOPOCODE_DB_DIR", data)
@@ -169,19 +170,21 @@ def test_symbol_sync_endpoint_calls_version_sync(tmp_path, monkeypatch):
     from topoone_app_architect.arch_routes import kb_gateway as _kg
     calls = []
     monkeypatch.setattr(_kg, "call_kb",
-                        lambda method, **p: calls.append((method, p)) or {"ok": True})
+                        lambda method, **p: calls.append((method, p))
+                        or {"requestId": "pur-1", "status": "pending"})
     c = _client()
     r = c.post("/api/architect/kb/semantic/symbol-sync",
                json={"root": str(root), "project": None})
     assert r.status_code == 200
     body = r.json()
-    assert body["data"]["synced"] is True
+    assert body["data"]["requested"] is True
     assert body["data"]["corePid"] == "proj-sync"
+    assert body["data"]["requestId"] == "pur-1"
     assert len(calls) == 1
     method, params = calls[0]
-    assert method == "version.sync"
+    assert method == "knowledge.pullRequest"
     assert params["project_id"] == "proj-sync"
     assert len(params["head"]) == 40
-    # 跟踪 KV 已记录
+    # 跟踪 KV 已记录(发起请求即对齐 head)
     kv = _sym._read_state_kv("proj-sync")
     assert kv.get("lastHead") == params["head"]
