@@ -196,7 +196,27 @@ export interface LineNotesResult {
   error?: string
 }
 
+export interface CodegraphStatus {
+  mode: 'on' | 'off' | 'auto'
+  env: string
+  cli: boolean
+  cliPath: string
+  kv?: string | null
+  source: 'env' | 'kv' | 'default'
+  native?: { nodes?: number }
+}
+
 export const semanticAssetService = {
+  /** codegraph 符号源开关：状态查询 / 三档切换(on|off|auto，KV 持久化)。 */
+  async codegraphStatus(): Promise<CodegraphStatus | undefined> {
+    return await apiGet<CodegraphStatus>('/kb/semantic/codegraph')
+  },
+
+  async setCodegraphMode(mode: 'on' | 'off' | 'auto'): Promise<boolean> {
+    await apiPost<unknown>('/kb/semantic/codegraph', { mode })
+    return true
+  },
+
   /** 检索已提取的语义资产。 */
   async search(query: string, kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel): Promise<SemanticAsset[]> {
     const r = await this.searchPage(query, kind, { limit: 100, offset: 0, scope, level })

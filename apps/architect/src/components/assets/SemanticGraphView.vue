@@ -12,7 +12,7 @@ import { semanticGraphViewDiagrams, semanticViewClickIds, recommendedSemanticVie
 import { useArchSettingsStore } from '@/stores/settings-store'
 import type { SemanticGraphViewId } from '@/utils/diagram-gen'
 import type { SemanticAsset, SemanticAssetLevel, SemanticAssetKind } from '@/types'
-import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
+import type { SemanticGraphResult, SourceSnippet, CodegraphStatus } from '@/services/semantic-asset-service'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 
 const { t } = useI18n()
@@ -78,6 +78,38 @@ function toggleMatrix() {
     try { localStorage.setItem('arch.matrixWin.minimized', '0') } catch { /* ignore */ }
   }
 }
+/** 符号源(CodeGraph)开关弹层：状态 + 三档切换(KV 持久化)。 */
+const cgOpen = ref(false)
+const cgStatus = ref<CodegraphStatus | null>(null)
+const cgSaving = ref(false)
+function onCgDocClick(e: MouseEvent) {
+  const t = e.target
+  if (!(t instanceof Node)) return
+  if ((t as HTMLElement).closest?.('[data-cg-pop]')) return
+  cgOpen.value = false
+}
+watch(cgOpen, (open) => {
+  if (open) setTimeout(() => document.addEventListener('click', onCgDocClick, true), 0)
+  else document.removeEventListener('click', onCgDocClick, true)
+})
+async function loadCgStatus() {
+  cgStatus.value = await semanticAssetService.codegraphStatus() ?? null
+}
+async function toggleCg() {
+  cgOpen.value = !cgOpen.value
+  if (cgOpen.value) void loadCgStatus()
+}
+async function setCgMode(m: 'on' | 'off' | 'auto') {
+  cgSaving.value = true
+  try {
+    if (await semanticAssetService.setCodegraphMode(m)) {
+      cgStatus.value = { ...(cgStatus.value ?? { env: '', cli: false, cliPath: '', source: 'default' }), mode: m, source: 'kv' }
+    }
+  } finally {
+    cgSaving.value = false
+  }
+}
+
 /** 资产节点索引浮窗(左停靠)：开关逻辑与矩阵同款。 */
 const indexOpen = ref(false)
 function toggleIndex() {
@@ -1662,6 +1694,44 @@ onMounted(async () => {
       >
         <ListBulletIcon class="w-3.5 h-3.5" />
       </button>
+      <!-- 符号源(CodeGraph)开关：三档 + 状态行 -->
+      <div class="relative shrink-0" data-cg-pop>
+        <button
+          class="btn btn-ghost !py-0.5 !text-[11px] flex items-center"
+          :class="cgOpen ? 'btn-primary' : ''"
+          :title="t('assetMgmt.codegraph.title')"
+          @click="toggleCg"
+        >
+          <AdjustmentsHorizontalIcon class="w-3.5 h-3.5" />
+        </button>
+        <div
+          v-if="cgOpen"
+          class="absolute right-0 top-8 z-30 w-72 rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl p-2.5 text-left"
+          @click.stop
+        >
+          <div class="text-[11px] font-semibold text-ctp-text mb-1.5">{{ t('assetMgmt.codegraph.title') }}</div>
+          <div class="flex gap-1 mb-2">
+            <button
+              v-for="m in (['on', 'auto', 'off'] as const)" :key="m"
+              class="btn !py-0.5 !px-2 !text-[10px] flex-1"
+              :class="cgStatus?.mode === m ? 'btn-primary' : 'btn-ghost'"
+              :disabled="cgSaving"
+              @click="setCgMode(m)"
+            >{{ t(`assetMgmt.codegraph.mode${m[0].toUpperCase()}${m.slice(1)}`) }}</button>
+          </div>
+          <div class="text-[9px] text-ctp-overlay0 leading-relaxed">
+            <div v-if="cgStatus">
+              <span :class="cgStatus.cli ? 'text-ctp-green' : 'text-ctp-peach'">{{ cgStatus.cli ? t('assetMgmt.codegraph.cliOk') : t('assetMgmt.codegraph.cliMissing') }}</span>
+              <span v-if="cgStatus.cliPath" class="font-mono truncate inline-block max-w-full align-bottom" :title="cgStatus.cliPath"> · {{ cgStatus.cliPath.split('/').slice(-1)[0] }}</span>
+              <span class="mx-1">·</span>{{ { env: t('assetMgmt.codegraph.srcEnv'), kv: t('assetMgmt.codegraph.srcKv'), default: t('assetMgmt.codegraph.srcDefault') }[cgStatus.source] }}
+              <div v-if="cgStatus.native?.nodes">· {{ t('assetMgmt.codegraph.nativeNodes') }}: {{ cgStatus.native.nodes.toLocaleString() }}</div>
+            </div>
+            <div class="mt-1 text-ctp-subtext0">
+              {{ cgStatus?.mode === 'off' ? t('assetMgmt.codegraph.hintOff') : cgStatus?.mode === 'on' ? t('assetMgmt.codegraph.hintOn') : t('assetMgmt.codegraph.hintAuto') }}
+            </div>
+          </div>
+        </div>
+      </div>
       <!-- 边类型图例 + 显隐过滤；间接边开关(浮层 Teleport 到 body，不撑开工具栏) -->
       <button
         ref="legendBtnRef"
