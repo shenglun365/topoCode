@@ -123,7 +123,16 @@ def resolve_scope_files(root: str, scope_type: str, scope_key: str,
 
 def _file_to_components(root: str, project: Optional[str]) -> Dict[str, List[str]]:
     """文件 → 拥有它的组件 id 列表(跨 INCLUDE/CALL 两套口径)。
-    供 `_save_assets` 把资产按锚点文件归属到所有组件(资产身份=代码，组件是下游投影)。"""
+    供 `_save_assets` 把资产按锚点文件归属到所有组件(资产身份=代码，组件是下游投影)。
+
+    ⚠️ _component_file_map 延迟导入：定义在 engine(带 TTL 缓存)，而 engine 顶层
+    import 本模块——顶层互相导入会循环。此前重构(e5af8ac)漏改为顶层名字，
+    NameError 被 _save_assets 的 try/except 吞成空映射 → 所有资产 meta.scopes
+    恒空 → 前端子组件(L1+)分组无资产不显示(实测 topoOne-animation 238 资产
+    scopes 全空回归)。
+    """
+    from .engine import _component_file_map
+
     out: Dict[str, List[str]] = {}
     for cid, files in _component_file_map(root, project).items():
         for f in files:
