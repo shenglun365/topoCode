@@ -27,7 +27,7 @@ onMounted(async () => {
     content.value = data?.content ?? ''
     title.value = data?.title ?? id
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败'
+    error.value = e instanceof Error ? e.message : t('doc.loadFailed')
   } finally {
     loading.value = false
   }

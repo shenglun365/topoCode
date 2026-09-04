@@ -85,7 +85,7 @@ function onFontSize(v: number) {
         app-key="architect"
         :provider="modelProvider"
         :context-options="[2048, 4096, 8192, 16384, 32768]"
-        context-label="输出上限"
+        :context-label="t('app.contextLimit')"
       />
     </template>
   </AppToolbar>

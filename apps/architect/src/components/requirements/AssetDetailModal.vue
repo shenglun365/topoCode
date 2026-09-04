@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CubeIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { AssetDetail, AssetScopeItem, FlowStep } from '@/types'
@@ -42,8 +42,15 @@ function detailLabelOf(): string {
   }
 }
 
+const STEP_TYPE_TEXT = computed<Record<string, string>>(() => ({
+  action: t('requirement.form.assetDetail.stepType.action'),
+  decision: t('requirement.form.assetDetail.stepType.decision'),
+  io: t('requirement.form.assetDetail.stepType.io'),
+  sync: t('requirement.form.assetDetail.stepType.sync'),
+}))
+
 function stepTypeOf(s: FlowStep): string {
-  return { action: '去', decision: '判', io: '入', sync: '同' }[s.type] ?? ''
+  return STEP_TYPE_TEXT.value[s.type] ?? ''
 }
 </script>
 

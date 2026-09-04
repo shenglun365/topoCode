@@ -587,7 +587,7 @@ async function runPurge() {
     purgeResult.value = res
     purgeOpen.value = true
   } catch (err: any) {
-    turns.value.push({ role: 'assistant', content: `✘ 影响范围计算失败：${err?.message || err}` })
+    turns.value.push({ role: 'assistant', content: t('assetMgmt.purgeImpactFailed', { msg: String(err?.message || err) }) })
   } finally {
     purging.value = false
   }
@@ -603,15 +603,15 @@ async function confirmPurge() {
     turns.value.push({
       role: 'assistant',
       content: [
-        `🧹 已物理删除 ${res.purged} 条 stale/deleted 语义资产。`,
-        impact.reqCount ? `受影响需求 ${impact.reqCount} 条（已标记需重新生成方案）。` : '',
-        impact.taskCount ? `受影响未完成任务 ${impact.taskCount} 个（已标记需重新生成方案）。` : '',
+        t('assetMgmt.purgeDone', { n: res.purged }),
+        impact.reqCount ? t('assetMgmt.purgeImpactReqs', { n: impact.reqCount }) : '',
+        impact.taskCount ? t('assetMgmt.purgeImpactTasks', { n: impact.taskCount }) : '',
       ].filter(Boolean).join(' '),
     })
     await Promise.all([loadOverview(), refreshStatus()])
     purgeOpen.value = false
   } catch (err: any) {
-    turns.value.push({ role: 'assistant', content: `✘ 清理失败：${err?.message || err}` })
+    turns.value.push({ role: 'assistant', content: t('assetMgmt.purgeFailed', { msg: String(err?.message || err) }) })
   } finally {
     purgeBusy.value = false
   }

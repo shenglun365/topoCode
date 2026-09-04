@@ -176,7 +176,7 @@ function seed() {
 }
 function base() {
   return {
-    title: form.title.trim() || '未命名需求',
+    title: form.title.trim() || t('requirement.chat.untitled'),
     desc: form.basicMd,
     priority: form.priority,
     kind: form.kind,
@@ -388,7 +388,7 @@ async function onSend(text: string) {
       conversationId: chatConvId.value || undefined,
       kind: 'requirement',
       reqId: editingId.value ?? (draftReqId.value || undefined),
-      title: form.title.trim() || '需求分析对话',
+      title: form.title.trim() || t('requirement.chat.title'),
       modelId: readModelPref('architect') || undefined,
       diagramSkill: diagramSkill.value,
       skillScenarios: contractSkill.value ? ['contract'] : [],
@@ -475,7 +475,7 @@ function applyConversation(conv: ConversationDetail): boolean {
   } else {
     draftReqId.value = nextDraftReqId()
   }
-  if (!form.title.trim() && conv.title && conv.title !== '需求分析对话' && conv.title !== 'requirement 对话') {
+  if (!form.title.trim() && conv.title && conv.title !== t('requirement.chat.title') && conv.title !== t('requirement.chat.legacyTitle')) {
     form.title = conv.title
   }
   return true

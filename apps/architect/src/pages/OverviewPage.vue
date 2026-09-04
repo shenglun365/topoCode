@@ -152,9 +152,9 @@ async function testKb() {
 }
 
 const connDocs: { icon: unknown; title: string; note: string }[] = [
-  { icon: BookOpenIcon, title: 'README', note: '架构师概览与入口' },
-  { icon: DocumentTextIcon, title: 'Conventions', note: '约定与库归属' },
-  { icon: DocumentTextIcon, title: 'KB Contract', note: 'KB 接口契约' },
+  { icon: BookOpenIcon, title: 'README', note: t('overview.docNoteReadme') },
+  { icon: DocumentTextIcon, title: 'Conventions', note: t('overview.docNoteConventions') },
+  { icon: DocumentTextIcon, title: 'KB Contract', note: t('overview.docNoteKbContract') },
 ]
 const docList = ref<{ id: string; title: string }[]>([])
 

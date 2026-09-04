@@ -181,7 +181,7 @@ function groupByType(items: ScopeProposalItem[]): { type: string; items: ScopePr
           </div>
 
           <p class="text-[9px] text-ctp-overlay0">
-            {{ t('scope.catalogHint') }}：{{ proposal.catalog?.length ?? 0 }} 项
+            {{ t('scope.catalogCount', { n: proposal.catalog?.length ?? 0 }) }}
           </p>
         </template>
       </div>

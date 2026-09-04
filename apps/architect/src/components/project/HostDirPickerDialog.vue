@@ -19,6 +19,19 @@ const view = ref<'browse' | 'confirm'>('browse')
 const dir = ref<DirList | null>(null)
 const loading = ref(false)
 const error = ref('')
+// 路径/过滤二合一输入（与 KB 目录选择一致）：输入即过滤当前列表，回车按路径跳转
+const pathDraft = ref('')
+
+const filteredEntries = computed(() => {
+  const entries = dir.value?.entries ?? []
+  const raw = pathDraft.value.trim()
+  if (!raw) return entries
+  // 兼容 Windows(\) 与 Linux(/) 分隔符：只取最后一段作为过滤片段
+  const sepIdx = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'))
+  const kw = (sepIdx >= 0 ? raw.slice(sepIdx + 1) : raw).toLowerCase()
+  if (!kw) return entries
+  return entries.filter(e => e.name.toLowerCase().includes(kw))
+})
 
 /** 当前选中的项目目录(三种方式：进入子目录后当前目录 / 点选子目录 / 默认当前目录)。 */
 const selectedPath = ref<string>('')
@@ -45,9 +58,11 @@ function fullPath(name: string): string {
 async function load(path?: string) {
   loading.value = true
   error.value = ''
+  const prevPath = dir.value?.path
   try {
     dir.value = await dirService.list(path)
     const cur = dir.value.path
+    if (cur !== prevPath) pathDraft.value = ''
     const selectedInView = selectedPath.value === cur || selectedPath.value.startsWith(`${cur}/`)
     if (!selectedInView) {
       // 进入新目录/离开视图后，默认选中当前目录作为项目目录
@@ -195,23 +210,24 @@ onMounted(() => load())
         <div class="flex items-center gap-2 mb-3">
           <button
             class="btn btn-ghost !px-2 text-xs"
-            title="上级目录"
+            :title="t('overview.openDir.up')"
             :disabled="!dir?.parent"
             @click="goUp"
           >
             <ArrowUpIcon class="w-4 h-4" />
           </button>
-          <button class="btn btn-ghost !px-2 text-xs" title="根目录" @click="goRoot">/</button>
-          <button class="btn btn-ghost !px-2 text-xs" title="用户主目录" @click="home">~</button>
+          <button class="btn btn-ghost !px-2 text-xs" :title="t('overview.openDir.root')" @click="goRoot">/</button>
+          <button class="btn btn-ghost !px-2 text-xs" :title="t('overview.openDir.home')" @click="home">~</button>
           <div class="flex-1 min-w-0">
             <input
               class="input font-mono text-xs !py-1.5"
-              :value="dir?.path ?? ''"
+              :value="pathDraft || dir?.path || ''"
               :placeholder="t('overview.openDir.pathPlaceholder')"
+              @input="(e: Event) => pathDraft = (e.target as HTMLInputElement).value"
               @keyup.enter="(e: KeyboardEvent) => load((e.target as HTMLInputElement).value)"
             />
           </div>
-          <button class="btn btn-ghost !px-2 text-xs" title="刷新" @click="load(dir?.path)">
+          <button class="btn btn-ghost !px-2 text-xs" :title="t('overview.openDir.reload')" @click="load(dir?.path)">
             <ArrowPathIcon class="w-4 h-4" />
           </button>
         </div>
@@ -245,7 +261,7 @@ onMounted(() => load())
           class="border border-ctp-surface0 rounded-lg divide-y divide-ctp-surface0 max-h-72 overflow-y-auto"
         >
           <li
-            v-for="e in dir.entries"
+            v-for="e in filteredEntries"
             :key="e.name"
             class="flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors"
             :class="selectedPath === fullPath(e.name) ? 'bg-ctp-blue/10' : 'hover:bg-ctp-surface0/60'"
@@ -283,6 +299,9 @@ onMounted(() => load())
           </li>
           <li v-if="dir.entries.length === 0" class="px-3 py-4 text-xs text-ctp-overlay1">
             {{ t('overview.openDir.dirEmpty') }}
+          </li>
+          <li v-else-if="filteredEntries.length === 0" class="px-3 py-4 text-xs text-ctp-overlay1">
+            {{ t('overview.openDir.noMatch') }}
           </li>
         </ul>
 

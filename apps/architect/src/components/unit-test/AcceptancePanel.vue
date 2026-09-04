@@ -67,7 +67,7 @@ async function openDual(item: ContractItem) {
   try {
     dual.value = await contractService.dualDiagram(item.id)
   } catch (err: any) {
-    dualError.value = err?.message || '双图对照失败'
+    dualError.value = err?.message || t('localAcceptance.dualFailed')
   } finally {
     dualBusy.value = false
   }
@@ -103,7 +103,7 @@ async function openAuth(item: ContractItem) {
   try {
     auth.value = await contractService.authorization(item.id)
   } catch (err: any) {
-    authError.value = err?.message || '可授权清单计算失败'
+    authError.value = err?.message || t('localAcceptance.authFailed')
   } finally {
     authBusy.value = false
   }

@@ -63,7 +63,7 @@ function cycleMode() {
       class="chip bg-ctp-surface0 text-ctp-sky"
       :title="t('overview.externalCalls')"
     >
-      {{ t('overview.externalCalls') }}: {{ mcp.calls.length }}<template v-if="mcp.pendingCount"> · {{ mcp.pendingCount }} 待处理</template>
+      {{ t('overview.externalCalls') }}: {{ mcp.calls.length }}<template v-if="mcp.pendingCount"> · {{ mcp.pendingCount }} {{ t('mcp.pending') }}</template>
     </span>
     <span>{{ t('app.name') }} · prototype v0.1</span>
   </footer>

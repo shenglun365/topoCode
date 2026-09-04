@@ -106,7 +106,7 @@ function labelOf(key: string): string {
   if (key === 'list') return t('execute.listTitle')
   if (key === 'create') return t('execute.createTask')
   const e = task.findExecution(execIdOf(key))
-  return e ? `执行: ${planTitleOf(e)}` : key
+  return e ? t('execute.execTab', { title: planTitleOf(e) }) : key
 }
 
 function openList() { activeKey.value = 'list' }

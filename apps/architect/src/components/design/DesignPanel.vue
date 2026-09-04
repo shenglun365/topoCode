@@ -87,7 +87,7 @@ async function generate() {
     afterTables.value = res.afterTables ?? []
     tab.value = 'data'
   } catch (err) {
-    genError.value = err instanceof Error ? err.message : '生成失败'
+    genError.value = err instanceof Error ? err.message : t('design.generateFailed')
   } finally {
     generating.value = false
   }
@@ -442,7 +442,7 @@ function columnsText(ch: DesignDataChange): string {
             :diagrams="{ mermaid: beforeCode }"
           />
           <DiagramCard
-            :title="`${t('design.after')}（变更着色：绿=新增 红=删除 黄=修改）`"
+            :title="t('design.afterColorLegend', { after: t('design.after') })"
             :diagrams="{ mermaid: afterCode }"
           />
         </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import starLogoMarkDark from '../../assets/star-logo-mark-v8.svg'
 import starLogoMarkLight from '../../assets/star-logo-mark-v8-light.svg'
 
@@ -7,6 +8,8 @@ const props = defineProps<{
   size?: number
   clickable?: boolean
 }>()
+
+const { t } = useI18n()
 
 const LOGO_THEME_KEY = 'topo_logo_theme'
 const savedTheme = localStorage.getItem(LOGO_THEME_KEY)
@@ -54,7 +57,7 @@ onUnmounted(() => {
     class="star-logo-mark"
     :class="{ clickable: clickable !== false }"
     :style="{ width: size + 'px', height: size + 'px' }"
-    title="点击切换 logo 配色"
+    :title="t('app.logoThemeToggle')"
     @click="toggleLogoTheme"
   />
 </template>

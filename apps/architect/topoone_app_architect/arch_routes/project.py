@@ -127,6 +127,22 @@ def _lookup_kb(kb_id: str) -> Optional[dict]:
     return None
 
 
+def _kb_baseline_head(kb_project_id: str, baseline_id: str = "") -> str:
+    """取 KB 项目基线版本对应的 head commit（version.list；baselineId 精确匹配，缺省取最新版本）。"""
+    if not kb_project_id:
+        return ""
+    try:
+        from .kb_gateway import call_kb
+        versions = call_kb("version.list", projectId=kb_project_id) or []
+    except Exception:
+        return ""
+    if baseline_id:
+        for v in versions:
+            if v.get("id") == baseline_id:
+                return v.get("head") or ""
+    return (versions[0].get("head") or "") if versions else ""
+
+
 # ── 同一仓库源校验 ───────────────────────────────────────────────
 
 def _norm_url(u: str) -> str:
@@ -363,11 +379,16 @@ async def bind_project(request: Request):
         ok_, reason = _same_repo_source(root, kb)
         if not ok_:
             return err(400, reason)
+        # 基线提交：取 KB 基线版本 head（变更检测的 diff base），branch 用真实分支
+        from . import arch_git
+        baseline_id = kb.get("currentVersionId")
+        baseline_head = _kb_baseline_head(kb["id"], baseline_id)
+        real_branch = (arch_git.repo_status(root) or {}).get("branch") or "main"
         store.ProjectsStore.upsert(proj_id, {
             "name": body.get("name") or base["name"], "desc": base["desc"],
             "rootPath": root, "kbRoot": kb.get("rootPath") or "",
-            "branch": "main", "baselineId": kb.get("currentVersionId"),
-            "baselineCommit": "", "createdAt": _ts(), "active": True,
+            "branch": real_branch, "baselineId": baseline_id,
+            "baselineCommit": baseline_head, "createdAt": _ts(), "active": True,
             "config": base.get("config") or dict(_DEFAULT_CONFIG),
             "mode": "existing",
             "kbProjectId": kb["id"], "kbSourceDir": kb.get("rootPath") or "",
@@ -409,13 +430,18 @@ async def link_project(request: Request):
     ok_, reason = _same_repo_source(arch_root, kb)
     if not ok_:
         return err(400, reason)
+    from . import arch_git
+    # 基线提交：取 KB 基线版本 head（变更检测的 diff base），branch 用真实分支
+    baseline_head = _kb_baseline_head(kb["id"], kb.get("currentVersionId"))
+    real_branch = (arch_git.repo_status(arch_root) or {}).get("branch") or "main"
     data = {
         "name": proj.get("name") or arch_root.rstrip("/").rsplit("/", 1)[-1],
         "desc": proj.get("desc", ""), "mode": proj.get("mode", "existing"),
         "rootPath": arch_root,
         "kbProjectId": kb["id"],
         "kbRoot": kb.get("rootPath") or "", "kbSourceDir": kb.get("rootPath") or "",
-        "baselineId": kb.get("currentVersionId"), "branch": "main",
+        "baselineId": kb.get("currentVersionId"), "baselineCommit": baseline_head,
+        "branch": real_branch,
         "gitLinked": True, "linkVerifiedAt": _ts(), "active": True,
         "config": proj.get("config") or dict(_DEFAULT_CONFIG),
         "createdAt": proj.get("createdAt") or _ts(), "updatedAt": _ts(),
@@ -455,14 +481,35 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
         return ok(None)
     from . import arch_git
     work_dir = proj.get("rootPath") or ""
-    # 真实 git head/branch/ahead + 工作树相对基线的真实差异
     st = arch_git.repo_status(work_dir) if work_dir else {}
     head = {
         "commit": arch_git.head_commit(work_dir) if work_dir else "",
         "branch": st.get("branch", ""),
         "ahead": st.get("ahead", 0),
     }
-    diff_raw = arch_git.diff_worktree(proj) if work_dir else {
+    # 基线提交：存量数据 baselineCommit 可能为空 → 按 baselineId 从 KB 版本补齐并惰性回写
+    baseline_head = proj.get("baselineCommit") or ""
+    kb_project_id = proj.get("kbProjectId") or ""
+    version = ""
+    if kb_project_id:
+        try:
+            from .kb_gateway import call_kb
+            versions = call_kb("version.list", projectId=kb_project_id) or []
+        except Exception:
+            versions = []
+        matched = None
+        if versions:
+            matched = next((v for v in versions if v.get("id") == proj.get("baselineId")), None) or versions[0]
+            version = matched.get("label") or matched.get("id") or ""
+            if not baseline_head:
+                baseline_head = matched.get("head") or ""
+    if baseline_head and not proj.get("baselineCommit"):
+        try:
+            store.ProjectsStore.update(proj["id"], {"baselineCommit": baseline_head, "updatedAt": _ts()})
+            proj = {**proj, "baselineCommit": baseline_head}
+        except Exception:
+            pass
+    diff_raw = arch_git.diff_worktree(proj, base=baseline_head) if work_dir else {
         "filesChanged": 0, "added": 0, "modified": 0, "deleted": 0,
         "deletedHighRisk": False, "files": []}
     diff = {
@@ -474,25 +521,10 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
         "files": [f.get("path") if isinstance(f, dict) else str(f)
                   for f in diff_raw.get("files", [])],
     }
-    # 基线：项目真实 baselineId/baselineCommit；version 经 KB version.list 查询(不可达→空)
-    version = ""
-    kb_project_id = proj.get("kbProjectId") or ""
-    if kb_project_id:
-        try:
-            from .kb_gateway import call_kb
-            versions = call_kb("version.list", projectId=kb_project_id) or []
-            for v in versions:
-                if v.get("id") == proj.get("baselineId"):
-                    version = v.get("label") or v.get("id") or ""
-                    break
-            if not version and versions:
-                version = versions[0].get("label") or versions[0].get("id") or ""
-        except Exception:
-            version = ""
     baseline = {
         "id": proj.get("baselineId") or "",
         "version": version,
-        "commit": proj.get("baselineCommit") or "",
+        "commit": baseline_head or proj.get("baselineCommit") or "",
         "manifestHash": "",
         "createdAt": 0,
     }
@@ -514,13 +546,23 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
     work_dir = proj.get("rootPath") or ""
     remote = _git_origin(work_dir)
     st = arch_git.repo_status(work_dir)
-    diff = arch_git.diff_worktree(proj) if work_dir else {
+    # 基线提交兜底：存量数据为空时按 baselineId 从 KB 版本取 head，并惰性回写
+    baseline_head = proj.get("baselineCommit") or ""
+    if not baseline_head and proj.get("kbProjectId") and proj.get("baselineId"):
+        baseline_head = _kb_baseline_head(proj["kbProjectId"], proj["baselineId"])
+        if baseline_head:
+            try:
+                store.ProjectsStore.update(proj["id"], {"baselineCommit": baseline_head, "updatedAt": _ts()})
+                proj = {**proj, "baselineCommit": baseline_head}
+            except Exception:
+                pass
+    diff = arch_git.diff_worktree(proj, base=baseline_head) if work_dir else {
         "filesChanged": 0, "added": 0, "modified": 0, "deleted": 0,
         "deletedHighRisk": False, "files": [], "byComponent": []}
     return ok({
         "workDir": work_dir,
         "remoteUrl": remote or proj.get("remoteUrl") or "",
-        "branch": proj.get("branch") or st.get("branch") or "",
+        "branch": st.get("branch") or proj.get("branch") or "",
         "defaultBranch": proj.get("defaultBranch") or "",
         "head": {"commit": st.get("commit") or "", "branch": st.get("branch") or "",
                  "ahead": st.get("ahead", 0), "behind": st.get("behind", 0),
@@ -616,7 +658,16 @@ async def get_baseline_dirty(root: Optional[str] = None, project: Optional[str] 
     from . import arch_git
     work_dir = proj.get("rootPath") or ""
     st = arch_git.repo_status(work_dir) if work_dir else {}
-    return ok({"dirty": bool(st.get("dirty"))})
+    # dirty 语义：相对 KB 基线提交存在任何差异（含已提交+未提交），或本地领先 upstream。
+    # 不依赖 @{upstream}：无 remote 的本地仓库此前恒判"干净"。
+    baseline_head = proj.get("baselineCommit") or _kb_baseline_head(
+        proj.get("kbProjectId") or "", proj.get("baselineId") or "")
+    if baseline_head and work_dir:
+        diff = arch_git.diff_worktree(proj, base=baseline_head)
+        dirty = bool(diff.get("filesChanged")) or bool(st.get("ahead", 0))
+    else:
+        dirty = bool(st.get("dirty")) or bool(st.get("ahead", 0))
+    return ok({"dirty": bool(dirty)})
 
 
 @router.post("/project/baseline/sync")

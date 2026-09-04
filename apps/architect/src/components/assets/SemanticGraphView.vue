@@ -484,14 +484,18 @@ const edgeTypeCounts = computed(() => {
   }
   return [...cnt.entries()].sort((a, b) => b[1] - a[1])
 })
-const EDGE_TYPE_TEXT: Record<string, string> = {
-  calls: '调用', references: '引用', imports: '导入', contains: '包含',
-  extends: '继承', implements: '实现', instantiates: '实例化',
-  assigns: '赋值', passes: '传参', type_of: '类型', returns: '返回',
-  overrides: '重写', decorates: '装饰', callback: '回调',
-}
+const EDGE_TYPE_TEXT = computed<Record<string, string>>(() => ({
+  calls: t('assetMgmt.graph.edgeType.calls'), references: t('assetMgmt.graph.edgeType.references'),
+  imports: t('assetMgmt.graph.edgeType.imports'), contains: t('assetMgmt.graph.edgeType.contains'),
+  extends: t('assetMgmt.graph.edgeType.extends'), implements: t('assetMgmt.graph.edgeType.implements'),
+  instantiates: t('assetMgmt.graph.edgeType.instantiates'),
+  assigns: t('assetMgmt.graph.edgeType.assigns'), passes: t('assetMgmt.graph.edgeType.passes'),
+  type_of: t('assetMgmt.graph.edgeType.type_of'), returns: t('assetMgmt.graph.edgeType.returns'),
+  overrides: t('assetMgmt.graph.edgeType.overrides'), decorates: t('assetMgmt.graph.edgeType.decorates'),
+  callback: t('assetMgmt.graph.edgeType.callback'),
+}))
 function edgeTypeLabel(k: string) {
-  return EDGE_TYPE_TEXT[k] || k || '关系'
+  return EDGE_TYPE_TEXT.value[k] || k || t('assetMgmt.graph.edgeTypeFallback')
 }
 const EDGE_TYPE_COLOR: Record<string, string> = {
   calls: 'text-ctp-red', references: 'text-ctp-blue', imports: 'text-ctp-yellow',
@@ -1355,7 +1359,7 @@ function applyNodeTooltips() {
   for (const e of scopedEdges.value) {
     // 悬停 = 关系描述 + 证据(文件:行/解析方式/置信度/间接中转)
     const ev: string[] = []
-    if (e.indirect && e.via) ev.push(`间接 ⇝ ${e.via}`)
+    if (e.indirect && e.via) ev.push(t('assetMgmt.graph.indirectVia', { via: e.via }))
     if (e.file) ev.push(`${e.file}${e.line ? `:${e.line}` : ''}`)
     if (e.resolvedBy) ev.push(e.resolvedBy + (e.confidence ? ` (${e.confidence})` : ''))
     const tip = [(e.desc || e.semantic || e.type || '').trim(), ...ev].filter(Boolean).join('\n')

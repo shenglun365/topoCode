@@ -609,7 +609,7 @@ async function copyAsset(a: SemanticAsset) {
             >• {{ iv }}</div>
           </div>
           <div v-if="a.astRefs?.length">
-            <div class="font-medium text-ctp-mauve mb-1">AST 锚点</div>
+            <div class="font-medium text-ctp-mauve mb-1">{{ t('semanticAssets.astAnchor') }}</div>
             <div
               v-for="(r, ri) in a.astRefs"
               :key="ri"

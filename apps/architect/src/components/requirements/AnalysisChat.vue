@@ -605,7 +605,7 @@ onUnmounted(() => {
                   v-if="a.astRefs?.length"
                   class="text-[10px] text-ctp-overlay0"
                 >
-                  <div class="font-medium text-ctp-mauve mb-0.5">AST 锚点</div>
+                  <div class="font-medium text-ctp-mauve mb-0.5">{{ t('requirement.chat.astAnchor') }}</div>
                   <div
                     v-for="(r, ri) in a.astRefs.slice(0, 8)"
                     :key="ri"

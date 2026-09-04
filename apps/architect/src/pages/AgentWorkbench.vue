@@ -112,7 +112,7 @@ async function newSession() {
     resetChat()
     rightTab.value = 'chat'
   } catch (err) {
-    alert(err instanceof Error ? err.message : '创建失败')
+    alert(err instanceof Error ? err.message : t('workbench.sessions.createFailed'))
   }
 }
 
@@ -232,7 +232,7 @@ async function finalize() {
     await requirementService.update(req.id, { status: 'analyzed', location: 'pool' })
     await loadSessions()
   } catch (err) {
-    alert(err instanceof Error ? err.message : '定稿失败')
+    alert(err instanceof Error ? err.message : t('workbench.finalizeFailed'))
   } finally {
     finalizing.value = false
   }
