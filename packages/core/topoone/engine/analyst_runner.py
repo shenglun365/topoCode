@@ -635,17 +635,19 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
             lang_key = f.get("language", "")
             if lang_key == "c_header":
                 lang_key = "c"
+            if not os.path.exists(abs_path):
+                return ("file_missing", None)
+            src_bytes = open(abs_path, "rb").read()
+            if len(src_bytes) > 500 * 1024:
+                return ("too_large", None)
+            if lang_key == "c" and abs_path.endswith((".h", ".hh")):
+                lang_key = detect_header_language(src_bytes)
             extractor = EXTRACTORS.get(lang_key)
             if extractor is None:
                 return ("no_extractor", None)
             parser = get_parser(lang_key)
             if parser is None:
                 return ("no_parser", None)
-            if not os.path.exists(abs_path):
-                return ("file_missing", None)
-            src_bytes = open(abs_path, "rb").read()
-            if len(src_bytes) > 500 * 1024:
-                return ("too_large", None)
             walker = TreeSitterWalker(abs_path, src_bytes, lang_key, extractor)
             table = walker.extract()
             rel_path = os.path.relpath(abs_path, ctx.proj_path)

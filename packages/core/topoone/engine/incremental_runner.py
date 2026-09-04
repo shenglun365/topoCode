@@ -36,20 +36,22 @@ def _parse_one_file(abs_path: str, lang_key: str, proj_path: str):
     """解析单个文件 → FileSymbolTable（复用 walker）。"""
     from parsers.core.walker import TreeSitterWalker
     from parsers.languages import EXTRACTORS
-    from parsers.language_loader import get_parser
+    from parsers.language_loader import get_parser, detect_header_language
 
     if lang_key == "c_header":
         lang_key = "c"
+    if not os.path.exists(abs_path):
+        return None
+    src_bytes = open(abs_path, "rb").read()
+    if len(src_bytes) > 500 * 1024:
+        return None
+    if lang_key == "c" and abs_path.endswith((".h", ".hh")):
+        lang_key = detect_header_language(src_bytes)
     extractor = EXTRACTORS.get(lang_key)
     if extractor is None:
         return None
     parser = get_parser(lang_key)
     if parser is None:
-        return None
-    if not os.path.exists(abs_path):
-        return None
-    src_bytes = open(abs_path, "rb").read()
-    if len(src_bytes) > 500 * 1024:
         return None
     walker = TreeSitterWalker(abs_path, src_bytes, lang_key, extractor)
     table = walker.extract()

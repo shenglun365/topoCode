@@ -5,10 +5,14 @@ Tree-sitter 语言包加载器
 支持 tree-sitter 0.23.x。不使用 tree_sitter_languages（已停止维护）。
 """
 import logging
+import re
 from typing import Dict, Optional
 from tree_sitter import Language, Parser
 
 logger = logging.getLogger(__name__)
+
+# .h 头文件 C++ 特征(行首 namespace/template/class — C 语法无这些关键字)
+_CPP_HINT = re.compile(r"^\s*namespace\s+\w|^\s*template\s*<|^\s*class\s+\w", re.M)
 
 # ==================== 导入独立语言包 ====================
 _ts_modules = {}
@@ -169,3 +173,14 @@ def get_parser(lang_name: str) -> Optional[Parser]:
 def get_available_languages() -> list:
     """获取所有可用的 tree-sitter 语言列表"""
     return list(LANGUAGES.keys())
+
+
+def detect_header_language(src_bytes: bytes) -> str:
+    """.h 头文件语言嗅探: 含 C++ 特征 → cpp, 否则 c。
+
+    C++ 项目的 .h 以 namespace/template/class 起始定义, 用纯 C parser
+    解析会因语法 ERROR 丢失全部符号(xgboost/v8 实测 struct/enum 漏抓)。
+    仅看头部 8KB, 足以覆盖 include guard + 首个类型定义。
+    """
+    head = src_bytes[:8192].decode("utf-8", errors="replace")
+    return "cpp" if _CPP_HINT.search(head) else "c"
