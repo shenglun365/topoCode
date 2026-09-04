@@ -614,7 +614,7 @@ def collect_context(root: str, scope_type: str, scope_key: str,
     conn, _cg_src = open_symbol_conn(root, project)
     cross = ""
     if conn is not None:
-        source = "codegraph" if _cg_src == "codegraph" else "native"
+        source = _cg_src if _cg_src in ('codegraph', 'merged') else 'native'
         nodes = _query_nodes(conn, files=files, symbols=syms)
         edges = _query_edges(conn, [n["id"] for n in nodes]) if nodes else []
         cross = _cross_file_edges_text(conn, [n["id"] for n in nodes])

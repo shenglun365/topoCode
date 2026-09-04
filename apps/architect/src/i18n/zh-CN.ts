@@ -866,7 +866,7 @@ export default {
     cg: {
       title: '符号源 (CodeGraph)',
       modeOn: '开启',
-      modeAuto: '自动',
+      modeAuto: '合并',
       modeOff: '关闭',
       cliOk: 'CLI 可用',
       cliMissing: 'CLI 缺失',
@@ -876,7 +876,7 @@ export default {
       srcDefault: '默认',
       envLocked: '环境变量覆盖中，修改 KV 无效',
       hintOff: '关闭后提取走 topocode 自身 AST 符号源(质量持平)：不触碰项目目录、不自动 init。',
-      hintAuto: '自动：检测到 codegraph CLI 即用之；否则用自身符号源。',
+      hintAuto: '合并(1+1)：native 符号优先 + codegraph 补充独有符号与关系；缺一自动退化，身份重合按归并类去重(native 行号优先，漂移计数可观测)。',
       hintOn: '开启：仅用 codegraph，CLI 缺失时提取降级并如实提示。',
       stale: '索引过期',
       baselineNone: '基线未对齐（尚无同步记录，提取仍可用）',
@@ -1533,7 +1533,7 @@ export default {
     codegraph: {
       title: '符号源 (CodeGraph)',
       modeOn: '开启',
-      modeAuto: '自动',
+      modeAuto: '合并',
       modeOff: '关闭',
       cliOk: 'CLI 可用',
       cliMissing: 'CLI 缺失',
@@ -1542,7 +1542,7 @@ export default {
       srcKv: '已保存',
       srcDefault: '默认',
       hintOff: '关闭后提取走 topocode 自身 AST 符号源(质量持平)，不触碰项目目录、不自动 init。',
-      hintAuto: '自动：检测到 codegraph CLI 即用之；否则用自身符号源。',
+      hintAuto: '合并(1+1)：native 符号优先 + codegraph 补充独有符号与关系；缺一自动退化，身份重合按归并类去重(native 行号优先，漂移计数可观测)。',
       hintOn: '开启：仅用 codegraph，CLI 缺失时提取降级并如实提示。',
     },
     index: {

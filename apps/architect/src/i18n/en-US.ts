@@ -840,7 +840,7 @@ export default {
     cg: {
       title: 'Symbol Source (CodeGraph)',
       modeOn: 'On',
-      modeAuto: 'Auto',
+      modeAuto: 'Merge',
       modeOff: 'Off',
       cliOk: 'CLI available',
       cliMissing: 'CLI missing',
@@ -850,7 +850,7 @@ export default {
       srcDefault: 'default',
       envLocked: 'env override active, KV changes ignored',
       hintOff: 'Off: extraction uses topocode native AST symbols (quality parity); never touches the project dir or auto-inits.',
-      hintAuto: 'Auto: use codegraph CLI when available, else native symbol source.',
+      hintAuto: 'Merge (1+1): native symbols take priority, codegraph adds unique symbols/edges; either side missing degrades gracefully. Identity overlap dedupes by kind class (native line numbers win, drift is counted).',
       hintOn: 'On: codegraph only; missing CLI degrades extraction with explicit reason.',
       stale: 'index stale',
       baselineNone: 'Baseline not aligned (no sync record yet; extraction still works)',
@@ -1508,7 +1508,7 @@ export default {
     codegraph: {
       title: 'Symbol Source (CodeGraph)',
       modeOn: 'On',
-      modeAuto: 'Auto',
+      modeAuto: 'Merge',
       modeOff: 'Off',
       cliOk: 'CLI available',
       cliMissing: 'CLI missing',
@@ -1517,7 +1517,7 @@ export default {
       srcKv: 'saved',
       srcDefault: 'default',
       hintOff: 'Off: extraction uses topocode native AST symbols (quality parity); never touches the project dir or auto-inits.',
-      hintAuto: 'Auto: use codegraph CLI when available, else native symbol source.',
+      hintAuto: 'Merge (1+1): native symbols take priority, codegraph adds unique symbols/edges; either side missing degrades gracefully. Identity overlap dedupes by kind class (native line numbers win, drift is counted).',
       hintOn: 'On: codegraph only; missing CLI degrades extraction with explicit reason.',
     },
     index: {

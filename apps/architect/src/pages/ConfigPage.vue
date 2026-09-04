@@ -485,6 +485,9 @@ onMounted(() => { void loadCgStatus() })
           <span class="mx-1 text-ctp-overlay0">·</span>
           <span class="text-ctp-overlay0">{{ { env: t('config.cg.srcEnv'), kv: t('config.cg.srcKv'), default: t('config.cg.srcDefault') }[cgStatus.source] }}</span>
           <span v-if="cgStatus.native?.nodes" class="text-ctp-overlay0"> · {{ t('config.cg.nativeNodes') }}: {{ cgStatus.native.nodes.toLocaleString() }}</span>
+          <span v-if="cgStatus.mergeStats" class="text-ctp-overlay0 font-mono" :title="t('config.cg.hintAuto')">
+            · ∪{{ (cgStatus.mergeStats.cgNodes ?? 0).toLocaleString() }} +{{ Math.max((cgStatus.mergeStats.cgNodes ?? 0) - (cgStatus.mergeStats.cgMapped ?? 0), 0).toLocaleString() }}<template v-if="cgStatus.mergeStats.lineDrift"> ⚠{{ cgStatus.mergeStats.lineDrift }}</template>
+          </span>
           <span v-if="cgStatus.state?.stale" class="text-ctp-yellow"> · {{ t('config.cg.stale') }} ({{ cgStatus.state.staleCount }})</span>
         </span>
       </div>

@@ -22,7 +22,7 @@ from typing import Optional, Tuple
 from . import codegraph as _cg_mod
 from .codegraph import effective_mode, logger
 
-_native_cache = {}   # core_pid -> (conn, ts)
+_native_cache = {}   # (core_pid, merge) -> (conn, ts)
 _state_cache = {}    # root -> (state, ts)
 _core_pid_cache = {} # root -> (core_pid|None, ts)
 _diff_cache = {}     # root -> (diff, ts)
@@ -87,16 +87,49 @@ def _resolve_core_pid(root: Optional[str]):
     return pid
 
 
-def _open_core_conn(core_pid: str):
-    """core 分析库只读连接 + TEMP 同构视图（按 core_pid 缓存 300s）。失败 None。
+# kind 归并类(身份对齐): 两源对同一符号的 kind 判定可能不同
+# (对象方法一方记 method 一方记 function)——身份键按归并类比较, 避免词汇差异产生重复节点。
+_KG_CLASS_TMPL = ("CASE {k} "
+                  "WHEN 'function' THEN 'callable' WHEN 'method' THEN 'callable' "
+                  "WHEN 'class' THEN 'type' WHEN 'struct' THEN 'type' WHEN 'interface' THEN 'type' "
+                  "WHEN 'enum' THEN 'type' WHEN 'type_alias' THEN 'type' WHEN 'trait' THEN 'type' "
+                  "WHEN 'protocol' THEN 'type' WHEN 'component' THEN 'type' "
+                  "WHEN 'variable' THEN 'data' WHEN 'constant' THEN 'data' WHEN 'field' THEN 'data' "
+                  "WHEN 'property' THEN 'data' WHEN 'enum_member' THEN 'data' "
+                  "ELSE 'other' END")
+
+
+def _kg_class(expr: str) -> str:
+    return _KG_CLASS_TMPL.format(k=expr)
+
+
+def _cg_path_norm(root: str) -> str:
+    """codegraph file_path 归一化为相对路径(可能存绝对路径/反斜杠)。root 转义后嵌入 SQL。"""
+    esc = (root or "").replace("'", "''").rstrip("/")
+    return (f"REPLACE(CASE WHEN file_path LIKE '{esc}/%' "
+            f"THEN substr(file_path, {len(esc) + 2}) ELSE file_path END, '\\', '/')")
+
+
+def _open_core_conn(core_pid: str, root: str = "", merge: bool = False):
+    """core 分析库只读连接 + TEMP 同构视图（按 (core_pid, merge) 缓存 300s）。失败 None。
 
     视图映射（下游 snake_case 符号模型）：
     - nodes ← graph_node（qualified_name/file_path/start_line/…；return_type 空占位）
     - edges ← graph_edge（type_of→references；metadata 缺省时按 provenance 注入证据）
       UNION edges_contains（class 行区间包住 method/function，物化 TEMP 表）
+
+    merge=True（auto 合并语义）：ATTACH codegraph.db 后把 nodes/edges 视图重建为
+    合并版——native 优先 + codegraph 补充：
+    - 身份键 (file_path, name, kind 归并类)：kind 判定差异(method vs function)不产生重复；
+      行号漂移正确去重且位置取 native(更新鲜)，漂移数计入 merge_stats 可观测。
+    - 节点 = native 全部 ∪ codegraph 独有(id 加 'cg:' 前缀防碰撞)。
+    - 边 = native 边原样 ∪ codegraph 边(重复端点经 cg_id_map 映射回 native id；
+      (kind,source,target) 已存在于 native 的丢弃，同 source/kind 不同 target 的
+      解析分歧两边都保留——证据互补)。
     """
     now = time.time()
-    hit = _native_cache.get(core_pid)
+    cache_key = (core_pid, merge)
+    hit = _native_cache.get(cache_key)
     if hit and now - hit[1] < _NATIVE_TTL:
         return hit[0]
     db = os.path.join(_core_data_dir(), "projects", core_pid, "project.db")
@@ -114,7 +147,7 @@ def _open_core_conn(core_pid: str):
         # uvicorn 线程池下后续请求可能落在不同线程；缺省 True 会抛
         # "SQLite objects created in a thread can only be used in that same thread"
         # (graph 端点 500 实测回归)。共享并发安全依赖"串行复用"假设，与既有设计一致。
-        conn.execute("CREATE TEMP VIEW IF NOT EXISTS nodes AS SELECT "
+        conn.execute("CREATE TEMP VIEW IF NOT EXISTS nodes_native AS SELECT "
                      "id, kind, name, qualified_name, file_path, "
                      "start_line, end_line, start_col AS start_column, end_col AS end_column, "
                      "signature, docstring, '' AS return_type "
@@ -127,7 +160,7 @@ def _open_core_conn(core_pid: str):
                      "FROM graph_node c JOIN graph_node m ON c.file_path = m.file_path AND c.id != m.id "
                      "WHERE c.kind = 'class' AND m.kind IN ('method', 'function') "
                      "AND m.start_line >= c.start_line AND m.end_line <= c.end_line")
-        conn.execute("CREATE TEMP VIEW IF NOT EXISTS edges AS SELECT "
+        conn.execute("CREATE TEMP VIEW IF NOT EXISTS edges_native AS SELECT "
                      "source_id AS source, target_id AS target, "
                      "CASE kind WHEN 'type_of' THEN 'references' ELSE kind END AS kind, "
                      "line, col, "
@@ -136,20 +169,110 @@ def _open_core_conn(core_pid: str):
                      "'resolvedBy', 'native-ast') ELSE metadata END AS metadata "
                      "FROM graph_edge "
                      "UNION ALL SELECT source, target, kind, line, col, metadata FROM edges_contains")
-        _native_cache[core_pid] = (conn, now)
+        conn.execute("DROP VIEW IF EXISTS nodes")
+        conn.execute("CREATE TEMP VIEW nodes AS SELECT * FROM nodes_native")
+        conn.execute("DROP VIEW IF EXISTS edges")
+        conn.execute("CREATE TEMP VIEW edges AS SELECT * FROM edges_native")
+        if merge and root:
+            _attach_codegraph_merge(conn, root)
+        _native_cache[cache_key] = (conn, now)
         return conn
     except Exception as e:
         logger.warning("[semantic] native 符号源打开失败(core=%s): %s", core_pid, e)
         return None
 
 
-def _open_native(root: Optional[str], project: Optional[str]) -> Optional[sqlite3.Connection]:
-    """core 分析库符号源入口：root → core_pid → 只读连接。任何失败 → None（降级路径）。"""
+def _attach_codegraph_merge(conn: sqlite3.Connection, root: str) -> bool:
+    """ATTACH codegraph.db 并把 nodes/edges 视图重建为 native∪codegraph 合并版。
+
+    失败(未初始化/CLI 未跑) → 恢复纯 native 视图并返回 False(调用方按 native 继续)。
+    """
+    try:
+        d = _cg_mod.cg_dir(root)
+        if not d or not os.path.isfile(os.path.join(d, "codegraph.db")):
+            return False
+        cg_db = os.path.join(d, "codegraph.db")
+        conn.execute("ATTACH DATABASE ? AS cg", (f"file:{cg_db}?mode=ro",))
+        pn = _cg_path_norm(root)
+        conn.execute("CREATE TEMP VIEW cg_nodes_norm AS SELECT "
+                     "id, kind, name, qualified_name, "
+                     f"{pn} AS file_path, "
+                     "start_line, end_line, start_column, end_column, "
+                     "signature, docstring, return_type FROM cg.nodes")
+        # native 边去重物化 + 探测索引(NOT EXISTS 过滤的性能前提, 否则大项目全表扫)
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS edges_dedup "
+                     "(kind TEXT, source TEXT, target TEXT)")
+        conn.execute("DELETE FROM edges_dedup")
+        conn.execute("INSERT INTO edges_dedup SELECT DISTINCT kind, source, target FROM edges_native")
+        conn.execute("CREATE INDEX IF NOT EXISTS temp.idx_edges_dedup ON edges_dedup(kind, source, target)")
+        # 身份重合映射: cg 节点 → 同 (file_path, name, kind 归并类) 的 native 节点 id
+        conn.execute("CREATE TEMP VIEW cg_id_map AS SELECT c.id AS cg_id, n.id AS native_id "
+                     "FROM cg_nodes_norm c JOIN nodes_native n "
+                     "ON n.file_path = c.file_path AND n.name = c.name "
+                     f"AND {_kg_class('n.kind')} = {_kg_class('c.kind')}")
+        # 不一致可观测: 漂移 = 身份重合但行号不同(一方过期信号)
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS merge_stats (k TEXT PRIMARY KEY, v INTEGER)")
+        conn.execute("DELETE FROM merge_stats")
+        conn.execute("INSERT INTO merge_stats VALUES "
+                     "('native_nodes', (SELECT COUNT(*) FROM nodes_native)), "
+                     "('cg_nodes', (SELECT COUNT(*) FROM cg_nodes_norm)), "
+                     "('cg_mapped', (SELECT COUNT(*) FROM cg_id_map)), "
+                     "('line_drift', (SELECT COUNT(*) FROM cg_id_map m "
+                     "JOIN cg_nodes_norm c ON c.id = m.cg_id "
+                     "JOIN nodes_native n ON n.id = m.native_id "
+                     "WHERE n.start_line != c.start_line))")
+        conn.execute("DROP VIEW IF EXISTS nodes")
+        conn.execute("CREATE TEMP VIEW nodes AS "
+                     "SELECT id, kind, name, qualified_name, file_path, start_line, end_line, "
+                     "start_column, end_column, signature, docstring, return_type FROM nodes_native "
+                     "UNION ALL "
+                     "SELECT 'cg:' || id, kind, name, qualified_name, file_path, start_line, end_line, "
+                     "start_column, end_column, signature, docstring, return_type "
+                     "FROM cg_nodes_norm c WHERE NOT EXISTS "
+                     "(SELECT 1 FROM cg_id_map m WHERE m.cg_id = c.id)")
+        conn.execute("DROP VIEW IF EXISTS edges")
+        conn.execute("CREATE TEMP VIEW edges AS "
+                     "SELECT source, target, kind, line, col, metadata FROM edges_native "
+                     "UNION ALL "
+                     "SELECT COALESCE(m1.native_id, 'cg:' || e.source) AS source, "
+                     "COALESCE(m2.native_id, 'cg:' || e.target) AS target, "
+                     "e.kind, e.line, e.col, "
+                     "json_object('resolvedBy', 'codegraph', 'confidence', 'exact') AS metadata "
+                     "FROM cg.edges e "
+                     "LEFT JOIN cg_id_map m1 ON m1.cg_id = e.source "
+                     "LEFT JOIN cg_id_map m2 ON m2.cg_id = e.target "
+                     "WHERE NOT EXISTS (SELECT 1 FROM edges_dedup d "
+                     "WHERE d.kind = e.kind "
+                     "AND d.source = COALESCE(m1.native_id, 'cg:' || e.source) "
+                     "AND d.target = COALESCE(m2.native_id, 'cg:' || e.target))")
+        return True
+    except Exception as e:
+        logger.warning("[semantic] codegraph 合并挂载失败, 回退纯 native: %s", e)
+        try:
+            conn.execute("DETACH DATABASE cg")
+        except Exception:
+            pass
+        try:
+            conn.execute("DROP VIEW IF EXISTS nodes")
+            conn.execute("CREATE TEMP VIEW nodes AS SELECT * FROM nodes_native")
+            conn.execute("DROP VIEW IF EXISTS edges")
+            conn.execute("CREATE TEMP VIEW edges AS SELECT * FROM edges_native")
+        except Exception:
+            pass
+        return False
+
+
+def _open_native(root: Optional[str], project: Optional[str],
+                 merge: bool = False) -> Optional[sqlite3.Connection]:
+    """core 分析库符号源入口：root → core_pid → 只读连接。任何失败 → None（降级路径）。
+
+    merge=True 时连接携带 codegraph ATTACH 合并视图(auto 语义)，native 优先。
+    """
     try:
         pid = _resolve_core_pid(root)
         if not pid:
             return None
-        return _open_core_conn(pid)
+        return _open_core_conn(pid, root=root or "", merge=merge)
     except Exception as e:
         logger.warning("[semantic] native 符号源打开失败: %s", e)
         return None
@@ -364,16 +487,22 @@ def open_symbol_conn(root: Optional[str], project: Optional[str]
 
     on   → 仅 codegraph（缺失 → (None, 'codegraph')，调用方按缺失降级）；
     off  → 仅 native（不触碰用户项目目录，零外部 CLI）；
-    auto → codegraph 可用则用之，否则 native（质量持平，如实标注来源）。
+    auto → 1+1 合并(默认，native 优先)：native 可用时 ATTACH codegraph 建
+           合并视图(source='merged')；native 缺失 → 纯 codegraph；双缺 → native 标签降级。
     """
     mode = effective_mode()
-    if mode in ('on', 'auto'):
+    if mode == 'on':
         conn = _cg_mod._open_cg(root) if root else None
         if conn is not None:
             return conn, 'codegraph'
-        if mode == 'on':
-            return None, 'codegraph'
-    native = _open_native(root, project)
+        return None, 'codegraph'
+    merge = (mode == 'auto')
+    native = _open_native(root, project, merge=merge)
     if native is not None:
-        return native, 'native'
+        return native, ('merged' if merge else 'native')
+    if merge:
+        # native 不可用 → 纯 codegraph
+        conn = _cg_mod._open_cg(root) if root else None
+        if conn is not None:
+            return conn, 'codegraph'
     return None, 'native'

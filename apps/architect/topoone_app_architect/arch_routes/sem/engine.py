@@ -1145,7 +1145,7 @@ def extract_scope(root: Optional[str], project: Optional[str],
     # degraded 归因：index_missing=代码图谱索引缺失(与 LLM 无关)；llm_disabled=显式关 LLM；
     # heuristic_fallback=定向管线零产出走旧启发式。供前端按真实原因提示。
     _src = ctx.get("source") or "live"
-    degraded = _src not in ("codegraph", "native")   # native 质量持平 → 非降级
+    degraded = _src not in ("codegraph", "native", "merged")   # native 质量持平(merged=1+1 合并) → 非降级
     reason = "index_missing" if degraded else ""
     logger.info(
         "[semantic] extract_scope 范围 %s(%s) level=%s kinds=%s files=%d symbols=%d "
@@ -1196,7 +1196,7 @@ def extract_scope(root: Optional[str], project: Optional[str],
     except Exception as e:
         logger.warning("[semantic] node briefs after extract failed: %s", e)
     _stale = {}
-    if _src == 'native':
+    if _src in ('native', 'merged'):
         try:
             from .symbols import symbol_source_state
             _ns = symbol_source_state(root, project)
@@ -4236,8 +4236,9 @@ async def api_codegraph_status(root: Optional[str] = None, project: Optional[str
     _root = _root or ''
     # native 统计（root 优先于 codegraph_status 内部上下文解析）
     _core_pid = _resolve_core_pid(_root)
+    _merge = (mode == 'auto')
     if _core_pid:
-        _conn = _open_core_conn(_core_pid)
+        _conn = _open_core_conn(_core_pid, root=_root, merge=_merge)
         if _conn is not None:
             try:
                 st['corePid'] = _core_pid
@@ -4245,6 +4246,12 @@ async def api_codegraph_status(root: Optional[str] = None, project: Optional[str
                 st['nativeEdges'] = _conn.execute("SELECT COUNT(*) FROM graph_edge").fetchone()[0]
             except Exception:
                 st['nativeNodes'] = st['nativeEdges'] = 0
+            if _merge:
+                try:
+                    st['mergeStats'] = {r[0]: r[1] for r in
+                                        _conn.execute("SELECT k, v FROM merge_stats").fetchall()}
+                except Exception:
+                    pass
         else:
             st['corePid'] = _core_pid
             st['nativeNodes'] = st['nativeEdges'] = 0
@@ -4254,6 +4261,7 @@ async def api_codegraph_status(root: Optional[str] = None, project: Optional[str
                "kv": kv_mode(), "source": "env" if os.environ.get("ARCH_CODEGRAPH") else ("kv" if kv_mode() else "default"),
                "corePid": st.get('corePid', ''),
                "native": {"nodes": st.get('nativeNodes', 0), "edges": st.get('nativeEdges', 0)},
+               "mergeStats": st.get('mergeStats'),
                "state": {"head": ns['head'], "lastHead": ns['lastHead'],
                          "dirty": ns['dirty'], "stale": ns['stale'],
                          "staleCount": len(ns['staleFiles'])}})

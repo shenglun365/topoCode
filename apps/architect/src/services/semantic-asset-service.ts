@@ -205,6 +205,8 @@ export interface CodegraphStatus {
   source: 'env' | 'kv' | 'default'
   corePid?: string
   native?: { nodes?: number; edges?: number }
+  /** auto 合并语义: native∪codegraph 合并统计(仅 auto+codegraph 可用时返回)。 */
+  mergeStats?: { nativeNodes?: number; cgNodes?: number; cgMapped?: number; lineDrift?: number }
   state?: {
     head: string
     lastHead: string
