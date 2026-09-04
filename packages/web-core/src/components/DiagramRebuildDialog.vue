@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { mermaidParseErrorDetail } from '../services/render'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   visible: boolean
@@ -64,7 +67,7 @@ async function renderPreview() {
       previewSvg.value = result.svg
     }
   } catch (e: any) {
-    previewError.value = mermaidParseErrorDetail(e) || '渲染失败'
+    previewError.value = mermaidParseErrorDetail(e) || t('diagram.renderFailed')
   } finally {
     previewLoading.value = false
   }
@@ -89,18 +92,18 @@ function onOverlayClick(e: MouseEvent) {
     <div v-if="visible" class="dialog-overlay" @click="onOverlayClick">
       <div class="dialog-panel">
         <div class="dialog-header">
-          <span class="dialog-title">图重建确认</span>
+          <span class="dialog-title">{{ t('diagram.rebuildConfirmTitle') }}</span>
           <button class="dialog-close" @click="onCancel">&times;</button>
         </div>
 
         <div class="dialog-body">
           <div class="code-section">
             <div class="code-panel original-panel">
-              <div class="code-panel-title">原始代码</div>
+              <div class="code-panel-title">{{ t('diagram.originalCode') }}</div>
               <pre class="code-pre"><code>{{ originalCode }}</code></pre>
             </div>
             <div class="code-panel edit-panel">
-              <div class="code-panel-title">重建后代码 <span class="editable-badge">可编辑</span></div>
+              <div class="code-panel-title">{{ t('diagram.rebuiltCode') }} <span class="editable-badge">{{ t('diagram.editable') }}</span></div>
               <textarea
                 class="code-textarea"
                 v-model="editCode"
@@ -111,9 +114,9 @@ function onOverlayClick(e: MouseEvent) {
           </div>
 
           <div class="preview-section">
-            <div class="preview-title">效果预览</div>
+            <div class="preview-title">{{ t('diagram.preview') }}</div>
             <div class="preview-content">
-              <div v-if="previewLoading" class="preview-loading">渲染中…</div>
+              <div v-if="previewLoading" class="preview-loading">{{ t('diagram.rendering') }}</div>
               <div v-else-if="previewError" class="preview-error">{{ previewError }}</div>
               <div v-else class="preview-svg" v-html="previewSvg"></div>
             </div>
@@ -121,8 +124,8 @@ function onOverlayClick(e: MouseEvent) {
         </div>
 
         <div class="dialog-footer">
-          <button class="btn-cancel" @click="onCancel">取消</button>
-          <button class="btn-confirm" @click="onConfirm">确认替换</button>
+          <button class="btn-cancel" @click="onCancel">{{ t('diagram.cancel') }}</button>
+          <button class="btn-confirm" @click="onConfirm">{{ t('diagram.confirmReplace') }}</button>
         </div>
       </div>
     </div>

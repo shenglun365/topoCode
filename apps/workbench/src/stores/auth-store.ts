@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import i18n from '@/i18n'
 import type { UserProfile, TransactionRecord } from '@/types'
 import { authService } from '@/services/auth-service'
 
@@ -89,7 +90,7 @@ export const useAuthStore = defineStore('auth', () => {
       saveSession(result.token, result.user)
       return true
     } catch (e: any) {
-      error.value = e.message || '登录失败'
+      error.value = e.message || i18n.global.t('auth.error.loginFailed')
       return false
     } finally {
       loading.value = false
@@ -104,7 +105,7 @@ export const useAuthStore = defineStore('auth', () => {
       saveSession(result.token, result.user)
       return true
     } catch (e: any) {
-      error.value = e.message || '验证码错误或已过期'
+      error.value = e.message || i18n.global.t('auth.error.invalidCode')
       return false
     } finally {
       loading.value = false
@@ -119,7 +120,7 @@ export const useAuthStore = defineStore('auth', () => {
       saveSession(result.token, result.user)
       return true
     } catch (e: any) {
-      error.value = e.message || '注册失败'
+      error.value = e.message || i18n.global.t('auth.error.registrationFailed')
       return false
     } finally {
       loading.value = false

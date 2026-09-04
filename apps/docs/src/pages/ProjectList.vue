@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as api from '@topo/web-core/services/api'
-import { t } from '@topo/web-core/i18n/web-locales'
 import type { Project, Task } from '@topo/web-core/types/domain'
 import { AppToolbar, readFontSize } from '@topo/web-core/shell'
+
+const { t } = useI18n()
 
 const fontSize = ref(readFontSize())
 
@@ -95,28 +97,28 @@ onMounted(async () => {
   <div class="container">
     <AppToolbar
       app-key="docs"
-      title="TopoCode 文档"
+      :title="t('projectList.title')"
       :font-size="fontSize"
       :font-targets="['--content-font-size']"
     />
     <div class="toolbar">
       <form @submit.prevent="page = 1" style="display:flex;gap:8px;flex:1;align-items:center">
-        <input v-model="search" type="text" placeholder="搜索项目/任务..." />
-        <button type="submit">搜索</button>
+        <input v-model="search" type="text" :placeholder="t('projectList.searchPlaceholder')" />
+        <button type="submit">{{ t('projectList.search') }}</button>
       </form>
       <select v-model="pageSize">
-        <option :value="50">50条/页</option>
-        <option :value="100">100条/页</option>
-        <option :value="200">200条/页</option>
+        <option :value="50">{{ t('projectList.perPage', { n: 50 }) }}</option>
+        <option :value="100">{{ t('projectList.perPage', { n: 100 }) }}</option>
+        <option :value="200">{{ t('projectList.perPage', { n: 200 }) }}</option>
       </select>
-      <span class="info">共 {{ allFlattened.length }} 条</span>
+      <span class="info">{{ t('projectList.total', { n: allFlattened.length }) }}</span>
       <a href="/chat" target="_blank" class="ai-link">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        AI助手
+        {{ t('projectList.aiAssistant') }}
       </a>
     </div>
 
-    <div v-if="loading" class="empty">加载中...</div>
+    <div v-if="loading" class="empty">{{ t('common.loading') }}</div>
     <template v-else>
       <div v-for="(item, idx) in pageItems" :key="`${item.project.id}-${item.task?.id || 'no-task'}`">
         <div v-if="idx === 0 || pageItems[idx-1].project.id !== item.project.id" class="project">
@@ -124,7 +126,7 @@ onMounted(async () => {
             <span class="arrow" :class="{ open: expandedProjects.has(item.project.id) }">▶</span>
             <span class="status-dot" :class="projectHasDocs(item.project.id) ? 'done' : 'pending'"></span>
             {{ item.project.name }}
-            <span v-if="item.project.isResource" class="badge badge-resource">资源中心导入</span>
+            <span v-if="item.project.isResource" class="badge badge-resource">{{ t('projectList.resourceImport') }}</span>
           </div>
           <div class="project-tasks" :class="{ open: expandedProjects.has(item.project.id) }">
             <template v-if="item.task">
@@ -133,18 +135,18 @@ onMounted(async () => {
                 <a v-if="(item.task as any).hasDoc" :href="`/doc?taskId=${item.task.id}&docId=overall-${item.task.id}`">{{ item.task.name }}</a>
                 <span v-else class="task-name-pending">{{ item.task.name }}</span>
                 <span class="status-label" :class="(item.task as any).hasDoc ? 'done' : 'pending'">
-                  {{ (item.task as any).hasDoc ? '已生成' : '未生成' }}
+                  {{ (item.task as any).hasDoc ? t('projectList.generated') : t('projectList.notGenerated') }}
                 </span>
               </div>
             </template>
             <template v-else>
-              <div class="task-item no-task">资源项目 — 无需分析任务</div>
+              <div class="task-item no-task">{{ t('projectList.resourceNoTask') }}</div>
             </template>
           </div>
         </div>
       </div>
 
-      <div v-if="!allFlattened.length" class="empty">暂无匹配结果</div>
+      <div v-if="!allFlattened.length" class="empty">{{ t('projectList.noMatch') }}</div>
 
       <div v-if="totalPages > 1" class="pagination">
         <a v-if="page > 1" href="#" @click.prevent="page = page - 1">‹</a>

@@ -41,4 +41,22 @@ const overrides: Record<string, string> = {
   xiaohongshu: '小红书',
 }
 
-export default { auth: { ...authZh, ...overrides } }
+export default { auth: { ...authZh, ...overrides,
+  validation: {
+    requireAccount: '请填写邮箱或手机号',
+    requireCode: '请填写验证码',
+    requirePassword: '请填写密码',
+  },
+  error: {
+    invalidCode: '验证码错误或已过期',
+    invalidCredentials: '邮箱或密码错误',
+    registrationFailed: '注册失败',
+    loginFailed: '登录失败',
+  },
+  placeholder: {
+    account: '邮箱 / 手机号',
+    confirmPassword: '确认新密码',
+    newPassword: '新密码（至少6位）',
+    verificationCode: '请输入验证码',
+  },
+} }

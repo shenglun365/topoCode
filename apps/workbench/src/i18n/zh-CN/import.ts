@@ -1,5 +1,9 @@
 export default { import: {
   loading: '导入中...',
+  scanFiles: '正在扫描文件...',
+  writeData: '正在写入数据...',
+  importingPhase: '正在导入...',
+  importProjectTitle: '项目导入中，请稍候...',
   error: {
     invalidPath: '无效的路径',
     failed: '导入失败',

@@ -121,7 +121,7 @@ function commName(item: CommunityItem): string {
 }
 
 function levelLabel(lv: string): string {
-  if (lv === 'L0') return t('report.l0Community', 'L0 社区')
+  if (lv === 'L0') return t('report.l0Community')
   const num = lv.slice(1)
   return t('report.lxCommunity', { level: num })
 }
@@ -169,7 +169,7 @@ function handleExternalTagClick(name: string, count: number) {
       v-if="!isExternalTab"
       class="ctv-level-filter"
     >
-      <span class="level-filter-label">{{ t('report.level', '层级') }}:</span>
+      <span class="level-filter-label">{{ t('report.level') }}:</span>
       <button
         v-for="lv in props.availableLevels"
         :key="lv"
@@ -204,7 +204,7 @@ function handleExternalTagClick(name: string, count: number) {
         v-if="filteredCommunities.length === 0"
         class="arch-empty"
       >
-        {{ props.search ? t('report.noSearchResults', '无匹配社区') : t('report.noCommunities', '该视角下无社区数据') }}
+        {{ props.search ? t('report.noSearchResults') : t('report.noCommunities') }}
       </div>
     </div>
 
@@ -242,13 +242,13 @@ function handleExternalTagClick(name: string, count: number) {
         v-if="props.edgeType === 'EXTERNAL_INCLUDE' && (!props.externalStats.externalDeps || props.externalStats.externalDeps.length === 0)"
         class="arch-empty"
       >
-        {{ t('report.noCommunities', '无外部依赖数据') }}
+        {{ t('report.noCommunities') }}
       </div>
       <div
         v-if="props.edgeType === 'EXTERNAL_CALL' && (!props.externalStats.externalCalls || props.externalStats.externalCalls.length === 0)"
         class="arch-empty"
       >
-        {{ t('report.noCommunities', '无外部调用数据') }}
+        {{ t('report.noCommunities') }}
       </div>
     </div>
 
@@ -256,7 +256,7 @@ function handleExternalTagClick(name: string, count: number) {
       v-if="isExternalTab && !props.externalStats"
       class="arch-empty"
     >
-      {{ t('report.noCommunities', '该视角下无数据') }}
+      {{ t('report.noCommunities') }}
     </div>
 
     <div
@@ -269,7 +269,7 @@ function handleExternalTagClick(name: string, count: number) {
         :disabled="page <= 1"
         @click="page--"
       >
-        {{ t('common.prev', '上一页') }}
+        {{ t('common.prev') }}
       </button>
       <span class="ctv-page-info">{{ totalPages > 1 ? `${page} / ${totalPages}` : '' }} ({{ filteredCommunities.length }})</span>
       <button
@@ -278,7 +278,7 @@ function handleExternalTagClick(name: string, count: number) {
         :disabled="page >= totalPages"
         @click="page++"
       >
-        {{ t('common.next', '下一页') }}
+        {{ t('common.next') }}
       </button>
     </div>
   </div>

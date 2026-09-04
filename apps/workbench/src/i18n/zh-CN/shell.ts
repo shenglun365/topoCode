@@ -1,5 +1,6 @@
 export default { shell: {
   topBar: {
+    brandTitle: 'TopoCode 知识库管理',
     file: '文件',
     contact: '联系方式',
     checkUpdate: '检查版本升级',
@@ -65,6 +66,7 @@ export default { shell: {
     pythonBackend: 'Python 后端',
     backendDisconnected: '后端未连接',
     backendRestarting: '后端重启中',
+    backendError: '后端异常',
     testModel: '点击测试模型连接',
     testing: '测试中...',
     branch: '分支',
@@ -99,6 +101,14 @@ export default { shell: {
     retryHint: '请检查终端输出的错误日志后重试。',
     retry: '重试启动',
     dismiss: '关闭提示',
+  },
+  crashDialog: {
+    title: '后端异常崩溃',
+    intro: '后端服务异常退出，错误信息：',
+    time: '时间：{time}',
+    hint: '点击"上报"将打开邮件客户端，请附上日志文件以便排查。',
+    report: '上报给开发者',
+    dismiss: '忽略',
   },
 },
 }

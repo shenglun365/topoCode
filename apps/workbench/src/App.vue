@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useThemeStore } from '@/stores/theme'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useModelConfigStore } from '@/stores/model-config-store'
@@ -7,6 +8,7 @@ import { useProjectStore } from '@/stores/project'
 import AppShell from '@/components/shell/AppShell.vue'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
 
+const { t } = useI18n()
 const themeStore = useThemeStore()
 const settingsStore = useSettingsStore()
 const modelConfigStore = useModelConfigStore()
@@ -15,9 +17,9 @@ const { showId, componentId } = useComponentId('AP-001')
 
 const importPhaseLabel = computed(() => {
   switch (projectStore.importStatus) {
-    case 'scan': return '正在扫描文件...'
-    case 'write': return '正在写入数据...'
-    default: return '正在导入...'
+    case 'scan': return t('import.scanFiles')
+    case 'write': return t('import.writeData')
+    default: return t('import.importingPhase')
   }
 })
 
@@ -48,7 +50,7 @@ onMounted(async () => {
     >
       <div class="import-block-card">
         <div class="import-block-spinner" />
-        <span class="import-block-title">项目导入中，请稍候...</span>
+        <span class="import-block-title">{{ t('import.importProjectTitle') }}</span>
         <span class="import-block-phase">{{ importPhaseLabel }}</span>
         <div class="import-block-bar">
           <div

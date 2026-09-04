@@ -485,7 +485,7 @@ function getConfigSummary(task: AnalysisTask): string {
           <button
             v-if="task.status === 'done'"
             class="btn btn-primary btn-xs"
-            :title="t('report.structuralReport', '结构分析')"
+            :title="t('report.structuralReport')"
             @click="onOpenAnalysis(task)"
           >
             <DocumentTextIcon class="w-3.5 h-3.5" />
@@ -543,7 +543,7 @@ function getConfigSummary(task: AnalysisTask): string {
         <div class="confirm-dialog">
           <div class="confirm-title">
             <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
-            <span>{{ t('import.fileCountExceed', '文件数量过多') }}</span>
+            <span>{{ t('import.fileCountExceed') }}</span>
           </div>
           <div class="confirm-body">
             {{ fileCountExceedMessage }}
@@ -553,7 +553,7 @@ function getConfigSummary(task: AnalysisTask): string {
               class="btn btn-primary"
               @click="showFileCountExceedDialog = false"
             >
-              {{ t('common.ok', '确定') }}
+              {{ t('common.ok') }}
             </button>
           </div>
         </div>

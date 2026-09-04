@@ -267,7 +267,7 @@ function isExtensionSupported(ext: string): boolean {
   return SUPPORTED_LANGUAGES.has(ext.toLowerCase())
 }
 
-const unsupportedTooltip = t('analysis.unsupportedExtension', '当前不支持解析此文件类型')
+const unsupportedTooltip = t('analysis.unsupportedExtension')
 
 // Remove a selected extension
 function removeExtension(ext: string) {
@@ -426,7 +426,7 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
     <div class="stats-section">
       <div class="section-header">
         <DocumentTextIcon class="w-4 h-4" />
-        <span>{{ t('analysis.languageScope', '选择语言类型') }}</span>
+        <span>{{ t('analysis.languageScope') }}</span>
         <div class="section-actions">
           <button
             class="text-btn"
@@ -513,7 +513,7 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
           class="text-btn"
           @click="showAllExtensions = !showAllExtensions"
         >
-          {{ showAllExtensions ? t('analysis.showLess', '收起') : t('analysis.showMore', { n: unsupportedExtensions.length }) }}
+          {{ showAllExtensions ? t('analysis.showLess') : t('analysis.showMore', { n: unsupportedExtensions.length }) }}
         </button>
       </div>
     </div>
@@ -548,7 +548,7 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
         v-if="selectedExtensions.length === 0"
         class="section-hint"
       >
-        {{ t('analysis.selectLanguageFirst', '请先选择语言类型') }}
+        {{ t('analysis.selectLanguageFirst') }}
       </div>
 
       <div
@@ -654,14 +654,14 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
         class="stats-warn"
       >
         <ExclamationTriangleIcon class="w-3.5 h-3.5" />
-        {{ t('analysis.fileCountWarn', '文件数超过5000，建议削减解析范围') }}
+        {{ t('analysis.fileCountWarn') }}
       </span>
       <span
         v-if="fileCountLevel === 'block'"
         class="stats-error"
       >
         <ExclamationTriangleIcon class="w-3.5 h-3.5" />
-        {{ t('analysis.fileCountBlock', '文件数超过10000，必须缩小解析范围') }}
+        {{ t('analysis.fileCountBlock') }}
       </span>
     </div>
 

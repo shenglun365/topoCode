@@ -24,11 +24,11 @@ const executing = ref(false)
 const doneMsg = ref('')
 
 const STAGES = [
-  { key: 'ast', label: t('version.stageAst', 'AST 解析（必更）') },
-  { key: 'graph', label: t('version.stageGraph', '调用/依赖/图节点（必更）') },
-  { key: 'presummary', label: t('version.stagePresummary', '文件预摘要（建议）') },
-  { key: 'community', label: t('version.stageCommunity', '组件语义/局部重划（可选）') },
-  { key: 'llm', label: t('version.stageLlm', 'LLM 深度语义（可选）') },
+  { key: 'ast', label: t('version.stageAst') },
+  { key: 'graph', label: t('version.stageGraph') },
+  { key: 'presummary', label: t('version.stagePresummary') },
+  { key: 'community', label: t('version.stageCommunity') },
+  { key: 'llm', label: t('version.stageLlm') },
 ]
 
 const isMajor = computed(() => preview.value?.changeType === 'major')
@@ -38,7 +38,7 @@ async function load() {
   try {
     requests.value = await ipc.knowledge.pendingUpdates(props.projectId)
   } catch (e: any) {
-    error.value = e?.message || t('version.loadFailed', '加载失败')
+    error.value = e?.message || t('version.loadFailed')
   } finally {
     loading.value = false
   }
@@ -66,7 +66,7 @@ async function doConfirm() {
       Object.entries(stages).map(([k, v]: any) => [k, !!(v.suggested && v.implemented)])
     )
   } catch (e: any) {
-    error.value = e?.message || t('version.confirmFailed', '确认失败')
+    error.value = e?.message || t('version.confirmFailed')
   } finally {
     busyId.value = ''
   }
@@ -84,12 +84,12 @@ async function execute() {
       requestId: activeRequest.value.id,
     })
     doneMsg.value = result.changed
-      ? `${t('version.done', '更新完成')} ${result.version?.id || ''}`
-      : t('version.noChange', '未检测到代码变化')
+      ? `${t('version.done')} ${result.version?.id || ''}`
+      : t('version.noChange')
     await load()
     emit('updated')
   } catch (e: any) {
-    error.value = e?.message || t('version.executeFailed', '执行失败')
+    error.value = e?.message || t('version.executeFailed')
   } finally {
     executing.value = false
   }
@@ -112,7 +112,7 @@ function close() {
 onMounted(load)
 
 function statusLabel(s: string): string {
-  return ({ pending: t('version.statusPending', '待处理'), confirmed: t('version.statusConfirmed', '已确认'), done: t('version.statusDone', '已完成'), cancelled: t('version.statusCancelled', '已取消') } as Record<string, string>)[s] || s
+  return ({ pending: t('version.statusPending'), confirmed: t('version.statusConfirmed'), done: t('version.statusDone'), cancelled: t('version.statusCancelled') } as Record<string, string>)[s] || s
 }
 </script>
 
@@ -121,7 +121,7 @@ function statusLabel(s: string): string {
     <div class="dialog-overlay" @click.self="close">
       <div class="dialog-card version-dialog">
         <div class="dialog-header">
-          <span class="dialog-title">{{ t('version.title', 'KB 基线更新') }}</span>
+          <span class="dialog-title">{{ t('version.title') }}</span>
           <button class="dialog-close" @click="close">&times;</button>
         </div>
 
@@ -133,9 +133,9 @@ function statusLabel(s: string): string {
 
           <!-- 待更新标记列表 -->
           <div v-if="!activeRequest" class="req-list">
-            <div v-if="loading" class="version-empty">{{ t('version.loading', '加载中...') }}</div>
+            <div v-if="loading" class="version-empty">{{ t('version.loading') }}</div>
             <div v-else-if="requests.length === 0" class="version-empty">
-              {{ t('version.noRequests', '暂无待更新标记（architect 发起后在此确认）') }}
+              {{ t('version.noRequests') }}
             </div>
             <div v-for="req in requests" :key="req.id" class="req-item">
               <div class="req-main">
@@ -150,10 +150,10 @@ function statusLabel(s: string): string {
               </div>
               <div v-if="req.status === 'pending'" class="req-actions">
                 <button class="btn btn-primary btn-sm" @click="startConfirm(req)">
-                  {{ t('version.confirm', '确认') }}
+                  {{ t('version.confirm') }}
                 </button>
                 <button class="btn btn-ghost btn-sm" @click="cancel(req)">
-                  {{ t('common.cancel', '取消') }}
+                  {{ t('common.cancel') }}
                 </button>
               </div>
             </div>
@@ -162,62 +162,62 @@ function statusLabel(s: string): string {
           <!-- 确认流程 -->
           <div v-else class="confirm-flow">
             <div v-if="!preview" class="confirm-method">
-              <div class="confirm-method-title">{{ t('version.pullMethod', '拉取方式') }}</div>
+              <div class="confirm-method-title">{{ t('version.pullMethod') }}</div>
               <label class="method-option">
                 <input v-model="confirmMethod" type="radio" value="pull">
-                <span>{{ t('version.methodPull', 'git pull（同分支前进）') }}</span>
+                <span>{{ t('version.methodPull') }}</span>
               </label>
               <label class="method-option">
                 <input v-model="confirmMethod" type="radio" value="worktree">
-                <span>{{ t('version.methodWorktree', 'git worktree（切分支/多工作区）') }}</span>
+                <span>{{ t('version.methodWorktree') }}</span>
               </label>
               <div class="confirm-actions">
                 <button class="btn btn-ghost btn-sm" @click="activeRequest = null">
-                  {{ t('common.back', '返回') }}
+                  {{ t('common.back') }}
                 </button>
                 <button class="btn btn-primary btn-sm" :disabled="busyId === 'confirm'" @click="doConfirm">
-                  {{ busyId === 'confirm' ? t('common.loading', '处理中...') : t('version.pullNow', '拉取并预览') }}
+                  {{ busyId === 'confirm' ? t('common.loading') : t('version.pullNow') }}
                 </button>
               </div>
             </div>
 
             <div v-else class="preview">
               <div class="preview-head">
-                <span class="preview-title">{{ t('version.preview', '变更预览') }}</span>
-                <span v-if="isMajor" class="badge-major">{{ t('version.major', '分支切换/Major') }}</span>
+                <span class="preview-title">{{ t('version.preview') }}</span>
+                <span v-if="isMajor" class="badge-major">{{ t('version.major') }}</span>
                 <span class="badge-risk" :class="preview.risk">{{ t(`version.risk.${preview.risk || 'low'}`, preview.risk || 'low') }}</span>
               </div>
               <div class="delta-cards">
                 <div class="delta-card add">
-                  <b>{{ preview.delta?.addedCount ?? 0 }}</b><span>{{ t('version.added', '新增') }}</span>
+                  <b>{{ preview.delta?.addedCount ?? 0 }}</b><span>{{ t('version.added') }}</span>
                 </div>
                 <div class="delta-card mod">
-                  <b>{{ preview.delta?.modifiedCount ?? 0 }}</b><span>{{ t('version.modified', '修改') }}</span>
+                  <b>{{ preview.delta?.modifiedCount ?? 0 }}</b><span>{{ t('version.modified') }}</span>
                 </div>
                 <div class="delta-card del">
-                  <b>{{ preview.delta?.deletedCount ?? 0 }}</b><span>{{ t('version.deleted', '删除') }}</span>
+                  <b>{{ preview.delta?.deletedCount ?? 0 }}</b><span>{{ t('version.deleted') }}</span>
                 </div>
               </div>
 
               <div class="impact-line">
-                {{ t('version.impact', '变更影响') }}：AST {{ preview.impact?.ast?.filesToParse ?? 0 }} 文件 · 图节点 {{ preview.impact?.graph?.nodeIdsAffected ?? 0 }} · 受影响社区 {{ preview.impact?.community?.affectedCommunities ?? 0 }}
+                {{ t('version.impactDetail', { impact: t('version.impact'), files: preview.impact?.ast?.filesToParse ?? 0, nodes: preview.impact?.graph?.nodeIdsAffected ?? 0, communities: preview.impact?.community?.affectedCommunities ?? 0 }) }}
               </div>
 
               <div class="stage-list">
-                <div class="stage-title">{{ t('version.chooseStages', '选择更新环节') }}</div>
+                <div class="stage-title">{{ t('version.chooseStages') }}</div>
                 <label v-for="s in STAGES" :key="s.key" class="stage-option">
                   <input v-model="stageSelection[s.key]" type="checkbox" :disabled="['ast', 'graph'].includes(s.key)">
                   <span>{{ s.label }}</span>
                 </label>
-                <div class="stage-note">{{ t('version.stageNote', 'AST/图节点为必更；组件环节默认不重划，由你根据变化量决定。') }}</div>
+                <div class="stage-note">{{ t('version.stageNote') }}</div>
               </div>
 
               <div class="confirm-actions">
                 <button class="btn btn-ghost btn-sm" @click="activeRequest = null">
-                  {{ t('common.back', '返回') }}
+                  {{ t('common.back') }}
                 </button>
                 <button class="btn btn-primary btn-sm" :disabled="executing" @click="execute">
-                  {{ executing ? t('common.loading', '执行中...') : t('version.execute', '执行更新') }}
+                  {{ executing ? t('common.loading') : t('version.execute') }}
                 </button>
               </div>
             </div>

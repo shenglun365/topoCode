@@ -258,7 +258,7 @@ onMounted(async () => {
         <a
           href="#/"
           class="toolbar-btn"
-        >← {{ t('nav.backHome', '返回首页') }}</a>
+        >← {{ t('nav.backHome') }}</a>
         <a
           href="#/settings"
           class="toolbar-btn"
@@ -305,13 +305,13 @@ onMounted(async () => {
             <path d="M12 8v4" />
             <path d="M12 16h.01" />
           </svg>
-          <span class="banner-text">{{ t('auth.sessionExpired', '登录已过期，请重新登录') }}</span>
+          <span class="banner-text">{{ t('auth.sessionExpired') }}</span>
           <a
             href="/app/#/login"
             class="btn btn-primary btn-xs"
             style="flex-shrink:0;"
           >
-            {{ t('auth.login', '登录') }}
+            {{ t('auth.login') }}
           </a>
           <button
             class="btn btn-ghost btn-icon btn-xs"
@@ -350,7 +350,7 @@ onMounted(async () => {
           <div style="margin-bottom:16px;">
             <div style="display:flex; align-items:center; gap:8px;">
               <h2 style="font-size:calc(16px * var(--ui-scale)); font-weight:600;">
-                {{ t('resource.center', '资源中心') }}
+                {{ t('resource.center') }}
               </h2>
               <button
                 class="btn btn-ghost btn-icon btn-xs"
@@ -371,7 +371,7 @@ onMounted(async () => {
               </button>
             </div>
             <p style="font-size:calc(12px * var(--ui-scale)); color:var(--text-muted); margin-top:4px;">
-              {{ t('resource.centerDesc', '浏览和下载可导入的结构分析包') }}
+              {{ t('resource.centerDesc') }}
             </p>
           </div>
           <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap;">
@@ -392,7 +392,7 @@ onMounted(async () => {
               <input
                 class="search-input"
                 type="text"
-                :placeholder="t('resource.search', '搜索资源')"
+                :placeholder="t('resource.search')"
                 @input="onSearchInput"
               >
             </div>
@@ -402,13 +402,13 @@ onMounted(async () => {
               @change="onSortChange(($event.target as HTMLSelectElement).value, resourceStore.sortOrder)"
             >
               <option value="time">
-                {{ t('settings.sortByTime', '时间') }}
+                {{ t('settings.sortByTime') }}
               </option>
               <option value="name">
-                {{ t('settings.sortByName', '名称') }}
+                {{ t('settings.sortByName') }}
               </option>
               <option value="downloads">
-                {{ t('settings.sortByDownloads', '下载量') }}
+                {{ t('settings.sortByDownloads') }}
               </option>
             </select>
             <select
@@ -417,10 +417,10 @@ onMounted(async () => {
               @change="onSortChange(resourceStore.sortBy, ($event.target as HTMLSelectElement).value)"
             >
               <option value="desc">
-                {{ t('settings.sortDesc', '倒序') }}
+                {{ t('settings.sortDesc') }}
               </option>
               <option value="asc">
-                {{ t('settings.sortAsc', '正序') }}
+                {{ t('settings.sortAsc') }}
               </option>
             </select>
           </div>
@@ -458,12 +458,12 @@ onMounted(async () => {
               v-if="!auth.isAuthenticated"
               style="display:inline-flex; gap:4px; align-items:center;"
             >
-              <span style="font-size:calc(11px * var(--ui-scale)); color:var(--text-muted);">{{ resourceStore.meta?.labels?.login_hint || '登录后可下载资源' }}</span>
+              <span style="font-size:calc(11px * var(--ui-scale)); color:var(--text-muted);">{{ resourceStore.meta?.labels?.login_hint || t('resource.loginHint') }}</span>
               <a
                 href="/app/#/login"
                 class="btn btn-primary btn-xs"
               >
-                {{ t('auth.login', '登录') }}
+                {{ t('auth.login') }}
               </a>
             </div>
           </div>
@@ -477,7 +477,7 @@ onMounted(async () => {
             v-else-if="resourceStore.filteredResources.length === 0"
             style="text-align:center; padding:40px; color:var(--text-muted);"
           >
-            {{ t('resource.noResources', '暂无资源') }}
+            {{ t('resource.noResources') }}
           </div>
           <div
             v-else

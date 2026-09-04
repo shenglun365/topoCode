@@ -33,7 +33,13 @@ export default {
       noMatchingCommunity: '未找到匹配的社区。',
       noComponents: '未找到组件。请先打开左侧结构图加载社区列表。',
       startFailed: '启动失败: {msg}',
+      unknownFlags: '未知参数: {flags}。可用参数: {valid}',
+      unknownFlagsPresummary: '未知参数: {flags}。可用参数: -j N (并发1-5), --force',
+      unknownFlagsOverview: '未知参数: {flags}。可用: --force, -L zh/en',
+      unknownFlagsPipeline: '未知参数: {flags}。可用: -j N (并发1-5), --force, -L zh/en',
     },
+    blockArchCommand: '该指令属于**架构分析**功能组。请点击左侧导航栏的「架构分析」图标切换页面后使用。',
+    resourceNoReanalyze: '资源中心下载的项目不支持重新分析。如有疑问，请咨询客服。',
     select: {
       modeActive: '已激活',
       modeExited: '已退出',
@@ -80,6 +86,8 @@ export default {
     },
   },
   ai: {
+  chatSystemPrompt: '你是 TopoCode 代码分析助手，基于当前项目知识库回答问题，回答简明准确。',
+  chatWelcome: '你好！我是 AI 助手，可以针对当前任务与代码进行提问。',
     assistantTitle: 'AI 助手',
     chatTab: '对话',
     assistantWelcome: '你好！我是 TopoCode AI 助手，可以帮你解答软件使用问题。输入 /help 查看可用命令。',
@@ -88,6 +96,7 @@ export default {
     inputPlaceholder: '输入问题... (Shift+Enter 换行)',
     typing: 'AI 正在输入...',
     clearChat: '清空对话',
+    llmApiNotConfigured: 'LLM API 未配置',
   },
 
   // ====== 系统提示词：身份定义 ======
@@ -268,15 +277,15 @@ export default {
 
   // ====== 命令参考 ======
   helpCommands: `## 可用命令
-| 指令 | 说明 |
-|------|------|
-| /help / /帮助 | 显示本帮助 |
-| /select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed] | 组件选择模式。无参数时切换选择模式；--all 全选；--include/--call 按边类型筛选；--l0~--l5 按层级筛选；--clear 清除；--unanalyzed 只选未分析 |
-| /presummary [-j N] [--force] | 文件预摘要 P0→P1→P2。--force 强制覆盖，-j N 并发数 1-5 |
-| /analyze [-j N] [--force] [-L zh/en] | 批量组件分析。--force 强制覆盖，-j 并发，-L 语言 |
-| /overview [--force] [-L zh/en] | 生成整体架构概览 |
-| /pipeline [-j N] [--force] [-L zh/en] | 一键流水线：项目摘要→预摘要→组件分析→架构概览 |
-| /retry [--force] | 重新执行流水线 |
+{'|'} 指令 {'|'} 说明 {'|'}
+{'|'}------{'|'}------{'|'}
+{'|'} /help / /帮助 {'|'} 显示本帮助 {'|'}
+{'|'} /select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed] {'|'} 组件选择模式。无参数时切换选择模式；--all 全选；--include/--call 按边类型筛选；--l0~--l5 按层级筛选；--clear 清除；--unanalyzed 只选未分析 {'|'}
+{'|'} /presummary [-j N] [--force] {'|'} 文件预摘要 P0→P1→P2。--force 强制覆盖，-j N 并发数 1-5 {'|'}
+{'|'} /analyze [-j N] [--force] [-L zh/en] {'|'} 批量组件分析。--force 强制覆盖，-j 并发，-L 语言 {'|'}
+{'|'} /overview [--force] [-L zh/en] {'|'} 生成整体架构概览 {'|'}
+{'|'} /pipeline [-j N] [--force] [-L zh/en] {'|'} 一键流水线：项目摘要→预摘要→组件分析→架构概览 {'|'}
+{'|'} /retry [--force] {'|'} 重新执行流水线 {'|'}
 
 ## 交互模式
 - **自由对话**：输入 TopoCode 使用相关问题

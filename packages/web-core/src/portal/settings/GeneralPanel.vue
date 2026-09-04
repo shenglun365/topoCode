@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ipc } from '../../services/ipc'
 import { LocaleToggle } from '../../shell'
 import { authHeaders } from '../../services/api'
 import type { ImportConfig } from '../../types/ipc'
+
+const { t } = useI18n()
 
 /** 系统进程（经网关 /api/system/apps 代理 supervisor） */
 interface SystemApp {
@@ -38,7 +41,7 @@ async function loadApps() {
     appsError.value = ''
   } catch (e: any) {
     apps.value = []
-    appsError.value = `进程信息不可用：${e?.message || e}（需 supervisor 控制面）`
+    appsError.value = t('settings.general.appsError', { message: e?.message || e })
   }
 }
 
@@ -47,7 +50,7 @@ async function restartApp(label: string) {
   try {
     await fetch(`/api/system/apps/${label}/restart`, { method: 'POST', headers: authHeaders() })
   } catch (e: any) {
-    window.alert(`重启失败：${e?.message || e}`)
+    window.alert(t('settings.general.restartFailed', { message: e?.message || e }))
   } finally {
     restarting.value = null
     await loadApps()
@@ -66,34 +69,43 @@ onMounted(() => {
 
 <template>
   <div class="panel">
-    <h3>通用设置</h3>
+    <h3>{{ t('settings.tabs.general') }}</h3>
 
     <div class="section">
-      <h4>界面语言</h4>
+      <h4>{{ t('settings.general.language') }}</h4>
       <div class="row">
         <LocaleToggle @update:locale="onLocale" />
-        <span class="muted">全局统一存储（topoone-locale），chat/docs 正文翻译分批接入。</span>
+        <span class="muted">{{ t('settings.general.localeHint') }}</span>
       </div>
     </div>
 
     <div class="section">
-      <h4>导入设置</h4>
+      <h4>{{ t('settings.general.importSection') }}</h4>
       <div class="row">
-        <label>忽略模式
+        <label>{{ t('settings.general.ignoreMode') }}
           <select v-model="importConfig.ignoreMode">
             <option value="strict">strict</option>
             <option value="loose">loose</option>
           </select>
         </label>
-        <button class="btn btn-primary btn-sm" @click="saveImportConfig">保存导入配置</button>
+        <button class="btn btn-primary btn-sm" @click="saveImportConfig">{{ t('settings.general.saveImport') }}</button>
       </div>
+      <div class="row mirror-row">
+        <label class="mirror-label">{{ t('settings.general.mirrorRoot') }}</label>
+        <input
+          v-model="importConfig.sourceMirrorRoot"
+          class="input mirror-input font-mono"
+          :placeholder="t('settings.general.mirrorRootPlaceholder')"
+        >
+      </div>
+      <p class="muted">{{ t('settings.general.mirrorRootHint') }}</p>
     </div>
 
     <div class="section">
-      <h4>子系统进程与端口（只读）</h4>
+      <h4>{{ t('settings.general.appsSection') }}</h4>
       <p v-if="appsError" class="error">{{ appsError }}</p>
       <table v-else class="settings-table">
-        <thead><tr><th>进程</th><th>状态</th><th>PID</th><th>重启次数</th><th>操作</th></tr></thead>
+        <thead><tr><th>{{ t('settings.general.process') }}</th><th>{{ t('common.status') }}</th><th>PID</th><th>{{ t('settings.general.restartCount') }}</th><th>{{ t('common.actions') }}</th></tr></thead>
         <tbody>
           <tr v-for="a in apps" :key="a.label">
             <td>{{ a.label }}</td>
@@ -102,7 +114,7 @@ onMounted(() => {
             <td>{{ a.restart_count }}</td>
             <td>
               <button class="btn btn-ghost btn-xs" :disabled="restarting === a.label" @click="restartApp(a.label)">
-                {{ restarting === a.label ? '重启中…' : '重启' }}
+                {{ restarting === a.label ? t('common.restarting') : t('common.restart') }}
               </button>
             </td>
           </tr>
@@ -111,3 +123,18 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.mirror-row {
+  margin-top: calc(10px * var(--ui-scale, 1));
+}
+.mirror-label {
+  margin-right: calc(8px * var(--ui-scale, 1));
+  white-space: nowrap;
+}
+.mirror-input {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(12px * var(--ui-scale, 1));
+}
+</style>

@@ -36,7 +36,7 @@ export default { knowledge: {
   sortByType: 'By Type',
   sortByStatus: 'By Status',
   searchPlaceholder: 'Search projects/documents...',
-  totalItems: '{{count}} items total',
+  totalItems: '{count} items total',
   sortUpdatedDesc: 'Updated ↓',
   sortUpdatedAsc: 'Updated ↑',
   sortCreatedDesc: 'Created ↓',

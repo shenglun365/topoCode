@@ -206,9 +206,9 @@ async function copyLink() {
   const link = auth.shareLink || `https://topocode.cn/register?ref=${auth.referralCode}`
   try {
     await navigator.clipboard.writeText(link)
-    toast.value = t('auth.copied', '已复制分享链接')
+    toast.value = t('auth.copied')
   } catch {
-    toast.value = t('auth.copyFailed', '复制失败')
+    toast.value = t('auth.copyFailed')
   }
   setTimeout(() => { toast.value = '' }, 2000)
 }
@@ -226,7 +226,7 @@ function shareWechat() {
 function shareXiaohongshu() {
   const link = auth.shareLink || `https://topocode.cn/register?ref=${auth.referralCode}`
   navigator.clipboard.writeText(link)
-  toast.value = t('auth.copiedXhs', '已复制，请打开小红书粘贴分享')
+  toast.value = t('auth.copiedXhs')
   setTimeout(() => { toast.value = '' }, 2000)
 }
 
@@ -301,7 +301,7 @@ function formatDate(dateStr: string): string {
     </div>
     <div class="info-list">
       <div class="info-row">
-        <span class="info-label">{{ t('auth.username', '用户名') }}</span>
+        <span class="info-label">{{ t('auth.username') }}</span>
         <span
           v-if="!editingUsername"
           class="info-value"
@@ -340,7 +340,7 @@ function formatDate(dateStr: string): string {
         </div>
       </div>
       <div class="info-row">
-        <span class="info-label">{{ t('auth.email', '邮箱') }}</span>
+        <span class="info-label">{{ t('auth.email') }}</span>
         <span
           v-if="auth.user?.email"
           class="info-value"
@@ -480,7 +480,7 @@ function formatDate(dateStr: string): string {
         </div>
       </div>
       <div class="info-row">
-        <span class="info-label">{{ t('auth.phone', '手机号') }}</span>
+        <span class="info-label">{{ t('auth.phone') }}</span>
         <span
           v-if="auth.user?.phone"
           class="info-value"
@@ -619,7 +619,7 @@ function formatDate(dateStr: string): string {
         </div>
       </div>
       <div class="info-row">
-        <span class="info-label">{{ t('auth.password', '密码') }}</span>
+        <span class="info-label">{{ t('auth.password') }}</span>
         <span
           v-if="auth.user?.has_password"
           class="info-value"
@@ -642,21 +642,21 @@ function formatDate(dateStr: string): string {
         </span>
       </div>
       <div class="info-row">
-        <span class="info-label">{{ t('auth.registerTime', '注册时间') }}</span>
+        <span class="info-label">{{ t('auth.registerTime') }}</span>
         <span class="info-value">{{ formatDate(auth.user?.created_at || '') }}</span>
       </div>
       <div class="info-row">
-        <span class="info-label">{{ t('auth.points', '积分') }}</span>
+        <span class="info-label">{{ t('auth.points') }}</span>
         <span class="info-value points">{{ auth.points }}</span>
       </div>
     </div>
 
     <div class="referral-section">
       <div class="section-title">
-        {{ t('auth.referralTitle', '邀请好友') }}
+        {{ t('auth.referralTitle') }}
       </div>
       <div class="referral-code">
-        <span class="code-label">{{ t('auth.referralCode', '邀请码') }}</span>
+        <span class="code-label">{{ t('auth.referralCode') }}</span>
         <span class="code-value">{{ auth.referralCode }}</span>
       </div>
       <div
@@ -668,7 +668,7 @@ function formatDate(dateStr: string): string {
           class="qr-img"
           @click="showQr = true"
         >
-        <span class="qr-hint">{{ t('auth.qrHint', '扫码打开分享链接') }}</span>
+        <span class="qr-hint">{{ t('auth.qrHint') }}</span>
       </div>
       <div class="share-buttons">
         <button
@@ -688,11 +688,11 @@ function formatDate(dateStr: string): string {
             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
           </svg>
-          <span>{{ t('auth.copyLink', '复制链接') }}</span>
+          <span>{{ t('auth.copyLink') }}</span>
         </button>
         <button
           class="share-btn"
-          title="分享到微博"
+          :title="t('auth.shareToWeibo')"
           @click="shareWeibo"
         >
           <svg
@@ -705,11 +705,11 @@ function formatDate(dateStr: string): string {
             <path d="M43.531 12.132c.296 2.149-.319 4.011-1.552 4.093-2.056.137-1.287-1.408-1.412-3.246-.078-1.132-1.016-2.439-1.835-2.823-1.606-.752-4.093.548-4.093-1.693 0-1.664 1.443-1.491 2.259-1.553 3.574-.272 6.216 2.191 6.633 5.222z" />
             <path d="M27.019 26.246c3.007 9.088-12.66 13.314-15.525 5.504-1.917-5.223 2.686-9.377 7.48-9.879 4.093-.429 7.144 1.658 8.045 4.375zm-7.198 1.553c.638 1.104 2.105.311 1.976-.564-.154-1.013-1.989-.863-1.976.564zm-2.541 4.799c2.634-.627 2.988-5.588-.988-4.658-3.34.78-2.694 5.533.988 4.658z" />
           </svg>
-          <span>{{ t('auth.weibo', '微博') }}</span>
+          <span>{{ t('auth.weibo') }}</span>
         </button>
         <button
           class="share-btn"
-          title="分享到微信"
+          :title="t('auth.shareToWechat')"
           @click="shareWechat"
         >
           <svg
@@ -720,7 +720,7 @@ function formatDate(dateStr: string): string {
             <path d="m2499.7 1313.8c0-347.3-335.9-630.6-749.5-630.6s-747.2 283.3-747.2 630.6 335.9 630.6 749.5 630.6c80 0 155.4-9.1 226.2-29.7 20.6-4.6 43.4-2.3 64 6.9l185.1 100.5c11.4 6.9 27.4-4.6 22.8-18.3l-36.6-148.5c-4.6-22.8 2.3-45.7 22.8-59.4 160.1-116.5 262.9-287.9 262.9-482.1zm-1016.8-82.2c-57.1 0-102.8-45.7-102.8-102.8s45.7-102.8 102.8-102.8 102.8 45.7 102.8 102.8-45.7 102.8-102.8 102.8zm505 0c-57.1 0-102.8-45.7-102.8-102.8s45.7-102.8 102.8-102.8 102.8 45.7 102.8 102.8-48 102.8-102.8 102.8z" />
             <path d="m941.4 1316.1c0-386.1 365.6-699.2 818-699.2h34.3c-73.2-349.6-443.3-616.9-888.9-616.9-500.4 0-904.8 333.6-904.8 747.2 0 228.5 125.7 434.1 322.2 571.2 13.7 9.1 18.3 25.1 16 41.1l-68.5 242.2c-4.6 16 13.7 32 29.7 22.8l267.3-159.9c18.3-11.4 38.8-13.7 59.4-6.9 89.1 22.8 182.8 36.6 278.8 36.6 20.6 0 41.1 0 64-2.3-18.4-57.1-27.5-116.5-27.5-175.9z" />
           </svg>
-          <span>{{ t('auth.wechat', '微信') }}</span>
+          <span>{{ t('auth.wechat') }}</span>
         </button>
       </div>
     </div>
@@ -730,7 +730,7 @@ function formatDate(dateStr: string): string {
         class="btn btn-ghost btn-sm"
         @click="handleLogout"
       >
-        {{ t('auth.logout', '退出登录') }}
+        {{ t('auth.logout') }}
       </button>
     </div>
 
@@ -745,12 +745,12 @@ function formatDate(dateStr: string): string {
             :src="qrDataUrl"
             class="qr-big"
           >
-          <p>{{ t('auth.qrScanWechat', '请用微信扫码分享') }}</p>
+          <p>{{ t('auth.qrScanWechat') }}</p>
           <button
             class="btn btn-sm btn-ghost"
             @click="showQr = false"
           >
-            {{ t('common.close', '关闭') }}
+            {{ t('common.close') }}
           </button>
         </div>
       </div>
@@ -770,20 +770,20 @@ function formatDate(dateStr: string): string {
     class="profile-tab unauthenticated"
   >
     <p class="login-hint">
-      {{ t('auth.loginHint', '登录后可查看个人资料和下载资源') }}
+      {{ t('auth.loginHint') }}
     </p>
     <div class="actions">
       <a
         href="/app/#/login"
         class="btn btn-primary btn-sm"
       >
-        {{ t('auth.login', '登录') }}
+        {{ t('auth.login') }}
       </a>
       <a
         href="/app/#/register"
         class="btn btn-ghost btn-sm"
       >
-        {{ t('auth.register', '注册') }}
+        {{ t('auth.register') }}
       </a>
     </div>
   </div>

@@ -161,7 +161,7 @@ export default { analysis: {
   fileCountBlock: '禁用创建任务',
   fileCountWarn: '文件数量较多，建议削减解析范围',
   unsupported: '不支持',
-  etaRemaining: '剩余 {{ task.eta }}',
+  etaRemaining: '剩余 {eta}',
   fileCountExceed: '文件数 {count} 超过 {limit}，请先削减解析范围',
   taskType: {
     internalDependency: '内部依赖分析',

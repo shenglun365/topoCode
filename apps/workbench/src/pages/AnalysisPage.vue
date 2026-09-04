@@ -241,7 +241,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
 
     const parts: string[] = []
     if (llmResult?.name || llmResult?.summary) {
-      parts.push(`# 社区: ${llmResult.name || communityId}`)
+      parts.push(t('report.communityHeading', { name: llmResult.name || communityId }))
       parts.push('')
       parts.push(`**ID**: ${communityId}`)
       parts.push('')

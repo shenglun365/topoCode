@@ -1,3 +1,4 @@
+import i18n from '@/i18n'
 import { useModelConfigStore } from '@/stores/model-config-store'
 import { readModelPref, readContextPref } from '@topo/web-core/shell'
 
@@ -36,7 +37,7 @@ export interface ChatOptions {
 
 export function chat(options: ChatOptions): Promise<string> {
   const modelId = getDefaultModelId()
-  if (!modelId) throw new Error('LLM API 未配置')
+  if (!modelId) throw new Error(i18n.global.t('ai.llmApiNotConfigured'))
   if (!window.api) throw new Error('IPC bridge not available')
   const bridge = window.api
 

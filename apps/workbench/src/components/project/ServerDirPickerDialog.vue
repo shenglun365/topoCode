@@ -52,6 +52,21 @@ const dir = ref<DirList | null>(null)
 const loading = ref(false)
 const error = ref('')
 const selectedPath = ref('')
+// 路径/过滤二合一输入：输入即过滤当前列表，回车按路径跳转
+const pathDraft = ref('')
+
+const filteredEntries = computed(() => {
+  const entries = dir.value?.entries ?? []
+  const raw = pathDraft.value.trim()
+  if (!raw) return entries
+  // 兼容 Windows(\) 与 Linux(/) 分隔符：只取最后一段作为过滤片段。
+  // /home/user/s 在 /home/user 下等价于过滤 "s"，可命中 soft；
+  // 以分隔符结尾（如 /home/user/）表示完整路径，不过滤。
+  const sepIdx = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'))
+  const kw = (sepIdx >= 0 ? raw.slice(sepIdx + 1) : raw).toLowerCase()
+  if (!kw) return entries
+  return entries.filter(e => e.name.toLowerCase().includes(kw))
+})
 
 const newDirMode = ref(false)
 const newDirName = ref('')
@@ -73,17 +88,19 @@ function fullPath(name: string): string {
 async function load(path?: string) {
   loading.value = true
   error.value = ''
+  const prevPath = dir.value?.path
   try {
     dir.value = await ipc.dir.list(path)
     const d = dir.value
     if (!d) return
+    if (d.path !== prevPath) pathDraft.value = ''
     const cur = d.path
     const selectedInView = selectedPath.value === cur || selectedPath.value.startsWith(`${cur}/`)
     if (!selectedInView) {
       selectedPath.value = cur ?? ''
     }
   } catch (e: any) {
-    error.value = e?.message || t('project.dirLoadFailed', '目录加载失败')
+    error.value = e?.message || t('project.dirLoadFailed')
   } finally {
     loading.value = false
   }
@@ -129,7 +146,7 @@ async function createDir() {
     newDirMode.value = false
     await load(parent)
   } catch (e: any) {
-    error.value = e?.message || t('project.dirCreateFailed', '创建目录失败')
+    error.value = e?.message || t('project.dirCreateFailed')
   } finally {
     creating.value = false
   }
@@ -143,7 +160,7 @@ async function analyzeAndConfirm() {
   try {
     analysis.value = await ipc.dir.analyze(root)
   } catch (e: any) {
-    error.value = e?.message || t('project.dirAnalyzeFailed', '目录分析失败')
+    error.value = e?.message || t('project.dirAnalyzeFailed')
   } finally {
     analyzing.value = false
   }
@@ -167,7 +184,7 @@ onMounted(() => load())
     <div class="dialog-overlay" @click.self="emit('close')">
       <div class="dialog-card server-dir-card">
         <div class="dialog-header">
-          <span class="dialog-title">{{ t('project.dirPickerTitle', '选择服务器目录') }}</span>
+          <span class="dialog-title">{{ t('project.dirPickerTitle') }}</span>
           <button class="dialog-close" @click="emit('close')">&times;</button>
         </div>
 
@@ -183,22 +200,23 @@ onMounted(() => load())
               <button
                 class="btn btn-ghost btn-sm"
                 :disabled="!dir?.parent"
-                :title="t('project.dirUp', '上级目录')"
+                :title="t('project.dirUp')"
                 @click="goUp"
               >
                 <ArrowUpIcon class="w-4 h-4" />
               </button>
               <button class="btn btn-ghost btn-sm" title="/" @click="goRoot">/</button>
-              <button class="btn btn-ghost btn-sm" :title="t('project.dirHome', '用户主目录')" @click="home">~</button>
+              <button class="btn btn-ghost btn-sm" :title="t('project.dirHome')" @click="home">~</button>
               <input
                 class="input path-input"
-                :value="dir?.path ?? ''"
-                :placeholder="t('project.dirPathPlaceholder', '输入路径后回车')"
+                :value="pathDraft || dir?.path || ''"
+                :placeholder="t('project.dirPathPlaceholder')"
+                @input="(e: any) => pathDraft = e.target.value"
                 @keyup.enter="(e: any) => load((e.target as HTMLInputElement).value)"
               >
               <button
                 class="btn btn-ghost btn-sm"
-                :title="t('project.dirRefresh', '刷新')"
+                :title="t('project.dirRefresh')"
                 @click="load(dir?.path)"
               >
                 <ArrowPathIcon class="w-4 h-4" />
@@ -213,7 +231,7 @@ onMounted(() => load())
                 class="perm-chip"
                 :class="dir.writable ? 'perm-ok' : 'perm-no'"
               >
-                {{ dir.writable ? t('project.dirWritable', '可写') : t('project.dirReadonly', '只读') }}
+                {{ dir.writable ? t('project.dirWritable') : t('project.dirReadonly') }}
               </span>
               <span
                 v-if="hostLabel"
@@ -225,7 +243,7 @@ onMounted(() => load())
                 @click="selectHere"
               >
                 <CheckIcon class="w-3 h-3" />
-                {{ selectedPath === dir.path ? t('project.dirSelected', '已选择当前目录') : t('project.dirSelectCurrent', '选择当前目录') }}
+                {{ selectedPath === dir.path ? t('project.dirSelected') : t('project.dirSelectCurrent') }}
               </button>
             </div>
 
@@ -238,7 +256,7 @@ onMounted(() => load())
               class="dir-list"
             >
               <li
-                v-for="e in dir.entries"
+                v-for="e in filteredEntries"
                 :key="e.name"
                 class="dir-item"
                 :class="selectedPath === fullPath(e.name) ? 'dir-item-sel' : ''"
@@ -252,19 +270,23 @@ onMounted(() => load())
                 <span
                   v-if="e.isDir && e.writable === false"
                   class="dir-ro"
-                >{{ t('project.dirReadonlyShort', '只读') }}</span>
+                >{{ t('project.dirReadonlyShort') }}</span>
                 <button
                   v-if="e.isDir"
                   class="btn btn-ghost btn-sm"
                   @click.stop="enter(e)"
                 >
-                  {{ t('project.dirEnter', '进入') }}
+                  {{ t('project.dirEnter') }}
                 </button>
               </li>
               <li
                 v-if="dir.entries.length === 0"
                 class="dir-empty"
-              >{{ t('project.dirEmpty', '目录为空') }}</li>
+              >{{ t('project.dirEmpty') }}</li>
+              <li
+                v-else-if="filteredEntries.length === 0"
+                class="dir-empty"
+              >{{ t('project.dirFilterNoMatch') }}</li>
             </ul>
 
             <div class="new-dir-row">
@@ -274,13 +296,13 @@ onMounted(() => load())
                 :disabled="!dir?.writable"
                 @click="newDirMode = true"
               >
-                <PlusIcon class="w-3.5 h-3.5" />{{ t('project.dirNew', '新建目录') }}
+                <PlusIcon class="w-3.5 h-3.5" />{{ t('project.dirNew') }}
               </button>
               <template v-else>
                 <input
                   v-model="newDirName"
                   class="input"
-                  :placeholder="t('project.dirNewPlaceholder', '目录名')"
+                  :placeholder="t('project.dirNewPlaceholder')"
                   @keyup.enter="createDir"
                 >
                 <button class="btn btn-primary btn-sm" :disabled="creating || !newDirName.trim()" @click="createDir">
@@ -299,7 +321,7 @@ onMounted(() => load())
                 :disabled="!selectedPath || analyzing"
                 @click="analyzeAndConfirm"
               >
-                {{ analyzing ? t('common.loading') : t('project.dirSelect', '确认选择') }}
+                {{ analyzing ? t('common.loading') : t('project.dirSelect') }}
               </button>
             </div>
           </template>
@@ -317,10 +339,10 @@ onMounted(() => load())
                 :class="analysis.isGitRoot ? 'analyze-ok' : 'analyze-warn'"
               >
                 <div class="analyze-item-title">
-                  {{ analysis.isGitRoot ? t('project.analyzeGitRoot', '是 git 仓库根目录') : t('project.analyzeNotGitRoot', '非 git 仓库根目录') }}
+                  {{ analysis.isGitRoot ? t('project.analyzeGitRoot') : t('project.analyzeNotGitRoot') }}
                 </div>
                 <div class="analyze-item-sub">
-                  {{ analysis.isGitRoot ? (analysis.gitBranch || '—') : t('project.analyzeGitHint', 'git-local 模式会克隆到源码缓存') }}
+                  {{ analysis.isGitRoot ? (analysis.gitBranch || '—') : t('project.analyzeGitHint') }}
                 </div>
               </div>
               <div
@@ -328,10 +350,10 @@ onMounted(() => load())
                 :class="analysis.hasCode ? 'analyze-ok' : ''"
               >
                 <div class="analyze-item-title">
-                  {{ analysis.hasCode ? t('project.analyzeHasCode', '目录已包含代码/内容') : t('project.analyzeEmpty', '目录为空') }}
+                  {{ analysis.hasCode ? t('project.analyzeHasCode') : t('project.analyzeEmpty') }}
                 </div>
                 <div class="analyze-item-sub">
-                  {{ t('project.analyzeCodeHint', '静态导入建议选择独立静态源码目录') }}
+                  {{ t('project.analyzeCodeHint') }}
                 </div>
               </div>
             </div>
@@ -342,7 +364,7 @@ onMounted(() => load())
             >
               <ExclamationTriangleIcon class="w-4 h-4 shrink-0" />
               <div>
-                <div class="analyze-item-title">{{ t('project.analyzeDuplicate', '该目录已存在对应项目') }}</div>
+                <div class="analyze-item-title">{{ t('project.analyzeDuplicate') }}</div>
                 <p class="analyze-item-sub font-mono">{{ analysis.duplicate.name }} · {{ analysis.duplicate.rootPath }}</p>
               </div>
             </div>
@@ -353,7 +375,7 @@ onMounted(() => load())
             >
               <CheckIcon class="w-4 h-4 shrink-0" />
               <div>
-                <div class="analyze-item-title">{{ t('project.analyzeSignature', '检测到源码目录签名，将重关联到既有项目') }}</div>
+                <div class="analyze-item-title">{{ t('project.analyzeSignature') }}</div>
                 <p class="analyze-item-sub font-mono">{{ analysis.signatureProject.name }} · {{ analysis.signatureProject.rootPath }}</p>
               </div>
             </div>
@@ -368,7 +390,7 @@ onMounted(() => load())
                 </button>
                 <button class="btn btn-primary btn-sm" @click="confirmSelect">
                   <CheckIcon class="w-3.5 h-3.5" />
-                  {{ t('project.dirConfirm', '使用该目录') }}
+                  {{ t('project.dirConfirm') }}
                 </button>
               </div>
             </div>

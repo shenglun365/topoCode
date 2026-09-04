@@ -64,15 +64,15 @@ function formatDate(iso: string): string {
 
 function typeLabel(type: string): string {
   switch (type) {
-    case 'recharge': return t('auth.orderRecharge', '充值')
-    case 'consume': return t('auth.orderConsume', '消费')
-    case 'reward': return t('auth.orderReward', '奖励')
+    case 'recharge': return t('auth.orderRecharge')
+    case 'consume': return t('auth.orderConsume')
+    case 'reward': return t('auth.orderReward')
     default: return type
   }
 }
 
 function currencyLabel(curr: string): string {
-  return curr === 'balance' ? t('auth.balance', '余额') : t('auth.points', '积分')
+  return curr === 'balance' ? t('auth.balance') : t('auth.points')
 }
 
 function amountStyle(amount: number) {
@@ -96,7 +96,7 @@ onMounted(() => {
         class="section-title"
         style="margin-bottom:0;"
       >
-        {{ t('auth.orderHistory', '交易记录') }}
+        {{ t('auth.orderHistory') }}
       </h2>
       <button
         class="btn btn-ghost btn-icon btn-xs"
@@ -143,7 +143,7 @@ onMounted(() => {
       v-else-if="auth.transactions.length === 0"
       class="empty"
     >
-      {{ t('settings.noResources', '暂无记录') }}
+      {{ t('settings.noResources') }}
     </div>
     <table
       v-else
@@ -151,12 +151,12 @@ onMounted(() => {
     >
       <thead>
         <tr>
-          <th>{{ t('auth.orderDate', '时间') }}</th>
-          <th>{{ t('auth.orderType', '类型') }}</th>
-          <th>{{ t('auth.orderCurrency', '币种') }}</th>
-          <th>{{ t('auth.orderAmount', '金额') }}</th>
-          <th>{{ t('auth.orderBalanceAfter', '余额') }}</th>
-          <th>{{ t('auth.orderDescription', '说明') }}</th>
+          <th>{{ t('auth.orderDate') }}</th>
+          <th>{{ t('auth.orderType') }}</th>
+          <th>{{ t('auth.orderCurrency') }}</th>
+          <th>{{ t('auth.orderAmount') }}</th>
+          <th>{{ t('auth.orderBalanceAfter') }}</th>
+          <th>{{ t('auth.orderDescription') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -226,12 +226,12 @@ onMounted(() => {
     v-else
     class="not-logged-in"
   >
-    <p>{{ t('auth.loginHint', '登录后可查看交易记录') }}</p>
+    <p>{{ t('auth.loginHint') }}</p>
     <a
       href="/app/#/login"
       class="btn btn-primary btn-sm"
     >
-      {{ t('auth.login', '登录') }}
+      {{ t('auth.login') }}
     </a>
   </div>
 </template>

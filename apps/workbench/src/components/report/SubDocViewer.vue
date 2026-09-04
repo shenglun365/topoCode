@@ -138,7 +138,7 @@ async function loadDoc() {
       }).catch(() => null)
       if (result?.name || result?.summary) {
         const parts: string[] = [
-          `# 社区: ${result.name || props.parentCommId}`, '',
+          t('report.communityHeading', { name: result.name || props.parentCommId }), '',
           `**ID**: ${props.parentCommId}`, '',
           result.summary || '',
         ]
@@ -159,9 +159,9 @@ async function loadDoc() {
               }).catch(() => null)
               if (pr?.name || pr?.summary) {
                 parts.push('', `---`, '',
-                  `## 父组件\n${pr.name || parentId} — ${(pr.summary || '').slice(0, 200)}`)
+                  t('report.parentComponent', { content: `${pr.name || parentId} — ${(pr.summary || '').slice(0, 200)}` }))
               } else if (parentId) {
-                parts.push('', `---`, '', `## 父组件\n${parentId}`)
+                parts.push('', `---`, '', t('report.parentComponent', { content: parentId }))
               }
             }
           } catch (e) { console.warn('[SubDocViewer] parent community error:', e) }

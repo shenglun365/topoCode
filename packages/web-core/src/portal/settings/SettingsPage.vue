@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { AppToolbar, readFontSize } from '../../shell'
 import ModelsPanel from './ModelsPanel.vue'
 import GeneralPanel from './GeneralPanel.vue'
@@ -7,16 +8,18 @@ import ThemesPanel from './ThemesPanel.vue'
 import AgentsPanel from './AgentsPanel.vue'
 import AboutPanel from './AboutPanel.vue'
 
+const { t } = useI18n()
+
 type SectionKey = 'models' | 'general' | 'theme' | 'agents' | 'about'
 
 const fontSize = ref(readFontSize())
 
-const sections: Array<{ key: SectionKey; label: string }> = [
-  { key: 'models', label: '模型设置' },
-  { key: 'general', label: '通用设置' },
-  { key: 'theme', label: '主题管理' },
-  { key: 'agents', label: 'Agent 与模板' },
-  { key: 'about', label: '关于' },
+const sections: Array<{ key: SectionKey; labelKey: string }> = [
+  { key: 'models', labelKey: 'settings.tabs.models' },
+  { key: 'general', labelKey: 'settings.tabs.general' },
+  { key: 'theme', labelKey: 'settings.tabs.theme' },
+  { key: 'agents', labelKey: 'settings.tabs.agents' },
+  { key: 'about', labelKey: 'settings.tabs.about' },
 ]
 
 const active = ref<SectionKey>('models')
@@ -30,14 +33,14 @@ function goHome() {
   <div class="settings-page">
     <AppToolbar
       app-key="portal"
-      title="设置"
+      :title="t('common.settings')"
       :font-targets="['--content-font-size']"
       :font-size="fontSize"
       @update:font-size="fontSize = $event"
     >
       <template #tools>
-        <a href="#/" class="toolbar-btn">← 返回首页</a>
-        <a href="#/user" class="toolbar-btn">用户中心</a>
+        <a href="#/" class="toolbar-btn">← {{ t('nav.backHome') }}</a>
+        <a href="#/user" class="toolbar-btn">{{ t('nav.userCenter') }}</a>
       </template>
     </AppToolbar>
 
@@ -50,7 +53,7 @@ function goHome() {
           :class="{ active: active === s.key }"
           @click="active = s.key"
         >
-          {{ s.label }}
+          {{ t(s.labelKey) }}
         </button>
       </aside>
       <main class="settings-main">

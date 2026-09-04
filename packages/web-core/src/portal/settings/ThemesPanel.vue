@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 interface CustomTheme {
   id: string
@@ -18,11 +21,11 @@ const CSS_VAR_MAP: Record<string, string> = {
 const FONT_VAR_MAP: Record<string, string> = { fontSans: '--font-sans', fontMono: '--font-mono' }
 
 const APPS = [
-  { key: 'app', label: '工作台 /app' },
-  { key: 'chat', label: 'AI CHAT' },
-  { key: 'docs', label: '文档 /doc' },
-  { key: 'architect', label: 'Architect' },
-  { key: 'portal', label: '门户 /' },
+  { key: 'app', labelKey: 'settings.appNames.workbench' },
+  { key: 'chat', labelKey: 'settings.appNames.chat' },
+  { key: 'docs', labelKey: 'settings.appNames.docs' },
+  { key: 'architect', labelKey: 'settings.appNames.architect' },
+  { key: 'portal', labelKey: 'settings.appNames.portal' },
 ]
 
 const customThemes = ref<CustomTheme[]>([])
@@ -72,27 +75,27 @@ onMounted(loadCustom)
 
 <template>
   <div class="panel">
-    <h3>主题管理</h3>
-    <p class="panel-hint">各子模块独立记忆主题（topoone-theme-{app}）；自定义主题可应用到 /app。</p>
+    <h3>{{ t('settings.tabs.theme') }}</h3>
+    <p class="panel-hint">{{ t('settings.themes.hint', { app: 'app' }) }}</p>
 
     <div class="section">
-      <h4>按子模块切换明暗</h4>
+      <h4>{{ t('settings.themes.toggleSection') }}</h4>
       <div class="theme-apps">
         <div v-for="a in APPS" :key="a.key" class="theme-app-row">
-          <span>{{ a.label }}</span>
+          <span>{{ t(a.labelKey) }}</span>
           <button class="btn btn-ghost btn-xs" @click="toggleTheme(a.key)">
-            {{ readTheme(a.key) === 'dark' ? '暗色 → 亮色' : '亮色 → 暗色' }}
+            {{ readTheme(a.key) === 'dark' ? t('settings.themes.toLight') : t('settings.themes.toDark') }}
           </button>
         </div>
       </div>
     </div>
 
     <div class="section">
-      <h4>自定义主题（应用到 /app）</h4>
-      <div v-if="customThemes.length === 0" class="muted">暂无自定义主题（在 /app 设置中创建）。</div>
-      <div v-for="t in customThemes" :key="t.id" class="theme-app-row">
-        <span>{{ t.name }}</span>
-        <button class="btn btn-ghost btn-xs" @click="applyCustom(t)">应用</button>
+      <h4>{{ t('settings.themes.customSection') }}</h4>
+      <div v-if="customThemes.length === 0" class="muted">{{ t('settings.themes.customEmpty') }}</div>
+      <div v-for="theme in customThemes" :key="theme.id" class="theme-app-row">
+        <span>{{ theme.name }}</span>
+        <button class="btn btn-ghost btn-xs" @click="applyCustom(theme)">{{ t('common.apply') }}</button>
       </div>
     </div>
   </div>

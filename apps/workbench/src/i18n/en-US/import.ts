@@ -1,5 +1,11 @@
 export default { import: {
+  loading: 'Importing...',
+  scanFiles: 'Scanning files...',
+  writeData: 'Writing data...',
+  importingPhase: 'Importing...',
+  importProjectTitle: 'Importing project, please wait...',
   error: {
+    invalidPath: 'Invalid path',
     duplicate: 'Project already exists',
     failed: 'Import failed',
   },

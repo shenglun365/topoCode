@@ -1,5 +1,6 @@
 export default { shell: {
   topBar: {
+    brandTitle: 'TopoCode Knowledge Base',
     file: 'File',
     contact: 'Contact',
     checkUpdate: 'Check for Updates',
@@ -65,6 +66,7 @@ export default { shell: {
     pythonBackend: 'Python Backend',
     backendDisconnected: 'Backend Disconnected',
     backendRestarting: 'Backend Restarting',
+    backendError: 'Backend Error',
     testModel: 'Click to test model connection',
     testing: 'Testing...',
     branch: 'Branch',
@@ -99,6 +101,14 @@ export default { shell: {
     retryHint: 'Please check the error logs in the terminal and try again.',
     retry: 'Restart',
     dismiss: 'Dismiss',
+  },
+  crashDialog: {
+    title: 'Backend Crash',
+    intro: 'The backend service exited unexpectedly. Error details:',
+    time: 'Time: {time}',
+    hint: 'Clicking "Report" opens your email client. Please attach the log files to help troubleshooting.',
+    report: 'Report to Developers',
+    dismiss: 'Ignore',
   },
 },
 }

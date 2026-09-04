@@ -33,7 +33,13 @@ export default {
       noMatchingCommunity: 'No matching community found.',
       noComponents: 'No components found. Please open the structure graph on the left first.',
       startFailed: 'Start failed: {msg}',
+      unknownFlags: 'Unknown flags: {flags}. Available flags: {valid}',
+      unknownFlagsPresummary: 'Unknown flags: {flags}. Available: -j N (concurrency 1-5), --force',
+      unknownFlagsOverview: 'Unknown flags: {flags}. Available: --force, -L zh/en',
+      unknownFlagsPipeline: 'Unknown flags: {flags}. Available: -j N (concurrency 1-5), --force, -L zh/en',
     },
+    blockArchCommand: 'This command belongs to the **Architecture Analysis** group. Click the "Architecture Analysis" icon in the left navigation bar to switch to that page before using it.',
+    resourceNoReanalyze: 'Projects downloaded from the Resource Center cannot be re-analyzed. Contact customer support if you have questions.',
     select: {
       modeActive: 'Activated',
       modeExited: 'Exited',
@@ -80,6 +86,8 @@ export default {
     },
   },
   ai: {
+  chatSystemPrompt: 'You are the TopoCode code analysis assistant. Answer questions based on the current project knowledge base. Be concise and accurate.',
+  chatWelcome: 'Hi! I am the AI assistant. Ask me anything about the current task and code.',
     assistantTitle: 'AI Assistant',
     chatTab: 'Chat',
     assistantWelcome: 'Hello! I am the TopoCode AI assistant. I can help you with software usage questions. Type /help to see available commands.',
@@ -88,6 +96,7 @@ export default {
     inputPlaceholder: 'Type a question... (Shift+Enter for new line)',
     typing: 'AI is typing...',
     clearChat: 'Clear chat',
+    llmApiNotConfigured: 'LLM API is not configured',
   },
 
   // ====== System Prompt: Role Definition ======
@@ -268,15 +277,15 @@ Keep responses concise and professional, using diagrams (Mermaid/PlantUML) for i
 
   // ====== Command Reference ======
   helpCommands: `## Available Commands
-| Command | Description |
-|---------|-------------|
-| /help | Show this help |
-| /select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed] | Component selection mode. No args to toggle; --all select all; --include/--call filter by edge type; --l0~--l5 filter by level; --clear clear; --unanalyzed unanalyzed only |
-| /presummary [-j N] [--force] | File pre-summary P0→P1→P2. --force overwrite, -j N concurrency 1-5 |
-| /analyze [-j N] [--force] [-L zh/en] | Batch component analysis. --force overwrite, -j concurrency, -L language |
-| /overview [--force] [-L zh/en] | Generate overall architecture overview |
-| /pipeline [-j N] [--force] [-L zh/en] | One-click pipeline: project summary → pre-summary → component analysis → architecture overview |
-| /retry [--force] | Re-run pipeline |
+{'|'} Command {'|'} Description {'|'}
+{'|'}---------{'|'}-------------{'|'}
+{'|'} /help {'|'} Show this help {'|'}
+{'|'} /select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed] {'|'} Component selection mode. No args to toggle; --all select all; --include/--call filter by edge type; --l0~--l5 filter by level; --clear clear; --unanalyzed unanalyzed only {'|'}
+{'|'} /presummary [-j N] [--force] {'|'} File pre-summary P0→P1→P2. --force overwrite, -j N concurrency 1-5 {'|'}
+{'|'} /analyze [-j N] [--force] [-L zh/en] {'|'} Batch component analysis. --force overwrite, -j concurrency, -L language {'|'}
+{'|'} /overview [--force] [-L zh/en] {'|'} Generate overall architecture overview {'|'}
+{'|'} /pipeline [-j N] [--force] [-L zh/en] {'|'} One-click pipeline: project summary → pre-summary → component analysis → architecture overview {'|'}
+{'|'} /retry [--force] {'|'} Re-run pipeline {'|'}
 
 ## Interaction Modes
 - **Free Chat**: Ask TopoCode usage-related questions

@@ -36,7 +36,7 @@ export default { knowledge: {
   sortByType: '按类型',
   sortByStatus: '按状态',
   searchPlaceholder: '搜索项目/文档...',
-  totalItems: '共 {{count}} 项',
+  totalItems: '共 {count} 项',
   sortUpdatedDesc: '更新时间 ↓',
   sortUpdatedAsc: '更新时间 ↑',
   sortCreatedDesc: '创建时间 ↓',

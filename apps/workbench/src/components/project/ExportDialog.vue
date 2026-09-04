@@ -137,7 +137,7 @@ function close() {
     <div class="dialog-overlay">
       <div class="dialog-card">
         <div class="dialog-header">
-          <span class="dialog-title">{{ t('project.exportStructure', '导出结构分析') }}</span>
+          <span class="dialog-title">{{ t('project.exportStructure') }}</span>
           <button
             v-if="!exporting"
             class="dialog-close"
@@ -156,7 +156,7 @@ function close() {
 
         <template v-if="!exporting && !done && !loading">
           <div class="dialog-hint">
-            {{ t('project.exportSelectHint', '选择要导出的分析任务') }}
+            {{ t('project.exportSelectHint') }}
           </div>
           <div class="select-all-row">
             <label class="cb-row">
@@ -166,7 +166,7 @@ function close() {
                 class="cb"
                 @change="toggleAll"
               >
-              <span class="cb-label">{{ t('common.selectAll', '全选') }} ({{ tasks.length }})</span>
+              <span class="cb-label">{{ t('common.selectAll') }} ({{ tasks.length }})</span>
             </label>
           </div>
           <div class="task-list">
@@ -203,7 +203,7 @@ function close() {
                 :disabled="selectedCount() === 0"
                 @click="startExport"
               >
-                {{ t('project.exportAction', '导出') }}
+                {{ t('project.exportAction') }}
               </button>
             </div>
           </div>
@@ -220,11 +220,11 @@ function close() {
             />
           </div>
           <div class="progress-info">
-            <span v-show="!done">{{ message || t('common.processing', '处理中...') }}</span>
+            <span v-show="!done">{{ message || t('common.processing') }}</span>
             <span
               v-show="done"
               class="done-text"
-            >{{ t('project.exportDone', '导出完成') }}</span>
+            >{{ t('project.exportDone') }}</span>
           </div>
           <div
             v-if="error"
@@ -241,7 +241,7 @@ function close() {
                 class="btn btn-primary btn-sm"
                 @click.prevent="handleDownload"
               >
-                <ArrowDownTrayIcon class="icon-sm" /> {{ t('project.downloadExport', '下载') }}
+                <ArrowDownTrayIcon class="icon-sm" /> {{ t('project.downloadExport') }}
               </a>
             </template>
             <button

@@ -227,7 +227,7 @@ export default { settings: {
   allHistory: '历史所有',
   zeroMeansUnlimited: '0 为不限制',
   extraConfig: '扩展参数',
-  extraConfigDesc: '自定义 API 请求参数 (JSON)，如 {"chat_template_kwargs": {"enable_thinking": false}}。注意：model、messages、stream 等系统关键参数不可覆盖。',
+  extraConfigDesc: '自定义 API 请求参数 (JSON)，如 {\'{\'}"chat_template_kwargs": {\'{\'}"enable_thinking": false{\'}\'}{\'}\'}。注意：model、messages、stream 等系统关键参数不可覆盖。',
   localModels: '本地模型',
   cloudServices: '云服务',
   customLocal: '自定义本地',

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { normalizeDiagram, enqueueRender, fitScale, mermaidParseErrorDetail } from '../services/render'
 import { diagramStateStore, type DiagramViewState } from '../services/diagramStateStore'
 import DiagramRebuildDialog from './DiagramRebuildDialog.vue'
@@ -7,6 +8,8 @@ import { MermaidEngine } from '@topo/graph-kernel/engines/mermaid/mermaid.ts'
 import { PlantUmlEngine } from '@topo/graph-kernel/engines/plantuml/plantuml.ts'
 import { themeVariablesFor } from '@topo/graph-kernel/vue/themes.ts'
 import { authHeaders } from '../services/api'
+
+const { t } = useI18n()
 
 function stripHtml(s: string) { return s.replace(/<!--[\s\S]*?-->/g, '') }
 
@@ -74,7 +77,7 @@ async function renderWithEngine(codeOverride?: string) {
       }
     }
   } catch (e: any) {
-    error.value = mermaidParseErrorDetail(e) || e.message || '渲染失败'
+    error.value = mermaidParseErrorDetail(e) || e.message || t('diagram.renderFailed')
     loading.value = false
   }
 }
@@ -350,22 +353,22 @@ function zoomOut() {
   <div class="diagram-container" ref="container" :style="containerHeight ? { height: containerHeight + 'px', flex: 'none' } : {}">
     <div class="diag-toolbar">
       <div class="diag-tabs">
-        <button class="diag-tab" :class="{ 'diag-tab-active': activeTab === 'chart' }" @click="activeTab = 'chart'">图表</button>
-        <button class="diag-tab" :class="{ 'diag-tab-active': activeTab === 'code' }" @click="activeTab = 'code'">代码</button>
-        <span v-if="toolGenerated" class="diag-tool-badge" title="由 web_diagram_build 工具生成">🛠 工具生成</span>
+        <button class="diag-tab" :class="{ 'diag-tab-active': activeTab === 'chart' }" @click="activeTab = 'chart'">{{ t('diagram.tabChart') }}</button>
+        <button class="diag-tab" :class="{ 'diag-tab-active': activeTab === 'code' }" @click="activeTab = 'code'">{{ t('diagram.tabCode') }}</button>
+        <span v-if="toolGenerated" class="diag-tool-badge" :title="t('diagram.toolBadgeTitle')">{{ t('diagram.toolBadge') }}</span>
       </div>
       <div class="diag-actions">
         <template v-if="activeTab === 'chart'">
-          <button class="diag-zoom-out" title="缩小" @click="zoomOut">−</button>
+          <button class="diag-zoom-out" :title="t('diagram.zoomOutTitle')" @click="zoomOut">−</button>
           <span class="diag-zoom-pct">{{ zoomPct }}</span>
-          <button class="diag-zoom-in" title="放大" @click="zoomIn">+</button>
+          <button class="diag-zoom-in" :title="t('diagram.zoomInTitle')" @click="zoomIn">+</button>
         </template>
-        <button class="diag-save-btn" :class="{ 'has-unsaved': unsaved }" :disabled="!unsaved" @click="emit('save-state')" title="保存同消息所有未保存的图状态">
-          <span v-if="unsaved" class="save-red-dot"></span>保存
+        <button class="diag-save-btn" :class="{ 'has-unsaved': unsaved }" :disabled="!unsaved" @click="emit('save-state')" :title="t('diagram.saveAllTitle')">
+          <span v-if="unsaved" class="save-red-dot"></span>{{ t('diagram.save') }}
         </button>
         <template v-if="activeTab === 'chart'">
-          <button class="diag-download" title="下载" @click="downloadSvg">⬇</button>
-          <button class="diag-fullscreen" title="全屏" @click="fullscreen">⛶</button>
+          <button class="diag-download" :title="t('diagram.downloadTitle')" @click="downloadSvg">⬇</button>
+          <button class="diag-fullscreen" :title="t('diagram.fullscreenTitle')" @click="fullscreen">⛶</button>
         </template>
       </div>
     </div>
@@ -378,9 +381,9 @@ function zoomOut() {
 
     <div v-show="activeTab === 'code'" class="diag-code">
       <div class="diag-code-actions">
-        <button class="diag-render-btn" @click="onReRender">重新渲染</button>
+        <button class="diag-render-btn" @click="onReRender">{{ t('diagram.reRender') }}</button>
         <button class="diag-rebuild-btn" @click="onRebuild" :disabled="rebuilding">
-          {{ rebuilding ? '重建中…' : '重建' }}
+          {{ rebuilding ? t('diagram.rebuilding') : t('diagram.rebuild') }}
         </button>
       </div>
       <textarea class="diag-textarea" ref="textarea" :value="code" spellcheck="false"></textarea>

@@ -37,7 +37,7 @@ const modelProvider: ModelSettingsProvider = {
   },
 }
 
-const title = computed(() => navigation.currentBreadcrumb?.label || '项目列表')
+const title = computed(() => navigation.currentBreadcrumb?.label || t('nav.projectList'))
 
 /** 模型/右面板工具仅在 代码解析、架构分析 页显示（首页隐藏） */
 const showTools = computed(() => ['/code', '/analysis'].includes(route.path))
@@ -79,7 +79,7 @@ onMounted(() => {
     <template #brand>
       <div class="menu-bar-logo">
         <StarLogoMark :size="18" />
-        <span class="logo-text">TopoCode 知识库管理</span>
+        <span class="logo-text">{{ t('shell.topBar.brandTitle') }}</span>
       </div>
     </template>
     <template #project>

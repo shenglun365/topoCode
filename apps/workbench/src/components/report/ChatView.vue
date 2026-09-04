@@ -108,7 +108,7 @@ async function handleSend() {
     if (err.name === 'AbortError') {
       assistantMsg.content = assistantMsg.content || t('report.agent.cancelled')
     } else {
-      assistantMsg.content = err.message || t('chat.requestFailed', '请求失败')
+      assistantMsg.content = err.message || t('chat.requestFailed')
       assistantMsg.role = 'error'
     }
     assistantMsg.isStreaming = false
@@ -205,16 +205,16 @@ watch(llmConfigured, (val) => {
     >
       <SparklesIcon class="icon-lg" />
       <div class="text-lg font-semibold">
-        {{ t('chat.title', 'Agent 对话') }}
+        {{ t('chat.title') }}
       </div>
       <div class="text-sm text-gray-500">
-        {{ t('chat.notConfigured', '请先在设置中配置 LLM 模型') }}
+        {{ t('chat.notConfigured') }}
       </div>
       <router-link
         to="/user#llm"
         class="config-link"
       >
-        {{ t('chat.goConfig', '去配置') }}
+        {{ t('chat.goConfig') }}
       </router-link>
     </div>
 
@@ -328,7 +328,7 @@ watch(llmConfigured, (val) => {
         <textarea
           v-model="userInput"
           class="chat-input"
-          :placeholder="t('chat.placeholder', '输入问题或架构分析需求...')"
+          :placeholder="t('chat.placeholder')"
           rows="1"
           :disabled="streaming"
           @keydown="handleKeydown"

@@ -1,10 +1,12 @@
 // @ts-nocheck — M11 迁移：既有代码（web/ 历史未严格类型门禁），保行为先跳过类型检查，清理留后续。
 import { ref, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as api from '@topo/web-core/services/api'
 import type { CommunityChild } from '@topo/web-core/types/domain'
 
 export function useDocState(taskId: ReturnType<typeof ref<string>>) {
   console.log('[useDocState] init')
+  const { t } = useI18n()
 
   const docId = ref(new URLSearchParams(location.search).get('docId') || '')
   const originalDocId = docId.value
@@ -42,6 +44,7 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
 
   async function loadDoc(afterRender?: () => void) {
     if (!taskId.value) return; loading.value = true
+    _syncUrl()
     try {
       if (docCommId.value) {
         const d = await api.getCommunityDoc(taskId.value, docCommId.value, docEdgeType.value)
@@ -53,18 +56,29 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
         }
       } else if (docId.value) {
         const d: any = await api.get('/api/docs/' + docId.value)
-        doc.value = { title: d.title || '文档', content: d.content || '', projectId: d.projectId, projectName: d.projectName }
+        doc.value = { title: d.title || t('doc.defaultTitle'), content: d.content || '', projectId: d.projectId, projectName: d.projectName }
       } else {
-        doc.value = { title: taskId.value, content: '选择左侧子组件查看详细文档' }
+        doc.value = { title: taskId.value, content: t('doc.selectChildHint') }
         docBreadcrumb.value = []
       }
       await loadChildren()
+      loadFiles()
     } catch (e: any) {
       console.error('[useDocState] loadDoc error:', e?.message || e)
     } finally {
       loading.value = false
       nextTick(() => { if (afterRender) afterRender() })
     }
+  }
+
+  /** 把当前 doc 状态同步到 URL（replaceState，不触发整页刷新），保证刷新/分享不丢上下文 */
+  function _syncUrl() {
+    try {
+      const u = new URLSearchParams(location.search)
+      if (docCommId.value) u.set('communityId', docCommId.value); else u.delete('communityId')
+      if (docEdgeType.value) u.set('edgeType', docEdgeType.value)
+      history.replaceState(null, '', `${location.pathname}?${u.toString()}${location.hash}`)
+    } catch (_) {}
   }
 
   async function loadChildren() {
@@ -90,8 +104,14 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
   }
 
   // ── File list ──
+  const sourceLoading = ref(false)
+
   async function loadFiles() {
-    if (!docCommId.value) return
+    if (!docCommId.value) {
+      // 根视图(overall)无社区文件列表，清空陈旧数据
+      files.value = []; filteredFiles.value = []
+      return
+    }
     try {
       const data = await api.get('/api/community-files', { task_id: taskId.value, community_id: docCommId.value, edge_type: docEdgeType.value })
       files.value = data.files || []
@@ -109,6 +129,20 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
     if (taskId.value) {
       api.get('/api/file-summary', { task_id: taskId.value, file_path: fp }).then(d => { fileSummary.value = d }).catch(() => { fileSummary.value = null })
     }
+  }
+
+  /** 源码浏览：拉取文件源码并全屏展示（旧版 /code 入口的 SPA 版替代） */
+  async function viewSource() {
+    const pid = doc.value?.projectId
+    if (!pid || !filePreview.value || sourceLoading.value) return
+    sourceLoading.value = true
+    try {
+      const d = await api.get('/api/file', { project_id: pid, path: filePreview.value })
+      const { codeFullscreen } = await import('@topo/web-core/services/render')
+      codeFullscreen((d.content || '') + ((d.truncated ? '\n… ' + t('viewer.truncated') : '')))
+    } catch (_) {
+      // 拉取失败保持现状
+    } finally { sourceLoading.value = false }
   }
 
   // ── TOC ──
@@ -156,8 +190,9 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
     docContentRef,
     tocVisible, tocCallChildren, tocIncludeChildren, tocLoading,
     files, filePage, fileSearch, filePreview, fileSummary, pageMode, filteredFiles,
+    sourceLoading,
     pushDocBc, loadDoc, loadChildren, navigateTo, navBack,
-    loadFiles, filterFiles, openFilePreview,
+    loadFiles, filterFiles, openFilePreview, viewSource,
     toggleToc, loadTocData, tocNavigate,
   }
 }

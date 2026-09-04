@@ -3,6 +3,8 @@ export default { nav: {
   code: 'Code Analysis',
   userCenter: 'User Center',
   projects: 'Projects',
+  projectList: 'Project List',
+  coder: 'Coding Workbench',
   analysis: 'Analysis',
   knowledge: 'Knowledge',
   settings: 'Settings',

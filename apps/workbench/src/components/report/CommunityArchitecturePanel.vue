@@ -111,13 +111,13 @@ function openCommunityDoc(item: CommunityItem) {
   >
     <div class="section-header">
       <RectangleGroupIcon class="w-4 h-4" />
-      <span>{{ t('report.communityArchitecture', '组件架构') }}</span>
+      <span>{{ t('report.communityArchitecture') }}</span>
       <span class="arch-stats">
         <template v-if="!isExternalTab">
           <span class="arch-stats-count">{{ runtimeCommunities.length }}</span>
-          {{ t('report.l0Communities', '个L0社区') }}
+          {{ t('report.l0Communities') }}
           <span class="arch-stats-divider">|</span>
-          <span class="arch-stats-coverage">{{ t('report.coverage', '覆盖率') }} <strong>{{ props.coveragePercent }}%</strong> {{ props.coveredFileCount }}/{{ props.totalScopeFiles }}</span>
+          <span class="arch-stats-coverage">{{ t('report.coverage') }} <strong>{{ props.coveragePercent }}%</strong> {{ props.coveredFileCount }}/{{ props.totalScopeFiles }}</span>
         </template>
         <template v-else-if="commEdgeType === 'EXTERNAL_INCLUDE' && props.externalStats">
           <span class="arch-stats-count">{{ props.externalStats.totalExternalDeps || 0 }}</span>{{ t('report.externalPackages') }}
@@ -144,7 +144,7 @@ function openCommunityDoc(item: CommunityItem) {
           <input
             v-model="communitySearch"
             type="text"
-            :placeholder="t('report.searchCommunity', '搜索组件...')"
+            :placeholder="t('report.searchCommunity')"
             class="arch-search-input"
           >
         </div>
@@ -158,7 +158,7 @@ function openCommunityDoc(item: CommunityItem) {
         @click="commEdgeType = 'INCLUDE'"
       >
         <FolderIcon class="w-3.5 h-3.5" />
-        {{ t('report.internalDependency', '内部依赖分析') }} ({{ props.depCommunityCount }})
+        {{ t('report.internalDependency') }} ({{ props.depCommunityCount }})
       </button>
       <button
         class="arch-tab"
@@ -166,7 +166,7 @@ function openCommunityDoc(item: CommunityItem) {
         @click="commEdgeType = 'CALL'"
       >
         <ChartBarIcon class="w-3.5 h-3.5" />
-        {{ t('report.internalCall', '内部调用分析') }} ({{ props.callCommunityCount }})
+        {{ t('report.internalCall') }} ({{ props.callCommunityCount }})
       </button>
       <button
         class="arch-tab"
@@ -174,7 +174,7 @@ function openCommunityDoc(item: CommunityItem) {
         @click="commEdgeType = 'EXTERNAL_INCLUDE'"
       >
         <FolderIcon class="w-3.5 h-3.5" />
-        {{ t('report.externalDependency', '外部依赖视图') }}
+        {{ t('report.externalDependency') }}
       </button>
       <button
         class="arch-tab"
@@ -182,7 +182,7 @@ function openCommunityDoc(item: CommunityItem) {
         @click="commEdgeType = 'EXTERNAL_CALL'"
       >
         <ChartBarIcon class="w-3.5 h-3.5" />
-        {{ t('report.externalCall', '外部调用视图') }}
+        {{ t('report.externalCall') }}
       </button>
     </div>
 

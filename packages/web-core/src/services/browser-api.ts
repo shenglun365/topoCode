@@ -78,6 +78,7 @@ export function createBrowserAPI(): any {
     getFileTree: (id: string, fromPath?: string | null) => callRpc('project.getFileTree', { id, fromPath }),
     updatePath: (id: string, newRootPath: string) => callRpc('project.updatePath', { id, newRootPath }),
     checkFileChanges: (id: string) => callRpc('project.checkFileChanges', { id }),
+    checkGitRepo: (path: string) => callRpc('project.checkGitRepo', { path }),
     updateMeta: (id: string, meta: Record<string, any>) => callRpc('project.updateMeta', { id, ...meta }),
     initSampleData: () => callRpc('project.initSampleData', {}),
     clearSampleData: (id: string) => callRpc('project.clearSampleData', { id }),

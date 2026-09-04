@@ -116,7 +116,7 @@ function openOverviewDoc() {
   emit('open-md', {
     taskId: props.taskId,
     content: '',
-    title: t('report.architectureOverview', '架构概览'),
+    title: t('report.architectureOverview'),
     subDocId: overviewDocId.value,
   })
 }
@@ -272,7 +272,7 @@ async function handleCommunityMD(params: {
   parentLevel?: string; parentCommId?: string; parentEdgeType?: string;
 }) {
   const parts: string[] = [
-    `# 社区: ${params.name}`,
+    t('report.communityHeading', { name: params.name }),
     '',
     `**ID**: ${params.communityId}`,
     '',
@@ -495,7 +495,7 @@ watch(agentCompletedSignal, async () => {
             <div class="header-spacer" />
             <button
               class="collapse-btn"
-              :title="t('common.minimize', '最小化')"
+              :title="t('common.minimize')"
               @click="toggleCollapse('task')"
             >
               <MinusIcon class="w-3.5 h-3.5" />

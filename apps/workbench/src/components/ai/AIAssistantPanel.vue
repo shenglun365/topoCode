@@ -353,7 +353,7 @@ async function handleSend() {
     if (currentPage.value === 'code' && ARCH_CMDS.some(cmd => text.toLowerCase().startsWith(cmd))) {
       addMessage('user', text)
       userInput.value = ''
-      addMessage('system', '该指令属于**架构分析**功能组。请点击左侧导航栏的「架构分析」图标切换页面后使用。')
+      addMessage('system', t('aiAssistant.blockArchCommand'))
       return
     }
 
@@ -361,7 +361,7 @@ async function handleSend() {
     if (isResourceProject.value && ARCH_CMDS.some(cmd => text.toLowerCase().startsWith(cmd))) {
       addMessage('user', text)
       userInput.value = ''
-      addMessage('system', '资源中心下载的项目不支持重新分析。如有疑问，请咨询客服。')
+      addMessage('system', t('aiAssistant.resourceNoReanalyze'))
       return
     }
 
@@ -388,7 +388,7 @@ async function handleSend() {
       const VALID_SELECT_FLAGS = ['--include','--call','--all','--clear','--l0','--l1','--l2','--l3','--l4','--l5','--unanalyzed']
       const unknownFlags = args.split(/\s+/).filter(f => f.startsWith('--') && !VALID_SELECT_FLAGS.includes(f.toLowerCase()))
       if (unknownFlags.length > 0) {
-        addMessage('system', `未知参数: ${unknownFlags.join('、')}。可用参数: ${VALID_SELECT_FLAGS.join(' ')}`)
+        addMessage('system', t('aiAssistant.errors.unknownFlags', { flags: unknownFlags.join('、'), valid: VALID_SELECT_FLAGS.join(' ') }))
         return
       }
       // 按条件自动选取社区
@@ -429,7 +429,7 @@ async function handleSend() {
       if (unknown.length > 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', `未知参数: ${unknown.join('、')}。可用参数: ${VALID_AC_FLAGS.join(' ')}`)
+        addMessage('system', t('aiAssistant.errors.unknownFlags', { flags: unknown.join('、'), valid: VALID_AC_FLAGS.join(' ') }))
         return
       }
       const force = text.includes('--force')
@@ -482,7 +482,7 @@ async function handleSend() {
       if (unknown.length > 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', `未知参数: ${unknown.join('、')}。可用参数: -j N (并发1-5), --force`)
+        addMessage('system', t('aiAssistant.errors.unknownFlagsPresummary', { flags: unknown.join('、') }))
         return
       }
       addMessage('user', text)
@@ -510,7 +510,7 @@ async function handleSend() {
       if (unknown.length > 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', `未知参数: ${unknown.join('、')}。可用: --force, -L zh/en`)
+        addMessage('system', t('aiAssistant.errors.unknownFlagsOverview', { flags: unknown.join('、') }))
         return
       }
       addMessage('user', text)
@@ -539,7 +539,7 @@ async function handleSend() {
       if (unknown.length > 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', `未知参数: ${unknown.join('、')}。可用: -j N (并发1-5), --force, -L zh/en`)
+        addMessage('system', t('aiAssistant.errors.unknownFlagsPipeline', { flags: unknown.join('、') }))
         return
       }
       const force = text.includes('--force')

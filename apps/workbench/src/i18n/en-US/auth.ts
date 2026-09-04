@@ -57,4 +57,22 @@ const overrides: Record<string, string> = {
   xiaohongshu: 'Xiaohongshu',
 }
 
-export default { auth: { ...authEn, ...overrides } }
+export default { auth: { ...authEn, ...overrides,
+  validation: {
+    requireAccount: 'Please enter your email or phone number',
+    requireCode: 'Please enter the verification code',
+    requirePassword: 'Please enter your password',
+  },
+  error: {
+    invalidCode: 'Verification code is invalid or expired',
+    invalidCredentials: 'Incorrect email or password',
+    registrationFailed: 'Registration failed',
+    loginFailed: 'Login failed',
+  },
+  placeholder: {
+    account: 'Email / phone',
+    confirmPassword: 'Confirm new password',
+    newPassword: 'New password (at least 6 characters)',
+    verificationCode: 'Enter verification code',
+  },
+} }

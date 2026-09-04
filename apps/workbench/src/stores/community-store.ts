@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import i18n from '@/i18n'
 import { ipc } from '@topo/web-core/services/ipc'
 import { isLLMConfigured } from '@/services/llmClient'
 import { controlDispatcher } from '@/services/control-dispatcher'
@@ -771,7 +772,7 @@ export const useCommunityStore = defineStore('community', () => {
     _cleanTerminalAgents(taskId, 'overview')
     const idx = t.agentTasks.length
     const actionLabel = 'overview'
-    addAgentTask(taskId, actionLabel, ['架构概览生成中...'])
+    addAgentTask(taskId, actionLabel, [i18n.global.t('report.agent.overviewGenerating')])
     t.agentTasks[idx].status = 'running'
 
     try {
@@ -779,16 +780,16 @@ export const useCommunityStore = defineStore('community', () => {
       if (result.success && result.agentTaskId) {
         cancelAgentPolling(taskId)
         t.agentTasks[idx].id = result.agentTaskId
-        updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: '架构概览生成中...' })
+        updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: i18n.global.t('report.agent.overviewGenerating') })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
       } else if (result.success && result.skipped) {
-        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: '架构概览已存在，跳过生成' })
+        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: i18n.global.t('report.agent.overviewExists') })
       } else {
-        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || i18n.global.t('report.agent.startFailed') })
       }
       return result
     } catch (e: any) {
-      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || '未知错误' })
+      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || i18n.global.t('report.agent.unknownError') })
       throw e
     }
   }
@@ -798,7 +799,7 @@ export const useCommunityStore = defineStore('community', () => {
     const t = ensureTask(taskId)
     const actionLabel = agentic ? 'agentic_analyze_components' : 'analyze_components'
     _cleanTerminalAgents(taskId, actionLabel)
-    const steps = components.map(c => `分析组件: ${c.name} (${c.type === 'community' ? '社区' : '外部包'})`)
+    const steps = components.map(c => i18n.global.t('report.agent.analyzeComponentStep', { name: c.name, type: c.type === 'community' ? i18n.global.t('report.agent.communityType') : i18n.global.t('report.agent.externalPackageType') }))
     const idx = t.agentTasks.length
     addAgentTask(taskId, actionLabel, steps)
     t.agentTasks[idx].status = 'running'
@@ -828,15 +829,15 @@ export const useCommunityStore = defineStore('community', () => {
         cancelAgentPolling(taskId)
         t.agentTasks[idx].id = result.agentTaskId
         const msg = result.skipped
-          ? `组件数: ${components.length}（跳过 ${result.skipped} 个已分析）`
-          : `组件数: ${components.length}`
+          ? i18n.global.t('report.agent.componentsCountSkipped', { count: components.length, skipped: result.skipped })
+          : i18n.global.t('report.agent.componentsCount', { count: components.length })
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: msg })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
       } else if (result.success && !result.agentTaskId) {
         const skipped = result.skipped || 0
-        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: `全跳过（${skipped} 个已分析）` })
+        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: i18n.global.t('report.agent.allSkipped', { skipped }) })
       } else {
-        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || i18n.global.t('report.agent.startFailed') })
       }
       return result
     } catch (e: any) {
@@ -867,7 +868,7 @@ export const useCommunityStore = defineStore('community', () => {
         if (!progress.found) {
           const t = tasks.value[taskId]
           if (t && t.agentTasks[taskIdx]) {
-            updateAgentTask(taskId, taskIdx, { status: 'failed', message: '任务已中断（后端进程重启）' })
+            updateAgentTask(taskId, taskIdx, { status: 'failed', message: i18n.global.t('report.agent.taskInterrupted') })
           }
           controlDispatcher.unregister(controlKey)
           return
@@ -884,7 +885,7 @@ export const useCommunityStore = defineStore('community', () => {
         const isCompleted = progress.status === 'completed' || progress.status === 'partial' ||
           progress.status === 'failed' || progress.status === 'cancelled'
         const msg = (!progress.message && stepTotal === 0 && stepCurrent === 0)
-          ? '正在启动…' : (progress.message || '')
+          ? i18n.global.t('report.agent.starting') : (progress.message || '')
         const newStatus = isCompleted
           ? (progress.status === 'failed' ? 'failed' :
              progress.status === 'cancelled' ? 'cancelled' :
@@ -1085,20 +1086,20 @@ export const useCommunityStore = defineStore('community', () => {
       if (idx < 0) return
       if (result.cancelled) {
         // 后端已接受停止请求 → 标记 stopping，等待 polling 更新为最终状态
-        updateAgentTask(taskId, idx, { status: 'stopping', message: '正在停止，等待当前 LLM 请求结束后完全终止' })
+        updateAgentTask(taskId, idx, { status: 'stopping', message: i18n.global.t('report.agent.cancelling') })
         // 保底：30 秒后若仍为 stopping，强制标记 cancelled
         setTimeout(() => {
           const t2 = tasks.value[taskId]
           if (t2) {
             const idx2 = t2.agentTasks.findIndex(at => at.id === agentTaskId)
             if (idx2 >= 0 && t2.agentTasks[idx2].status === 'stopping') {
-              updateAgentTask(taskId, idx2, { status: 'cancelled', message: '停止超时，已强制终止' })
+              updateAgentTask(taskId, idx2, { status: 'cancelled', message: i18n.global.t('report.agent.stopTimeout') })
             }
           }
         }, 30000)
       } else {
         // 任务已处于完成状态
-        updateAgentTask(taskId, idx, { status: 'cancelled', message: '任务已中断' })
+        updateAgentTask(taskId, idx, { status: 'cancelled', message: i18n.global.t('report.agent.taskCancelled') })
       }
       // 取消 presummary 管线队友
       for (const at of t.agentTasks) {
@@ -1121,10 +1122,10 @@ export const useCommunityStore = defineStore('community', () => {
     // 清理已终态的 presummary_files agent
     _cleanTerminalAgents(taskId, 'presummary_files')
     const conc = Math.max(1, Math.min(10, subagentConcurrency))
-    const concHint = conc > 1 ? ` (并发 ${conc})` : ''
-    const stepDesc = `${limit > 0 ? `预摘要 ${batch} (限 ${limit} 个文件)` : `预摘要 ${batch}`}${concHint}`
+    const concHint = conc > 1 ? i18n.global.t('report.agent.concHint', { n: conc }) : ''
+    const stepDesc = `${limit > 0 ? i18n.global.t('report.agent.presummaryBatchLimited', { batch, limit }) : i18n.global.t('report.agent.presummaryBatch', { batch })}${concHint}`
     const idx = t.agentTasks.length
-    addAgentTask(taskId, 'presummary_files', [stepDesc, '等待 LLM 分析完成'])
+    addAgentTask(taskId, 'presummary_files', [stepDesc, i18n.global.t('report.agent.waitingLlm')])
     t.agentTasks[idx].status = 'running'
 
     try {
@@ -1137,10 +1138,10 @@ export const useCommunityStore = defineStore('community', () => {
       }
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId
-        updateAgentTask(taskId, idx, { progress: 0, message: `文件数: ${result.fileCount || 0}` })
+        updateAgentTask(taskId, idx, { progress: 0, message: i18n.global.t('report.agent.fileCountMsg', { count: result.fileCount || 0 }) })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
       } else {
-        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || i18n.global.t('report.agent.startFailed') })
       }
       return result
     } catch (e: any) {
@@ -1153,8 +1154,8 @@ export const useCommunityStore = defineStore('community', () => {
     // 清理已终态的 presummary_files agent
     _cleanTerminalAgents(taskId, 'presummary_files')
     const conc = Math.max(1, Math.min(10, subagentConcurrency))
-    const concHint = conc > 1 ? ` (并发 ${conc})` : ''
-    const stepDesc = `预摘要 ${batches.join('→')} (${batches.length} 批次${concHint})`
+    const concHint = conc > 1 ? i18n.global.t('report.agent.concHint', { n: conc }) : ''
+    const stepDesc = i18n.global.t('report.agent.presummaryPipelineStep', { batches: batches.join('→'), count: batches.length, hint: concHint })
 
     // 清除同任务下旧的 presummary_files agent（防止重复卡片）
     const stale = (t.agentTasks || []).filter(a =>
@@ -1170,7 +1171,7 @@ export const useCommunityStore = defineStore('community', () => {
     }
 
     const idx = t.agentTasks.length
-    addAgentTask(taskId, 'presummary_files', [stepDesc, '等待 LLM 分析完成'])
+    addAgentTask(taskId, 'presummary_files', [stepDesc, i18n.global.t('report.agent.waitingLlm')])
     t.agentTasks[idx].status = 'running'
 
     try {
@@ -1179,16 +1180,16 @@ export const useCommunityStore = defineStore('community', () => {
       // console.log('[pipeline] response success=%s agentTaskId=%s fileCount=%s', result.success, result.agentTaskId, result.fileCount)
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId
-        updateAgentTask(taskId, idx, { progress: 0, message: `文件数: ${result.fileCount || 0}` })
+        updateAgentTask(taskId, idx, { progress: 0, message: i18n.global.t('report.agent.fileCountMsg', { count: result.fileCount || 0 }) })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
         // console.log('[pipeline] polling started for agent=%s idx=%d', result.agentTaskId, idx)
       } else if (result.success) {
         // 无 agentTaskId = 全部批次已缓存（后端已跳过）→ 快速标记完成，不留 running
         // 同步替换占位 steps（卡片无 taskLogs 时渲染最后一个 step 的描述，占位文案"等待 LLM 分析完成"对已完成卡片是错的）
-        t.agentTasks[idx].steps = [{ description: '全部已缓存，已跳过', status: 'done' }]
-        updateAgentTask(taskId, idx, { status: 'completed', progress: 100, message: '全部已缓存，已跳过' })
+        t.agentTasks[idx].steps = [{ description: i18n.global.t('report.agent.allCachedSkipped'), status: 'done' }]
+        updateAgentTask(taskId, idx, { status: 'completed', progress: 100, message: i18n.global.t('report.agent.allCachedSkipped') })
       } else {
-        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || i18n.global.t('report.agent.startFailed') })
       }
       return result
     } catch (e: any) {
@@ -1213,13 +1214,13 @@ export const useCommunityStore = defineStore('community', () => {
     t.agentTasks = t.agentTasks.filter(at => at.action !== 'pipeline')
     const idx = t.agentTasks.length
     const subConc = Math.max(1, Math.min(5, concurrency))
-    const concHint = subConc > 1 ? `（并发 ${subConc}）` : ''
+    const concHint = subConc > 1 ? i18n.global.t('report.agent.concHintFull', { n: subConc }) : ''
     addAgentTask(taskId, 'pipeline', [
-      `流水线启动${concHint}`,
-      '项目摘要',
-      '文件预摘要 P0→P1→P2',
-      '组件分析 L0→L5',
-      '整体架构分析',
+      i18n.global.t('report.agent.pipelineStart', { hint: concHint }),
+      i18n.global.t('report.pipeline.preprocessing'),
+      i18n.global.t('report.agent.pipelinePreSummary'),
+      i18n.global.t('report.agent.pipelineComponentAnalysis'),
+      i18n.global.t('report.pipeline.overallArchitecture'),
     ])
     t.agentTasks[idx].status = 'running'
     try {
@@ -1231,11 +1232,11 @@ export const useCommunityStore = defineStore('community', () => {
       })
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId
-        updateAgentTask(taskId, idx, { progress: 0, message: '流水线启动中...' })
+        updateAgentTask(taskId, idx, { progress: 0, message: i18n.global.t('report.agent.pipelineStarting') })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
         _pollProgressStats(taskId)
       } else {
-        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || i18n.global.t('report.agent.startFailed') })
       }
       return result
     } catch (e: any) {

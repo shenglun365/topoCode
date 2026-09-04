@@ -1,5 +1,6 @@
 // @ts-nocheck — M11 迁移：既有代码（web/ 历史未严格类型门禁），保行为先跳过类型检查，清理留后续。
 import { ref, computed, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as api from '@topo/web-core/services/api'
 import type { GraphNode, GraphEdge, CommunityChild } from '@topo/web-core/types/domain'
 import cytoscape from 'cytoscape'
@@ -9,6 +10,7 @@ cytoscape.use(coseBilkent)
 
 export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
   console.log('[useGraphState] init')
+  const { t } = useI18n()
   const { applyNodeColors, _buildLayout, _afterLayout } = useGraphLayout()
 
   const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
@@ -28,7 +30,7 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
   const gran = ref('component')
   const graphTab = ref<'graph' | 'heatmap'>('graph')
   const toolbarCollapsed = ref(false)
-  const toolbarTitle = ref('图谱操作')
+  const toolbarTitle = ref(t('viewer.toolbarTitle'))
   const isHeatmap = computed(() => graphTab.value === 'heatmap')
   const rightCommTree = ref<CommunityChild[]>([])
   const rightDepth = ref(1)
@@ -117,7 +119,7 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
         layout: _buildLayout(_cy, graphNodes.value.length),
       })
       applyNodeColors(_cy, { visitedCommId: graphCommId.value, gran: gran.value })
-      toolbarTitle.value = `图操作（${graphNodes.value.length} 节点 / ${graphEdges.value.length} 边）`
+      toolbarTitle.value = t('viewer.toolbarStats', { nodes: graphNodes.value.length, edges: graphEdges.value.length })
       setupFollowMode()
     } catch (e) { console.warn('[renderGraph] failed:', e); return }
     _afterLayout(_cy)
@@ -314,11 +316,11 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
   }
 
   function filterToggleLabel(): string {
-    return { hideOrphan: '隐藏孤立', hideAll: '隐藏全部', showAll: '显示全部' }[filterToggleState.value] || '隐藏孤立'
+    return { hideOrphan: t('viewer.filterHideOrphan'), hideAll: t('viewer.filterHideAll'), showAll: t('viewer.filterShowAll') }[filterToggleState.value] || t('viewer.filterHideOrphan')
   }
 
   function filterToggleTitle(): string {
-    return { hideOrphan: '隐藏孤立节点（无连线）', hideAll: '隐藏所有节点', showAll: '显示所有节点' }[filterToggleState.value] || '隐藏孤立节点（无连线）'
+    return { hideOrphan: t('viewer.filterHideOrphanTitle'), hideAll: t('viewer.filterHideAllTitle'), showAll: t('viewer.filterShowAllTitle') }[filterToggleState.value] || t('viewer.filterHideOrphanTitle')
   }
 
   function _nodeFilterColor(id: string): string {

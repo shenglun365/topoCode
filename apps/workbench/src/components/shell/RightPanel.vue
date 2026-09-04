@@ -62,7 +62,7 @@ const title = computed(() => {
     return t('report.codeIndex')
   }
   if (showAgentTasks.value) {
-    return t('report.agentTasks', '解析任务')
+    return t('report.agentTasks')
   }
   if (isAnalysisReport.value) {
     return t('ai.assistantTitle')
@@ -267,7 +267,7 @@ function toggleFloat() {
       <div class="panel-header-actions">
         <div
           class="icon-btn"
-          :title="panelStore.rightFloating ? t('shell.rightPanel.dock', '停靠') : t('shell.rightPanel.float', '弹出窗口')"
+          :title="panelStore.rightFloating ? t('shell.rightPanel.dock') : t('shell.rightPanel.float')"
           @click="toggleFloat"
         >
           <ArrowTopRightOnSquareIcon
@@ -304,14 +304,14 @@ function toggleFloat() {
         @click="panelStore.setRightTab('ai')"
       >
         <ChatBubbleLeftIcon class="w-3.5 h-3.5" />
-        <span>{{ t('ai.chatTab', '对话') }}</span>
+        <span>{{ t('ai.chatTab') }}</span>
       </button>
       <button
         :class="['right-tab', { active: panelStore.rightTab === 'tasks' }]"
         @click="panelStore.setRightTab('tasks')"
       >
         <CommandLineIcon class="w-3.5 h-3.5" />
-        <span>{{ t('report.agentTasks', '解析任务') }}</span>
+        <span>{{ t('report.agentTasks') }}</span>
       </button>
     </div>
     <div class="panel-body">

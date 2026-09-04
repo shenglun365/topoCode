@@ -3,6 +3,8 @@ export default { nav: {
   code: '代码解析',
   userCenter: '用户中心',
   projects: '项目',
+  projectList: '项目列表',
+  coder: '编码工作台',
   analysis: '架构分析',
   knowledge: '知识库',
   settings: '设置',

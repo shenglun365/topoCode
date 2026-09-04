@@ -134,6 +134,9 @@ function createRealIPC() {
       checkFileChanges: async (id: string) => {
         return await api.project.checkFileChanges(id)
       },
+      checkGitRepo: async (path: string) => {
+        return await api.project.checkGitRepo(path)
+      },
       initSampleData: async () => {
         return await api.project.initSampleData()
       },
@@ -603,18 +606,22 @@ function createRealIPC() {
       },
       getImportConfig: async () => {
         const result: ImportConfig = await api.settings.getImportConfig()
+        const r: any = result || {}
         return {
-          ignoreMode: result.ignoreMode || 'strict',
-          extraIgnoreFiles: result.extraIgnoreFiles || [],
-          customPatterns: result.customPatterns || [],
+          ignoreMode: r.ignoreMode || r.ignore_mode || 'strict',
+          extraIgnoreFiles: r.extraIgnoreFiles || r.extra_ignore_files || [],
+          customPatterns: r.customPatterns || r.custom_patterns || [],
+          sourceMirrorRoot: r.sourceMirrorRoot || r.source_mirror_root || '',
         }
       },
-      setImportConfig: async (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[] }) => {
+      setImportConfig: async (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[]; sourceMirrorRoot?: string }) => {
         const result: ImportConfig = await api.settings.setImportConfig(params)
+        const r: any = result || {}
         return {
-          ignoreMode: result.ignoreMode || 'strict',
-          extraIgnoreFiles: result.extraIgnoreFiles || [],
-          customPatterns: result.customPatterns || [],
+          ignoreMode: r.ignoreMode || r.ignore_mode || 'strict',
+          extraIgnoreFiles: r.extraIgnoreFiles || r.extra_ignore_files || [],
+          customPatterns: r.customPatterns || r.custom_patterns || [],
+          sourceMirrorRoot: r.sourceMirrorRoot || r.source_mirror_root || '',
         }
       },
     },

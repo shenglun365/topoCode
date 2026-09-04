@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // @ts-nocheck — M11 迁移：既有代码（web/ 历史未严格类型门禁），保行为先跳过类型检查，清理留后续。
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { diagramStateStore } from '@topo/web-core/services/diagramStateStore'
 import { parseDocContent } from '@topo/web-core/services/parseContent'
 import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
@@ -45,6 +46,7 @@ const {
   docContentRef,
   tocVisible, tocCallChildren, tocIncludeChildren, tocLoading,
   files, filePage, fileSearch, filePreview, fileSummary, pageMode, filteredFiles: filteredFiles_,
+  sourceLoading, viewSource,
   pushDocBc, loadDoc, loadChildren, navigateTo, navBack,
   loadFiles, filterFiles, openFilePreview,
   toggleToc, loadTocData, tocNavigate,
@@ -68,6 +70,7 @@ const {
   initContextMenuAutoClose,
 } = useGraphState(taskId)
 
+const { t } = useI18n()
 const { toast } = useToast()
 
 const fontSize = ref(parseInt(localStorage.getItem('topoone-font-size') || '18'))
@@ -121,6 +124,12 @@ function toggleTab() {
 }
 
 function ctxOpenDoc() {
+  // 文件级节点：id 即相对路径 → 直接展示文件摘要（社区文档对文件无内容）
+  if (gran.value === 'file') {
+    openFilePreview(contextNodeId.value)
+    contextMenuVisible.value = false
+    return
+  }
   docId.value = ''
   docCommId.value = contextNodeId.value
   docEdgeType.value = graphEdgeType.value
@@ -136,7 +145,7 @@ function ctxSaveNote() {
     projectId: doc.value?.projectId || '', projectName: doc.value?.projectName || '', taskId: taskId.value,
     componentId: n.id, label: n.label, text: n.label,
   })
-  toast('已存入便签')
+  toast(t('viewer.savedToNote'))
   contextMenuVisible.value = false
 }
 
@@ -186,7 +195,7 @@ function showSelBar(sel: Selection) {
   if (rect.left === 0 && rect.top === 0 && rect.width === 0) { console.log('[selBar] skip: zero-origin rect'); return }
   selBarEl = document.createElement('div')
   selBarEl.className = 'sel-toolbar'
-  selBarEl.innerHTML = '<button data-action="copy">复制</button><button data-action="note">存入便签</button>'
+  selBarEl.innerHTML = `<button data-action="copy">${t('viewer.selCopy')}</button><button data-action="note">${t('viewer.selNote')}</button>`
   document.body.appendChild(selBarEl)
   void selBarEl.offsetHeight
   const bw = selBarEl.offsetWidth || 80
@@ -204,18 +213,18 @@ function showSelBar(sel: Selection) {
   selBarEl.querySelector('[data-action="copy"]')!.addEventListener('click', () => {
     try {
       if (navigator.clipboard) {
-        navigator.clipboard.writeText(selText).then(() => { toast('已复制'); removeSelBar() }).catch(() => { toast('复制失败'); removeSelBar() })
+        navigator.clipboard.writeText(selText).then(() => { toast(t('common.copied')); removeSelBar() }).catch(() => { toast(t('common.copyFailed')); removeSelBar() })
       } else {
         const ta = document.createElement('textarea')
         ta.value = selText; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta)
         ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
-        toast('已复制'); removeSelBar()
+        toast(t('common.copied')); removeSelBar()
       }
-    } catch (_) { toast('复制失败'); removeSelBar() }
+    } catch (_) { toast(t('common.copyFailed')); removeSelBar() }
   })
   selBarEl.querySelector('[data-action="note"]')!.addEventListener('click', () => {
     _addRefToDraft({ projectId: '', projectName: '', taskId: taskId.value, componentId: '', label: selText.slice(0, 40), text: selText.slice(0, 2000) })
-    toast('已存入便签')
+    toast(t('viewer.savedToNote'))
     removeSelBar()
   })
 }
@@ -267,8 +276,8 @@ function attachHeadingButtons() {
             : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 16l-4-4 4-4"/></svg>')
           : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="14" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8" y1="8" x2="16" y2="4"/><line x1="8" y1="13" x2="4" y2="16"/><line x1="16" y1="13" x2="20" y2="16"/></svg>'
         const title = isRoot
-          ? (et === 'INCLUDE' ? '在依赖关系中查看' : '在调用关系中查看')
-          : '在结构图中查看'
+          ? (et === 'INCLUDE' ? t('viewer.viewInInclude') : t('viewer.viewInCall'))
+          : t('viewer.viewInGraph')
         const ib = document.createElement('span')
         ib.className = 'hd-btn-icon'
         ib.title = title
@@ -322,12 +331,12 @@ function saveAnnotation() {
   if (!text?.trim()) { editAnnoData.value = null; return }
   if (isNew) { doc.value.content += `\n\n<!-- annotation:${Date.now().toString(36)} -->${text.trim()}<!-- /annotation -->` }
   else { const r = new RegExp(`<!--\\s*annotation:${id}\\s*-->[\\s\\S]*?<!--\\s*/annotation\\s*-->`, 'g'); doc.value.content = doc.value.content.replace(r, `<!-- annotation:${id} -->${text.trim()}<!-- /annotation -->`) }
-  editAnnoData.value = null; toast('批注已保存')
+  editAnnoData.value = null; toast(t('viewer.annoSaved'))
 }
 function deleteAnnotation() {
   if (!editAnnoData.value?.id || !doc.value) return
   doc.value.content = doc.value.content.replace(new RegExp(`<!--\\s*annotation:${editAnnoData.value.id}\\s*-->[\\s\\S]*?<!--\\s*/annotation\\s*-->\\n?`, 'g'), '')
-  editAnnoData.value = null; toast('批注已删除')
+  editAnnoData.value = null; toast(t('viewer.annoDeleted'))
 }
 
 
@@ -389,7 +398,7 @@ async function saveDiagramStates() {
     hasUnsavedDiag.value = false
     document.dispatchEvent(new CustomEvent('diagram-state-changed'))
     const { toast } = await import('@topo/web-core/composables/useToast')
-    toast('图状态已保存')
+    toast(t('viewer.diagramSaved'))
   } catch (_) {}
 }
 
@@ -397,7 +406,6 @@ onMounted(() => {
   applyFontSize(fontSize.value)
   loadDoc(() => { checkHash() })
   loadGraph()
-  loadFiles()
   initSelectionToolbar()
   _notesLoad()
   initNotesChannel()
@@ -504,18 +512,18 @@ onMounted(() => {
           :class="{ 'has-unsaved': hasUnsavedDiag }"
           :disabled="!hasUnsavedDiag"
           @click="saveDiagramStates"
-          title="保存图状态到服务器"
+          :title="t('viewer.saveDiagramTitle')"
         >
           <span
             v-if="hasUnsavedDiag"
             class="save-red-dot"
-          ></span>保存图状态
+          ></span>{{ t('viewer.saveDiagram') }}
         </button>
         <button
           class="toolbar-btn notes-btn"
           type="button"
           @click="openNotesModal"
-          title="便签"
+          :title="t('viewer.notesBtnTitle')"
         >
           <svg
             width="16"
@@ -537,7 +545,7 @@ onMounted(() => {
           :class="{ active: leftVisible }"
           type="button"
           @click="toggleLeft"
-          title="文档面板"
+          :title="t('viewer.docPanel')"
         >
           <svg
             width="16"
@@ -555,7 +563,7 @@ onMounted(() => {
           :class="{ active: rightVisible }"
           type="button"
           @click="toggleRight"
-          title="图谱面板"
+          :title="t('viewer.graphPanel')"
         >
           <svg
             width="16"
@@ -597,7 +605,7 @@ onMounted(() => {
             stroke-width="2"
             stroke-linecap="round"
             stroke-linejoin="round"
-          ><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg> 返回
+          ><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg> {{ t('common.back') }}
         </a>
       </template>
     </AppToolbar>
@@ -607,7 +615,7 @@ onMounted(() => {
         <!-- Left Breadcrumb -->
         <div class="breadcrumb">
           <template v-if="docBreadcrumb.length">
-            <span class="bc-link" @click="navBack(-1)">根</span>
+            <span class="bc-link" @click="navBack(-1)">{{ t('common.root') }}</span>
             <template v-for="(bc, i) in docBreadcrumb" :key="i">
               <span class="bc-sep"> › </span>
               <span class="bc-link" @click="navBack(i)">{{ bc.label }}</span>
@@ -617,16 +625,19 @@ onMounted(() => {
         </div>
 
         <div v-if="pageMode === 'file-summary' && filePreview" class="file-preview-panel">
-          <div class="file-preview-header"><button class="tb-btn" @click="pageMode = 'doc'; filePreview = null">← 返回文档</button></div>
+          <div class="file-preview-header">
+            <button class="tb-btn" @click="pageMode = 'doc'; filePreview = null">{{ t('viewer.backToDoc') }}</button>
+            <button class="tb-btn" :disabled="sourceLoading" @click="viewSource">{{ sourceLoading ? t('common.loading') : t('viewer.viewSource') }}</button>
+          </div>
           <div class="file-preview-info"><code>{{ filePreview }}</code></div>
           <div class="file-summary-area">
             <div v-if="fileSummary?.found" class="file-summary-text">{{ fileSummary.summary }}</div>
-            <div v-else class="file-summary-empty">暂无摘要</div>
+            <div v-else class="file-summary-empty">{{ t('viewer.noSummary') }}</div>
           </div>
         </div>
 
         <div v-else class="doc-scroll">
-          <div v-if="loading" class="loading">加载中...</div>
+          <div v-if="loading" class="loading">{{ t('common.loading') }}</div>
           <div v-else-if="doc" ref="docContentRef" class="content" @click="onDocAnnoClick">
             <template v-for="(b, i) in docBlocks" :key="i">
               <span v-if="b.type === 'text'" class="doc-render" v-html="getAnnotationBlocks(b.html || '')"></span>
@@ -650,12 +661,12 @@ onMounted(() => {
               />
             </template>
           </div>
-          <div v-else class="content"><p>请通过 URL 参数传入 taskId</p></div>
+          <div v-else class="content"><p>{{ t('viewer.needTaskId') }}</p></div>
 
           <!-- File list section (inside scroll, below content) -->
           <div v-if="files.length" class="file-list-section">
-            <h3>文件列表 ({{ files.length }})</h3>
-            <input v-model="fileSearch" class="file-search" placeholder="搜索文件..." @input="filterFiles" />
+            <h3>{{ t('viewer.fileList', { n: files.length }) }}</h3>
+            <input v-model="fileSearch" class="file-search" :placeholder="t('viewer.searchFile')" @input="filterFiles" />
             <div v-for="f in filteredFiles_.slice(0, 20)" :key="f.path" class="file-item" @click="openFilePreview(f.path)">
               <span class="file-name">{{ f.name }}</span>
               <span class="file-path">{{ f.path }}</span>
@@ -664,9 +675,10 @@ onMounted(() => {
 
           <!-- Children (inside scroll, below content) -->
           <div v-if="children.length" class="children-section">
-            <h3>子组件 ({{ children.length }})</h3>
+            <h3>{{ t('viewer.childComponents', { n: children.length }) }}</h3>
             <div v-for="c in children" :key="c.commId" class="child-item">
-              <a :href="`/doc?taskId=${taskId}&communityId=${c.commId}&edgeType=${docEdgeType}`">{{ c.name || c.commId }}</a>
+              <!-- SPA 导航：保留面包屑，且不重置右侧结构图（旧版 a href 整页刷新导致丢状态） -->
+              <a :href="`/doc?taskId=${taskId}&communityId=${c.commId}&edgeType=${c.edgeType || docEdgeType}`" @click.prevent="navigateTo(c.commId, c.edgeType)">{{ c.name || c.commId }}</a>
             </div>
           </div>
         </div>
@@ -675,17 +687,17 @@ onMounted(() => {
         <div class="toc-float" id="tocFloat" ref="tocFloatRef">
           <button class="toc-toggle" @click="toggleToc">{{ tocVisible ? '✕' : '☰' }}</button>
           <div v-if="tocVisible" class="toc-panel">
-            <div v-if="tocLoading" class="toc-loading">加载中...</div>
+            <div v-if="tocLoading" class="toc-loading">{{ t('common.loading') }}</div>
             <template v-else>
               <div v-if="tocCallChildren.length" class="toc-section">
-                <div class="toc-title">调用分析 ({{ tocCallChildren.length }})</div>
+                <div class="toc-title">{{ t('viewer.callAnalysis', { n: tocCallChildren.length }) }}</div>
                 <div v-for="c in tocCallChildren" :key="c.commId" class="toc-item" @click="tocNavigate(c)">{{ c.name || c.commId }}</div>
               </div>
               <div v-if="tocIncludeChildren.length" class="toc-section">
-                <div class="toc-title">依赖分析 ({{ tocIncludeChildren.length }})</div>
+                <div class="toc-title">{{ t('viewer.includeAnalysis', { n: tocIncludeChildren.length }) }}</div>
                 <div v-for="c in tocIncludeChildren" :key="c.commId" class="toc-item" @click="tocNavigate(c)">{{ c.name || c.commId }}</div>
               </div>
-              <div v-if="!tocCallChildren.length && !tocIncludeChildren.length" class="toc-empty">没有更深层的组件结构</div>
+              <div v-if="!tocCallChildren.length && !tocIncludeChildren.length" class="toc-empty">{{ t('viewer.noDeeperStructure') }}</div>
             </template>
           </div>
         </div>
@@ -696,7 +708,7 @@ onMounted(() => {
       <div v-show="rightVisible" class="right-panel" :style="{ flex: rightFlex }">
         <!-- Right Breadcrumb -->
         <div class="breadcrumb">
-          <span class="bc-link" @click="graphBreadcrumb = []; graphCommId = ''; loadGraph(); loadRightCommTree()">根</span>
+          <span class="bc-link" @click="graphBreadcrumb = []; graphCommId = ''; loadGraph(); loadRightCommTree()">{{ t('common.root') }}</span>
           <template v-for="(cs, i) in graphBreadcrumb" :key="i">
             <span class="bc-sep"> › </span>
             <span class="bc-link" @click="graphBreadcrumb = graphBreadcrumb.slice(0, i + 1); graphCommId = cs.cid; graphEdgeType = cs.et; loadGraph(); loadRightCommTree()">{{ cs.label || cs.cid.slice(0, 16) }} <span class="bc-et">({{ cs.et }})</span></span>
@@ -710,15 +722,15 @@ onMounted(() => {
             <div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;margin-bottom:2px;padding-bottom:3px;border-bottom:1px solid var(--border);flex-wrap:wrap">
               <div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">
                 <div class="et-tabs">
-                  <button v-for="et in etOptions" :key="et" class="et-tab" :class="{ active: graphEdgeType === et }" @click="setEdgeType(et)">{{ et === 'INCLUDE' ? '内部依赖' : et === 'CALL' ? '内部调用' : et === 'EXTERNAL_INCLUDE' ? '外部依赖' : '外部调用' }}</button>
+                  <button v-for="et in etOptions" :key="et" class="et-tab" :class="{ active: graphEdgeType === et }" @click="setEdgeType(et)">{{ et === 'INCLUDE' ? t('viewer.etInclude') : et === 'CALL' ? t('viewer.etCall') : et === 'EXTERNAL_INCLUDE' ? t('viewer.etExternalInclude') : t('viewer.etExternalCall') }}</button>
                 </div>
               </div>
               <div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">
-                <label v-if="gran === 'component'" style="font-size:var(--ui-font-size);color:var(--text-muted)">深度: <select v-model.number="rightDepth" @change="loadGraph" class="depth-select">
+                <label v-if="gran === 'component'" style="font-size:var(--ui-font-size);color:var(--text-muted)">{{ t('viewer.depth') }} <select v-model.number="rightDepth" @change="loadGraph" class="depth-select">
                   <option :value="1">1</option><option :value="2">2</option><option :value="3">3</option><option :value="4">4</option><option :value="5">5</option>
                 </select></label>
                 <span v-if="gran === 'component'" class="tab-sep">|</span>
-                <label style="font-size:var(--ui-font-size);color:var(--text-muted)">超时: <select v-model.number="layoutTimeout" class="depth-select">
+                <label style="font-size:var(--ui-font-size);color:var(--text-muted)">{{ t('viewer.timeout') }} <select v-model.number="layoutTimeout" class="depth-select">
                   <option :value="30">30s</option><option :value="60">60s</option><option :value="90">90s</option><option :value="120">120s</option>
                 </select></label>
               </div>
@@ -730,7 +742,7 @@ onMounted(() => {
 
                   </div>
                 </div>
-                <div v-else class="comm-tree-empty" style="font-size:var(--ui-font-size);color:var(--text-muted);padding:8px">加载社区列表...</div>
+                <div v-else class="comm-tree-empty" style="font-size:var(--ui-font-size);color:var(--text-muted);padding:8px">{{ t('viewer.loadCommunities') }}</div>
               </div>
             </div>
           </div>
@@ -743,12 +755,12 @@ onMounted(() => {
             <button class="graph-toolbar-collapse" @click="toolbarCollapsed = !toolbarCollapsed">{{ toolbarCollapsed ? '+' : '−' }}</button>
           </div>
           <div v-show="!toolbarCollapsed" class="graph-toolbar-body">
-            <button class="tb-btn" :class="{ active: followMode, 'tb-disabled': isHeatmap }" @click="toggleFollowMode">{{ followMode ? '跟随' : '独立' }}</button>
-            <button class="tb-btn" :class="{ active: showEdges, 'tb-disabled': isHeatmap }" @click="toggleEdges">连线</button>
-            <button class="tb-btn" :class="{ active: gran === 'component', 'tb-disabled': isHeatmap }" @click="toggleGran">{{ gran === 'component' ? '组件' : '文件' }}</button>
-            <button class="tb-btn" :class="{ active: true }" @click="toggleTab">{{ graphTab === 'graph' ? '关系图' : '热力图' }}</button>
-            <button class="tb-btn" :class="{ 'tb-disabled': isHeatmap }" @click="toggleFilter">筛选</button>
-            <button class="tb-btn" :class="{ 'tb-disabled': isHeatmap }" @click="resetLayout">重置</button>
+            <button class="tb-btn" :class="{ active: followMode, 'tb-disabled': isHeatmap }" @click="toggleFollowMode">{{ followMode ? t('viewer.follow') : t('viewer.independent') }}</button>
+            <button class="tb-btn" :class="{ active: showEdges, 'tb-disabled': isHeatmap }" @click="toggleEdges">{{ t('viewer.edges') }}</button>
+            <button class="tb-btn" :class="{ active: gran === 'component', 'tb-disabled': isHeatmap }" @click="toggleGran">{{ gran === 'component' ? t('viewer.component') : t('viewer.file') }}</button>
+            <button class="tb-btn" :class="{ active: true }" @click="toggleTab">{{ graphTab === 'graph' ? t('viewer.graphTab') : t('viewer.heatmapTab') }}</button>
+            <button class="tb-btn" :class="{ 'tb-disabled': isHeatmap }" @click="toggleFilter">{{ t('viewer.filter') }}</button>
+            <button class="tb-btn" :class="{ 'tb-disabled': isHeatmap }" @click="resetLayout">{{ t('viewer.reset') }}</button>
           </div>
         </div>
 
@@ -757,7 +769,7 @@ onMounted(() => {
           <button class="graph-filter-close" @click="filterVisible = false">✕</button>
           <div class="graph-filter-header">
             <span class="graph-filter-drag-icon">⠿</span>
-            <input v-model="filterQuery" class="filter-input" placeholder="搜索节点..." @input="applyFilter" />
+            <input v-model="filterQuery" class="filter-input" :placeholder="t('viewer.searchNode')" @input="applyFilter" />
             <button class="tb-btn graph-filter-toggle" @click="cycleFilter" :title="filterToggleTitle()">{{ filterToggleLabel() }}</button>
           </div>
           <div class="graph-filter-list">
@@ -765,26 +777,26 @@ onMounted(() => {
               <span class="gfi-dot" :style="{ background: _nodeFilterColor(n.id) }"></span>
               <span class="gfi-label">{{ n.label }}</span>
             </div>
-            <div v-if="!filteredNodeList.length" class="graph-filter-empty">无匹配节点</div>
+            <div v-if="!filteredNodeList.length" class="graph-filter-empty">{{ t('viewer.noMatchNode') }}</div>
           </div>
         </div>
 
         <!-- Graph -->
         <div v-show="graphTab === 'graph'" class="cy-container">
           <div class="cy-canvas" ref="cyContainer"></div>
-          <div v-if="graphLoading" class="cy-overlay"><div class="cy-overlay-box"><div class="spinner"></div><span>加载图谱...</span></div></div>
-          <div v-if="!graphNodes.length && !graphLoading" class="cy-placeholder">暂无图谱数据</div>
+          <div v-if="graphLoading" class="cy-overlay"><div class="cy-overlay-box"><div class="spinner"></div><span>{{ t('viewer.loadingGraph') }}</span></div></div>
+          <div v-if="!graphNodes.length && !graphLoading" class="cy-placeholder">{{ t('viewer.noGraphData') }}</div>
         </div>
 
         <!-- Heatmap -->
         <div v-show="graphTab === 'heatmap'" class="heatmap-container">
           <div class="heatmap-controls">
-            <label>规模: <select v-model.number="heatmapSize" @change="loadHeatmap(taskId.value, graphEdgeType.value, graphCommId.value)">
+            <label>{{ t('viewer.scale') }} <select v-model.number="heatmapSize" @change="loadHeatmap(taskId.value, graphEdgeType.value, graphCommId.value)">
               <option :value="5">5x5</option><option :value="10">10x10</option><option :value="15">15x15</option>
               <option :value="20">20x20</option><option :value="30">30x30</option><option :value="50">50x50</option>
             </select></label>
           </div>
-          <div v-if="heatmapLoading" class="loading">加载热力图...</div>
+          <div v-if="heatmapLoading" class="loading">{{ t('viewer.loadingHeatmap') }}</div>
           <div v-else-if="heatmapData" class="heatmap-grid">
             <table><thead><tr><th></th><th v-for="c in heatmapData.cols" :key="c" class="hm-col-hdr" :title="c">{{ c.slice(0,12) }}</th></tr></thead>
               <tbody><tr v-for="(row, ri) in heatmapData.matrix" :key="ri">
@@ -794,7 +806,7 @@ onMounted(() => {
               </tr></tbody>
             </table>
           </div>
-          <div v-else class="cy-placeholder" style="position:static">暂无热力图数据</div>
+          <div v-else class="cy-placeholder" style="position:static">{{ t('viewer.noHeatmapData') }}</div>
         </div>
 
         <GraphContextMenu
@@ -816,28 +828,28 @@ onMounted(() => {
         <div v-if="notesModalVisible" class="note-overlay" @click.self="notesModalVisible = false">
           <div class="note-modal">
             <div class="note-modal-header">
-              <h2>便签簿</h2>
+              <h2>{{ t('viewer.notesBook') }}</h2>
               <button class="close" @click="notesModalVisible = false">&times;</button>
             </div>
             <div class="note-modal-filter">
               <select v-model="notesProjectFilter">
-                <option value="">全部项目</option>
+                <option value="">{{ t('viewer.allProjects') }}</option>
                 <option v-for="p in notesProjectOptions" :key="p" :value="p">{{ p }}</option>
               </select>
               <select v-model="notesFilterStatus">
-                <option value="all">全部状态</option>
-                <option value="draft">草稿</option>
-                <option value="pending">待处理</option>
-                <option value="done">已完成</option>
+                <option value="all">{{ t('viewer.allStatus') }}</option>
+                <option value="draft">{{ t('viewer.statusDraft') }}</option>
+                <option value="pending">{{ t('viewer.statusPending') }}</option>
+                <option value="done">{{ t('viewer.statusDone') }}</option>
               </select>
               <select v-model="notesSortOrder">
-                <option value="seq">按序号</option>
-                <option value="time">按时间</option>
+                <option value="seq">{{ t('viewer.sortSeq') }}</option>
+                <option value="time">{{ t('viewer.sortTime') }}</option>
               </select>
-              <span class="info">{{ filteredNotes.reduce((a:any,n:any)=>a+(n.refs?.length||0),0) }} 条</span>
+              <span class="info">{{ t('viewer.refCount', { n: filteredNotes.reduce((a:any,n:any)=>a+(n.refs?.length||0),0) }) }}</span>
             </div>
             <div class="note-modal-body">
-              <div v-if="!filteredNotes.length" class="note-empty">暂无草稿，在文档区选中文本后可存入便签</div>
+              <div v-if="!filteredNotes.length" class="note-empty">{{ t('viewer.notesEmpty') }}</div>
               <template v-for="n in filteredNotes" :key="n.id">
                 <div v-for="(r, ri) in n.refs" :key="r._id || ri" class="note-draft-card">
                   <div class="draft-header">
@@ -847,10 +859,10 @@ onMounted(() => {
                       <span v-if="r.projectName" class="ref-id">{{ r.projectName }}</span>
                       <span v-if="r.taskId" class="ref-id">{{ r.taskId.slice(0,8) }}</span>
                       <span v-if="r.componentId" class="ref-id">{{ r.componentId.slice(0,12) }}</span>
-                      <button class="copy-id-btn" title="复制引用ID" @click.stop="navigator.clipboard?.writeText(r.componentId || r._id).then(()=>toast('已复制'))?.catch(()=>{})">复制</button>
+                      <button class="copy-id-btn" :title="t('viewer.copyRefId')" @click.stop="navigator.clipboard?.writeText(r.componentId || r._id).then(()=>toast(t('common.copied')))?.catch(()=>{})">{{ t('viewer.selCopy') }}</button>
                     </span>
                     <span class="draft-actions">
-                      <button class="del" @click.stop="deleteRefFromNote(n.id, r._id)">删除</button>
+                      <button class="del" @click.stop="deleteRefFromNote(n.id, r._id)">{{ t('common.delete') }}</button>
                     </span>
                   </div>
                   <div class="draft-body">
@@ -860,20 +872,20 @@ onMounted(() => {
               </template>
             </div>
             <div class="note-modal-user-text">
-              <textarea v-model="notesUserText" placeholder="描述分析需求..." rows="2"></textarea>
-              <div class="hint">提示：使用 #编号 引用材料</div>
+              <textarea v-model="notesUserText" :placeholder="t('viewer.describeRequirement')" rows="2"></textarea>
+              <div class="hint">{{ t('viewer.refHint') }}</div>
             </div>
             <div v-if="notesExecStep === 'sessions'" class="note-modal-sessions">
               <select id="noteSessionSelect" class="session-select" size="5">
-                <option value="__new__">＋ 新建会话</option>
+                <option value="__new__">{{ t('viewer.newSession') }}</option>
                 <option v-for="s in notesSessions" :key="s.id" :value="s.id">{{ s.title || s.id.slice(0,12) }}</option>
               </select>
             </div>
             <div class="note-modal-footer">
-              <label class="checkbox-label"><input type="checkbox" v-model="notesAutoDelete" checked> 自动删除已处理引用</label>
-              <button class="btn btn-secondary" @click="deleteSelectedRefs">删除选中</button>
-              <button class="btn btn-secondary" @click="manualDrafts">手动处理</button>
-              <button class="btn btn-primary" @click="executeNotes">{{ notesExecStep === 'sessions' ? '确认发送' : '执行' }}</button>
+              <label class="checkbox-label"><input type="checkbox" v-model="notesAutoDelete" checked> {{ t('viewer.autoDelete') }}</label>
+              <button class="btn btn-secondary" @click="deleteSelectedRefs">{{ t('viewer.deleteSelected') }}</button>
+              <button class="btn btn-secondary" @click="manualDrafts">{{ t('viewer.manualHandle') }}</button>
+              <button class="btn btn-primary" @click="executeNotes">{{ notesExecStep === 'sessions' ? t('viewer.confirmSend') : t('common.execute') }}</button>
             </div>
           </div>
         </div>
@@ -881,14 +893,14 @@ onMounted(() => {
         <!-- Annotation Editor -->
         <div v-if="editAnnoData" class="dialog-overlay" @click.self="editAnnoData = null">
           <div class="dialog-box" style="width:520px">
-            <h3>{{ editAnnoData.isNew ? '添加批注' : '编辑批注' }}</h3>
+            <h3>{{ editAnnoData.isNew ? t('viewer.annoAdd') : t('viewer.annoEdit') }}</h3>
             <div v-if="editAnnoData.id" style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:8px">{{ editAnnoData.id }}</div>
-            <textarea v-model="editAnnoData.text" class="anno-textarea" placeholder="输入批注内容..."></textarea>
+            <textarea v-model="editAnnoData.text" class="anno-textarea" :placeholder="t('viewer.annoPlaceholder')"></textarea>
             <div class="dialog-actions">
-              <button v-if="!editAnnoData.isNew" class="dialog-btn" style="color:#ef4444" @click="deleteAnnotation">删除</button>
+              <button v-if="!editAnnoData.isNew" class="dialog-btn" style="color:#ef4444" @click="deleteAnnotation">{{ t('common.delete') }}</button>
               <span style="flex:1"></span>
-              <button class="dialog-btn" @click="editAnnoData = null">取消</button>
-              <button class="dialog-btn primary" @click="saveAnnotation">保存</button>
+              <button class="dialog-btn" @click="editAnnoData = null">{{ t('common.cancel') }}</button>
+              <button class="dialog-btn primary" @click="saveAnnotation">{{ t('common.save') }}</button>
             </div>
           </div>
         </div>
@@ -948,7 +960,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .file-name{font-weight:500;white-space:nowrap;color:var(--text)}
 .file-path{color:var(--text-muted);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .file-preview-panel{padding:16px 20px;flex:1;overflow-y:auto}
-.file-preview-header{margin-bottom:12px}
+.file-preview-header{margin-bottom:12px;display:flex;gap:8px;align-items:center}
 .file-preview-info code{font-family:var(--font-mono);font-size:var(--ui-font-size);background:var(--bg-code);padding:2px 6px;border-radius:3px}
 .file-summary-area{margin-top:16px}
 .file-summary-text{font-size:var(--ui-font-size);line-height:1.7;white-space:pre-wrap;color:var(--text)}

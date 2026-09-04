@@ -222,7 +222,7 @@ export default { settings: {
   allHistory: 'All History',
   zeroMeansUnlimited: '0 means no limit',
   extraConfig: 'Extra Params',
-  extraConfigDesc: 'Custom API request parameters (JSON), e.g. {"chat_template_kwargs": {"enable_thinking": false}}. Note: system fields like model, messages, stream cannot be overridden.',
+  extraConfigDesc: 'Custom API request parameters (JSON), e.g. {\'{\'}"chat_template_kwargs": {\'{\'}"enable_thinking": false{\'}\'}{\'}\'}. Note: system fields like model, messages, stream cannot be overridden.',
   localModels: 'Local Models',
   cloudServices: 'Cloud Services',
   customLocal: 'Custom Local',

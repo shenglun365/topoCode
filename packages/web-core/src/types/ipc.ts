@@ -422,6 +422,8 @@ export interface ImportConfig {
   ignoreMode: 'standard' | 'strict' | 'minimal'
   extraIgnoreFiles: string[]
   customPatterns: string[]
+  /** 源码镜像根目录（基线代码拉取位置，默认 {data-dir}/source-cache） */
+  sourceMirrorRoot?: string
 }
 
 /** 后端状态 */
@@ -486,6 +488,7 @@ export interface IPCAPI {
     getFileTree: (id: string, fromPath?: string | null) => Promise<FileTreeNode[]>
     updatePath: (id: string, newRootPath: string) => Promise<{ project: Project; invalidFiles: string[]; needsResync: boolean }>
     checkFileChanges: (id: string) => Promise<{ added: string[]; modified: string[]; deleted: string[]; hasChanges: boolean }>
+    checkGitRepo: (path: string) => Promise<{ exists: boolean; isGitRepo: boolean }>
     updateMeta: (id: string, meta: Record<string, any>) => Promise<Project>
     initSampleData: () => Promise<{ project: Project }>
     clearSampleData: (id: string) => Promise<{ success: boolean }>
@@ -677,7 +680,7 @@ export interface IPCAPI {
     getBindings: () => Promise<Record<string, string>>
     updateBindings: (params: { bindings: Record<string, string> }) => Promise<Record<string, string>>
     getImportConfig: () => Promise<ImportConfig>
-    setImportConfig: (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[] }) => Promise<ImportConfig>
+    setImportConfig: (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[]; sourceMirrorRoot?: string }) => Promise<ImportConfig>
   }
 
   // 模型用量统计

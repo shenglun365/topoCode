@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import i18n from '@/i18n'
 import type { PageType, Breadcrumb, NavigationState } from '@/types'
 
 export const useNavigationStore = defineStore('navigation', () => {
@@ -18,13 +19,13 @@ export const useNavigationStore = defineStore('navigation', () => {
 
   function updateBreadcrumbs(page: PageType) {
     const pageNames: Record<PageType, string> = {
-      home: '项目列表',
-      code: '代码解析',
-      analysis: '代码分析',
-      knowledge: '知识库',
-      user: '用户中心',
-      settings: '设置',
-      coder: '编码工作台',
+      home: i18n.global.t('nav.projectList'),
+      code: i18n.global.t('nav.code'),
+      analysis: i18n.global.t('pageTitle.analysis'),
+      knowledge: i18n.global.t('nav.knowledge'),
+      user: i18n.global.t('nav.userCenter'),
+      settings: i18n.global.t('nav.settings'),
+      coder: i18n.global.t('nav.coder'),
     }
     breadcrumbs.value = [
       { label: 'TopoCode', page: 'home' },

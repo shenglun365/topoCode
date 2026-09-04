@@ -150,7 +150,7 @@ function onClearCacheDone() {
           @click="showImportDialog = true"
         >
           <ArrowUpTrayIcon class="w-4 h-4" />
-          <span>{{ t('project.importStructure', '导入分析结果') }}</span>
+          <span>{{ t('project.importStructure') }}</span>
         </button>
         <button
           v-if="!isResourceProject"
@@ -158,7 +158,7 @@ function onClearCacheDone() {
           @click="showExportDialog = true"
         >
           <ArrowDownTrayIcon class="w-4 h-4" />
-          <span>{{ t('project.exportStructure', '导出分析结果') }}</span>
+          <span>{{ t('project.exportStructure') }}</span>
         </button>
         <button
           v-if="!isResourceProject"
@@ -166,7 +166,7 @@ function onClearCacheDone() {
           @click="showVerifyDialog = true"
         >
           <CheckCircleIcon class="w-4 h-4" />
-          <span>{{ t('project.verifyFiles', '校验') }}</span>
+          <span>{{ t('project.verifyFiles') }}</span>
         </button>
         <button
           v-if="!isResourceProject"

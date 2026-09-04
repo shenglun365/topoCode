@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FolderOpenIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import { ipc } from '@topo/web-core/services/ipc'
 import ServerDirPickerDialog from './ServerDirPickerDialog.vue'
 
 const { t } = useI18n()
@@ -10,10 +11,9 @@ const projectStore = useProjectStore()
 
 const emit = defineEmits<{ close: []; imported: [projectId: string] }>()
 
-type ImportMode = 'static' | 'git-local' | 'git-remote'
+type ImportMode = 'git-local' | 'git-remote'
 
-const mode = ref<ImportMode>('static')
-const dirPath = ref('')
+const mode = ref<ImportMode>('git-local')
 const localRepoPath = ref('')
 const repoUrl = ref('')
 const branch = ref('')
@@ -21,27 +21,24 @@ const head = ref('')
 const error = ref('')
 const busy = ref(false)
 
+// 本地目录非 git 仓库：需用户勾选同意后由 TopoCode 自动初始化
+const isNotGitRepo = ref(false)
+const initGit = ref(false)
+
 // 服务端目录浏览器（Web 模式选目录）
 const pickerVisible = ref(false)
-const pickerTarget = ref<'dir' | 'localRepo'>('dir')
+const pickerTarget = ref<'localRepo'>('localRepo')
 
 const MODES: Array<{ value: ImportMode; label: string; hint: string }> = [
-  { value: 'static', label: t('project.importModeStatic', '独立源码目录'), hint: t('project.importModeStaticHint', '从本地目录导入') },
-  { value: 'git-local', label: t('project.importModeGitLocal', '本地 Git 仓库'), hint: t('project.importModeGitLocalHint', '克隆本地仓库到源码缓存') },
-  { value: 'git-remote', label: t('project.importModeGitRemote', '远程 Git 仓库'), hint: t('project.importModeGitRemoteHint', '克隆远程仓库到源码缓存') },
+  { value: 'git-local', label: t('project.importModeGitLocal'), hint: t('project.importModeGitLocalHint') },
+  { value: 'git-remote', label: t('project.importModeGitRemote'), hint: t('project.importModeGitRemoteHint') },
 ]
 
 const canImport = computed(() => {
   if (busy.value) return false
-  if (mode.value === 'static') return !!dirPath.value
   if (mode.value === 'git-local') return !!localRepoPath.value
   return !!repoUrl.value
 })
-
-async function pickDirectory() {
-  pickerTarget.value = 'dir'
-  pickerVisible.value = true
-}
 
 async function pickLocalRepo() {
   pickerTarget.value = 'localRepo'
@@ -51,9 +48,19 @@ async function pickLocalRepo() {
 function onPickerSaved(path: string) {
   if (pickerTarget.value === 'localRepo') {
     localRepoPath.value = path
-  } else {
-    dirPath.value = path
+    isNotGitRepo.value = false
+    initGit.value = false
   }
+}
+
+async function checkLocalRepo(): Promise<boolean> {
+  try {
+    const res = await ipc.project.checkGitRepo(localRepoPath.value)
+    isNotGitRepo.value = !!(res && res.exists && !res.isGitRepo)
+  } catch {
+    isNotGitRepo.value = false
+  }
+  return !isNotGitRepo.value
 }
 
 async function doImport() {
@@ -63,23 +70,31 @@ async function doImport() {
   try {
     let path = ''
     const opts: any = { mode: mode.value, branch: branch.value, head: head.value }
-    if (mode.value === 'static') {
-      path = dirPath.value
-    } else if (mode.value === 'git-local') {
+    if (mode.value === 'git-local') {
       path = localRepoPath.value
       opts.local_repo_path = localRepoPath.value
+      const isRepo = await checkLocalRepo()
+      if (!isRepo && !initGit.value) {
+        error.value = t('project.initGitHint')
+        busy.value = false
+        return
+      }
+      if (!isRepo) opts.init_git = true
     } else {
       opts.repo_url = repoUrl.value
     }
     const project = await projectStore.importProject(path, opts)
     if (!project) {
-      error.value = t('project.importDuplicate', '项目已存在或导入失败')
+      error.value = t('project.importDuplicate')
     } else {
       emit('imported', project.id)
       emit('close')
     }
   } catch (e: any) {
-    error.value = e?.message || t('project.importFailed', '导入失败')
+    const msg = String(e?.message || e)
+    error.value = msg.startsWith('NOT_A_GIT_REPO')
+      ? t('project.notGitRepo', { path: msg.slice('NOT_A_GIT_REPO:'.length).trim() })
+      : (e?.message || t('project.importFailed'))
   } finally {
     busy.value = false
   }
@@ -115,46 +130,35 @@ function close() {
             </button>
           </div>
 
-          <!-- static：独立静态目录提示 -->
-          <div
-            v-if="mode === 'static'"
-            class="field"
-          >
-            <label class="field-label">{{ t('project.sourceDir', '源码目录') }}</label>
-            <div class="field-row">
-              <input
-                v-model="dirPath"
-                class="input"
-                :placeholder="t('project.sourceDirPlaceholder', '选择源码目录')"
-              >
-              <button class="btn btn-ghost btn-sm" @click="pickDirectory">
-                <FolderOpenIcon class="w-4 h-4" />{{ t('project.browse', '浏览') }}
-              </button>
-            </div>
-            <div class="hint-warn">
-              {{ t('project.staticDirAdvice', '建议使用独立的静态源码目录：不要选择工程目录、不要选择 git 本地仓库目录、不要选择会被频繁改动的目录。') }}
-            </div>
-          </div>
-
           <!-- git-local -->
           <div
-            v-else-if="mode === 'git-local'"
+            v-if="mode === 'git-local'"
             class="field"
           >
-            <label class="field-label">{{ t('project.localRepo', '本地仓库路径') }}</label>
+            <label class="field-label">{{ t('project.localRepo') }}</label>
             <div class="field-row">
               <input
                 v-model="localRepoPath"
                 class="input"
-                :placeholder="t('project.localRepoPlaceholder', '选择本地 git 仓库目录')"
+                :placeholder="t('project.localRepoPlaceholder')"
               >
               <button class="btn btn-ghost btn-sm" @click="pickLocalRepo">
-                <FolderOpenIcon class="w-4 h-4" />{{ t('project.browse', '浏览') }}
+                <FolderOpenIcon class="w-4 h-4" />{{ t('project.browse') }}
               </button>
             </div>
             <div class="hint-info">
-              {{ t('project.gitLocalAdvice', '将从该仓库克隆到源码缓存目录，独立于原仓库。') }}
+              {{ t('project.gitLocalAdvice') }}
             </div>
+            <label
+              v-if="isNotGitRepo"
+              class="init-git-row"
+            >
+              <input
+                v-model="initGit"
+                type="checkbox"
+              >
+              <span>{{ t('project.initGitConfirm') }}</span>
+            </label>
           </div>
 
           <!-- git-remote -->
@@ -162,38 +166,36 @@ function close() {
             v-else
             class="field"
           >
-            <label class="field-label">{{ t('project.remoteRepo', '远端仓库地址') }}</label>
+            <label class="field-label">{{ t('project.remoteRepo') }}</label>
             <div class="field-row">
               <input
                 v-model="repoUrl"
                 class="input"
-                :placeholder="t('project.remoteRepoPlaceholder', 'https://github.com/user/repo.git 或 git@...')"
+                :placeholder="t('project.remoteRepoPlaceholder')"
               >
               <ArrowDownTrayIcon class="w-4 h-4 text-muted" />
             </div>
           </div>
 
-          <!-- 分支/head（git 模式） -->
-          <template v-if="mode !== 'static'">
-            <div class="field-row two-col">
+          <!-- 分支/head -->
+          <div class="field-row two-col">
               <div class="field grow">
-                <label class="field-label">{{ t('project.branch', '分支（可选）') }}</label>
+                <label class="field-label">{{ t('project.branch') }}</label>
                 <input
                   v-model="branch"
                   class="input"
-                  :placeholder="t('project.branchPlaceholder', '默认分支')"
+                  :placeholder="t('project.branchPlaceholder')"
                 >
               </div>
               <div class="field grow">
-                <label class="field-label">{{ t('project.head', '提交版本 head（可选）') }}</label>
+                <label class="field-label">{{ t('project.head') }}</label>
                 <input
                   v-model="head"
                   class="input"
-                  :placeholder="t('project.headPlaceholder', '默认最新')"
+                  :placeholder="t('project.headPlaceholder')"
                 >
               </div>
             </div>
-          </template>
 
           <div
             v-if="error"
@@ -208,7 +210,7 @@ function close() {
             :disabled="!canImport"
             @click="doImport"
           >
-            {{ busy ? t('project.importing') : t('project.importStart', '开始导入') }}
+            {{ busy ? t('project.importing') : t('project.importStart') }}
           </button>
         </div>
       </div>
@@ -314,6 +316,14 @@ function close() {
   font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   line-height: 1.5;
+}
+.init-git-row {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
+  color: var(--text-primary);
+  cursor: pointer;
 }
 .import-error {
   font-size: calc(12px * var(--ui-scale, 1));

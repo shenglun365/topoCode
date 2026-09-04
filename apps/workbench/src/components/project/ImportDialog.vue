@@ -56,9 +56,9 @@ async function startUpload(file: File) {
   try {
     // 浏览器无本地文件系统访问权：先上传到服务器，再走归档导入
     const serverPath = await (window.api as any).system.uploadArchive(file)
-    if (!serverPath) throw new Error(t('project.import.uploadFailed', '上传失败'))
+    if (!serverPath) throw new Error(t('project.import.uploadFailed'))
     progress.value = 10
-    message.value = t('project.import.importing', '正在导入...')
+    message.value = t('project.import.importing')
     const result = await (window.api as any).system.importProjectArchive(serverPath, importMode.value, props.projectId)
     const importId = result.importId
     startPolling(importId)
@@ -128,7 +128,7 @@ function goToProject() {
     >
       <div class="dialog-card">
         <div class="dialog-header">
-          <span class="dialog-title">{{ t('project.importStructure', '导入结构分析') }}</span>
+          <span class="dialog-title">{{ t('project.importStructure') }}</span>
           <button
             v-show="!uploading && !done"
             class="dialog-close"
@@ -155,7 +155,7 @@ function goToProject() {
             <ArrowUpTrayIcon class="icon-lg" />
           </div>
           <div class="upload-hint">
-            {{ t('project.importHint', '选择之前导出的结构分析包 (.zip)，或拖拽到此处') }}
+            {{ t('project.importHint') }}
           </div>
           <div class="mode-selector">
             <label class="mode-option">
@@ -165,7 +165,7 @@ function goToProject() {
                 value="share"
                 class="mode-radio"
               >
-              <span class="mode-label">{{ t('project.importModeShare', '写入当前项目（分享）') }}</span>
+              <span class="mode-label">{{ t('project.importModeShare') }}</span>
             </label>
             <label class="mode-option">
               <input
@@ -174,14 +174,14 @@ function goToProject() {
                 value="restore"
                 class="mode-radio"
               >
-              <span class="mode-label">{{ t('project.importModeRestore', '覆盖原项目（恢复备份）') }}</span>
+              <span class="mode-label">{{ t('project.importModeRestore') }}</span>
             </label>
           </div>
           <button
             class="btn btn-primary btn-sm"
             @click="pickAndImport"
           >
-            {{ t('project.selectFile', '选择文件') }}
+            {{ t('project.selectFile') }}
           </button>
           <div
             v-if="error"
@@ -202,12 +202,12 @@ function goToProject() {
             />
           </div>
           <div class="progress-info">
-            <span v-show="!done">{{ message || t('common.processing', '处理中...') }}</span>
+            <span v-show="!done">{{ message || t('common.processing') }}</span>
             <span
               v-show="done"
               class="done-text"
             >
-              {{ t('project.importDone', '导入完成') }}: {{ newProjectName }}
+              {{ t('project.importDone') }}: {{ newProjectName }}
             </span>
           </div>
           <div
@@ -225,7 +225,7 @@ function goToProject() {
                 class="btn btn-primary btn-sm"
                 @click="goToProject"
               >
-                {{ t('project.goToProject', '查看项目') }}
+                {{ t('project.goToProject') }}
               </button>
             </template>
             <button

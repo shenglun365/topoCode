@@ -36,7 +36,7 @@ function truncatePath(p: string): string {
       <button
         v-if="showMinimize"
         class="collapse-btn"
-        :title="t('common.minimize', '最小化')"
+        :title="t('common.minimize')"
         @click="$emit('minimize')"
       >
         <MinusIcon class="w-3.5 h-3.5" />

@@ -117,11 +117,11 @@ export const useProjectStore = defineStore('project', () => {
     if (running && running.length > 0) {
       const names = running.map((r: any) => r.name).join('、')
       const choice = await confirmChoice(
-        `检测到 ${running.length} 个正在执行的分析任务（${names}）。请选择处理方式：`,
+        i18n.global.t('project.importRunningConfirm', { count: running.length, names }),
         [
-          { label: '停止任务并导入', value: 'stop', variant: 'danger' },
-          { label: '等待完成后导入', value: 'wait', variant: 'warning' },
-          { label: '取消导入', value: 'cancel', variant: 'ghost' },
+          { label: i18n.global.t('project.importChoiceStop'), value: 'stop', variant: 'danger' },
+          { label: i18n.global.t('project.importChoiceWait'), value: 'wait', variant: 'warning' },
+          { label: i18n.global.t('project.importChoiceCancel'), value: 'cancel', variant: 'ghost' },
         ]
       )
       if (choice === 'cancel') return null

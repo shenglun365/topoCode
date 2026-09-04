@@ -161,7 +161,7 @@ export default { analysis: {
   fileCountBlock: 'Block task creation',
   fileCountWarn: 'Large file count, consider reducing scope',
   unsupported: 'Unsupported',
-  etaRemaining: '{{ task.eta }} remaining',
+  etaRemaining: '{eta} remaining',
   fileCountExceed: 'File count {count} exceeds {limit}, please reduce the parse scope',
   taskType: {
     internalDependency: 'Internal Dependency Analysis',

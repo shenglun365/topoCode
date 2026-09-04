@@ -110,7 +110,7 @@ function statusColor(status: string) {
     >
       <div class="dialog-card">
         <div class="dialog-header">
-          <span class="dialog-title">{{ t('project.verifyFiles', '文件比对') }}</span>
+          <span class="dialog-title">{{ t('project.verifyFiles') }}</span>
           <button
             class="dialog-close"
             @click="close"
@@ -137,7 +137,7 @@ function statusColor(status: string) {
             />
           </div>
           <div class="progress-info">
-            {{ message || t('common.processing', '处理中...') }}
+            {{ message || t('common.processing') }}
           </div>
         </div>
 
@@ -186,13 +186,13 @@ function statusColor(status: string) {
             </div>
             <div class="stats">
               <div class="stat-row">
-                <CheckCircleIcon class="stat-icon matched" /><span>{{ t('project.verifyMatched', '匹配') }}: {{ result.matched }}</span>
+                <CheckCircleIcon class="stat-icon matched" /><span>{{ t('project.verifyMatched') }}: {{ result.matched }}</span>
               </div>
               <div class="stat-row">
-                <XCircleIcon class="stat-icon mismatched" /><span>{{ t('project.verifyMismatch', '不匹配') }}: {{ result.mismatch }}</span>
+                <XCircleIcon class="stat-icon mismatched" /><span>{{ t('project.verifyMismatch') }}: {{ result.mismatch }}</span>
               </div>
               <div class="stat-row">
-                <QuestionMarkCircleIcon class="stat-icon missing" /><span>{{ t('project.verifyMissing', '缺失') }}: {{ result.missing }}</span>
+                <QuestionMarkCircleIcon class="stat-icon missing" /><span>{{ t('project.verifyMissing') }}: {{ result.missing }}</span>
               </div>
             </div>
           </div>
@@ -203,16 +203,16 @@ function statusColor(status: string) {
               class="filter-select"
             >
               <option value="all">
-                {{ t('common.all', '全部') }} ({{ result.total }})
+                {{ t('common.all') }} ({{ result.total }})
               </option>
               <option value="matched">
-                {{ t('project.verifyMatched', '匹配') }} ({{ result.matched }})
+                {{ t('project.verifyMatched') }} ({{ result.matched }})
               </option>
               <option value="mismatch">
-                {{ t('project.verifyMismatch', '不匹配') }} ({{ result.mismatch }})
+                {{ t('project.verifyMismatch') }} ({{ result.mismatch }})
               </option>
               <option value="missing">
-                {{ t('project.verifyMissing', '缺失') }} ({{ result.missing }})
+                {{ t('project.verifyMissing') }} ({{ result.missing }})
               </option>
             </select>
           </div>
@@ -235,7 +235,7 @@ function statusColor(status: string) {
               v-if="filteredDetails().length === 0"
               class="empty-detail"
             >
-              {{ t('common.noData', '无数据') }}
+              {{ t('common.noData') }}
             </div>
           </div>
         </template>

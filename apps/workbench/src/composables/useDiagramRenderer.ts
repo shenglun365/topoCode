@@ -7,6 +7,7 @@
 */
 
 import { ref } from 'vue'
+import i18n from '@/i18n'
 import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
 import { normalizeMermaidCode } from '@topo/web-core/services/diagram-normalize'
 
@@ -39,7 +40,7 @@ function injectDiagram(block: DiagramBlock) {
     el.innerHTML = `<div class="fallback-diagram">
       <div class="fallback-diagram-header">
         <span class="fallback-diagram-lang">${escapeHtml(block.lang.toUpperCase())}</span>
-        <button class="fallback-diagram-copy" onclick="navigator.clipboard.writeText(this.parentElement.parentElement.querySelector('code').textContent)">📋 复制代码</button>
+        <button class="fallback-diagram-copy" onclick="navigator.clipboard.writeText(this.parentElement.parentElement.querySelector('code').textContent)">${i18n.global.t('diagram.copyCode')}</button>
       </div>
       <pre class="fallback-code"><code>${escapedCode}</code></pre>
       <div class="diagram-error">${escapedError}</div>

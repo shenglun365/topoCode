@@ -1,10 +1,12 @@
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as api from '@topo/web-core/services/api'
 import { useToast } from '@topo/web-core/composables/useToast'
 
 export function useNotes(taskId: ReturnType<typeof ref<string>>) {
   console.log('[useNotes] init')
   const { toast } = useToast()
+  const { t } = useI18n()
 
   const notesModalVisible = ref(false)
   const notesList = ref<any[]>([])
@@ -146,7 +148,7 @@ export function useNotes(taskId: ReturnType<typeof ref<string>>) {
 
   function manualDrafts() {
     const checked = document.querySelectorAll<HTMLInputElement>('.cbox:checked')
-    if (!checked.length) { toast('请选择要处理的引用'); return }
+    if (!checked.length) { toast(t('notes.selectRefsRequired')); return }
     const keepRefs = new Map<string, Set<string>>()
     checked.forEach(cb => {
       const [nid, rid] = cb.value.split('|')
@@ -177,12 +179,12 @@ export function useNotes(taskId: ReturnType<typeof ref<string>>) {
     console.log(`[notes] manualDrafts checked=${checked.length} sourceNoteIds=[${Array.from(keepRefs.keys()).join(',')}] newPending=${pendingList.length} autoDelete=${notesAutoDelete.value}`)
     _notesSave()
     notesModalVisible.value = false
-    toast('已标记为待处理')
+    toast(t('notes.markedPending'))
   }
 
   async function executeNotes() {
     const checked = document.querySelectorAll<HTMLInputElement>('.cbox:checked')
-    if (!checked.length && !notesUserText.value.trim()) { toast('请选择便签或输入内容'); return }
+    if (!checked.length && !notesUserText.value.trim()) { toast(t('notes.selectOrInputRequired')); return }
 
     if (notesExecStep.value === 'none') {
       // 第一歩：保存选中的引用到缓存，避免后续 DOM 重渲染丢失状态
@@ -200,13 +202,13 @@ export function useNotes(taskId: ReturnType<typeof ref<string>>) {
     if (notesExecStep.value === 'sessions') {
       const selSession = document.querySelector<HTMLSelectElement>('#noteSessionSelect')
       let sessionId = selSession?.value
-      if (!sessionId) { toast('请选择会话'); return }
+      if (!sessionId) { toast(t('notes.selectSessionRequired')); return }
       if (sessionId === '__new__') {
         try {
-          const s = await api.createSession('新对话')
+          const s = await api.createSession(t('notes.defaultSessionTitle'))
           sessionId = s.id
           notesSessions.value.unshift(s)
-        } catch (_) { toast('创建会话失败'); return }
+        } catch (_) { toast(t('notes.sessionCreateFailed')); return }
       }
       const refs: any[] = []
       for (const { noteId, refId } of _pendingExecRefs) {
@@ -230,7 +232,7 @@ export function useNotes(taskId: ReturnType<typeof ref<string>>) {
           console.log(`[notes] executeNotes autoDelete removed ${_pendingExecRefs.length} refs`)
           _notesSave()
         }
-      } catch (_) { toast('执行失败') }
+      } catch (_) { toast(t('notes.execFailed')) }
       _pendingExecRefs = []
       notesModalVisible.value = false
       notesExecStep.value = 'none'

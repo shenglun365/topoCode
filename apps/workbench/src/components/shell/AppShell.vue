@@ -30,12 +30,12 @@ const crashReportStore = useCrashReportStore()
 
 // P5: URL 为项目唯一事实源；回退最近项目（多页签各自 URL 驱动，互不影响）
 const LAST_PROJECT_KEY = 'topoone-last-project'
-const TITLE_PAGE_NAMES: Record<string, string> = {
-  '/home': '项目',
-  '/code': '代码解析',
-  '/analysis': '代码分析',
-  '/knowledge': '知识库',
-  '/coder': '编码工作台',
+const TITLE_PAGE_KEYS: Record<string, string> = {
+  '/home': 'nav.projects',
+  '/code': 'nav.code',
+  '/analysis': 'pageTitle.analysis',
+  '/knowledge': 'nav.knowledge',
+  '/coder': 'nav.coder',
 }
 
 async function syncProjectFromRoute() {
@@ -55,10 +55,10 @@ async function syncProjectFromRoute() {
 
 function updateTitle() {
   const project = projectStore.selectedProject
-  const page = TITLE_PAGE_NAMES[route.path] || ''
+  const pageKey = TITLE_PAGE_KEYS[route.path]
   const parts = ['TopoCode']
   if (project?.name) parts.push(project.name)
-  if (page) parts.push(page)
+  if (pageKey) parts.push(t(pageKey))
   document.title = parts.join(' · ')
 }
 
@@ -188,15 +188,15 @@ onUnmounted(() => {
       @click.self="crashReportStore.closeDialog"
     >
       <div class="confirm-box crash-dialog">
-        <h3 class="crash-dialog-title">后端异常崩溃</h3>
+        <h3 class="crash-dialog-title">{{ t('shell.crashDialog.title') }}</h3>
         <div class="crash-dialog-body">
-          <p>后端服务异常退出，错误信息：</p>
+          <p>{{ t('shell.crashDialog.intro') }}</p>
           <pre class="crash-detail">{{ crashReportStore.selectedCrash.summary }}</pre>
           <p class="crash-time">
-            时间：{{ crashReportStore.selectedCrash.timestamp }}
+            {{ t('shell.crashDialog.time', { time: crashReportStore.selectedCrash.timestamp }) }}
           </p>
           <p class="crash-hint">
-            点击"上报"将打开邮件客户端，请附上日志文件以便排查。
+            {{ t('shell.crashDialog.hint') }}
           </p>
         </div>
         <div class="confirm-actions">
@@ -204,13 +204,13 @@ onUnmounted(() => {
             class="confirm-btn confirm-btn-primary"
             @click="crashReportStore.report(crashReportStore.selectedCrash!)"
           >
-            上报给开发者
+            {{ t('shell.crashDialog.report') }}
           </button>
           <button
             class="confirm-btn"
             @click="crashReportStore.dismiss(crashReportStore.selectedCrash!)"
           >
-            忽略
+            {{ t('shell.crashDialog.dismiss') }}
           </button>
         </div>
       </div>

@@ -44,7 +44,7 @@ async function testModelStatus() {
       @click="crashStore.openCrash(crashStore.latestCrash!)"
     >
       <span class="status-dot status-error blink" />
-      <span>后端异常</span>
+      <span>{{ t('shell.statusBar.backendError') }}</span>
     </div>
     <span
       v-if="showId"

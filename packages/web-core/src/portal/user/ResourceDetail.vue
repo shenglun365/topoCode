@@ -134,8 +134,8 @@ const dislikeActive = computed(() => props.resource?.my_vote === -1)
             v-if="meta?.feature_flags?.show_detail_meta !== false && !isPrerelease"
             class="detail-meta"
           >
-            <span>{{ (labels.download_count || '下载量') }}: {{ resource.download_count }}</span>
-            <span>{{ (labels.publish_date || '发布时间') }}: {{ resource.created_at }}</span>
+            <span>{{ (labels.download_count || t('resource.downloadCount')) }}: {{ resource.download_count }}</span>
+            <span>{{ (labels.publish_date || t('resource.publishDate')) }}: {{ resource.created_at }}</span>
           </div>
 
           <div class="vote-section">
@@ -198,7 +198,7 @@ const dislikeActive = computed(() => props.resource?.my_vote === -1)
             class="btn btn-ghost btn-sm"
             @click="$emit('close')"
           >
-            {{ labels.close || '关闭' }}
+            {{ labels.close || t('common.close') }}
           </button>
           <button
             v-if="!isPrerelease"

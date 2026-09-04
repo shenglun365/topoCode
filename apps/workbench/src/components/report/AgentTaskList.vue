@@ -319,7 +319,7 @@ const actionLabel = (action: string) => {
       <button
         v-if="allTasks.length > 0"
         class="atl-clear-btn"
-        :title="t('report.clearHistory', '清除历史')"
+        :title="t('report.clearHistory')"
         @click="clearHistory"
       >
         {{ t('common.clear') }}
@@ -329,7 +329,7 @@ const actionLabel = (action: string) => {
       v-if="allTasks.length === 0 && historyLoaded"
       class="atl-empty"
     >
-      {{ t('report.noAgentTasks', '暂无 Agent 任务') }}
+      {{ t('report.noAgentTasks') }}
     </div>
     <div
       v-if="!historyLoaded"
@@ -367,7 +367,7 @@ const actionLabel = (action: string) => {
         <button
           v-show="task.status === 'stopping'"
           class="atl-stop-btn atl-stopping"
-          :title="t('report.agent.stopping', '停止中')"
+          :title="t('report.agent.stopping')"
           disabled
         >
           <ClockIcon class="w-3 h-3" />
@@ -384,19 +384,19 @@ const actionLabel = (action: string) => {
       </div>
       <div class="atl-task-logs">
         <div class="atl-log-count">
-          <span>{{ t('report.agent.progress', '进度') }}: {{ task.progress }}%</span>
+          <span>{{ t('report.agent.progress') }}: {{ task.progress }}%</span>
         </div>
         <div
           v-if="task.totalFiles > 0"
           class="atl-log-breakdown"
         >
-          {{ t('report.agent.files', '文件') }}: {{ task.doneFiles || 0 }}/{{ task.totalFiles }}
+          {{ t('report.agent.files') }}: {{ task.doneFiles || 0 }}/{{ task.totalFiles }}
         </div>
         <div
           v-if="task.totalComps > 0"
           class="atl-log-breakdown"
         >
-          {{ t('report.agent.components', '组件') }}: {{ task.doneComps || 0 }}/{{ task.totalComps }}
+          {{ t('report.agent.components') }}: {{ task.doneComps || 0 }}/{{ task.totalComps }}
         </div>
         <div
           v-if="task.currentFile"

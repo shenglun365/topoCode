@@ -18,7 +18,8 @@
     "./shell/*": "./src/shell/*",
     "./styles/variables.scss": "./src/styles/variables.scss",
     "./styles/global.scss": "./src/styles/global.scss",
-    "./portal/*": "./src/portal/*"
+    "./portal/*": "./src/portal/*",
+    "./portal/i18n": "./src/portal/i18n.ts"
   },
   "scripts": {
     "typecheck": "vue-tsc --noEmit",

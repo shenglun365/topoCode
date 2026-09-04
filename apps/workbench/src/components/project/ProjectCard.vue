@@ -62,7 +62,7 @@ let pinnedWarningTimer: ReturnType<typeof setTimeout> | null = null
 
 const changesDialogVisible = ref(false)
 const changesLoading = ref(false)
-const changesResult = ref<{ added: string[]; modified: string[]; deleted: string[]; hasChanges: boolean } | null>(null)
+const changesResult = ref<{ added: string[]; modified: string[]; deleted: string[]; hasChanges: boolean; sourceHead?: string; mirrorHead?: string; branch?: string; note?: string } | null>(null)
 const changesError = ref<string | null>(null)
 const changesActiveTab = ref<'added' | 'modified' | 'deleted'>('modified')
 
@@ -531,7 +531,7 @@ async function onVersionUpdated() {
         v-if="project.hasFileChanges"
         class="badge"
         style="background:#f59e0b;color:#fff;font-size:calc(7px * var(--ui-scale, 1));"
-      >{{ t('project.filesChanged', '变更') }}</span>
+      >{{ t('project.filesChanged') }}</span>
       <span
         :class="`badge ${getStatusBadge(project.status)}`"
         style="font-size:calc(8px * var(--ui-scale, 1));"
@@ -598,7 +598,7 @@ async function onVersionUpdated() {
           @click="startVersionUpdate"
         >
           <ArrowPathIcon class="w-4 h-4" />
-          <span>{{ t('version.title', 'KB 基线更新') }}</span>
+          <span>{{ t('version.title') }}</span>
         </div>
         <!-- 资源项目操作 -->
         <template v-if="isResourceProject">
@@ -608,14 +608,14 @@ async function onVersionUpdated() {
             @click="handleResetProject"
           >
             <ArrowPathIcon class="w-4 h-4" />
-            <span>{{ t('project.resetProject', '重置项目') }}</span>
+            <span>{{ t('project.resetProject') }}</span>
           </div>
           <div
             class="context-menu-item"
             @click="handleDeleteBackup"
           >
             <ArchiveBoxXMarkIcon class="w-4 h-4" />
-            <span>{{ t('project.deleteBackup', '删除备份') }}</span>
+            <span>{{ t('project.deleteBackup') }}</span>
           </div>
           <div class="context-menu-divider" />
         </template>
@@ -687,36 +687,36 @@ async function onVersionUpdated() {
           <!-- 版本基线：远端/本地仓库、分支、head -->
           <div class="edit-info-section">
             <div class="edit-info-field">
-              <label class="edit-info-label">{{ t('project.remoteUrl', '远端仓库地址') }}</label>
+              <label class="edit-info-label">{{ t('project.remoteUrl') }}</label>
               <input
                 v-model="editRemoteUrl"
                 class="edit-info-input"
-                :placeholder="t('project.remoteUrlPlaceholder', 'https://github.com/user/repo.git（可选）')"
+                :placeholder="t('project.remoteUrlPlaceholder')"
               >
             </div>
             <div class="edit-info-field">
-              <label class="edit-info-label">{{ t('project.localRepoPath', '本地仓库地址') }}</label>
+              <label class="edit-info-label">{{ t('project.localRepoPath') }}</label>
               <input
                 v-model="editLocalRepoPath"
                 class="edit-info-input"
-                :placeholder="t('project.localRepoPathPlaceholder', '/path/to/repo（可选）')"
+                :placeholder="t('project.localRepoPathPlaceholder')"
               >
             </div>
             <div class="edit-info-row">
               <div class="edit-info-field grow">
-                <label class="edit-info-label">{{ t('project.branch', '代码分支') }}</label>
+                <label class="edit-info-label">{{ t('project.branch') }}</label>
                 <input
                   v-model="editBranch"
                   class="edit-info-input"
-                  :placeholder="t('project.branchPlaceholder', '如 main（可选）')"
+                  :placeholder="t('project.branchPlaceholder')"
                 >
               </div>
               <div class="edit-info-field grow">
-                <label class="edit-info-label">{{ t('project.head', '代码版本 head') }}</label>
+                <label class="edit-info-label">{{ t('project.head') }}</label>
                 <input
                   v-model="editHead"
                   class="edit-info-input"
-                  :placeholder="t('project.headPlaceholder', 'commit hash（可选）')"
+                  :placeholder="t('project.headPlaceholder')"
                 >
               </div>
             </div>
@@ -834,6 +834,20 @@ async function onVersionUpdated() {
           v-else-if="changesResult && !changesResult.hasChanges"
           class="changes-dialog-body"
         >
+          <div
+            v-if="changesResult.note === 'fetch-failed'"
+            class="changes-note"
+          >{{ t('project.changes.noteFetchFailed') }}</div>
+          <div
+            v-else-if="changesResult.note === 'mirror-missing'"
+            class="changes-note"
+          >{{ t('project.changes.noteMirrorMissing') }}</div>
+          <div
+            v-if="changesResult.sourceHead || changesResult.mirrorHead"
+            class="changes-heads font-mono"
+          >
+            {{ t('project.changes.headsInfo', { source: (changesResult.sourceHead || '—').slice(0, 8), mirror: (changesResult.mirrorHead || '—').slice(0, 8) }) }}
+          </div>
           <div class="changes-dialog-ok">
             <CheckIcon class="w-5 h-5 text-success" />
             <span>{{ t('project.noChanges') }}</span>
@@ -852,6 +866,16 @@ async function onVersionUpdated() {
           v-else-if="changesResult && changesResult.hasChanges"
           class="changes-dialog-body"
         >
+          <div
+            v-if="changesResult.note === 'diff-failed'"
+            class="changes-note"
+          >{{ t('project.changes.noteDiffFailed') }}</div>
+          <div
+            v-if="changesResult.sourceHead || changesResult.mirrorHead"
+            class="changes-heads font-mono"
+          >
+            {{ t('project.changes.headsInfo', { source: (changesResult.sourceHead || '—').slice(0, 8), mirror: (changesResult.mirrorHead || '—').slice(0, 8) }) }}
+          </div>
           <div class="changes-tabs">
             <button
               class="changes-tab"
@@ -1262,6 +1286,18 @@ async function onVersionUpdated() {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+.changes-note {
+  font-size: calc(11px * var(--ui-scale, 1));
+  color: #d97706;
+  background: color-mix(in srgb, #d97706 10%, transparent);
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  line-height: 1.5;
+}
+.changes-heads {
+  font-size: calc(10px * var(--ui-scale, 1));
+  color: var(--text-muted);
 }
 .changes-dialog-ok {
   display: flex;

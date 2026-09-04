@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import i18n from '@/i18n'
 import { useProjectStore } from '@/stores/project'
 import { useNavigationStore } from '@/stores/navigation'
 import type { PageType } from '@/types'
@@ -12,7 +13,7 @@ const routes: RouteRecordRaw[] = [
           path: '/',
           name: 'HomePortal',
           component: () => import('@/pages/HomePortal.vue'),
-          meta: { title: '首页', hideShell: true },
+          meta: { title: 'nav.home', hideShell: true },
         },
       ]
     : [
@@ -25,43 +26,43 @@ const routes: RouteRecordRaw[] = [
     path: '/home',
     name: 'Home',
     component: () => import('@/pages/HomePage.vue'),
-    meta: { title: '知识库解析和管理' },
+    meta: { title: 'pageTitle.home' },
   },
   {
     path: '/code',
     name: 'Code',
     component: () => import('@/pages/CodePage.vue'),
-    meta: { title: '代码解析' },
+    meta: { title: 'nav.code' },
   },
   {
     path: '/analysis',
     name: 'Analysis',
     component: () => import('@/pages/AnalysisPage.vue'),
-    meta: { title: '代码分析' },
+    meta: { title: 'pageTitle.analysis' },
   },
   {
     path: '/knowledge',
     name: 'Knowledge',
     component: () => import('@/pages/KnowledgePage.vue'),
-    meta: { title: '知识库' },
+    meta: { title: 'nav.knowledge' },
   },
   {
     path: '/login',
     name: 'Login',
     component: () => import('@/pages/LoginPage.vue'),
-    meta: { title: '登录', hideShell: true },
+    meta: { title: 'pageTitle.login', hideShell: true },
   },
   {
     path: '/register',
     name: 'Register',
     component: () => import('@/pages/RegisterPage.vue'),
-    meta: { title: '注册', hideShell: true },
+    meta: { title: 'pageTitle.register', hideShell: true },
   },
   {
     path: '/reset-password',
     name: 'ResetPassword',
     component: () => import('@/pages/ResetPasswordPage.vue'),
-    meta: { title: '重置密码', hideShell: true },
+    meta: { title: 'pageTitle.resetPassword', hideShell: true },
   },
 ]
 
@@ -79,7 +80,7 @@ router.beforeEach((to, _from, next) => {
   }
   const title = to.meta.title as string
   if (title) {
-    document.title = `TopoCode · ${title}`
+    document.title = `TopoCode · ${i18n.global.t(title)}`
   }
   next()
 })
