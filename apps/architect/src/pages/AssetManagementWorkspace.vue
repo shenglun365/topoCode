@@ -356,59 +356,132 @@ const compHierLevel = computed<Map<string, string>>(() => {
   }
   return m
 })
-/** 资产 tab 组件树行：全部层级从根展开；选 L0/L1 时以该层组件为初始列表(可展开更低从属组件)。 */
-const semanticGroups = computed<SemanticGroup[]>(() => {
+/** 目录树行：组件(目录) / 文件 / 资产 三类节点的扁平 DFS 序列。
+ *  结构 = 组件按父子层级作目录；文件挂「独有它的」组件节点(own = owns − 直接子组件 owns，
+ *  被子组件拥有的文件下放到子组件)；资产挂首锚点文件下，无锚点资产挂组件直属；无归属资产归「其它」。 */
+type TreeRow = { key: string; t: 'comp' | 'file' | 'asset'; depth: number;
+                 g?: SemanticGroup; file?: string; n?: number; a?: SemanticAsset }
+const fileOpen = reactive<Record<string, boolean>>({})
+const subtreeCount = ref(new Map<string, number>())
+function toggleFileOpen(key: string) {
+  fileOpen[key] = fileOpen[key] !== false ? false : true
+}
+function fileBase(p: string): string {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return i >= 0 ? p.slice(i + 1) : p
+}
+
+const semanticTreeRows = computed<TreeRow[]>(() => {
   const sel = new Set(scopeSel.value)
   const all = sel.size === 0
-  const byComp = new Map<string, SemanticAsset[]>()
-  const other: SemanticAsset[] = []
+  // 资产分桶：首锚点文件 → byFile；无锚点 → 组件直属 direct；无归属 → other
+  const byFile = new Map<string, SemanticAsset[]>()
+  const direct = new Map<string, SemanticAsset[]>()
+  const otherFiles = new Map<string, SemanticAsset[]>()
+  const otherDirect: SemanticAsset[] = []
   for (const a of items.value) {
     const cids = componentsOf(a)
+    const file = a.astRefs?.[0]?.file || ''
     if (!cids.length) {
-      other.push(a)
+      if (file) {
+        const l = otherFiles.get(file) ?? []
+        l.push(a)
+        otherFiles.set(file, l)
+      } else otherDirect.push(a)
       continue
     }
-    // 多归属：共享代码资产同时挂到每个拥有组件下(各组件视角均可见)
-    for (const cid of cids) {
-      if (!byComp.has(cid)) byComp.set(cid, [])
-      byComp.get(cid)!.push(a)
+    const cid = a.scopeKey && cids.includes(a.scopeKey) ? a.scopeKey : cids[0]!
+    if (file) {
+      const l = byFile.get(file) ?? []
+      l.push(a)
+      byFile.set(file, l)
+    } else {
+      const l = direct.get(cid) ?? []
+      l.push(a)
+      direct.set(cid, l)
     }
   }
-  const groups: SemanticGroup[] = []
-  // 树根：全部 → 无父节点；选层级 → 该层级组件(即便有父，也从这层开始作为初始列表)。
-  const roots = compLevelSel.value === 'all'
-    ? treeComps.value.filter((c) => !c.parentId)
-    : treeComps.value.filter((c) => (c.hierLevel ?? compHierLevel.value.get(c.id)) === compLevelSel.value)
-  const walk = (parentId: string | undefined, depth: number) => {
-    for (const c of treeComps.value) {
-      if (c.parentId !== parentId) continue
-      if (all || sel.has(c.id)) {
-        const assets = byComp.get(c.id)
-        const hasChild = treeComps.value.some((x) => x.parentId === c.id)
-        // 组头常驻(有资产或有下级组件即渲染)——折叠态组头保留，层级结构始终可导航
-        if (assets?.length || hasChild) {
-          groups.push({ key: c.id, name: c.name, depth, assets: assets ?? [], hierLevel: c.hierLevel })
+  const children = new Map<string, CompNode[]>()
+  const roots: CompNode[] = []
+  for (const c of treeComps.value) {
+    const pk = c.parentId ?? ''
+    const arr = children.get(pk) ?? []
+    arr.push(c)
+    children.set(pk, arr)
+    // 层级筛选: 全部 → 无父组件为根；选层级 → 该层组件为初始根(即便有父，子树照常递归)
+    if (!c.parentId || (compLevelSel.value !== 'all'
+        && (c.hierLevel ?? compHierLevel.value.get(c.id)) === compLevelSel.value)) roots.push(c)
+  }
+  const uniqueFiles = (c: CompNode): string[] => {
+    const sub = new Set<string>()
+    for (const ch of children.get(c.id) ?? []) for (const f of ch.owns) sub.add(f)
+    return c.owns.filter((f) => !sub.has(f)).sort()
+  }
+  // 子树资产总数(组头计数 chip，模板引用)——每次重算填充
+  const counts = new Map<string, number>()
+  const countSub = (c: CompNode): number => {
+    const sub = new Set<string>()
+    for (const ch of children.get(c.id) ?? []) for (const f of ch.owns) sub.add(f)
+    let n = direct.get(c.id)?.length ?? 0
+    for (const f of c.owns) if (!sub.has(f)) n += byFile.get(f)?.length ?? 0
+    for (const ch of children.get(c.id) ?? []) n += countSub(ch)
+    counts.set(c.id, n)
+    return n
+  }
+  const rows: TreeRow[] = []
+  const walk = (c: CompNode, depth: number) => {
+    if (!(all || sel.has(c.id))) {
+      // 路径节点：自身不渲染，仍下探(选中集可能命中后代)
+      for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
+      return
+    }
+    countSub(c)
+    rows.push({ key: c.id, t: 'comp', depth,
+                g: { key: c.id, name: c.name, depth, assets: [], hierLevel: c.hierLevel } })
+    if (compOpen[c.id] === false) return   // 折叠 → 子组件/文件/资产整支隐藏
+    for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
+    for (const f of uniqueFiles(c)) {
+      const fk = c.id + '::' + f
+      const list = byFile.get(f) ?? []
+      rows.push({ key: 'f:' + fk, t: 'file', depth: depth + 1, file: f, n: list.length })
+      if (fileOpen[fk] !== false) {
+        for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: depth + 2, a })
+      }
+    }
+    for (const a of direct.get(c.id) ?? []) rows.push({ key: 'a:' + a.id, t: 'asset', depth: depth + 1, a })
+  }
+  for (const r of roots) walk(r, 0)
+  if ((otherFiles.size || otherDirect.length) && (all || sel.has(OTHER_KEY))) {
+    rows.push({ key: OTHER_KEY, t: 'comp', depth: 0,
+                g: { key: OTHER_KEY, name: t('assetMgmt.other'), depth: 0, assets: [] } })
+    if (compOpen[OTHER_KEY] !== false) {
+      for (const f of [...otherFiles.keys()].sort()) {
+        const fk = OTHER_KEY + '::' + f
+        const list = otherFiles.get(f) ?? []
+        rows.push({ key: 'f:' + fk, t: 'file', depth: 1, file: f, n: list.length })
+        if (fileOpen[fk] !== false) {
+          for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: 2, a })
         }
       }
-      if (compOpen[c.id] !== false) walk(c.id, depth + 1)
+      for (const a of otherDirect) rows.push({ key: 'a:' + a.id, t: 'asset', depth: 1, a })
     }
   }
-  for (const r of roots) {
-    groups.push({ key: r.id, name: r.name, depth: 0, assets: byComp.get(r.id) ?? [], hierLevel: r.hierLevel })
-    if (compOpen[r.id] !== false) walk(r.id, 1)
-  }
-  if (other.length && (all || sel.has(OTHER_KEY))) {
-    groups.push({ key: OTHER_KEY, name: t('assetMgmt.other'), depth: 0, assets: other })
-  }
-  return groups
+  subtreeCount.value = counts
+  return rows
 })
 
 const scopeSummary = computed(() => {
   if (!scopeSel.value.length) return t('assetMgmt.scopeAll')
-  // 共享资产会挂在多个组件组下 → 按资产 id 去重计数
+  // 共享资产会挂在多个组件下 → 按资产 id 去重计数
+  const sel = new Set(scopeSel.value)
   const ids = new Set<string>()
-  for (const g of semanticGroups.value) {
-    for (const a of g.assets) ids.add(a.id)
+  for (const a of items.value) {
+    const cids = componentsOf(a)
+    if (!cids.length) {
+      if (sel.has(OTHER_KEY)) ids.add(a.id)
+      continue
+    }
+    if (cids.some((cid) => sel.has(cid))) ids.add(a.id)
   }
   return `${ids.size}/${items.value.length}`
 })
@@ -1707,15 +1780,21 @@ onMounted(async () => {
           <!-- 语义资产：按组件树文件树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
           <template v-if="tab === 'semantic'">
             <template
-              v-for="g in semanticGroups"
-              :key="g.key"
+              v-for="row in semanticTreeRows"
+              :key="row.key"
             >
+              <!-- 组件(目录)节点 -->
+              <template v-if="row.t === 'comp'">
+                <div
+                  v-for="g in row.g ? [row.g] : []"
+                  :key="row.key + ':h'"
+                >
               <div
                 class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5"
-                :style="{ paddingLeft: (g.depth * 12) + 'px' }"
+                :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <button
-                  v-if="g.key !== OTHER_KEY && (hasChildren(g.key) || g.assets.length)"
+                  v-if="g.key !== OTHER_KEY && (hasChildren(g.key) || (subtreeCount.get(g.key) ?? 0) > 0)"
                   class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
                   @click="toggleOpen(g.key)"
                 >
@@ -1775,7 +1854,7 @@ onMounted(async () => {
                     <ChatBubbleLeftRightIcon class="w-3 h-3" />
                   </button>
                 </template>
-                <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ g.assets.length }}</span>
+                <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ subtreeCount.get(g.key) ?? 0 }}</span>
                 <template v-if="g.key !== OTHER_KEY">
                   <span
                     v-if="compCoverage(g.key)"
@@ -1798,13 +1877,45 @@ onMounted(async () => {
                   </button>
                 </template>
               </div>
-              <!-- 折叠该组件时隐藏其资产(组头保留，计数 chip 仍在) -->
-              <template v-if="compOpen[g.key] !== false">
+                </div>
+              </template>
+              <!-- 文件节点：独有文件，折叠其下资产 -->
               <div
-                v-for="a in g.assets"
-                :key="a.id"
-                class="border border-ctp-mauve/20 hover:border-ctp-mauve/40 rounded-lg overflow-hidden"
+                v-else-if="row.t === 'file'"
+                class="flex items-center gap-1.5 px-1 py-0.5"
+                :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
+                <button
+                  class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
+                  @click="toggleFileOpen(row.key!)"
+                >
+                  <ChevronDownIcon
+                    v-if="fileOpen[row.key!] !== false"
+                    class="w-3 h-3"
+                  />
+                  <ChevronRightIcon
+                    v-else
+                    class="w-3 h-3"
+                  />
+                </button>
+                <DocumentTextIcon class="w-3 h-3 text-ctp-overlay1 shrink-0" />
+                <span
+                  class="font-mono text-[10px] text-ctp-subtext1 truncate"
+                  :title="row.file"
+                >{{ fileBase(row.file!) }}</span>
+                <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ row.n }}</span>
+              </div>
+              <!-- 资产卡片(挂文件下/组件直属) -->
+              <div
+                v-else
+                class="mt-0.5"
+                :style="{ paddingLeft: (row.depth * 12) + 'px' }"
+              >
+                <div
+                  v-for="a in row.a ? [row.a] : []"
+                  :key="row.key"
+                  class="border border-ctp-mauve/20 hover:border-ctp-mauve/40 rounded-lg overflow-hidden"
+                >
                 <div class="flex items-center gap-1.5 px-2 py-1.5">
                   <component
                     :is="kindIcon(a.kind)"
@@ -2060,10 +2171,10 @@ onMounted(async () => {
                   </div>
                 </div>
               </div>
-              </template>
+                </div>
             </template>
             <p
-              v-if="!semanticGroups.length && !loading"
+              v-if="!semanticTreeRows.length && !loading"
               class="text-xs text-ctp-overlay0 text-center py-8"
             >
               {{ t('assetMgmt.emptySemantic') }}
