@@ -1645,8 +1645,13 @@ export default {
     },
     allLevels: 'All levels',
     allCompLevels: 'All component levels',
-    collapseAll: 'Collapse all (component hierarchy)',
-    expandAll: 'Expand all',
+    treeLevel: {
+      0: 'Collapse to L0',
+      1: 'Components',
+      2: 'Files open',
+      3: 'All expanded',
+    },
+    treeLevelHint: 'Expand level: click to cycle Collapse-to-L0 → Components → Files open → All expanded',
     componentKind: {
       component: 'Component',
       service: 'Service',

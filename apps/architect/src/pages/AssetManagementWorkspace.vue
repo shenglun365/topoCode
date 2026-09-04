@@ -309,26 +309,13 @@ function toggleOpen(id: string) {
   compOpen[id] = compOpen[id] !== false ? false : true
 }
 
-/** 层级折叠：有子组件的组件默认收起(逐层点击展开)；用户显式点过的保持其选择。
- *  目录加载/变化后对未显式操作过的组件初始化。 */
-function initCollapseByHierarchy() {
-  for (const c of treeComps.value) {
-    if (c.id in compOpen) continue
-    if (treeComps.value.some((x) => x.parentId === c.id)) compOpen[c.id] = false
-  }
+/** 树展开级别(工具栏单按钮循环)：
+ *  0 全部收起(只显示顶层组件) → 1 组件展开(所有组件组头) → 2 文件展开(组件+文件) → 3 全部展开(含资产)。 */
+const treeLevel = ref(1)
+const TREE_LEVEL_MAX = 3
+function cycleTreeLevel() {
+  treeLevel.value = treeLevel.value >= TREE_LEVEL_MAX ? 0 : treeLevel.value + 1
 }
-
-function collapseAllComps() {
-  for (const c of treeComps.value) {
-    if (treeComps.value.some((x) => x.parentId === c.id)) compOpen[c.id] = false
-  }
-}
-
-function expandAllComps() {
-  for (const c of treeComps.value) compOpen[c.id] = true
-}
-
-watch(treeComps, () => initCollapseByHierarchy(), { immediate: true, deep: false })
 
 /** 组件树行(DFS，父在前子在后，含缩进深度)。 */
 interface CompRow { comp: CompNode; depth: number }
@@ -432,39 +419,50 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
   const rows: TreeRow[] = []
   const walk = (c: CompNode, depth: number) => {
     if (!(all || sel.has(c.id))) {
-      // 路径节点：自身不渲染，仍下探(选中集可能命中后代)
-      for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
+      // 路径节点：自身不渲染，仍下探(选中集可能命中后代)；level0 只显示顶层组件
+      if (treeLevel.value >= 1) {
+        for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
+      }
       return
     }
     countSub(c)
     rows.push({ key: c.id, t: 'comp', depth,
                 g: { key: c.id, name: c.name, depth, assets: [], hierLevel: c.hierLevel } })
-    if (compOpen[c.id] === false) return   // 折叠 → 子组件/文件/资产整支隐藏
-    for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
-    for (const f of uniqueFiles(c)) {
-      const fk = c.id + '::' + f
-      const list = byFile.get(f) ?? []
-      rows.push({ key: 'f:' + fk, t: 'file', depth: depth + 1, file: f, n: list.length, fk })
-      if (fileOpen[fk] !== false) {
-        for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: depth + 2, a })
+    if (compOpen[c.id] === false) return   // 单节点折叠 → 子组件/文件/资产整支隐藏
+    const lv = treeLevel.value
+    if (lv >= 1) {
+      for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
+    }
+    if (lv >= 2) {
+      for (const f of uniqueFiles(c)) {
+        const fk = c.id + '::' + f
+        const list = byFile.get(f) ?? []
+        rows.push({ key: 'f:' + fk, t: 'file', depth: depth + 1, file: f, n: list.length, fk })
+        if (lv === 3 && fileOpen[fk] !== false) {
+          for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: depth + 2, a })
+        }
       }
     }
-    for (const a of direct.get(c.id) ?? []) rows.push({ key: 'a:' + a.id, t: 'asset', depth: depth + 1, a })
+    if (lv === 3) {
+      for (const a of direct.get(c.id) ?? []) rows.push({ key: 'a:' + a.id, t: 'asset', depth: depth + 1, a })
+    }
   }
   for (const r of roots) walk(r, 0)
   if ((otherFiles.size || otherDirect.length) && (all || sel.has(OTHER_KEY))) {
     rows.push({ key: OTHER_KEY, t: 'comp', depth: 0,
                 g: { key: OTHER_KEY, name: t('assetMgmt.other'), depth: 0, assets: [] } })
-    if (compOpen[OTHER_KEY] !== false) {
+    if (compOpen[OTHER_KEY] !== false && treeLevel.value >= 2) {
       for (const f of [...otherFiles.keys()].sort()) {
         const fk = OTHER_KEY + '::' + f
         const list = otherFiles.get(f) ?? []
         rows.push({ key: 'f:' + fk, t: 'file', depth: 1, file: f, n: list.length, fk })
-        if (fileOpen[fk] !== false) {
+        if (treeLevel.value === 3 && fileOpen[fk] !== false) {
           for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: 2, a })
         }
       }
-      for (const a of otherDirect) rows.push({ key: 'a:' + a.id, t: 'asset', depth: 1, a })
+      if (treeLevel.value === 3) {
+        for (const a of otherDirect) rows.push({ key: 'a:' + a.id, t: 'asset', depth: 1, a })
+      }
     }
   }
   subtreeCount.value = counts
@@ -1259,22 +1257,22 @@ onMounted(async () => {
               {{ lv }}
             </option>
           </select>
-          <template v-if="tab === 'semantic'">
-            <button
-              class="btn btn-ghost !py-0.5 !px-1.5 !text-[11px] shrink-0"
-              :title="t('assetMgmt.collapseAll')"
-              @click="collapseAllComps"
-            >
-              <ChevronRightIcon class="w-3 h-3" />
-            </button>
-            <button
-              class="btn btn-ghost !py-0.5 !px-1.5 !text-[11px] shrink-0"
-              :title="t('assetMgmt.expandAll')"
-              @click="expandAllComps"
-            >
-              <ChevronDownIcon class="w-3 h-3" />
-            </button>
-          </template>
+          <button
+            v-if="tab === 'semantic'"
+            class="btn btn-ghost !py-0.5 !px-2 !text-[11px] shrink-0"
+            :title="t('assetMgmt.treeLevelHint')"
+            @click="cycleTreeLevel"
+          >
+            <ChevronRightIcon
+              v-if="treeLevel === 0"
+              class="w-3 h-3"
+            />
+            <ChevronDownIcon
+              v-else
+              class="w-3 h-3"
+            />
+            {{ t(`assetMgmt.treeLevel.${treeLevel}`) }}
+          </button>
           <template v-if="tab === 'semantic'">
             <div
               class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden"
@@ -1795,7 +1793,7 @@ onMounted(async () => {
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <button
-                  v-if="g.key !== OTHER_KEY && (hasChildren(g.key) || (subtreeCount.get(g.key) ?? 0) > 0)"
+                  v-if="g.key !== OTHER_KEY && treeLevel > 0 && (hasChildren(g.key) || (subtreeCount.get(g.key) ?? 0) > 0)"
                   class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
                   @click="toggleOpen(g.key)"
                 >
@@ -1887,6 +1885,7 @@ onMounted(async () => {
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <button
+                  v-if="treeLevel === 3"
                   class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
                   @click="toggleFileOpen(row.fk!)"
                 >
@@ -1899,6 +1898,10 @@ onMounted(async () => {
                     class="w-3 h-3"
                   />
                 </button>
+                <span
+                  v-else
+                  class="w-4 shrink-0"
+                />
                 <DocumentTextIcon class="w-3 h-3 text-ctp-overlay1 shrink-0" />
                 <span
                   class="font-mono text-[10px] text-ctp-subtext1 truncate"

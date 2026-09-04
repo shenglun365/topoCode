@@ -1670,8 +1670,13 @@ export default {
     },
     allLevels: '全部粒度',
     allCompLevels: '全部组件层级',
-    collapseAll: '全部收起(组件层级折叠)',
-    expandAll: '全部展开',
+    treeLevel: {
+      0: '全部收起 (L0)',
+      1: '组件展开',
+      2: '文件展开',
+      3: '全部展开',
+    },
+    treeLevelHint: '展开级别：点击在 全部收起(L0) → 组件展开 → 文件展开 → 全部展开 间循环',
     componentKind: {
       component: '组件',
       service: '服务',
