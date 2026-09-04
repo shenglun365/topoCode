@@ -98,7 +98,17 @@ async function openAssetDiagram(a: SemanticAsset) {
 const kind = ref<SemanticAssetKind | ''>('')
 const level = ref<SemanticAssetLevel | ''>('')
 /** 语义资产 tab：组件层级(L0/L1)筛选。空 = 全部层级(按组件树展开)；L0/L1 = 以该层组件为树根。 */
-const compLevelSel = ref<'all' | 'L0' | 'L1'>('all')
+const compLevelSel = ref<string>('all')
+/** 层级筛选选项：组件树实际出现的层级(L0…L5 随 KB 社区细分深度动态)；无数据时兜底 L0/L1。 */
+const compLevelOptions = computed<string[]>(() => {
+  const s = new Set<string>()
+  for (const c of treeComps.value) {
+    const lv = c.hierLevel ?? compHierLevel.value.get(c.id)
+    if (lv) s.add(lv)
+  }
+  const arr = [...s].sort()
+  return arr.length ? arr : ['L0', 'L1']
+})
 /** 语义图谱多资源 tab(从语义列表/组件列表打开，可并存)。 */
 const graphTabs = ref<GraphTabDef[]>([])
 const activeGraphTab = ref('')
@@ -161,6 +171,13 @@ const OTHER_KEY = '__other__'
 /** 统一组件节点(树/归属映射用)。 */
 interface CompNode { id: string; name: string; parentId?: string; owns: string[]; hierLevel?: string }
 
+/** 组件 id 层级推断：comm-<task>-incl|call-<L\d+>-… KB 社区递归细分最深到 L5，
+ *  目录 hierLevel 字段缺失时按 id 兜底(实测 catalog 14 组件 hierLevel 全 None)。 */
+function compLevelFromId(id: string | undefined): string | undefined {
+  if (!id) return undefined
+  return /-(?:incl|call)-(L\d+)-/.exec(id)?.[1]
+}
+
 /** 组件目录(完整来源，跨 INCLUDE/CALL × L0/L1，与组件列表一致)。 */
 const compCatalog = ref<AssetDetail[]>([])
 
@@ -176,10 +193,10 @@ async function loadCompCatalog() {
  *  两者均空(如 KB 冷启动)时，从当前资产 scopeKey(comm-*) 兜底构建，保证筛选菜单不空。 */
 const treeComps = computed<CompNode[]>(() => {
   if (compCatalog.value.length) {
-    return compCatalog.value.map((c) => ({ id: c.assetId, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [], hierLevel: c.hierLevel ?? undefined }))
+    return compCatalog.value.map((c) => ({ id: c.assetId, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [], hierLevel: c.hierLevel ?? compLevelFromId(c.assetId) }))
   }
   if (arch.components.length) {
-    return arch.components.map((c) => ({ id: c.id, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [], hierLevel: (c as { hierLevel?: string }).hierLevel ?? undefined }))
+    return arch.components.map((c) => ({ id: c.id, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [], hierLevel: (c as { hierLevel?: string }).hierLevel ?? compLevelFromId(c.id) }))
   }
   const byId = new Map<string, CompNode>()
   for (const a of items.value) {
@@ -1139,11 +1156,12 @@ onMounted(async () => {
             <option value="all">
               {{ t('assetMgmt.allCompLevels') }}
             </option>
-            <option value="L0">
-              L0
-            </option>
-            <option value="L1">
-              L1
+            <option
+              v-for="lv in compLevelOptions"
+              :key="lv"
+              :value="lv"
+            >
+              {{ lv }}
             </option>
           </select>
           <template v-if="tab === 'semantic'">
