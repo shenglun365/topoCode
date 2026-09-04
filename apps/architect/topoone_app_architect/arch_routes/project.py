@@ -55,10 +55,23 @@ def _synthesize(root: str) -> dict:
 def _resolve_project(root: Optional[str] = None, project_id: Optional[str] = None) -> Optional[dict]:
     """按 URL 解析当前项目(arch_projects 为唯一事实源):
     - project=<architect行id>: 读 `arch_projects` 行;
+    - project=<KB pid>(对话链路透传 proj-xxx): 按 kbProjectId 反查绑定行——
+      双 id 体系兼容(KB 对话上下文只携带 KB pid，若按行 id 查不到就降级，
+      组件目录/提取会静默走空，实测 topoOne-animation 提取 count:0 回归)；
     - root=<path>: 优先 get_by_root；未登记路径 → 临时合成的工作目录项目(降级，不再按路径猜 KB)。
     """
     if project_id:
-        return store.ProjectsStore.get(project_id)
+        row = store.ProjectsStore.get(project_id)
+        if row is not None:
+            return row
+        for r in store.ProjectsStore.all():
+            if r.get("kbProjectId") == project_id:
+                return r
+        if root:
+            root = str(root).strip()
+            if root:
+                return store.ProjectsStore.get_by_root(root) or _synthesize(root)
+        return None
     if root:
         root = str(root).strip()
         if not root:
