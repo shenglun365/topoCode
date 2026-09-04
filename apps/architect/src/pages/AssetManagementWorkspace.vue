@@ -1232,17 +1232,7 @@ onMounted(async () => {
             class="btn btn-ghost !py-0.5 !px-2 !text-[11px] shrink-0"
             :title="t('assetMgmt.treeLevelHint')"
             @click="cycleTreeLevel"
-          >
-            <ChevronRightIcon
-              v-if="treeLevel === 0"
-              class="w-3 h-3"
-            />
-            <ChevronDownIcon
-              v-else
-              class="w-3 h-3"
-            />
-            {{ t(`assetMgmt.treeLevel.${treeLevel}`) }}
-          </button>
+          >{{ t(`assetMgmt.treeLevel.${treeLevel}`) }}</button>
           <template v-if="tab === 'semantic'">
             <div
               class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden"
