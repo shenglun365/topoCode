@@ -1414,6 +1414,9 @@ class MultiDBManager:
             "analysis_task_runs": [
                 ("snapshot_scopes", "TEXT"),
             ],
+            "project_versions": [
+                ("baseline_commit", "TEXT DEFAULT ''"),
+            ],
             "analysis_tasks_misc": [  # 通过 analysis_tasks 表执行
             ],
             "projects": [
@@ -1962,9 +1965,27 @@ class MultiDBManager:
                 pass
         project_db.conn.commit()
 
+    def source_mirror_root(self) -> str:
+        """源码镜像根目录（可配置）。
+
+        优先读主库 app_config 的 `source_mirror_root`（设置页「通用 → 导入设置」），
+        未配置/无效时回退默认 `{data_dir}/source-cache`。
+        """
+        try:
+            row = self.main_db.fetchone(
+                "SELECT value FROM app_config WHERE key = ?", ("source_mirror_root",))
+            v = (row or {}).get("value") if row else ""
+            v = (v or "").strip()
+            if v:
+                os.makedirs(v, exist_ok=True)
+                return v
+        except Exception as e:
+            logger.warning(f"[mirror] read source_mirror_root failed: {e}")
+        return os.path.join(self.data_dir, "source-cache")
+
     def source_cache_dir_for(self, project_id: str) -> str:
-        """KB 项目源码缓存目录: {data_dir}/source-cache/{project_id}/"""
-        return os.path.join(self.data_dir, "source-cache", project_id)
+        """KB 项目源码镜像目录: {镜像根目录}/{project_id}/（含 worktree/ 与 baseline.git）。"""
+        return os.path.join(self.source_mirror_root(), project_id)
 
     def ensure_history_table(self, project_db: SQLiteContext, table: str,
                              suffix: str = "_history"):

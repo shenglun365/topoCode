@@ -94,7 +94,7 @@ async def spa_web_root():
 
 @vue_router.get("/projects", response_class=HTMLResponse)
 async def spa_projects():
-    """知识库解析和管理门户 SPA（/projects）"""
+    """知识库构建和管理门户 SPA（/projects）"""
     if _exists("web-root.html"):
         return FileResponse(_file("web-root.html"))
     return HTMLResponse("web-root SPA not built. Run: npm run build:web")

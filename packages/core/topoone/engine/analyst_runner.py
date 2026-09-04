@@ -592,7 +592,7 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
     from parsers.core.walker import TreeSitterWalker, _detect_language
     from parsers.core.symbol_model import FileSymbolTable
     from parsers.languages import EXTRACTORS
-    from parsers.language_loader import get_parser
+    from parsers.language_loader import get_parser, detect_header_language
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     a_store = ctx.analysis_store
@@ -1126,7 +1126,7 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
                     logger.warning(f"[EXECUTE] _update_progress(95) took {_dt*1000:.0f}ms")
                 logger.info(f"[EXECUTE] task={task_id} calling generateProjectSummary")
                 try:
-                    from core_service import _do_generate_project_summary
+                    from topoone.engine.report_service import _do_generate_project_summary
                     await _do_generate_project_summary(multi_db, pid)
                     logger.info(f"[EXECUTE] Project summary auto-generated: task={task_id}")
                 except Exception as _e:

@@ -378,11 +378,19 @@ def _upsert_file(project_db, path: str, meta: dict, version_id: str) -> None:
 def register_version(multi_db: MultiDBManager, project_id: str, *,
                      branch: str = "", head: str = "", label: str = "",
                      change_type: str = "minor", parent_version_id: str | None = None,
-                     delta: dict | None = None, is_baseline: bool = False) -> dict:
-    """注册新版本基线，记录 delta 文件列表，更新 projects.current_version_id。"""
+                     delta: dict | None = None, is_baseline: bool = False,
+                     baseline_commit: str = "") -> dict:
+    """注册新版本基线，记录 delta 文件列表，更新 projects.current_version_id。
+
+    baseline_commit 为该项目自有基线仓库（baseline.git）中本次快照的 commit，
+    与 head 共同维护 KB 基线 ↔ 上游仓库版本的对应关系。
+    """
     main_db = multi_db.main_db
     vid = _new_version_id()
     now = _ts()
+    meta = {"synced_at": now}
+    if baseline_commit:
+        meta["baseline_commit"] = baseline_commit
     main_db.insert("project_versions", {
         "id": vid,
         "project_id": project_id,
@@ -396,7 +404,8 @@ def register_version(multi_db: MultiDBManager, project_id: str, *,
         "modified_count": len(delta["modified"]) if delta else 0,
         "deleted_count": len(delta["deleted"]) if delta else 0,
         "is_baseline": 1 if is_baseline else 0,
-        "metadata": json.dumps({"synced_at": now}),
+        "baseline_commit": baseline_commit,
+        "metadata": json.dumps(meta),
         "created_at": now,
     })
 
@@ -485,6 +494,19 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
     archived = _archive_and_apply(project_db, old_manifest, new_manifest, new_version_id)
     project_db.conn.commit()
 
+    # git 项目：把更新后的 worktree 快照进项目自有基线仓库（baseline.git）
+    baseline_commit = ""
+    if project.get("import_mode") in ("git-local", "git-remote") and root and os.path.isdir(root):
+        try:
+            from topoone.engine import git_service
+            if git_service.is_git_repo(root):
+                src = project.get("remote_url") or project.get("local_repo_path") or ""
+                baseline_commit = git_service.snapshot_baseline(
+                    root, os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git"),
+                    f"baseline: {src}#{branch or ''}@{head or ''} (sync)")
+        except Exception as e:
+            logger.warning(f"[sync] baseline snapshot failed for {project_id}: {e}")
+
     version = register_version(
         multi_db, project_id,
         branch=branch or (latest["branch"] if latest else ""),
@@ -493,6 +515,7 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
         change_type=change_type,
         parent_version_id=latest["id"] if latest else None,
         delta=delta,
+        baseline_commit=baseline_commit,
     )
 
     stage_plan = build_stage_plan(project_id, project_db, main_db, delta, branch_switched)

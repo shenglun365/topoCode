@@ -143,18 +143,20 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return rows
 
     @server.register("project.import")
-    def import_project(path: str, mode: str = "static", branch: str = "",
+    def import_project(path: str, mode: str = "git-local", branch: str = "",
                        head: str = "", repo_url: str = "",
-                       local_repo_path: str = ""):
+                       local_repo_path: str = "", init_git: bool = False):
         """导入项目（后台执行，避免大项目阻塞网关 120s 超时）。
 
+        仅支持 git-local / git-remote 两种模式（独立源码目录模式已取消：
+        本地目录非 git 仓库时需 init_git=true 授权 TopoCode 自动初始化）。
         立即返回 {requestId, status:"running"}；进度经 `event:project.import.progress`
         推送，结果可用 `project.importStatus(requestId)` 轮询。
         """
         import threading
 
-        mode = (mode or "static")
-        if mode not in ("static", "git-local", "git-remote"):
+        mode = (mode or "git-local")
+        if mode not in ("git-local", "git-remote"):
             raise ValueError(f"Invalid import mode: {mode}")
 
         request_id = f"imp-{uuid.uuid4().hex[:8]}"
@@ -169,7 +171,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             try:
                 _asyncio.run(_import_project_impl(
                     server, main_db, multi_db, path, mode, branch, head,
-                    repo_url, local_repo_path, request_id))
+                    repo_url, local_repo_path, request_id, init_git=init_git))
             except Exception as e:
                 logger.error(f"[import] background job {request_id} failed: {e}")
                 _IMPORT_JOBS[request_id] = {"status": "error", "error": str(e), "progress": 100}
@@ -328,12 +330,19 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             result = _build_file_tree(files, include_children=False)
         return result
 
+    @server.register("project.checkGitRepo")
+    def check_git_repo(path: str = ""):
+        """检查本地目录是否为 git 仓库（导入弹窗据此提示自动初始化）"""
+        if not path or not os.path.isdir(path):
+            return {"exists": False, "isGitRepo": False}
+        from topoone.engine import git_service
+        return {"exists": True, "isGitRepo": git_service.is_git_repo(path)}
+
     @server.register("project.updatePath")
     def update_path(id: str, newRootPath: str):
         """修改项目根目录，校验相对路径有效性"""
         if not os.path.isdir(newRootPath):
             raise FileNotFoundError(f"Directory not found: {newRootPath}")
-
         project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
         if not project:
             raise ValueError(f"Project not found: {id}")
@@ -367,8 +376,17 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("project.checkFileChanges")
     async def check_file_changes(id: str):
-        """对比文件系统与 source_files.content_hash，返回变更列表（应用 gitignore 过滤）"""
+        """检查文件变更。
+
+        git 项目（git-local/git-remote）：比较 源仓库/上游 vs 镜像工作副本
+        （镜像自身与上次扫描一致是预期，不能自比），返回源侧新增/修改/删除清单；
+        静态遗留项目：沿用 source_files.content_hash 对比。
+        """
         import asyncio
+
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
+        if not project:
+            raise ValueError(f"Project not found: {id}")
 
         def _scan_files():
             project_db = multi_db.get_project_db(id)
@@ -416,22 +434,77 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
             return added, modified, deleted
 
-        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
-        if not project:
-            raise ValueError(f"Project not found: {id}")
+        def _git_changes():
+            from topoone.engine import git_service
+            root = project["root_path"]
+            out = {"added": [], "modified": [], "deleted": [], "hasChanges": False,
+                   "sourceHead": "", "mirrorHead": "", "branch": project.get("branch") or "",
+                   "note": ""}
+            if not os.path.isdir(root) or not git_service.is_git_repo(root):
+                out["note"] = "mirror-missing"
+                return out
+            try:
+                mirror_head = git_service.rev_parse(root, "HEAD")
+            except Exception:
+                mirror_head = ""
+            try:
+                branch = project.get("branch") or git_service.current_branch(root)
+            except Exception:
+                branch = project.get("branch") or ""
+            out["mirrorHead"] = mirror_head
+            out["branch"] = branch
 
-        added, modified, deleted = await asyncio.to_thread(_scan_files)
-        has_changes = bool(added or modified or deleted)
+            # 优先：本地源仓库 HEAD；否则（git-remote）fetch 上游后取 origin/<branch>
+            source = project.get("local_repo_path") or ""
+            source_head = ""
+            source_repo = ""
+            if source and os.path.isdir(source) and git_service.is_git_repo(source):
+                try:
+                    source_head = git_service.rev_parse(source, "HEAD")
+                    source_repo = source
+                except Exception as e:
+                    logger.warning(f"[checkFileChanges] resolve source HEAD failed: {e}")
+            if not source_head:
+                try:
+                    git_service.fetch(root, timeout=300)
+                    ref = f"origin/{branch}" if branch else "origin/HEAD"
+                    source_head = git_service.rev_parse(root, ref)
+                    source_repo = root
+                except Exception as e:
+                    logger.warning(f"[checkFileChanges] fetch upstream failed: {e}")
+                    out["note"] = "fetch-failed"
+                    return out
+            out["sourceHead"] = source_head
+            if not mirror_head or mirror_head == source_head:
+                return out
+            try:
+                diff = git_service.diff_name_status(source_repo, mirror_head, source_head)
+            except Exception as e:
+                logger.warning(f"[checkFileChanges] diff failed: {e}")
+                out["hasChanges"] = True
+                out["note"] = "diff-failed"
+                return out
+            out.update(diff)
+            out["hasChanges"] = bool(diff["added"] or diff["modified"] or diff["deleted"])
+            return out
 
-        if has_changes:
+        mode = project.get("import_mode") or ""
+        if mode in ("git-local", "git-remote"):
+            result = await asyncio.to_thread(_git_changes)
+        else:
+            added, modified, deleted = await asyncio.to_thread(_scan_files)
+            has_changes = bool(added or modified or deleted)
+            result = {
+                "added": added,
+                "modified": modified,
+                "deleted": deleted,
+                "hasChanges": has_changes,
+            }
+
+        if result.get("hasChanges"):
             main_db.update("projects", {"has_file_changes": 1}, "id = ?", (id,))
 
-        return {
-            "added": added,
-            "modified": modified,
-            "deleted": deleted,
-            "hasChanges": has_changes,
-        }
+        return result
 
     @server.register("project.checkPathValidity")
     def check_path_validity(id: str):
@@ -1827,6 +1900,8 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     return server
 
+    return server
+
 
 # ==================== 后端管理方法 ====================
 
@@ -2083,13 +2158,15 @@ def register_module_methods(server: ZMQServer, module_manager=None):
 # ==================== 辅助函数 ====================
 
 async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBManager,
-                               path: str, mode: str = "static", branch: str = "",
+                               path: str, mode: str = "git-local", branch: str = "",
                                head: str = "", repo_url: str = "",
-                               local_repo_path: str = "", request_id: str = ""):
+                               local_repo_path: str = "", request_id: str = "",
+                               init_git: bool = False):
     """project.import 后台执行体（在独立线程的 asyncio 循环中运行）。
 
-    迁移自原内联 async handler：支持 static / git-local / git-remote 三种模式，
-    导入完成后注册初始 KB 版本基线，并回写存储统计缓存列。
+    仅支持 git-local / git-remote 两种模式：克隆到可配置的源码镜像目录，
+    并把首次 checkout 的目录树快照进项目自有基线仓库（baseline.git），
+    完成后注册初始 KB 版本基线，回写存储统计缓存列。
     """
     import time as _t
 
@@ -2099,8 +2176,8 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
     from topoone.engine import git_service
     from topoone.engine.version_sync_service import register_version
 
-    mode = (mode or "static")
-    if mode not in ("static", "git-local", "git-remote"):
+    mode = (mode or "git-local")
+    if mode not in ("git-local", "git-remote"):
         raise ValueError(f"Invalid import mode: {mode}")
 
     if request_id:
@@ -2127,13 +2204,19 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
 
     project_name = _project_name_source()
 
-    # ── git 模式：克隆到源码缓存目录 ──
+    # ── git 模式：克隆到源码镜像目录 ──
     if mode in ("git-local", "git-remote"):
         if mode == "git-local":
             if not local_repo_path and not path:
                 raise ValueError("local_repo_path is required for git-local")
             source = local_repo_path or path
             resolved_local = source
+            if not git_service.is_git_repo(source):
+                # 独立源码目录模式已取消：非 git 仓库需用户勾选授权后自动初始化
+                if not init_git:
+                    raise ValueError(f"NOT_A_GIT_REPO: {source}")
+                logger.info(f"[import] initializing git repo at {source} (user consented)")
+                git_service.ensure_git_repo(source)
             resolved_remote = git_service.remote_url(source)
         else:
             if not repo_url:
@@ -2154,6 +2237,16 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
             except Exception:
                 branch = ""
         effective_root = cache_root
+
+        # 基线快照：镜像仓库作为代码基线，自有 git 版本管理（baseline.git）
+        baseline_commit = ""
+        try:
+            baseline_commit = git_service.snapshot_baseline(
+                cache_root, os.path.join(source_cache_dir, "baseline.git"),
+                f"baseline: {resolved_remote or source}#{branch}@{resolved_head} (import)")
+            logger.info(f"[import] baseline snapshot: {baseline_commit[:8]}")
+        except Exception as e:
+            logger.warning(f"[import] baseline snapshot failed (non-fatal): {e}")
 
     if not os.path.isdir(effective_root):
         raise FileNotFoundError(f"Directory not found: {effective_root}")
@@ -2260,7 +2353,7 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
         "import_mode": mode,
         "remote_url": resolved_remote or "",
         "local_repo_path": resolved_local or "",
-        "source_cache_dir": source_cache_dir if mode in ("git-local", "git-remote") else "",
+        "source_cache_dir": source_cache_dir,
         "last_sync": now,
         "db_size_bytes": os.path.getsize(multi_db.project_db_path(project_id)) if os.path.exists(multi_db.project_db_path(project_id)) else 0,
         "source_size_bytes": source_size,
@@ -2287,6 +2380,7 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
             change_type="minor",
             delta={"added": all_paths, "modified": [], "deleted": []},
             is_baseline=True,
+            baseline_commit=baseline_commit,
         )
         project_db.executemany(
             "UPDATE source_files SET version_from = ? WHERE version_from IS NULL",

@@ -101,6 +101,7 @@ def clone(source: str, dest: str, branch: Optional[str] = None,
     """克隆仓库到 dest。
 
     - branch 指定时 clone 该分支；head 指定时 clone 后 checkout 该提交。
+    - 空仓库（无任何提交）时返回 ''。
     - 返回最终解析出的 head commit。
     """
     if os.path.exists(dest):
@@ -113,7 +114,10 @@ def clone(source: str, dest: str, branch: Optional[str] = None,
     _run_git(os.getcwd(), *cmd, timeout=timeout)
     if head:
         _run_git(dest, "checkout", head, timeout=timeout)
-    return rev_parse(dest, "HEAD", timeout=timeout)
+    try:
+        return rev_parse(dest, "HEAD", timeout=timeout)
+    except GitError:
+        return ""
 
 
 def fetch(path: str, timeout: int = 900) -> None:
@@ -167,6 +171,32 @@ def remote_url(path: str) -> str:
         return ""
 
 
+def diff_name_status(path: str, base: str, target: str,
+                     timeout: int = 600) -> dict:
+    """base → target 的文件级差异（A/M/D 清单）。
+
+    --no-renames：重命名记为 A+D 一对，便于映射到「新增/删除」。
+    """
+    raw = _run_git(path, "diff", "--name-status", "--no-renames",
+                   base, target, timeout=timeout)
+    added: list = []
+    modified: list = []
+    deleted: list = []
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line or "\t" not in line:
+            continue
+        status, _, name = line.partition("\t")
+        s = status[:1].upper()
+        if s == "A":
+            added.append(name)
+        elif s == "D":
+            deleted.append(name)
+        else:
+            modified.append(name)
+    return {"added": added, "modified": modified, "deleted": deleted}
+
+
 def checkout_ref(path: str, branch: Optional[str], head: Optional[str],
                  method: str = "pull", timeout: int = 900) -> str:
     """按用户选择的方式把 path 仓库推进到 (branch, head)。
@@ -186,3 +216,51 @@ def checkout_ref(path: str, branch: Optional[str], head: Optional[str],
             resolved = rev_parse(path, "HEAD", timeout=timeout)
         return resolved
     raise GitError(f"unknown method: {method}")
+
+
+def ensure_git_repo(path: str, timeout: int = 600) -> str:
+    """把普通目录初始化为 git 仓库（git init + add -A + 首次提交）。
+
+    供「独立源码目录未 git 初始化」时经用户同意后由 TopoCode 自动初始化。
+    返回首次提交 hash。
+    """
+    if not os.path.isdir(path):
+        raise GitError(f"directory not found: {path}")
+    _run_git(path, "init", timeout=timeout)
+    _run_git(path, "add", "-A", timeout=timeout)
+    _run_git(path, "-c", "user.name=topocode", "-c", "user.email=topocode@local",
+             "commit", "-m", "topocode: init baseline", timeout=timeout)
+    return rev_parse(path, "HEAD", timeout=timeout)
+
+
+def snapshot_baseline(worktree: str, baseline_repo: str, message: str,
+                      timeout: int = 900) -> str:
+    """把 worktree 当前 HEAD 的目录树快照为一个 commit，链入项目自有基线仓库。
+
+    - baseline_repo 是项目独享的裸仓库（{镜像目录}/{project_id}/baseline.git），
+      其 baseline 分支上的每个 commit 对应一次导入/更新的基线代码版本。
+    - 只用 plumbing（rev-parse / commit-tree / push），不改动 worktree 的工作
+      分支与工作树；commit 链以 -p 串联形成基线历史。
+    - commit message 携带与上游仓库的对应关系（source#branch@head），
+      同时该映射落库 project_versions.baseline_commit。
+    返回基线 commit hash。
+    """
+    if not os.path.isdir(worktree):
+        raise GitError(f"worktree not found: {worktree}")
+    if not os.path.isdir(baseline_repo):
+        _run_git(os.getcwd(), "init", "--bare", baseline_repo, timeout=timeout)
+    tree = _run_git(worktree, "rev-parse", "HEAD^{tree}", timeout=timeout)
+    args = ["-c", "user.name=topocode", "-c", "user.email=topocode@local",
+            "commit-tree", tree, "-m", message]
+    prev = ""
+    try:
+        prev = _run_git(baseline_repo, "rev-parse", "refs/heads/baseline", timeout=60)
+    except GitError:
+        prev = ""
+    if prev:
+        args = ["-c", "user.name=topocode", "-c", "user.email=topocode@local",
+                "commit-tree", tree, "-p", prev, "-m", message]
+    commit = _run_git(worktree, *args, timeout=timeout)
+    _run_git(worktree, "push", baseline_repo,
+             f"{commit}:refs/heads/baseline", "--force", timeout=timeout)
+    return commit

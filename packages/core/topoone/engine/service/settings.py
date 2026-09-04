@@ -490,29 +490,55 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.getImportConfig")
     def get_import_config():
-        """获取导入配置（忽略模式、自定义模式、额外 ignore 文件）"""
-        return _load_import_config(main_db)
+        """获取导入配置（忽略模式、自定义模式、额外 ignore 文件、源码镜像根目录）"""
+        cfg = _load_import_config(main_db)
+        mirror = multi_db.source_mirror_root()
+        return {
+            "ignore_mode": cfg["ignore_mode"], "ignoreMode": cfg["ignore_mode"],
+            "custom_patterns": cfg["custom_patterns"], "customPatterns": cfg["custom_patterns"],
+            "extra_ignore_files": cfg["extra_ignore_files"], "extraIgnoreFiles": cfg["extra_ignore_files"],
+            "source_mirror_root": mirror, "sourceMirrorRoot": mirror,
+        }
 
     @server.register("settings.setImportConfig")
-    def set_import_config(ignore_mode: str = None, custom_patterns: list = None, extra_ignore_files: list = None):
-        """保存导入配置"""
+    def set_import_config(ignore_mode: str = None, custom_patterns: list = None,
+                          extra_ignore_files: list = None,
+                          ignoreMode: str = None, customPatterns: list = None,
+                          extraIgnoreFiles: list = None, sourceMirrorRoot: str = None,
+                          source_mirror_root: str = None):
+        """保存导入配置（兼容 camelCase 与 snake_case 参数名）"""
         now = datetime.now().isoformat()
-        if ignore_mode is not None:
+        mode_val = ignore_mode if ignore_mode is not None else ignoreMode
+        patterns_val = custom_patterns if custom_patterns is not None else customPatterns
+        files_val = extra_ignore_files if extra_ignore_files is not None else extraIgnoreFiles
+        mirror_val = sourceMirrorRoot if sourceMirrorRoot is not None else source_mirror_root
+        if mode_val is not None:
             main_db.execute(
                 "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_ignore_mode", ignore_mode, now),
+                ("import_ignore_mode", mode_val, now),
             )
-        if custom_patterns is not None:
+        if patterns_val is not None:
             main_db.execute(
                 "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_custom_patterns", json.dumps(custom_patterns), now),
+                ("import_custom_patterns", json.dumps(patterns_val), now),
             )
-        if extra_ignore_files is not None:
+        if files_val is not None:
             main_db.execute(
                 "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_extra_ignore_files", json.dumps(extra_ignore_files), now),
+                ("import_extra_ignore_files", json.dumps(files_val), now),
             )
-        return _load_import_config(main_db)
+        if mirror_val is not None:
+            mirror_val = str(mirror_val).strip()
+            if mirror_val:
+                if not os.path.isabs(mirror_val):
+                    raise ValueError(f"mirror root must be an absolute path: {mirror_val}")
+                os.makedirs(mirror_val, exist_ok=True)
+                main_db.execute(
+                    "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+                    ("source_mirror_root", mirror_val, now),
+                )
+        main_db.conn.commit()
+        return get_import_config()
 
     return server
 

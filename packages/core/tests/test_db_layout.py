@@ -125,12 +125,12 @@ class TestChatRouting:
 # ── 导入重关联(源码目录移动后) ─────────────────────────────────
 
 class TestReassociation:
-    def _import(self, tmp_path, path, mode="static"):
+    def _import(self, tmp_path, path, mode="git-local", init_git=True):
         from topoone.engine.service import register_project_methods
         md = _mk(tmp_path)
         srv = _FakeServer()
         register_project_methods(srv, md)
-        job = srv.methods["project.import"](path=path, mode=mode)
+        job = srv.methods["project.import"](path=path, mode=mode, init_git=init_git)
         # 后台导入任务 → 轮询 project.importStatus 直至完成
         deadline = time.time() + 60
         while True:
@@ -144,33 +144,66 @@ class TestReassociation:
         row["reassociated"] = bool(st.get("reassociated"))
         return md, srv, row
 
-    def test_import_writes_signature_and_central_db(self, tmp_path):
+    def test_import_git_local_writes_mirror_baseline_and_central_db(self, tmp_path):
         src = tmp_path / "mymod"
         src.mkdir()
         (src / "a.py").write_text("X = 1\n", encoding="utf-8")
         md, srv, row = self._import(tmp_path, str(src))
         assert row["id"].startswith("proj-")
-        assert row["root_path"] == str(src)
-        # 签名写入 + 项目库中心化
-        assert MultiDBManager.read_proj_signature(str(src)) == row["id"]
+        # 源目录被授权自动 git init
+        assert os.path.isdir(os.path.join(str(src), ".git"))
+        # 镜像目录：worktree 工作副本 + baseline.git 基线版本库
+        mirror = os.path.join(str(tmp_path), "source-cache", row["id"])
+        assert row["root_path"] == os.path.join(mirror, "worktree")
+        assert os.path.isfile(os.path.join(mirror, "worktree", "a.py"))
+        assert os.path.isdir(os.path.join(mirror, "baseline.git"))
+        # 签名写在镜像 worktree；项目库中心化
+        assert MultiDBManager.read_proj_signature(row["root_path"]) == row["id"]
         assert os.path.isfile(os.path.join(str(tmp_path), "projects", row["id"], "project.db"))
-        assert not os.path.exists(os.path.join(str(src), ".topocode", "data"))
+        # 版本基线记录 baseline_commit（DB ↔ git 对应关系）
+        ver = md.main_db.fetchone(
+            "SELECT * FROM project_versions WHERE project_id = ?", (row["id"],))
+        assert ver and ver["baseline_commit"]
+
+    def test_import_rejects_non_git_dir_without_consent(self, tmp_path):
+        from topoone.engine.service import register_project_methods
+        src = tmp_path / "nogit"
+        src.mkdir()
+        (src / "a.py").write_text("X = 1\n", encoding="utf-8")
+        md = _mk(tmp_path)
+        srv = _FakeServer()
+        register_project_methods(srv, md)
+        job = srv.methods["project.import"](path=str(src), mode="git-local", init_git=False)
+        deadline = time.time() + 30
+        while True:
+            st = srv.methods["project.importStatus"](requestId=job["requestId"])
+            if st.get("status") in ("done", "error"):
+                break
+            assert time.time() < deadline, f"import timeout: {st}"
+            time.sleep(0.2)
+        assert st.get("status") == "error"
+        assert "NOT_A_GIT_REPO" in st.get("error", "")
+        # 未授权时不得改动用户目录
+        assert not os.path.isdir(os.path.join(str(src), ".git"))
 
     def test_moved_dir_reassociates(self, tmp_path):
-        # 1) 先正常导入
-        old = tmp_path / "old"
-        old.mkdir()
-        (old / "a.py").write_text("X = 1\n", encoding="utf-8")
-        md, _srv, row1 = self._import(tmp_path, str(old))
+        # git 模式重关联：源仓库带 origin（仅元数据，无需网络），同源重导入命中 remote_url 匹配
+        import subprocess
+        src = tmp_path / "old"
+        src.mkdir()
+        (src / "a.py").write_text("X = 1\n", encoding="utf-8")
+        subprocess.run(["git", "init"], cwd=str(src), capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=str(src), capture_output=True)
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@local",
+                        "commit", "-m", "init"], cwd=str(src), capture_output=True)
+        subprocess.run(["git", "remote", "add", "origin", "https://example.com/old.git"],
+                       cwd=str(src), capture_output=True)
+        md, _srv, row1 = self._import(tmp_path, str(src))
         pid = row1["id"]
-        # 2) 目录整体“移动”
-        new = tmp_path / "moved"
-        os.rename(str(old), str(new))
-        # 3) 重新导入新路径 → 命中签名重关联(不产生新项目)
-        md2, _srv2, row2 = self._import(tmp_path, str(new))
+        # 同源（remote_url 相同）重导入 → 命中重关联(不产生新项目)
+        md2, _srv2, row2 = self._import(tmp_path, str(src))
         assert row2.get("reassociated") is True
         assert row2["id"] == pid
-        assert row2["root_path"] == str(new)
         n = md2.main_db.fetchone("SELECT COUNT(*) AS c FROM projects")["c"]
         assert n == 1
 
@@ -184,22 +217,23 @@ class TestReassociation:
         srv.methods["project.remove"](id=pid)
         assert md.main_db.fetchone("SELECT id FROM projects WHERE id=?", (pid,)) is None
         assert not os.path.exists(md.project_db_path(pid))
-        assert MultiDBManager.read_proj_signature(str(src)) == ""
+        assert MultiDBManager.read_proj_signature(row["root_path"]) == ""
 
     def test_update_path_migrates_signature(self, tmp_path):
         from topoone.engine.service import register_project_methods  # noqa: F841
-        src1 = tmp_path / "p1"
+        src = tmp_path / "p1"
         src2 = tmp_path / "p2"
-        src1.mkdir()
+        src.mkdir()
         src2.mkdir()
-        (src1 / "a.py").write_text("X = 1\n", encoding="utf-8")
+        (src / "a.py").write_text("X = 1\n", encoding="utf-8")
         (src2 / "a.py").write_text("X = 1\n", encoding="utf-8")
-        md, srv, row = self._import(tmp_path, str(src1))
+        md, srv, row = self._import(tmp_path, str(src))
         pid = row["id"]
+        old_root = row["root_path"]
         out = srv.methods["project.updatePath"](id=pid, newRootPath=str(src2))
         assert out["project"]["root_path"] == str(src2)
         assert MultiDBManager.read_proj_signature(str(src2)) == pid
-        assert MultiDBManager.read_proj_signature(str(src1)) == ""
+        assert MultiDBManager.read_proj_signature(old_root) == ""
         # 项目库仍为中心路径(不受根目录变更影响)
         assert os.path.isfile(md.project_db_path(pid))
 
