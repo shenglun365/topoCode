@@ -1229,7 +1229,7 @@ onMounted(async () => {
           </select>
           <button
             v-if="tab === 'semantic'"
-            class="btn btn-ghost !py-0.5 !px-2 !text-[11px] shrink-0"
+            class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer"
             :title="t('assetMgmt.treeLevelHint')"
             @click="cycleTreeLevel"
           >{{ t(`assetMgmt.treeLevel.${treeLevel}`) }}</button>
