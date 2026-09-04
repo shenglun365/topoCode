@@ -1645,6 +1645,8 @@ export default {
     },
     allLevels: 'All levels',
     allCompLevels: 'All component levels',
+    collapseAll: 'Collapse all (component hierarchy)',
+    expandAll: 'Expand all',
     componentKind: {
       component: 'Component',
       service: 'Service',

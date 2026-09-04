@@ -309,6 +309,27 @@ function toggleOpen(id: string) {
   compOpen[id] = compOpen[id] !== false ? false : true
 }
 
+/** 层级折叠：有子组件的组件默认收起(逐层点击展开)；用户显式点过的保持其选择。
+ *  目录加载/变化后对未显式操作过的组件初始化。 */
+function initCollapseByHierarchy() {
+  for (const c of treeComps.value) {
+    if (c.id in compOpen) continue
+    if (treeComps.value.some((x) => x.parentId === c.id)) compOpen[c.id] = false
+  }
+}
+
+function collapseAllComps() {
+  for (const c of treeComps.value) {
+    if (treeComps.value.some((x) => x.parentId === c.id)) compOpen[c.id] = false
+  }
+}
+
+function expandAllComps() {
+  for (const c of treeComps.value) compOpen[c.id] = true
+}
+
+watch(treeComps, () => initCollapseByHierarchy(), { immediate: true, deep: false })
+
 /** 组件树行(DFS，父在前子在后，含缩进深度)。 */
 interface CompRow { comp: CompNode; depth: number }
 const compRows = computed<CompRow[]>(() => {
@@ -364,8 +385,8 @@ const semanticGroups = computed<SemanticGroup[]>(() => {
       if (all || sel.has(c.id)) {
         const assets = byComp.get(c.id)
         const hasChild = treeComps.value.some((x) => x.parentId === c.id)
-        // 有资产或(展开态下)有下级组件时才渲染该节点
-        if (assets?.length || (hasChild && compOpen[c.id] !== false)) {
+        // 组头常驻(有资产或有下级组件即渲染)——折叠态组头保留，层级结构始终可导航
+        if (assets?.length || hasChild) {
           groups.push({ key: c.id, name: c.name, depth, assets: assets ?? [], hierLevel: c.hierLevel })
         }
       }
@@ -1164,6 +1185,22 @@ onMounted(async () => {
               {{ lv }}
             </option>
           </select>
+          <template v-if="tab === 'semantic'">
+            <button
+              class="btn btn-ghost !py-0.5 !px-1.5 !text-[11px] shrink-0"
+              :title="t('assetMgmt.collapseAll')"
+              @click="collapseAllComps"
+            >
+              <ChevronRightIcon class="w-3 h-3" />
+            </button>
+            <button
+              class="btn btn-ghost !py-0.5 !px-1.5 !text-[11px] shrink-0"
+              :title="t('assetMgmt.expandAll')"
+              @click="expandAllComps"
+            >
+              <ChevronDownIcon class="w-3 h-3" />
+            </button>
+          </template>
           <template v-if="tab === 'semantic'">
             <div
               class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden"

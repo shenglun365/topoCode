@@ -1670,6 +1670,8 @@ export default {
     },
     allLevels: '全部粒度',
     allCompLevels: '全部组件层级',
+    collapseAll: '全部收起(组件层级折叠)',
+    expandAll: '全部展开',
     componentKind: {
       component: '组件',
       service: '服务',
