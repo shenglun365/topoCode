@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from './GraphMatrixWindow.vue'
 import AssetIndexWindow from './AssetIndexWindow.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
@@ -56,6 +56,22 @@ const selDetail = ref<SemanticAsset | null>(null)
 /** 邻域聚焦：开启后图谱只渲染选中资产周围 focusHops 跳子图(缓解大图拥挤/过宽/过长)。 */
 const focusMode = ref(false)
 const focusHops = ref(2)
+/** 范围锁定：锁定时切换选中节点不跟随重查(图谱视角保持)，解锁恢复漫游。 */
+const focusLock = ref(false)
+const lockAnchor = ref('')   // 锁定瞬间的中心锚点(软刷新/重查仍以其为中心)
+
+function toggleFocusLock() {
+  if (!focusMode.value) return
+  focusLock.value = !focusLock.value
+  if (focusLock.value) {
+    lockAnchor.value = selId.value
+  } else {
+    const drifted = selId.value && selId.value !== lockAnchor.value
+    lockAnchor.value = ''
+    // 解锁且选中已偏离锚点 → 立即对齐漫游态
+    if (drifted) void load()
+  }
+}
 /** 关系矩阵浮窗(独立全局浮窗，数据跟随当前图谱口径)。 */
 const matrixOpen = ref(false)
 /** 边图例浮层开关。 */
@@ -541,11 +557,11 @@ async function load(reset = false) {
   try {
     const scope = props.tab.kind === 'comp' ? [props.tab.compId!] : undefined
     // 邻域聚焦：聚焦模式开启且有选中 → 以选中资产为中心 focusHops 跳子图；
-    // 否则单资产 tab 聚焦该资产(1 跳)、组件 tab 全量。
+    // 范围锁定时以锁定锚点为中心(切换选中不跟随)；否则单资产 tab 聚焦该资产(1 跳)、组件 tab 全量。
     let focus: string | undefined
     let hops = 1
-    if (focusMode.value && selId.value) {
-      focus = selId.value
+    if (focusMode.value && (focusLock.value ? lockAnchor.value : selId.value)) {
+      focus = focusLock.value ? lockAnchor.value : selId.value
       hops = focusHops.value
     } else if (props.tab.kind === 'asset') {
       focus = props.tab.assetId
@@ -586,9 +602,16 @@ watch(availableLevels, (vals) => {
 watch([focusMode, focusHops], () => {
   void load()
 })
-// 聚焦态下选中变化 → 跟随重查(以新选中为中心)。
+// 聚焦关闭 → 锁定随之复位(无聚焦则无锁定语义)。
+watch(focusMode, (on) => {
+  if (!on) {
+    focusLock.value = false
+    lockAnchor.value = ''
+  }
+})
+// 聚焦态下选中变化 → 跟随重查(以新选中为中心)；范围锁定时不跟随(漫游暂停)。
 watch(selId, (id, old) => {
-  if (focusMode.value && id && id !== old) void load()
+  if (focusMode.value && !focusLock.value && id && id !== old) void load()
 })
 
 function clearSel() {
@@ -635,7 +658,9 @@ async function softRefreshGraph() {
   try {
     fresh = await semanticAssetService.graph(
       kindFilter.value || undefined, scope, effectiveLevel.value || undefined,
-      focusMode.value && selId.value ? { focus: selId.value, hops: focusHops.value } : undefined)
+      focusMode.value && (focusLock.value ? lockAnchor.value : selId.value)
+        ? { focus: focusLock.value ? lockAnchor.value : selId.value, hops: focusHops.value }
+        : undefined)
   } catch {
     return
   }
@@ -1678,6 +1703,17 @@ onMounted(async () => {
       >
         <option v-for="h in [1, 2, 3]" :key="h" :value="h">{{ h }} {{ t('assetMgmt.graph.hop') }}</option>
       </select>
+      <!-- 范围锁定：锁定时切换选中节点不跟随刷新关系视角；解锁恢复漫游 -->
+      <button
+        v-if="focusMode"
+        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
+        :class="focusLock ? 'btn-primary' : ''"
+        :title="focusLock ? t('assetMgmt.graph.focusLockOn') : t('assetMgmt.graph.focusLockHint')"
+        @click="toggleFocusLock"
+      >
+        <LockClosedIcon v-if="focusLock" class="w-3.5 h-3.5" />
+        <LockOpenIcon v-else class="w-3.5 h-3.5" />
+      </button>
       <!-- 拓展关联：基于选中节点扩展 1 跳关联(增量合并，可累积)；无未拓展关联时置灰 -->
       <button
         class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"

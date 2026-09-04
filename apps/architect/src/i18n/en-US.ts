@@ -1494,6 +1494,8 @@ export default {
       closeFullscreen: 'Exit fullscreen',
       focusHint: 'Focus on the N-hop neighborhood of the selected asset; renders only the relevant subgraph (eases dense / over-wide / over-long graphs)',
       focusHops: 'hops',
+      focusLockHint: 'Lock scope: switching selection no longer re-queries the relation view (browse within a fixed subgraph); unlock to resume roaming.',
+      focusLockOn: 'Locked: graph scope is fixed, selection only updates details; click to unlock and resume roaming.',
       expandLabel: 'Expand',
       expandHint: 'Expand 1-hop relations of the selected node (incremental merge, cumulative; related files are added as source tabs in the asset card)',
       expandAdded: '+{n} nodes',

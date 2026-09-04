@@ -1519,6 +1519,8 @@ export default {
       closeFullscreen: '退出全屏',
       focusHint: '聚焦到选中资产周围 N 跳邻域，只渲染相关子图（缓解大图拥挤/过宽/过长）',
       focusHops: '跳数',
+      focusLockHint: '范围锁定：锁定后切换选中节点不再跟随刷新关系视角(便于在固定子图内浏览)；解锁恢复漫游。',
+      focusLockOn: '已锁定：图谱视角固定，切换选中仅更新详情；点击解锁恢复跟随漫游。',
       expandLabel: '拓展关联',
       expandHint: '基于选中节点拓展 1 跳关联节点（增量合并，可累积；相关文件自动加入资产卡源码 tab）',
       expandAdded: '+{n} 节点',
