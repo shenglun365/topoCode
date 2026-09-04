@@ -97,18 +97,6 @@ async function openAssetDiagram(a: SemanticAsset) {
 }
 const kind = ref<SemanticAssetKind | ''>('')
 const level = ref<SemanticAssetLevel | ''>('')
-/** 语义资产 tab：组件层级(L0/L1)筛选。空 = 全部层级(按组件树展开)；L0/L1 = 以该层组件为树根。 */
-const compLevelSel = ref<string>('all')
-/** 层级筛选选项：组件树实际出现的层级(L0…L5 随 KB 社区细分深度动态)；无数据时兜底 L0/L1。 */
-const compLevelOptions = computed<string[]>(() => {
-  const s = new Set<string>()
-  for (const c of treeComps.value) {
-    const lv = c.hierLevel ?? compHierLevel.value.get(c.id)
-    if (lv) s.add(lv)
-  }
-  const arr = [...s].sort()
-  return arr.length ? arr : ['L0', 'L1']
-})
 /** 语义图谱多资源 tab(从语义列表/组件列表打开，可并存)。 */
 const graphTabs = ref<GraphTabDef[]>([])
 const activeGraphTab = ref('')
@@ -396,9 +384,7 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
     const arr = children.get(pk) ?? []
     arr.push(c)
     children.set(pk, arr)
-    // 层级筛选: 全部 → 无父组件为根；选层级 → 该层组件为初始根(即便有父，子树照常递归)
-    if (!c.parentId || (compLevelSel.value !== 'all'
-        && (c.hierLevel ?? compHierLevel.value.get(c.id)) === compLevelSel.value)) roots.push(c)
+    if (!c.parentId) roots.push(c)
   }
   const uniqueFiles = (c: CompNode): string[] => {
     const sub = new Set<string>()
@@ -1239,22 +1225,6 @@ onMounted(async () => {
               :value="l.value"
             >
               {{ l.label }}
-            </option>
-          </select>
-          <select
-            v-if="tab === 'semantic'"
-            v-model="compLevelSel"
-            class="input !py-0.5 !px-2 !text-[11px] w-auto"
-          >
-            <option value="all">
-              {{ t('assetMgmt.allCompLevels') }}
-            </option>
-            <option
-              v-for="lv in compLevelOptions"
-              :key="lv"
-              :value="lv"
-            >
-              {{ lv }}
             </option>
           </select>
           <button

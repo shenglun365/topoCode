@@ -1644,7 +1644,6 @@ export default {
       implementation: 'Implementation',
     },
     allLevels: 'All levels',
-    allCompLevels: 'All component levels',
     treeLevel: {
       0: 'Collapse to L0',
       1: 'Components',

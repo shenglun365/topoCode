@@ -1669,7 +1669,6 @@ export default {
       implementation: '实现',
     },
     allLevels: '全部粒度',
-    allCompLevels: '全部组件层级',
     treeLevel: {
       0: '全部收起 (L0)',
       1: '组件展开',
