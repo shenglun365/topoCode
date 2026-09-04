@@ -1674,6 +1674,7 @@ export default {
     scopeHint: 'Select components to scope; empty = all',
     scopeAll: 'All',
     clearScope: 'Clear',
+    filterActive: '{n} component scope filter(s) active',
     scopeGroupHint: 'Scope control: summary on the left, open component filter on the right',
     filter: 'Filter',
     compType: 'Component Type',

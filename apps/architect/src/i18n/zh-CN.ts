@@ -1699,6 +1699,7 @@ export default {
     scopeHint: '勾选组件设定查找范围，空 = 全部',
     scopeAll: '全部',
     clearScope: '清除',
+    filterActive: '已设置 {n} 个组件范围筛选',
     scopeGroupHint: '范围控制：左侧为当前范围汇总，右侧展开组件范围筛选',
     filter: '筛选',
     compType: '组件类型',
