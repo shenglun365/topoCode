@@ -360,7 +360,8 @@ const compHierLevel = computed<Map<string, string>>(() => {
  *  结构 = 组件按父子层级作目录；文件挂「独有它的」组件节点(own = owns − 直接子组件 owns，
  *  被子组件拥有的文件下放到子组件)；资产挂首锚点文件下，无锚点资产挂组件直属；无归属资产归「其它」。 */
 type TreeRow = { key: string; t: 'comp' | 'file' | 'asset'; depth: number;
-                 g?: SemanticGroup; file?: string; n?: number; a?: SemanticAsset }
+                 g?: SemanticGroup; file?: string; n?: number; a?: SemanticAsset;
+                 fk?: string }
 const fileOpen = reactive<Record<string, boolean>>({})
 const subtreeCount = ref(new Map<string, number>())
 function toggleFileOpen(key: string) {
@@ -443,7 +444,7 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
     for (const f of uniqueFiles(c)) {
       const fk = c.id + '::' + f
       const list = byFile.get(f) ?? []
-      rows.push({ key: 'f:' + fk, t: 'file', depth: depth + 1, file: f, n: list.length })
+      rows.push({ key: 'f:' + fk, t: 'file', depth: depth + 1, file: f, n: list.length, fk })
       if (fileOpen[fk] !== false) {
         for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: depth + 2, a })
       }
@@ -458,7 +459,7 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
       for (const f of [...otherFiles.keys()].sort()) {
         const fk = OTHER_KEY + '::' + f
         const list = otherFiles.get(f) ?? []
-        rows.push({ key: 'f:' + fk, t: 'file', depth: 1, file: f, n: list.length })
+        rows.push({ key: 'f:' + fk, t: 'file', depth: 1, file: f, n: list.length, fk })
         if (fileOpen[fk] !== false) {
           for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: 2, a })
         }
@@ -1887,10 +1888,10 @@ onMounted(async () => {
               >
                 <button
                   class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
-                  @click="toggleFileOpen(row.key!)"
+                  @click="toggleFileOpen(row.fk!)"
                 >
                   <ChevronDownIcon
-                    v-if="fileOpen[row.key!] !== false"
+                    v-if="fileOpen[row.fk!] !== false"
                     class="w-3 h-3"
                   />
                   <ChevronRightIcon
