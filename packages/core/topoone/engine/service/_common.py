@@ -141,7 +141,7 @@ class GitIgnoreParser:
 
 DEFAULT_IGNORE_PATTERNS = [
     # topoCode 自身数据
-    '.topocode/', '.topocode-archive',
+    '.topocode/', '.topocode-archive', '.codegraph/',
     # 忽略文件自身
     '.gitignore', '.dockerignore', '.npmignore', '.ignore',
     '.prettierignore', '.eslintignore',
@@ -268,6 +268,9 @@ def build_effective_ignore_patterns(config: dict) -> list[str]:
     if '.topocode/' not in seen:
         base.append('.topocode/')
         seen.add('.topocode/')
+    if '.codegraph/' not in seen:
+        base.append('.codegraph/')
+        seen.add('.codegraph/')
     return base
 
 
@@ -284,6 +287,13 @@ def should_ignore_file(rel_path: str,
     # 检查默认 + 自定义忽略模式
     patterns = extra_patterns or DEFAULT_IGNORE_PATTERNS
     for pattern in patterns:
+        # 目录模式('xx/')：gitignore 语义——目录自身或其下任意层级的文件都忽略
+        if pattern.endswith('/'):
+            dirname = pattern[:-1]
+            if dirname and (rel_path == dirname or rel_path.startswith(pattern)
+                            or f'/{dirname}/' in f'/{rel_path}/'):
+                return True
+            continue
         if fnmatch.fnmatch(rel_path, pattern):
             return True
         if fnmatch.fnmatch(os.path.basename(rel_path), pattern):
@@ -292,22 +302,26 @@ def should_ignore_file(rel_path: str,
     return False
 
 
-def _ensure_topocode_in_gitignore(root_path: str):
-    """Ensure .topocode is listed in the project's .gitignore."""
+# topoCode 自身数据目录：导入/分析时不得识别为项目代码
+TOPOCODE_DATA_DIRS = ('.topocode/', '.codegraph/')
+
+
+def _ensure_topocode_dirs_in_gitignore(root_path: str):
+    """Ensure topoCode data dirs (.topocode/.codegraph) are listed in the project's .gitignore."""
     gitignore_path = os.path.join(root_path, '.gitignore')
-    entry = '.topocode/'
     try:
         if os.path.exists(gitignore_path):
             with open(gitignore_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            normalized = [l.strip() for l in lines]
-            if '.topocode' in normalized or '.topocode/' in normalized:
+                normalized = [l.strip() for l in f.readlines()]
+            missing = [e for e in TOPOCODE_DATA_DIRS
+                       if e not in normalized and e.rstrip('/') not in normalized]
+            if not missing:
                 return
             with open(gitignore_path, 'a', encoding='utf-8') as f:
-                f.write(f'\n{entry}\n')
+                f.write('\n' + '\n'.join(missing) + '\n')
         else:
             with open(gitignore_path, 'w', encoding='utf-8') as f:
-                f.write(f'{entry}\n')
+                f.write('\n'.join(TOPOCODE_DATA_DIRS) + '\n')
     except Exception as e:
         logger.warning(f'[import] failed to update .gitignore: {e}')
 

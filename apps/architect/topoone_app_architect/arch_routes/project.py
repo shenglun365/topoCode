@@ -329,6 +329,9 @@ async def create_greenfield_project(request: Request):
         "productForm": body.get("productForm"),
         "pinned": False, "favorite": False,
     }
+    # 导入即补 .gitignore：topoCode 自身数据目录不入项目代码
+    from . import arch_git
+    arch_git.ensure_gitignore_entries(project["rootPath"])
     store.ProjectsStore.create(project)
     return ok(project)
 
@@ -367,6 +370,9 @@ async def bind_project(request: Request):
     root = str(exec_root).strip()
     if not root:
         return err(400, "工作目录不能为空")
+    # 导入即补 .gitignore：topoCode 自身数据目录(.topocode/.codegraph)不入项目代码
+    from . import arch_git
+    arch_git.ensure_gitignore_entries(root)
     proj_id = _stable_proj_id(root)
     base = _resolve_project(root, None) or _synthesize(root)
     kb_id = body.get("kbProjectId") or body.get("projectId")
@@ -380,7 +386,6 @@ async def bind_project(request: Request):
         if not ok_:
             return err(400, reason)
         # 基线提交：取 KB 基线版本 head（变更检测的 diff base），branch 用真实分支
-        from . import arch_git
         baseline_id = kb.get("currentVersionId")
         baseline_head = _kb_baseline_head(kb["id"], baseline_id)
         real_branch = (arch_git.repo_status(root) or {}).get("branch") or "main"
@@ -427,10 +432,12 @@ async def link_project(request: Request):
     if not proj or not proj.get("rootPath"):
         return err(400, "未定位到要关联的 architect 项目(缺 execRoot)")
     arch_root = proj["rootPath"]
+    # 后补关联同样补 .gitignore(topoCode 自身数据目录不入项目代码)
+    from . import arch_git
+    arch_git.ensure_gitignore_entries(arch_root)
     ok_, reason = _same_repo_source(arch_root, kb)
     if not ok_:
         return err(400, reason)
-    from . import arch_git
     # 基线提交：取 KB 基线版本 head（变更检测的 diff base），branch 用真实分支
     baseline_head = _kb_baseline_head(kb["id"], kb.get("currentVersionId"))
     real_branch = (arch_git.repo_status(arch_root) or {}).get("branch") or "main"
@@ -536,9 +543,111 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
     })
 
 
+def _comp_depth(comp_id: str, by_id: dict) -> int:
+    """组件在 parentId 链上的深度(根=0)；带环保护(访问过即止)。"""
+    depth, cur, seen = 0, comp_id, set()
+    while cur:
+        if cur in seen:
+            break
+        seen.add(cur)
+        parent = (by_id.get(cur) or {}).get("parentId") or ""
+        if not parent or parent not in by_id:
+            break
+        depth += 1
+        cur = parent
+    return depth
+
+
+def _by_kb_components(files: list, proj: dict) -> list:
+    """按 KB 组件汇总工作树变更(概览页「组件变更情况」口径)。
+
+    - 文件归属：按组件 owns 匹配，命中多个时归入最深(最具体)组件，父层经上卷获得；
+    - 展示名：KB 有 name 用 name，没有用组件 id；未命中任何组件 → 「未归属」桶；
+    - 层级汇总：父子层级向上上卷，父组件的 added/modified/deleted/files 含全部子孙；
+    - KB 未关联/不可达/无组件 → 空列表(前端降级文案)；
+    - 只保留子树内有变更的组件，输出按层级 DFS 先序(父先于子)。
+    """
+    kb_id = proj.get("kbProjectId") or ""
+    if not kb_id:
+        return []
+    try:
+        model = build_architecture_model(proj.get("rootPath"), proj.get("id"))
+    except Exception:
+        return []
+    comps = model.get("components") or []
+    by_id = {c.get("id"): c for c in comps if c.get("id")}
+    if not by_id:
+        return []
+    depth = {cid: _comp_depth(cid, by_id) for cid in by_id}
+    children = {cid: [] for cid in by_id}
+    for cid, c in by_id.items():
+        pid = c.get("parentId") or ""
+        if pid in by_id:
+            children[pid].append(cid)
+
+    own = {cid: {"added": 0, "modified": 0, "deleted": 0, "files": []} for cid in by_id}
+    unowned = {"added": 0, "modified": 0, "deleted": 0, "files": []}
+    for f in files:
+        path = f.get("path") if isinstance(f, dict) else str(f)
+        status = f.get("status") if isinstance(f, dict) else ""
+        owners = [cid for cid, c in by_id.items() if path in (c.get("owns") or [])]
+        target = max(owners, key=lambda cid: depth[cid]) if owners else "__unowned__"
+        bucket = own.get(target) or unowned
+        bucket["files"].append(path)
+        if status == "A":
+            bucket["added"] += 1
+        elif status == "D":
+            bucket["deleted"] += 1
+        else:
+            bucket["modified"] += 1
+
+    # 自底向上上卷：深组件先处理，其已累计的合计再加给父组件
+    agg = {cid: {"added": own[cid]["added"], "modified": own[cid]["modified"],
+                 "deleted": own[cid]["deleted"], "fileset": set(own[cid]["files"])}
+           for cid in by_id}
+    for cid in sorted(by_id, key=lambda c: depth[c], reverse=True):
+        pid = (by_id[cid].get("parentId") or "")
+        if pid in agg and pid != cid:
+            agg[pid]["added"] += agg[cid]["added"]
+            agg[pid]["modified"] += agg[cid]["modified"]
+            agg[pid]["deleted"] += agg[cid]["deleted"]
+            agg[pid]["fileset"] |= agg[cid]["fileset"]
+
+    out: list = []
+
+    def _emit(cid: str, level: int, seen: set):
+        if cid in seen:
+            return
+        seen.add(cid)
+        a = agg[cid]
+        if a["added"] or a["modified"] or a["deleted"]:
+            out.append({
+                "id": cid, "name": (by_id[cid].get("name") or "").strip() or cid,
+                "parentId": by_id[cid].get("parentId") or "", "level": level,
+                "added": a["added"], "modified": a["modified"], "deleted": a["deleted"],
+                "files": sorted(a["fileset"]),
+            })
+        for ch in children[cid]:
+            _emit(ch, level + 1, seen)
+
+    for cid in by_id:
+        pid = by_id[cid].get("parentId") or ""
+        if pid not in by_id:
+            _emit(cid, 0, set())
+    if unowned["files"]:
+        out.append({"id": "__unowned__", "name": "", "parentId": "", "level": 0,
+                    "added": unowned["added"], "modified": unowned["modified"],
+                    "deleted": unowned["deleted"], "files": unowned["files"]})
+    return out
+
+
 @router.get("/project/overview")
 async def get_project_overview(root: Optional[str] = None, project: Optional[str] = None):
-    """项目概览(工作区首页)：工作目录、远端仓库、知识库关联、基线、相对基线的代码变更与组件变更。"""
+    """项目概览(工作区首页)：工作目录、远端仓库、知识库关联、基线、相对基线的代码变更与组件变更。
+
+    组件变更(byComponent)按 KB 组件汇总：文件经 owns 归属组件，展示名 name 优先否则 id，
+    父组件汇总含子组件变更数据(层级 DFS 先序)。
+    """
     proj = _resolve_project(root, project)
     if not proj:
         return ok(None)
@@ -582,7 +691,8 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
         "diff": {"filesChanged": diff["filesChanged"], "added": diff["added"],
                  "modified": diff["modified"], "deleted": diff["deleted"],
                  "deletedHighRisk": diff["deletedHighRisk"],
-                 "files": diff["files"], "byComponent": diff["byComponent"]},
+                 "files": diff["files"],
+                 "byComponent": _by_kb_components(diff.get("files") or [], proj)},
     })
 
 

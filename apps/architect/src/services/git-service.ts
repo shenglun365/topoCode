@@ -1,4 +1,5 @@
 import { apiGet, apiPost } from './api-client'
+import { currentProjectParams } from './project-service'
 
 export interface GitRepoState {
   commit: string
@@ -27,6 +28,17 @@ export interface GitCommit {
   files: GitFileChange[]
 }
 
+export interface GitLogEntry {
+  oid: string
+  subject: string
+  date: string
+}
+
+export interface GitLogResult {
+  entries: GitLogEntry[]
+  baseline: string
+}
+
 export interface GitService {
   head(repo: string): Promise<GitRepoState>
   checkout(repo: string, commit: string): Promise<void>
@@ -34,6 +46,7 @@ export interface GitService {
   changes(repo: string): Promise<GitChangesSummary>
   log(repo: string, from: string, to: string): Promise<GitCommit[]>
   workingTree(repo: string): Promise<GitFileChange[]>
+  commitLog(limit?: number): Promise<GitLogResult>
 }
 
 /** 后端不可达时保持旧行为(空结果), 不中断 UI。 */
@@ -107,6 +120,19 @@ class HttpGitService implements GitService {
       }))
     } catch {
       return fallback([])
+    }
+  }
+
+  /** 近期提交 + 基线 commit(对比选择器数据源)。显式携带当前项目上下文。 */
+  async commitLog(limit = 50): Promise<GitLogResult> {
+    try {
+      const { root, project } = currentProjectParams()
+      const qs = new URLSearchParams({ limit: String(limit) })
+      if (root) qs.set('root', root)
+      if (project) qs.set('project', project)
+      return await apiGet<GitLogResult>(`/git/log?${qs.toString()}`)
+    } catch {
+      return fallback({ entries: [], baseline: '' })
     }
   }
 }

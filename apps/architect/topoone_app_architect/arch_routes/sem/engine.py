@@ -4002,14 +4002,96 @@ async def api_impact(root: Optional[str] = None, project: Optional[str] = None):
     return ok(_impact_analysis(root, project))
 
 
+def _diff_rows(base_lines: List[str], tgt_lines: List[str]) -> List[dict]:
+    """基准/目标两侧内容 → 逐行注解行序列(ctx/add/del，双侧行号)。difflib opcodes。"""
+    import difflib
+    sm = difflib.SequenceMatcher(None, base_lines, tgt_lines, autojunk=False)
+    rows: List[dict] = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                rows.append({"kind": "ctx", "code": base_lines[i1 + k],
+                             "baseLine": i1 + k + 1, "targetLine": j1 + k + 1,
+                             "line": j1 + k + 1})
+        else:
+            if tag in ("replace", "delete"):
+                for k in range(i1, i2):
+                    rows.append({"kind": "del", "code": base_lines[k],
+                                 "baseLine": k + 1, "targetLine": None, "line": k + 1})
+            if tag in ("replace", "insert"):
+                for k in range(j1, j2):
+                    rows.append({"kind": "add", "code": tgt_lines[k],
+                                 "baseLine": None, "targetLine": k + 1, "line": k + 1})
+    return rows
+
+
+def _diff_window(rows: List[dict], anchor: int, before: int, after: int, limit: int) -> List[dict]:
+    """diff 行窗口：全部变更 hunk ±3 行上下文 + 锚点邻域；超 limit 时按离锚点远近裁剪。"""
+    n = len(rows)
+    if n <= limit:
+        return rows
+    changed = [i for i, r in enumerate(rows) if r["kind"] != "ctx"]
+    anchor_idx = next((i for i, r in enumerate(rows)
+                       if anchor and (r.get("targetLine") == anchor or r.get("baseLine") == anchor)), None)
+    ranges: List[List[int]] = [[max(0, i - 3), min(n - 1, i + 3)] for i in changed]
+    if not ranges and anchor:
+        ranges = [[max(0, anchor - 1 - before), min(n - 1, anchor - 1 + after)]]
+    ranges.sort()
+    merged: List[List[int]] = []
+    for s, e in ranges:
+        if merged and s <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    center = anchor_idx if anchor_idx is not None else (changed[0] if changed else 0)
+    merged.sort(key=lambda r: abs((r[0] + r[1]) // 2 - center))
+    picked: List[List[int]] = []
+    used = 0
+    for s, e in merged:
+        take = min(e, s + limit - used - 1) if used + (e - s + 1) > limit else e
+        if take < s:
+            break
+        picked.append([s, take])
+        used += take - s + 1
+        if used >= limit:
+            break
+    picked.sort()
+    idxs: List[int] = []
+    for s, e in picked:
+        idxs.extend(range(s, e + 1))
+    if anchor_idx is not None and anchor_idx not in idxs:
+        idxs.extend(range(max(0, anchor_idx - 2), min(n - 1, anchor_idx + 2) + 1))
+        idxs = sorted(set(idxs))
+    return [rows[i] for i in idxs]
+
+
+def _git_blob_lines(rpath: str, ref: str, file: str) -> List[str]:
+    """git show ref:file → 行列表；失败抛 RuntimeError(调用方转 404)。"""
+    import subprocess as _sp
+    p = _sp.run(["git", "-C", rpath, "show", f"{ref}:{file}"], capture_output=True, timeout=20)
+    if p.returncode != 0:
+        raise RuntimeError(f"提交 {ref[:12]} 中不存在文件: {file}")
+    return p.stdout.decode("utf-8", errors="replace").splitlines()
+
+
 @router.get("/kb/semantic/source-snippet")
 async def api_source_snippet(root: Optional[str] = None, project: Optional[str] = None,
                              file: str = "", line: int = 0, symbol: str = "",
-                             before: int = 10, after: int = 10, limit: int = 60):
+                             before: int = 10, after: int = 10, limit: int = 60,
+                             ref: str = "", diff_base: str = ""):
     """锚点前后源码窗口（实现层逻辑精确核对）。
 
     symbol 已知（AST 缓存可解析行段）→ 优先展开整个符号体（startLine..endLine + 尾部余量）；
     否则按 anchor±before/after 取窗口。总窗口上限 limit 行，防超长文件全量返回。
+
+    ref（commit）：对比模式下按资产侧归属取「该 head 时点」的内容（git show ref:file），
+    保证不同 head 下资产卡代码准确；此时不做当前树的符号行段展开（AST 缓存/codegraph
+    行号属于工作区版本，对历史内容无意义），仅按锚点行 ± 窗口取。
+
+    diff_base（commit）：git diff 模式——diff_base 内容 vs 目标侧内容(ref 或工作区)逐行
+    对比，返回 ctx/add/del 注解行(kind + baseLine/targetLine 双行号)，窗口=全部变更
+    hunk±3 行上下文(超 limit 按离锚点远近裁剪，始终保证锚点邻域在场)。资产卡据此精确
+    显示 增/删/改 了哪些行。
     """
     rpath = resolve_root(root, project)
     if not rpath or not file:
@@ -4018,22 +4100,40 @@ async def api_source_snippet(root: Optional[str] = None, project: Optional[str] 
     base = os.path.realpath(rpath)
     if not full.startswith(base + os.sep):
         return err(400, f"路径越界: {file}")
-    if not os.path.isfile(full):
-        return err(400, f"文件不存在: {file}")
-    try:
-        with open(full, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.read().splitlines()
-    except Exception as e:
-        return err(500, f"读取失败: {e}")
+    ref = (ref or "").strip()
+    diff_base = (diff_base or "").strip()
+    if ref:
+        try:
+            lines = _git_blob_lines(rpath, ref, file)
+        except RuntimeError as e:
+            return err(404, str(e))
+    else:
+        if not os.path.isfile(full):
+            return err(400, f"文件不存在: {file}")
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        except Exception as e:
+            return err(500, f"读取失败: {e}")
     if not lines:
         return ok({"file": file, "symbol": symbol, "anchorLine": 0,
                    "highlight": [], "lines": []})
     n = len(lines)
     anchor = int(line or 0)
+    if diff_base:
+        try:
+            base_lines = _git_blob_lines(rpath, diff_base, file)
+        except RuntimeError as e:
+            return err(404, str(e))
+        rows = _diff_window(_diff_rows(base_lines, lines), anchor, before, after, limit)
+        highlight = [r["line"] for r in rows if anchor and r.get("targetLine") == anchor]
+        return ok({"file": file, "symbol": symbol, "anchorLine": anchor or 1,
+                   "highlight": highlight, "lines": rows,
+                   "diffBase": diff_base, "ref": ref or ""})
     start = end = anchor
     highlight: List[int] = []
     resolved = False
-    if symbol and anchor:
+    if symbol and anchor and not ref:
         # AST 缓存里有该符号的行段 → 整段显示（更精确覆盖实现层逻辑）
         try:
             pid = project_id_for(root, project)
@@ -4466,6 +4566,28 @@ async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
                              focus=focus, hops=hops,
                              include_indirect=include_indirect))
 
+@router.get("/kb/semantic/asset-compare")
+async def api_asset_compare(root: Optional[str] = None, project: Optional[str] = None,
+                            base: str = "", target: str = "worktree"):
+    """资产/组件变更对比：任意 head 对 vs head/工作区（缓存态，零持久化）。
+
+    - base 缺省取项目 baselineCommit(KB 基线)；须为对比目标的祖先(含基线)；
+    - target='worktree'(缺省, HEAD+未提交+未跟踪) 或任意 commit；
+    - 返回文件级变更 + KB 组件口径的组件变更(未归属新增文件归「其他」) +
+      资产增量(stable/changed/new/removed + pending 待提取, 按锚点哈希×两侧内容 md5 推导) +
+      「其他」资产与组件内资产的跨域 relations 联系；
+    - 结果仅进程内缓存(TTL 60s + LRU 32)，不落库。
+
+    ⚠️ 必须注册在 /kb/semantic/{asset_id} 之前：FastAPI 按注册顺序匹配，
+    否则 asset-compare 会被动态段吞掉(detail 404)。A1-T2。
+    """
+    from . import compare as _cmp
+    res = await asyncio.to_thread(_cmp.cached_compare, root, project, base, target)
+    if isinstance(res, dict) and res.get("error"):
+        return err(400, res["error"])
+    return ok(res)
+
+
 @router.get("/kb/semantic/{asset_id}")
 async def api_detail(asset_id: str, root: Optional[str] = None, project: Optional[str] = None):
     a = detail(asset_id, root, project)
@@ -4504,7 +4626,8 @@ async def api_line_notes(asset_id: str, file: str, start: int, end: int,
         generate_line_notes, asset_id, file, start, end, root, project, model_id, force))
 
 
-# ── 静态查询路由置底（A1-T2：在 {asset_id} 动态路由之后注册）──
+# ── 静态查询路由置底（A1-T2）：新增静态路径务必注册在 {asset_id} 之前 ──
+
 
 
 

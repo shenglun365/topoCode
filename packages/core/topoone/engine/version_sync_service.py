@@ -131,8 +131,8 @@ def compute_manifest(root: str, main_db) -> dict:
     try:
         for dirpath, dirnames, filenames in os.walk(root):
             rel_root = os.path.relpath(dirpath, root)
-            # KB 元数据目录永不索引；.git 为仓库元数据
-            if rel_root == ".topocode" or rel_root == ".git":
+            # KB 元数据目录永不索引；.codegraph 为 codegraph 索引；.git 为仓库元数据
+            if rel_root in (".topocode", ".codegraph", ".git"):
                 dirnames[:] = []
                 continue
             dirnames[:] = [
@@ -143,7 +143,7 @@ def compute_manifest(root: str, main_db) -> dict:
             for filename in filenames:
                 full = os.path.join(dirpath, filename)
                 rel = os.path.relpath(full, root).replace('\\', '/')
-                if rel.startswith(".topocode/") or rel.startswith(".git/"):
+                if rel.startswith(".topocode/") or rel.startswith(".codegraph/") or rel.startswith(".git/"):
                     continue
                 if should_ignore_file(rel, parser, extra_patterns=extra_patterns):
                     continue

@@ -13,7 +13,8 @@ import SemanticGraphView, { type GraphTabDef } from '@/components/assets/Semanti
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
-import { semanticAssetService, type BaselineDiff, type CoverageInfo, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
+import { semanticAssetService, type AssetCompareResult, type BaselineDiff, type CoverageInfo, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
+import { gitService, type GitLogEntry } from '@/services/git-service'
 import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
 import { namingService, type NamingConvention } from '@/services/naming-service'
@@ -517,13 +518,70 @@ async function loadBaselineDiff() {
 
 function toggleDiffMode() {
   diffMode.value = !diffMode.value
-  if (diffMode.value) loadBaselineDiff()
+  if (diffMode.value) {
+    loadBaselineDiff()
+    void loadCommitOptions()
+    void runCompare()
+  }
 }
 
-/** 变更文件 → 类别 快查表（语义行徽标 / 图谱节点着色用）。 */
+// ---- 任意 head 对 vs head/工作区 资产/组件对比(基准缺省=KB 基线 baselineCommit；缓存态) ----
+const cmpBase = ref('')            // '' = KB 基线(baselineCommit)
+const cmpTarget = ref('worktree')  // 'worktree' = 工作区(含未提交/未跟踪)
+const commitOptions = ref<GitLogEntry[]>([])
+const baselineSha = ref('')
+const compareData = ref<AssetCompareResult | null>(null)
+const compareError = ref('')
+const compareLoading = ref(false)
+
+async function loadCommitOptions() {
+  const res = await gitService.commitLog(50)
+  commitOptions.value = res.entries
+  baselineSha.value = res.baseline
+}
+
+async function runCompare() {
+  compareLoading.value = true
+  compareError.value = ''
+  try {
+    compareData.value = await semanticAssetService.assetCompare(
+      cmpBase.value || undefined,
+      cmpTarget.value || 'worktree',
+    ) ?? null
+  } catch (e) {
+    compareData.value = null
+    compareError.value = e instanceof Error && e.message ? e.message : t('assetMgmt.diff.cmpFailed')
+  } finally {
+    compareLoading.value = false
+  }
+}
+
+// ---- 提取闭环：待提取文件(目标侧无资产匹配) → 按文件范围补提(分批) → 重新对比 ----
+const extractingPending = ref(false)
+
+async function extractPendingAndRecompare() {
+  const files = compareData.value?.assets.pending.files ?? []
+  if (!files.length) return
+  if (!window.confirm(t('assetMgmt.diff.extractConfirm', { n: files.length }))) return
+  extractingPending.value = true
+  try {
+    const BATCH = 10
+    for (let i = 0; i < files.length; i += BATCH) {
+      await semanticAssetService.extract({ type: 'files', files: files.slice(i, i + BATCH) })
+    }
+  } catch (e) {
+    compareError.value = e instanceof Error && e.message ? e.message : t('assetMgmt.diff.cmpFailed')
+  } finally {
+    extractingPending.value = false
+  }
+  await Promise.all([loadSemantic(), runCompare()])
+}
+
+/** 变更文件 → 类别 快查表（语义行徽标 / 图谱节点着色用）。
+ *  选了对比对(base/target)后跟随所选口径(默认对=基线→工作区，与 baselineDiff 一致)。 */
 const changedFileMap = computed<Map<string, 'added' | 'modified' | 'deleted'>>(() => {
   const m = new Map<string, 'added' | 'modified' | 'deleted'>()
-  const d = baselineDiffData.value
+  const d = compareData.value ?? baselineDiffData.value
   if (!d) return m
   for (const p of d.files.added) m.set(p, 'added')
   for (const p of d.files.modified) m.set(p, 'modified')
@@ -1171,6 +1229,59 @@ onMounted(async () => {
           <SparklesIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.chatExtract') }}
         </button>
       </div>
+      <!-- 基线对比 · 对比起止 head 选择(任意 head 对 vs head/工作区；全 tab 可见) + 紧凑结果 -->
+      <div v-if="diffMode" class="mt-2.5 flex items-center gap-1.5 flex-wrap">
+        <span class="text-[10px] text-ctp-overlay0 shrink-0">{{ t('assetMgmt.diff.cmpBase') }}</span>
+        <select
+          v-model="cmpBase"
+          class="input !py-0.5 !px-1.5 !text-[10px] min-w-0 max-w-[30%]"
+          :title="t('assetMgmt.diff.cmpBaseHint')"
+          @change="runCompare"
+        >
+          <option value="">{{ t('assetMgmt.diff.kbBaseline') }}{{ baselineSha ? ` (${baselineSha.slice(0, 8)})` : '' }}</option>
+          <option v-for="c in commitOptions" :key="`b-${c.oid}`" :value="c.oid">{{ c.oid.slice(0, 8) }} {{ c.subject.slice(0, 26) }}</option>
+        </select>
+        <span class="text-ctp-overlay0 shrink-0">→</span>
+        <select
+          v-model="cmpTarget"
+          class="input !py-0.5 !px-1.5 !text-[10px] min-w-0 max-w-[30%]"
+          :title="t('assetMgmt.diff.cmpTargetHint')"
+          @change="runCompare"
+        >
+          <option value="worktree">{{ t('assetMgmt.diff.worktree') }}</option>
+          <option v-for="c in commitOptions" :key="`t-${c.oid}`" :value="c.oid">{{ c.oid.slice(0, 8) }} {{ c.subject.slice(0, 26) }}</option>
+        </select>
+        <button
+          class="btn btn-ghost !py-0.5 !px-1.5 shrink-0"
+          :title="t('assetMgmt.diff.cmpRerun')"
+          @click="runCompare"
+        >
+          <ArrowPathIcon class="w-3 h-3" :class="compareLoading ? 'animate-spin' : ''" />
+        </button>
+        <span v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</span>
+        <span v-else-if="compareError" class="text-[10px] text-ctp-red truncate max-w-[40%]" :title="compareError">{{ compareError }}</span>
+        <template v-else-if="compareData && !compareData.noChanges">
+          <span v-if="compareData.cached" class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay0">{{ t('assetMgmt.diff.cached') }}</span>
+          <span class="text-[10px] text-ctp-subtext1 font-semibold">{{ t('assetMgmt.diff.assetDelta') }}</span>
+          <span class="text-[10px] text-ctp-overlay1">{{ t('assetMgmt.diff.stableN', { n: compareData.assets.stable }) }}</span>
+          <span class="text-[10px] text-ctp-yellow">{{ t('assetMgmt.diff.changedN', { n: compareData.assets.changedTotal }) }}</span>
+          <span class="text-[10px] text-ctp-green">{{ t('assetMgmt.diff.newN', { n: compareData.assets.newTotal }) }}</span>
+          <span class="text-[10px] text-ctp-red">{{ t('assetMgmt.diff.removedN', { n: compareData.assets.removedTotal }) }}</span>
+          <span v-if="compareData.assets.pending.count" class="text-[10px] text-ctp-peach">{{ t('assetMgmt.diff.pendingN', { n: compareData.assets.pending.count }) }}</span>
+          <span v-if="compareData.newFileCount" class="text-[10px] text-ctp-green">{{ t('assetMgmt.diff.pendingNew', { n: compareData.newFileCount }) }}</span>
+          <span v-if="compareData.crossLinkCount" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.crossLinks', { n: compareData.crossLinkCount }) }}</span>
+          <!-- 提取闭环：目标侧=工作区 且 有待提取文件 → 按文件范围补提 → 重新对比 -->
+          <button
+            v-if="compareData.assets.pending.count && compareData.targetIsWorktree && !extractingPending"
+            class="btn btn-xs btn-blue !py-0.5 shrink-0"
+            :title="t('assetMgmt.diff.extractRecompareHint', { n: compareData.assets.pending.count })"
+            @click="extractPendingAndRecompare"
+          >
+            <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.diff.extractRecompare', { n: compareData.assets.pending.count }) }}
+          </button>
+          <span v-if="extractingPending" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.extracting') }}</span>
+        </template>
+      </div>
     </div>
 
     <div
@@ -1477,6 +1588,7 @@ onMounted(async () => {
                 :key="gt.id"
                 :tab="gt"
                 :diff-files="changedFilesForGraph"
+                :compare-data="compareData"
                 @close="closeGraphTab"
               />
             </div>
@@ -1741,6 +1853,90 @@ onMounted(async () => {
               </div>
               <div v-if="baselineDiffData && baselineDiffData.dirty" class="px-3 pb-2 text-[9px] text-ctp-overlay0">
                 {{ t('assetMgmt.diff.dirty') }}: {{ baselineDiffData.dirty }}
+              </div>
+
+              <!-- 对比结果明细：资产变化 + 组件变化(其他桶) + 跨域联系；起止 head 在顶部工具栏选择 -->
+              <div class="px-3 pb-3 pt-2 mt-1 border-t border-ctp-surface0 space-y-2">
+                <p v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</p>
+                <p v-else-if="compareError" class="text-[10px] text-ctp-red">{{ compareError }}</p>
+                <template v-else-if="compareData">
+                  <p v-if="compareData.noChanges" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.noChanges') }}</p>
+                  <template v-else>
+                    <div class="flex items-center gap-2 text-[10px] flex-wrap">
+                      <span class="text-ctp-subtext1 font-semibold">{{ t('assetMgmt.diff.assetDelta') }}</span>
+                      <span class="text-ctp-overlay1">{{ t('assetMgmt.diff.stableN', { n: compareData.assets.stable }) }}</span>
+                      <span class="text-ctp-yellow">{{ t('assetMgmt.diff.changedN', { n: compareData.assets.changedTotal }) }}</span>
+                      <span class="text-ctp-red">{{ t('assetMgmt.diff.removedN', { n: compareData.assets.removedTotal }) }}</span>
+                      <span v-if="compareData.newFileCount" class="text-ctp-green">{{ t('assetMgmt.diff.pendingNew', { n: compareData.newFileCount }) }}</span>
+                    </div>
+                    <div class="space-y-0.5">
+                      <div v-for="c in compareData.components" :key="c.id" class="flex items-center gap-2 text-[10px] min-w-0">
+                        <span
+                          class="truncate min-w-0 flex-1"
+                          :class="c.id === '__other__' ? 'text-ctp-overlay1 italic' : 'text-ctp-text font-medium'"
+                          :title="c.id === '__other__' ? t('assetMgmt.diff.otherBucketHint') : c.id"
+                        >{{ c.name || t('assetMgmt.diff.otherBucket') }}</span>
+                        <span class="text-ctp-green font-mono shrink-0">+{{ c.added }}</span>
+                        <span class="text-ctp-yellow font-mono shrink-0">~{{ c.modified }}</span>
+                        <span class="text-ctp-red font-mono shrink-0">-{{ c.deleted }}</span>
+                      </div>
+                    </div>
+                    <!-- 资产明细：目标侧新增 / 需更新(side 标注) / 待提取文件 -->
+                    <div v-if="compareData.assets.new.length" class="space-y-0.5">
+                      <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.diff.newAssets') }}</div>
+                      <div v-for="a in compareData.assets.new.slice(0, 20)" :key="a.id" class="flex items-center gap-2 text-[10px] min-w-0">
+                        <span class="truncate min-w-0 flex-1 text-ctp-text" :title="a.id">{{ a.name }}</span>
+                        <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0">{{ t(`assetMgmt.kind.${a.kind}`) }}</span>
+                        <span class="font-mono text-[9px] text-ctp-overlay0 shrink-0" :title="a.component">{{ a.component === '__other__' ? t('assetMgmt.diff.otherBucket') : a.component }}</span>
+                      </div>
+                    </div>
+                    <div v-if="compareData.assets.changed.length" class="space-y-0.5">
+                      <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.diff.changedAssets') }}</div>
+                      <div v-for="a in compareData.assets.changed.slice(0, 20)" :key="a.id" class="flex items-center gap-2 text-[10px] min-w-0">
+                        <span class="truncate min-w-0 flex-1 text-ctp-text" :title="a.id">{{ a.name }}</span>
+                        <span
+                          class="chip !text-[8px] shrink-0"
+                          :class="a.strong ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-surface0 text-ctp-overlay1'"
+                          :title="t(a.strong ? 'assetMgmt.diff.strongHitHint' : 'assetMgmt.diff.weakHitHint')"
+                        >{{ t(a.strong ? 'assetMgmt.diff.strongHit' : 'assetMgmt.diff.weakHit') }}</span>
+                        <span
+                          class="chip !text-[8px] shrink-0"
+                          :class="a.side === 'target' ? 'bg-ctp-green/15 text-ctp-green' : a.side === 'base' ? 'bg-ctp-blue/15 text-ctp-blue' : 'bg-ctp-peach/15 text-ctp-peach'"
+                          :title="t(`assetMgmt.diff.side.${a.side || 'stale'}`)"
+                        >{{ t(`assetMgmt.diff.side.${a.side || 'stale'}`) }}</span>
+                        <span class="font-mono text-[9px] text-ctp-overlay0 shrink-0" :title="a.component">{{ a.component === '__other__' ? t('assetMgmt.diff.otherBucket') : a.component }}</span>
+                      </div>
+                      <div v-if="compareData.assets.changedWeak" class="text-[9px] text-ctp-overlay0">
+                        {{ t('assetMgmt.diff.weakSummary', { strong: compareData.assets.changedStrong, weak: compareData.assets.changedWeak }) }}
+                      </div>
+                    </div>
+                    <div v-if="compareData.assets.pending.count" class="space-y-0.5">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[9px] text-ctp-peach">{{ t('assetMgmt.diff.pendingFiles', { n: compareData.assets.pending.count }) }}</span>
+                        <button
+                          v-if="compareData.targetIsWorktree && !extractingPending"
+                          class="btn btn-xs btn-blue !py-0 !px-1.5 !text-[9px]"
+                          :title="t('assetMgmt.diff.extractRecompareHint', { n: compareData.assets.pending.count })"
+                          @click="extractPendingAndRecompare"
+                        >
+                          <SparklesIcon class="w-2.5 h-2.5" />{{ t('assetMgmt.diff.extractRecompare', { n: compareData.assets.pending.count }) }}
+                        </button>
+                        <span v-if="extractingPending" class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.diff.extracting') }}</span>
+                      </div>
+                      <div v-for="f in compareData.assets.pending.files.slice(0, 30)" :key="f" class="font-mono text-[9px] text-ctp-subtext0 truncate" :title="f">{{ f }}</div>
+                      <div v-if="compareData.assets.pending.files.length > 30" class="text-[9px] text-ctp-overlay0">+{{ compareData.assets.pending.files.length - 30 }}</div>
+                      <p v-if="!compareData.targetIsWorktree" class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.diff.pendingCommitHint') }}</p>
+                    </div>
+                    <div v-if="compareData.crossLinkCount" class="text-[9px] text-ctp-overlay0 leading-relaxed">
+                      {{ t('assetMgmt.diff.crossLinks', { n: compareData.crossLinkCount } ) }}
+                      <span
+                        v-for="(l, i) in compareData.crossLinks.slice(0, 3)"
+                        :key="i"
+                        class="ml-1 font-mono text-ctp-subtext0"
+                      >{{ l.fromName }}→{{ l.toName }}</span>
+                    </div>
+                  </template>
+                </template>
               </div>
             </div>
           </template>

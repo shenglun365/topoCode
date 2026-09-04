@@ -25,7 +25,7 @@ from topoone.engine.task_manager import (
 
 logger = logging.getLogger(__name__)
 
-from topoone.engine.service._common import GitIgnoreParser, IGNORE_FILE_PRIORITY, MultiIgnoreParser, _load_import_config, build_effective_ignore_patterns, should_ignore_file, _ensure_topocode_in_gitignore, _simple_hash, _IMPORT_JOBS
+from topoone.engine.service._common import GitIgnoreParser, IGNORE_FILE_PRIORITY, MultiIgnoreParser, _load_import_config, build_effective_ignore_patterns, should_ignore_file, _ensure_topocode_dirs_in_gitignore, _simple_hash, _IMPORT_JOBS
 def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
     """注册项目管理方法"""
     main_db = multi_db.main_db
@@ -2365,7 +2365,7 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
     else:
         main_db.insert("projects", main_row)
 
-    _ensure_topocode_in_gitignore(effective_root)
+    _ensure_topocode_dirs_in_gitignore(effective_root)
     multi_db.write_proj_signature(effective_root, project_id)
 
     # ── 注册初始 KB 版本基线（全部文件 = added）──
@@ -2479,8 +2479,10 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
 
             rel_path = os.path.relpath(entry.path, root_path).replace('\\', '/')
 
-            # KB 元数据目录永不索引（.topocode 会在初始化时被创建）；.git 为仓库元数据
+            # KB 元数据目录永不索引（.topocode 会在初始化时被创建）；.codegraph 为
+            # codegraph 符号索引；.git 为仓库元数据
             if rel_path == '.topocode' or rel_path.startswith('.topocode/') \
+                    or rel_path == '.codegraph' or rel_path.startswith('.codegraph/') \
                     or rel_path == '.git' or rel_path.startswith('.git/'):
                 ignored_count += 1
                 continue

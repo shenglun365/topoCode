@@ -296,3 +296,34 @@ def diff_files(project: dict, task_branch: str, base: str = "") -> dict:
         if len(parts) >= 2:
             files.append({"status": parts[0], "path": parts[1]})
     return {"filesChanged": len(files), "files": files}
+
+
+# topoCode 自身数据目录：导入/打开项目时补进 .gitignore，避免被识别为项目代码
+TOPOCODE_DATA_DIRS = ('.topocode/', '.codegraph/')
+
+
+def ensure_gitignore_entries(root: str) -> bool:
+    """确保项目 .gitignore 含 .topocode/.codegraph(缺文件则创建)；best-effort。
+
+    返回是否发生了写入(含新建文件)。
+    """
+    root = (root or "").strip()
+    if not root or not os.path.isdir(root):
+        return False
+    gi = os.path.join(root, '.gitignore')
+    try:
+        if os.path.exists(gi):
+            with open(gi, 'r', encoding='utf-8') as f:
+                normalized = [l.strip() for l in f.readlines()]
+            missing = [e for e in TOPOCODE_DATA_DIRS
+                       if e not in normalized and e.rstrip('/') not in normalized]
+            if not missing:
+                return False
+            with open(gi, 'a', encoding='utf-8') as f:
+                f.write('\n' + '\n'.join(missing) + '\n')
+        else:
+            with open(gi, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(TOPOCODE_DATA_DIRS) + '\n')
+        return True
+    except Exception:
+        return False

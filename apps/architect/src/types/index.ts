@@ -1252,8 +1252,14 @@ export interface ProjectOverviewDiffFile {
   deletions: number
 }
 
+/** 概览页组件变更(按 KB 组件汇总)：counts/files 为本组件+全部子孙的上卷合计。 */
 export interface ProjectOverviewComponent {
+  id: string
+  /** KB 组件 name，缺失时后端已回退为组件 id；「未归属」桶为空串 */
   name: string
+  parentId: string
+  /** 层级深度(根=0)，列表按层级 DFS 先序(父先于子) */
+  level: number
   added: number
   modified: number
   deleted: number

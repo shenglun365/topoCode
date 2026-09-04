@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from './GraphMatrixWindow.vue'
 import AssetIndexWindow from './AssetIndexWindow.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
@@ -13,7 +13,7 @@ import { useArchSettingsStore } from '@/stores/settings-store'
 import type { SemanticGraphViewId } from '@/utils/diagram-gen'
 import type { SemanticAsset, SemanticAssetLevel, SemanticAssetKind } from '@/types'
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
-import { semanticAssetService } from '@/services/semantic-asset-service'
+import { semanticAssetService, type AssetCompareResult } from '@/services/semantic-asset-service'
 
 const { t } = useI18n()
 
@@ -26,7 +26,7 @@ export interface GraphTabDef {
   assetId?: string
 }
 
-const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string> }>()
+const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string>; compareData?: AssetCompareResult | null }>()
 const emit = defineEmits<{ close: [id: string] }>()
 
 const level = ref<SemanticAssetLevel | ''>('')
@@ -50,6 +50,30 @@ const diffNodeCount = computed(() => diffNodeIds.value.size)
 function isDiffNode(id: string): boolean {
   return props.diffFiles ? diffNodeIds.value.has(id) : false
 }
+
+// ---- 对比口径(任意 head 对)资产级变化：存在时优先于文件级 diff 徽标 ----
+type DiffBucket = 'changed' | 'new' | 'removed'
+/** 资产 id → 变化桶。仅收录强关联(锚点符号代码段有变更)；
+ *  弱关联(同文件其他位置变更,可能受影响)不标色——文件级口径的噪声来源。
+ *  ⚠️ strong 缺失(旧后端未重启)视为强——避免降级成"全都不标色"。 */
+const diffKindById = computed<Map<string, DiffBucket>>(() => {
+  const m = new Map<string, DiffBucket>()
+  const c = props.compareData
+  if (!c) return m
+  for (const a of c.assets.changed) if (a.strong !== false) m.set(a.id, 'changed')
+  for (const a of c.assets.new) m.set(a.id, 'new')
+  for (const a of c.assets.removed) m.set(a.id, 'removed')
+  return m
+})
+const diffBucketCounts = computed(() => {
+  const counts: Record<DiffBucket, number> = { changed: 0, new: 0, removed: 0 }
+  for (const k of diffKindById.value.values()) counts[k] += 1
+  return counts
+})
+/** 仅看变化：图谱只渲染参与本次对比的资产(缓解大图下找变化节点)。 */
+const diffOnly = ref(false)
+/** 弱关联计数(仅同文件变更；不标色，仅提示)。 */
+const weakCount = computed(() => props.compareData?.assets.changedWeak ?? 0)
 const loading = ref(false)
 const selId = ref('')
 const selDetail = ref<SemanticAsset | null>(null)
@@ -182,7 +206,7 @@ function injectReplayBtn(tries = 0) {
 /** 播放到最后一步后关掉动画态：之后主题/语言/全屏等重渲染不再重播。 */
 function onDiagramReady() {
   injectReplayBtn()
-  void nextTick(() => { applySelectedNodeStyle(); applyNodeTooltips() })
+  void nextTick(() => { applySelectedNodeStyle(); applyNodeTooltips(); applyDiffNodeStyles() })
   if (!animating.value) return
   const tryWatch = (tries = 0) => {
     const ctrl = diagRef.value?.getAnimation() ?? null
@@ -452,9 +476,10 @@ const kindOptions = computed(() =>
 /** 生效粒度(粒度下拉选择；空=全部)。 */
 const effectiveLevel = computed<SemanticAssetLevel | ''>(() => level.value)
 
-/** 生效节点集：按类型 + 粒度过滤。 */
+/** 生效节点集：按类型 + 粒度过滤；「仅看变化」开启时只留对比命中资产。 */
 const scopedNodes = computed(() => kindNodes.value.filter((n) =>
-  !effectiveLevel.value || n.level === effectiveLevel.value))
+  (!effectiveLevel.value || n.level === effectiveLevel.value) &&
+  (!diffOnly.value || !diffKindById.value.size || diffKindById.value.has(n.id))))
 
 const scopedEdges = computed(() => {
   const ids = new Set(scopedNodes.value.map((n) => n.id))
@@ -1267,6 +1292,28 @@ function applySelectedNodeStyle() {
   selectedNodeEl?.classList.add('td-node-selected')
 }
 
+/** 对比变化节点着色：桶类 td-node-diff-{changed|new|removed}(黄/绿/红虚线)。
+ *  与选中态同款 id 寻址(mermaid 主口径)；对比数据晚于图就绪时由 watch 重放。 */
+function applyDiffNodeStyles() {
+  const host: HTMLElement | null = diagRef.value?.containerRef ?? null
+  const svg = host?.querySelector('svg')
+  if (!svg) return
+  svg.querySelectorAll('[class*="td-node-diff"]').forEach((el) =>
+    el.classList.remove('td-node-diff-changed', 'td-node-diff-new', 'td-node-diff-removed'))
+  if (!diffKindById.value.size) return
+  const rootPrefix = svg.id ? `${svg.id}-` : ''
+  for (const [nid, aid] of clickIds.value) {
+    const bucket = diffKindById.value.get(aid)
+    if (!bucket) continue
+    for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
+      if (resolveNodeIdFromEl(el, rootPrefix) !== nid) continue
+      el.classList.add(`td-node-diff-${bucket}`)
+      break
+    }
+  }
+}
+watch(diffKindById, () => void nextTick(applyDiffNodeStyles))
+
 /** 节点多行 tooltip：名称 / 类别·粒度 / 简介 / 锚点 / 关系(出·入)。数据现成，双引擎通用；
  *  单资产(孤立节点)hover 亦可见真实信息，避免「只有一个 ID」。 */
 function nodeTooltipText(n: { id: string; kind: string; level?: string; name: string; desc: string; nodeBrief?: string }): string {
@@ -1502,6 +1549,25 @@ watch(selId, (id, old) => {
 
 // 锚点变化 → 重建代码段并逐段拉取源码窗口；注解失效(后端落库缓存，重击按钮秒回)。
 // 完整代码视图打开时跳过重建(同文件资产切换不刷新资产卡)；关闭后下次锚点变化正常重建。
+
+/** 对比口径下资产卡代码的取数参数：
+ *  - 资产参与本次对比(changed/new/removed) → 显示目标侧内容(worktree/目标 head)，
+ *    并与基准 commit 做 git diff 逐行注解：基准侧资产的原代码以 -行呈现，
+ *    目标侧新代码以 +行呈现(统一 diff 视图，增/删/改精确显示)；
+ *  - 稳定资产(两侧内容一致) → 维持现状(工作区内容 + 符号体展开)，无 diff 开销。 */
+function snippetOptsFor(assetId: string): { ref?: string; diffBase?: string } {
+  const c = props.compareData
+  if (!c || c.noChanges) return {}
+  let side = ''
+  for (const a of c.assets.changed) if (a.id === assetId) side = a.side || 'stale'
+  for (const a of c.assets.new) if (a.id === assetId) side = 'target'
+  for (const a of c.assets.removed) if (a.id === assetId) side = 'base'
+  if (!side) return {}
+  // diff 比较对象恒为 基准 vs 目标侧；ref 仅决定显示内容取哪个 head(目标侧)
+  const ref = c.targetIsWorktree ? '' : c.target
+  return { ref: ref || undefined, diffBase: c.base || undefined }
+}
+
 async function rebuildSegments(anchors: { file: string; startLine: number; symbol: string }[]) {
   const cap = anchors.slice(0, MAX_SEGMENTS)
   activeFileTab.value = cap[0]?.file ?? ''   // 跟随图节点切换 → 文件 tab 焦点落在主锚点文件
@@ -1511,10 +1577,11 @@ async function rebuildSegments(anchors: { file: string; startLine: number; symbo
   lineNotesMaps.value = {}
   lineNotesDegraded.value = false
   lineNotesError.value = ''
+  const opts = snippetOptsFor(selId.value)
   await Promise.all(cap.map(async (a, i) => {
     let sn: SourceSnippet | null = null
     try {
-      sn = (await semanticAssetService.sourceSnippet(a.file, a.startLine, a.symbol, 10, 10, SEG_SNIPPET_LIMIT)) ?? null
+      sn = (await semanticAssetService.sourceSnippet(a.file, a.startLine, a.symbol, 10, 10, SEG_SNIPPET_LIMIT, opts)) ?? null
     } catch {
       sn = null
     }
@@ -1526,6 +1593,13 @@ async function rebuildSegments(anchors: { file: string; startLine: number; symbo
 watch(selAnchors, (anchors) => {
   if (fullCode.value) return
   void rebuildSegments(anchors)
+})
+// 对比数据晚到(工具栏发起对比/切 head) → 已打开的资产卡带 diff 参数重建，
+// 保证 +/- 行视图与所选对比对一致(全文视图打开时同 rebuildSegments 策略跳过)。
+watch(() => props.compareData, () => {
+  if (!selId.value || fullCode.value) return
+  const anchors = selAnchors.value
+  if (anchors.length) void rebuildSegments(anchors)
 })
 
 // 选中变化后详情/源码异步到达 → 到位后闪烁。
@@ -1565,7 +1639,7 @@ async function toggleFullCode() {
 async function loadFullCodeFor(file: string): Promise<boolean> {
   fullCodeLoading.value = true
   try {
-    fullCode.value = (await semanticAssetService.sourceSnippet(file, 1, undefined, FULL_FILE_LIMIT, FULL_FILE_LIMIT, FULL_FILE_LIMIT)) ?? null
+    fullCode.value = (await semanticAssetService.sourceSnippet(file, 1, undefined, FULL_FILE_LIMIT, FULL_FILE_LIMIT, FULL_FILE_LIMIT, snippetOptsFor(selId.value))) ?? null
     fullCodeNotes.value = {}
     return !!fullCode.value
   } catch {
@@ -1820,6 +1894,21 @@ onMounted(async () => {
         v-if="graph"
         class="text-[10px] text-ctp-overlay0 font-mono shrink-0"
       >{{ scopedNodes.length }} {{ t('assetMgmt.graph.nodes') }} · {{ scopedEdges.length }} {{ t('assetMgmt.graph.edges') }}</span>
+      <!-- 对比变化图例 + 仅看变化(资产级口径来自 asset-compare；无对比数据时退化为文件级 diff 徽标) -->
+      <template v-if="diffKindById.size">
+        <button
+          class="btn btn-ghost btn-xs shrink-0"
+          :class="diffOnly ? 'btn-primary' : ''"
+          :title="t('assetMgmt.graph.diffOnlyHint')"
+          @click="diffOnly = !diffOnly"
+        >
+          <FunnelIcon class="w-3 h-3" />{{ t('assetMgmt.graph.diffOnly') }}
+        </button>
+        <span class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendChanged')">{{ t('assetMgmt.diff.changedN', { n: diffBucketCounts.changed }) }}</span>
+        <span class="chip bg-ctp-green/15 text-ctp-green font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendNew')">{{ t('assetMgmt.diff.newN', { n: diffBucketCounts.new }) }}</span>
+        <span v-if="diffBucketCounts.removed" class="chip bg-ctp-red/15 text-ctp-red font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendRemoved')">{{ t('assetMgmt.diff.removedN', { n: diffBucketCounts.removed }) }}</span>
+        <span v-if="weakCount" class="chip bg-ctp-surface0 text-ctp-overlay1 font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendWeak')">{{ t('assetMgmt.diff.weakN', { n: weakCount }) }}</span>
+      </template>
       <span
         v-if="graph && props.diffFiles && diffNodeCount"
         class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0"
@@ -1907,7 +1996,7 @@ onMounted(async () => {
       <div
         v-else
         class="h-full relative"
-        :class="cardFullscreen ? 'fixed inset-0 z-50 bg-ctp-mantle p-2' : ''"
+        :class="cardFullscreen ? 'fixed inset-0 z-20 bg-ctp-mantle p-2' : ''"
       >
         <pre
           v-if="cardSrcOpen"
@@ -2069,16 +2158,19 @@ onMounted(async () => {
             class="m-0 overflow-auto rounded border border-ctp-surface1 bg-ctp-surface0 p-2 font-mono leading-relaxed"
             :style="{ fontSize: codeFontSize + 'px' }"
           ><template
-            v-for="l in fullCode.lines"
-            :key="l.line"
+            v-for="(l, fli) in fullCode.lines"
+            :key="`f:${fli}`"
 ><div
   :data-full-line="l.line"
   class="flex flex-wrap items-baseline gap-1.5"
-  :class="fullCodeOwners.has(l.line) && fullCodeOwners.get(l.line) !== selId ? 'cursor-pointer' : ''"
+  :class="[
+    l.kind === 'add' ? 'bg-ctp-green/15 rounded-sm' : l.kind === 'del' ? 'bg-ctp-red/15 rounded-sm' : '',
+    fullCodeOwners.has(l.line) && fullCodeOwners.get(l.line) !== selId ? 'cursor-pointer' : '',
+  ]"
   :title="fullCodeOwners.has(l.line) && fullCodeOwners.get(l.line) !== selId
     ? `${ownerName(fullCodeOwners.get(l.line)!)} · ${t('assetMgmt.graph.fullCodeClickHint')}` : ''"
   @click="onFullCodeLineClick(l.line)"
-><span class="select-none text-ctp-overlay0 shrink-0">{{ l.line }}</span> <span
+><span class="select-none text-ctp-overlay0 shrink-0 w-12 text-right">{{ l.kind === 'del' ? `-${l.baseLine ?? l.line}` : `${l.kind === 'add' ? '+' : ''}${l.targetLine ?? l.line}` }}</span> <span
               :class="fullCodeOwners.has(l.line) && fullCodeOwners.get(l.line) !== selId
                 ? ['text-ctp-sky', 'bg-ctp-sky/15', 'font-semibold rounded-sm px-0.5', 'hover:bg-ctp-sky/25']
                 : fullCodeSelfLines.has(l.line)
@@ -2188,6 +2280,11 @@ onMounted(async () => {
               {{ t('assetMgmt.graph.sourceCode') }}
               <span class="text-ctp-overlay1 font-normal">{{ shortPath(seg.file) }}:L{{ seg.startLine }}<span v-if="seg.symbol"> · {{ seg.symbol }}</span></span>
             </span>
+            <span
+              v-if="seg.snippet?.diffBase"
+              class="chip !text-[8px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+              :title="t('assetMgmt.graph.diffViewHint')"
+            >diff</span>
             <span class="flex-1" />
             <button
               class="text-ctp-overlay0 hover:text-ctp-text p-0.5 shrink-0"
@@ -2207,9 +2304,12 @@ onMounted(async () => {
             :class="cardSize.h ? '' : 'max-h-52'"
             :style="{ fontSize: codeFontSize + 'px' }"
           ><template
-            v-for="l in seg.snippet.lines"
-            :key="l.line"
-  ><div class="flex flex-wrap items-baseline gap-1.5"><span class="select-none text-ctp-overlay0 shrink-0">{{ l.line }}</span> <span
+            v-for="(l, li) in seg.snippet.lines"
+            :key="`${si}:${li}`"
+  ><div
+    class="flex flex-wrap items-baseline gap-1.5"
+    :class="l.kind === 'add' ? ['bg-ctp-green/15', 'rounded-sm'] : l.kind === 'del' ? ['bg-ctp-red/15', 'rounded-sm'] : ''"
+  ><span class="select-none text-ctp-overlay0 shrink-0 w-12 text-right">{{ l.kind === 'del' ? `-${l.baseLine ?? l.line}` : `${l.kind === 'add' ? '+' : ''}${l.targetLine ?? l.line}` }}</span> <span
               :data-anchor-line="segHighlighted(seg, l.line) ? '1' : null"
               :class="segHighlighted(seg, l.line)
                 ? [kindTextClass, kindBgClass, 'font-semibold rounded-sm px-0.5', flashing ? 'anchor-flash' : '']
@@ -2381,6 +2481,34 @@ onMounted(async () => {
 :deep(.td-node-selected) text {
   fill: #fab387 !important;
   font-weight: 700;
+}
+/* 对比变化节点着色(asset-compare 资产级口径)：以浅色底填充为主(比描边醒目)，
+   透明度压低保证节点文字可读；辅以同色细描边勾勒轮廓。
+   需更新=黄底 · 目标侧新增=绿底 · 目标侧移除=红底+虚线(消失语义) */
+:deep(.td-node-diff-changed) rect,
+:deep(.td-node-diff-changed) polygon,
+:deep(.td-node-diff-changed) ellipse,
+:deep(.td-node-diff-changed) circle {
+  fill: rgba(249, 226, 175, 0.28) !important;
+  stroke: rgba(249, 226, 175, 0.75) !important;
+  stroke-width: 1.5px !important;
+}
+:deep(.td-node-diff-new) rect,
+:deep(.td-node-diff-new) polygon,
+:deep(.td-node-diff-new) ellipse,
+:deep(.td-node-diff-new) circle {
+  fill: rgba(166, 227, 161, 0.24) !important;
+  stroke: rgba(166, 227, 161, 0.75) !important;
+  stroke-width: 1.5px !important;
+}
+:deep(.td-node-diff-removed) rect,
+:deep(.td-node-diff-removed) polygon,
+:deep(.td-node-diff-removed) ellipse,
+:deep(.td-node-diff-removed) circle {
+  fill: rgba(243, 139, 168, 0.24) !important;
+  stroke: rgba(243, 139, 168, 0.8) !important;
+  stroke-width: 1.5px !important;
+  stroke-dasharray: 6 3 !important;
 }
 /* 资产卡四边独立拉伸把手(上下左右)：透明热区，hover 显提示条 */
 .card-edge {

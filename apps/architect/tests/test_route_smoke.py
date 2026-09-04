@@ -56,7 +56,8 @@ def test_static_routes_before_dynamic_asset_id():
                  "/api/architect/kb/semantic/status",
                  "/api/architect/kb/semantic/graph",
                  "/api/architect/kb/semantic/mappings",
-                 "/api/architect/kb/semantic/codegraph"):
+                 "/api/architect/kb/semantic/codegraph",
+                 "/api/architect/kb/semantic/asset-compare"):
         resp = client.get(path)
         assert resp.status_code != 404, f"{path} 未注册"
         body = resp.json()

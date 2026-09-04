@@ -336,6 +336,25 @@ def _write_state_kv(core_pid: str, head: str) -> None:
         logger.warning("[semantic] 符号源跟踪状态写入失败: %s", e)
 
 
+def resolve_base_commit(root: Optional[str], project: Optional[str] = None) -> str:
+    """变更对比基准 commit（统一锚点）。
+
+    项目 baselineCommit(KB 基线版本 head) 优先；无基线时回退符号源同步 KV 的
+    lastHead(历史行为兼容)。两者皆无 → ''(未对齐基线)。
+    """
+    if root:
+        try:
+            from ..project import _resolve_project
+            proj = _resolve_project(root, project) or {}
+            bc = (proj.get("baselineCommit") or "").strip()
+            if bc:
+                return bc
+        except Exception:
+            pass
+    pid = _resolve_core_pid(root)
+    return ((_read_state_kv(pid) or {}).get("lastHead") or "") if pid else ""
+
+
 def symbol_source_state(root: Optional[str], project: Optional[str] = None) -> dict:
     """符号源状态 + 变更范围识别（只识别范围，不实时解析）。TTL 60s。
 
@@ -358,7 +377,7 @@ def symbol_source_state(root: Optional[str], project: Optional[str] = None) -> d
     stale = False
     last_head = ''
     if pid:
-        last_head = (_read_state_kv(pid) or {}).get('lastHead') or ''
+        last_head = resolve_base_commit(root, project)
     if root and head:
         out = _git(root, ['status', '--porcelain'])
         if out is not None:
@@ -411,9 +430,9 @@ def _git_name_status(root: str, base: str) -> dict:
 
 
 def _git_porcelain_status(root: str) -> dict:
-    """git status --porcelain → {added,modified,deleted}（工作区未提交）。"""
+    """git status --porcelain -uall → {added,modified,deleted}（工作区未提交；未跟踪逐文件枚举）。"""
     res = {'added': [], 'modified': [], 'deleted': []}
-    out = _git(root, ['status', '--porcelain'])
+    out = _git(root, ['status', '--porcelain', '-uall'])
     if not out:
         return res
     for line in out.splitlines():
@@ -451,8 +470,7 @@ def baseline_diff(root: Optional[str], project: Optional[str] = None,
         return hit[0]
     head_out = _git(root, ['rev-parse', 'HEAD']) if root else None
     head = head_out.strip() if head_out else ''
-    pid = _resolve_core_pid(root)
-    last_head = ((_read_state_kv(pid) or {}).get('lastHead') or '') if pid else ''
+    last_head = resolve_base_commit(root, project)
     if root and last_head and last_head != head:
         committed = _git_name_status(root, last_head)
     else:

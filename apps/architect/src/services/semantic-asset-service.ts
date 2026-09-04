@@ -180,12 +180,26 @@ export interface SemanticGraphResult {
 }
 
 /** 锚点前后源码窗口（SourceSnippet：行号+代码+命中高亮行段）。 */
+export interface SourceSnippetLine {
+  line: number
+  code: string
+  /** diff 模式(git diff 口径)：ctx=上下文 / add=目标侧新增 / del=基准侧删除 */
+  kind?: 'ctx' | 'add' | 'del'
+  /** diff 模式双行号：del 行=基准侧行号；ctx 行两侧都有 */
+  baseLine?: number | null
+  targetLine?: number | null
+}
+
 export interface SourceSnippet {
   file: string
   symbol?: string
   anchorLine: number
   highlight: number[]
-  lines: { line: number; code: string }[]
+  lines: SourceSnippetLine[]
+  /** diff 模式：基准 commit(对比起点的代码)；无则为普通窗口 */
+  diffBase?: string
+  /** 内容来源 commit(工作区时为空) */
+  ref?: string
 }
 
 /** AI 逐行解读结果(关键行行号 → 用途说明)。 */
@@ -227,6 +241,70 @@ export interface BaselineDiff {
   counts: { added: number; modified: number; deleted: number }
 }
 
+/** 资产/组件变更对比(任意 head 对 vs head/工作区；缓存态)。 */
+export interface AssetCompareComponent {
+  id: string
+  /** KB 组件展示名；「其他」桶(id=__other__)为空串，由前端 i18n */
+  name: string
+  added: number
+  modified: number
+  deleted: number
+}
+
+export interface AssetCompareAsset {
+  id: string
+  name: string
+  kind: string
+  level: string
+  /** 所属组件 id；未归属=__other__ */
+  component: string
+  files: string[]
+  /** 侧归属：资产提取时锚点哈希与哪一侧内容匹配（base=基准侧/target=目标侧/stale=中间态） */
+  side?: 'base' | 'target' | 'stale'
+  /** 符号级判定：true=锚点符号代码段有变更(强) / false=仅同文件其他位置变更(弱，可能受影响) */
+  strong?: boolean
+}
+
+export interface AssetCompareCrossLink {
+  fromId: string
+  fromName: string
+  toId: string
+  toName: string
+  type: string
+  semantic: string
+}
+
+export interface AssetCompareResult {
+  base: string
+  baseIsBaseline: boolean
+  target: string
+  targetIsWorktree: boolean
+  head: string
+  noChanges: boolean
+  files: { added: string[]; modified: string[]; deleted: string[] }
+  counts: { added: number; modified: number; deleted: number }
+  components: AssetCompareComponent[]
+  newFileCount: number
+  assets: {
+    stable: number
+    changed: AssetCompareAsset[]
+    changedTotal: number
+    /** 符号段行区间命中变更 hunk（强关联） */
+    changedStrong: number
+    /** 仅同文件其他位置变更（弱关联，可能受影响） */
+    changedWeak: number
+    new: AssetCompareAsset[]
+    newTotal: number
+    removed: AssetCompareAsset[]
+    removedTotal: number
+    /** 目标侧存在但无资产匹配其内容 → 待提取(仅 worktree 目标可补提) */
+    pending: { count: number; files: string[] }
+  }
+  crossLinks: AssetCompareCrossLink[]
+  crossLinkCount: number
+  cached?: boolean
+}
+
 export const semanticAssetService = {
   /** codegraph 符号源开关：状态查询 / 三档切换(on|off|auto，KV 持久化)。 */
   async codegraphStatus(): Promise<CodegraphStatus | undefined> {
@@ -249,6 +327,15 @@ export const semanticAssetService = {
   async baselineDiff(): Promise<BaselineDiff | undefined> {
     const c = ctx()
     return await apiGet<BaselineDiff>(`/kb/semantic/baseline-diff${c ? `?${c}` : ''}`)
+  },
+
+  /** 资产/组件变更对比：base 缺省=baselineCommit；target='worktree'(缺省)|commit。 */
+  async assetCompare(base?: string, target?: string): Promise<AssetCompareResult | undefined> {
+    const parts: string[] = []
+    if (base) parts.push(`base=${encodeURIComponent(base)}`)
+    if (target) parts.push(`target=${encodeURIComponent(target)}`)
+    const qs = [parts.join('&'), ctx()].filter(Boolean).join('&')
+    return await apiGet<AssetCompareResult>(`/kb/semantic/asset-compare${qs ? `?${qs}` : ''}`)
   },
 
   /** 冷启动：未注册仓库 → core 建项(含初始基线) + 全量分析发起。 */
@@ -285,13 +372,17 @@ export const semanticAssetService = {
     return apiGet<SemanticAsset>(`/kb/semantic/${assetId}${qsWith('')}`)
   },
 
-  /** 锚点前后源码窗口（symbol 已知时后端优先展开整个符号体；limit 可放宽以取全文）。 */
-  async sourceSnippet(file: string, line: number, symbol?: string, before = 10, after = 10, limit?: number): Promise<SourceSnippet | undefined> {
+  /** 锚点前后源码窗口（symbol 已知时后端优先展开整个符号体；limit 可放宽以取全文）。
+   *  ref=取该 commit 时点内容；diffBase=与基准 commit 做 git diff 逐行注解(增/删/改)。 */
+  async sourceSnippet(file: string, line: number, symbol?: string, before = 10, after = 10, limit?: number,
+                      opts?: { ref?: string; diffBase?: string }): Promise<SourceSnippet | undefined> {
     const parts = [`file=${encodeURIComponent(file)}`, `line=${line}`]
     if (symbol) parts.push(`symbol=${encodeURIComponent(symbol)}`)
     parts.push(`before=${before}`)
     parts.push(`after=${after}`)
     if (limit) parts.push(`limit=${limit}`)
+    if (opts?.ref) parts.push(`ref=${encodeURIComponent(opts.ref)}`)
+    if (opts?.diffBase) parts.push(`diff_base=${encodeURIComponent(opts.diffBase)}`)
     return apiGet<SourceSnippet>(`/kb/semantic/source-snippet${qsWith(parts.join('&'))}`)
   },
 

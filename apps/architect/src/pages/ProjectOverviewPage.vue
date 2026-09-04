@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon, DocumentTextIcon, CubeIcon,
-  CodeBracketIcon, CheckCircleIcon, XCircleIcon, MagnifyingGlassIcon,
+  CodeBracketIcon, CheckCircleIcon, XCircleIcon, MagnifyingGlassIcon, ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
 import { projectService } from '@/services/project-service'
 import type { KbMatchResult, ProjectOverview } from '@/types'
@@ -202,17 +202,23 @@ function statusCls(s: string): string {
           <CubeIcon class="w-4 h-4 text-ctp-mauve" />
           <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.componentChanges') }}</span>
         </div>
-        <div v-if="overview.kb.linked && overview.diff.byComponent.length" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div v-if="overview.kb.linked && overview.diff.byComponent.length" class="space-y-1">
           <div
             v-for="c in overview.diff.byComponent"
-            :key="c.name"
-            class="border border-ctp-surface0 rounded-lg px-3 py-2"
+            :key="c.id"
+            class="flex items-center justify-between gap-3 border border-ctp-surface0 rounded-lg px-3 py-2"
+            :style="{ marginLeft: `${c.level * 20}px` }"
           >
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-sm text-ctp-text font-medium">{{ c.name }}</span>
-              <span class="text-[11px] text-ctp-overlay1">{{ c.files.length }} {{ t('overviewHome.filesUnit') }}</span>
+            <div class="flex items-center gap-1.5 min-w-0">
+              <ChevronRightIcon v-if="c.level > 0" class="w-3 h-3 text-ctp-overlay0 shrink-0" />
+              <span
+                class="truncate text-sm"
+                :class="c.level > 0 ? 'text-ctp-subtext1' : 'text-ctp-text font-medium'"
+                :title="c.id ? `${c.name || t('overviewHome.unowned')} (${c.id})` : t('overviewHome.unowned')"
+              >{{ c.name || t('overviewHome.unowned') }}</span>
             </div>
-            <div class="flex gap-2 text-[11px]">
+            <div class="flex items-center gap-2 text-[11px] shrink-0">
+              <span class="text-ctp-overlay1">{{ c.files.length }} {{ t('overviewHome.filesUnit') }}</span>
               <span class="text-ctp-green">{{ t('overviewHome.added') }} {{ c.added }}</span>
               <span class="text-ctp-blue">{{ t('overviewHome.modified') }} {{ c.modified }}</span>
               <span class="text-ctp-red">{{ t('overviewHome.deleted') }} {{ c.deleted }}</span>
