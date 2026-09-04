@@ -1591,7 +1591,6 @@ export default {
     },
     searchPlaceholder: 'Search assets…',
     allKinds: 'All kinds',
-    search: 'Search',
     extractSemantic: 'Extract Semantic Assets',
     enterExtractMode: 'Select Mode',
     exitExtractMode: 'Exit Select',

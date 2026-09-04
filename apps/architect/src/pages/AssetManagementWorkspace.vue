@@ -998,6 +998,16 @@ function onSearch() {
   }
 }
 
+// 搜索词防抖自动查询(300ms)——筛选下拉均为 @change 即时提交, 搜索框对齐同体验
+let qDebounce: ReturnType<typeof setTimeout> | null = null
+watch(q, () => {
+  if (qDebounce) clearTimeout(qDebounce)
+  qDebounce = setTimeout(() => {
+    qDebounce = null
+    if (tab.value !== 'graph' && tab.value !== 'overview') loadSemantic()
+  }, 300)
+})
+
 // 分页已移除：语义资产为树形分组视图，全量加载(loadSemantic limit=2000)。
 
 onMounted(async () => {
@@ -1136,13 +1146,6 @@ onMounted(async () => {
               L1
             </option>
           </select>
-          <button
-            class="btn btn-xs btn-ghost"
-            :disabled="loading"
-            @click="onSearch"
-          >
-            <ArrowPathIcon class="w-3 h-3" />{{ t('assetMgmt.search') }}
-          </button>
           <template v-if="tab === 'semantic'">
             <div
               class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden"

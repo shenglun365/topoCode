@@ -1616,7 +1616,6 @@ export default {
     },
     searchPlaceholder: '搜索资产…',
     allKinds: '全部类型',
-    search: '检索',
     extractSemantic: '提取语义资产',
     enterExtractMode: '进入复选',
     exitExtractMode: '退出复选',
