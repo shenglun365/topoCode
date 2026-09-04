@@ -56,8 +56,16 @@ const selDetail = ref<SemanticAsset | null>(null)
 /** 邻域聚焦：开启后图谱只渲染选中资产周围 focusHops 跳子图(缓解大图拥挤/过宽/过长)。 */
 const focusMode = ref(false)
 const focusHops = ref(2)
-/** 范围锁定：锁定时切换选中节点不跟随重查(图谱视角保持)，解锁恢复漫游。 */
-const focusLock = ref(false)
+/** 范围锁定：锁定时切换选中节点不跟随重查(图谱视角保持)，解锁恢复漫游。
+ *  默认锁定；全局共享偏好，LS 持久化(arch.graph.focusLock)。 */
+const FOCUS_LOCK_KEY = 'arch.graph.focusLock'
+const focusLock = ref((() => {
+  try { return (localStorage.getItem(FOCUS_LOCK_KEY) ?? '1') !== '0' }
+  catch { return true }
+})())
+watch(focusLock, (v) => {
+  try { localStorage.setItem(FOCUS_LOCK_KEY, v ? '1' : '0') } catch { /* ignore */ }
+})
 const lockAnchor = ref('')   // 锁定瞬间的中心锚点(软刷新/重查仍以其为中心)
 
 function toggleFocusLock() {
@@ -560,6 +568,10 @@ async function load(reset = false) {
     // 范围锁定时以锁定锚点为中心(切换选中不跟随)；否则单资产 tab 聚焦该资产(1 跳)、组件 tab 全量。
     let focus: string | undefined
     let hops = 1
+    // 默认锁定(LS 偏好)且锚点未定 → 固化首个中心为锚点，此后切换选中不跟随
+    if (focusMode.value && focusLock.value && !lockAnchor.value && selId.value) {
+      lockAnchor.value = selId.value
+    }
     if (focusMode.value && (focusLock.value ? lockAnchor.value : selId.value)) {
       focus = focusLock.value ? lockAnchor.value : selId.value
       hops = focusHops.value
@@ -602,11 +614,13 @@ watch(availableLevels, (vals) => {
 watch([focusMode, focusHops], () => {
   void load()
 })
-// 聚焦关闭 → 锁定随之复位(无聚焦则无锁定语义)。
+// 聚焦开/关只管理本次锚点：锁定偏好(focusLock)是 LS 持久值，不随聚焦开关复位。
+// 关闭 → 清锚点；开启且处于锁定偏好 → 以当前选中为新一轮锚点。
 watch(focusMode, (on) => {
   if (!on) {
-    focusLock.value = false
     lockAnchor.value = ''
+  } else if (focusLock.value) {
+    lockAnchor.value = selId.value
   }
 })
 // 聚焦态下选中变化 → 跟随重查(以新选中为中心)；范围锁定时不跟随(漫游暂停)。
