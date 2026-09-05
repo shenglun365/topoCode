@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from './GraphMatrixWindow.vue'
 import AssetIndexWindow from './AssetIndexWindow.vue'
+import FileIndexWindow from './FileIndexWindow.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
 import { makeButton } from '@topo/graph-kernel/plugins/ui.ts'
 import type { NodeClickEvent } from '@topo/graph-kernel/plugins/types.ts'
@@ -11,7 +12,7 @@ import { themeVariablesFor } from '@topo/graph-kernel/vue/themes.ts'
 import { semanticGraphViewDiagrams, semanticViewClickIds, recommendedSemanticView, semanticNodeLabelText, supportedViewsFor, viewUnavailableReasons } from '@/utils/diagram-gen'
 import { useArchSettingsStore } from '@/stores/settings-store'
 import type { SemanticGraphViewId } from '@/utils/diagram-gen'
-import type { SemanticAsset, SemanticAssetLevel, SemanticAssetKind } from '@/types'
+import type { SemanticAsset, SemanticAssetLevel, SemanticAssetKind, GraphFileEntry } from '@/types'
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
 import { semanticAssetService, type AssetCompareResult } from '@/services/semantic-asset-service'
 
@@ -20,14 +21,50 @@ const { t } = useI18n()
 /** 图谱资源 tab 定义(由外部资产列表/组件列表打开)。 */
 export interface GraphTabDef {
   id: string
-  kind: 'all' | 'comp' | 'asset'
+  kind: 'all' | 'comp' | 'asset' | 'file'
   title: string
   compId?: string
   assetId?: string
+  /** kind='file'：锚定该文件的资产子图。 */
+  fileId?: string
 }
 
-const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string>; compareData?: AssetCompareResult | null }>()
+const props = defineProps<{
+  tab: GraphTabDef
+  diffFiles?: Set<string>
+  compareData?: AssetCompareResult | null
+  /** 当前 tab 范围的文件索引(all/comp tab 由父级预算)；>500 资产时启用手动圈定。 */
+  fileIndex?: GraphFileEntry[]
+  /** 组件 id → 名称(文件索引分组展示)。 */
+  compNames?: Record<string, string>
+}>()
 const emit = defineEmits<{ close: [id: string] }>()
+
+/** 图谱规模闸门：范围资产超此值不自动渲染，须经文件索引手动圈定(≤预算)。 */
+const FILE_BUDGET = 500
+const fileIndex = computed(() => props.fileIndex ?? [])
+const scopeTotal = computed(() => fileIndex.value.reduce((s, e) => s + e.n, 0))
+const overLimit = computed(() => scopeTotal.value > FILE_BUDGET)
+// 文件范围选择按 tab 持久化：重开 tab 不再强制圈定。
+const fileScopeKey = computed(() => `arch.graph.fileScope:${props.tab.id}`)
+const fileScopeSel = ref<string[]>((() => {
+  try { return JSON.parse(localStorage.getItem(`arch.graph.fileScope:${props.tab.id}`) || '[]') } catch { return [] }
+})())
+const fileScopeOpen = ref(false)
+/** 已圈定文件集合的资产数(工具栏徽标提示)。 */
+const scopeAssets = computed(() => {
+  const set = new Set(fileScopeSel.value)
+  return fileIndex.value.reduce((s, e) => s + (set.has(e.file) ? e.n : 0), 0)
+})
+watch(fileScopeKey, (k) => {
+  try { fileScopeSel.value = JSON.parse(localStorage.getItem(k) || '[]') } catch { fileScopeSel.value = [] }
+})
+function applyFileScope(files: string[]) {
+  fileScopeSel.value = files
+  try { localStorage.setItem(fileScopeKey.value, JSON.stringify(files)) } catch { /* ignore */ }
+  fileScopeOpen.value = false
+  void load(true)
+}
 
 const level = ref<SemanticAssetLevel | ''>('')
 /** 类型(资产类别)过滤：空=全部。 */
@@ -52,21 +89,22 @@ function isDiffNode(id: string): boolean {
 }
 
 // ---- 对比口径(任意 head 对)资产级变化：存在时优先于文件级 diff 徽标 ----
-type DiffBucket = 'changed' | 'new' | 'removed'
-/** 资产 id → 变化桶。仅收录强关联(锚点符号代码段有变更)；
- *  弱关联(同文件其他位置变更,可能受影响)不标色——文件级口径的噪声来源。
- *  ⚠️ strong 缺失(旧后端未重启)视为强——避免降级成"全都不标色"。 */
+type DiffBucket = 'changed' | 'weak' | 'new' | 'removed'
+/** 资产 id → 变化桶(后端 asset-compare 符号级判定)：
+ *  changed=强关联(符号代码段有变更,黄底) / weak=弱关联(仅同文件其他位置变更,灰底)
+ *  / new=目标侧新增(绿底) / removed=目标侧移除(红虚线)。
+ *  ⚠️ strong 缺失(旧后端未重启)视为强。 */
 const diffKindById = computed<Map<string, DiffBucket>>(() => {
   const m = new Map<string, DiffBucket>()
   const c = props.compareData
   if (!c) return m
-  for (const a of c.assets.changed) if (a.strong !== false) m.set(a.id, 'changed')
+  for (const a of c.assets.changed) m.set(a.id, a.strong === false ? 'weak' : 'changed')
   for (const a of c.assets.new) m.set(a.id, 'new')
   for (const a of c.assets.removed) m.set(a.id, 'removed')
   return m
 })
 const diffBucketCounts = computed(() => {
-  const counts: Record<DiffBucket, number> = { changed: 0, new: 0, removed: 0 }
+  const counts: Record<DiffBucket, number> = { changed: 0, weak: 0, new: 0, removed: 0 }
   for (const k of diffKindById.value.values()) counts[k] += 1
   return counts
 })
@@ -476,10 +514,13 @@ const kindOptions = computed(() =>
 /** 生效粒度(粒度下拉选择；空=全部)。 */
 const effectiveLevel = computed<SemanticAssetLevel | ''>(() => level.value)
 
-/** 生效节点集：按类型 + 粒度过滤；「仅看变化」开启时只留对比命中资产。 */
+/** 生效节点集：按类型 + 粒度过滤；「仅看变化」开启时只留对比命中资产。
+ *  ⚠️ 焦点资产(单资产 tab)永不被过滤——新提取/未入对比缓存的资产曾被 diffOnly
+ *  滤成空图，误报「暂无语义资产」。 */
 const scopedNodes = computed(() => kindNodes.value.filter((n) =>
   (!effectiveLevel.value || n.level === effectiveLevel.value) &&
-  (!diffOnly.value || !diffKindById.value.size || diffKindById.value.has(n.id))))
+  (!diffOnly.value || !diffKindById.value.size || diffKindById.value.has(n.id)
+   || (props.tab.kind === 'asset' && n.id === props.tab.assetId))))
 
 const scopedEdges = computed(() => {
   const ids = new Set(scopedNodes.value.map((n) => n.id))
@@ -587,12 +628,22 @@ const diagrams = computed<Partial<Record<'mermaid' | 'plantuml', string>>>(() =>
 })
 
 async function load(reset = false) {
+  // 规模闸门：范围资产 >500 且未圈定文件范围 → 不自动渲染，强制打开文件索引。
+  if (overLimit.value && !fileScopeSel.value.length) {
+    graph.value = null
+    fileScopeOpen.value = true
+    return
+  }
   loading.value = true
   expandedTabs.value = []   // 图谱重查(刷新/切视图/聚焦切换) → 拓展沉淀 tab 重置
   // 访问历史 tab 不在此清空：图谱 tab 切换经 :key 重建组件自然重置；
   // 聚焦模式/切视图触发的 load() 属同上下文重查，历史应保留(常驻)。
   try {
     const scope = props.tab.kind === 'comp' ? [props.tab.compId!] : undefined
+    // 文件范围：仅锚定该文件的资产子图(文件级图谱入口)
+    const file = props.tab.kind === 'file' ? props.tab.fileId : undefined
+    // 多文件范围：超限 tab 经文件索引圈定后的选取
+    const files = overLimit.value && fileScopeSel.value.length ? fileScopeSel.value : undefined
     // 邻域聚焦：聚焦模式开启且有选中 → 以选中资产为中心 focusHops 跳子图；
     // 范围锁定时以锁定锚点为中心(切换选中不跟随)；否则单资产 tab 聚焦该资产(1 跳)、组件 tab 全量。
     let focus: string | undefined
@@ -607,7 +658,7 @@ async function load(reset = false) {
     } else if (props.tab.kind === 'asset') {
       focus = props.tab.assetId
     }
-    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value })
+    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value, file, files })
     if (reset) {
       // 打开/切换 tab：类型重置为全部；粒度默认=组件级取该组件最高可用层级，其余取全部。
       kindFilter.value = ''
@@ -1292,14 +1343,26 @@ function applySelectedNodeStyle() {
   selectedNodeEl?.classList.add('td-node-selected')
 }
 
-/** 对比变化节点着色：桶类 td-node-diff-{changed|new|removed}(黄/绿/红虚线)。
- *  与选中态同款 id 寻址(mermaid 主口径)；对比数据晚于图就绪时由 watch 重放。 */
+/** 对比变化节点着色：桶类 td-node-diff-{changed|weak|new|removed} + 形状内联样式兜底
+ *  (setProperty important，免疫 mermaid 主题样式优先级)。寻址与选中态同款(mermaid id 主口径)。 */
+const DIFF_FILL: Record<DiffBucket, string> = {
+  changed: 'rgba(249, 226, 175, 0.30)',   // 黄：强关联(符号段变更)
+  weak: 'rgba(136, 137, 163, 0.16)',      // 灰：弱关联(同文件变更,段未变)
+  new: 'rgba(166, 227, 161, 0.26)',       // 绿：目标侧新增
+  removed: 'rgba(243, 139, 168, 0.26)',   // 红：目标侧移除
+}
+const DIFF_STROKE: Record<DiffBucket, string> = {
+  changed: 'rgba(249, 226, 175, 0.8)',
+  weak: 'rgba(136, 137, 163, 0.5)',
+  new: 'rgba(166, 227, 161, 0.8)',
+  removed: 'rgba(243, 139, 168, 0.8)',
+}
 function applyDiffNodeStyles() {
   const host: HTMLElement | null = diagRef.value?.containerRef ?? null
   const svg = host?.querySelector('svg')
   if (!svg) return
   svg.querySelectorAll('[class*="td-node-diff"]').forEach((el) =>
-    el.classList.remove('td-node-diff-changed', 'td-node-diff-new', 'td-node-diff-removed'))
+    el.classList.remove('td-node-diff-changed', 'td-node-diff-weak', 'td-node-diff-new', 'td-node-diff-removed'))
   if (!diffKindById.value.size) return
   const rootPrefix = svg.id ? `${svg.id}-` : ''
   for (const [nid, aid] of clickIds.value) {
@@ -1308,6 +1371,14 @@ function applyDiffNodeStyles() {
     for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
       if (resolveNodeIdFromEl(el, rootPrefix) !== nid) continue
       el.classList.add(`td-node-diff-${bucket}`)
+      // 内联样式兜底：mermaid 主题样式(SVG 内 <style> 带 id 选择器)特异性高于类规则，
+      // 类规则虽有 !important 但部分引擎渲染路径会被内联呈现覆盖——双保险。
+      for (const shape of el.querySelectorAll<SVGElement>('rect, polygon, ellipse, circle')) {
+        shape.style.setProperty('fill', DIFF_FILL[bucket], 'important')
+        shape.style.setProperty('stroke', DIFF_STROKE[bucket], 'important')
+        if (bucket === 'removed') shape.style.setProperty('stroke-dasharray', '6 3', 'important')
+        else shape.style.removeProperty('stroke-dasharray')
+      }
       break
     }
   }
@@ -1837,6 +1908,18 @@ onMounted(async () => {
       >
         <ListBulletIcon class="w-3.5 h-3.5" />
       </button>
+      <!-- 文件范围索引(仅超限 tab)：圈定 ≤500 资产的文件集合后重查图谱 -->
+      <button
+        v-if="overLimit"
+        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
+        :class="fileScopeOpen || fileScopeSel.length ? 'btn-primary' : ''"
+        :title="fileScopeSel.length
+          ? t('assetMgmt.fileIndex.titleActive', { files: fileScopeSel.length, n: scopeAssets })
+          : t('assetMgmt.fileIndex.pickTitle')"
+        @click="fileScopeOpen = !fileScopeOpen"
+      >
+        <FolderOpenIcon class="w-3.5 h-3.5" />
+      </button>
       <!-- 边类型图例 + 显隐过滤；间接边开关(浮层 Teleport 到 body，不撑开工具栏) -->
       <button
         ref="legendBtnRef"
@@ -1890,10 +1973,6 @@ onMounted(async () => {
         </button>
       </template>
       <span class="flex-1" />
-      <span
-        v-if="graph"
-        class="text-[10px] text-ctp-overlay0 font-mono shrink-0"
-      >{{ scopedNodes.length }} {{ t('assetMgmt.graph.nodes') }} · {{ scopedEdges.length }} {{ t('assetMgmt.graph.edges') }}</span>
       <!-- 对比变化图例 + 仅看变化(资产级口径来自 asset-compare；无对比数据时退化为文件级 diff 徽标) -->
       <template v-if="diffKindById.size">
         <button
@@ -1986,11 +2065,26 @@ onMounted(async () => {
       >
         {{ t('assetMgmt.graph.loading') }}
       </div>
+      <!-- 规模闸门：范围超限且未圈定文件 → 引导打开文件索引 -->
+      <div
+        v-else-if="overLimit && !fileScopeSel.length"
+        class="absolute inset-0 flex flex-col items-center justify-center gap-2.5 text-xs text-ctp-overlay0 px-6"
+      >
+        <FolderOpenIcon class="w-8 h-8 text-ctp-overlay0/60" />
+        <p class="max-w-sm text-center leading-relaxed">
+          {{ t('assetMgmt.fileIndex.overHint', { total: scopeTotal, budget: FILE_BUDGET }) }}
+        </p>
+        <button class="btn btn-primary btn-xs shrink-0" @click="fileScopeOpen = true">
+          {{ t('assetMgmt.fileIndex.pickTitle') }}
+        </button>
+      </div>
       <div
         v-else-if="!graph || !scopedNodes.length"
         class="absolute inset-0 flex items-center justify-center text-xs text-ctp-overlay0"
       >
-        {{ t('assetMgmt.graph.empty') }}
+        {{ props.tab.kind === 'asset'
+          ? t('assetMgmt.graph.emptyAsset')
+          : props.tab.kind === 'file' ? t('assetMgmt.graph.emptyFile') : t('assetMgmt.graph.empty') }}
       </div>
 
       <div
@@ -2437,6 +2531,18 @@ onMounted(async () => {
         @select="onMatrixSelect"
         @close="indexOpen = false"
       />
+      <!-- 文件范围索引浮窗：>500 资产的 tab 须在此圈定文件集合(多选/整组/预算) -->
+      <FileIndexWindow
+        v-if="fileScopeOpen"
+        :entries="fileIndex"
+        :selected="fileScopeSel"
+        :budget="FILE_BUDGET"
+        :total="scopeTotal"
+        :comp-names="props.compNames"
+        :forced="overLimit && !fileScopeSel.length"
+        @apply="applyFileScope"
+        @close="fileScopeOpen = false"
+      />
     </div>
   </div>
 </template>
@@ -2484,13 +2590,22 @@ onMounted(async () => {
 }
 /* 对比变化节点着色(asset-compare 资产级口径)：以浅色底填充为主(比描边醒目)，
    透明度压低保证节点文字可读；辅以同色细描边勾勒轮廓。
-   需更新=黄底 · 目标侧新增=绿底 · 目标侧移除=红底+虚线(消失语义) */
+   强关联=黄底 · 弱关联=灰浅底(段未变) · 目标侧新增=绿底 · 目标侧移除=红底+虚线。
+   (运行时另注入同值内联样式兜底，双保险) */
 :deep(.td-node-diff-changed) rect,
 :deep(.td-node-diff-changed) polygon,
 :deep(.td-node-diff-changed) ellipse,
 :deep(.td-node-diff-changed) circle {
-  fill: rgba(249, 226, 175, 0.28) !important;
-  stroke: rgba(249, 226, 175, 0.75) !important;
+  fill: rgba(249, 226, 175, 0.30) !important;
+  stroke: rgba(249, 226, 175, 0.8) !important;
+  stroke-width: 1.5px !important;
+}
+:deep(.td-node-diff-weak) rect,
+:deep(.td-node-diff-weak) polygon,
+:deep(.td-node-diff-weak) ellipse,
+:deep(.td-node-diff-weak) circle {
+  fill: rgba(136, 137, 163, 0.16) !important;
+  stroke: rgba(136, 137, 163, 0.5) !important;
   stroke-width: 1.5px !important;
 }
 :deep(.td-node-diff-new) rect,

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowPathIcon, BookOpenIcon, DocumentTextIcon, FolderIcon,
-  MagnifyingGlassIcon, RocketLaunchIcon, ShieldCheckIcon, SparklesIcon,
+  MagnifyingGlassIcon, PencilSquareIcon, RocketLaunchIcon, ShieldCheckIcon, SparklesIcon,
   CheckCircleIcon, TrashIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { ArrowUpOnSquareIcon, StarIcon } from '@heroicons/vue/24/solid'
@@ -129,6 +129,36 @@ function askDelete(p: ProjectInfo) {
   deleteData.value = false
 }
 
+// ---- 项目改名(仅 architect 本地 arch_projects，不联动 KB) ----
+const renamingId = ref('')
+const renameDraft = ref('')
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+function startRename(p: ProjectInfo) {
+  renamingId.value = p.id
+  renameDraft.value = p.name || ''
+  void nextTick(() => renameInputRef.value?.focus())
+}
+
+function cancelRename() {
+  renamingId.value = ''
+  renameDraft.value = ''
+}
+
+async function saveRename(p: ProjectInfo) {
+  if (renamingId.value !== p.id) return   // blur/enter 双触发防抖
+  const name = renameDraft.value.trim()
+  cancelRename()
+  if (!name || name === p.name) return
+  busyId.value = p.id
+  try {
+    await projectService.renameProject({ execRoot: p.rootPath, name })
+    await loadOverview()
+  } finally {
+    busyId.value = null
+  }
+}
+
 async function confirmDelete() {
   if (!deleting.value) return
   busyId.value = deleting.value.id
@@ -229,7 +259,19 @@ function openDoc(id: string) {
           >
             <div class="flex-1 min-w-0 pl-1">
               <div class="flex items-center gap-2 min-w-0">
-                <span class="text-sm text-ctp-text truncate">{{ p.name }}</span>
+                <input
+                  v-if="renamingId === p.id"
+                  ref="renameInputRef"
+                  v-model="renameDraft"
+                  class="input !py-0.5 !px-2 !text-xs w-52"
+                  :placeholder="t('overview.renamePlaceholder')"
+                  :title="t('overview.renameHint')"
+                  @click.stop
+                  @keyup.enter="saveRename(p)"
+                  @keyup.esc="cancelRename"
+                  @blur="saveRename(p)"
+                >
+                <span v-else class="text-sm text-ctp-text truncate">{{ p.name }}</span>
                 <ArrowUpOnSquareIcon
                   v-if="p.pinned"
                   class="w-3.5 h-3.5 text-ctp-blue shrink-0"
@@ -248,6 +290,33 @@ function openDoc(id: string) {
               <div class="text-[11px] text-ctp-overlay1 font-mono truncate">{{ p.rootPath }}</div>
             </div>
             <div class="flex items-center gap-1 shrink-0" @click.stop>
+              <button
+                v-if="renamingId !== p.id"
+                class="btn btn-ghost !px-1.5 !py-1 text-ctp-overlay1 hover:text-ctp-text"
+                :title="t('overview.rename')"
+                :disabled="busyId === p.id"
+                @click="startRename(p)"
+              >
+                <PencilSquareIcon class="w-4 h-4" />
+              </button>
+              <template v-else>
+                <button
+                  class="btn btn-ghost !px-1.5 !py-1 text-ctp-green"
+                  :title="t('common.confirm')"
+                  @mousedown.prevent
+                  @click="saveRename(p)"
+                >
+                  <CheckCircleIcon class="w-4 h-4" />
+                </button>
+                <button
+                  class="btn btn-ghost !px-1.5 !py-1 text-ctp-overlay1 hover:text-ctp-red"
+                  :title="t('common.cancel')"
+                  @mousedown.prevent
+                  @click="cancelRename"
+                >
+                  <XMarkIcon class="w-4 h-4" />
+                </button>
+              </template>
               <button
                 class="btn btn-ghost !px-1.5 !py-1"
                 :class="p.pinned ? 'text-ctp-blue' : 'text-ctp-overlay1 hover:text-ctp-blue'"

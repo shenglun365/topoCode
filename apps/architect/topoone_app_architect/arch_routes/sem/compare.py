@@ -191,6 +191,20 @@ def _component_maps(model: dict) -> Tuple[Dict[str, str], Dict[str, str]]:
     return names, owner
 
 
+def _owner_of(owner: Dict[str, str], p: str) -> str:
+    """文件 → 组件 id：精确命中优先；未命中做双向后缀对齐——
+    git diff 在工作目录(可为仓库子目录)执行产出 workDir 相对路径，
+    而 KB owns 为镜像根相对路径，两侧基准不同，精确匹配会大面积漏归「其他」。"""
+    if not p or not owner:
+        return ""
+    if p in owner:
+        return owner[p]
+    for o, cid in owner.items():
+        if o and (p.endswith("/" + o) or o.endswith("/" + p)):
+            return cid
+    return ""
+
+
 def _asset_brief(a: dict, files: List[str], comp: str) -> dict:
     return {"id": a.get("id") or "", "name": a.get("name") or "",
             "kind": a.get("kind") or "", "level": a.get("level") or "",
@@ -289,7 +303,7 @@ def compare_changes(root: Optional[str], project: Optional[str],
     comp_delta: Dict[str, dict] = {}
     for k in ("added", "modified", "deleted"):
         for p in files[k]:
-            cid = owner.get(p) or OTHER
+            cid = _owner_of(owner, p) or OTHER
             bucket = comp_delta.setdefault(cid, {"id": cid, "name": names.get(cid) or "",
                                                  "added": 0, "modified": 0, "deleted": 0})
             bucket[k] += 1
@@ -322,7 +336,7 @@ def compare_changes(root: Optional[str], project: Optional[str],
         af = {f for f in af if f}
         if not af:
             continue
-        comp = owner.get(next(iter(af))) or OTHER
+        comp = _owner_of(owner, next(iter(af))) or OTHER
         hit_del = af & deleted
         hit_mod = af & modified
         hit_add = af & added

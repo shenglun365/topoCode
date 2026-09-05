@@ -285,6 +285,27 @@ async def flag_project(request: Request):
     return ok(row or proj)
 
 
+@router.post("/project/rename")
+async def rename_project(request: Request):
+    """项目改名(仅 architect 本地 arch_projects，不联动 KB)。
+
+    Body: { name, root?/execRoot? 或 project? }。
+    名字独立保存在 arch_projects 行；KB(知识库)侧项目名不受影响。
+    """
+    body = await request.json() or {}
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return err(400, "项目名不能为空")
+    proj = _resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
+    if not proj or not proj.get("id"):
+        return err(400, "未定位到项目")
+    row = store.ProjectsStore.update(proj["id"], {"name": name, "updatedAt": _ts()})
+    if not row:
+        # 临时工作目录(_synthesize, 未入库)不支持改名——请先通过「打开工作目录」导入
+        return err(400, "项目未登记(临时工作目录)，请先导入后再改名")
+    return ok(row)
+
+
 @router.post("/project/delete")
 async def delete_project(request: Request):
     """删除项目列表记录(可选同时删除 architect 相关的项目数据)。
@@ -571,10 +592,14 @@ def _by_kb_components(files: list, proj: dict) -> list:
     if not kb_id:
         return []
     try:
-        model = build_architecture_model(proj.get("rootPath"), proj.get("id"))
+        # 组件目录(architecture.catalog)：唯一 id + parentId + owns，含 L0-L2 父子层级。
+        # ⚠️ 不用 architecture.model——其 components 被拍平(parentId 丢失、id 序号重复)，
+        # 无法构建组件树(实测 nginx-src：catalog 99 组件带层级 vs model 21 组件 id 重复)。
+        from .common import build_component_catalog
+        catalog = build_component_catalog(proj.get("rootPath"), proj.get("id"))
+        comps = catalog.get("components") or []
     except Exception:
         return []
-    comps = model.get("components") or []
     by_id = {c.get("id"): c for c in comps if c.get("id")}
     if not by_id:
         return []
@@ -585,15 +610,30 @@ def _by_kb_components(files: list, proj: dict) -> list:
         if pid in by_id:
             children[pid].append(cid)
 
+    # 路径对齐：catalog owns 相对 KB 镜像根(仓库根)，变更文件相对 architect 工作目录
+    # (可能是仓库的子目录，如 nginx-src/src)。双向后缀匹配兼容两种基准。
+    def _owns_match(owned: str, changed: str) -> bool:
+        return (owned == changed
+                or owned.endswith("/" + changed)
+                or changed.endswith("/" + owned))
+
+    def _owner_of(path: str) -> str:
+        from .sem.paths import _norm_path
+        p = _norm_path(path)
+        owners = [cid for cid, c in by_id.items()
+                  if any(_owns_match(_norm_path(o), p) for o in (c.get("owns") or []))]
+        return max(owners, key=lambda cid: depth[cid]) if owners else "__unowned__"
+
     own = {cid: {"added": 0, "modified": 0, "deleted": 0, "files": []} for cid in by_id}
     unowned = {"added": 0, "modified": 0, "deleted": 0, "files": []}
+    fstatus: dict = {}   # path -> A/M/D(独占计数用)
     for f in files:
         path = f.get("path") if isinstance(f, dict) else str(f)
         status = f.get("status") if isinstance(f, dict) else ""
-        owners = [cid for cid, c in by_id.items() if path in (c.get("owns") or [])]
-        target = max(owners, key=lambda cid: depth[cid]) if owners else "__unowned__"
+        target = _owner_of(path)
         bucket = own.get(target) or unowned
         bucket["files"].append(path)
+        fstatus[path] = status
         if status == "A":
             bucket["added"] += 1
         elif status == "D":
@@ -613,6 +653,30 @@ def _by_kb_components(files: list, proj: dict) -> list:
             agg[pid]["deleted"] += agg[cid]["deleted"]
             agg[pid]["fileset"] |= agg[cid]["fileset"]
 
+    # 独占文件 = 自身归属且未被任何子孙覆盖。文件清单只在叶子完整列出，
+    # 上级组件仅列未被子组件覆盖的文件(消重复)；增/改/删 chips 仍为子树上卷合计。
+    def _desc_files(cid: str) -> set:
+        out: set = set()
+        stack = list(children[cid])
+        while stack:
+            ch = stack.pop()
+            out |= set(own[ch]["files"])
+            stack.extend(children[ch])
+        return out
+
+    excl_cache: dict = {}
+
+    def _exclusive(cid: str) -> dict:
+        if cid not in excl_cache:
+            desc = _desc_files(cid)
+            excl = [f for f in own[cid]["files"] if f not in desc]
+            cnt = {"added": 0, "modified": 0, "deleted": 0}
+            for f in excl:
+                st = fstatus.get(f)
+                cnt["added" if st == "A" else "deleted" if st == "D" else "modified"] += 1
+            excl_cache[cid] = {"files": sorted(excl), **cnt}
+        return excl_cache[cid]
+
     out: list = []
 
     def _emit(cid: str, level: int, seen: set):
@@ -621,11 +685,16 @@ def _by_kb_components(files: list, proj: dict) -> list:
         seen.add(cid)
         a = agg[cid]
         if a["added"] or a["modified"] or a["deleted"]:
+            ex = _exclusive(cid)
             out.append({
                 "id": cid, "name": (by_id[cid].get("name") or "").strip() or cid,
                 "parentId": by_id[cid].get("parentId") or "", "level": level,
-                "added": a["added"], "modified": a["modified"], "deleted": a["deleted"],
-                "files": sorted(a["fileset"]),
+                # files/added/modified/deleted = 自身独占(未被子孙覆盖，消重复)
+                "files": ex["files"],
+                "added": ex["added"], "modified": ex["modified"], "deleted": ex["deleted"],
+                # 子树上卷合计(父含子，供 chips 汇总展示)
+                "totalAdded": a["added"], "totalModified": a["modified"],
+                "totalDeleted": a["deleted"], "totalFiles": len(a["fileset"]),
             })
         for ch in children[cid]:
             _emit(ch, level + 1, seen)
@@ -637,16 +706,35 @@ def _by_kb_components(files: list, proj: dict) -> list:
     if unowned["files"]:
         out.append({"id": "__unowned__", "name": "", "parentId": "", "level": 0,
                     "added": unowned["added"], "modified": unowned["modified"],
-                    "deleted": unowned["deleted"], "files": unowned["files"]})
+                    "deleted": unowned["deleted"], "files": unowned["files"],
+                    "totalAdded": unowned["added"], "totalModified": unowned["modified"],
+                    "totalDeleted": unowned["deleted"], "totalFiles": len(unowned["files"])})
     return out
+
+
+def _looks_like_remote_url(url: str) -> bool:
+    """区分远端仓库地址与本地路径：URL scheme(git/ssh/http[s]) 或 scp 形如 user@host:path
+    才算远端；纯文件路径(如 KB git-local 导入写进 remote_url 的源目录)不算。"""
+    u = (url or "").strip()
+    if not u:
+        return False
+    import re
+    if re.match(r"^(https?|ssh|git|ftps?)://", u, re.I):
+        return True
+    if u.startswith("git@"):
+        return True
+    # scp 形式 user@host:path(排除 Windows 盘符 C:\ 与纯相对路径)
+    return bool(re.match(r"^[^/@\\]+@[^/\\]+:[^/]", u)) and not re.match(r"^[A-Za-z]:[\\/]", u)
 
 
 @router.get("/project/overview")
 async def get_project_overview(root: Optional[str] = None, project: Optional[str] = None):
     """项目概览(工作区首页)：工作目录、远端仓库、知识库关联、基线、相对基线的代码变更与组件变更。
 
-    组件变更(byComponent)按 KB 组件汇总：文件经 owns 归属组件，展示名 name 优先否则 id，
-    父组件汇总含子组件变更数据(层级 DFS 先序)。
+    组件变更(byComponent)按 KB 组件目录(architecture.catalog)的父子层级输出：
+    文件经 owns 归属(最深组件)；文件清单只在叶子完整列出，父组件仅列未被子组件
+    覆盖的独占文件(files/added/modified/deleted)，另附子树上卷合计(total*)；未归属
+    文件归「__unowned__」分组。
     """
     proj = _resolve_project(root, project)
     if not proj:
@@ -654,6 +742,10 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
     from . import arch_git
     work_dir = proj.get("rootPath") or ""
     remote = _git_origin(work_dir)
+    # 仓库类型：git origin 存在且形如远端 URL → remote；否则本地仓库。
+    # KB 的 remote_url 字段在 git-local 导入时会写入本地路径，禁止直接当远端展示。
+    if not _looks_like_remote_url(remote):
+        remote = ""
     st = arch_git.repo_status(work_dir)
     # 基线提交兜底：存量数据为空时按 baselineId 从 KB 版本取 head，并惰性回写
     baseline_head = proj.get("baselineCommit") or ""
@@ -670,7 +762,9 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
         "deletedHighRisk": False, "files": [], "byComponent": []}
     return ok({
         "workDir": work_dir,
-        "remoteUrl": remote or proj.get("remoteUrl") or "",
+        # 仅真实远端 URL(git origin)；本地仓库为空串，仓库类型见 repoKind
+        "remoteUrl": remote,
+        "repoKind": "remote" if remote else "local",
         "branch": st.get("branch") or proj.get("branch") or "",
         "defaultBranch": proj.get("defaultBranch") or "",
         "head": {"commit": st.get("commit") or "", "branch": st.get("branch") or "",

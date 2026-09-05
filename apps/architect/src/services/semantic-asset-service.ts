@@ -274,6 +274,81 @@ export interface AssetCompareCrossLink {
   semantic: string
 }
 
+/** 「校验并提取」变化量计划(校验阶段产物：reconcile 标准化 + 增量统计)。 */
+export interface ExtractPlanResult {
+  added: number
+  modified: number
+  deleted: number
+  neverExtracted: number
+  staleOnly: number
+  toExtract: number
+  invalidated: number
+  batchesEstimate?: number
+  truncated?: boolean
+  files: string[]
+}
+
+/** 快照批量提取作业(后端 daemon 线程；进程内状态，重启即失)。 */
+export interface SyncExtractJob {
+  running: boolean
+  total: number
+  done: number
+  saved: number
+  batches: number
+  errors: { files: string[]; error: string }[]
+  stopped?: boolean
+  startedAt?: number
+  finishedAt?: number
+  level?: string
+  batch?: number
+}
+
+/** 未归属组件文件(owns 未覆盖)；assetCount = 首锚点为该文件的已提取资产数，
+ *  activeCount = 其中 active 态数量(仅剩 stale → 待重提，重提可复活旧行)，
+ *  extractable = false 表示无独立符号(config 聚合头等)，提取结构性无产出。 */
+export interface UnownedFileEntry {
+  path: string
+  assetCount: number
+  activeCount?: number
+  extractable?: boolean
+}
+
+export interface UnownedFilesResult {
+  files: UnownedFileEntry[]
+  unownedCount: number
+  ownedCount: number
+  totalFiles: number
+  symbolSource?: string
+  truncated?: boolean
+}
+
+/** 未归属文件 ↔ 已归属组件的跨组件符号关联(按组件聚合 + 样本边)。 */
+export interface UnownedCrossLink {
+  file: string
+  crossCount: number
+  byComponent: { component: string; count: number; kinds: string[] }[]
+  samples: { node: string; target: string; targetFile: string; component: string; kind: string; dir: 'in' | 'out' }[]
+}
+
+/** 未归属文件循环批量提取作业(后端 daemon 线程；进程内状态，重启即失)。
+ *  unowned/withAssets/noSymbols = 清单三分盘点(未归属 = 待提取 + 已有资产 + 无独立符号)。 */
+export interface UnownedExtractJob {
+  running: boolean
+  total: number
+  done: number
+  saved: number
+  batches: number
+  errors: { files: string[]; error: string }[]
+  stopped?: boolean
+  startedAt?: number
+  finishedAt?: number
+  level?: string
+  batch?: number
+  unowned?: number
+  withAssets?: number
+  noSymbols?: number
+}
+
 export interface AssetCompareResult {
   base: string
   baseIsBaseline: boolean
@@ -336,6 +411,60 @@ export const semanticAssetService = {
     if (target) parts.push(`target=${encodeURIComponent(target)}`)
     const qs = [parts.join('&'), ctx()].filter(Boolean).join('&')
     return await apiGet<AssetCompareResult>(`/kb/semantic/asset-compare${qs ? `?${qs}` : ''}`)
+  },
+
+  /** 未归属组件的文件清单(KB owns 未覆盖, 含每文件已提取资产数)。 */
+  async unownedFiles(limit = 500): Promise<UnownedFilesResult> {
+    return await apiGet<UnownedFilesResult>(`/kb/semantic/unowned-files${qsWith(`limit=${limit}`)}`)
+  },
+
+  /** 未归属文件 ↔ 已归属组件的跨组件符号关联(file 缺省=全部未归属文件)。 */
+  async unownedCrossLinks(file?: string, limit = 200): Promise<{ links: UnownedCrossLink[]; totalCross: number; files: number }> {
+    const parts: string[] = []
+    if (file) parts.push(`file=${encodeURIComponent(file)}`)
+    parts.push(`limit=${limit}`)
+    return await apiGet(`/kb/semantic/unowned-cross-links${qsWith(parts.join('&'))}`)
+  },
+
+  /** 启动「未归属文件」循环批量提取后端作业(daemon 线程，页面关闭不受影响)；action='stop' 请求停止。
+   *  ⚠️ body 必须带 root/project——后端按它解析项目根，缺失会 invalid_root(此前 UI 批量按钮从未成功启动的根因)。 */
+  async unownedExtract(action: 'start' | 'stop' = 'start', opts?: { batch?: number; level?: string }): Promise<{ started?: boolean; total?: number; reason?: string; stopped?: boolean; unowned?: number; withAssets?: number; noSymbols?: number }> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/unowned-extract', {
+      root,
+      project,
+      action,
+      batch: opts?.batch,
+      level: opts?.level,
+    })
+  },
+
+  /** 批量提取作业进度轮询。 */
+  async unownedExtractStatus(): Promise<UnownedExtractJob> {
+    return await apiGet<UnownedExtractJob>(`/kb/semantic/unowned-extract-status${qsWith('')}`)
+  },
+
+  /** 「校验并提取」校验阶段：变化量计划(reconcile 标准化 + 增量统计与样本)。 */
+  async extractPlan(): Promise<ExtractPlanResult> {
+    const { root, project } = currentProjectParams()
+    return await apiPost<ExtractPlanResult>('/kb/semantic/extract-plan', { root, project })
+  },
+
+  /** 「校验并提取」执行阶段：快照批量提取作业；action='stop' 请求停止。 */
+  async syncExtract(action: 'start' | 'stop' = 'start', opts?: { batch?: number; level?: string }): Promise<{ started?: boolean; total?: number; reason?: string; message?: string; stopped?: boolean }> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/sync-extract', {
+      root,
+      project,
+      action,
+      batch: opts?.batch,
+      level: opts?.level,
+    })
+  },
+
+  /** 快照批量提取作业进度轮询。 */
+  async syncExtractStatus(): Promise<SyncExtractJob> {
+    return await apiGet<SyncExtractJob>(`/kb/semantic/sync-extract-status${qsWith('')}`)
   },
 
   /** 冷启动：未注册仓库 → core 建项(含初始基线) + 全量分析发起。 */
@@ -541,7 +670,7 @@ export const semanticAssetService = {
   },
 
   /** 语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。 */
-  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number; includeIndirect?: boolean }): Promise<SemanticGraphResult> {
+  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number; includeIndirect?: boolean; file?: string; files?: string[] }): Promise<SemanticGraphResult> {
     const parts: string[] = []
     if (kind) parts.push(`kind=${encodeURIComponent(kind)}`)
     if (level) parts.push(`level=${encodeURIComponent(level)}`)
@@ -549,7 +678,11 @@ export const semanticAssetService = {
     if (opts?.focus) parts.push(`focus=${encodeURIComponent(opts.focus)}`)
     if (opts?.hops) parts.push(`hops=${opts.hops}`)
     if (opts?.includeIndirect) parts.push('include_indirect=true')
-    parts.push('limit=2000')
+    if (opts?.file) parts.push(`file=${encodeURIComponent(opts.file)}`)
+    if (opts?.files?.length) parts.push(`files=${encodeURIComponent(opts.files.join(','))}`)
+    // limit 10000：2000 上限在大项目(3.7k+ 资产)会把较早的活跃资产截掉——
+    // 文件级/聚焦图谱查不到明明存在的资产(实测回归)。
+    parts.push('limit=10000')
     return apiGet<SemanticGraphResult>(`/kb/semantic/graph${qsWith(parts.join('&'))}`)
   },
 

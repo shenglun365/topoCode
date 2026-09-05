@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
   ChartBarSquareIcon, StopIcon, XMarkIcon, ArrowsRightLeftIcon, ChatBubbleLeftRightIcon,
+  DocumentTextIcon, CheckIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
@@ -13,7 +14,7 @@ import SemanticGraphView, { type GraphTabDef } from '@/components/assets/Semanti
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
-import { semanticAssetService, type AssetCompareResult, type BaselineDiff, type CoverageInfo, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
+import { semanticAssetService, type AssetCompareResult, type BaselineDiff, type CoverageInfo, type ExtractPlanResult, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult, type SyncExtractJob, type UnownedCrossLink, type UnownedExtractJob, type UnownedFileEntry } from '@/services/semantic-asset-service'
 import { gitService, type GitLogEntry } from '@/services/git-service'
 import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
@@ -23,7 +24,7 @@ import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import { useChatProgress } from '@/composables/useChatProgress'
 import { readModelPref } from '@topo/web-core/shell'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
-import type { AssetDetail, AssetDiagramItem, ConversationDetail, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
+import type { AssetDetail, AssetDiagramItem, ConversationDetail, GraphFileEntry, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
 
@@ -108,7 +109,7 @@ function openGraphTab(kind: GraphTabDef['kind'], id: string, title: string) {
   if (existing) {
     activeGraphTab.value = existing.id
   } else {
-    const def: GraphTabDef = { id: key, kind, title, compId: kind === 'comp' ? id : undefined, assetId: kind === 'asset' ? id : undefined }
+    const def: GraphTabDef = { id: key, kind, title, compId: kind === 'comp' ? id : undefined, assetId: kind === 'asset' ? id : undefined, fileId: kind === 'file' ? id : undefined }
     graphTabs.value.push(def)
     activeGraphTab.value = def.id
   }
@@ -123,10 +124,42 @@ function closeGraphTab(id: string) {
     activeGraphTab.value = graphTabs.value[i]?.id ?? graphTabs.value[i - 1]?.id ?? ''
   }
 }
+
+// ---- 图谱文件索引(>500 资产强制手动圈定)：按 tab 范围预算 文件→资产数/组件归属 ----
+/** all/comp tab：范围内每个首锚点文件的资产数与归属组件；asset/file tab 无需圈定。 */
+function buildGraphFileIndex(gt: GraphTabDef): GraphFileEntry[] {
+  if (gt.kind !== 'all' && gt.kind !== 'comp') return []
+  const inScope = (a: SemanticAsset) =>
+    gt.kind === 'all' ? true : componentsOf(a).includes(gt.compId!)
+  const byFile = new Map<string, { n: number; comps: Set<string> }>()
+  for (const a of items.value) {
+    if (a.status === 'deleted' || !inScope(a)) continue
+    const f = a.astRefs?.[0]?.file || ''
+    if (!f) continue
+    const e = byFile.get(f) ?? { n: 0, comps: new Set<string>() }
+    e.n += 1
+    for (const c of componentsOf(a)) e.comps.add(c)
+    byFile.set(f, e)
+  }
+  return [...byFile.entries()].map(([file, e]) => ({
+    file,
+    dir: file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '/',
+    n: e.n,
+    comps: [...e.comps],
+  }))
+}
+const graphFileIndexes = computed<Record<string, GraphFileEntry[]>>(() => {
+  const out: Record<string, GraphFileEntry[]> = {}
+  for (const gt of graphTabs.value) out[gt.id] = buildGraphFileIndex(gt)
+  return out
+})
+const graphCompNames = computed<Record<string, string>>(() =>
+  Object.fromEntries(compCatalog.value.map((c) => [c.assetId, c.name])))
 const q = ref('')
-const items = ref<SemanticAsset[]>([])
+// shallowRef：3776+ 资产整表深代理开销可观；树按整表/整行替换更新，
+// 行内变更(refreshOne/懒加载 detail)后手动克隆数组触发。
+const items = shallowRef<SemanticAsset[]>([])
 const loading = ref(false)
-const reconciling = ref(false)
 const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
 /** 概览统计(总量/按类别/按粒度/状态)。 */
@@ -295,15 +328,55 @@ watch(scopeSel, () => {
 })
 
 function toggleOpen(id: string) {
-  compOpen[id] = compOpen[id] !== false ? false : true
+  // 按有效态翻转(而非手动记录)：level<2 下未操作组件有效态=闭，首点即展开
+  compOpen[id] = !compExpandState(id)
 }
 
-/** 树展开级别(工具栏单按钮循环)：
+/** 树展开级别(工具栏单按钮循环)——只定义列表「默认展开态」，点击时重置手动开合，
+ *  此后用户逐组件/逐文件手动开合不受层级限制(手动值 > 层级默认值)：
  *  0 全部收起(只显示顶层组件) → 1 组件展开(所有组件组头) → 2 文件展开(组件+文件) → 3 全部展开(含资产)。 */
 const treeLevel = ref(1)
 const TREE_LEVEL_MAX = 3
 function cycleTreeLevel() {
   treeLevel.value = treeLevel.value >= TREE_LEVEL_MAX ? 0 : treeLevel.value + 1
+  // 重置手动开合 → 列表回到该层级的默认展开态
+  for (const k of Object.keys(compOpen)) delete compOpen[k]
+  for (const k of Object.keys(fileOpen)) delete fileOpen[k]
+}
+
+/** 组件子节点展开态：手动开合优先；未手动操作时按层级默认(level>=1 展开)。 */
+function compChildrenOpen(cid: string): boolean {
+  if (compOpen[cid] === true) return true
+  if (compOpen[cid] === false) return false
+  return treeLevel.value >= 1
+}
+
+/** 组件有效展开态(箭头图标与翻转的单一事实源)：
+ *  手动值优先；默认 = 有子组件且 level>=1(子头可见) 或 level>=2(文件可见)。
+ *  图标态若与内容渲染不同源，就会出现"箭头开、内容闭"的错位。 */
+function compExpandState(cid: string): boolean {
+  if (compOpen[cid] === true) return true
+  if (compOpen[cid] === false) return false
+  return (treeLevel.value >= 1 && hasChildren(cid)) || treeLevel.value >= 2
+}
+
+/** 文件有效展开态(同上，默认层级 3)。 */
+function fileExpandState(fk: string): boolean {
+  if (fileOpen[fk] === true) return true
+  if (fileOpen[fk] === false) return false
+  return treeLevel.value >= 3
+}
+/** 组件内容(独有文件)展开态：手动展开跨层级生效；默认层级 2。 */
+function compContentOpen(cid: string): boolean {
+  return compOpen[cid] === true || (compOpen[cid] !== false && treeLevel.value >= 2)
+}
+/** 组件直属资产展开态：手动展开跨层级生效；默认层级 3。 */
+function compDirectOpen(cid: string): boolean {
+  return compOpen[cid] === true || (compOpen[cid] !== false && treeLevel.value >= 3)
+}
+/** 文件下资产展开态：手动展开跨层级生效；默认层级 3。 */
+function fileAssetsOpen(fk: string): boolean {
+  return fileOpen[fk] === true || (fileOpen[fk] !== false && treeLevel.value >= 3)
 }
 
 /** 组件树行(DFS，父在前子在后，含缩进深度)。 */
@@ -337,11 +410,15 @@ const compHierLevel = computed<Map<string, string>>(() => {
  *  被子组件拥有的文件下放到子组件)；资产挂首锚点文件下，无锚点资产挂组件直属；无归属资产归「其它」。 */
 type TreeRow = { key: string; t: 'comp' | 'file' | 'asset'; depth: number;
                  g?: SemanticGroup; file?: string; n?: number; a?: SemanticAsset;
-                 fk?: string }
+                 fk?: string; unowned?: boolean; extractable?: boolean }
 const fileOpen = reactive<Record<string, boolean>>({})
 const subtreeCount = ref(new Map<string, number>())
+/** 组件是否有可折叠内容(组头箭头渲染依据)；随 semanticTreeRows 重算填充。 */
+const compCollapsible = ref(new Map<string, boolean>())
+/** 基线对比 · 组件子树变化上卷(组头彩色计数 chip)；随 semanticTreeRows 重算填充。 */
+const diffRollup = ref(new Map<string, { changed: number; added: number; deleted: number }>())
 function toggleFileOpen(key: string) {
-  fileOpen[key] = fileOpen[key] !== false ? false : true
+  fileOpen[key] = !fileExpandState(key)
 }
 function fileBase(p: string): string {
   const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
@@ -394,6 +471,39 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
   }
   // 子树资产总数(组头计数 chip，模板引用)——每次重算填充
   const counts = new Map<string, number>()
+  // 组件是否有可折叠内容(子组件/资产/独有文件任一)：组头箭头渲染依据。
+  // 零资产纯文件叶子组件(如未提取的 Stream 模块)没有它时箭头不渲染 → 文件行无法收拢。
+  const collap = new Map<string, boolean>()
+  // 基线对比 · 组件级变化归属：直接归属(资产→componentsOf 多归属，无归属→OTHER)
+  // + 子树上卷(父组件头显示整个子树的彩色计数)。文件行计数走 diffFileCounts。
+  const diffSums = new Map<string, { changed: number; added: number; deleted: number }>()
+  const diffDirect = new Map<string, { changed: number; added: number; deleted: number }>()
+  if (diffMode.value && cmpBucketById.value.size) {
+    const byId = new Map(items.value.map((x) => [x.id, x]))
+    for (const [id, bucket] of cmpBucketById.value) {
+      const a = byId.get(id)
+      if (!a) continue
+      const cids = componentsOf(a)
+      for (const cid of (cids.length ? cids : [OTHER_KEY])) {
+        const e = diffDirect.get(cid) ?? { changed: 0, added: 0, deleted: 0 }
+        if (bucket === 'modified') e.changed += 1
+        else if (bucket === 'added') e.added += 1
+        else e.deleted += 1
+        diffDirect.set(cid, e)
+      }
+    }
+  }
+  const diffSub = (c: CompNode): { changed: number; added: number; deleted: number } => {
+    const acc = { ...(diffDirect.get(c.id) ?? { changed: 0, added: 0, deleted: 0 }) }
+    for (const ch of children.get(c.id) ?? []) {
+      const s = diffSub(ch)
+      acc.changed += s.changed
+      acc.added += s.added
+      acc.deleted += s.deleted
+    }
+    diffSums.set(c.id, acc)
+    return acc
+  }
   const countSub = (c: CompNode): number => {
     const sub = new Set<string>()
     for (const ch of children.get(c.id) ?? []) for (const f of ch.owns) sub.add(f)
@@ -406,53 +516,71 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
   const rows: TreeRow[] = []
   const walk = (c: CompNode, depth: number) => {
     if (!(all || sel.has(c.id))) {
-      // 路径节点：自身不渲染，仍下探(选中集可能命中后代)；level0 只显示顶层组件
-      if (treeLevel.value >= 1) {
+      // 路径节点：自身不渲染，仍下探(选中集可能命中后代)；下探条件与普通组件一致
+      if (compChildrenOpen(c.id)) {
         for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
       }
       return
     }
     countSub(c)
+    collap.set(c.id, (children.get(c.id)?.length ?? 0) > 0
+      || (counts.get(c.id) ?? 0) > 0 || uniqueFiles(c).length > 0)
     rows.push({ key: c.id, t: 'comp', depth,
                 g: { key: c.id, name: c.name, depth, assets: [], hierLevel: c.hierLevel } })
-    if (compOpen[c.id] === false) return   // 单节点折叠 → 子组件/文件/资产整支隐藏
-    const lv = treeLevel.value
-    if (lv >= 1) {
+    const expand = compChildrenOpen(c.id)     // 子组件
+    const content = compContentOpen(c.id)     // 独有文件
+    if (!expand && !content) return           // 整支收起(手动关闭或层级默认收起)
+    if (expand) {
       for (const ch of children.get(c.id) ?? []) walk(ch, depth + 1)
     }
-    if (lv >= 2) {
+    if (content) {
       for (const f of uniqueFiles(c)) {
         const fk = c.id + '::' + f
         const list = byFile.get(f) ?? []
         rows.push({ key: 'f:' + fk, t: 'file', depth: depth + 1, file: f, n: list.length, fk })
-        if (lv === 3 && fileOpen[fk] !== false) {
+        if (fileAssetsOpen(fk)) {
           for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: depth + 2, a })
         }
       }
     }
-    if (lv === 3) {
+    if (compDirectOpen(c.id)) {
       for (const a of direct.get(c.id) ?? []) rows.push({ key: 'a:' + a.id, t: 'asset', depth: depth + 1, a })
     }
   }
-  for (const r of roots) walk(r, 0)
-  if ((otherFiles.size || otherDirect.length) && (all || sel.has(OTHER_KEY))) {
+  for (const r of roots) { walk(r, 0); diffSub(r) }
+  // 「未归属」组(单一分组)：KB owns 未覆盖的文件 ∪ 无组件归属的孤儿资产。
+  // 文件并集去重——已提取资产挂其锚点文件下(与组件组同构)；仅存在于 owns 缺口
+  // 清单的文件显示「未提取」。同受组头开合(compOpen)与树层级(treeLevel)控制。
+  if ((otherFiles.size || otherDirect.length || unownedFiles.value.length)
+      && (all || sel.has(OTHER_KEY))) {
+    const fileAssets = new Map<string, SemanticAsset[]>(otherFiles)
+    const unownedEntry = new Map(unownedFiles.value.map((x) => [x.path, x]))
+    for (const f of unownedFiles.value) {
+      if (!fileAssets.has(f.path)) fileAssets.set(f.path, [])
+    }
+    counts.set(OTHER_KEY, fileAssets.size + otherDirect.length)
+    collap.set(OTHER_KEY, true)
+    diffSums.set(OTHER_KEY, diffDirect.get(OTHER_KEY) ?? { changed: 0, added: 0, deleted: 0 })
     rows.push({ key: OTHER_KEY, t: 'comp', depth: 0,
-                g: { key: OTHER_KEY, name: t('assetMgmt.other'), depth: 0, assets: [] } })
-    if (compOpen[OTHER_KEY] !== false && treeLevel.value >= 2) {
-      for (const f of [...otherFiles.keys()].sort()) {
+                g: { key: OTHER_KEY, name: t('assetMgmt.unownedFiles'), depth: 0, assets: [] } })
+    if (compContentOpen(OTHER_KEY)) {
+      for (const f of [...fileAssets.keys()].sort()) {
         const fk = OTHER_KEY + '::' + f
-        const list = otherFiles.get(f) ?? []
-        rows.push({ key: 'f:' + fk, t: 'file', depth: 1, file: f, n: list.length, fk })
-        if (treeLevel.value === 3 && fileOpen[fk] !== false) {
+        const list = fileAssets.get(f) ?? []
+        rows.push({ key: 'f:' + fk, t: 'file', depth: 1, file: f, n: list.length,
+                    fk, unowned: true, extractable: unownedEntry.get(f)?.extractable })
+        if (fileAssetsOpen(fk)) {
           for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: 2, a })
         }
       }
-      if (treeLevel.value === 3) {
-        for (const a of otherDirect) rows.push({ key: 'a:' + a.id, t: 'asset', depth: 1, a })
-      }
+    }
+    if (compDirectOpen(OTHER_KEY)) {
+      for (const a of otherDirect) rows.push({ key: 'a:' + a.id, t: 'asset', depth: 1, a })
     }
   }
   subtreeCount.value = counts
+  compCollapsible.value = collap
+  diffRollup.value = diffSums
   return rows
 })
 
@@ -484,8 +612,22 @@ async function loadSemantic() {
   try {
     // 树形分组视图(按组件逐层展开)必须全量加载——分页会把组内条目截断到单页，
     // 组头计数与低序组件组显示错误(后端 _grouped_search_items 本就全量排序后返回)。
-    const r = await semanticAssetService.searchPage(q.value, kind.value || undefined, { limit: 2000, offset: 0, scope: scopeParams(), level: level.value || undefined })
-    items.value = r.items
+    // ⚠️ 单页拉全(页大小 10000, cap 20000)：后端本就全量排序后切片，两页各跑一遍
+    // 全量(取数+分组+count)纯属重复——实测单请求省 ~1.5s。>10000 时循环仍可续页。
+    const PAGE = 10000
+    const CAP = 20000
+    let all: SemanticAsset[] = []
+    let total = 0
+    for (let offset = 0; offset < CAP; offset += PAGE) {
+      const r = await semanticAssetService.searchPage(q.value, kind.value || undefined, {
+        limit: PAGE, offset,
+        scope: scopeParams(), level: level.value || undefined,
+      })
+      all = all.concat(r.items)
+      total = r.total
+      if (all.length >= total || !r.items.length) break
+    }
+    items.value = all
   } finally {
     loading.value = false
   }
@@ -577,6 +719,295 @@ async function extractPendingAndRecompare() {
   await Promise.all([loadSemantic(), runCompare()])
 }
 
+// ---- 未归属组件文件：清单 + 单文件/循环批量提取 + 跨组件关联 ----
+const unownedFiles = ref<UnownedFileEntry[]>([])
+const unownedMeta = ref<{ unownedCount: number; ownedCount: number; totalFiles: number; truncated: boolean } | null>(null)
+const unownedLoading = ref(false)
+/** 文件(norm path) → 跨组件关联(计数 + 按组件聚合 + 样本)。 */
+const unownedLinks = ref<Map<string, UnownedCrossLink>>(new Map())
+
+async function loadUnownedFiles() {
+  unownedLoading.value = true
+  try {
+    const r = await semanticAssetService.unownedFiles()
+    unownedFiles.value = r.files
+    unownedMeta.value = { unownedCount: r.unownedCount, ownedCount: r.ownedCount, totalFiles: r.totalFiles, truncated: !!r.truncated }
+  } catch {
+    unownedFiles.value = []
+    unownedMeta.value = null
+  } finally {
+    unownedLoading.value = false
+  }
+}
+
+async function loadUnownedLinks() {
+  try {
+    const r = await semanticAssetService.unownedCrossLinks()
+    unownedLinks.value = new Map(r.links.map((l) => [l.file, l]))
+  } catch {
+    unownedLinks.value = new Map()
+  }
+}
+
+/** 单文件提取：完成后刷新未归属清单(该文件 assetCount 变化)与资产列表。
+ *  全程写对话区(与组件提取同款 user+assistant 双 turn)——提取是后端异步管线，
+ *  不写对话用户看不到任何反馈。 */
+const unownedExtractingOne = ref('')
+async function extractUnownedFile(path: string) {
+  if (unownedExtractingOne.value) return
+  if (unownedExtracting.value) return
+  turns.value.push({ role: 'user', content: t('assetMgmt.unowned.chatOne', { file: path }) })
+  const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
+  unownedExtractingOne.value = path
+  try {
+    const res = await semanticAssetService.extract(
+      { type: 'files', files: [path] },
+      kinds.map((k) => k.value),
+      { level: 'implementation' },
+    )
+    const n = res.count ?? res.assets?.length ?? 0
+    if (res.error) {
+      turns.value[idx].content = `${t('assetMgmt.unowned.chatOneFailed')}\n${res.error}`
+    } else if (n > 0) {
+      turns.value[idx].content = t('assetMgmt.unowned.chatOneDone', { n })
+      turns.value[idx].assets = res.assets ?? []
+    } else {
+      turns.value[idx].content = t('assetMgmt.unowned.chatOneEmpty')
+    }
+    refreshAfterExtract()
+    await loadUnownedFiles()
+  } catch (err: any) {
+    turns.value[idx].content = err?.message || t('assetMgmt.batchFailed')
+  } finally {
+    unownedExtractingOne.value = ''
+  }
+}
+
+// ---- 循环批量提取 = 后端作业(daemon 线程)：页面关闭不影响，进度靠轮询。 ----
+// 纯增量操作(只新增/更新资产)：无需 confirm；中断后重按自动续传(跳过已提取)。
+const unownedJob = ref<UnownedExtractJob | null>(null)
+let unownedJobTimer: ReturnType<typeof setInterval> | null = null
+let unownedJobDoneSeen = -1
+/** 批量作业的对话区 turn 下标(完成后回填摘要)。 */
+const unownedJobChatIdx = ref(-1)
+
+const unownedExtracting = computed(() => !!unownedJob.value?.running)
+
+/** 进度 chip 标题：落库数 + 清单说明(无独立符号不参与提取)。作业缺盘点字段时回退本地清单计数。 */
+const unownedJobHint = computed(() => {
+  const j = unownedJob.value
+  const unowned = j?.unowned ?? unownedMeta.value?.unownedCount ?? unownedFiles.value.length
+  const noSymbols = j?.noSymbols ?? unownedFiles.value.filter((f) => f.extractable === false).length
+  return t('assetMgmt.unowned.extractingHint', { saved: j?.saved ?? 0, unowned, noSymbols })
+})
+
+function stopUnownedJobPolling() {
+  if (unownedJobTimer) { clearInterval(unownedJobTimer); unownedJobTimer = null }
+}
+
+async function pollUnownedJobOnce() {
+  try {
+    const st = await semanticAssetService.unownedExtractStatus()
+    const wasRunning = !!unownedJob.value?.running
+    unownedJob.value = st
+    // 每批落库后轻量刷新清单(进度可见)；作业结束做全量刷新 + 对话区摘要
+    if (st.running) {
+      if (st.done !== unownedJobDoneSeen) {
+        unownedJobDoneSeen = st.done
+        void loadUnownedFiles()
+      }
+    } else if (wasRunning) {
+      stopUnownedJobPolling()
+      if (unownedJobChatIdx.value >= 0) {
+        const errs = st.errors ?? []
+        let msg = st.stopped
+          ? t('assetMgmt.unowned.chatJobStopped', { done: st.done, saved: st.saved })
+          : t('assetMgmt.unowned.chatJobDone', { done: st.done, saved: st.saved })
+        if (errs.length) {
+          msg += '\n' + t('assetMgmt.unowned.chatJobErrors')
+          for (const e of errs.slice(0, 3)) msg += `\n· ${e.error}`
+        }
+        if (!st.saved) msg += '\n' + t('assetMgmt.unowned.chatOneEmpty')
+        turns.value[unownedJobChatIdx.value].content = msg
+        unownedJobChatIdx.value = -1
+      }
+      await Promise.all([loadUnownedFiles(), loadSemantic(), refreshStatus(), loadOverview(), loadCoverage()])
+    }
+  } catch { /* 轮询失败静默，下轮重试 */ }
+}
+
+function startUnownedJobPolling() {
+  stopUnownedJobPolling()
+  unownedJobDoneSeen = unownedJob.value?.done ?? -1
+  unownedJobTimer = setInterval(pollUnownedJobOnce, 2500)
+  void pollUnownedJobOnce()
+}
+
+async function extractAllUnowned() {
+  turns.value.push({ role: 'user', content: t('assetMgmt.unowned.chatJobUser') })
+  const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
+  const r = await semanticAssetService.unownedExtract('start', { batch: 10 })
+  if (r.started) {
+    unownedJob.value = { running: true, total: r.total ?? 0, done: 0, saved: 0, batches: 0, errors: [] }
+    unownedJobChatIdx.value = idx
+    // 等式盘点：未归属 = 待提取 + 已有资产 + 无独立符号——解释"49 个为何只提 38 个"
+    turns.value[idx].content = t('assetMgmt.unowned.chatJobStart', {
+      n: r.total ?? 0, unowned: r.unowned ?? 0,
+      withAssets: r.withAssets ?? 0, noSymbols: r.noSymbols ?? 0,
+    })
+    startUnownedJobPolling()
+  } else if (r.reason === 'already_running') {
+    turns.value[idx].content = t('assetMgmt.unowned.chatJobAlready')
+    unownedJobChatIdx.value = idx       // 接管：完成后把摘要回填到本 turn
+    startUnownedJobPolling()
+  } else if (r.reason === 'nothing_to_extract') {
+    turns.value[idx].content = t('assetMgmt.unowned.chatJobNoneDetail', {
+      unowned: r.unowned ?? 0, withAssets: r.withAssets ?? 0, noSymbols: r.noSymbols ?? 0,
+    })
+  } else {
+    // 请求失败(服务未启动/后端版本较旧路由缺失/项目根未解析)——不能伪装成"没有待提取"
+    turns.value[idx].content = r.reason === 'invalid_root'
+      ? t('assetMgmt.unowned.chatJobInvalidRoot')
+      : t('assetMgmt.unowned.chatJobFailed')
+    void pollUnownedJobOnce()
+  }
+}
+
+async function stopUnownedExtract() {
+  await semanticAssetService.unownedExtract('stop')
+  void pollUnownedJobOnce()
+}
+
+// ---- 校验并提取：变化量计划 → 用户确认 → 快照批量作业(后端，页面关闭不影响) ----
+const syncPlan = ref<ExtractPlanResult | null>(null)
+const syncPlanOpen = ref(false)
+const syncPlanLoading = ref(false)
+const syncJob = ref<SyncExtractJob | null>(null)
+let syncJobTimer: ReturnType<typeof setInterval> | null = null
+let syncJobDoneSeen = -1
+/** 作业对应对话区 turn 下标(完成后回填摘要)。 */
+const syncJobChatIdx = ref(-1)
+
+const syncExtracting = computed(() => !!syncJob.value?.running)
+
+async function planSyncExtract() {
+  if (syncPlanLoading.value || syncExtracting.value) return
+  syncPlanLoading.value = true
+  try {
+    syncPlan.value = await semanticAssetService.extractPlan()
+    const p = syncPlan.value
+    if (!p.toExtract && !p.deleted && !p.invalidated) {
+      turns.value.push({ role: 'assistant', content: t('assetMgmt.sync.noChange') })
+    } else if (!p.toExtract) {
+      // 只有失效(删除文件)没有待提取：校验结果直接告知
+      turns.value.push({ role: 'assistant', content: t('assetMgmt.sync.invalidatedOnly', { n: p.invalidated, d: p.deleted }) })
+      await Promise.all([loadSemantic(), refreshStatus()])
+    } else {
+      syncPlanOpen.value = true
+    }
+  } catch (e: any) {
+    turns.value.push({ role: 'assistant', content: e?.message || t('assetMgmt.sync.planFailed') })
+  } finally {
+    syncPlanLoading.value = false
+  }
+}
+
+function cancelSyncExtract() {
+  syncPlanOpen.value = false
+}
+
+async function confirmSyncExtract() {
+  syncPlanOpen.value = false
+  const p = syncPlan.value
+  turns.value.push({ role: 'user', content: t('assetMgmt.sync.chatUser') })
+  const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
+  const r = await semanticAssetService.syncExtract('start', { batch: 10 })
+  if (r.started) {
+    syncJob.value = { running: true, total: r.total ?? 0, done: 0, saved: 0, batches: 0, errors: [] }
+    syncJobChatIdx.value = idx
+    turns.value[idx].content = t('assetMgmt.sync.chatStart', {
+      n: r.total ?? 0, batches: p?.batchesEstimate ?? Math.ceil((r.total ?? 0) / 10),
+      added: p?.added ?? 0, modified: p?.modified ?? 0,
+      never: p?.neverExtracted ?? 0, stale: p?.staleOnly ?? 0,
+    })
+    startSyncJobPolling()
+  } else if (r.reason === 'already_running') {
+    turns.value[idx].content = t('assetMgmt.sync.chatBusy')
+    syncJobChatIdx.value = idx
+    startSyncJobPolling()
+  } else if (r.reason === 'unowned_running') {
+    turns.value[idx].content = t('assetMgmt.sync.chatUnownedBusy')
+  } else {
+    turns.value[idx].content = r.message || t('assetMgmt.sync.chatFailed')
+  }
+}
+
+function stopSyncJobPolling() {
+  if (syncJobTimer) { clearInterval(syncJobTimer); syncJobTimer = null }
+}
+
+async function pollSyncJobOnce() {
+  try {
+    const st = await semanticAssetService.syncExtractStatus()
+    const wasRunning = !!syncJob.value?.running
+    syncJob.value = st
+    if (st.running) {
+      if (st.done !== syncJobDoneSeen) {
+        syncJobDoneSeen = st.done
+        void loadSemantic()
+      }
+    } else if (wasRunning) {
+      stopSyncJobPolling()
+      if (syncJobChatIdx.value >= 0) {
+        const errs = st.errors ?? []
+        let msg = st.stopped
+          ? t('assetMgmt.sync.chatStopped', { done: st.done, saved: st.saved })
+          : t('assetMgmt.sync.chatDone', { done: st.done, saved: st.saved })
+        if (errs.length) {
+          msg += '\n' + t('assetMgmt.unowned.chatJobErrors')
+          for (const e of errs.slice(0, 3)) msg += `\n· ${e.error}`
+        }
+        turns.value[syncJobChatIdx.value].content = msg
+        syncJobChatIdx.value = -1
+      }
+      await Promise.all([loadSemantic(), refreshStatus(), loadOverview(), loadCoverage(), loadUnownedFiles()])
+    }
+  } catch { /* 轮询失败静默，下轮重试 */ }
+}
+
+function startSyncJobPolling() {
+  stopSyncJobPolling()
+  syncJobDoneSeen = syncJob.value?.done ?? -1
+  syncJobTimer = setInterval(pollSyncJobOnce, 2500)
+  void pollSyncJobOnce()
+}
+
+async function stopSyncExtract() {
+  await semanticAssetService.syncExtract('stop')
+  void pollSyncJobOnce()
+}
+
+/** 未归属资产行的「关联 N」chip 数据(仅「其它」域资产；锚点文件反查)。 */
+function unownedLinkOf(a: SemanticAsset): UnownedCrossLink | null {
+  if (componentsOf(a).length) return null
+  const file = a.astRefs?.[0]?.file || ''
+  return unownedLinks.value.get(file) ?? null
+}
+
+function unownedLinkTitle(l: UnownedCrossLink): string {
+  return l.byComponent.slice(0, 6).map((c) => `${c.component}(${c.count})`).join(' · ')
+}
+
+/** 资产 id → 跨组件关联(「其它」域资产渲染入口：links 变化时统一重算一次)。 */
+const unownedLinkByAssetId = computed<Map<string, UnownedCrossLink>>(() => {
+  const m = new Map<string, UnownedCrossLink>()
+  for (const a of items.value) {
+    const l = unownedLinkOf(a)
+    if (l) m.set(a.id, l)
+  }
+  return m
+})
+
 /** 变更文件 → 类别 快查表（语义行徽标 / 图谱节点着色用）。
  *  选了对比对(base/target)后跟随所选口径(默认对=基线→工作区，与 baselineDiff 一致)。 */
 const changedFileMap = computed<Map<string, 'added' | 'modified' | 'deleted'>>(() => {
@@ -605,15 +1036,87 @@ function assetChangeMark(a: SemanticAsset): 'added' | 'modified' | 'deleted' | '
   return mark
 }
 
-/** 资产 id → 变更类别（语义行徽标渲染入口：diffMode/变更集变化时统一重算一次）。 */
+/** 资产 id → 变更类别（语义行徽标渲染入口：diffMode/变更集变化时统一重算一次）。
+ *  对比口径(compare)优先：资产级 side/strong 判定精确到符号段，文件级口径仅兜底。 */
+const cmpBucketById = computed<Map<string, 'modified' | 'added' | 'deleted'>>(() => {
+  const m = new Map<string, 'modified' | 'added' | 'deleted'>()
+  const c = compareData.value
+  if (!diffMode.value || !c) return m
+  for (const a of c.assets.changed) m.set(a.id, 'modified')
+  for (const a of c.assets.new) m.set(a.id, 'added')
+  for (const a of c.assets.removed) m.set(a.id, 'deleted')
+  return m
+})
+
 const changeMarkById = computed<Map<string, 'added' | 'modified' | 'deleted'>>(() => {
   const m = new Map<string, 'added' | 'modified' | 'deleted'>()
   if (!diffMode.value) return m
+  const buckets = cmpBucketById.value
   for (const a of items.value) {
-    const mark = assetChangeMark(a)
+    const mark = buckets.get(a.id) ?? assetChangeMark(a)
     if (mark) m.set(a.id, mark)
   }
   return m
+})
+
+/** 基线对比 · 文件级变化归属：文件(树侧路径) → {changed,new,removed}(按首锚点归属)。
+ *  compare 资产经 items 反查(锚点路径与树同基准)；结果供文件行彩色计数 chip。 */
+const diffFileCounts = computed<Map<string, { changed: number; added: number; deleted: number }>>(() => {
+  const m = new Map<string, { changed: number; added: number; deleted: number }>()
+  if (!diffMode.value) return m
+  const byId = new Map(items.value.map((x) => [x.id, x]))
+  const buckets = cmpBucketById.value
+  for (const [id, bucket] of buckets) {
+    const a = byId.get(id)
+    const f = a?.astRefs?.[0]?.file || ''
+    if (!f) continue
+    const e = m.get(f) ?? { changed: 0, added: 0, deleted: 0 }
+    if (bucket === 'modified') e.changed += 1
+    else if (bucket === 'added') e.added += 1
+    else e.deleted += 1
+    m.set(f, e)
+  }
+  return m
+})
+
+/** 待提取/新增文件集合(compare 的 git 路径可能是 workDir 相对) → 双向后缀匹配树侧路径。 */
+function treeFileOf(cmpFile: string): string {
+  const u = diffFileUniverse.value
+  if (u.has(cmpFile)) return cmpFile
+  for (const f of u) {
+    if (f.endsWith('/' + cmpFile) || cmpFile.endsWith('/' + f)) return f
+  }
+  return ''
+}
+const pendingFileSet = computed<Set<string>>(() => {
+  const s = new Set<string>()
+  if (diffMode.value && compareData.value) {
+    for (const f of compareData.value.assets.pending.files) {
+      const t = treeFileOf(f)
+      if (t) s.add(t)
+    }
+  }
+  return s
+})
+const addedFileSet = computed<Set<string>>(() => {
+  const s = new Set<string>()
+  if (diffMode.value && compareData.value) {
+    for (const f of compareData.value.files.added) {
+      const t = treeFileOf(f)
+      if (t) s.add(t)
+    }
+  }
+  return s
+})
+/** 文件匹配全集(树侧锚点 ∪ 组件 owns)，供后缀对齐反查。 */
+const diffFileUniverse = computed<Set<string>>(() => {
+  const s = new Set<string>()
+  for (const a of items.value) {
+    const f = a.astRefs?.[0]?.file
+    if (f) s.add(f)
+  }
+  for (const c of treeComps.value) for (const f of c.owns) s.add(f)
+  return s
 })
 
 /** diff 徽标文案（markAdded/markModified/markDeleted）；空 mark 返回空串。 */
@@ -753,25 +1256,21 @@ async function refreshStatus() {
   }
 }
 
-async function reconcile() {
-  reconciling.value = true
-  try {
-    await semanticAssetService.reconcile(true)
-    await Promise.all([loadSemantic(), refreshStatus()])
-  } finally {
-    reconciling.value = false
-  }
-}
-
 async function refreshOne(a: SemanticAsset) {
   try {
     const res = await semanticAssetService.refreshAsset(a.id)
     if (res.asset) {
       const i = items.value.findIndex((x) => x.id === a.id)
-      if (i >= 0) items.value[i] = { ...items.value[i], ...res.asset }
+      if (i >= 0) {
+        items.value[i] = { ...items.value[i], ...res.asset }
+        items.value = [...items.value]
+      }
     } else if (res.status === 'deleted') {
       const i = items.value.findIndex((x) => x.id === a.id)
-      if (i >= 0) items.value[i] = { ...items.value[i], status: 'deleted', needsUpdate: 1 }
+      if (i >= 0) {
+        items.value[i] = { ...items.value[i], status: 'deleted', needsUpdate: 1 }
+        items.value = [...items.value]
+      }
     }
     await refreshStatus()
   } catch (err: any) {
@@ -783,8 +1282,32 @@ function usable(a: SemanticAsset): boolean {
   return a.status !== 'stale' && a.status !== 'deleted' && !a.needsUpdate
 }
 
-function toggle(id: string) {
+// 展开卡懒加载 detail：列表(light 模式)不带 detail 大字段；首次展开时
+// 单查 /{id} 回填。detailDone 含"已确认无 detail"的行，避免重复请求。
+const detailLoading = reactive<Record<string, boolean>>({})
+const detailDone = new Set<string>()
+async function toggle(id: string) {
   expanded[id] = !expanded[id]
+  if (!expanded[id] || detailDone.has(id)) return
+  const i = items.value.findIndex((x) => x.id === id)
+  if (i < 0 || items.value[i]!.detail !== undefined) {
+    detailDone.add(id)
+    return
+  }
+  detailLoading[id] = true
+  try {
+    const full = await semanticAssetService.detail(id)
+    const j = items.value.findIndex((x) => x.id === id)
+    if (j >= 0) {
+      items.value[j] = { ...items.value[j], detail: full?.detail }
+      items.value = [...items.value]
+    }
+  } catch {
+    /* 详情加载失败静默：展开块仅缺 fields/steps 等小节 */
+  } finally {
+    detailDone.add(id)
+    detailLoading[id] = false
+  }
 }
 
 function kindIcon(k: SemanticAsset['kind']) {
@@ -1029,11 +1552,6 @@ async function switchTier(tier: 'low' | 'mid' | 'high') {
   }
 }
 
-/** 对话提取：聚焦右栏对话并预填提取提示（按需提取，提议制由 agent 承接）。 */
-function askExtractGeneral() {
-  askAgent(t('assetMgmt.chatExtractPrompt'))
-}
-
 /** 按需提取：确定性直调 REST(不走对话模型——小模型可能不按工具协议执行而编造报告)。
  *  过程与结果以对话回合呈现；完成后刷新资产数据。 */
 async function askExtractComponent(key: string, name: string) {
@@ -1165,8 +1683,20 @@ watch(q, () => {
 // 分页已移除：语义资产为树形分组视图，全量加载(loadSemantic limit=2000)。
 
 onMounted(async () => {
-  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage()])
+  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage(), loadUnownedFiles(), loadUnownedLinks()])
   turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
+  // 批量提取是后端作业：页面重开(此前关闭)也要接管进度轮询
+  void pollUnownedJobOnce().then(() => {
+    if (unownedJob.value?.running) startUnownedJobPolling()
+  })
+  void pollSyncJobOnce().then(() => {
+    if (syncJob.value?.running) startSyncJobPolling()
+  })
+})
+
+onUnmounted(() => {
+  stopUnownedJobPolling()
+  stopSyncJobPolling()
 })
 </script>
 
@@ -1203,32 +1733,39 @@ onMounted(async () => {
           <template v-else-if="baselineDiffData.stale">{{ t('assetMgmt.diff.stale', { n: totalChanged }) }}</template>
           <template v-else>{{ t('assetMgmt.diff.noBaseline') }}</template>
         </span>
-        <div class="flex-1" />
-        <button
-          class="btn btn-sm btn-ghost"
-          @click="historyOpen = true"
-        >
-          <ClipboardDocumentListIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.historyButton') }}
-        </button>
-        <button
-          class="btn btn-sm btn-ghost"
-          :disabled="reconciling"
-          @click="reconcile"
-        >
-          <ArrowPathIcon
-            class="w-3.5 h-3.5"
-            :class="reconciling ? 'animate-spin' : ''"
-          />{{ reconciling ? t('assetMgmt.reconciling') : t('assetMgmt.reconcile') }}
-        </button>
-        <button
-          class="btn btn-sm btn-primary"
-          :disabled="busy"
-          :title="t('assetMgmt.chatExtractHint')"
-          @click="askExtractGeneral"
-        >
-          <SparklesIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.chatExtract') }}
-        </button>
-      </div>
+         <div class="flex-1" />
+         <button
+           class="btn btn-sm btn-ghost"
+           @click="historyOpen = true"
+         >
+           <ClipboardDocumentListIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.historyButton') }}
+         </button>
+         <!-- 校验并提取：先校验变化量 → 确认 → 快照批量作业(后端，页面关闭不影响) -->
+         <button
+           class="btn btn-sm"
+           :class="syncExtracting ? 'btn-primary' : 'btn-primary'"
+           :disabled="syncPlanLoading || syncExtracting"
+           :title="syncExtracting
+             ? t('assetMgmt.sync.extractingHint', { saved: syncJob?.saved ?? 0 })
+             : t('assetMgmt.sync.hint')"
+           @click="planSyncExtract"
+         >
+           <ArrowPathIcon
+             class="w-3.5 h-3.5"
+             :class="syncPlanLoading ? 'animate-spin' : ''"
+           />{{ syncExtracting
+             ? t('assetMgmt.sync.extracting', { done: syncJob?.done ?? 0, total: syncJob?.total ?? 0 })
+             : (syncPlanLoading ? t('assetMgmt.sync.planning') : t('assetMgmt.sync.button')) }}
+         </button>
+         <button
+           v-if="syncExtracting"
+           class="btn btn-sm btn-ghost"
+           :title="t('assetMgmt.sync.stop')"
+           @click="stopSyncExtract"
+         >
+           <StopIcon class="w-3.5 h-3.5" />
+         </button>
+       </div>
       <!-- 基线对比 · 对比起止 head 选择(任意 head 对 vs head/工作区；全 tab 可见) + 紧凑结果 -->
       <div v-if="diffMode" class="mt-2.5 flex items-center gap-1.5 flex-wrap">
         <span class="text-[10px] text-ctp-overlay0 shrink-0">{{ t('assetMgmt.diff.cmpBase') }}</span>
@@ -1519,12 +2056,12 @@ onMounted(async () => {
                   <span class="w-4 shrink-0" />
                   <input
                     type="checkbox"
-                    class="accent-ctp-mauve shrink-0"
+                    class="accent-ctp-yellow shrink-0"
                     :checked="scopeSel.includes(OTHER_KEY)"
                     @change="toggleOther"
                   >
-                  <span class="text-[11px] text-ctp-subtext1">{{ t('assetMgmt.other') }}</span>
-                  <span class="text-[9px] text-ctp-overlay0 truncate">{{ t('assetMgmt.otherDesc') }}</span>
+                  <span class="text-[11px] text-ctp-subtext1">{{ t('assetMgmt.unownedFiles') }}</span>
+                  <span class="text-[9px] text-ctp-overlay0 truncate">{{ t('assetMgmt.unowned.desc') }}</span>
                 </div>
               </div>
               <div class="flex items-center justify-between border-t border-ctp-surface0 pt-1.5">
@@ -1589,6 +2126,8 @@ onMounted(async () => {
                 :tab="gt"
                 :diff-files="changedFilesForGraph"
                 :compare-data="compareData"
+                :file-index="graphFileIndexes[gt.id] ?? []"
+                :comp-names="graphCompNames"
                 @close="closeGraphTab"
               />
             </div>
@@ -1958,12 +2497,12 @@ onMounted(async () => {
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <button
-                  v-if="g.key !== OTHER_KEY && treeLevel > 0 && (hasChildren(g.key) || (subtreeCount.get(g.key) ?? 0) > 0)"
+                  v-if="(compCollapsible.get(g.key) ?? false) || hasChildren(g.key) || (subtreeCount.get(g.key) ?? 0) > 0"
                   class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
                   @click="toggleOpen(g.key)"
                 >
                   <ChevronDownIcon
-                    v-if="compOpen[g.key] !== false"
+                    v-if="compExpandState(g.key)"
                     class="w-3 h-3"
                   />
                   <ChevronRightIcon
@@ -1979,9 +2518,9 @@ onMounted(async () => {
                   v-if="g.key !== OTHER_KEY"
                   class="w-3 h-3 text-ctp-blue shrink-0"
                 />
-                <span
+                <DocumentTextIcon
                   v-else
-                  class="w-3 h-3 shrink-0"
+                  class="w-3 h-3 text-ctp-yellow shrink-0"
                 />
                 <span
                   v-if="g.hierLevel"
@@ -2019,6 +2558,54 @@ onMounted(async () => {
                   </button>
                 </template>
                 <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ subtreeCount.get(g.key) ?? 0 }}</span>
+                <!-- 基线对比 · 组件(子树)变化上卷：需更新/新增/移除 彩色计数 -->
+                <template v-if="diffMode && diffRollup.get(g.key)">
+                  <span
+                    v-if="diffRollup.get(g.key)!.changed"
+                    class="chip !text-[8px] bg-ctp-yellow/15 text-ctp-yellow shrink-0 font-mono"
+                    :title="t('assetMgmt.diff.changedN', { n: diffRollup.get(g.key)!.changed })"
+                  >{{ t('assetMgmt.diff.chipChanged', { n: diffRollup.get(g.key)!.changed }) }}</span>
+                  <span
+                    v-if="diffRollup.get(g.key)!.added"
+                    class="chip !text-[8px] bg-ctp-green/15 text-ctp-green shrink-0 font-mono"
+                    :title="t('assetMgmt.diff.newN', { n: diffRollup.get(g.key)!.added })"
+                  >{{ t('assetMgmt.diff.chipAdded', { n: diffRollup.get(g.key)!.added }) }}</span>
+                  <span
+                    v-if="diffRollup.get(g.key)!.deleted"
+                    class="chip !text-[8px] bg-ctp-red/15 text-ctp-red shrink-0 font-mono"
+                    :title="t('assetMgmt.diff.removedN', { n: diffRollup.get(g.key)!.deleted })"
+                  >{{ t('assetMgmt.diff.chipRemoved', { n: diffRollup.get(g.key)!.deleted }) }}</span>
+                </template>
+                <!-- 未归属组：截断提示 + 循环批量提取(后端作业，页面关闭不影响；每批 10) -->
+                <template v-if="g.key === OTHER_KEY">
+                  <span
+                    v-if="unownedMeta?.truncated"
+                    class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                    :title="t('assetMgmt.unowned.truncatedHint', { total: unownedMeta?.totalFiles ?? 0, owned: unownedMeta?.ownedCount ?? 0 })"
+                  >{{ t('assetMgmt.unowned.truncated') }}</span>
+                  <span
+                    v-if="unownedExtracting"
+                    class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue shrink-0 font-mono"
+                    :title="unownedJobHint"
+                  >{{ t('assetMgmt.unowned.extracting', { done: unownedJob?.done ?? 0, total: unownedJob?.total ?? 0 }) }}</span>
+                  <button
+                    v-if="unownedExtracting"
+                    class="text-ctp-overlay0 hover:text-ctp-red p-0.5 shrink-0"
+                    :title="t('assetMgmt.unowned.stop')"
+                    @click="stopUnownedExtract"
+                  >
+                    <StopIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-else
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0 disabled:opacity-40"
+                    :disabled="unownedExtractingOne !== ''"
+                    :title="t('assetMgmt.unowned.extractAllHint')"
+                    @click="extractAllUnowned"
+                  >
+                    <SparklesIcon class="w-3 h-3" />
+                  </button>
+                </template>
                 <template v-if="g.key !== OTHER_KEY">
                   <span
                     v-if="compCoverage(g.key)"
@@ -2050,12 +2637,12 @@ onMounted(async () => {
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <button
-                  v-if="treeLevel === 3"
+                  v-if="row.n"
                   class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
                   @click="toggleFileOpen(row.fk!)"
                 >
                   <ChevronDownIcon
-                    v-if="fileOpen[row.fk!] !== false"
+                    v-if="fileExpandState(row.fk!)"
                     class="w-3 h-3"
                   />
                   <ChevronRightIcon
@@ -2072,7 +2659,77 @@ onMounted(async () => {
                   class="font-mono text-[10px] text-ctp-subtext1 truncate"
                   :title="row.file"
                 >{{ fileBase(row.file!) }}</span>
-                <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ row.n }}</span>
+                <!-- 文件级语义图谱：该文件锚定的资产子图(有资产才可看) -->
+                <button
+                  v-if="row.n"
+                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0"
+                  :title="t('assetMgmt.graph.viewFileGraph')"
+                  @click="openGraphTab('file', row.file!, fileBase(row.file!))"
+                >
+                  <Squares2X2Icon class="w-3 h-3" />
+                </button>
+                <!-- 基线对比 · 文件级变化归属：需更新/新增/移除彩色计数 + 待提取/新增文件 -->
+                <template v-if="diffMode && row.file">
+                  <span
+                    v-if="diffFileCounts.get(row.file)?.changed"
+                    class="chip !text-[8px] bg-ctp-yellow/15 text-ctp-yellow shrink-0 font-mono"
+                  >{{ t('assetMgmt.diff.chipChanged', { n: diffFileCounts.get(row.file)!.changed }) }}</span>
+                  <span
+                    v-if="diffFileCounts.get(row.file)?.added"
+                    class="chip !text-[8px] bg-ctp-green/15 text-ctp-green shrink-0 font-mono"
+                  >{{ t('assetMgmt.diff.chipAdded', { n: diffFileCounts.get(row.file)!.added }) }}</span>
+                  <span
+                    v-if="diffFileCounts.get(row.file)?.deleted"
+                    class="chip !text-[8px] bg-ctp-red/15 text-ctp-red shrink-0 font-mono"
+                  >{{ t('assetMgmt.diff.chipRemoved', { n: diffFileCounts.get(row.file)!.deleted }) }}</span>
+                  <span
+                    v-if="pendingFileSet.has(row.file)"
+                    class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                    :title="t('assetMgmt.diff.pendingN', { n: compareData?.assets.pending.count ?? 0 })"
+                  >{{ t('assetMgmt.diff.chipPending') }}</span>
+                  <span
+                    v-else-if="addedFileSet.has(row.file)"
+                    class="chip !text-[8px] bg-ctp-green/15 text-ctp-green shrink-0"
+                    :title="t('assetMgmt.diff.pendingNew', { n: compareData?.newFileCount ?? 0 })"
+                  >{{ t('assetMgmt.diff.chipNewFile') }}</span>
+                </template>
+                <span
+                  v-if="!row.unowned"
+                  class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]"
+                >{{ row.n }}</span>
+                <!-- 未归属文件行：未提取标记 + 跨组件关联 chip + 单文件提取 -->
+                <template v-if="row.unowned">
+                  <span
+                    v-if="row.extractable === false"
+                    class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay0 shrink-0"
+                    :title="t('assetMgmt.unowned.noSymbolsHint')"
+                  >{{ t('assetMgmt.unowned.noSymbols') }}</span>
+                  <span
+                    v-else-if="!row.n"
+                    class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1 shrink-0"
+                  >{{ t('assetMgmt.unowned.noAssets') }}</span>
+                  <span
+                    v-if="row.n"
+                    class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]"
+                  >{{ row.n }}</span>
+                  <span
+                    v-if="unownedLinks.get(row.file || '')"
+                    class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0 cursor-help"
+                    :title="unownedLinkTitle(unownedLinks.get(row.file || '')!)"
+                  >{{ t('assetMgmt.unowned.related', { n: unownedLinks.get(row.file || '')!.crossCount }) }}</span>
+                  <button
+                    v-if="row.extractable !== false"
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0 disabled:opacity-40"
+                    :disabled="unownedExtractingOne !== '' || unownedExtracting"
+                    :title="t('assetMgmt.unowned.extractOne')"
+                    @click="extractUnownedFile(row.file!)"
+                  >
+                    <SparklesIcon
+                      class="w-3 h-3"
+                      :class="{ 'animate-pulse text-ctp-mauve': unownedExtractingOne === row.file }"
+                    />
+                  </button>
+                </template>
               </div>
               <!-- 资产卡片(挂文件下/组件直属) -->
               <div
@@ -2129,6 +2786,13 @@ onMounted(async () => {
                     <ArrowsRightLeftIcon class="w-2.5 h-2.5 inline -mt-0.5" />
                     {{ diffMarkLabel(changeMarkById.get(a.id)) }}
                   </span>
+                  <!-- 未归属资产与组件内资产的跨组件关联：点击跳图谱聚焦，出入边即关联 -->
+                  <span
+                    v-if="unownedLinkByAssetId.get(a.id)"
+                    class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0 cursor-pointer hover:bg-ctp-teal/25"
+                    :title="unownedLinkTitle(unownedLinkByAssetId.get(a.id)!)"
+                    @click="openGraphTab('asset', a.id, a.name)"
+                  >{{ t('assetMgmt.unowned.related', { n: unownedLinkByAssetId.get(a.id)!.crossCount }) }}</span>
                   <span class="flex-1" />
                   <span
                     class="text-[9px] text-ctp-overlay0 font-mono"
@@ -2194,6 +2858,12 @@ onMounted(async () => {
                   v-if="expanded[a.id]"
                   class="border-t border-ctp-mauve/15 px-2 py-1.5 space-y-1 text-[10px]"
                 >
+                  <div
+                    v-if="detailLoading[a.id] && a.detail === undefined"
+                    class="text-ctp-overlay0 animate-pulse"
+                  >
+                    {{ t('assetMgmt.detailLoading') }}
+                  </div>
                   <PseudoExplainer :asset-id="a.id" :initial="a.pseudo" />
                   <div v-if="a.detail?.fields?.length">
                     <div class="font-medium text-ctp-mauve mb-0.5">
@@ -2538,6 +3208,67 @@ onMounted(async () => {
               />
             </div>
           </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- 校验并提取 · 变化范围确认弹窗：先校验后执行(所见即所得，按快照执行) -->
+    <div
+      v-if="syncPlanOpen && syncPlan"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-ctp-crust/70 p-4"
+      @click.self="cancelSyncExtract"
+    >
+      <div class="panel max-w-lg w-full max-h-[80vh] flex flex-col">
+        <div class="panel-header">
+          <span class="flex items-center gap-2 text-sm font-semibold text-ctp-text">
+            <ArrowPathIcon class="w-4 h-4 text-ctp-blue" />{{ t('assetMgmt.sync.planTitle') }}
+          </span>
+        </div>
+        <div class="p-3 space-y-2 overflow-auto text-xs">
+          <p class="text-ctp-subtext1">{{ t('assetMgmt.sync.planDesc') }}</p>
+          <div class="grid grid-cols-2 gap-1.5">
+            <div class="rounded-md bg-ctp-surface0/60 px-2.5 py-1.5 flex items-center justify-between">
+              <span class="text-ctp-subtext0">{{ t('assetMgmt.sync.rowAdded') }}</span>
+              <span class="font-mono text-ctp-green">{{ syncPlan.added }}</span>
+            </div>
+            <div class="rounded-md bg-ctp-surface0/60 px-2.5 py-1.5 flex items-center justify-between">
+              <span class="text-ctp-subtext0">{{ t('assetMgmt.sync.rowModified') }}</span>
+              <span class="font-mono text-ctp-yellow">{{ syncPlan.modified }}</span>
+            </div>
+            <div class="rounded-md bg-ctp-surface0/60 px-2.5 py-1.5 flex items-center justify-between">
+              <span class="text-ctp-subtext0">{{ t('assetMgmt.sync.rowNever') }}</span>
+              <span class="font-mono text-ctp-sky">{{ syncPlan.neverExtracted }}</span>
+            </div>
+            <div class="rounded-md bg-ctp-surface0/60 px-2.5 py-1.5 flex items-center justify-between">
+              <span class="text-ctp-subtext0">{{ t('assetMgmt.sync.rowStale') }}</span>
+              <span class="font-mono text-ctp-peach">{{ syncPlan.staleOnly }}</span>
+            </div>
+          </div>
+          <div class="rounded-md border border-ctp-blue/30 bg-ctp-blue/10 px-2.5 py-1.5 flex items-center justify-between">
+            <span class="text-ctp-text font-semibold">{{ t('assetMgmt.sync.rowTotal') }}</span>
+            <span class="font-mono text-ctp-blue">{{ syncPlan.toExtract }}</span>
+          </div>
+          <p
+            v-if="syncPlan.deleted || syncPlan.invalidated"
+            class="text-ctp-overlay1"
+          >{{ t('assetMgmt.sync.deletedNote', { d: syncPlan.deleted, n: syncPlan.invalidated }) }}</p>
+          <p class="text-ctp-overlay0">{{ t('assetMgmt.sync.batchesNote', { n: syncPlan.batchesEstimate ?? Math.ceil(syncPlan.toExtract / 10) }) }}</p>
+          <div v-if="syncPlan.files.length">
+            <p class="text-ctp-overlay0 mb-1">{{ t('assetMgmt.sync.filesSample') }}</p>
+            <div class="rounded-md bg-ctp-mantle border border-ctp-surface1 p-2 font-mono text-[10px] text-ctp-subtext1 max-h-32 overflow-auto space-y-0.5">
+              <div v-for="f in syncPlan.files" :key="f">{{ f }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 px-3 py-2 border-t border-ctp-surface0">
+          <button
+            class="btn btn-sm btn-ghost"
+            @click="cancelSyncExtract"
+          >{{ t('assetMgmt.sync.cancel') }}</button>
+          <button
+            class="btn btn-sm btn-primary"
+            @click="confirmSyncExtract"
+          >{{ t('assetMgmt.sync.confirm') }}</button>
         </div>
       </div>
     </div>

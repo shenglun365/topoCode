@@ -90,8 +90,17 @@ def _grouped_search_items(root: Optional[str], project: Optional[str],
     pid = project_id_for(root, project)
     total = store.SemanticAssetsStore.count(pid, q, kind, scopes=scopes, level=level)
     fetch = max(int(total), 1) + 1
+    # light=True：列表仅需元数据+ast_refs(排序分组用)；detail 等大字段由
+    # /{id} 详情接口按需提供。3776 资产实测省 ~2MB 载荷与一半 JSON 解析。
     rows = store.SemanticAssetsStore.search(pid, q, kind, limit=fetch, offset=0,
-                                            scopes=scopes, level=level)
+                                            scopes=scopes, level=level, light=True)
+    # meta 瘦身：meta.files(实测 1.4MB/3774 资产)列表无消费方——树/组件归属
+    # 只需 scopes/componentId；stale 提示需 invalidateReason。
+    for a in rows:
+        m = a.get("meta")
+        if isinstance(m, dict) and "files" in m:
+            a["meta"] = {k: v for k, v in m.items()
+                         if k in ("scopes", "componentId", "invalidateReason")}
     order, file_to_comp = _component_order_map(root, project)
     if not order:
         return rows[int(offset):int(offset) + int(limit)]
@@ -202,9 +211,13 @@ def reconcile_semantic(root: Optional[str], project: Optional[str],
         affected = probe.get("affectedFiles") or []
         invalidated += invalidate_assets_for_files(
             pid, affected, change="modified", reason="新文件依赖影响",
-            root=root, force=True)
+            root=root, force=False)
+        # force=False(哈希校验)：新文件只是"可能影响"受依赖文件的资产——
+        # 受影响文件内容未变时不应失效。此前 force=True 命中即失效，配合惰性
+        # reconcile 形成死循环：提取→active→搜索触发 reconcile→强制 stale→
+        # 又视为待提取→再提取(实测 2 个文件 × 30 资产反复重提)。
     invalidated = list(dict.fromkeys(invalidated))
-    rows = store.SemanticAssetsStore.all_status(pid, limit=4000)
+    rows = store.SemanticAssetsStore.all_status(pid, limit=4000, light=True)
     stale = sum(1 for a in rows if a.get("status") == "stale")
     active = sum(1 for a in rows if a.get("status") == "active")
     return {"stale": stale, "active": active, "invalidated": invalidated,
@@ -1066,8 +1079,8 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
                     aliases.append(old_name)
                 if aliases:
                     payload["nameAlias"] = aliases
-            if old.get("status") == "deleted":
-                payload["status"] = "active"   # 软删后重新生成 → 恢复
+            if old.get("status") != "active":
+                payload["status"] = "active"   # 软删/误标 stale 后重新提取 → 复活
             # 合并多组件归属：同一代码在 INCLUDE/CALL 下提取 → 归并到既有行。
             old_meta = dict((old.get("meta") or {}))
             old_scopes = old_meta.get("scopes") or []
@@ -1186,6 +1199,15 @@ def extract_scope(root: Optional[str], project: Optional[str],
         degraded, len(all_assets), len(ctx.get("text") or ""))
     # 名称继承：re-extract 覆盖前保住用户改名(旧行名优先)+ 新资产墓碑承接
     _inherit_names(pid, all_assets)
+    # files/symbols 范围的 scope_key 按内容集派生(此前恒 "_" → _save_assets 的
+    # stale 清扫按 scope_type+scope_key 圈定，每提一个新文件就把之前所有
+    # files 范围资产全部误标 stale——列表(search 仅 active)看似"没入库")。
+    if scope_type == "files" and not scope_key:
+        scope_key = "files:" + hashlib.md5(
+            "\n".join(sorted(ctx.get("files") or files or [])).encode("utf-8")).hexdigest()[:16]
+    elif scope_type == "symbols" and not scope_key:
+        scope_key = "symbols:" + hashlib.md5(
+            "\n".join(sorted(ctx.get("symbols") or symbols or [])).encode("utf-8")).hexdigest()[:16]
     saved = _save_assets(pid, scope_type or "project", scope_key or "_", all_assets, ctx)
     # 节点简介(node_brief)：提取时按文件批量生成(LLM 路径)，失败静默(选中时可懒生成)
     try:
@@ -2253,7 +2275,8 @@ def semantic_graph(root: Optional[str], project: Optional[str],
                    kind: str = "", scopes: Optional[List[str]] = None,
                    level: str = "", limit: int = 2000,
                    focus: str = "", hops: int = 1,
-                   include_indirect: bool = False) -> Dict[str, Any]:
+                   include_indirect: bool = False,
+                   file: str = "", files: str = "") -> Dict[str, Any]:
     """语义层图谱：节点=语义资产，边=资产间 relations，锚点=AST 引用。
 
     边 = 存库基础 relations(按 id/name/nameAlias/符号解析) ∪ 程序化派生边
@@ -2263,11 +2286,46 @@ def semantic_graph(root: Optional[str], project: Optional[str],
 
     focus: 单资产聚焦——仅返回该资产周围的 hops 跳子图(默认 1 跳)；
     未传 focus 时返回范围内全部节点。
+    file: 文件范围——仅返回锚定该文件的资产子图(文件级图谱入口)。
+    files: 多文件范围(逗号分隔)——大项目图谱 >500 资产时由文件索引浮窗
+    手动圈定范围(资产索引同款交互)，与 file 取并集。
     """
     _lazy_reconcile(root, project)
     pid = project_id_for(root, project)
     rows = store.SemanticAssetsStore.search(pid, text="", kind=kind,
                                             limit=limit, scopes=scopes, level=level)
+    # stale 资产同样入图：列表可见「需更新」徽标，图谱却查不到会让
+    # 文件级/资产级入口空图(实测：文件资产全 stale → "暂无语义资产")。
+    # 仅排除 deleted；kind/level/scope 过滤与 search 同口径。
+    seen_ids = {r.get("id") for r in rows}
+    for a in store.SemanticAssetsStore.list_stale(pid):
+        aid = a.get("id")
+        if not aid or aid in seen_ids:
+            continue
+        if kind in SEMANTIC_KINDS and (a.get("kind") or "") != kind:
+            continue
+        if level in SEMANTIC_LEVELS and (a.get("level") or "") != level:
+            continue
+        if scopes:
+            hit = False
+            for s in scopes:
+                if s == "__other__":
+                    if (a.get("scopeType") or "") != "comm":
+                        hit = True
+                elif a.get("scopeKey") == s or s in ((a.get("meta") or {}).get("scopes") or []):
+                    hit = True
+            if not hit:
+                continue
+        seen_ids.add(aid)
+        rows.append(a)
+    # 文件范围：单文件(file) ∪ 多文件(files 逗号分隔，文件索引浮窗圈定)。
+    file_set = {_norm_path(f) for f in (files or "").split(",") if f.strip()}
+    if file:
+        file_set.add(_norm_path(file))
+    if file_set:
+        rows = [a for a in rows
+                if any(_norm_path(r.get("file") or "") in file_set
+                       for r in (a.get("astRefs") or []))]
     all_active = [a for a in store.SemanticAssetsStore.all_status(pid, limit=4000)
                   if a.get("status") == "active"]
     idx = _relation_target_index(all_active)
@@ -3812,7 +3870,17 @@ def invalidate_assets_for_files(pid: str, files: List[str], *,
     if not files:
         return []
     invalidated = []
-    for a in store.SemanticAssetsStore.all_status(pid, limit=2000):
+    # 单遍 md5 记忆化：同一文件被多资产锚定时此前逐资产重复读盘+哈希
+    # (92 个修改文件 × 多锚点 → 数百次重复 md5)。缓存生命周期 = 本次调用，
+    # 不跨请求——不影响下一次 reconcile 对文件真实变化的感知。
+    md5_cache: Dict[str, str] = {}
+
+    def _md5(f: str) -> str:
+        if f not in md5_cache:
+            md5_cache[f] = _file_md5(root, f)
+        return md5_cache[f]
+
+    for a in store.SemanticAssetsStore.all_status(pid, limit=2000, light=True):
         if a.get("status") == "deleted":
             continue
         anchors = {_norm_path(f): h for f, h in (a.get("anchorHashes") or {}).items()}
@@ -3823,7 +3891,7 @@ def invalidate_assets_for_files(pid: str, files: List[str], *,
             continue
         if not force:
             changed_hit = [f for f in hit if (not anchors[f])
-                           or (_file_md5(root, f) and _file_md5(root, f) != anchors[f])]
+                           or (_md5(f) and _md5(f) != anchors[f])]
             if not changed_hit:
                 continue
         # 文件已删 → change=deleted；否则 modified(哈希变化或受新文件影响)
@@ -4513,10 +4581,15 @@ async def api_mappings(root: Optional[str] = None, project: Optional[str] = None
 
 @router.get("/kb/semantic/status")
 async def api_status(root: Optional[str] = None, project: Optional[str] = None):
-    """资产新鲜度状态(含 stale/deleted 统计 + 变更文件)。"""
-    _lazy_reconcile(root, project, force=True)
+    """资产新鲜度状态(含 stale/deleted 统计 + 变更文件)。
+
+    reconcile 走 TTL 惰性(30s 内不重算，与 search 共享入口限频)；强制校验
+    由「校验并提取」显式触发。此前 force=True 使每次开页都全量 reconcile
+    (git diff + md5 逐文件)，实测 2.8s——纯开页只需计数。
+    """
+    _lazy_reconcile(root, project)
     pid = project_id_for(root, project)
-    rows = store.SemanticAssetsStore.all_status(pid, limit=4000)
+    rows = store.SemanticAssetsStore.all_status(pid, limit=4000, light=True)
     counts = {"active": 0, "stale": 0, "deleted": 0, "needsUpdate": 0}
     for a in rows:
         counts[a.get("status") or "active"] = counts.get(a.get("status") or "active", 0) + 1
@@ -4553,18 +4626,21 @@ async def api_semantic_stats(root: Optional[str] = None, project: Optional[str] 
 @router.get("/kb/semantic/graph")
 async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
                     kind: str = "", scope: str = "", level: str = "", limit: int = 2000,
-                    focus: str = "", hops: int = 1, include_indirect: bool = False):
+                    focus: str = "", hops: int = 1, include_indirect: bool = False,
+                    file: str = "", files: str = ""):
     """语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。
 
     scope: 逗号分隔的组件范围(scope_key)；kind: 资产种类过滤；level: 抽象粒度过滤。
     focus: 单资产聚焦(仅返回其周围 hops 跳子图)；hops: 聚焦跳数，默认 1。
     include_indirect: 追加 1 跳中转间接边(虚线展示，默认关)。
+    file: 文件范围(锚定该文件的资产子图；文件级图谱入口)。
+    files: 多文件范围(逗号分隔；大项目 >500 资产时文件索引浮窗圈定)。
     """
     scopes = [s.strip() for s in (scope or "").split(",") if s.strip()] or None
     lvl = level if level in SEMANTIC_LEVELS else ""
     return ok(semantic_graph(root, project, kind, scopes, level=lvl, limit=limit,
                              focus=focus, hops=hops,
-                             include_indirect=include_indirect))
+                             include_indirect=include_indirect, file=file, files=files))
 
 @router.get("/kb/semantic/asset-compare")
 async def api_asset_compare(root: Optional[str] = None, project: Optional[str] = None,
@@ -4585,6 +4661,99 @@ async def api_asset_compare(root: Optional[str] = None, project: Optional[str] =
     res = await asyncio.to_thread(_cmp.cached_compare, root, project, base, target)
     if isinstance(res, dict) and res.get("error"):
         return err(400, res["error"])
+    return ok(res)
+
+
+@router.get("/kb/semantic/unowned-files")
+async def api_unowned_files(root: Optional[str] = None, project: Optional[str] = None,
+                            limit: int = 500):
+    """未归属组件的文件清单(KB owns 未覆盖, 含每文件已提取资产数)。
+
+    ⚠️ 与 asset-compare 同理必须注册在 /kb/semantic/{asset_id} 之前，否则被动态段吞掉。
+    """
+    from . import unowned as _uo
+    res = await asyncio.to_thread(_uo.unowned_files, root, project, limit)
+    if isinstance(res, dict) and res.get("error"):
+        return err(400, res["error"])
+    return ok(res)
+
+
+@router.get("/kb/semantic/unowned-cross-links")
+async def api_unowned_cross_links(root: Optional[str] = None, project: Optional[str] = None,
+                                  file: Optional[str] = None, limit: int = 200):
+    """未归属文件 ↔ 已归属组件的跨组件符号关联(按组件聚合 + 样本边)。"""
+    from . import unowned as _uo
+    res = await asyncio.to_thread(_uo.unowned_cross_links, root, project, file, limit)
+    if isinstance(res, dict) and res.get("error"):
+        return err(400, res["error"])
+    return ok(res)
+
+
+@router.post("/kb/semantic/unowned-extract")
+async def api_unowned_extract(request: Request):
+    """启动「未归属文件」循环批量提取后端作业(单飞，daemon 线程，页面关闭不影响)。
+
+    body: {root?, project?, batch?=10, level?='implementation', action?='start'|'stop'}
+    start 立即返回 {started, total}；进度经 GET /unowned-extract-status 轮询。
+    """
+    from . import unowned as _uo
+    body = await request.json()
+    action = (body.get("action") or "start").strip().lower()
+    if action == "stop":
+        res = await asyncio.to_thread(_uo.unowned_extract_stop,
+                                      body.get("root"), body.get("project"))
+        return ok(res)
+    res = await asyncio.to_thread(_uo.unowned_extract_start, body.get("root"),
+                                  body.get("project"),
+                                  int(body.get("batch") or 10),
+                                  body.get("level") or "implementation")
+    return ok(res)
+
+
+@router.get("/kb/semantic/unowned-extract-status")
+async def api_unowned_extract_status(root: Optional[str] = None, project: Optional[str] = None):
+    """批量提取作业进度轮询。⚠️ 必须注册在 /kb/semantic/{asset_id} 之前。"""
+    from . import unowned as _uo
+    res = await asyncio.to_thread(_uo.unowned_extract_status, root, project)
+    return ok(res)
+
+
+@router.post("/kb/semantic/extract-plan")
+async def api_extract_plan(request: Request):
+    """「校验并提取」校验阶段：reconcile 标准化 stale + 变化量统计与样本清单。"""
+    from . import sync_extract as _se
+    body = await request.json()
+    res = await asyncio.to_thread(_se.extract_plan, body.get("root"), body.get("project"))
+    if isinstance(res, dict) and res.get("error"):
+        return err(400, res["error"])
+    return ok(res)
+
+
+@router.post("/kb/semantic/sync-extract")
+async def api_sync_extract(request: Request):
+    """「校验并提取」执行阶段：快照批量提取后端作业(单飞，daemon 线程，页面关闭不影响)。
+
+    body: {root?, project?, batch?=10, level?='implementation', action?='start'|'stop'}
+    """
+    from . import sync_extract as _se
+    body = await request.json()
+    action = (body.get("action") or "start").strip().lower()
+    if action == "stop":
+        res = await asyncio.to_thread(_se.sync_extract_stop,
+                                      body.get("root"), body.get("project"))
+        return ok(res)
+    res = await asyncio.to_thread(_se.sync_extract_start, body.get("root"),
+                                  body.get("project"),
+                                  int(body.get("batch") or 10),
+                                  body.get("level") or "implementation")
+    return ok(res)
+
+
+@router.get("/kb/semantic/sync-extract-status")
+async def api_sync_extract_status(root: Optional[str] = None, project: Optional[str] = None):
+    """快照批量提取作业进度轮询。⚠️ 必须注册在 /kb/semantic/{asset_id} 之前。"""
+    from . import sync_extract as _se
+    res = await asyncio.to_thread(_se.sync_extract_status, root, project)
     return ok(res)
 
 

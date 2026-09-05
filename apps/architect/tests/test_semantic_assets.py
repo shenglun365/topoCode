@@ -364,9 +364,17 @@ def test_reconcile_new_file_reverse_probe(tmp_path, monkeypatch):
         "added": ["new_mod.py"], "modified": [], "deleted": []})
     _patch_all(monkeypatch, "probe_impact", lambda root, project, files: {
         "dependents": ["dep.py"], "deps": [], "affectedFiles": ["new_mod.py", "dep.py"]})
+    # 受影响但锚点内容未变(磁盘文件不存在→无哈希) → 不失效。
+    # 此前 force=True 命中即失效，配合惰性 reconcile 形成"提取→active→
+    # 搜索触发 reconcile→强制 stale→又视为待提取"的死循环(实测回归)。
     res = S.reconcile_semantic("/tmp/x", None, force=True)
     assert res["newFiles"] == ["new_mod.py"]
-    assert "sa-s-i-e-97" in res["invalidated"]
+    assert "sa-s-i-e-97" not in res["invalidated"]
+    assert store.SemanticAssetsStore.get("sa-s-i-e-97")["needsUpdate"] == 0
+    # 受影响且内容真的变了(md5 与提取时锚点哈希不一致) → 失效
+    _patch_all(monkeypatch, "_file_md5", lambda root, f: "h2" if f == "dep.py" else "")
+    res2 = S.reconcile_semantic("/tmp/x", None, force=True)
+    assert "sa-s-i-e-97" in res2["invalidated"]
     assert store.SemanticAssetsStore.get("sa-s-i-e-97")["needsUpdate"] == 1
 
 

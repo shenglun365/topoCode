@@ -12,6 +12,17 @@ class SemanticAssetsStore:
     TABLE = "arch_semantic_assets"
     KINDS = ("entity", "contract", "state", "rule", "process", "decision")
     LEVELS = ("implementation", "logic", "business")
+    # 列表瘦身列(仅排除 pseudo/detail/line_notes/node_brief/edge_notes)：
+    # 树/列表/图谱仅需元数据+ast_refs；detail(3776 行实测≈2MB)等大字段只在
+    # /{id} 详情需要。anchor_hashes 必须保留——失效校验(invalidate)靠它与
+    # 当前文件 md5 比对判定内容真变。列清单须与建表列保持同步。
+    LIGHT_COLUMNS = (
+        "id, project_id, kind, level, name, desc, ast_refs, scope_type, scope_key, "
+        "scope_comm_id, source, src_hash, change, status, meta, anchor_hashes, "
+        "canonical_key, renamed_from, name_alias, needs_update, last_checked_at, "
+        "deleted_at, created_at, updated_at, parent_id, voided_reason, voided_at, "
+        "voided_by, voided_framework_version, stale_by_framework"
+    )
 
     @classmethod
     def all(cls, project_id: str = "", kind: str = "", limit: int = 200):
@@ -93,12 +104,15 @@ class SemanticAssetsStore:
     @classmethod
     def search(cls, project_id: str, text: str = "", kind: str = "",
                limit: int = 20, offset: int = 0,
-               scopes: Optional[list] = None, level: str = "") -> list[dict]:
+               scopes: Optional[list] = None, level: str = "",
+               light: bool = False) -> list[dict]:
         """全文朴素检索：名称/描述命中，支持分页(limit/offset)与范围/粒度过滤。
 
         scopes: 组件 id 列表；含哨兵 "__other__" 表示非 comm 范围资产(scope_type != 'comm')。
         scope 命中含 meta.scopes 多组件归属(INCLUDE/CALL 两套口径共享代码只存一份)。
+        light=True: 只取 LIGHT_COLUMNS(列表/树视图瘦身，省 detail 等大字段与 JSON 解析)。
         """
+        cols = cls.LIGHT_COLUMNS if light else "*"
         conds = ["project_id = ?", "status = 'active'"]
         params: list = [project_id]
         if kind in cls.KINDS:
@@ -115,7 +129,7 @@ class SemanticAssetsStore:
         if scope_sql:
             conds.append(scope_sql)
             params += scope_params
-        sql = (f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+        sql = (f"SELECT {cols} FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
                f"ORDER BY updated_at DESC LIMIT ? OFFSET ?")
         params += [int(limit), int(offset)]
         rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id or None)
@@ -196,19 +210,24 @@ class SemanticAssetsStore:
         rows, _ = _fetchall_routed(
             cls.TABLE,
             "SELECT * FROM arch_semantic_assets WHERE project_id = ? "
-            "AND status = 'stale' ORDER BY updated_at DESC LIMIT 200",
+            "AND status = 'stale' ORDER BY updated_at DESC LIMIT 2000",
             (project_id,),
             project_id or None,
         )
         return [_row_to_api(r) for r in rows]
 
     @classmethod
-    def all_status(cls, project_id: str, limit: int = 400) -> list[dict]:
-        """全部状态(含 stale/deleted，供 reconcile/status 统计)。"""
+    def all_status(cls, project_id: str, limit: int = 400, light: bool = False) -> list[dict]:
+        """全部状态(含 stale/deleted，供 reconcile/status 统计)。
+
+        light=True: 只取 LIGHT_COLUMNS——统计/失效校验仅需 status/needsUpdate/
+        anchorHashes(meta 外独立列已保留)等，跳过 detail 等大字段解析。
+        """
+        cols = cls.LIGHT_COLUMNS if light else "*"
         rows, _ = _fetchall_routed(
             cls.TABLE,
-            "SELECT * FROM arch_semantic_assets WHERE project_id = ? "
-            "ORDER BY updated_at DESC LIMIT ?",
+            f"SELECT {cols} FROM arch_semantic_assets WHERE project_id = ? "
+            f"ORDER BY updated_at DESC LIMIT ?",
             (project_id, int(limit)),
             project_id or None,
         )

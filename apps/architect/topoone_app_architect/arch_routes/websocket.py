@@ -24,6 +24,79 @@ _MIN_CHAT_MAX_TOKENS = 8192
 # 避免前端「知识库检索中…」永久挂起、内容始终不返回。
 _STREAM_IDLE_TIMEOUT_S = 60.0
 
+# ── LLM chunk 实时转发过滤器 ─────────────────────────────────────────────
+# 旧实现整轮缓冲 round_text、结束后才 24 字符假流式重发——LLM 生成期间(可长达
+# 数十秒)前端零反馈，用户感知为「处理完成后还要等很久才有消息」。
+# 现改为边生成边转发，但必须剔除 [TOOL_CALL] 块(不可展示)：命中疑似标记后
+# 停止本轮实时转发(余量在回合结束时按 strip 后文本对齐补发)。
+import re as _re
+_LIVE_SUSPECT = _re.compile(r'(?:^|\n)[ \t]*```|\[?\s*TOOL_CALL(?![\w])')
+_LIVE_TOOL_HINT = _re.compile(r'\[?\s*TOOL_CALL(?![\w])')
+_LIVE_HOLD_BACK = 24
+_LIVE_FENCE_PROBE = 32   # 围栏后需积累的判定字符数(区分代码块与工具块围栏前缀)
+
+
+class _LiveForward:
+    """单轮 LLM 输出的实时转发状态机：
+    - 普通文本 → 放行(留尾部 holdback 防标记被截断)；
+    - markdown 代码围栏 → 积累 _LIVE_FENCE_PROBE 字符判定：其后出现 TOOL_CALL
+      → 从围栏起静默(工具块不可展示)；否则是普通代码块 → 放行继续；
+    - 直接命中 TOOL_CALL 标记 → 自标记起静默至本轮结束。"""
+
+    def __init__(self):
+        self.buf = ""          # 待判定缓冲(含末尾 holdback)
+        self.blocked = False   # 命中工具块 → 本轮停止实时转发
+        self.emitted = ""      # 本轮已实时发出的文本
+
+    def _emit(self, out: list, text: str) -> None:
+        out.append(text)
+        self.emitted += text
+
+    def feed(self, delta: str) -> str:
+        if not delta:
+            return ""
+        self.buf += delta
+        out: list = []
+        while not self.blocked:
+            m = _LIVE_SUSPECT.search(self.buf)
+            if not m:
+                break
+            is_fence = m.group(0).lstrip().startswith("`")
+            if is_fence:
+                after = self.buf[m.end():]
+                if len(after) < _LIVE_FENCE_PROBE:
+                    break              # 判定字符不足 → 等下一段输入
+                if _LIVE_TOOL_HINT.search(after[:_LIVE_FENCE_PROBE]):
+                    self._emit(out, self.buf[:m.start()])
+                    self.buf = self.buf[m.start():]
+                    self.blocked = True
+                    break
+                # 普通代码块 → 放行围栏本身，继续扫描其后内容
+                self._emit(out, self.buf[:m.end()])
+                self.buf = self.buf[m.end():]
+                continue
+            # 直接 TOOL_CALL 标记(可能带 [ 前缀) → 自标记起静默
+            self._emit(out, self.buf[:m.start()])
+            self.buf = self.buf[m.start():]
+            self.blocked = True
+            break
+        if not self.blocked and len(self.buf) > _LIVE_HOLD_BACK:
+            cut = len(self.buf) - _LIVE_HOLD_BACK
+            self._emit(out, self.buf[:cut])
+            self.buf = self.buf[cut:]
+        return "".join(out)
+
+    def flush(self, stripped_final: str) -> str:
+        """回合结束：按 strip_tool_blocks 后的最终文本对齐补发余量。"""
+        core = self.emitted.strip()
+        rem = stripped_final
+        if core and stripped_final.startswith(core):
+            rem = stripped_final[len(core):]
+        elif core and core in stripped_final:
+            rem = stripped_final.split(core, 1)[-1]
+        self.emitted += rem
+        return rem
+
 
 def _chat_max_tokens() -> Optional[int]:
     """读 KB 侧 `llm.maxTokens` 偏好(与 llm.modelId 同源)；未配置返回 None → 主后端用模型配置。
@@ -146,6 +219,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
     request_id = None
     assistant_text = ""
+    visible = ""            # 本次回合实际发出的 chunk 总量(实时转发+补发；done/落库以此为准)
     tool_round = 0
     loop_fell_back = False
     chat_start_sent = False
@@ -174,9 +248,16 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         chat_start_sent = True
         round_text = ""
         round_ok = True
+        live = _LiveForward()   # 本轮实时转发状态(工具块抑制)
         async for event_type, payload in _iter_llm_events(rid, idle_timeout=_STREAM_IDLE_TIMEOUT_S):
             if event_type == "chunk":
-                round_text += payload.get("text") or ""
+                text = payload.get("text") or ""
+                round_text += text
+                # 实时转发(剔除工具块)：LLM 生成即逐字可见，不再整轮沉默
+                out = live.feed(text)
+                if out:
+                    visible += out
+                    await websocket.send_json({"type": "chunk", "requestId": rid, "delta": out})
             elif event_type == "reasoning":
                 # 推理内容单独转发(不混入正文)；前端可折叠展示思考过程
                 text = payload.get("text") or ""
@@ -196,6 +277,12 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             round_ok = False
             logger.warning("[kb-chat] stream idle timeout rid=%s partial_chars=%s → llm.sync 收尾",
                            rid, len(round_text))
+        # 本轮结束：补发 strip 工具块后的余量(holdback 尾巴/被静默段的合法文本)
+        if round_ok:
+            rem = live.flush(req_agent.strip_tool_blocks(round_text))
+            if rem:
+                visible += rem
+                await websocket.send_json({"type": "chunk", "requestId": rid, "delta": rem})
         if not round_ok:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
@@ -244,35 +331,36 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         assistant_text = req_agent.strip_tool_blocks(round_text)
         break
 
-    # 最终答案按小块逐字转发，保持流式观感
-    if assistant_text:
-        CHUNK_SIZE = 24
-        for i in range(0, len(assistant_text), CHUNK_SIZE):
-            await websocket.send_json({"type": "chunk", "requestId": request_id,
-                                       "delta": assistant_text[i:i + CHUNK_SIZE]})
-    elif not loop_fell_back:
-        # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
-        # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
+    # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
+    # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
+    if not loop_fell_back and not assistant_text and not visible:
         await _ensure_chat_start()
         assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
-        if assistant_text:
-            CHUNK_SIZE = 24
-            for i in range(0, len(assistant_text), CHUNK_SIZE):
-                await websocket.send_json({"type": "chunk", "requestId": request_id,
-                                           "delta": assistant_text[i:i + CHUNK_SIZE]})
-        else:
-            await websocket.send_json({"type": "error", "requestId": request_id,
-                                       "message": "LLM 未返回内容"})
-    else:
-        await websocket.send_json({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
-    if assistant_text:
+
+    # 降级通道(llm.sync / 断流收尾)无逐字流 → 假流式补发；实时转发路径
+    # visible 已含全部内容，跳过避免重复。断流后收尾的极端场景 partial
+    # 可见 + 完整收尾文本 → 追加(轻微重复优于丢内容)。
+    if assistant_text and (loop_fell_back or not visible):
+        CHUNK_SIZE = 24
+        for i in range(0, len(assistant_text), CHUNK_SIZE):
+            d = assistant_text[i:i + CHUNK_SIZE]
+            visible += d
+            await websocket.send_json({"type": "chunk", "requestId": request_id,
+                                       "delta": d})
+
+    # done/落库以「本次回合实际可见文本」为准(含工具轮前的说明文字，
+    # 与前端逐字累积的内容严格一致，避免 done 覆盖造成跳变)。
+    final_content = visible or assistant_text
+    if final_content:
         assistant_msg_id = store.next_id("m")
         store.ConversationsStore.append_message({
             "id": assistant_msg_id, "conversationId": conv_id,
-            "role": "assistant", "time": _ts(), "content": assistant_text,
+            "role": "assistant", "time": _ts(), "content": final_content,
         })
         await websocket.send_json({"type": "done", "conversationId": conv_id,
-                                   "content": assistant_text, "messageId": assistant_msg_id})
+                                   "content": final_content, "messageId": assistant_msg_id})
+    else:
+        await websocket.send_json({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
 
 
 async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds: int = 4) -> str:

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon, DocumentTextIcon, CubeIcon,
   CodeBracketIcon, CheckCircleIcon, XCircleIcon, MagnifyingGlassIcon, ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
 import { projectService } from '@/services/project-service'
-import type { KbMatchResult, ProjectOverview } from '@/types'
+import type { KbMatchResult, ProjectOverview, ProjectOverviewComponent } from '@/types'
 import KbLinkDialog from '@/components/project/KbLinkDialog.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 
@@ -80,6 +80,65 @@ function statusLabel(s: string): string {
 }
 function statusCls(s: string): string {
   return s === 'A' ? 'text-ctp-green' : s === 'D' ? 'text-ctp-red' : 'text-ctp-blue'
+}
+
+// ---- 组件变更：组件树父子层级渲染(逐层可开可闭，含未归属分组) + 分组展开到变更文件清单 ----
+interface CompTreeNode { c: ProjectOverviewComponent; children: CompTreeNode[] }
+
+const compTree = computed<CompTreeNode[]>(() => {
+  const list = overview.value?.diff.byComponent ?? []
+  const map = new Map<string, CompTreeNode>(list.map((c) => [c.id, { c, children: [] }]))
+  const roots: CompTreeNode[] = []
+  for (const node of map.values()) {
+    const parent = node.c.parentId ? map.get(node.c.parentId) : undefined
+    if (parent && parent !== node) parent.children.push(node)
+    else roots.push(node)
+  }
+  return roots
+})
+
+const expandedComps = ref<Set<string>>(new Set())
+const filesOpenComps = ref<Set<string>>(new Set())
+
+watch(compTree, (tree) => {
+  expandedComps.value = new Set(tree.map((n) => n.c.id))   // 默认展开顶层，子层收起
+  filesOpenComps.value = new Set()
+})
+
+/** 可见节点(DFS)：收起的组件其子树不渲染。 */
+const visibleComps = computed(() => {
+  const out: { c: ProjectOverviewComponent; children: CompTreeNode[] }[] = []
+  const walk = (nodes: CompTreeNode[]) => {
+    for (const n of nodes) {
+      out.push(n)
+      if (expandedComps.value.has(n.c.id)) walk(n.children)
+    }
+  }
+  walk(compTree.value)
+  return out
+})
+
+function toggleComp(id: string) {
+  const next = new Set(expandedComps.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedComps.value = next
+}
+
+function toggleCompFiles(id: string) {
+  const next = new Set(filesOpenComps.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  filesOpenComps.value = next
+}
+
+const allExpanded = computed(() => compTree.value.length > 0 &&
+  compTree.value.every((r) => expandedComps.value.has(r.c.id)))
+
+function toggleAllComps() {
+  expandedComps.value = allExpanded.value
+    ? new Set()
+    : new Set(compTree.value.map((n) => n.c.id))
 }
 </script>
 
@@ -161,8 +220,31 @@ function statusCls(s: string): string {
               <span class="font-mono break-all">{{ overview.kb.kbSourceDir }}</span>
             </div>
           </div>
+          <!-- 基线信息(并入知识库关联组，不单列)：基线 commit + 分支 + 仓库 -->
+          <div class="mt-3 pt-2.5 border-t border-ctp-surface0/70 flex items-center gap-2 text-xs flex-wrap">
+            <span class="text-ctp-overlay1 shrink-0">{{ t('overviewHome.baseline') }}</span>
+            <template v-if="overview.baseline.exists">
+              <span class="font-mono text-ctp-text">{{ overview.baseline.commit?.slice(0, 8) }}</span>
+              <span v-if="overview.baseline.id" class="font-mono text-ctp-overlay1">({{ overview.baseline.id }})</span>
+            </template>
+            <span v-else class="text-ctp-subtext0">{{ t('overviewHome.noBaseline') }}</span>
+            <span class="text-ctp-surface1 shrink-0">|</span>
+            <span class="text-ctp-overlay1 shrink-0">{{ t('overviewHome.branch') }}</span>
+            <span class="font-mono text-ctp-text">{{ overview.head.branch || overview.branch || 'main' }}</span>
+            <span class="text-ctp-surface1 shrink-0">|</span>
+            <span class="text-ctp-overlay1 shrink-0">{{ t('overviewHome.repo') }}</span>
+            <span
+              class="chip shrink-0"
+              :class="overview.repoKind === 'remote' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext1'"
+              :title="overview.repoKind === 'remote' ? t('overviewHome.repoRemoteHint') : t('overviewHome.repoLocalHint')"
+            >{{ overview.repoKind === 'remote' ? t('overviewHome.repoRemote') : t('overviewHome.repoLocal') }}</span>
+            <span
+              class="font-mono text-ctp-text truncate max-w-[40ch]"
+              :title="overview.repoKind === 'remote' ? overview.remoteUrl : overview.workDir"
+            >{{ overview.repoKind === 'remote' ? overview.remoteUrl : overview.workDir }}</span>
+          </div>
         </div>
-        <div v-else class="text-sm text-ctp-subtext0 flex items-center gap-1.5">
+        <div v-else class="text-sm text-ctp-subtext0 flex items-center gap-1.5 flex-wrap">
           <span class="inline-flex items-center gap-1.5 text-ctp-red text-xs">
             <XCircleIcon class="w-4 h-4" /> {{ t('overviewHome.kbNotLinked') }}
           </span>
@@ -174,6 +256,7 @@ function statusCls(s: string): string {
             <MagnifyingGlassIcon class="w-3.5 h-3.5" />
             {{ matching ? t('app.loading') : t('overviewHome.findLink') }}
           </button>
+          <span class="text-xs text-ctp-subtext0">{{ t('overviewHome.noBaseline') }}</span>
         </div>
       </section>
 
@@ -183,53 +266,72 @@ function statusCls(s: string): string {
         @close="closeLinkDialog"
       />
 
-      <!-- ③ 基线信息 -->
-      <section class="panel p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <DocumentTextIcon class="w-4 h-4 text-ctp-sapphire" />
-          <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.baseline') }}</span>
-        </div>
-        <p v-if="overview.baseline.exists" class="text-xs text-ctp-text font-mono">
-          {{ overview.baseline.commit?.slice(0, 8) }}
-          <span v-if="overview.baseline.id" class="text-ctp-overlay1"> ({{ overview.baseline.id }})</span>
-        </p>
-        <p v-else class="text-xs text-ctp-subtext0">{{ t('overviewHome.noBaseline') }}</p>
-      </section>
-
-      <!-- ④ 组件变更情况 -->
+      <!-- ③ 组件变更情况（组件树父子层级 · 逐层开合 · 含未归属分组 · 可展开到变更文件） -->
       <section class="panel p-4">
         <div class="flex items-center gap-2 mb-3">
           <CubeIcon class="w-4 h-4 text-ctp-mauve" />
           <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.componentChanges') }}</span>
+          <span class="flex-1" />
+          <button
+            v-if="overview.kb.linked && compTree.length"
+            class="btn btn-ghost !px-1.5 !py-0.5 !text-[10px]"
+            @click="toggleAllComps"
+          >{{ allExpanded ? t('overviewHome.collapseAll') : t('overviewHome.expandAll') }}</button>
         </div>
-        <div v-if="overview.kb.linked && overview.diff.byComponent.length" class="space-y-1">
-          <div
-            v-for="c in overview.diff.byComponent"
-            :key="c.id"
-            class="flex items-center justify-between gap-3 border border-ctp-surface0 rounded-lg px-3 py-2"
-            :style="{ marginLeft: `${c.level * 20}px` }"
-          >
-            <div class="flex items-center gap-1.5 min-w-0">
-              <ChevronRightIcon v-if="c.level > 0" class="w-3 h-3 text-ctp-overlay0 shrink-0" />
+        <div v-if="overview.kb.linked && compTree.length" class="space-y-1">
+          <template v-for="node in visibleComps" :key="node.c.id">
+            <div
+              class="flex items-center gap-1.5 border border-ctp-surface0 rounded-lg px-3 py-2"
+              :style="{ marginLeft: `${node.c.level * 20}px` }"
+            >
+              <button
+                v-if="node.children.length"
+                class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
+                :title="expandedComps.has(node.c.id) ? t('overviewHome.collapse') : t('overviewHome.expand')"
+                @click.stop="toggleComp(node.c.id)"
+              >
+                <ChevronRightIcon class="w-3.5 h-3.5 transition-transform" :class="expandedComps.has(node.c.id) ? 'rotate-90' : ''" />
+              </button>
+              <span v-else class="w-[18px] shrink-0" />
               <span
                 class="truncate text-sm"
-                :class="c.level > 0 ? 'text-ctp-subtext1' : 'text-ctp-text font-medium'"
-                :title="c.id ? `${c.name || t('overviewHome.unowned')} (${c.id})` : t('overviewHome.unowned')"
-              >{{ c.name || t('overviewHome.unowned') }}</span>
+                :class="node.c.level > 0 ? 'text-ctp-subtext1' : 'text-ctp-text font-medium'"
+                :title="node.c.id === '__unowned__' ? t('overviewHome.unownedHint') : `${node.c.name || t('overviewHome.unowned')} (${node.c.id})`"
+              >{{ node.c.name || t('overviewHome.unowned') }}</span>
+              <span class="flex-1" />
+              <button
+                class="flex items-center gap-1 text-[11px] text-ctp-overlay1 hover:text-ctp-text shrink-0"
+                :title="t('overviewHome.filesToggle')"
+                @click.stop="toggleCompFiles(node.c.id)"
+              >
+                <DocumentTextIcon class="w-3.5 h-3.5" />
+                {{ node.c.files.length }} {{ t('overviewHome.filesUnit') }}
+                <ChevronRightIcon class="w-3 h-3 transition-transform" :class="filesOpenComps.has(node.c.id) ? 'rotate-90' : ''" />
+              </button>
+              <span class="text-[11px] text-ctp-green shrink-0">{{ t('overviewHome.added') }} {{ node.c.totalAdded ?? node.c.added }}</span>
+              <span class="text-[11px] text-ctp-blue shrink-0">{{ t('overviewHome.modified') }} {{ node.c.totalModified ?? node.c.modified }}</span>
+              <span class="text-[11px] text-ctp-red shrink-0">{{ t('overviewHome.deleted') }} {{ node.c.totalDeleted ?? node.c.deleted }}</span>
             </div>
-            <div class="flex items-center gap-2 text-[11px] shrink-0">
-              <span class="text-ctp-overlay1">{{ c.files.length }} {{ t('overviewHome.filesUnit') }}</span>
-              <span class="text-ctp-green">{{ t('overviewHome.added') }} {{ c.added }}</span>
-              <span class="text-ctp-blue">{{ t('overviewHome.modified') }} {{ c.modified }}</span>
-              <span class="text-ctp-red">{{ t('overviewHome.deleted') }} {{ c.deleted }}</span>
+            <!-- 变更文件清单(分组内联展开；父组件为含子孙的并集) -->
+            <div
+              v-if="filesOpenComps.has(node.c.id) && node.c.files.length"
+              class="border border-ctp-surface0/60 rounded-lg bg-ctp-mantle/40 overflow-hidden max-h-64 overflow-y-auto"
+              :style="{ marginLeft: `${(node.c.level + 1) * 20}px` }"
+            >
+              <div
+                v-for="f in node.c.files"
+                :key="f"
+                class="px-3 py-1 font-mono text-[10px] text-ctp-subtext0 truncate border-b border-ctp-surface0/40 last:border-b-0"
+                :title="f"
+              >{{ f }}</div>
             </div>
-          </div>
+          </template>
         </div>
         <p v-if="!overview.kb.linked" class="text-xs text-ctp-subtext0">{{ t('overviewHome.noComponentNeedKb') }}</p>
-        <p v-else-if="!overview.diff.byComponent.length" class="text-xs text-ctp-subtext0">{{ t('overviewHome.noComponentChange') }}</p>
+        <p v-else-if="!compTree.length" class="text-xs text-ctp-subtext0">{{ t('overviewHome.noComponentChange') }}</p>
       </section>
 
-      <!-- ⑤ 代码变更情况（对比基线） -->
+      <!-- ④ 代码变更情况（对比基线） -->
       <section class="panel p-4">
         <div class="flex items-center gap-2 mb-3">
           <CodeBracketIcon class="w-4 h-4 text-ctp-green" />

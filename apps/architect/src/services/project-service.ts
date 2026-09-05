@@ -63,6 +63,10 @@ export const projectService = {
   async flagProject(opts: { execRoot?: string; root?: string; project?: string; pinned?: boolean; favorite?: boolean }): Promise<ProjectInfo> {
     return apiPost<ProjectInfo>('/project/flag', opts)
   },
+  /** 项目改名(仅 architect 本地 arch_projects，不联动 KB)。 */
+  async renameProject(opts: { name: string; execRoot?: string; root?: string; project?: string }): Promise<ProjectInfo> {
+    return apiPost<ProjectInfo>('/project/rename', opts)
+  },
   /** 删除项目列表记录(可选同时删除 architect 相关数据，如架构快照)。 */
   async deleteProject(opts: { execRoot?: string; root?: string; project?: string; deleteData?: boolean }): Promise<{ deleted: boolean; deleteData: boolean; id: string }> {
     return apiPost('/project/delete', opts)

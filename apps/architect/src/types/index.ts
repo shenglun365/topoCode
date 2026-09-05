@@ -1260,15 +1260,25 @@ export interface ProjectOverviewComponent {
   parentId: string
   /** 层级深度(根=0)，列表按层级 DFS 先序(父先于子) */
   level: number
+  /** 自身独占计数(未被子孙组件覆盖，消重复) */
   added: number
   modified: number
   deleted: number
+  /** 自身独占的变更文件清单(叶子=全量，父级=未被子组件覆盖部分) */
   files: string[]
+  /** 子树上卷合计(含子孙)，供父组件汇总展示 */
+  totalAdded?: number
+  totalModified?: number
+  totalDeleted?: number
+  totalFiles?: number
 }
 
 export interface ProjectOverview {
   workDir: string
+  /** 仅真实远端 URL(git origin)；本地仓库为空串 */
   remoteUrl: string
+  /** 仓库类型：remote=有远端 origin / local=纯本地仓库 */
+  repoKind?: 'remote' | 'local'
   branch: string
   defaultBranch: string
   head: { commit: string; branch: string; ahead: number; behind: number; dirty: boolean }
@@ -1484,4 +1494,16 @@ export interface WorkflowMission {
 export interface GuidedWorkflow {
   missions: WorkflowMission[]
   ctx: () => WorkflowCtx
+}
+
+/** 图谱文件索引条目(父级按当前图谱 tab 范围预算；>500 资产强制手动圈定)。 */
+export interface GraphFileEntry {
+  /** 树侧文件路径(首锚点)。 */
+  file: string
+  /** 源码目录(file 去掉文件名)。 */
+  dir: string
+  /** 该文件锚定的范围内语义资产数。 */
+  n: number
+  /** 归属组件 id 列表(componentsOf 口径，首项为主分组)。 */
+  comps: string[]
 }
