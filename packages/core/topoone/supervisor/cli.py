@@ -40,7 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # === 架构查询 ===
     p_comm = sub.add_parser("community", help="查看社区结构")
-    p_comm.add_argument("--type", choices=["INCLUDE", "CALL"], default="INCLUDE")
+    p_comm.add_argument("--type", choices=["UNIFIED", "INCLUDE", "CALL"], default="UNIFIED")
     p_comm.add_argument("--level", type=int, default=0)
     p_comm.add_argument("--json", action="store_true")
 
@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_arch_analyze = p_arch_subs.add_parser("analyze", help="批量 LLM 分析社区")
     p_arch_analyze.add_argument("--all", action="store_true", help="分析全部社区")
     p_arch_analyze.add_argument("--level", default="L0")
-    p_arch_analyze.add_argument("--edge-type", default="INCLUDE", choices=["INCLUDE", "CALL"])
+    p_arch_analyze.add_argument("--edge-type", default="UNIFIED", choices=["UNIFIED", "INCLUDE", "CALL"])
     p_arch_analyze.add_argument("--output", default="", help="输出目录")
     p_arch_analyze.add_argument("--model", default="", help="LLM 模型 ID")
 
@@ -705,7 +705,7 @@ def _cmd_query(args):
     if args.command == "community":
         result = ctx.get_summary()
         communities = ctx._store.get_communities(
-            ctx._task_id, edge_type=getattr(args, "type", "INCLUDE")
+            ctx._task_id, edge_type=getattr(args, "type", "UNIFIED")
         )
         result["communities"] = [
             {"comm_id": c.get("comm_id"), "node_count": c.get("node_count"), "quality_score": c.get("quality_score")}
@@ -862,7 +862,7 @@ def _cmd_arch(args):
     print(f"  project: {project_root}")
     if action == "analyze":
         print(f"  level: {getattr(args, 'level', 'L0')}")
-        print(f"  type: {getattr(args, 'edge_type', 'INCLUDE')}")
+        print(f"  type: {getattr(args, 'edge_type', 'UNIFIED')}")
     elif action == "export":
         print(f"  format: {getattr(args, 'format', 'md')}")
         print(f"  output: {getattr(args, 'output') or '.topocode/architecture/'}")

@@ -32,7 +32,6 @@ except ImportError:
 
 from topoone.config import (
     HUB_DEGREE_RATIO, HUB_MIN_DEGREE, ORPHAN_MAX_DEGREE,
-    INTRAn_FILE_EDGE_WEIGHT, INTRAn_FILE_EDGE_FALLBACK_WEIGHT,
     LARGE_GRAPH_NODE_THRESHOLD,
 )
 
@@ -82,7 +81,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
 
     # 3. 构建图 + 枢纽/孤立节点过滤
     graph, edge_directions, hub_nodes, orphan_nodes, node_coreness = _build_graph(
-        edges, edge_type, filter_intra_file=False, node_lookup=node_lookup
+        edges, edge_type, node_lookup=node_lookup
     )
     all_nodes = set(graph.keys())
     for neighbors in graph.values():
@@ -131,56 +130,6 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         node_coreness=node_coreness,
     )
 
-    # 5. 检测是否需要备选方案（CALL 图连通性过高）
-    use_fallback = False
-    if edge_type == "CALL" and len(communities) == 1:
-        l0_comms = analysis_store.get_communities(task_id, edge_type, "L0")
-        if l0_comms and l0_comms[0].get("quality_score", 1.0) < 0.01:
-            use_fallback = True
-            logger.info(
-                f"[COMMUNITY] CALL: 检测到超级连通分量（1 个社区，质量分={l0_comms[0]['quality_score']:.4f}），"
-                f"启用备选方案：同文件内调用降权"
-            )
-
-    if use_fallback:
-        analysis_store.clear_communities_for_task(task_id, edge_type)
-        logger.info(f"[COMMUNITY] CALL: 已清除默认方案的社区数据，重新分析")
-
-        # 重新构建图（同文件内调用降权而非删除）
-        graph, edge_directions, hub_nodes, orphan_nodes, node_coreness = _build_graph(
-            edges, edge_type, filter_intra_file=False,
-            intra_file_weight=INTRAn_FILE_EDGE_FALLBACK_WEIGHT,
-            node_lookup=node_lookup,
-        )
-        graph, edge_directions, hub_nodes, orphan_nodes = _filter_hubs_and_orphans(
-            graph, edge_directions
-        )
-        all_nodes = set(graph.keys())
-        for neighbors in graph.values():
-            all_nodes.update(neighbors)
-
-        if len(all_nodes) < min_node_cnt:
-            logger.info(f"[COMMUNITY] CALL (备选): 节点数 {len(all_nodes)} < {min_node_cnt}，跳过")
-            _save_special_nodes(task_id, edge_type, hub_nodes, orphan_nodes, graph, edge_directions, analysis_store)
-            return {"community_count": 0, "levels": 0,
-                    "hub_count": len(hub_nodes), "orphan_count": len(orphan_nodes)}
-
-        logger.info(f"[COMMUNITY] CALL (备选): 图包含 {len(all_nodes)} 个节点")
-
-        communities = _detect_communities(graph, all_nodes)
-        if not communities:
-            _save_special_nodes(task_id, edge_type, hub_nodes, orphan_nodes, graph, edge_directions, analysis_store)
-            return {"community_count": 0, "levels": 0,
-                    "hub_count": len(hub_nodes), "orphan_count": len(orphan_nodes)}
-
-        saved, hub_saved, orphan_saved = _save_communities(
-            task_id, edge_type, level, parent_comm_id,
-            communities, graph, analysis_store, edge_directions,
-            node_lookup=node_lookup,
-            node_coreness=node_coreness,
-        )
-        logger.info(f"[COMMUNITY] CALL (备选): L0 产生 {len(communities)} 个社区")
-
     # 6. 递归分析子社区
     total_count = saved
     max_depth = 0
@@ -211,11 +160,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         level = new_level
         max_depth = depth
 
-    fallback_tag = " (备选)" if use_fallback else ""
-    logger.info(
-        f"[COMMUNITY] {edge_type}{fallback_tag}: "
-        f"共 {total_count} 个社区, 枢纽 {hub_saved} 个, 孤立 {orphan_saved} 个"
-    )
+    logger.info(f"[COMMUNITY] {edge_type}: 共 {total_count} 个社区")
 
     # 7. 社区去重：父社区只有一个子社区时，对比节点相似度删除冗余子社区
     deleted = _deduplicate_single_child_communities(task_id, edge_type, analysis_store)
@@ -223,11 +168,17 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         total_count -= deleted
         logger.info(f"[COMMUNITY] {edge_type}: 社区去重完成，已删除 {deleted} 个冗余子社区")
 
+    # 8. HUB/ORPHAN 成功路径落库（供 UNIFIED 合并 F5 与诊断使用）
+    _save_special_nodes(task_id, edge_type, hub_nodes, orphan_nodes,
+                        graph, edge_directions, analysis_store)
+    if hub_nodes or orphan_nodes:
+        logger.info(f"[COMMUNITY] {edge_type}: 落库 HUB={len(hub_nodes)}, ORPHAN={len(orphan_nodes)}")
+
     return {
         "community_count": total_count,
         "levels": max_depth + 1 if total_count > 0 else 0,
-        "hub_count": hub_saved,
-        "orphan_count": orphan_saved,
+        "hub_count": len(hub_nodes),
+        "orphan_count": len(orphan_nodes),
     }
 
 
@@ -264,8 +215,6 @@ def _build_node_lookup(analysis_store, task_id: str) -> dict:
 
 
 def _build_graph(edges: List[Dict], edge_type: str, *,
-                 filter_intra_file: bool = False,
-                 intra_file_weight: float = 1.0,
                  node_lookup: Dict[str, tuple] = None) -> Tuple[Dict, Dict, Set, Set, Dict]:
     """
     从边数据构建无向图（邻接表），含枢纽/孤立节点预过滤 + k-core 核心度。
@@ -273,9 +222,6 @@ def _build_graph(edges: List[Dict], edge_type: str, *,
     Returns:
         (filtered_graph, edge_directions, hub_nodes, orphan_nodes, node_coreness)
     """
-    if filter_intra_file:
-        intra_file_weight = 0.0
-
     # 构建 node_lookup (v2: 从 graph_node 查询)
     if node_lookup is None:
         node_lookup = {}

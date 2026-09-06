@@ -15,7 +15,7 @@
 | `topoone/messaging/` | 内部消息总线（ZMQ PUB/SUB：5680/5682/5683/5684） | 各进程内嵌 |
 | `topoone/llm/` | LLM 推理服务 + prompt/instruction 管理 + providers | llm :3484（`python -m topoone.llm`，PUB 5682） |
 | `topoone/agent/` | Agent 工作流（workflows/toolkits/sandbox）+ worker + tools_executor | agent :3482（`python -m topoone.agent`，PUB 5684） |
-| `topoone/plugins/` | 核心插件：`parsers/`（tree-sitter）、`community/`（社区算法）、`mcp/`（MCP Server :3460）、`runner/`（Coding Agent 执行 :3458）、`installer/`（Agent 配置安装）、`llm-provider-{openai,ollama,lm-studio}/` | mcp/runner 独立进程；其余进程内嵌 |
+| `topoone/plugins/` | 核心插件：`parsers/`（tree-sitter）、`community/`（社区算法 + `unified_merge.py` UNIFIED 对齐合并引擎，docs/kb-unified-components-plan.md）、`mcp/`（MCP Server :3460）、`runner/`（Coding Agent 执行 :3458）、`installer/`（Agent 配置安装）、`llm-provider-{openai,ollama,lm-studio}/` | mcp/runner 独立进程；其余进程内嵌 |
 | `topoone/manifest.py` | AppManifest 数据类 + `discover_apps`/`validate_registry`（冲突即 ManifestError） | 被 gateway/supervisor 调用 |
 | `topoone/config.py` / `logging_config.py` / `http_logging.py` / `service_common.py` | 全局配置/日志/HTTP 日志/服务公共件 | — |
 | `packages/core/tests/`（16 文件） | 核心 pytest | — |

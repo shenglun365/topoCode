@@ -15,7 +15,7 @@ const funcGroup = useFuncGroupStore()
 const props = defineProps<{
   taskId: string
   tabId: string
-  edgeType: 'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'
+  edgeType: 'UNIFIED' | 'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'
   externalStats: any
   availableLevels: string[]
   search: string

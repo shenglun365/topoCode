@@ -305,7 +305,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         cid = c.get("id", "")
                         if cid.startswith("comm-"):
                             parts = cid.split("-")
-                            et = {"incl": "INCLUDE", "call": "CALL"}.get(parts[2] if len(parts) > 2 else "", "INCLUDE")
+                            et = {"incl": "INCLUDE", "call": "CALL", "uni": "UNIFIED"}.get(parts[2] if len(parts) > 2 else "", "INCLUDE")
                             lv = parts[3] if len(parts) > 3 else "L0"
                         else:
                             et = c.get("edgeType", "")
@@ -504,7 +504,7 @@ def _pipeline_get_batch_files(project_db, task_id: str, project_id: str, batch: 
         from topoone.engine.task_manager import _compute_file_ranks
 
         components = []
-        for et in ("INCLUDE", "CALL"):
+        for et in ("UNIFIED",):
             rows = project_db.execute(
                 "SELECT comm_id, quality_score FROM community_hierarchy "
                 "WHERE task_id=? AND edge_type=? AND comm_lv='L0' ORDER BY node_count DESC",
@@ -528,7 +528,9 @@ def _pipeline_get_batch_files(project_db, task_id: str, project_id: str, batch: 
 
 
 def _pipeline_get_level_components(project_db, task_id: str, level: str, force: bool) -> list:
-    edge_types = ['INCLUDE', 'CALL']
+    # 组件统一（kb-unified-components-plan §4）：LLM 命名仅对 UNIFIED 取件，
+    # INCLUDE/CALL 划分止步算法层，不再产生 LLM 记录
+    edge_types = ['UNIFIED']
     results = []
     for et in edge_types:
         rows = project_db.execute(

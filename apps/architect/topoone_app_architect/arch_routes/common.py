@@ -98,18 +98,18 @@ def build_component_catalog(root=None, project=None) -> dict:
         from . import project as _project_mod
         from .kb_gateway import call_kb
         if _project_mod.kb_degraded(root, project):
-            return {"components": [], "edgeTypes": ["INCLUDE", "CALL"], "levels": ["L0", "L1"], "taskId": None}
+            return {"components": [], "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None}
         proj = _project_mod._resolve_project(root, project)
         kb_id = (proj or {}).get("kbProjectId") or (proj or {}).get("kb_project_id")
         if not kb_id:
-            return {"components": [], "edgeTypes": ["INCLUDE", "CALL"], "levels": ["L0", "L1"], "taskId": None}
+            return {"components": [], "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None}
         catalog = call_kb("architecture.catalog", projectId=kb_id)
         if catalog is None:
             raise KbUnavailableError("KB 不可达：architecture.catalog 调用失败，无法读取组件目录。")
         if not isinstance(catalog, dict):
             raise KbUnavailableError("KB 能力不足：architecture.catalog 返回了非目录结构。")
         catalog.setdefault("components", [])
-        catalog.setdefault("edgeTypes", ["INCLUDE", "CALL"])
+        catalog.setdefault("edgeTypes", ["UNIFIED"])
         catalog.setdefault("levels", ["L0", "L1"])
         catalog.setdefault("taskId", None)
         return catalog

@@ -87,21 +87,19 @@ class AnalysisContext:
             lang = n.get("language", "unknown")
             languages[lang] = languages.get(lang, 0) + 1
 
-        incl_comms = self._store.get_communities(self._task_id, edge_type="INCLUDE", comm_lv="L0")
-        call_comms = self._store.get_communities(self._task_id, edge_type="CALL", comm_lv="L0")
+        uni_comms = self._store.get_communities(self._task_id, edge_type="UNIFIED", comm_lv="L0")
 
         total_symbols = sum(1 for n in nodes if n.get("kind") not in ("file", "import"))
 
         what = (
             f"Project contains {len(file_nodes)} files, {total_symbols} symbols, "
-            f"distributed across {len(incl_comms)} dependency communities and {len(call_comms)} call communities"
+            f"organized into {len(uni_comms)} unified components"
         )
         how = f"Main languages: {', '.join(f'{k}({v})' for k, v in sorted(languages.items(), key=lambda x: -x[1])[:5])}"
-        why = f"Dependency communities reflect static dependency relationships between modules; call communities reflect runtime call clustering. Combining both assesses architecture coupling and cohesion."
+        why = f"Unified components merge dependency (INCLUDE) and call (CALL) community structures; each component carries inc/call density evidence for coupling and cohesion assessment."
 
         # Child layers: all L0 communities
-        children = [c.get("comm_id", "") for c in incl_comms if c.get("comm_id")]
-        children += [c.get("comm_id", "") for c in call_comms if c.get("comm_id")]
+        children = [c.get("comm_id", "") for c in uni_comms if c.get("comm_id")]
 
         return ContextLayer(
             level="project",
@@ -114,8 +112,7 @@ class AnalysisContext:
                 "file_count": len(file_nodes),
                 "symbol_count": total_symbols,
                 "languages": languages,
-                "include_communities": len(incl_comms),
-                "call_communities": len(call_comms),
+                "unified_components": len(uni_comms),
             },
             children=children,
         )
@@ -148,7 +145,7 @@ class AnalysisContext:
 
         node_count = len(node_list)
         edge_count = len(edge_list)
-        edge_type = comm.get("edge_type", "INCLUDE")
+        edge_type = comm.get("edge_type", "UNIFIED")
 
         # Identify hub nodes (high degree)
         degree: dict[str, int] = {}
@@ -459,14 +456,12 @@ class AnalysisContext:
         try:
             total_nodes = self._store.count_graph_nodes(self._task_id)
             total_edges = len(self._store.get_graph_edges(self._task_id))
-            incl_comms = len(self._store.get_communities(self._task_id, edge_type="INCLUDE"))
-            call_comms = len(self._store.get_communities(self._task_id, edge_type="CALL"))
+            uni_comms = len(self._store.get_communities(self._task_id, edge_type="UNIFIED"))
             return {
                 "task_id": self._task_id,
                 "total_nodes": total_nodes,
                 "total_edges": total_edges,
-                "include_communities": incl_comms,
-                "call_communities": call_comms,
+                "unified_components": uni_comms,
                 "ready": total_nodes > 0,
             }
         except Exception as e:

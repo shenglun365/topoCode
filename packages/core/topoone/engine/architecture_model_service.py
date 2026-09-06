@@ -96,7 +96,7 @@ def _community_change(file_change: dict, files) -> str:
 
 def build_architecture_model(multi_db, project_id: str, *,
                              task_id: str = "", level: str = "L1",
-                             edge_type: str = "INCLUDE") -> dict:
+                             edge_type: str = "UNIFIED") -> dict:
     """为 KB 项目构建真实架构模型。任务/社区缺失时返回空模型（不抛异常）。"""
     if not project_id:
         return _empty_model()
@@ -123,7 +123,7 @@ def build_architecture_model(multi_db, project_id: str, *,
         logger.warning("[architecture.model] project db unavailable: %s", e)
         return _empty_model()
 
-    et = (edge_type or "INCLUDE").upper()
+    et = (edge_type or "UNIFIED").upper()
     lv = (level or "L1").upper()
 
     # ── 社区（L1 优先，空则 L0） ─────────────────────────────
@@ -279,8 +279,8 @@ def build_architecture_model(multi_db, project_id: str, *,
 
 def build_component_catalog(multi_db, project_id: str, *,
                             task_id: str = "") -> dict:
-    """组件目录（选择器专用）：合并 依赖分析(INCLUDE) 与 调用分析(CALL)、
-    以及 L0/L1 两层社区，附带父组件 / 文件数 / 类型等元数据。
+    """组件目录（选择器专用）：UNIFIED 单套组件树（L0/L1），
+    附带父组件 / 文件数 / 类型等元数据。
 
     返回 { components: [...], edgeTypes: [...], levels: [...] }，
     供 `/kb/assets/search` 做「按类型 / 层级」筛选与列表信息展示。
@@ -309,15 +309,16 @@ def build_component_catalog(multi_db, project_id: str, *,
         logger.warning("[architecture.catalog] project db unavailable: %s", e)
         return {"components": [], "edgeTypes": [], "levels": []}
 
-    # ── 全量社区：跨 edge_type × comm_lv ──────────────────────────────
-    edge_types = ["INCLUDE", "CALL"]
+    # ── 全量社区：UNIFIED 单套口径（组件统一，kb-unified-components-plan）──
+    edge_types = ["UNIFIED"]
     levels = ["L0", "L1"]
     rows = []
     try:
         rows = project_db.fetchall(
             "SELECT comm_id, comm_lv, parent_comm_id, node_list, edge_list, "
             "file_count, edge_count, node_count, description "
-            "FROM graph_doc WHERE task_id = ? ORDER BY quality_score DESC",
+            "FROM graph_doc WHERE task_id = ? AND edge_type = 'UNIFIED' "
+            "ORDER BY quality_score DESC",
             (tid,))
     except Exception:
         pass
@@ -410,7 +411,7 @@ def build_component_catalog(multi_db, project_id: str, *,
         cid = row["comm_id"]
         files = comm_files.get(cid, [])
         parent_id = row.get("parent_comm_id")
-        edge_type = _edge_type_of(cid) or "INCLUDE"
+        edge_type = _edge_type_of(cid) or "UNIFIED"
         lv = row.get("comm_lv") or "L0"
         resp = [f.split("/")[-1].rsplit(".", 1)[0] for f in files if f][:6]
         components.append({
@@ -442,11 +443,13 @@ def build_component_catalog(multi_db, project_id: str, *,
 
 
 def _edge_type_of(cid: str) -> str:
-    """从社区 id 推断分析类型(INCLUDE=依赖分析 / CALL=调用分析)。"""
+    """从社区 id 推断分析类型（组件统一后仅有 UNIFIED；旧前缀兜底映射）。"""
     lower = (cid or "").lower()
     if "-call-" in lower:
         return "CALL"
-    return "INCLUDE"
+    if "-uni-" in lower:
+        return "UNIFIED"
+    return "UNIFIED"
 
 
 def _lang_from(lang_of: dict, files) -> str:

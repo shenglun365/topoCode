@@ -65,6 +65,7 @@ export default { report: {
   communityArchitecture: '组件架构',
   l0Communities: '个L0社区',
   searchCommunity: '搜索组件名称/ID...',
+  unifiedComponents: '组件',
   internalDependency: '内部依赖分析',
   internalCall: '内部调用分析',
   externalDependency: '外部依赖视图',

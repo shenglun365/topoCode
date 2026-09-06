@@ -385,7 +385,7 @@ async function handleSend() {
         return
       }
       // 校验未知参数
-      const VALID_SELECT_FLAGS = ['--include','--call','--all','--clear','--l0','--l1','--l2','--l3','--l4','--l5','--unanalyzed']
+      const VALID_SELECT_FLAGS = ['--all','--clear','--l0','--l1','--l2','--l3','--l4','--l5','--unanalyzed']
       const unknownFlags = args.split(/\s+/).filter(f => f.startsWith('--') && !VALID_SELECT_FLAGS.includes(f.toLowerCase()))
       if (unknownFlags.length > 0) {
         addMessage('system', t('aiAssistant.errors.unknownFlags', { flags: unknownFlags.join('、'), valid: VALID_SELECT_FLAGS.join(' ') }))

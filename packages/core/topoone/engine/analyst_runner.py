@@ -915,9 +915,11 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
 
     try:
         from community_analysis import analyze_communities as _analyze_communities
+        from unified_merge import analyze_unified as _analyze_unified
         _community_available = True
     except ImportError:
         _analyze_communities = None
+        _analyze_unified = None
         _community_available = False
         logger.warning("community_analysis plugin not available, community analysis will be skipped")
 
@@ -979,6 +981,25 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
                 ctx.log(f"CALL community analysis failed: {e}")
         else:
             ctx.log("Community analysis plugin not installed, skipping CALL")
+
+    # UNIFIED 对齐合并：双线划分结果 → 单套组件树（docs/kb-unified-components-plan.md §3）
+    if should_stop(ctx.task_id):
+        ctx.log("Step 4: Stop signal detected, skipping UNIFIED merge")
+        ctx.stopped = True
+        ctx.report_progress(99.0)
+        return ctx
+
+    if _community_available and _analyze_unified is not None:
+        try:
+            uni_result = _analyze_unified(task_id=task_id, analysis_store=a_store)
+            best = a_store.get_best_community(task_id, "UNIFIED")
+            if best:
+                ctx.best_dep_community_id = best["comm_id"]
+            ctx.log(f"UNIFIED merge complete: {uni_result.get('community_count', 0)} communities"
+                    f" ({uni_result.get('levels', 0)} levels)")
+        except Exception as e:
+            ctx.log(f"UNIFIED merge failed: {e}")
+            logger.exception("UNIFIED merge failed")
 
     ctx.report_progress(99.0)
     return ctx

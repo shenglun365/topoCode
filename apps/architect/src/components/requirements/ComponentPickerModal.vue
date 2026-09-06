@@ -162,7 +162,7 @@ function addComponent(assetId: string) {
 /** 打开组件知识库文档(viewer，新标签页)。URL 带 ?docId=overall-<taskId> 供面包屑回退。 */
 function openDoc(asset: AssetDetail) {
   const taskId = asset.taskId ?? ''
-  const url = `/doc?taskId=${encodeURIComponent(taskId)}&docId=${encodeURIComponent(`overall-${taskId}`)}&communityId=${encodeURIComponent(asset.assetId)}&edgeType=${encodeURIComponent(asset.edgeType ?? 'INCLUDE')}`
+  const url = `/doc?taskId=${encodeURIComponent(taskId)}&docId=${encodeURIComponent(`overall-${taskId}`)}&communityId=${encodeURIComponent(asset.assetId)}&edgeType=${encodeURIComponent(asset.edgeType ?? 'UNIFIED')}`
   window.open(url, '_blank')
 }
 </script>
@@ -273,7 +273,7 @@ function openDoc(asset: AssetDetail) {
                   v-if="r.asset.edgeType"
                   class="chip text-[10px] shrink-0"
                   :class="r.asset.edgeType === 'CALL' ? 'bg-ctp-mauve/15 text-ctp-mauve' : 'bg-ctp-sky/15 text-ctp-sky'"
-                >{{ r.asset.edgeType === 'CALL' ? t('requirement.form.assetPickTypeCall') : t('requirement.form.assetPickTypeInclude') }}</span>
+                >{{ r.asset.edgeType === 'CALL' ? t('requirement.form.assetPickTypeCall') : r.asset.edgeType === 'INCLUDE' ? t('requirement.form.assetPickTypeInclude') : t('requirement.form.assetPickTypeUnified') }}</span>
                 <span
                   v-if="r.asset.hierLevel"
                   class="chip bg-ctp-crust text-[10px] shrink-0"

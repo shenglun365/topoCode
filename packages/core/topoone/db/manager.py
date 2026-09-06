@@ -1174,7 +1174,7 @@ PROJECT_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS graph_node_positions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         task_id TEXT NOT NULL,
-        edge_type TEXT NOT NULL CHECK(edge_type IN ('INCLUDE','CALL','EXTERNAL_INCLUDE','EXTERNAL_CALL')),
+        edge_type TEXT NOT NULL CHECK(edge_type IN ('INCLUDE','CALL','UNIFIED','EXTERNAL_INCLUDE','EXTERNAL_CALL')),
         drill_key TEXT NOT NULL,
         snapshot_id TEXT,
         layout_type TEXT NOT NULL CHECK(layout_type IN ('dagre','force')),
@@ -1702,6 +1702,42 @@ class MultiDBManager:
             for col in ('component_type', 'status'):
                 if col not in llm_cols:
                     project_db.execute(f'ALTER TABLE community_llm_results ADD COLUMN "{col}" TEXT')
+        except Exception:
+            pass
+
+
+        # 迁移：graph_node_positions CHECK 扩 UNIFIED（组件统一，存量库表重建）
+        try:
+            row = project_db.fetchone(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='graph_node_positions'"
+            )
+            if row and row["sql"] and "'UNIFIED'" not in row["sql"]:
+                project_db.execute("DROP INDEX IF EXISTS idx_graph_pos_active_unique")
+                project_db.execute("DROP INDEX IF EXISTS idx_graph_pos_snap_unique")
+                project_db.execute("ALTER TABLE graph_node_positions RENAME TO graph_node_positions_legacy")
+                project_db.execute("""
+                    CREATE TABLE graph_node_positions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id TEXT NOT NULL,
+                        edge_type TEXT NOT NULL CHECK(edge_type IN ('INCLUDE','CALL','UNIFIED','EXTERNAL_INCLUDE','EXTERNAL_CALL')),
+                        drill_key TEXT NOT NULL,
+                        snapshot_id TEXT,
+                        layout_type TEXT NOT NULL CHECK(layout_type IN ('dagre','force')),
+                        node_id TEXT NOT NULL,
+                        pos_x REAL NOT NULL,
+                        pos_y REAL NOT NULL,
+                        updated_at TEXT DEFAULT (datetime('now'))
+                    )
+                """)
+                project_db.execute("""
+                    INSERT INTO graph_node_positions
+                        (task_id, edge_type, drill_key, snapshot_id, layout_type, node_id, pos_x, pos_y, updated_at)
+                    SELECT task_id, edge_type, drill_key, snapshot_id, layout_type, node_id, pos_x, pos_y, updated_at
+                    FROM graph_node_positions_legacy
+                """)
+                project_db.execute("DROP TABLE graph_node_positions_legacy")
+                project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_pos_active_unique ON graph_node_positions(task_id, edge_type, drill_key, layout_type, node_id) WHERE snapshot_id IS NULL")
+                project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_pos_snap_unique ON graph_node_positions(task_id, edge_type, drill_key, snapshot_id, layout_type, node_id)")
         except Exception:
             pass
 

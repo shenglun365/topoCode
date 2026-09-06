@@ -242,7 +242,7 @@ def build_stage_plan(project_id: str, project_db: SQLiteContext, main_db,
         try:
             rows = project_db.fetchall(
                 """SELECT task_id, edge_type, comm_lv, comm_id, node_list
-                   FROM graph_doc WHERE task_id = ?""",
+                   FROM graph_doc WHERE task_id = ? AND edge_type = 'UNIFIED'""",
                 (task_id,),
             )
             for r in rows:

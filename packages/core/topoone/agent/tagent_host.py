@@ -74,7 +74,7 @@ class TopoDataProvider:
         try:
             from topoone.engine.task_manager import _compute_file_ranks
             components = []
-            for et in ("INCLUDE", "CALL"):
+            for et in ("UNIFIED",):   # 组件统一：交付口径仅 UNIFIED
                 for row in self._db.execute(
                     "SELECT comm_id, quality_score FROM community_hierarchy "
                     "WHERE task_id=? AND edge_type=? AND comm_lv='L0' ORDER BY node_count DESC",
@@ -169,7 +169,7 @@ class TopoDataProvider:
             candidates.append((edge_type, ""))
         if comm_lv:
             candidates.append(("", comm_lv))
-        candidates.extend([("INCLUDE", ""), ("CALL", "")])
+        candidates.extend([("UNIFIED", ""), ("INCLUDE", ""), ("CALL", "")])
         for et, cl in candidates:
             params: list = [tid, comm_id]
             sql = "SELECT * FROM graph_doc WHERE task_id=? AND comm_id=?"
@@ -315,7 +315,7 @@ class TopoPipelineProvider(TopoDataProvider):
         try:
             from topoone.engine.task_manager import _compute_file_ranks
             components = []
-            for et in ("INCLUDE", "CALL"):
+            for et in ("UNIFIED",):   # 组件统一：交付口径仅 UNIFIED
                 for row in self._db.execute(
                     "SELECT comm_id, quality_score FROM community_hierarchy "
                     "WHERE task_id=? AND edge_type=? AND comm_lv='L0' ORDER BY node_count DESC",

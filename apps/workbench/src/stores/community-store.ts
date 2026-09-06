@@ -169,50 +169,27 @@ export const useCommunityStore = defineStore('community', () => {
       const t = ensureTask(taskId)
       try {
         const _t0 = Date.now()
-        const [callLevels, depLevels, callResults, depResults] = await Promise.all([
-          ipc.analysis.getCascadeLevels(taskId, 'CALL').catch((e: any) => { console.warn('[community-store] getCascadeLevels CALL failed', e?.message); return null }),
-          ipc.analysis.getCascadeLevels(taskId, 'INCLUDE').catch((e: any) => { console.warn('[community-store] getCascadeLevels INCLUDE failed', e?.message); return null }),
-          ipc.analysis.listCommunityResults(taskId, 'CALL').catch((e: any) => { console.warn('[community-store] listCommunityResults CALL failed', e?.message); return ({ results: [] }) }),
-          ipc.analysis.listCommunityResults(taskId, 'INCLUDE').catch((e: any) => { console.warn('[community-store] listCommunityResults INCLUDE failed', e?.message); return ({ results: [] }) }),
+        // 组件统一（kb-unified-components-plan）：仅加载 UNIFIED 单套口径
+        const [uniLevels, uniResults] = await Promise.all([
+          ipc.analysis.getCascadeLevels(taskId, 'UNIFIED').catch((e: any) => { console.warn('[community-store] getCascadeLevels UNIFIED failed', e?.message); return null }),
+          ipc.analysis.listCommunityResults(taskId, 'UNIFIED').catch((e: any) => { console.warn('[community-store] listCommunityResults UNIFIED failed', e?.message); return ({ results: [] }) }),
         ])
         // console.log('[community-store] loadCommunities 4 requests done', { taskId, ms: Date.now() - _t0 })
         const llmMap: Record<string, any> = {}
-        for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
+        for (const rRaw of [...(uniResults?.results || [])]) {
           const r = rRaw as Record<string, unknown>
           const id = (r.commId || r.comm_id) as string | undefined
           if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
         }
         const communities: CommunityItem[] = []
-        if (callLevels?.levels) {
-          for (const lv of callLevels.levels) {
+        if (uniLevels?.levels) {
+          for (const lv of uniLevels.levels) {
             if (!lv.items) continue
             for (const item of lv.items) {
               const saved = llmMap[item.id]
               communities.push({
-                id: `CALL-${item.id}`,
-                communityId: item.id, level: lv.lv, edgeType: 'CALL',
-                nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
-                qualityScore: item.qualityScore ?? null,
-                avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
-                maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
-                coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
-                status: saved?.status === 'completed' ? 'completed' : ('pending' as any),
-                selected: false,
-                parentId: item.parentCommId ?? undefined,
-                name: saved?.name || item.id,
-                summary: saved?.summary || undefined,
-              })
-            }
-          }
-        }
-        if (depLevels?.levels) {
-          for (const lv of depLevels.levels) {
-            if (!lv.items) continue
-            for (const item of lv.items) {
-              const saved = llmMap[item.id]
-              communities.push({
-                id: `INCLUDE-${item.id}`,
-                communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
+                id: `UNIFIED-${item.id}`,
+                communityId: item.id, level: lv.lv, edgeType: 'UNIFIED',
                 nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
                 qualityScore: item.qualityScore ?? null,
                 avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
@@ -228,8 +205,7 @@ export const useCommunityStore = defineStore('community', () => {
           }
         }
         t.uniqueFileCounts = {
-          CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
-          INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
+          UNIFIED: (uniLevels as any)?.totalUniqueFiles ?? 0,
         }
         const savedIds = getSelections(taskId)
         const newCommMap = new Map(communities.map(c => [c.id, c]))
@@ -286,47 +262,23 @@ export const useCommunityStore = defineStore('community', () => {
     const promise = (async () => {
       const t = ensureTask(taskId)
       try {
-        const callLevels = dash.callLevels
-        const depLevels = dash.depLevels
-        const callResults = dash.callResults || { results: [] }
-        const depResults = dash.depResults || { results: [] }
+        const uniLevels = dash.uniLevels || dash.callLevels || dash.depLevels
+        const uniResults = dash.uniResults || dash.callResults || dash.depResults || { results: [] }
         const llmMap: Record<string, any> = {}
-        for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
+        for (const rRaw of [...(uniResults?.results || [])]) {
           const r = rRaw as Record<string, unknown>
           const id = (r.commId || r.comm_id) as string | undefined
           if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
         }
         const communities: CommunityItem[] = []
-        if (callLevels?.levels) {
-          for (const lv of callLevels.levels) {
+        if (uniLevels?.levels) {
+          for (const lv of uniLevels.levels) {
             if (!lv.items) continue
             for (const item of lv.items) {
               const saved = llmMap[item.id]
               communities.push({
-                id: `CALL-${item.id}`,
-                communityId: item.id, level: lv.lv, edgeType: 'CALL',
-                nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
-                qualityScore: item.qualityScore ?? null,
-                avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
-                maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
-                coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
-                status: saved?.status === 'completed' ? 'completed' : ('pending' as any),
-                selected: false,
-                parentId: item.parentCommId ?? undefined,
-                name: saved?.name || item.id,
-                summary: saved?.summary || undefined,
-              })
-            }
-          }
-        }
-        if (depLevels?.levels) {
-          for (const lv of depLevels.levels) {
-            if (!lv.items) continue
-            for (const item of lv.items) {
-              const saved = llmMap[item.id]
-              communities.push({
-                id: `INCLUDE-${item.id}`,
-                communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
+                id: `UNIFIED-${item.id}`,
+                communityId: item.id, level: lv.lv, edgeType: 'UNIFIED',
                 nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
                 qualityScore: item.qualityScore ?? null,
                 avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
@@ -342,22 +294,40 @@ export const useCommunityStore = defineStore('community', () => {
           }
         }
         t.uniqueFileCounts = {
-          CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
-          INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
+          UNIFIED: (uniLevels as any)?.totalUniqueFiles ?? 0,
         }
         const savedIds = getSelections(taskId)
-        const savedStatuses = new Map(t.communities.map(c => [c.id, c.status] as const))
-        for (const c of communities) {
-          const prevStatus = savedStatuses.get(c.id)
-          if (prevStatus === 'running' || prevStatus === 'queued') {
-            c.status = prevStatus
+        const newCommMap = new Map(communities.map(c => [c.id, c]))
+        for (const existing of t.communities) {
+          const newData = newCommMap.get(existing.id)
+          if (newData) {
+            if (existing.status === 'error' || existing.status === 'running' || existing.status === 'queued') {
+              existing.selected = savedIds.includes(existing.id)
+              newCommMap.delete(existing.id)
+              continue
+            }
+            const saved = llmMap[existing.communityId]
+            if (saved && saved.status === 'completed') {
+              existing.status = 'completed'
+              existing.name = saved.name || existing.communityId
+              existing.summary = saved.summary || undefined
+            } else {
+              existing.status = 'pending'
+            }
+            existing.selected = savedIds.includes(existing.id)
+            newCommMap.delete(existing.id)
           }
-          if (prevStatus === 'error') {
-            c.status = 'error'
+        }
+        for (const c of Array.from(newCommMap.values())) {
+          const saved = llmMap[c.communityId]
+          if (saved && saved.status === 'completed') {
+            c.status = 'completed'
+            c.name = saved.name || c.communityId
+            c.summary = saved.summary || undefined
           }
           c.selected = savedIds.includes(c.id)
+          t.communities.push(c)
         }
-        t.communities = communities
         t.llmResults = llmMap
         const pid = dash.task?.project_id || dash.task?.projectId
         if (pid) loadProjectContext(taskId, pid)
@@ -372,6 +342,7 @@ export const useCommunityStore = defineStore('community', () => {
     return promise
   }
 
+  /** 从 getReportDashboard 合并响应中加载社区数据（一次 RPC 替代 4 次独立调用） */
   async function loadProjectContext(taskId: string, projectId: string) {
     if (!projectId) return
 

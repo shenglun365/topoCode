@@ -64,6 +64,7 @@ export default { report: {
   communityArchitecture: 'Component Architecture',
   l0Communities: 'L0 communities',
   searchCommunity: 'Search component name/ID...',
+  unifiedComponents: 'Components',
   internalDependency: 'Internal Dependencies',
   internalCall: 'Internal Calls',
   externalDependency: 'External Dependencies',

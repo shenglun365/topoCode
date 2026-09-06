@@ -11,7 +11,7 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
   const docId = ref(new URLSearchParams(location.search).get('docId') || '')
   const originalDocId = docId.value
   const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
-  const urlEt = new URLSearchParams(location.search).get('edgeType') || 'INCLUDE'
+  const urlEt = new URLSearchParams(location.search).get('edgeType') || 'UNIFIED'
 
   const docCommId = ref(urlCid)
   const docEdgeType = ref(urlEt)
@@ -97,7 +97,7 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
 
   function navBack(idx: number) {
     if (idx < 0 || !docBreadcrumb.value[idx]) {
-      docId.value = originalDocId; docCommId.value = ''; docEdgeType.value = 'INCLUDE'; docBreadcrumb.value = []; loadDoc(); return
+      docId.value = originalDocId; docCommId.value = ''; docEdgeType.value = 'UNIFIED'; docBreadcrumb.value = []; loadDoc(); return
     }
     const target = docBreadcrumb.value[idx]
     if (target?.cid) { docCommId.value = target.cid; docEdgeType.value = target.et || 'INCLUDE'; docBreadcrumb.value = docBreadcrumb.value.slice(0, idx + 1); loadDoc() }

@@ -14,7 +14,7 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
   const { applyNodeColors, _buildLayout, _afterLayout } = useGraphLayout()
 
   const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
-  const urlEt = new URLSearchParams(location.search).get('edgeType') || 'INCLUDE'
+  const urlEt = new URLSearchParams(location.search).get('edgeType') || 'UNIFIED'
 
   // ── Graph state ──
   const graphCommId = ref(urlCid)
@@ -35,7 +35,7 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
   const rightCommTree = ref<CommunityChild[]>([])
   const rightDepth = ref(1)
   const layoutTimeout = ref(60)
-  const etOptions = ['INCLUDE', 'CALL', 'EXTERNAL_INCLUDE', 'EXTERNAL_CALL'] as const
+  const etOptions = ['UNIFIED', 'EXTERNAL_INCLUDE', 'EXTERNAL_CALL'] as const
 
   // ── Filter state ──
   const filterVisible = ref(false)

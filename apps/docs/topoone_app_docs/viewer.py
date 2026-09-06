@@ -65,7 +65,7 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
                             edge_type: str = Query(None), edgeType: str = Query(None)):
     tid = task_id or taskId
     cid = community_id or communityId
-    et = edge_type or edgeType or 'CALL'
+    et = edge_type or edgeType or 'UNIFIED'
     if not tid or not cid:
         raise HTTPException(422, "task_id/taskId and community_id/communityId are required")
     if not common.multi_db:
@@ -107,7 +107,7 @@ async def get_community_files(task_id: str = Query(None), taskId: str = Query(No
                                edge_type: str = Query(None), edgeType: str = Query(None)):
     tid = task_id or taskId
     cid = community_id or communityId
-    et = edge_type or edgeType or 'CALL'
+    et = edge_type or edgeType or 'UNIFIED'
     if not tid or not cid:
         raise HTTPException(422, "task_id/taskId and community_id/communityId are required")
     if not common.multi_db:
@@ -176,7 +176,7 @@ async def get_community_children(task_id: str = Query(None), taskId: str = Query
                                   edge_type: str = Query(None), edgeType: str = Query(None)):
     tid = task_id or taskId
     pid = parent_comm_id or parentCommId
-    et = (edge_type or edgeType or 'CALL').upper()
+    et = (edge_type or edgeType or 'UNIFIED').upper()
     if not tid:
         raise HTTPException(422, "task_id/taskId is required")
     if not common.multi_db:
@@ -198,7 +198,7 @@ async def get_community_graph(task_id: str = Query(None), taskId: str = Query(No
                               gran: str = Query(None), gran_: str = Query(None),
                               depth: int = Query(1)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "CALL"
+    edge_type = edge_type or edgeType or "UNIFIED"
     comm_lv_raw = comm_lv or commLv
     comm_lv = comm_lv_raw or "L0"
     comm_id = comm_id or commId or ""
@@ -213,7 +213,7 @@ async def get_community_graph(task_id: str = Query(None), taskId: str = Query(No
         raise HTTPException(503, "Backend not ready")
     try:
         pid, pdb = common._resolve_project_db(task_id)
-        et = (edge_type or edgeType or "CALL").upper()
+        et = (edge_type or edgeType or "UNIFIED").upper()
         proj_row = common.multi_db.main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (pid,))
         project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
 
@@ -236,7 +236,7 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
                           comm_id: str = Query(None), commId: str = Query(None),
                           scope: str = Query(None), scope_: str = Query(None)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "CALL"
+    edge_type = edge_type or edgeType or "UNIFIED"
     comm_id = comm_id or commId or ""
     sc = (scope or scope_ or "both").lower()
     if not task_id:
@@ -245,7 +245,7 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
         raise HTTPException(503, "Backend not ready")
     try:
         pid, pdb = common._resolve_project_db(task_id)
-        et = (edge_type or edgeType or "CALL").upper()
+        et = (edge_type or edgeType or "UNIFIED").upper()
         proj_row = common.multi_db.main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (pid,))
         project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
         _proot = project_root.replace('\\', '/') if project_root else ''
@@ -470,14 +470,14 @@ async def get_file(project_id: str = Query(...), path: str = Query(...)):
 async def get_cascade_levels(task_id: str = Query(None), taskId: str = Query(None),
                               edge_type: str = Query(None), edgeType: str = Query(None)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "CALL"
+    edge_type = edge_type or edgeType or "UNIFIED"
     if not task_id:
         raise HTTPException(422, "task_id is required")
     if not common.multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
         _, pdb = common._resolve_project_db(task_id)
-        et = (edge_type or edgeType or "CALL").upper()
+        et = (edge_type or edgeType or "UNIFIED").upper()
         return cd.get_cascade_levels(pdb, task_id, et)
     except HTTPException:
         raise
@@ -492,7 +492,7 @@ async def get_heatmap(task_id: str = Query(None), taskId: str = Query(None),
                        comm_id: str = Query(None), commId: str = Query(None),
                        comm_lv: str = Query(None), commLv: str = Query(None)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "CALL"
+    edge_type = edge_type or edgeType or "UNIFIED"
     if not task_id:
         raise HTTPException(422, "task_id is required")
     if not common.multi_db:
@@ -500,7 +500,7 @@ async def get_heatmap(task_id: str = Query(None), taskId: str = Query(None),
     size = max(5, min(50, size))
     try:
         pid, pdb = common._resolve_project_db(task_id)
-        et = (edge_type or edgeType or "CALL").upper()
+        et = (edge_type or edgeType or "UNIFIED").upper()
         cid = comm_id or commId or ""
         clv = comm_lv or commLv or "L0"
         proj_row = common.multi_db.main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (pid,))

@@ -103,8 +103,8 @@ WEB_TOOL_DEFINITIONS = [
                     "taskId": {"type": "string", "description": "分析任务 ID"},
                     "edgeType": {
                         "type": "string",
-                        "description": "边类型: CALL 或 INCLUDE",
-                        "default": "CALL",
+                        "description": "边类型: UNIFIED（统一组件口径）",
+                        "default": "UNIFIED",
                     },
                 },
                 "required": ["taskId"],
@@ -123,8 +123,8 @@ WEB_TOOL_DEFINITIONS = [
                     "commId": {"type": "string", "description": "社区 ID"},
                     "edgeType": {
                         "type": "string",
-                        "description": "边类型: CALL 或 INCLUDE",
-                        "default": "CALL",
+                        "description": "边类型: UNIFIED（统一组件口径）",
+                        "default": "UNIFIED",
                     },
                 },
                 "required": ["taskId", "commId"],
@@ -143,8 +143,8 @@ WEB_TOOL_DEFINITIONS = [
                     "commId": {"type": "string", "description": "社区 ID"},
                     "edgeType": {
                         "type": "string",
-                        "description": "边类型: CALL 或 INCLUDE",
-                        "default": "CALL",
+                        "description": "边类型: UNIFIED（统一组件口径）",
+                        "default": "UNIFIED",
                     },
                     "depth": {
                         "type": "integer",
@@ -173,8 +173,8 @@ WEB_TOOL_DEFINITIONS = [
                     "commId": {"type": "string", "description": "社区 ID"},
                     "edgeType": {
                         "type": "string",
-                        "description": "边类型: CALL 或 INCLUDE",
-                        "default": "CALL",
+                        "description": "边类型: UNIFIED（统一组件口径）",
+                        "default": "UNIFIED",
                     },
                 },
                 "required": ["taskId", "commId"],
@@ -732,7 +732,7 @@ class WebToolExecutor:
 
     def _get_community_tree(self, args: dict) -> dict:
         task_id = args.get("taskId", "")
-        et = (args.get("edgeType") or "CALL").upper()
+        et = (args.get("edgeType") or "UNIFIED").upper()
         pid, pdb = self._resolve_task(task_id)
         levels = cd.get_cascade_levels(pdb, task_id, et)
         return {"levels": levels, "taskId": task_id, "edgeType": et}
@@ -740,7 +740,7 @@ class WebToolExecutor:
     def _get_community_detail(self, args: dict) -> dict:
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
-        et = (args.get("edgeType") or "CALL").upper()
+        et = (args.get("edgeType") or "UNIFIED").upper()
         inferred = cd._infer_edge_type(comm_id)
         if inferred:
             et = inferred
@@ -769,7 +769,7 @@ class WebToolExecutor:
     def _get_community_graph(self, args: dict) -> dict:
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
-        et = (args.get("edgeType") or "CALL").upper()
+        et = (args.get("edgeType") or "UNIFIED").upper()
         depth = int(args.get("depth", 1))
         gran = (args.get("gran") or "component").lower()
         pid, pdb = self._resolve_task(task_id)
@@ -811,12 +811,12 @@ class WebToolExecutor:
 
     def _get_community_files(self, args: dict) -> dict:
         """列出社区包含的源码文件。
-        INCLUDE 社区: node_list 为文件路径字符串列表。
+        UNIFIED 社区: node_list 为文件路径字符串列表。
         CALL 社区: node_list 为符号节点 [id 或 {id, ...}]，id 可能为文件路径或符号 hash。
         """
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
-        et = (args.get("edgeType") or "CALL").upper()
+        et = (args.get("edgeType") or "UNIFIED").upper()
         inferred = cd._infer_edge_type(comm_id)
         if inferred:
             et = inferred

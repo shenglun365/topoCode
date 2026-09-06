@@ -573,6 +573,7 @@ export default {
       assetPickFilterType: 'Analysis type',
       assetPickFilterLevel: 'Level',
       assetPickTypeAll: 'All',
+      assetPickTypeUnified: 'Unified',
       assetPickTypeInclude: 'Dependency',
       assetPickTypeCall: 'Call graph',
       assetPickLevelAll: 'All levels',

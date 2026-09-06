@@ -357,7 +357,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         """获取指定层级的社区完整信息（含节点路径和边详情）"""
         pid = project_id or projectId
         tid = task_id or taskId
-        et = edge_type or edgeType or 'CALL'
+        et = edge_type or edgeType or 'UNIFIED'
         logger.info("[report.getLevelCommunityDetail] ENTRY task_id=%s level=%s edge_type=%s project_id=%s", tid, level, et, pid)
         project_db = multi_db.get_project_db(pid)
         communities = project_db.fetchall(
@@ -527,7 +527,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         from pathlib import Path
         tid = task_id or taskId
         cid = community_id or communityId
-        et = edge_type or edgeType or "INCLUDE"
+        et = edge_type or edgeType or "UNIFIED"
         if not tid or not cid:
             raise ValueError("task_id and community_id are required")
 
@@ -578,7 +578,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         import json as _json
         tid = task_id or taskId
         cid = community_id or communityId
-        et = edge_type or edgeType or "INCLUDE"
+        et = edge_type or edgeType or "UNIFIED"
         if not tid or not cid:
             raise ValueError("task_id and community_id are required")
 

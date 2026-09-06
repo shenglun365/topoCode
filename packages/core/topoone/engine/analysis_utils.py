@@ -90,9 +90,9 @@ def get_cascade_levels_impl(project_db, tid, et, pid=None, multi_db=None):
 
 
 def get_l0_comps(project_db, tid, multi_db=None):
-    """获取 L0 社区列表，合并 CALL 和 INCLUDE 两个边类型"""
+    """获取 L0 社区列表（组件统一：仅 UNIFIED 口径）"""
     comps = []
-    for et in ("INCLUDE", "CALL"):
+    for et in ("UNIFIED",):
         cascades = get_cascade_levels_impl(project_db, tid, et, multi_db=multi_db)
         for l in cascades.get("levels", []):
             if l.get("lv") == "L0":

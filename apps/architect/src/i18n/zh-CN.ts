@@ -599,6 +599,7 @@ export default {
       assetPickFilterType: '分析类型',
       assetPickFilterLevel: '层级',
       assetPickTypeAll: '全部',
+      assetPickTypeUnified: '统一组件',
       assetPickTypeInclude: '依赖分析',
       assetPickTypeCall: '调用分析',
       assetPickLevelAll: '全部层级',

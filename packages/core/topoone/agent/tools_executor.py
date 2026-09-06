@@ -323,7 +323,7 @@ class ToolExecutor:
         task_id = args.get('taskId', '')
         comm_id = args.get('commId', '')
         comm_lv = args.get('commLv', 'L2')
-        edge_type = args.get('edgeType', 'CALL')
+        edge_type = args.get('edgeType', 'UNIFIED')
         inferred = _infer_edge_type(comm_id)
         if inferred:
             edge_type = inferred

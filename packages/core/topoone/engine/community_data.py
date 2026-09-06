@@ -32,7 +32,12 @@ def _infer_edge_type(comm_id: str) -> str:
         return ''
     parts = comm_id.split('-')
     if len(parts) >= 3:
-        return 'CALL' if parts[2] == 'call' else 'INCLUDE' if parts[2] == 'incl' else ''
+        if parts[2] == 'call':
+            return 'CALL'
+        if parts[2] == 'incl':
+            return 'INCLUDE'
+        if parts[2] == 'uni':
+            return 'UNIFIED'
     return ''
 
 

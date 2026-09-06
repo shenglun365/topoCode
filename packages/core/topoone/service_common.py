@@ -206,12 +206,21 @@ def _drill_heatmap(pdb, task_id, et, comm_lv, comm_id, size, project_root):
     if not file_child:
         return {"rows": [], "cols": [], "matrix": [], "maxCount": 0}
 
-    kind = "imports" if et == "INCLUDE" else "calls"
-    all_ge = pdb.fetchall(
-        "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?",
-        (task_id, kind)
-    )
-    hash_to_path = cd.resolve_call_symbols(pdb, task_id, all_ge, _rel) if et == "CALL" else {}
+    if et == "UNIFIED":
+        # 统一口径：组件内聚合依赖+调用两类边
+        all_ge = pdb.fetchall(
+            "SELECT source_id, target_id FROM graph_edge "
+            "WHERE task_id=? AND kind IN ('imports','calls')",
+            (task_id,)
+        )
+        hash_to_path = cd.resolve_call_symbols(pdb, task_id, all_ge, _rel)
+    else:
+        kind = "imports" if et == "INCLUDE" else "calls"
+        all_ge = pdb.fetchall(
+            "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?",
+            (task_id, kind)
+        )
+        hash_to_path = cd.resolve_call_symbols(pdb, task_id, all_ge, _rel) if et == "CALL" else {}
 
     edge_counts = {}
     for e in all_ge:

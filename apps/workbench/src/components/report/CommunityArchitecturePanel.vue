@@ -34,7 +34,7 @@ const emit = defineEmits<{
 }>()
 
 const { showId, componentId } = useComponentId('CV-001')
-const commEdgeType = ref<'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'>('INCLUDE')
+const commEdgeType = ref<'UNIFIED' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'>('UNIFIED')
 const communitySearch = ref('')
 
 // 恢复 tab UI 状态
@@ -154,19 +154,11 @@ function openCommunityDoc(item: CommunityItem) {
     <div class="arch-tabs">
       <button
         class="arch-tab"
-        :class="{ active: commEdgeType === 'INCLUDE' }"
-        @click="commEdgeType = 'INCLUDE'"
+        :class="{ active: commEdgeType === 'UNIFIED' }"
+        @click="commEdgeType = 'UNIFIED'"
       >
         <FolderIcon class="w-3.5 h-3.5" />
-        {{ t('report.internalDependency') }} ({{ props.depCommunityCount }})
-      </button>
-      <button
-        class="arch-tab"
-        :class="{ active: commEdgeType === 'CALL' }"
-        @click="commEdgeType = 'CALL'"
-      >
-        <ChartBarIcon class="w-3.5 h-3.5" />
-        {{ t('report.internalCall') }} ({{ props.callCommunityCount }})
+        {{ t('report.unifiedComponents') }}
       </button>
       <button
         class="arch-tab"

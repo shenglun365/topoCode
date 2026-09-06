@@ -1365,7 +1365,7 @@ def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("architecture.model")
     def architecture_model(project_id: str = None, task_id: str = "",
-                           level: str = "L1", edge_type: str = "INCLUDE",
+                           level: str = "L1", edge_type: str = "UNIFIED",
                            projectId: str = None, taskId: str = None):
         """(KB-REQ-17) 项目真实架构模型：由分析图社区/节点/边/版本差异构建。
 

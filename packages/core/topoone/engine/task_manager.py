@@ -201,7 +201,7 @@ def _count_batched_source_files(task_id: str, project_db, project_root: str = ""
     count = 0
     try:
         comps = []
-        for et in ("INCLUDE", "CALL"):
+        for et in ("UNIFIED",):   # 组件统一：交付口径仅 UNIFIED
             rows = project_db.execute(
                 "SELECT comm_id, quality_score FROM community_hierarchy "
                 "WHERE task_id=? AND edge_type=? AND comm_lv='L0' ORDER BY node_count DESC",
@@ -1222,7 +1222,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     'targetLabel': agg_labels_map.get(t) or node_display(t),
                     'sourceRefId': node_ref_id(s),
                     'targetRefId': node_ref_id(t),
-                    'type': et or 'CALL',
+                    'type': et or 'UNIFIED',
                     'direction': direction,
                 })
 
@@ -1303,7 +1303,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                             'targetLabel': node_display(edge[1]),
                                             'sourceRefId': node_ref_id(edge[0]),
                                             'targetRefId': node_ref_id(edge[1]),
-                                            'type': et or 'CALL',
+                                            'type': et or 'UNIFIED',
                                         })
                             break
 
@@ -1703,7 +1703,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         返回格式: {levels: [{lv: 'L0', items: [{id, label, nodeCount, parentCommId}]}]}
         """
         tid = task_id or taskId
-        et = edge_type or edgeType or 'CALL'
+        et = edge_type or edgeType or 'UNIFIED'
         if not tid:
             raise ValueError("task_id is required")
         logger.info("[analysis.getCascadeLevels] ENTRY task_id=%s edge_type=%s", tid, et)
@@ -1726,7 +1726,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         depth=None):
         """获取查询统计: 社区数、节点数、边数"""
         tid = task_id or taskId
-        et = edge_type or edgeType or 'CALL'
+        et = edge_type or edgeType or 'UNIFIED'
         cl = comm_lv or commLv
         cids = comm_ids or commIds or []
         d = depth or 1
@@ -1794,7 +1794,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                    comm_lv=None, commLv=None):
         """获取指定层级社区间的跨社区边（聚合计数）"""
         tid = task_id or taskId
-        et = edge_type or edgeType or 'INCLUDE'
+        et = edge_type or edgeType or 'UNIFIED'
         lv = comm_lv or commLv or 'L0'
 
         if not tid:
@@ -1933,6 +1933,59 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                    len(doc_rows), len(cross_edges), len(all_edges))
 
         return {'crossEdges': cross_edges}
+
+    @server.register("analysis.rebuildUnified")
+    def rebuild_unified(project_id=None, projectId=None):
+        """组件统一：清库重算 UNIFIED 组件树（kb-unified-components-plan §5/§7 Stage 2）。
+
+        对指定项目（缺省=全部有分析任务的项目）的最新分析任务重跑
+        INCLUDE/CALL 社区 + UNIFIED 对齐合并；旧口径组件数据随重算清除。
+        """
+        from topoone.engine.store.analysis_store import AnalysisStore
+        from topoone.engine.store.task_store import TaskStore
+        from topoone.plugins.community.community_analysis import analyze_communities
+        from topoone.plugins.community.unified_merge import analyze_unified
+        from topoone.config import (COMMUNITY_MIN_NODE_INCLUDE,
+                                    COMMUNITY_MIN_NODE_CALL)
+
+        t_store = TaskStore(multi_db.main_db)
+        if pid := (project_id or projectId):
+            project_ids = [pid]
+        else:
+            rows = t_store._db.execute(
+                "SELECT DISTINCT project_id FROM analysis_tasks ORDER BY project_id"
+            ).fetchall()
+            project_ids = [r["project_id"] for r in rows]
+
+        results = []
+        for pid in project_ids:
+            try:
+                pdb = multi_db.get_project_db(pid)
+                row = pdb.fetchone(
+                    "SELECT task_id FROM graph_doc WHERE comm_lv LIKE 'L%' "
+                    "GROUP BY task_id ORDER BY MAX(rowid) DESC LIMIT 1"
+                )
+                if not row or not row["task_id"]:
+                    results.append({"project_id": pid, "skipped": "no graph data"})
+                    continue
+                tid = row["task_id"]
+                store = AnalysisStore(pdb)
+                inc = analyze_communities(tid, store, "INCLUDE",
+                                          min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE)
+                call = analyze_communities(tid, store, "CALL",
+                                           min_node_cnt=COMMUNITY_MIN_NODE_CALL)
+                uni = analyze_unified(tid, store)
+                results.append({
+                    "project_id": pid, "task_id": tid,
+                    "include": inc.get("community_count"),
+                    "call": call.get("community_count"),
+                    "unified": uni.get("community_count"),
+                    "levels": uni.get("levels"),
+                })
+            except Exception as e:
+                results.append({"project_id": pid, "error": str(e)})
+        return {"success": True, "rebuilt": results}
+
 
     @server.register("analysis.getExternalStats")
     def get_external_stats(task_id=None, taskId=None):
@@ -2173,7 +2226,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         """返回指定层级+edge_type 下所有社区的文件路径列表。
         返回格式: { communityId: [filePath, ...] }"""
         tid = task_id or taskId
-        et = edge_type or edgeType or 'INCLUDE'
+        et = edge_type or edgeType or 'UNIFIED'
         lv = comm_lv or commLv
         if not tid or not lv:
             raise ValueError("task_id and comm_lv are required")
@@ -2203,7 +2256,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                   comm_id=None, commId=None):
         """返回叶子社区的文件级图数据（节点 + 边），来自 graph_doc 的 node_list / edge_list。"""
         tid = task_id or taskId
-        et = edge_type or edgeType or 'INCLUDE'
+        et = edge_type or edgeType or 'UNIFIED'
         cid = comm_id or commId
         if not tid or not cid:
             raise ValueError("task_id and comm_id are required")
@@ -2719,17 +2772,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         return {"success": True}
 
     def get_l0_comps(project_db, tid):
-        """获取 L0 社区列表，合并 CALL 和 INCLUDE 两个边类型。"""
+        """获取 L0 社区列表（组件统一：仅 UNIFIED 口径）。"""
         comps = []
-        for et in ("INCLUDE", "CALL"):
-            cascades = get_cascade_levels_impl(project_db, tid, et)
-            for l in cascades.get("levels", []):
-                if l.get("lv") == "L0":
-                    for it in l.get("items", []):
-                        comps.append({
-                            "id": it.get("id", ""),
-                            "metadata": {"qualityScore": it.get("qualityScore", 0)},
-                        })
+        cascades = get_cascade_levels_impl(project_db, tid, "UNIFIED")
+        for l in cascades.get("levels", []):
+            if l.get("lv") == "L0":
+                for it in l.get("items", []):
+                    comps.append({
+                        "id": it.get("id", ""),
+                        "metadata": {"qualityScore": it.get("qualityScore", 0)},
+                    })
                     break
         return comps
 
@@ -3335,7 +3387,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 cid = ec["id"]
                 if ec.get("type") == "community" and cid.startswith("comm-"):
                     parts = cid.split("-")
-                    et = {"incl": "INCLUDE", "call": "CALL"}.get(parts[2] if len(parts) > 2 else "", "INCLUDE")
+                    et = {"incl": "INCLUDE", "call": "CALL", "uni": "UNIFIED"}.get(parts[2] if len(parts) > 2 else "", "INCLUDE")
                     lv = parts[3] if len(parts) > 3 else "L0"
                 else:
                     et = ""
@@ -3441,7 +3493,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_root = _get_project_root(pid)
         project_summary = _get_project_summary(pid)
         project_name = task.get("name") or pid
-        et = edge_type or edgeType or "INCLUDE"
+        et = edge_type or edgeType or "UNIFIED"
         lv = level or "L0"
         mid = model_id or modelId or ""
 
@@ -3505,7 +3557,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         """创建分析报告子文档（写入 ingest 文件，由消费端入库）"""
         from topoone.engine.ingest import write_ingest
         tid = task_id or taskId
-        et = edge_type or edgeType or 'CALL'
+        et = edge_type or edgeType or 'UNIFIED'
         cid = comm_id or commId
         tpl = template_id or templateId
         provided_id = id or docId

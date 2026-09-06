@@ -55,6 +55,14 @@ PROGRESS_INTERVAL = 5
 COMMUNITY_MIN_NODE_INCLUDE = 6    # INCLUDE 图最小节点数
 COMMUNITY_MIN_NODE_CALL = 12      # CALL 图最小节点数（原20→12，降低粒度）
 
+# UNIFIED 对齐合并（docs/kb-unified-components-plan.md §3/§9）
+COMMUNITY_UNIFIED_TAU = 0.9               # 强阈值 τ（双向重合率）
+COMMUNITY_UNIFIED_TAU_LO = 0.6            # 弱阈值 τ_lo（D1 弱并）
+COMMUNITY_UNIFIED_SCORE_INC = 1.0         # 仲裁打分 import 权重
+COMMUNITY_UNIFIED_SCORE_CALL = 1.0        # 仲裁打分 call 权重（密度归一时按文件对数比）
+COMMUNITY_MIN_NODE_UNIFIED = 6            # UNIFIED 独立最小节点数
+COMMUNITY_UNIFIED_FORCE_ASSIGN = True     # F3-bis 强制归入级联（关闭退回 ORPHAN 终态）
+
 # 枢纽节点过滤：度 > max(HUB_MIN_DEGREE, total_nodes * HUB_DEGREE_RATIO) 时视为枢纽
 HUB_DEGREE_RATIO = 0.3            # 度超过总节点30%
 HUB_MIN_DEGREE = 50               # 至少50度才触发（小项目不误判）
@@ -63,9 +71,6 @@ HUB_MIN_DEGREE = 50               # 至少50度才触发（小项目不误判）
 ORPHAN_MAX_DEGREE = 0              # 仅移除完全无连接的节点（度为 1 的叶子节点纳入社区检测）
 
 # 同文件内调用降权系数（备选方案）：设为 1.0 = 等同处理，< 1.0 = 降低影响力
-INTRAn_FILE_EDGE_WEIGHT = 1.0       # 正常值
-INTRAn_FILE_EDGE_FALLBACK_WEIGHT = 0.1  # 备选方案时降权
-
 # ==================== 进程架构模式 ====================
 # "monolith" — 单进程模式（默认）：所有 Worker 退化为线程池 / asyncio task，适用于开发/调试
 # "distributed" — 多进程模式：AST / LLM / Agent / DB Service 各为独立进程

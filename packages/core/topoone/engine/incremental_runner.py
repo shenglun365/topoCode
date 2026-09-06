@@ -294,14 +294,22 @@ def _inc_community(multi_db: MultiDBManager, project_db: SQLiteContext,
     """
     from topoone.engine.store.analysis_store import AnalysisStore
     from topoone.plugins.community.community_analysis import analyze_communities
+    from topoone.plugins.community.unified_merge import analyze_unified
+    from topoone.config import (
+        COMMUNITY_MIN_NODE_INCLUDE, COMMUNITY_MIN_NODE_CALL,
+    )
     try:
         a_store = AnalysisStore(project_db)
-        inc = analyze_communities(task_id, a_store, "INCLUDE")
-        call = analyze_communities(task_id, a_store, "CALL")
+        inc = analyze_communities(task_id, a_store, "INCLUDE",
+                                  min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE)
+        call = analyze_communities(task_id, a_store, "CALL",
+                                   min_node_cnt=COMMUNITY_MIN_NODE_CALL)
+        unified = analyze_unified(task_id, a_store)
         return {
             "status": "done",
             "include": inc,
             "call": call,
+            "unified": unified,
             "community_count": max(inc.get("community_count", 0),
                                    call.get("community_count", 0)),
         }

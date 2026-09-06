@@ -54,7 +54,7 @@ class GetCommunitySubgraphTool(AgentTool):
                         "task_id": {"type": "string", "description": "Analysis task ID"},
                         "comm_id": {"type": "string", "description": "Community group ID"},
                         "comm_lv": {"type": "string", "description": "Community level (L0/L1/L2)", "default": "L2"},
-                        "edge_type": {"type": "string", "description": "Edge type (CALL/INCLUDE)", "default": "CALL"},
+                        "edge_type": {"type": "string", "description": "Edge type (UNIFIED/INCLUDE/CALL)", "default": "UNIFIED"},
                         "depth": {"type": "integer", "description": "Expand depth (1-4), default 2", "default": 2},
                     },
                     "required": ["task_id", "comm_id"],
