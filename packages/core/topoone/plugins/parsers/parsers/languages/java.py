@@ -39,6 +39,18 @@ def _java_extract_package(node: SyntaxNode, source: str) -> str | None:
     return None
 
 
+def _java_extract_param(node: SyntaxNode, source: str) -> dict | None:
+    """formal_parameter → {name, type}：参数 variable 节点 + type_of 引用的依据"""
+    name_node = node.child_by_field_name("name")
+    type_node = node.child_by_field_name("type")
+    if name_node is None or type_node is None:
+        return None
+    return {
+        "name": source[name_node.start_byte:name_node.end_byte],
+        "type": source[type_node.start_byte:type_node.end_byte],
+    }
+
+
 JAVA = LanguageExtractor(
     function_types=(),
     class_types=("class_declaration",),
@@ -60,4 +72,5 @@ JAVA = LanguageExtractor(
     is_static=_java_is_static,
     extract_import=_java_extract_import,
     extract_package=_java_extract_package,
+    extract_param=_java_extract_param,
 )

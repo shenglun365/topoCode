@@ -214,7 +214,7 @@ class TestReassociation:
         (src / "a.py").write_text("X = 1\n", encoding="utf-8")
         md, srv, row = self._import(tmp_path, str(src))
         pid = row["id"]
-        srv.methods["project.remove"](id=pid)
+        srv.methods["project.remove"](id=pid, wait=True)
         assert md.main_db.fetchone("SELECT id FROM projects WHERE id=?", (pid,)) is None
         assert not os.path.exists(md.project_db_path(pid))
         assert MultiDBManager.read_proj_signature(row["root_path"]) == ""

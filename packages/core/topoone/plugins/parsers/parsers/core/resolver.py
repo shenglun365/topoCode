@@ -175,23 +175,32 @@ class ResolutionEngine:
 
                 # 策略 1: 文件内 local scope 链查找
                 target = self._resolve_local(ref, table)
+                if target:
+                    method = "local"
 
                 # 策略 2: import 跨文件解析 (P0: use cached file lookup; P1: skip if name not exported anywhere)
-                if not target and ref.reference_name in _all_exported:
+                # 组合名 (pkg.Func / Cls.method) 也放行 —— 由 _resolve_via_import 的点分分支处理
+                if not target and (ref.reference_name in _all_exported or "." in ref.reference_name):
                     result = self._resolve_via_import(ref, table, file_cache)
                     if result:
                         target = result
+                        method = "import"
 
                 # 策略 2.5: 实例方法推断 — `recv.method()` / `this.method()` →
                 # receiver 类型作用域内的方法(对齐 codegraph instance-method 策略族)。
                 # 此前 member 调用只能整串 qualified/name 匹配，TS 前端大量
                 # `adapter.build()` 形态全部 unresolved(实测 calls 解析率 4%)。
                 if not target and "." in ref.reference_name:
-                    target = self._resolve_instance_method(ref, table)
+                    result = self._resolve_instance_method(ref, table)
+                    if result:
+                        target = result
+                        method = "instance_method"
 
                 # 策略 3: qualified name 匹配
                 if not target:
                     target = self._qualified_index.get(ref.reference_name)
+                    if target:
+                        method = "qualified_name"
 
                 # 策略 4: name 匹配 (project-wide, 低置信度)
                 if not target:
@@ -290,6 +299,8 @@ class ResolutionEngine:
         """
         name = ref.reference_name
         recv, meth = name.rsplit(".", 1)
+        if recv.startswith("this."):
+            recv = recv[len("this."):]
         caller = self._node_by_id.get(ref.from_node_id)
         if not caller:
             return None
@@ -328,6 +339,17 @@ class ResolutionEngine:
                             break
                     cache[recv] = type_node  # None 也缓存(负缓存)，避免重复扫描
 
+        if type_node is None:
+            # 静态类调用: `Cls.meth()` — recv 为项目内 class/interface/enum/struct 名
+            if recv and recv[0].isupper():
+                cls_like = ("class", "interface", "struct", "enum")
+                local = [n for n in self._file_node_index.get(table.file_path, {}).get(recv, [])
+                         if n.kind.value in cls_like]
+                if not local:
+                    local = [n for n in self._name_index.get(recv, [])
+                             if n.kind.value in cls_like]
+                if local:
+                    type_node = local[0]
         if type_node is None:
             return None
 
@@ -378,21 +400,37 @@ class ResolutionEngine:
                     return nodes[0]
 
         # 包限定调用 "pkg.Func" → 分割后通过 import 匹配
-        if "." in name and src_lang in ("go", "python", "typescript", "javascript", "java"):
+        if "." in name and src_lang in ("go", "python", "typescript", "javascript", "java",
+                                        "kotlin", "csharp", "scala"):
             pkg_part, func_part = name.rsplit(".", 1)
             for imp, target_file in import_cache.items():
                 imp_pkg = imp.split("/")[-1].split(".")[-1]
                 if imp_pkg == pkg_part or imp.endswith(pkg_part):
+                    # 1) 顶层导出函数 (Go pkg.Func / Python module.func)
                     exports = self._export_index.get(target_file, set())
                     if func_part in exports:
                         nodes = self._file_node_index.get(target_file, {}).get(func_part, [])
                         if nodes:
                             return nodes[0]
+                    # 2) 类静态/实例方法 (Java/Kotlin/C# `Cls.method()`)
+                    for cls in self._file_node_index.get(target_file, {}).get(pkg_part, []):
+                        if cls.kind.value in ("class", "interface", "struct", "enum"):
+                            prefix = cls.qualified_name + "::"
+                            for n in (self._file_node_index.get(target_file, {}).get(func_part, [])
+                                      + self._name_index.get(func_part, [])):
+                                if n.kind.value in ("method", "function", "property") and \
+                                        (n.qualified_name == prefix + func_part
+                                         or n.qualified_name.startswith(prefix)):
+                                    return n
 
         return None
 
     def _find_file_for_import(self, module_name: str, current_file: str) -> Optional[str]:
         """根据 import 模块名找到目标文件路径（使用 _suffix_index O(1) 查找）"""
+        # 0. 点分模块名归一化 (Java/Kotlin/C#: a.b.C → a/b/C)，使命名空间导入可命中路径后缀索引
+        if "." in module_name and "/" not in module_name:
+            module_name = module_name.replace(".", "/")
+
         # 1. 精确后缀匹配（去扩展名）
         target = self._suffix_index.get(module_name)
         if target:

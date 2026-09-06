@@ -50,6 +50,8 @@ export const useProjectStore = defineStore('project', () => {
   const importProgress = ref<number | null>(null)
   const importing = ref(false)
   const importStatus = ref<'scan' | 'write' | 'done' | ''>('')
+  /** 项目删除进度（后台删除轮询态；id + phase + progress） */
+  const deleteProgress = ref<{ id: string; phase: string; progress: number } | null>(null)
 
   // 委托给 funcGroup store（首页功能组）
   const funcGroup = useFuncGroupStore()
@@ -244,10 +246,39 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function removeProject(id: string) {
-    await ipc.project.remove(id)
-    const idx = projects.value.findIndex(p => p.id === id)
-    if (idx >= 0) projects.value.splice(idx, 1)
-    if (selectedProjectId.value === id) deselectProject()
+    const res: any = await ipc.project.remove(id)
+    // 同步模式（wait=true / 旧后端）：立即返回
+    if (!res || !res.requestId) {
+      const idx = projects.value.findIndex(p => p.id === id)
+      if (idx >= 0) projects.value.splice(idx, 1)
+      if (selectedProjectId.value === id) deselectProject()
+      return
+    }
+    // 后台模式：轮询删除进度（大项目删除耗时较长，UI 需要反馈）
+    deleteProgress.value = { id, phase: 'prepare', progress: 0 }
+    try {
+      for (;;) {
+        await new Promise(r => setTimeout(r, 500))
+        let st: any
+        try {
+          st = await ipc.project.removeStatus(res.requestId)
+        } catch {
+          continue
+        }
+        if (!st || st.status === 'unknown') {
+          // 状态丢失（如后端重启）：视为完成，刷新列表兜底
+          break
+        }
+        deleteProgress.value = { id, phase: st.phase || '', progress: st.progress ?? 0 }
+        if (st.status === 'done') break
+        if (st.status === 'error') throw new Error(st.error || 'delete failed')
+      }
+    } finally {
+      deleteProgress.value = null
+      const idx = projects.value.findIndex(p => p.id === id)
+      if (idx >= 0) projects.value.splice(idx, 1)
+      if (selectedProjectId.value === id) deselectProject()
+    }
   }
 
   async function clearProjectCache(id: string) {
@@ -512,6 +543,7 @@ export const useProjectStore = defineStore('project', () => {
     importProgress,
     importing,
     importStatus,
+    deleteProgress,
     selectProject,
     deselectProject,
     removeProject,

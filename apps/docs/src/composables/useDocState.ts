@@ -21,10 +21,9 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
   const children = ref<CommunityChild[]>([])
   const docContentRef = ref<HTMLDivElement>()
 
-  // TOC state
+  // TOC state（UNIFIED 单套组件）
   const tocVisible = ref(false)
-  const tocCallChildren = ref<CommunityChild[]>([])
-  const tocIncludeChildren = ref<CommunityChild[]>([])
+  const tocChildren = ref<CommunityChild[]>([])
   const tocLoading = ref(false)
 
   // File list state
@@ -100,7 +99,7 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
       docId.value = originalDocId; docCommId.value = ''; docEdgeType.value = 'UNIFIED'; docBreadcrumb.value = []; loadDoc(); return
     }
     const target = docBreadcrumb.value[idx]
-    if (target?.cid) { docCommId.value = target.cid; docEdgeType.value = target.et || 'INCLUDE'; docBreadcrumb.value = docBreadcrumb.value.slice(0, idx + 1); loadDoc() }
+    if (target?.cid) { docCommId.value = target.cid; docEdgeType.value = target.et || 'UNIFIED'; docBreadcrumb.value = docBreadcrumb.value.slice(0, idx + 1); loadDoc() }
   }
 
   // ── File list ──
@@ -153,25 +152,12 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
 
   async function loadTocData() {
     tocLoading.value = true
-    tocCallChildren.value = []
-    tocIncludeChildren.value = []
+    tocChildren.value = []
     try {
-      const isRoot = !docCommId.value
-      if (isRoot) {
-        const [callKids, includeKids] = await Promise.all([
-          api.getCommunityChildren(taskId.value, undefined, 'CALL'),
-          api.getCommunityChildren(taskId.value, undefined, 'INCLUDE'),
-        ])
-        tocCallChildren.value = callKids || []
-        tocIncludeChildren.value = includeKids || []
-      } else {
-        const kids = await api.getCommunityChildren(taskId.value, docCommId.value, docEdgeType.value)
-        if (docEdgeType.value === 'CALL') tocCallChildren.value = kids || []
-        else tocIncludeChildren.value = kids || []
-      }
+      const kids = await api.getCommunityChildren(taskId.value, docCommId.value || undefined, 'UNIFIED')
+      tocChildren.value = kids || []
     } catch (_) {
-      tocCallChildren.value = []
-      tocIncludeChildren.value = []
+      tocChildren.value = []
     } finally { tocLoading.value = false }
   }
 
@@ -188,7 +174,7 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
     docId, originalDocId,
     docCommId, docEdgeType, docBreadcrumb, doc, loading, children,
     docContentRef,
-    tocVisible, tocCallChildren, tocIncludeChildren, tocLoading,
+    tocVisible, tocChildren, tocLoading,
     files, filePage, fileSearch, filePreview, fileSummary, pageMode, filteredFiles,
     sourceLoading,
     pushDocBc, loadDoc, loadChildren, navigateTo, navBack,

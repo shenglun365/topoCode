@@ -51,6 +51,7 @@ class LanguageExtractor:
     extract_import: Optional[Callable[[SyntaxNode, str], Optional[dict]]] = None
     extract_package: Optional[Callable[[SyntaxNode, str], Optional[str]]] = None
     extract_receiver: Optional[Callable[[SyntaxNode, str], Optional[str]]] = None
+    extract_param: Optional[Callable[[SyntaxNode, str], Optional[dict]]] = None
     classify_class: Optional[Callable[[SyntaxNode], str]] = None
     is_exported: Optional[Callable[[SyntaxNode, str], bool]] = None
     is_async: Optional[Callable[[SyntaxNode], bool]] = None

@@ -535,6 +535,7 @@ class TreeSitterWalker:
         self._extract_decorators(node, func_node.id)
         # 类型注解
         self._extract_type_annotations(node, func_node.id)
+        self._extract_param_variables(node)
 
         self._push_scope(func_node.id)
         body = self._resolve_body(node)
@@ -592,6 +593,7 @@ class TreeSitterWalker:
 
         self._extract_decorators(node, method_node.id)
         self._extract_type_annotations(node, method_node.id)
+        self._extract_param_variables(node)
 
         self._push_scope(method_node.id)
         body = self._resolve_body(node)
@@ -741,6 +743,28 @@ class TreeSitterWalker:
                             k = NodeKind.CONSTANT if node.type == "const_declaration" else NodeKind.VARIABLE
                             self._create_node(k, _node_text(n, self.source), c,
                                               is_exported=is_exported)
+
+        # Java / Kotlin / C# / Scala — `Type name = ...`（type + variable_declarator）
+        elif self.language in ("java", "kotlin", "csharp", "scala"):
+            type_node = _child_by_field(node, "type")
+            for i in range(node.named_child_count):
+                child = node.named_child(i)
+                if child and child.type in ("variable_declarator", "declarator"):
+                    name_node = _child_by_field(child, "name")
+                    if not name_node:
+                        continue
+                    var_node = self._create_node(kind, _node_text(name_node, self.source), child,
+                                                 is_exported=is_exported)
+                    if var_node and type_node:
+                        for t_node in self._walk_type_nodes(type_node):
+                            if t_node.type in _TYPE_IDENTIFIER_NODES:
+                                self.unresolved_refs.append(UnresolvedReference(
+                                    from_node_id=var_node.id,
+                                    reference_name=_node_text(t_node, self.source),
+                                    reference_kind=EdgeKind.TYPE_OF,
+                                    line=t_node.start_point[0] + 1, col=t_node.start_point[1],
+                                    file_path=self.file_path, language=self.language,
+                                ))
 
         # C/C++ / generic
         else:
@@ -1281,6 +1305,49 @@ class TreeSitterWalker:
 
     # ── 类型注解 ─────────────────────────────────────────
 
+    def _extract_param_variables(self, node: SyntaxNode):
+        """参数声明 → variable 节点 + type_of 引用（跨文件实例方法解析的接收者类型依据）
+
+        仅当语言定义了 extract_param 钩子时生效（如 Java formal_parameter）。
+        """
+        ex_extract = getattr(self.ex, "extract_param", None)
+        if not ex_extract:
+            return
+        params = _child_by_field(node, self.ex.params_field)
+        if params is None:
+            # 字段名兜底: 部分语言语法树把参数列表挂在其他 field (如 kotlin)
+            for c in node.named_children:
+                if c and "parameter" in c.type:
+                    params = c
+                    break
+        if params is None:
+            return
+        for i in range(params.named_child_count):
+            p = params.named_child(i)
+            if not p:
+                continue
+            info = ex_extract(p, self.source_str)
+            if not info or not info.get("name") or not info.get("type"):
+                continue
+            var_node = self._create_node(NodeKind.VARIABLE, info["name"], p)
+            if not var_node:
+                continue
+            tname = info["type"]
+            ld = max(tname.rfind("."), tname.rfind("::"))
+            if ld >= 0:
+                tname = tname[ld + 1:]
+            tname = tname.split("<")[0].strip()
+            # 剥离类型注解噪声前缀 (TS ": Client"、Go/C/C++ "*Store"、"&Foo")
+            tname = tname.lstrip(":*&! ").strip()
+            if not tname or not tname.replace("_", "").isalnum():
+                continue
+            self.unresolved_refs.append(UnresolvedReference(
+                from_node_id=var_node.id, reference_name=tname,
+                reference_kind=EdgeKind.TYPE_OF,
+                line=p.start_point[0] + 1, col=p.start_point[1],
+                file_path=self.file_path, language=self.language,
+            ))
+
     def _extract_type_annotations(self, node: SyntaxNode, owner_id: str):
         """对参数类型和返回类型中引用的标识符创建 type_of/returns 引用"""
         # 参数
@@ -1372,6 +1439,8 @@ class TreeSitterWalker:
                 self._collect_call(n)
             elif n.type in ex.instantiation_types or n.type in _INSTANTIATION_NODES:
                 self._collect_instantiation(n)
+            elif n.type in ex.variable_types and not self._inside_class_like():
+                self._extract_variable(n)
             elif n.type == "identifier":
                 self._collect_usage_candidate(n)
             elif ex.extract_bare_call:

@@ -26,6 +26,8 @@ from topoone.engine.task_manager import (
 logger = logging.getLogger(__name__)
 
 from topoone.engine.service._common import GitIgnoreParser, IGNORE_FILE_PRIORITY, MultiIgnoreParser, _load_import_config, build_effective_ignore_patterns, should_ignore_file, _ensure_topocode_dirs_in_gitignore, _simple_hash, _IMPORT_JOBS
+import threading
+from topoone.engine.service._common import _DELETE_JOBS
 def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
     """注册项目管理方法"""
     main_db = multi_db.main_db
@@ -200,23 +202,62 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
 
     @server.register("project.remove")
-    def remove_project(id: str):
+    def remove_project(id: str, wait: bool = False):
+        """删除项目（后台执行，大项目删除耗时较长）。
+
+        默认后台执行：立即返回 {requestId, status:"deleting"}；
+        进度经 `event:project.remove.progress` 推送，可用 `project.removeStatus(requestId)` 轮询。
+        阶段: tasks(任务记录) → database(项目库) → source(源码缓存) → record(主库记录)。
+        wait=true 时同步执行到底并返回 {deleted: true}（内部调用/测试用）。
+        """
         if not id or id == "undefined":
             raise ValueError(f"Invalid project id: {id}")
-        # 删除与分析任务相关的运行记录
-        tasks = main_db.fetchall("SELECT id FROM analysis_tasks WHERE project_id=?", (id,))
-        for t in tasks:
-            main_db.delete("analysis_task_runs", "task_id=?", (t["id"],))
-        # 删除分析任务
-        main_db.delete("analysis_tasks", "project_id=?", (id,))
-        # 删除项目库（中心路径）
-        multi_db.delete_project_db(id)
-        # 删除源码目录 proj-id 签名（best-effort）
-        row = main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (id,))
-        if row and row.get("root_path"):
-            multi_db.remove_proj_signature(row["root_path"])
-        # 删除主库记录
-        main_db.delete("projects", "id = ?", (id,))
+        row = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
+        if not row:
+            raise ValueError(f"Project not found: {id}")
+        root_path = row.get("root_path") or ""
+
+        if wait:
+            _remove_project_impl(server, main_db, multi_db, id, root_path, "")
+            return {"deleted": True}
+
+        request_id = f"del-{uuid.uuid4().hex[:8]}"
+        from topoone.engine.service._common import _DELETE_JOBS
+        _DELETE_JOBS[request_id] = {
+            "status": "starting", "progress": 0, "phase": "prepare", "projectId": id,
+        }
+        if len(_DELETE_JOBS) > 100:
+            for k in list(_DELETE_JOBS.keys())[:-100]:
+                _DELETE_JOBS.pop(k, None)
+
+        def _run():
+            try:
+                _remove_project_impl(server, main_db, multi_db, id, root_path, request_id)
+            except Exception as e:
+                logger.error(f"[remove] background job {request_id} failed: {e}")
+                from topoone.engine.service._common import _DELETE_JOBS as _J
+                _J[request_id] = {"status": "error", "error": str(e), "progress": 100, "projectId": id}
+                try:
+                    server.publish("project", "remove.progress", {
+                        "projectId": id, "requestId": request_id,
+                        "progress": 100, "phase": "error", "error": str(e),
+                    })
+                except Exception:
+                    pass
+
+        threading.Thread(target=_run, name=f"remove-{request_id}", daemon=True).start()
+        return {"requestId": request_id, "status": "deleting", "projectId": id}
+
+    @server.register("project.removeStatus")
+    def remove_project_status(requestId: str = ""):
+        """项目删除后台任务状态（配合 project.remove 后台化）。"""
+        if not requestId:
+            raise ValueError("requestId is required")
+        from topoone.engine.service._common import _DELETE_JOBS
+        job = _DELETE_JOBS.get(requestId)
+        if not job:
+            return {"status": "unknown"}
+        return dict(job)
 
     @server.register("project.updateMeta")
     def update_project_meta(id: str, **kwargs):
@@ -2156,6 +2197,98 @@ def register_module_methods(server: ZMQServer, module_manager=None):
 
 
 # ==================== 辅助函数 ====================
+
+
+def _remove_project_impl(server, main_db, multi_db: MultiDBManager, pid: str,
+                         root_path: str, request_id: str):
+    """项目删除实现：tasks → database → source → record 四阶段，进度写入 _DELETE_JOBS 并推送事件。"""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    def _set(phase: str, progress: int, **extra):
+        if request_id:
+            job = _DELETE_JOBS.get(request_id)
+            if job is not None:
+                job.update({"phase": phase, "progress": progress, "status": "deleting", "projectId": pid, **extra})
+        try:
+            server.publish("project", "remove.progress", {
+                "projectId": pid, "requestId": request_id,
+                "progress": progress, "phase": phase, **extra,
+            })
+        except Exception:
+            pass
+
+    _set("prepare", 1)
+
+    # 阶段 1: 任务记录（runs + tasks）
+    _set("tasks", 5)
+    tasks = main_db.fetchall("SELECT id FROM analysis_tasks WHERE project_id=?", (pid,))
+    for i, t in enumerate(tasks):
+        main_db.delete("analysis_task_runs", "task_id=?", (t["id"],))
+        if i % 50 == 0:
+            _set("tasks", 5 + int(15 * (i + 1) / max(len(tasks), 1)))
+    main_db.delete("analysis_tasks", "project_id=?", (pid,))
+    _set("tasks", 20)
+
+    # 阶段 2: 项目库文件
+    _set("database", 25)
+    multi_db.delete_project_db(pid)
+    _set("database", 60)
+
+    # 阶段 3: 源码镜像缓存（按字节计进度，大目录的主要耗时来源）
+    _set("source", 65)
+    try:
+        src_dir = multi_db.source_cache_dir_for(pid)
+    except Exception:
+        src_dir = ""
+    if src_dir and os.path.isdir(src_dir):
+        files: list = []
+        total_bytes = 0
+        for r, _d, fs in os.walk(src_dir):
+            for f in fs:
+                fp = os.path.join(r, f)
+                try:
+                    total_bytes += os.path.getsize(fp)
+                except OSError:
+                    pass
+                files.append(fp)
+        done_bytes = 0
+        for i, fp in enumerate(files):
+            try:
+                done_bytes += os.path.getsize(fp)
+            except OSError:
+                pass
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+            if i % 200 == 0 or i == len(files) - 1:
+                _set("source", 65 + int(25 * done_bytes / max(total_bytes, 1)))
+        shutil.rmtree(src_dir, ignore_errors=True)
+    _set("source", 90)
+
+    # 阶段 4: 签名 + 主库记录
+    _set("record", 92)
+    if root_path:
+        try:
+            multi_db.remove_proj_signature(root_path)
+        except Exception:
+            pass
+    main_db.delete("projects", "id = ?", (pid,))
+    _set("record", 100)
+
+    if request_id:
+        job = _DELETE_JOBS.get(request_id)
+        if job is not None:
+            job.update({"status": "done", "progress": 100, "phase": "done"})
+    try:
+        server.publish("project", "remove.progress", {
+            "projectId": pid, "requestId": request_id, "progress": 100, "phase": "done",
+        })
+    except Exception:
+        pass
+    _log.info(f"[remove] project {pid} deleted")
+
 
 async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBManager,
                                path: str, mode: str = "git-local", branch: str = "",

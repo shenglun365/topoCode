@@ -30,6 +30,18 @@ def _csharp_import(node: SyntaxNode, source: str) -> dict | None:
     return None
 
 
+def _csharp_extract_param(node: SyntaxNode, source: str) -> dict | None:
+    """parameter: `Foo x`（params/out/ref 修饰等同处理）"""
+    name_node = node.child_by_field_name("name")
+    type_node = node.child_by_field_name("type")
+    if name_node is None or type_node is None:
+        return None
+    return {
+        "name": source[name_node.start_byte:name_node.end_byte],
+        "type": source[type_node.start_byte:type_node.end_byte],
+    }
+
+
 CSHARP = LanguageExtractor(
     class_types=("class_declaration",),
     struct_types=("struct_declaration",),
@@ -48,4 +60,5 @@ CSHARP = LanguageExtractor(
     extract_visibility=_csharp_visibility,
     is_static=_csharp_is_static,
     extract_import=_csharp_import,
+    extract_param=_csharp_extract_param,
 )

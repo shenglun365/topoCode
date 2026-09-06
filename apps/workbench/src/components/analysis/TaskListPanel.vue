@@ -247,14 +247,19 @@ function onOpenAnalysis(task: AnalysisTask) {
   navigation.navigateTo('analysis')
 }
 
+const deletingTaskId = ref<string | null>(null)
+
 async function confirmDelete() {
-  if (!deleteConfirm.value) return
+  if (!deleteConfirm.value || deletingTaskId.value) return
+  deletingTaskId.value = deleteConfirm.value
   try {
     await analysisStore.deleteTask(deleteConfirm.value)
     deleteConfirm.value = null
     await loadTasks()
   } catch (err) {
     console.error('Failed to delete task:', err)
+  } finally {
+    deletingTaskId.value = null
   }
 }
 
@@ -515,18 +520,28 @@ function getConfigSummary(task: AnalysisTask): string {
             <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
             <span>{{ t('analysis.confirmDelete') }}</span>
           </div>
+          <div
+            v-if="deletingTaskId"
+            class="confirm-body"
+            style="display:flex; align-items:center; gap:8px;"
+          >
+            <span class="spinner" style="width:14px; height:14px; border-width:2px;" />
+            <span>{{ t('analysis.deletingTask') }}</span>
+          </div>
           <div class="confirm-actions">
             <button
               class="btn btn-ghost"
+              :disabled="!!deletingTaskId"
               @click="cancelDelete"
             >
               {{ t('analysis.deleteCancelled') }}
             </button>
             <button
               class="btn btn-danger"
+              :disabled="!!deletingTaskId"
               @click="confirmDelete"
             >
-              {{ t('analysis.deleteConfirmed') }}
+              {{ deletingTaskId ? t('analysis.deletingTask') : t('analysis.deleteConfirmed') }}
             </button>
           </div>
         </div>

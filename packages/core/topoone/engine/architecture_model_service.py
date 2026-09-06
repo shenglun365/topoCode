@@ -417,6 +417,9 @@ def build_component_catalog(multi_db, project_id: str, *,
         components.append({
             "id": cid,
             "name": _name(cid),
+            # named=False 表示 KB 尚未解析(无 LLM 名，name 为路径族推导的临时名)，
+            # 消费方可据此改显组件 id(如概览「组件变更情况」)。
+            "named": bool((llm.get(cid) or {}).get("name")),
             "kind": _kind(cid, files),
             "desc": (_summary(cid, row.get("description") or "") or "").strip()[:400],
             "lang": _lang_from(lang_of, files),

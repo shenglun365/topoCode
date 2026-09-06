@@ -19,11 +19,29 @@ import tempfile
 
 import pytest
 
-BASELINE_DB = os.path.expanduser("~/.topocode/projects/proj-c2ca8b92/project.db")
+def _find_analyzed_db() -> str:
+    """自动发现任一含 UNIFIED L0 数据的项目库（不硬编码项目 id）。"""
+    import glob
+    for dbp in sorted(glob.glob(os.path.expanduser("~/.topocode/projects/*/project.db")),
+                      key=os.path.getmtime, reverse=True):
+        try:
+            db = sqlite3.connect(f"file:{dbp}?mode=ro", uri=True)
+            row = db.execute(
+                "SELECT 1 FROM graph_doc WHERE edge_type='UNIFIED' AND comm_lv='L0' LIMIT 1"
+            ).fetchone()
+            db.close()
+            if row:
+                return dbp
+        except Exception:
+            continue
+    return ""
+
+
+BASELINE_DB = _find_analyzed_db()
 
 pytestmark = pytest.mark.skipif(
-    not os.path.exists(BASELINE_DB),
-    reason="需要本机已分析的项目库 proj-c2ca8b92",
+    not BASELINE_DB,
+    reason="需要本机至少一个已产出 UNIFIED 组件的项目库",
 )
 
 

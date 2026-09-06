@@ -483,7 +483,8 @@ export interface IPCAPI {
     import: (path: string, opts?: { mode?: string; branch?: string; head?: string; repoUrl?: string; localRepoPath?: string }) => Promise<Project | { requestId: string; status: string; importing: boolean }>
     importStatus: (requestId: string) => Promise<{ status: string; progress?: number; phase?: string; projectId?: string; error?: string }>
     get: (id: string) => Promise<Project>
-    remove: (id: string) => Promise<void>
+    remove: (id: string, wait?: boolean) => Promise<{ requestId?: string; status?: string; deleted?: boolean }>
+    removeStatus: (requestId: string) => Promise<{ status: string; progress?: number; phase?: string; projectId?: string; error?: string }>
     sync: (id: string) => Promise<Project>
     getFileTree: (id: string, fromPath?: string | null) => Promise<FileTreeNode[]>
     updatePath: (id: string, newRootPath: string) => Promise<{ project: Project; invalidFiles: string[]; needsResync: boolean }>
@@ -571,7 +572,7 @@ export interface IPCAPI {
     getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<any>
     getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
     getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
-    getReportDashboard: (taskId: string) => Promise<{ task: any; callLevels: any; depLevels: any; callResults: { results: any[] }; depResults: { results: any[] }; fileStats: any; preSummary?: { counts: Record<string, number>; total_files: number; cached_count: number; project_root: string } }>
+    getReportDashboard: (taskId: string) => Promise<{ task: any; uniLevels: any; uniResults: { results: any[] }; fileStats: any; preSummary?: { counts: Record<string, number>; total_files: number; cached_count: number; project_root: string } }>
     getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number; metadata?: { avgCoreness?: number; maxCoreness?: number; coreNodeRatio?: number } }> }>; totalUniqueFiles: number }>
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
@@ -590,6 +591,7 @@ export interface IPCAPI {
     startPreSummary: (params: { taskId: string; batch?: string; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string; allCached?: boolean }>
     startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; batches: string[]; total: number; agentTaskId?: string; fileCount?: number; allCached?: boolean; error?: string }>
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
+    getPreSummaryFileSource: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; content?: string; size?: number; truncated?: boolean; error?: string }>
     deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
     startPipeline: (params: { taskId: string; force?: boolean; language?: string; concurrency?: number; subagent_concurrency?: number; component_timeout?: number }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>

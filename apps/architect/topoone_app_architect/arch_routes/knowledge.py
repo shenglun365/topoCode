@@ -95,8 +95,7 @@ async def search_assets(q: Optional[str] = "", root: Optional[str] = None, proje
         ql = q.lower()
         comps = [c for c in comps if ql in c["id"].lower() or ql in c["name"].lower()]
     if type:
-        # 组件统一后仅 UNIFIED 口径；旧别名（依赖/调用/INCLUDE/CALL）桥接为 UNIFIED
-        t = "UNIFIED"
+        t = (type or "").upper()
         comps = [c for c in comps if (c.get("edgeType") or "").upper() == t]
     if level:
         lv = level.upper()

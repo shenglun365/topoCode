@@ -41,6 +41,32 @@ def _infer_edge_type(comm_id: str) -> str:
     return ''
 
 
+def unified_l0_components(db, task_id: str) -> list:
+    """标准访问器：UNIFIED L0 组件清单（组件统一后唯一的组件读取口径）。
+
+    直查 SQLite community_hierarchy——与合并写入同连接、强一致；
+    禁止经 DuckDB 级联读取（分析副本存在同步滞后）。
+    返回 [{id, qualityScore}]，按 node_count 降序。
+    """
+    rows = db.execute(
+        "SELECT comm_id, quality_score FROM community_hierarchy "
+        "WHERE task_id=? AND edge_type='UNIFIED' AND comm_lv='L0' "
+        "ORDER BY node_count DESC", (task_id,)
+    ).fetchall()
+    return [{"id": r["comm_id"], "qualityScore": r["quality_score"] or 0} for r in rows]
+
+
+def edge_type_to_kinds(edge_type: str) -> list:
+    """标准映射：组件口径 → graph_edge.kind 列表（UNIFIED=依赖+调用）。"""
+    if edge_type == "INCLUDE":
+        return ["imports"]
+    if edge_type == "CALL":
+        return ["calls"]
+    if edge_type == "UNIFIED":
+        return ["imports", "calls"]
+    return []
+
+
 def _make_rel(project_root: str):
     """返回路径规范化函数: file:/abs/path → rel/path"""
     __root = project_root.replace('\\', '/') if project_root else ''

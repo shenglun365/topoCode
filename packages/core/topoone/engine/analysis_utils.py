@@ -90,16 +90,7 @@ def get_cascade_levels_impl(project_db, tid, et, pid=None, multi_db=None):
 
 
 def get_l0_comps(project_db, tid, multi_db=None):
-    """获取 L0 社区列表（组件统一：仅 UNIFIED 口径）"""
-    comps = []
-    for et in ("UNIFIED",):
-        cascades = get_cascade_levels_impl(project_db, tid, et, multi_db=multi_db)
-        for l in cascades.get("levels", []):
-            if l.get("lv") == "L0":
-                for it in l.get("items", []):
-                    comps.append({
-                        "id": it.get("id", ""),
-                        "metadata": {"qualityScore": it.get("qualityScore", 0)},
-                    })
-                break
-    return comps
+    """获取 L0 社区列表（组件统一：标准访问器，直查 SQLite）。"""
+    from topoone.engine.community_data import unified_l0_components
+    return [{"id": c["id"], "metadata": {"qualityScore": c["qualityScore"]}}
+            for c in unified_l0_components(project_db, tid)]

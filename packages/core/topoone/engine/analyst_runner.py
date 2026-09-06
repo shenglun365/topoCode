@@ -997,6 +997,12 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
                 ctx.best_dep_community_id = best["comm_id"]
             ctx.log(f"UNIFIED merge complete: {uni_result.get('community_count', 0)} communities"
                     f" ({uni_result.get('levels', 0)} levels)")
+            # 失效预摘要 rank 缓存：合并写入中途可能被进度轮询缓存了不完整的
+            # UNIFIED L0 ranks（TTL 3600s），不清会导致进度/批次范围永久错
+            try:
+                _get_state_store()._cache.delete_file_ranks(task_id)
+            except Exception:
+                pass
         except Exception as e:
             ctx.log(f"UNIFIED merge failed: {e}")
             logger.exception("UNIFIED merge failed")

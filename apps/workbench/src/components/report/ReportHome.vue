@@ -148,8 +148,8 @@ function setPreSummaryFromDashboard(dash: any) {
       total_files: dash.preSummary.total_files,
       cached_count: dash.preSummary.cached_count,
       failed_count: dash.preSummary.failed_count || 0,
-      counts: dash.preSummary.counts || { P0: 0, P1: 0, P2: 0 },
-      batch_cached: dash.preSummary.batch_cached || { P0: 0, P1: 0, P2: 0 },
+      counts: dash.preSummary.counts || { P0: 0, P1: 0, P2: 0, P3: 0 },
+      batch_cached: dash.preSummary.batch_cached || { P0: 0, P1: 0, P2: 0, P3: 0 },
       project_root: dash.preSummary.project_root || '',
     }
   }
@@ -227,7 +227,8 @@ const externalStats = computed(() =>
 const coveredFileCount = computed(() => {
   const counts = communityStore.tasks[props.taskId]?.uniqueFileCounts
   if (counts) {
-    const included = Math.max((counts['INCLUDE'] ?? 0), (counts['CALL'] ?? 0))
+    // 组件统一：优先 UNIFIED 口径，兼容旧双线键
+    const included = counts['UNIFIED'] ?? 0
     return Math.min(included, totalScopeFiles.value)
   }
   return 0
@@ -600,6 +601,12 @@ watch(agentCompletedSignal, async () => {
                     :style="batchBarStyle('P2')"
                   >
                     P2: {{ preSummaryStatus.counts?.P2 || 0 }} ({{ preSummaryStatus.counts?.P2 ? Math.round((preSummaryStatus.batch_cached?.P2 || 0) / preSummaryStatus.counts.P2 * 100) : 0 }}%)
+                  </span>
+                  <span
+                    class="presummary-batch presummary-batch-p3"
+                    :title="t('report.preSummaryP3Tip')"
+                  >
+                    P3({{ t('report.preSummaryP3') }}): {{ preSummaryStatus.counts?.P3 || 0 }} ({{ preSummaryStatus.counts?.P3 ? Math.round((preSummaryStatus.batch_cached?.P3 || 0) / preSummaryStatus.counts.P3 * 100) : 0 }}%)
                   </span>
                 </div>
               </template>
@@ -1226,6 +1233,11 @@ watch(agentCompletedSignal, async () => {
   background: var(--bg-tertiary);
   color: var(--text-muted);
   border: 1px solid var(--border);
+}
+.presummary-batch-p3 {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
 }
 .card-summary-hint {
   font-size: calc(10px * var(--ui-scale, 1));

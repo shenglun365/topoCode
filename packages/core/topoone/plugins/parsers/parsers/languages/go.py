@@ -38,6 +38,18 @@ def _go_is_exported(node: SyntaxNode, source: str) -> bool:
     return False
 
 
+def _go_extract_param(node: SyntaxNode, source: str) -> dict | None:
+    """parameter: `x Foo` / `x, y Foo`（仅单名字形态；省略名字的类型形态跳过）"""
+    name_node = node.child_by_field_name("name")
+    type_node = node.child_by_field_name("type")
+    if name_node is None or type_node is None or name_node.type != "identifier":
+        return None
+    return {
+        "name": source[name_node.start_byte:name_node.end_byte],
+        "type": source[type_node.start_byte:type_node.end_byte],
+    }
+
+
 GO = LanguageExtractor(
     function_types=("function_declaration",),
     method_types=("method_declaration",),
@@ -52,5 +64,6 @@ GO = LanguageExtractor(
     methods_are_top_level=True,
     resolve_type_alias_kind=_go_resolve_type_alias,
     extract_receiver=_go_get_receiver,
+    extract_param=_go_extract_param,
     is_exported=_go_is_exported,
 )

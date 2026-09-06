@@ -89,6 +89,21 @@ const pathConfirmMessage = ref('')
 // 示例项目
 const isSample = computed(() => !!props.project.isSample)
 
+// 删除进度（后端后台删除，卡片内联反馈）
+const isDeleting = computed(() => projectStore.deleteProgress?.id === props.project.id)
+const deletePct = computed(() => projectStore.deleteProgress?.progress ?? 0)
+const deletePhaseLabel = computed(() => {
+  const phase = projectStore.deleteProgress?.phase || ''
+  const map: Record<string, string> = {
+    prepare: t('project.deletePhase.prepare'),
+    tasks: t('project.deletePhase.tasks'),
+    database: t('project.deletePhase.database'),
+    source: t('project.deletePhase.source'),
+    record: t('project.deletePhase.record'),
+  }
+  return map[phase] || t('project.deleting')
+})
+
 // 资源中心导入的项目
 const isResourceProject = computed(() => props.project.id?.startsWith?.('TOPORES_ID:'))
 
@@ -415,9 +430,25 @@ async function onVersionUpdated() {
   <div
     class="project-card card card-clickable"
     :class="{ 'card-pinned': project.pinned }"
+    style="position: relative;"
     @click="emit('select', project)"
     @contextmenu="showMenu"
   >
+    <!-- 删除进度覆盖层 -->
+    <div
+      v-if="isDeleting"
+      class="delete-overlay"
+      @click.stop
+    >
+      <div class="delete-overlay-title">{{ t('project.deleting') }}</div>
+      <div class="progress-bar delete-overlay-bar">
+        <div
+          class="progress-bar-fill"
+          :style="{ width: deletePct + '%' }"
+        />
+      </div>
+      <div class="delete-overlay-phase">{{ deletePhaseLabel }} · {{ deletePct }}%</div>
+    </div>
     <!-- 置顶（左上）/收藏（右上）：小图标，减轻对标题/操作按钮的遮挡 -->
     <ArrowUpOnSquareIcon
       v-if="project.pinned"
@@ -1380,4 +1411,31 @@ async function onVersionUpdated() {
   border-radius: calc(6px * var(--ui-scale, 1));
 }
 .btn-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* 删除进度覆盖层 */
+.delete-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(4px * var(--ui-scale, 1));
+  background: color-mix(in srgb, var(--bg-primary, #1e1e2e) 82%, transparent);
+  border-radius: inherit;
+  backdrop-filter: blur(2px);
+}
+.delete-overlay-title {
+  font-size: calc(12px * var(--ui-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.delete-overlay-bar {
+  width: 78%;
+}
+.delete-overlay-phase {
+  font-size: calc(10px * var(--ui-scale, 1));
+  color: var(--text-muted);
+}
 </style>

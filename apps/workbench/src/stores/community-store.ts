@@ -257,13 +257,12 @@ export const useCommunityStore = defineStore('community', () => {
     const key = _inflightKey(taskId, 'loadCommunitiesFromDashboard')
     const existing = _inflightLoads.get(key)
     if (existing) return existing
-    // console.log('[community-store] loadCommunitiesFromDashboard start', { taskId, hasCallLevels: !!dash?.callLevels, hasDepLevels: !!dash?.depLevels })
-
+    
     const promise = (async () => {
       const t = ensureTask(taskId)
       try {
-        const uniLevels = dash.uniLevels || dash.callLevels || dash.depLevels
-        const uniResults = dash.uniResults || dash.callResults || dash.depResults || { results: [] }
+        const uniLevels = dash.uniLevels
+        const uniResults = dash.uniResults || { results: [] }
         const llmMap: Record<string, any> = {}
         for (const rRaw of [...(uniResults?.results || [])]) {
           const r = rRaw as Record<string, unknown>
@@ -1172,6 +1171,10 @@ export const useCommunityStore = defineStore('community', () => {
   async function getFileSummary(taskId: string, filePath: string) {
     return await ipc.analysis.getFileSummary({ taskId, file_path: filePath })
   }
+
+  async function getPreSummaryFileSource(taskId: string, filePath: string) {
+    return await ipc.analysis.getPreSummaryFileSource({ taskId, file_path: filePath })
+  }
   async function deleteFileSummary(taskId: string, filePath: string) {
     return await ipc.analysis.deleteFileSummary({ taskId, file_path: filePath })
   }
@@ -1227,6 +1230,6 @@ export const useCommunityStore = defineStore('community', () => {
     loadAgentTaskHistory, clearAgentTaskHistory, getCachedTaskLogs, agentTaskHistoryOffset, agentTaskHistoryTotal,
     cancelAgentPolling, cancelAgentTask, ensureAgentPolling,
     getPreSummaryStatus, listPreSummaryFiles, startPreSummary, startPreSummaryPipeline,
-    getFileSummary, deleteFileSummary, rerunFileSummary, startPipeline, getProgressStats,
+    getFileSummary, getPreSummaryFileSource, deleteFileSummary, rerunFileSummary, startPipeline, getProgressStats,
   }
 })

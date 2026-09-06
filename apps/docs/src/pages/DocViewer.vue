@@ -18,7 +18,7 @@ import { AppToolbar } from '@topo/web-core/shell'
 
 const taskId = ref(new URLSearchParams(location.search).get('taskId') || '')
 const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
-const urlEt = new URLSearchParams(location.search).get('edgeType') || 'INCLUDE'
+const urlEt = new URLSearchParams(location.search).get('edgeType') || 'UNIFIED'
 
 const {
   floatBounds, updateFloatBoundaries, clampFloatPosition,
@@ -44,7 +44,7 @@ const {
   docId, originalDocId,
   docCommId, docEdgeType, docBreadcrumb, doc, loading, children,
   docContentRef,
-  tocVisible, tocCallChildren, tocIncludeChildren, tocLoading,
+  tocVisible, tocChildren, tocLoading,
   files, filePage, fileSearch, filePreview, fileSummary, pageMode, filteredFiles: filteredFiles_,
   sourceLoading, viewSource,
   pushDocBc, loadDoc, loadChildren, navigateTo, navBack,
@@ -259,9 +259,9 @@ function attachHeadingButtons() {
       if (!m && !isRoot && !Object.keys(commLinks).length) {
         if (docCommId.value) m = [docCommId.value]
       }
-      let ets = isRoot ? ['INCLUDE', 'CALL'] : Object.keys(commLinks).slice(0, 1)
+      let ets = isRoot ? ['UNIFIED'] : Object.keys(commLinks).slice(0, 1)
       if (!ets.length) {
-        if (m) ets = isRoot ? ['INCLUDE', 'CALL'] : [docEdgeType.value || 'INCLUDE']
+        if (m) ets = [docEdgeType.value || 'UNIFIED']
         else return
       }
       const hText = h.textContent?.trim() || ''
@@ -271,13 +271,9 @@ function attachHeadingButtons() {
         const cid = commLinks[et] || (m ? m[0] : '')
         if (!cid || cid === 'undefined') return
         const icon = isRoot
-          ? (et === 'INCLUDE'
-            ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M16 12H8M12 8l4 4-4 4"/></svg>'
-            : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 16l-4-4 4-4"/></svg>')
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M16 12H8M12 8l4 4-4 4"/></svg>'
           : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="14" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8" y1="8" x2="16" y2="4"/><line x1="8" y1="13" x2="4" y2="16"/><line x1="16" y1="13" x2="20" y2="16"/></svg>'
-        const title = isRoot
-          ? (et === 'INCLUDE' ? t('viewer.viewInInclude') : t('viewer.viewInCall'))
-          : t('viewer.viewInGraph')
+        const title = t('viewer.viewInGraph')
         const ib = document.createElement('span')
         ib.className = 'hd-btn-icon'
         ib.title = title
@@ -689,15 +685,11 @@ onMounted(() => {
           <div v-if="tocVisible" class="toc-panel">
             <div v-if="tocLoading" class="toc-loading">{{ t('common.loading') }}</div>
             <template v-else>
-              <div v-if="tocCallChildren.length" class="toc-section">
-                <div class="toc-title">{{ t('viewer.callAnalysis', { n: tocCallChildren.length }) }}</div>
-                <div v-for="c in tocCallChildren" :key="c.commId" class="toc-item" @click="tocNavigate(c)">{{ c.name || c.commId }}</div>
+              <div v-if="tocChildren.length" class="toc-section">
+                <div class="toc-title">{{ t('viewer.componentToc', { n: tocChildren.length }) }}</div>
+                <div v-for="c in tocChildren" :key="c.commId" class="toc-item" @click="tocNavigate(c)">{{ c.name || c.commId }}</div>
               </div>
-              <div v-if="tocIncludeChildren.length" class="toc-section">
-                <div class="toc-title">{{ t('viewer.includeAnalysis', { n: tocIncludeChildren.length }) }}</div>
-                <div v-for="c in tocIncludeChildren" :key="c.commId" class="toc-item" @click="tocNavigate(c)">{{ c.name || c.commId }}</div>
-              </div>
-              <div v-if="!tocCallChildren.length && !tocIncludeChildren.length" class="toc-empty">{{ t('viewer.noDeeperStructure') }}</div>
+              <div v-if="!tocChildren.length" class="toc-empty">{{ t('viewer.noDeeperStructure') }}</div>
             </template>
           </div>
         </div>
@@ -719,22 +711,22 @@ onMounted(() => {
         <div class="toc-float" id="fileCommFloat" ref="fileCommFloatRef">
           <button class="toc-toggle" @click="commFloatVisible = !commFloatVisible">{{ commFloatVisible ? '✕' : '☰' }}</button>
           <div v-if="commFloatVisible" class="toc-panel file-comm-panel">
-            <div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;margin-bottom:2px;padding-bottom:3px;border-bottom:1px solid var(--border);flex-wrap:wrap">
-              <div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">
-                <div class="et-tabs">
-                  <button v-for="et in etOptions" :key="et" class="et-tab" :class="{ active: graphEdgeType === et }" @click="setEdgeType(et)">{{ et === 'INCLUDE' ? t('viewer.etInclude') : et === 'CALL' ? t('viewer.etCall') : et === 'EXTERNAL_INCLUDE' ? t('viewer.etExternalInclude') : t('viewer.etExternalCall') }}</button>
-                </div>
+            <div class="file-comm-toolbar">
+              <div class="et-tabs">
+                <button v-for="et in etOptions" :key="et" class="et-tab" :class="{ active: graphEdgeType === et }" @click="setEdgeType(et)">{{ et === 'EXTERNAL_INCLUDE' ? t('viewer.etExternalInclude') : et === 'EXTERNAL_CALL' ? t('viewer.etExternalCall') : t('viewer.etUnified') }}</button>
               </div>
-              <div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">
-                <label v-if="gran === 'component'" style="font-size:var(--ui-font-size);color:var(--text-muted)">{{ t('viewer.depth') }} <select v-model.number="rightDepth" @change="loadGraph" class="depth-select">
-                  <option :value="1">1</option><option :value="2">2</option><option :value="3">3</option><option :value="4">4</option><option :value="5">5</option>
-                </select></label>
+              <div class="file-comm-toolbar-row">
+                <label v-if="gran === 'component'" class="file-comm-label">{{ t('viewer.depth') }}
+                  <select v-model.number="rightDepth" @change="loadGraph" class="depth-select">
+                    <option :value="1">1</option><option :value="2">2</option><option :value="3">3</option><option :value="4">4</option><option :value="5">5</option>
+                  </select></label>
                 <span v-if="gran === 'component'" class="tab-sep">|</span>
-                <label style="font-size:var(--ui-font-size);color:var(--text-muted)">{{ t('viewer.timeout') }} <select v-model.number="layoutTimeout" class="depth-select">
-                  <option :value="30">30s</option><option :value="60">60s</option><option :value="90">90s</option><option :value="120">120s</option>
-                </select></label>
+                <label class="file-comm-label">{{ t('viewer.timeout') }}
+                  <select v-model.number="layoutTimeout" class="depth-select">
+                    <option :value="30">30s</option><option :value="60">60s</option><option :value="90">90s</option><option :value="120">120s</option>
+                  </select></label>
               </div>
-              <hr class="right-panel-hr">
+            </div>
               <div id="rightCommList">
                 <div v-if="rightCommTree.length" class="comm-tree">
                   <div v-for="c in rightCommTree" :key="c.commId" class="comm-tree-item" @click="navigateComm(c.commId, c.name)">
@@ -746,7 +738,6 @@ onMounted(() => {
               </div>
             </div>
           </div>
-        </div>
 
         <!-- Graph toolbar -->
         <div class="graph-toolbar" :class="{ collapsed: toolbarCollapsed }">
@@ -1056,7 +1047,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .toc-item:hover{background:var(--bg-code)}
 .toc-empty{color:var(--text-muted);font-style:italic;padding:8px;text-align:center;font-size:var(--ui-font-size)}
 .toc-loading{color:var(--text-muted);padding:8px;text-align:center;font-size:var(--ui-font-size)}
-.file-comm-panel{width:260px}
+.file-comm-panel{width:260px;overflow:hidden;display:flex;flex-direction:column}
+.file-comm-toolbar{padding-bottom:4px;margin-bottom:4px;border-bottom:1px solid var(--border);flex-shrink:0}
+.file-comm-toolbar-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding-top:2px}
+.file-comm-label{font-size:var(--ui-font-size);color:var(--text-muted);white-space:nowrap}
+.file-comm-panel #rightCommList{overflow-y:auto;max-height:calc(50vh - 64px);min-height:40px}
 .ctx-menu{position:fixed;z-index:1000;min-width:140px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.25);padding:4px;font-size:var(--ui-font-size)}
 .ctx-item{padding:5px 8px;border-radius:4px;cursor:pointer;color:var(--text)}
 .ctx-item:hover{background:var(--bg-hover)}

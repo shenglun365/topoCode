@@ -22,6 +22,31 @@ def _py_is_async(node: SyntaxNode) -> bool:
     return prev is not None and prev.type == "async"
 
 
+def _py_extract_param(node: SyntaxNode, source: str) -> dict | None:
+    """带注解的参数: `x: Foo` / `x: Foo = d`（无注解参数无类型信息，跳过）"""
+    name_node = node.child_by_field_name("name")
+    if name_node is None:
+        if node.type == "typed_parameter":
+            for c in node.named_children:
+                if c.type == "identifier":
+                    name_node = c
+                    break
+        if name_node is None:
+            return None
+    type_node = node.child_by_field_name("type")
+    if type_node is None:
+        for c in node.named_children:
+            if c.type in ("type", "generic_type", "attribute", "subscript"):
+                type_node = c
+                break
+    if type_node is None:
+        return None
+    return {
+        "name": source[name_node.start_byte:name_node.end_byte],
+        "type": source[type_node.start_byte:type_node.end_byte],
+    }
+
+
 PYTHON = LanguageExtractor(
     function_types=("function_definition",),
     class_types=("class_definition",),
@@ -35,4 +60,5 @@ PYTHON = LanguageExtractor(
     return_field="return_type",
     is_async=_py_is_async,
     extract_import=_py_extract_import,
+    extract_param=_py_extract_param,
 )

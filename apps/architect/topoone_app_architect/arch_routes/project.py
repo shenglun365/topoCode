@@ -686,9 +686,14 @@ def _by_kb_components(files: list, proj: dict) -> list:
         a = agg[cid]
         if a["added"] or a["modified"] or a["deleted"]:
             ex = _exclusive(cid)
+            # KB 未解析的组件(named=False，name 为路径族推导的临时名如 "src") → 显示组件 ID
+            comp_meta = by_id[cid]
+            disp_name = (comp_meta.get("name") or "").strip()
+            if not comp_meta.get("named", True) or not disp_name:
+                disp_name = cid
             out.append({
-                "id": cid, "name": (by_id[cid].get("name") or "").strip() or cid,
-                "parentId": by_id[cid].get("parentId") or "", "level": level,
+                "id": cid, "name": disp_name,
+                "parentId": comp_meta.get("parentId") or "", "level": level,
                 # files/added/modified/deleted = 自身独占(未被子孙覆盖，消重复)
                 "files": ex["files"],
                 "added": ex["added"], "modified": ex["modified"], "deleted": ex["deleted"],

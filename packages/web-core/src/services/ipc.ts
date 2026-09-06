@@ -118,8 +118,13 @@ function createRealIPC() {
         const result = await api.project.get(id)
         return adaptProject(result)
       },
-      remove: async (id: string) => {
-        await api.project.remove(id)
+      remove: async (id: string, wait?: boolean) => {
+        // 后台化：返回 {requestId, status:"deleting"}；进度用 removeStatus 轮询。
+        // wait=true 时同步删除（返回 {deleted:true}），用于确定性强的小数据量场景。
+        return await api.project.remove(id, wait)
+      },
+      removeStatus: async (requestId: string) => {
+        return await api.call('project.removeStatus', { requestId })
       },
       sync: async (id: string) => {
         const result = await api.project.sync(id)
@@ -331,6 +336,9 @@ function createRealIPC() {
       },
       getReportDashboard: async (taskId: string) => {
         return await api.analysis.getReportDashboard(taskId)
+      },
+      getPreSummaryFileSource: async (params: { taskId: string; file_path: string }) => {
+        return await api.analysis.getPreSummaryFileSource(params)
       },
       getQueryStats: async (params: {
         taskId: string

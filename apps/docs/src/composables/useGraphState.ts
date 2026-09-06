@@ -215,7 +215,8 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
     graphEdgeType.value = et
     if (et.startsWith('EXTERNAL_')) gran.value = 'component'
     if (gran.value === 'file' && (et === 'EXTERNAL_INCLUDE' || et === 'EXTERNAL_CALL')) {
-      graphEdgeType.value = et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL'
+      // 旧双线已下线：文件粒度外部图回退 UNIFIED
+      graphEdgeType.value = 'UNIFIED'
     }
     graphCommId.value = ''
     graphBreadcrumb.value = []

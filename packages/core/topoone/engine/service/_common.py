@@ -41,6 +41,7 @@ from topoone.engine.task_manager import (
 # 后台导入任务注册表：requestId -> {status, progress, phase, projectId, error}
 # project.import 改为后台执行后，前端据此轮询进度（进度事件仍走 WS）。
 _IMPORT_JOBS: dict = {}
+_DELETE_JOBS: dict = {}
 
 
 

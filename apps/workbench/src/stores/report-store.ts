@@ -6,10 +6,8 @@ import { useProjectStore } from './project'
 
 export interface DashboardData {
   task: any
-  callLevels: any
-  depLevels: any
-  callResults: { results: any[] }
-  depResults: { results: any[] }
+  uniLevels: any
+  uniResults: { results: any[] }
   fileStats: any
   preSummary?: {
     counts: Record<string, number>
@@ -97,13 +95,13 @@ export const useReportStore = defineStore('report', () => {
       try {
         console.log('[report-store] loadDashboard sending getReportDashboard', { taskId })
         const dash = await ipc.analysis.getReportDashboard(taskId)
-        console.log('[report-store] loadDashboard received', { taskId, hasFileStats: !!dash?.fileStats, hasCallLevels: !!dash?.callLevels })
+        console.log('[report-store] loadDashboard received', { taskId, hasFileStats: !!dash?.fileStats, hasUniLevels: !!dash?.uniLevels })
         if (dash) {
           dashboardCache.value = { ...dashboardCache.value, [taskId]: dash }
           // 注入社区数据到 communityStore
           const { useCommunityStore } = await import('./community-store')
           const commStore = useCommunityStore()
-          if (dash.callLevels || dash.depLevels || dash.fileStats) {
+          if (dash.uniLevels || dash.fileStats) {
             console.log('[report-store] loadDashboard calling loadCommunitiesFromDashboard')
             await commStore.loadCommunitiesFromDashboard(taskId, dash)
             console.log('[report-store] loadDashboard loadCommunitiesFromDashboard done')
@@ -131,8 +129,7 @@ export const useReportStore = defineStore('report', () => {
           await commStore.loadCommunities(taskId, pid)
           const fallback: DashboardData = {
             task, fileStats,
-            callLevels: null, depLevels: null,
-            callResults: { results: [] }, depResults: { results: [] },
+            uniLevels: null, uniResults: { results: [] },
             preSummary: { counts: { P0: 0, P1: 0, P2: 0 }, total_files: 0, cached_count: 0, project_root: '' },
           }
           dashboardCache.value = { ...dashboardCache.value, [taskId]: fallback }

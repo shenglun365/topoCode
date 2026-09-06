@@ -54,6 +54,7 @@ export default { analysis: {
   // Task operations
   confirmDelete: 'Confirm deleting this task? This cannot be undone.',
   deleteConfirmed: 'Confirm',
+  deletingTask: 'Deleting task, please wait…',
   deleteCancelled: 'Cancel',
 
   // Task detail

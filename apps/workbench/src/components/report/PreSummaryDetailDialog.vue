@@ -24,6 +24,34 @@ const source = ref('')
 const found = ref(false)
 const deleting = ref(false)
 
+// 视图切换：摘要 / 源码
+const viewMode = ref<'summary' | 'source'>('summary')
+const sourceContent = ref('')
+const sourceLoading = ref(false)
+const sourceFound = ref(false)
+const sourceTruncated = ref(false)
+let sourceLoaded = false
+
+async function loadSource() {
+  if (sourceLoaded || sourceLoading.value) return
+  sourceLoading.value = true
+  try {
+    const resp = await communityStore.getPreSummaryFileSource(props.taskId, props.filePath)
+    sourceFound.value = !!resp?.found
+    sourceContent.value = resp?.content || ''
+    sourceTruncated.value = !!resp?.truncated
+    sourceLoaded = true
+  } catch {
+    sourceFound.value = false
+  }
+  finally { sourceLoading.value = false }
+}
+
+function switchMode(mode: 'summary' | 'source') {
+  viewMode.value = mode
+  if (mode === 'source') loadSource()
+}
+
 async function loadSummary() {
   loading.value = true
   try {
@@ -72,6 +100,22 @@ onMounted(loadSummary)
     <div class="psd-dialog">
       <div class="psd-header">
         <span class="psd-title">{{ t('report.filePreSummary') }}</span>
+        <div class="psd-view-toggle">
+          <button
+            class="psd-mode-btn"
+            :class="{ 'psd-mode-active': viewMode === 'summary' }"
+            @click="switchMode('summary')"
+          >
+            {{ t('report.preSummaryViewSummary') }}
+          </button>
+          <button
+            class="psd-mode-btn"
+            :class="{ 'psd-mode-active': viewMode === 'source' }"
+            @click="switchMode('source')"
+          >
+            {{ t('report.preSummaryViewSource') }}
+          </button>
+        </div>
         <div class="psd-spacer" />
         <button
           class="psd-close-btn"
@@ -97,18 +141,41 @@ onMounted(loadSummary)
         </div>
         <div class="psd-divider" />
         <div class="psd-content">
-          <template v-if="loading">
-            <div class="psd-loading">
-              {{ t('common.loading') }}
-            </div>
-          </template>
-          <template v-else-if="!found">
-            <div class="psd-not-found">
-              {{ t('report.preSummaryNotCached') }}
-            </div>
+          <template v-if="viewMode === 'summary'">
+            <template v-if="loading">
+              <div class="psd-loading">
+                {{ t('common.loading') }}
+              </div>
+            </template>
+            <template v-else-if="!found">
+              <div class="psd-not-found">
+                {{ t('report.preSummaryNotCached') }}
+              </div>
+            </template>
+            <template v-else>
+              <pre class="psd-summary-text">{{ summary }}</pre>
+            </template>
           </template>
           <template v-else>
-            <pre class="psd-summary-text">{{ summary }}</pre>
+            <template v-if="sourceLoading">
+              <div class="psd-loading">
+                {{ t('common.loading') }}
+              </div>
+            </template>
+            <template v-else-if="!sourceFound">
+              <div class="psd-not-found">
+                {{ t('report.preSummarySourceNotFound') }}
+              </div>
+            </template>
+            <template v-else>
+              <div
+                v-if="sourceTruncated"
+                class="psd-truncated-tip"
+              >
+                {{ t('report.preSummarySourceTruncated') }}
+              </div>
+              <pre class="psd-source-text">{{ sourceContent }}</pre>
+            </template>
           </template>
         </div>
       </div>
@@ -266,6 +333,43 @@ onMounted(loadSummary)
   min-height: calc(80px * var(--ui-scale, 1));
 }
 
+.psd-view-toggle {
+  display: flex;
+  gap: calc(4px * var(--ui-scale, 1));
+  margin-left: calc(10px * var(--ui-scale, 1));
+}
+.psd-mode-btn {
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  border: 1px solid var(--border);
+  border-radius: calc(4px * var(--ui-scale, 1));
+  background: transparent;
+  color: var(--text-muted);
+  font-size: calc(10px * var(--ui-scale, 1));
+  cursor: pointer;
+}
+.psd-mode-btn:hover {
+  color: var(--text-primary);
+}
+.psd-mode-active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent);
+}
+.psd-source-text {
+  margin: 0;
+  max-height: 100%;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: calc(11px * var(--ui-scale, 1));
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--text-primary);
+}
+.psd-truncated-tip {
+  padding: calc(4px * var(--ui-scale, 1)) 0;
+  color: var(--text-muted);
+  font-size: calc(10px * var(--ui-scale, 1));
+}
 .psd-summary-text {
   font-size: calc(12px * var(--ui-scale, 1));
   line-height: 1.7;

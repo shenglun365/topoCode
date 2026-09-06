@@ -154,7 +154,9 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
 
     class RunPreSummaryTool(AgentTool):
         name = "pipeline_run_presummary"
-        description = "运行预摘要批次"
+        description = ("运行预摘要批次（P0/P1/P2=组件内文件，由流水线调度；"
+                       "P3=未纳入组件分析的文件，不参与强制处理，"
+                       "agent 可经 presummary_supplement 按需补充）")
         category = "pipeline"
         llm_visible = False
 
@@ -491,9 +493,57 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                 _log.exception(f"[Pipeline] overview failed: {e}")
                 return ToolResult.fail(str(e))
 
+    class SupplementPreSummaryTool(AgentTool):
+        """按需补充预摘要（LLM 可见）：默认针对 P3（未纳入组件分析的文件）。
+
+        组件内文件（P0-P2）已由流水线覆盖；当 agent 在分析过程中发现
+        所需文件缺少预摘要时，调用本工具按批次补充。
+        """
+        name = "presummary_supplement"
+        description = ("补充文件预摘要：默认处理 P3 批次（未纳入组件分析的文件，"
+                       "只处理尚无摘要的文件）。当分析中发现所需文件缺少预摘要时调用；"
+                       "也可显式传 batches 补充其他批次。")
+        category = "pipeline"
+        llm_visible = True
+
+        def to_openai_schema(self, filter_names=None):
+            return {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "batches": {
+                                "type": "array",
+                                "items": {"type": "string",
+                                          "enum": ["P0", "P1", "P2", "P3"]},
+                                "description": '要补充的批次，默认 ["P3"]（未纳入组件分析的文件）',
+                            },
+                            "force": {
+                                "type": "boolean",
+                                "description": "true=强制重新生成已缓存摘要（默认 false，只补充缺失的）",
+                            },
+                        },
+                    },
+                },
+            }
+
+        async def execute(self, task_id: str, batches: list = None,
+                          force: bool = False, language: str = "") -> ToolResult:
+            batches = [b for b in (batches or ["P3"]) if b in ("P0", "P1", "P2", "P3")] or ["P3"]
+            runner = RunPreSummaryTool()
+            if hasattr(self, 'cancel_event'):
+                runner.cancel_event = self.cancel_event
+            if hasattr(self, '_forward_log'):
+                runner._forward_log = self._forward_log
+            return await runner.execute(task_id, batches, force, language)
+
     registry = ToolRegistry()
     registry.register(EnsureSummaryTool())
     registry.register(RunPreSummaryTool())
+    registry.register(SupplementPreSummaryTool())
     registry.register(RunComponentAnalysisTool())
     registry.register(RunOverviewTool())
     return registry

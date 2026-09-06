@@ -20,7 +20,7 @@ const taskName = computed(() => {
   return props.taskId || ''
 })
 
-const BATCHES = ['P0', 'P1', 'P2'] as const
+const BATCHES = ['P0', 'P1', 'P2', 'P3'] as const
 type Batch = typeof BATCHES[number]
 
 const activeBatch = ref<Batch>('P0')
@@ -206,12 +206,18 @@ watch(() => props.taskId, loadFiles)
             </td>
             <td class="ps-cell-action">
               <button
+                v-if="f.batch !== 'P3'"
                 class="ps-delete-btn"
                 :title="t('report.preSummaryDelete')"
                 @click.stop="openDetail(f.file_path)"
               >
                 {{ t('report.preSummaryViewDetails') }}
               </button>
+              <span
+                v-else
+                class="ps-uncached-badge"
+                :title="t('report.preSummaryP3Tip')"
+              >{{ t('report.preSummaryP3') }}</span>
             </td>
           </tr>
         </tbody>

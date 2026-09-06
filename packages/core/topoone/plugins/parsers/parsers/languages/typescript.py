@@ -42,6 +42,18 @@ def _ts_resolve_body(node: SyntaxNode, body_field: str) -> SyntaxNode | None:
     return None
 
 
+def _ts_extract_param(node: SyntaxNode, source: str) -> dict | None:
+    """parameter: `x: Foo` — pattern 为标识符才有类型可推断（解构模式跳过）"""
+    name_node = node.child_by_field_name("pattern") or node.child_by_field_name("name")
+    type_node = node.child_by_field_name("type")
+    if name_node is None or type_node is None or name_node.type not in ("identifier", "shorthand_property_identifier"):
+        return None
+    return {
+        "name": source[name_node.start_byte:name_node.end_byte],
+        "type": source[type_node.start_byte:type_node.end_byte],
+    }
+
+
 TYPESCRIPT = LanguageExtractor(
     function_types=("function_declaration", "arrow_function", "function_expression"),
     class_types=("class_declaration", "abstract_class_declaration"),
@@ -64,6 +76,7 @@ TYPESCRIPT = LanguageExtractor(
     is_const=_ts_is_const,
     is_exported=_js_is_exported,
     extract_import=_js_extract_import,
+    extract_param=_ts_extract_param,
     extract_visibility=_ts_get_visibility,
     resolve_body=_ts_resolve_body,
 )

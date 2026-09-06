@@ -18,6 +18,7 @@ from topoone.db.manager import MultiDBManager
 from topoone.engine.store.task_store import TaskStore
 from topoone.engine.store.analysis_store import AnalysisStore
 from topoone.engine.analysis_utils import get_cascade_levels_impl, get_l0_comps
+from topoone.engine.community_data import unified_l0_components
 from topoone.engine.analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task
 
 logger = logging.getLogger(__name__)
@@ -177,10 +178,34 @@ def _compute_file_ranks(task_id: str, project_db, components: list,
         else:
             item["batch"] = "P2"
 
+    # P3(未包含)：源码中未纳入任何组件分析的文件——仅清单化展示与 agent 按需
+    # 补充预摘要（pipeline_run_presummary 传 batches=["P3"]），不参与强制预摘要，
+    # 也不计入预摘要进度分母。用于判定组件分析覆盖边界。
+    p3_count = 0
+    try:
+        covered = {it["file_path"] for it in scored}
+        # 仅真实源码文件（language 非空且非 directory，剔除 README/目录/include 杂项行）
+        for row in project_db.execute(
+            "SELECT file_path, COALESCE(size, 0) AS sz FROM source_files "
+            "WHERE language IS NOT NULL AND language != '' AND language != 'directory'"
+        ).fetchall():
+            rel = row["file_path"]
+            if rel and rel not in covered:
+                scored.append({
+                    "file_path": rel, "score": 0, "cross": 0, "edges": 0,
+                    "size": row["sz"] or 0, "is_large": 0, "quality": 0,
+                    "batch": "P3",
+                })
+                p3_count += 1
+    except Exception as e:
+        logger.warning(f"[_compute_file_ranks] P3(未包含) 计算失败: {e}")
+
     return {
         "files": scored,
-        "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end},
+        "counts": {"P0": p0_end, "P1": p1_end - p0_end,
+                   "P2": total - p1_end, "P3": p3_count},
     }
+
 
 
 _batched_files_cache: dict = {}
@@ -200,15 +225,8 @@ def _count_batched_source_files(task_id: str, project_db, project_root: str = ""
         return hit[0]
     count = 0
     try:
-        comps = []
-        for et in ("UNIFIED",):   # 组件统一：交付口径仅 UNIFIED
-            rows = project_db.execute(
-                "SELECT comm_id, quality_score FROM community_hierarchy "
-                "WHERE task_id=? AND edge_type=? AND comm_lv='L0' ORDER BY node_count DESC",
-                (task_id, et)
-            ).fetchall()
-            for row in rows:
-                comps.append({"id": row[0], "metadata": {"qualityScore": row[1] or 0}})
+        comps = [{"id": c["id"], "metadata": {"qualityScore": c["qualityScore"]}}
+                 for c in unified_l0_components(project_db, task_id)]
         ranks = _compute_file_ranks(task_id, project_db, comps, project_root)
         count = sum(1 for f in ranks.get("files", []) if f.get("batch") in ("P0", "P1", "P2"))
     except Exception:
@@ -1491,26 +1509,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         logger.info("[PERF] getReportDashboard load_task=%.1fms", (time.perf_counter() - t0) * 1000)
 
-        # 1. 获取级联社区层级 (CALL + INCLUDE) — 并行
+        # 1. 级联社区层级（组件统一：仅 UNIFIED；callLevels/depLevels 为兼容别名）
         t0 = time.perf_counter()
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            fut_call = pool.submit(get_cascade_levels_impl, project_db, tid, 'CALL')
-            fut_dep = pool.submit(get_cascade_levels_impl, project_db, tid, 'INCLUDE')
-            call_levels = fut_call.result()
-            dep_levels = fut_dep.result()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            uni_levels = pool.submit(get_cascade_levels_impl, project_db, tid, 'UNIFIED').result()
         t_cascade = time.perf_counter() - t0
-        logger.info("[PERF] getReportDashboard cascade_levels (parallel) total=%.1fms", t_cascade * 1000)
+        logger.info("[PERF] getReportDashboard cascade_levels total=%.1fms", t_cascade * 1000)
 
-        # 2. 获取 LLM 结果 — 并行
+        # 2. LLM 结果（仅 UNIFIED）
         t0 = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            fut_call_res = pool.submit(_list_community_results_impl, project_db, tid, 'CALL')
-            fut_dep_res = pool.submit(_list_community_results_impl, project_db, tid, 'INCLUDE')
-            call_results = fut_call_res.result()
-            dep_results = fut_dep_res.result()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            uni_results = pool.submit(_list_community_results_impl, project_db, tid, 'UNIFIED').result()
         t_llm = time.perf_counter() - t0
-        logger.info("[PERF] getReportDashboard llm_results (parallel) total=%.1fms", t_llm * 1000)
+        logger.info("[PERF] getReportDashboard llm_results total=%.1fms", t_llm * 1000)
 
         # 3. 获取文件统计
         t0 = time.perf_counter()
@@ -1535,8 +1547,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 comps = get_l0_comps(project_db, tid)
                 rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
             if rank_data:
-                pre_summary['counts'] = rank_data.get("counts", {'P0': 0, 'P1': 0, 'P2': 0})
-                pre_summary['total_files'] = len(rank_data.get("files", []))
+                pre_summary['counts'] = rank_data.get("counts", {'P0': 0, 'P1': 0, 'P2': 0, 'P3': 0})
+                _files = rank_data.get("files", [])
+                pre_summary['total_files'] = sum(1 for f in _files if f.get("batch") != "P3")
+                pre_summary['p3_count'] = len(_files) - pre_summary['total_files']
             pre_summary['project_root'] = project_root
         except Exception as e:
             logger.warning("[getReportDashboard] preSummary failed: %s", e)
@@ -1545,10 +1559,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         logger.info("[analysis.getReportDashboard] DONE task_id=%s", tid)
         return {
             'task': task,
-            'callLevels': call_levels,
-            'depLevels': dep_levels,
-            'callResults': call_results,
-            'depResults': dep_results,
+            'uniLevels': uni_levels,
+            'uniResults': uni_results,
             'fileStats': file_stats,
             'preSummary': pre_summary,
         }
@@ -2772,18 +2784,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         return {"success": True}
 
     def get_l0_comps(project_db, tid):
-        """获取 L0 社区列表（组件统一：仅 UNIFIED 口径）。"""
-        comps = []
-        cascades = get_cascade_levels_impl(project_db, tid, "UNIFIED")
-        for l in cascades.get("levels", []):
-            if l.get("lv") == "L0":
-                for it in l.get("items", []):
-                    comps.append({
-                        "id": it.get("id", ""),
-                        "metadata": {"qualityScore": it.get("qualityScore", 0)},
-                    })
-                    break
-        return comps
+        """获取 L0 社区列表（组件统一：标准访问器，直查 SQLite）。"""
+        from topoone.engine.community_data import unified_l0_components
+        return [{"id": c["id"],
+                 "metadata": {"qualityScore": c["qualityScore"]}}
+                for c in unified_l0_components(project_db, tid)]
 
     @server.register("analysis.getPreSummaryStatus")
     def get_pre_summary_status(task_id=None, taskId=None):
@@ -2800,32 +2805,69 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         rank_data = multi_db.cache_store.get_file_ranks(tid)
         if rank_data is None:
-            comps = get_l0_comps(project_db, tid)
+            comps = [{"id": c["id"], "metadata": {"qualityScore": c["qualityScore"]}}
+                     for c in unified_l0_components(project_db, tid)]
             rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
             multi_db.cache_store.set_file_ranks(tid, rank_data)
 
         # 查已缓存文件数 + 按批次统计（每次轮询只查 COUNT）
         cached_count = 0
-        batch_cached = {"P0": 0, "P1": 0, "P2": 0}
-        rank_paths = {f["file_path"] for f in rank_data["files"]}
+        batch_cached = {"P0": 0, "P1": 0, "P2": 0, "P3": 0}
+        # P3 不计入进度分母，但按批次统计其已缓存数（供 P3 行展示）
+        rank_paths = {f["file_path"] for f in rank_data["files"] if f["batch"] != "P3"}
         rank_map = {f["file_path"]: f["batch"] for f in rank_data["files"]}
         try:
             cached_rows = project_db.execute(
                 "SELECT file_path FROM file_summaries WHERE project_id=?", (pid,)
             ).fetchall()
             for r in cached_rows:
-                if r[0] in rank_paths:
+                b = rank_map.get(r[0])
+                if b is None:
+                    continue
+                batch_cached[b] += 1
+                if b != "P3":
                     cached_count += 1
-                    batch_cached[rank_map[r[0]]] += 1
         except Exception:
             pass
 
+        # total_files 为预摘要分母（P0+P1+P2）；P3 未纳入不计入进度
         return {
-            "counts": rank_data["counts"], "total_files": len(rank_data["files"]),
+            "counts": rank_data["counts"],
+            "total_files": len(rank_paths),
+            "p3_count": len(rank_data["files"]) - len(rank_paths),
             "cached_count": cached_count, "batch_cached": batch_cached,
             "project_root": project_root,
             "failed_count": multi_db.cache_store.get_ps_failed(tid),
         }
+
+    @server.register("analysis.getPreSummaryFileSource")
+    def get_pre_summary_file_source(task_id=None, taskId=None,
+                                    file_path=None, filePath=None):
+        """预摘要详情：读取文件源码（路径限定项目根内防穿越；≤512KB 截断）"""
+        import os as _os
+        tid = task_id or taskId
+        rel = file_path or filePath
+        if not tid or not rel:
+            raise ValueError("task_id and file_path are required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_root = _get_project_root(pid)
+
+        abs_path = _os.path.realpath(_os.path.join(project_root, rel))
+        root_real = _os.path.realpath(project_root)
+        if abs_path != root_real and not abs_path.startswith(root_real + _os.sep):
+            return {"found": False, "error": "path outside project root"}
+        if not _os.path.isfile(abs_path):
+            return {"found": False, "error": "file not found"}
+        cap = 512 * 1024
+        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(cap)
+        size = _os.path.getsize(abs_path)
+        return {"found": True, "content": content, "size": size,
+                "truncated": size > cap, "file_path": rel}
 
     @server.register("analysis.listPreSummaryFiles")
     def list_pre_summary_files(task_id=None, taskId=None, batch="P0",
@@ -2844,7 +2886,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         def _load_and_filter(cached_ok=True):
             rd = multi_db.cache_store.get_file_ranks(tid) if cached_ok else None
             if rd is None:
-                comps = get_l0_comps(project_db, tid)
+                comps = [{"id": c["id"], "metadata": {"qualityScore": c["qualityScore"]}}
+                         for c in unified_l0_components(project_db, tid)]
                 rd = _compute_file_ranks(tid, project_db, comps, project_root)
                 if cached_ok:
                     multi_db.cache_store.set_file_ranks(tid, rd)

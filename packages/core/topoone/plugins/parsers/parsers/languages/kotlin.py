@@ -34,15 +34,39 @@ def _kotlin_package(node: SyntaxNode, source: str) -> str | None:
     return None
 
 
-def _kotlin_extract_import(node: SyntaxNode, source: str) -> dict | None:
-    if node.type == "import_header":
-        ident = node.child_by_field_name("identifier")
-        if ident:
-            return {"module_name": source[ident.start_byte:ident.end_byte]}
-        for c in node.named_children:
-            if c.type in ("identifier", "simple_identifier"):
-                return {"module_name": source[c.start_byte:c.end_byte]}
+def _kotlin_resolve_body(node: SyntaxNode, source: str):
+    """kotlin 函数体字段是 function_body 而非 body"""
+    for c in node.named_children:
+        if c.type == "function_body":
+            return c
     return None
+
+
+def _kotlin_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    """import com.demo.Store — qualified_identifier 整体取文本"""
+    for c in node.named_children:
+        if c.type in ("qualified_identifier", "dot_qualified_expression",
+                      "identifier", "simple_identifier"):
+            return {"module_name": source[c.start_byte:c.end_byte]}
+    return None
+
+
+def _kotlin_extract_param(node: SyntaxNode, source: str) -> dict | None:
+    """parameter: `x: Foo` — 标识符为名，其后 user_type/类型节点为类型"""
+    name_node = None
+    type_node = None
+    for c in node.named_children:
+        if c.type in ("identifier", "simple_identifier") and name_node is None:
+            name_node = c
+        elif c.type in ("user_type", "nullable_type", "function_type", "type",
+                        "generic_type", "attribute"):
+            type_node = c
+    if name_node is None or type_node is None:
+        return None
+    return {
+        "name": source[name_node.start_byte:name_node.end_byte],
+        "type": source[type_node.start_byte:type_node.end_byte],
+    }
 
 
 KOTLIN = LanguageExtractor(
@@ -50,7 +74,7 @@ KOTLIN = LanguageExtractor(
     method_types=("function_declaration",),
     interface_types=("class_declaration",),
     enum_types=("class_declaration",),
-    import_types=("import_header",),
+    import_types=("import",),
     call_types=("call_expression",),
     variable_types=("property_declaration",),
     package_types=("package_header",),
@@ -61,4 +85,6 @@ KOTLIN = LanguageExtractor(
     extract_visibility=_kotlin_visibility,
     extract_package=_kotlin_package,
     extract_import=_kotlin_extract_import,
+    extract_param=_kotlin_extract_param,
+    resolve_body=_kotlin_resolve_body,
 )

@@ -54,6 +54,7 @@ export default { analysis: {
   // 任务操作
   confirmDelete: '确认删除此任务？此操作不可撤销。',
   deleteConfirmed: '确定',
+  deletingTask: '正在删除任务，请稍候…',
   deleteCancelled: '取消',
 
   // 任务详情

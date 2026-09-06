@@ -19,6 +19,12 @@ import topoone.engine.community_data as cd
 
 logger = logging.getLogger(__name__)
 
+def _et_unified(et: str) -> str:
+    """旧双线(INCLUDE/CALL)已并入 UNIFIED：URL 传入旧值一律按 UNIFIED 读取（EXTERNAL_* 外部线保留）。"""
+    return "UNIFIED" if (et or "").upper() in ("INCLUDE", "CALL") else et
+
+
+
 # ── File logger for diagram editor (not to console) ──
 _diag_log = logging.getLogger(f"{__name__}.diagram_editor")
 _diag_log.setLevel(logging.DEBUG)
@@ -65,7 +71,7 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
                             edge_type: str = Query(None), edgeType: str = Query(None)):
     tid = task_id or taskId
     cid = community_id or communityId
-    et = edge_type or edgeType or 'UNIFIED'
+    et = _et_unified(edge_type or edgeType or 'UNIFIED')
     if not tid or not cid:
         raise HTTPException(422, "task_id/taskId and community_id/communityId are required")
     if not common.multi_db:
@@ -107,7 +113,7 @@ async def get_community_files(task_id: str = Query(None), taskId: str = Query(No
                                edge_type: str = Query(None), edgeType: str = Query(None)):
     tid = task_id or taskId
     cid = community_id or communityId
-    et = edge_type or edgeType or 'UNIFIED'
+    et = _et_unified(edge_type or edgeType or 'UNIFIED')
     if not tid or not cid:
         raise HTTPException(422, "task_id/taskId and community_id/communityId are required")
     if not common.multi_db:
@@ -176,7 +182,7 @@ async def get_community_children(task_id: str = Query(None), taskId: str = Query
                                   edge_type: str = Query(None), edgeType: str = Query(None)):
     tid = task_id or taskId
     pid = parent_comm_id or parentCommId
-    et = (edge_type or edgeType or 'UNIFIED').upper()
+    et = _et_unified((edge_type or edgeType or 'UNIFIED').upper())
     if not tid:
         raise HTTPException(422, "task_id/taskId is required")
     if not common.multi_db:
@@ -198,7 +204,7 @@ async def get_community_graph(task_id: str = Query(None), taskId: str = Query(No
                               gran: str = Query(None), gran_: str = Query(None),
                               depth: int = Query(1)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "UNIFIED"
+    edge_type = _et_unified(edge_type or edgeType or "UNIFIED")
     comm_lv_raw = comm_lv or commLv
     comm_lv = comm_lv_raw or "L0"
     comm_id = comm_id or commId or ""
@@ -236,7 +242,7 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
                           comm_id: str = Query(None), commId: str = Query(None),
                           scope: str = Query(None), scope_: str = Query(None)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "UNIFIED"
+    edge_type = _et_unified(edge_type or edgeType or "UNIFIED")
     comm_id = comm_id or commId or ""
     sc = (scope or scope_ or "both").lower()
     if not task_id:
@@ -347,9 +353,10 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
                 if n["id"]:
                     fp_to_id[fp] = n["id"]
 
-        kind = "imports" if et == "INCLUDE" else "calls"
+        kinds = ["imports", "calls"] if et == "UNIFIED" else ["imports" if et == "INCLUDE" else "calls"]
+        ph = ",".join("?" * len(kinds))
         all_edges = pdb.fetchall(
-            "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?", (task_id, kind)
+            f"SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind IN ({ph})", (task_id, *kinds)
         )
         edge_set = set()
         for e in all_edges:
@@ -470,7 +477,7 @@ async def get_file(project_id: str = Query(...), path: str = Query(...)):
 async def get_cascade_levels(task_id: str = Query(None), taskId: str = Query(None),
                               edge_type: str = Query(None), edgeType: str = Query(None)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "UNIFIED"
+    edge_type = _et_unified(edge_type or edgeType or "UNIFIED")
     if not task_id:
         raise HTTPException(422, "task_id is required")
     if not common.multi_db:
@@ -492,7 +499,7 @@ async def get_heatmap(task_id: str = Query(None), taskId: str = Query(None),
                        comm_id: str = Query(None), commId: str = Query(None),
                        comm_lv: str = Query(None), commLv: str = Query(None)):
     task_id = task_id or taskId
-    edge_type = edge_type or edgeType or "UNIFIED"
+    edge_type = _et_unified(edge_type or edgeType or "UNIFIED")
     if not task_id:
         raise HTTPException(422, "task_id is required")
     if not common.multi_db:
