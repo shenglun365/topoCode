@@ -61,7 +61,7 @@ export default {
     resource: 'Project Resources',
     tree: {
       main: 'Requirements · Main',
-      requirements: 'Requirement Plans',
+      requirements: 'Tasks',
       dataAssets: 'Data Assets',
       components: 'System Baseline',
       dataStructures: 'Data Structures',
@@ -240,7 +240,7 @@ export default {
   assetChat: {
     proposal: {
       title: 'Proposal',
-      goto: 'Open requirements',
+      goto: 'Open tasks',
     },
   },
 

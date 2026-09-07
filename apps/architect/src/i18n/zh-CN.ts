@@ -61,7 +61,7 @@ export default {
     resource: '项目资源',
     tree: {
       main: '需求 · 主界面',
-      requirements: '需求方案',
+      requirements: '任务管理',
       dataAssets: '数据资产',
       components: '系统基线',
       dataStructures: '数据结构',
@@ -264,7 +264,7 @@ export default {
   assetChat: {
     proposal: {
       title: '需求提案',
-      goto: '前往需求方案',
+      goto: '前往任务管理',
     },
   },
 
