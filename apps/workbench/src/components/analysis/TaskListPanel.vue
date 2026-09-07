@@ -22,7 +22,7 @@ import TaskDetailDialog from './TaskDetailDialog.vue'
 import type { AnalysisTask } from '@topo/web-core/types/ipc'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
 import { ipc } from '@topo/web-core/services/ipc'
-import type { KbViewStatus } from '@topo/web-core/types/ipc'
+import type { KbViewStatus, KbViewHistoryEntry } from '@topo/web-core/types/ipc'
 import { LinkIcon, LinkSlashIcon } from '@heroicons/vue/24/outline'
 import { displayDispatcher } from '@/services/display-dispatcher'
 import { createLogger } from '@topo/web-core/utils/logger'
@@ -57,6 +57,20 @@ async function loadTasks() {
 
 // ── 基线视图：任务挂载管理（对外唯一生效视图） ──
 const viewStatus = ref<KbViewStatus | null>(null)
+// 变更记录(挂载/卸载审计)
+const historyOpen = ref(false)
+const historyEntries = ref<KbViewHistoryEntry[]>([])
+async function toggleHistory() {
+  historyOpen.value = !historyOpen.value
+  if (historyOpen.value) {
+    try {
+      const res = await ipc.view.history({ projectId: props.projectId })
+      historyEntries.value = res?.entries ?? []
+    } catch {
+      historyEntries.value = []
+    }
+  }
+}
 const viewBusyTask = ref<string | null>(null)
 
 async function loadViewStatus() {
@@ -397,11 +411,38 @@ function getConfigSummary(task: AnalysisTask): string {
         v-else
         class="view-warn"
       >{{ t('analysis.viewEmptyHint') }}</span>
+      <span class="view-divider" />
+      <span
+        class="stat-value font-mono"
+        :title="t('analysis.viewVersionHint')"
+      >v{{ viewStatus.viewVersion }}</span>
+      <button
+        class="view-history-toggle"
+        :title="t('analysis.viewHistory')"
+        @click="toggleHistory"
+      >{{ historyOpen ? '▾' : '▸' }} {{ t('analysis.viewHistory') }}</button>
       <span
         v-if="viewStatus.stale"
         class="view-stale"
         :title="t('analysis.viewStaleHint')"
       >{{ t('analysis.viewStale') }}</span>
+    </div>
+
+    <!-- 变更记录(挂载/卸载审计：任务名/任务ID/现状) -->
+    <div v-if="historyOpen && viewStatus" class="view-history panel">
+      <p v-if="!historyEntries.length" class="vh-empty">{{ t('analysis.viewHistoryEmpty') }}</p>
+      <div v-for="(h, i) in historyEntries" :key="i" class="vh-row">
+        <span class="vh-action" :class="h.action === 'mount' ? 'vh-mount' : 'vh-unmount'">
+          {{ h.action === 'mount' ? t('analysis.vhMount') : t('analysis.vhUnmount') }}
+        </span>
+        <span class="vh-name" :title="h.taskId">{{ h.taskName || h.taskId }}</span>
+        <span class="vh-id">{{ h.taskId }}</span>
+        <span class="vh-status" :class="h.taskExists ? 'vh-alive' : 'vh-dead'">
+          {{ h.taskExists ? t('analysis.vhAlive') : t('analysis.vhDeleted') }}
+        </span>
+        <span class="vh-ver">v{{ h.version }}</span>
+        <span class="vh-time">{{ h.createdAt }}</span>
+      </div>
     </div>
 
     <!-- 统计摘要 -->
@@ -1044,6 +1085,28 @@ function getConfigSummary(task: AnalysisTask): string {
   font-size: 11px;
   cursor: help;
 }
+
+/* 变更记录 */
+.view-history-toggle {
+  @apply ml-auto text-[11px] text-ctp-overlay1 hover:text-ctp-text cursor-pointer shrink-0;
+}
+.view-history {
+  @apply mt-1.5 max-h-56 overflow-auto text-[11px];
+}
+.vh-empty { @apply text-ctp-overlay0 text-center py-2; }
+.vh-row {
+  @apply flex items-center gap-2 px-2 py-1 border-b border-ctp-surface0/40 last:border-0;
+}
+.vh-action { @apply shrink-0 px-1.5 rounded text-[10px]; }
+.vh-mount { @apply bg-ctp-green/15 text-ctp-green; }
+.vh-unmount { @apply bg-ctp-red/15 text-ctp-red; }
+.vh-name { @apply min-w-0 flex-1 truncate text-ctp-text; }
+.vh-id { @apply shrink-0 font-mono text-[10px] text-ctp-overlay0 hidden md:inline; }
+.vh-status { @apply shrink-0 px-1.5 rounded text-[10px]; }
+.vh-alive { @apply bg-ctp-sky/15 text-ctp-sky; }
+.vh-dead { @apply bg-ctp-surface1 text-ctp-overlay0 line-through; }
+.vh-ver { @apply shrink-0 font-mono text-[10px] text-ctp-overlay1; }
+.vh-time { @apply shrink-0 text-[10px] text-ctp-overlay0; }
 .view-cov-low { color: var(--warning, #e0a03c); }
 
 </style>

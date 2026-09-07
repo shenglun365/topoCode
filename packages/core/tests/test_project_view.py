@@ -65,6 +65,27 @@ def test_coverage_scoped_tasks_union(mdb):
     assert st["coverage"]["coveragePct"] == 100.0
 
 
+def test_view_change_log_and_history(mdb):
+    """变更记录: mount/unmount 留痕(版本/动作/任务名快照/任务现状)。"""
+    vs.mount_task(mdb, "proj-t", "task-aaaaaaaa")
+    vs.unmount_task(mdb, "proj-t", "task-aaaaaaaa")
+    vs.mount_task(mdb, "proj-t", "task-aaaaaaaa")
+    h = vs.view_history(mdb, "proj-t")
+    e = h["entries"]
+    assert len(e) == 3
+    assert [x["action"] for x in e] == ["mount", "unmount", "mount"]   # 倒序
+    assert [x["version"] for x in e] == [4, 3, 2]   # 初始 v1 + 三次变更
+    assert e[0]["taskId"] == "task-aaaaaaaa"
+    assert e[0]["taskName"] == "task-aaaaaaaa"
+    assert e[0]["taskExists"] is True
+    # 任务删除后 → 现状=已删除
+    db = mdb.main_db
+    db.execute("DELETE FROM analysis_tasks WHERE id = 'task-aaaaaaaa'")
+    db.commit()
+    h2 = vs.view_history(mdb, "proj-t")
+    assert all(x["taskExists"] is False for x in h2["entries"])
+
+
 def test_strict_overlap_rejected_then_force(mdb):
     vs.mount_task(mdb, "proj-t", "task-aaaaaaaa")
     with pytest.raises(ValueError, match="交叉.*1 个文件"):

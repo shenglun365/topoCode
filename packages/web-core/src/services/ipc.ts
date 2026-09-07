@@ -252,6 +252,9 @@ function createRealIPC() {
       unmount: async (params: { projectId: string; taskId: string }) => {
         return await api.view.unmount(params)
       },
+      history: async (params: { projectId: string; limit?: number }) => {
+        return await api.view.history(params)
+      },
     },
 
     // ==================== 代码分析 ====================

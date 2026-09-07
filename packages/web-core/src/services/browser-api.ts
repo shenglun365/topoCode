@@ -94,7 +94,7 @@ export function createBrowserAPI(): any {
   const version = makeGroup('version', [
     'list', 'get', 'preview', 'sync', 'diff', 'materialize', 'cleanup', 'getDiffStats', 'checkout',
   ])
-  const view = makeGroup('view', ['status', 'summary', 'mount', 'unmount'])
+  const view = makeGroup('view', ['status', 'summary', 'mount', 'unmount', 'history'])
   const group = {
     list: () => callRpc('group.list', {}),
     create: (name: string, parent_id: string | null) => callRpc('group.create', { name, parent_id }),

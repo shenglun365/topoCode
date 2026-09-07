@@ -519,6 +519,7 @@ export interface IPCAPI {
     summary: (params: { projectId: string }) => Promise<KbViewSummary>
     mount: (params: { projectId: string; taskId: string; force?: boolean }) => Promise<KbViewStatus>
     unmount: (params: { projectId: string; taskId: string }) => Promise<KbViewStatus>
+    history: (params: { projectId: string; limit?: number }) => Promise<{ projectId: string; entries: KbViewHistoryEntry[] }>
   }
 
   // 分组管理
@@ -1081,6 +1082,16 @@ export interface KbViewMount {
 }
 
 /** 基线视图全景(view.status) */
+/** 基线视图变更记录条目(挂载/卸载审计；taskExists=false 表示任务已删除)。 */
+export interface KbViewHistoryEntry {
+  version: number
+  action: 'mount' | 'unmount' | string
+  taskId: string
+  taskName: string
+  taskExists: boolean
+  createdAt: string
+}
+
 export interface KbViewStatus {
   projectId: string
   viewVersion: number

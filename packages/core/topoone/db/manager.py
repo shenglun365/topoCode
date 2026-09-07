@@ -304,6 +304,18 @@ MAIN_DB_TABLES_SQL = """
         PRIMARY KEY (project_id, task_id)
     );
 
+    -- 基线视图变更记录(挂载/卸载审计；任务名为操作时快照，现状经 LEFT JOIN 判定)
+    CREATE TABLE IF NOT EXISTS view_change_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        task_name TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_view_log ON view_change_log(project_id, id);
+
     -- 任务配置变更历史
     CREATE TABLE IF NOT EXISTS task_config_history (
         id TEXT PRIMARY KEY,

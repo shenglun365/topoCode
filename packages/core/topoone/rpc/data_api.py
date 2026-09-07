@@ -69,7 +69,7 @@ async def execute_sql(body: dict):
 EXTERNAL_METHODS = {
     # 项目/视图（基线视图对外契约：view.* 任务挂载管理与状态）
     "project.list",
-    "view.status", "view.summary", "view.mount", "view.unmount",
+    "view.status", "view.summary", "view.mount", "view.unmount", "view.history",
     # 架构只读（经基线视图解析任务）
     "architecture.catalog", "architecture.model",
     # 版本/基线

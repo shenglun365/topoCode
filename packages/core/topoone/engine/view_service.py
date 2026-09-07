@@ -50,6 +50,42 @@ def _bump(main_db, project_id: str, overlap_warned: bool = None):
     main_db.commit()
 
 
+def _log_change(main_db, project_id: str, action: str, task_id: str, task_name: str = "") -> None:
+    """视图变更留痕：版本号(_bump 后) + 动作 + 任务名快照。"""
+    try:
+        row = main_db.fetchone(
+            "SELECT version FROM project_views WHERE project_id = ?", (project_id,))
+        main_db.execute(
+            "INSERT INTO view_change_log (project_id, version, action, task_id, task_name, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, int(row["version"]) if row else 0, action, task_id,
+             task_name or "", _now()))
+        main_db.commit()
+    except Exception:
+        pass
+
+
+def view_history(multi_db, project_id: str, limit: int = 100) -> dict:
+    """视图变更记录(倒序)：动作/任务名快照/任务ID/任务现状(有效|已删除)/版本/时间。"""
+    if not project_id:
+        raise ValueError("project_id is required")
+    main_db = multi_db.main_db
+    rows = main_db.fetchall(
+        "SELECT l.version, l.action, l.task_id, l.task_name, l.created_at, "
+        "(t.id IS NOT NULL) AS exists_now "
+        "FROM view_change_log l LEFT JOIN analysis_tasks t ON t.id = l.task_id "
+        "WHERE l.project_id = ? ORDER BY l.id DESC LIMIT ?",
+        (project_id, max(1, min(int(limit), 500))))
+    return {"projectId": project_id, "entries": [{
+        "version": int(r["version"] or 0),
+        "action": r["action"] or "mount",
+        "taskId": r["task_id"] or "",
+        "taskName": r["task_name"] or "",
+        "taskExists": bool(r["exists_now"]),
+        "createdAt": r["created_at"] or "",
+    } for r in rows]}
+
+
 def _mounts(main_db, project_id: str) -> list:
     return [dict(r) for r in main_db.fetchall(
         "SELECT task_id, mounted_files, mounted_at FROM view_mounts "
@@ -187,6 +223,7 @@ def mount_task(multi_db, project_id: str, task_id: str, force: bool = False) -> 
         "INSERT OR REPLACE INTO view_mounts (project_id, task_id, mounted_files, mounted_at) "
         "VALUES (?, ?, ?, ?)", (project_id, task_id, len(cand), _now()))
     _bump(main_db, project_id, overlap_warned=bool(force))
+    _log_change(main_db, project_id, "mount", task_id, task.get("name") or "")
     logger.info("[view.mount] project=%s task=%s files=%d force=%s",
                 project_id, task_id, len(cand), force)
     return view_status(multi_db, project_id)
@@ -197,9 +234,12 @@ def unmount_task(multi_db, project_id: str, task_id: str) -> dict:
         raise ValueError("project_id and task_id are required")
     main_db = multi_db.main_db
     _ensure_view(main_db, project_id)
+    gone = _task_row(main_db, task_id)
     main_db.execute("DELETE FROM view_mounts WHERE project_id = ? AND task_id = ?",
                     (project_id, task_id))
     _bump(main_db, project_id)
+    _log_change(main_db, project_id, "unmount", task_id,
+                (gone or {}).get("name") or "")
     logger.info("[view.unmount] project=%s task=%s", project_id, task_id)
     return view_status(multi_db, project_id)
 
@@ -311,6 +351,10 @@ def register_view_methods(server, multi_db) -> None:
     @server.register("view.status")
     def view_status_rpc(project_id=None, projectId=None):
         return view_status(multi_db, project_id or projectId)
+
+    @server.register("view.history")
+    def view_history_rpc(project_id=None, projectId=None, limit=100):
+        return view_history(multi_db, project_id or projectId, limit=limit)
 
     @server.register("view.summary")
     def view_summary_rpc(project_id=None, projectId=None):
