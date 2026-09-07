@@ -16,6 +16,13 @@ import { sessionService, type ConversationMeta } from '@/services/session-servic
 import { busService, type NeedsInputItem } from '@/services/bus-service'
 import { namingService } from '@/services/naming-service'
 
+const props = withDefaults(defineProps<{
+  /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
+  inline?: boolean
+  /** 新建会话的默认类型(资产地图页传 asset)。 */
+  defaultKind?: string
+}>(), { inline: false, defaultKind: 'requirement' })
+
 const { t } = useI18n()
 const router = useRouter()
 const conv = useConversationStore()
@@ -48,7 +55,7 @@ function switchTo(meta: ConversationMeta) {
 }
 function newChat() {
   listOpen.value = false
-  conv.newConversation('requirement')
+  conv.newConversation(props.defaultKind || 'requirement')
   void loadRecent()
 }
 function onGotoRequirements() {
@@ -103,9 +110,9 @@ async function answerClarify() {
 </script>
 
 <template>
-  <!-- 收起态: 右缘浮标 -->
+  <!-- 收起态: 右缘浮标(仅全局悬浮形态) -->
   <button
-    v-if="!conv.dockOpen"
+    v-if="!props.inline && !conv.dockOpen"
     class="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-xl border border-r-0 border-ctp-surface1 bg-ctp-mantle px-1.5 py-4 text-ctp-subtext0 shadow-lg hover:text-ctp-text"
     :title="t('session.dock.open')"
     @click="conv.setDockOpen(true)"
@@ -113,10 +120,12 @@ async function answerClarify() {
     <ChatBubbleOvalLeftEllipsisIcon class="h-5 w-5" />
   </button>
 
-  <!-- 展开态: 右侧会话栏 -->
+  <!-- 展开态: 全局悬浮(右缘 overlay) / inline(页面右栏停靠) -->
   <aside
-    v-else
-    class="fixed right-0 top-0 z-40 flex h-full w-[26rem] flex-col border-l border-ctp-surface0 bg-ctp-base shadow-2xl"
+    v-else-if="props.inline || conv.dockOpen"
+    :class="props.inline
+      ? 'relative flex h-full min-h-0 w-full flex-col bg-ctp-base'
+      : 'fixed right-0 top-0 z-40 flex h-full w-[26rem] flex-col border-l border-ctp-surface0 bg-ctp-base shadow-2xl'"
   >
     <!-- 头部: 标题 + kind + 会话切换 -->
     <div class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
@@ -142,6 +151,7 @@ async function answerClarify() {
           <ChevronDownIcon class="h-4 w-4" />
         </button>
         <button
+          v-if="!props.inline"
           class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
           :title="t('common.close')"
           @click="conv.setDockOpen(false)"

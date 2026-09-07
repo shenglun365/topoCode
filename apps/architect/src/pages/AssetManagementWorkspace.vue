@@ -22,6 +22,7 @@ import { namingService, type NamingConvention } from '@/services/naming-service'
 import { useSplitPane } from '@/composables/useSplitPane'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { useConversationStore } from '@/stores/conversation-store'
+import ConversationDock from '@/components/chat/ConversationDock.vue'
 import type { AssetDetail, AssetDiagramItem, ConversationDetail, GraphFileEntry, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
@@ -64,10 +65,6 @@ function ensureAssetConversation() {
     conv.newConversation('asset', t('assetMgmt.chatTitle'))
   }
 }
-function openAssetChat() {
-  ensureAssetConversation()
-}
-
 /** 导入指定历史会话(资产管理 → 全局会话栏)。 */
 function importHistory(detail: ConversationDetail) {
   conv.applyConversation(detail)
@@ -2960,18 +2957,9 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- 右：全局会话栏入口(P1 决策2: 整个 architect 唯一对话栏) -->
-      <div class="flex min-h-0 w-40 shrink-0 flex-col items-center justify-center gap-2.5 px-2 text-ctp-overlay0">
-        <ChatBubbleOvalLeftEllipsisIcon class="h-8 w-8" />
-        <p class="text-center text-[11px] leading-relaxed">
-          {{ t('assetMgmt.chatMovedHint') }}
-        </p>
-        <button class="btn btn-sm btn-blue" @click="openAssetChat">
-          <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />{{ t('assetMgmt.openChat') }}
-        </button>
-        <button class="btn btn-sm btn-ghost" @click="historyOpen = true">
-          <ClipboardDocumentListIcon class="h-3.5 w-3.5" />{{ t('assetMgmt.historyButton') }}
-        </button>
+      <!-- 右：全局会话栏·inline 停靠(P1 决策2: 唯一对话栏——本页停靠形态) -->
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+        <ConversationDock inline default-kind="asset" />
       </div>
     </div>
 
