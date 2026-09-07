@@ -22,7 +22,8 @@ def mdb(tmp_path):
     db.commit()
     pdb = md.get_project_db("proj-t")
     for fp in ("a.py", "b.py", "c.py"):
-        pdb.execute("INSERT INTO source_files (id, file_path) VALUES (?, ?)", (fp, fp))
+        pdb.execute("INSERT INTO source_files (id, file_path, language) VALUES (?, ?, 'python')",
+                    (fp, fp))
     # 任务覆盖：aaa → {a.py, b.py}；bbb → {b.py, c.py}(与 aaa 交叉 b.py)
     for nid, tid, fp in (("n1", "task-aaaaaaaa", "a.py"), ("n2", "task-aaaaaaaa", "b.py"),
                          ("n3", "task-bbbbbbbb", "b.py"), ("n4", "task-bbbbbbbb", "c.py")):
@@ -41,8 +42,27 @@ def test_mount_rejects_non_done(mdb):
 def test_mount_status_and_coverage(mdb):
     st = vs.mount_task(mdb, "proj-t", "task-aaaaaaaa")
     assert [m["taskId"] for m in st["mounted"]] == ["task-aaaaaaaa"]
-    assert st["coverage"] == {"totalFiles": 3, "coveredFiles": 2, "coveragePct": 66.7}
+    # 任务口径: 无 scope → 选择集=全部源文件; 已分析∩已选择 = {a,b}
+    assert st["coverage"]["totalFiles"] == 3
+    assert st["coverage"]["coveredFiles"] == 2
+    assert st["coverage"]["coveragePct"] == 66.7
+    assert st["coverage"]["perTask"] == [{
+        "taskId": "task-aaaaaaaa", "selectedFiles": 3,
+        "coveredFiles": 2, "coveragePct": 66.7}]
     assert vs.resolve_view_task_ids(mdb, "proj-t") == ["task-aaaaaaaa"]
+
+
+def test_coverage_scoped_tasks_union(mdb):
+    """任务口径汇总: 选择集过滤生效, 跨任务并集聚合。"""
+    md = mdb
+    db = md.main_db
+    db.execute("UPDATE analysis_tasks SET scopes = '[\"a.py\"]' WHERE id = 'task-aaaaaaaa'")
+    db.commit()
+    st = vs.mount_task(md, "proj-t", "task-aaaaaaaa")
+    # aaa 选择 {a.py}, 已分析 {a,b} ∩ 选择 = {a}
+    assert st["coverage"]["totalFiles"] == 1
+    assert st["coverage"]["coveredFiles"] == 1
+    assert st["coverage"]["coveragePct"] == 100.0
 
 
 def test_strict_overlap_rejected_then_force(mdb):

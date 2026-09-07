@@ -1088,7 +1088,13 @@ export interface KbViewStatus {
   overlapWarned: boolean
   publishedAt: string
   mounted: KbViewMount[]
-  coverage: { totalFiles: number; coveredFiles: number; coveragePct: number | null }
+  coverage: {
+    totalFiles: number
+    coveredFiles: number
+    coveragePct: number | null
+    /** P·任务口径汇总: 各挂载任务(选择→已分析)分项。 */
+    perTask?: { taskId: string; selectedFiles: number; coveredFiles: number; coveragePct: number | null }[]
+  }
   stale: boolean
   unmountedLatest: { taskId: string; taskName: string; createdAt: string } | null
 }

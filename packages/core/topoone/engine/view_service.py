@@ -63,6 +63,26 @@ def _task_row(main_db, task_id: str) -> dict:
     return dict(row) if row else {}
 
 
+def _task_selected_files(project_db, task_row: dict) -> set:
+    """任务「选择」的源码文件集：按任务声明的 scopes/extensions/exclude_dirs
+    过滤 source_files(与 analyst_runner 解析入口同口径)。"""
+    if not task_row:
+        return set()
+    try:
+        from .store.analysis_store import AnalysisStore
+        scopes = _json_list(task_row.get("scopes")) or (
+            [task_row.get("scope")] if task_row.get("scope") else [])
+        a_store = AnalysisStore(project_db)
+        rows = a_store.list_source_files(
+            scopes=scopes,
+            extensions=_json_list(task_row.get("extensions")),
+            exclude_dirs=_json_list(task_row.get("exclude_dirs")),
+        )
+        return {r["file_path"] for r in rows if r.get("file_path")}
+    except Exception:
+        return set()
+
+
 def _task_files(project_db, task_id: str) -> set:
     """任务实际覆盖文件集：graph_node 出现过的全部 file_path(去重)。"""
     try:
@@ -197,19 +217,32 @@ def view_status(multi_db, project_id: str) -> dict:
     except Exception as e:
         raise ValueError(f"project db unavailable: {e}")
 
-    total_files = _total_source_files(project_db)
-    mounted = []
+    # 覆盖率 = 任务口径汇总：分母=各任务「选择」的源码文件并集，
+    # 分子=各任务「已分析∩已选择」并集(挂载时拒绝重叠，force 挂载的交叠由并集去重)
+    selected_all: set = set()
     covered: set = set()
+    per_task: list = []
+    mounted = []
     for m in mounts:
         tid = m["task_id"]
         t = _task_row(main_db, tid)
-        files = _task_files(project_db, tid)
-        covered |= files
+        analyzed = _task_files(project_db, tid)
+        selected = _task_selected_files(project_db, t)
+        covered_task = analyzed & selected
+        selected_all |= selected
+        covered |= covered_task
+        per_task.append({
+            "taskId": tid,
+            "selectedFiles": len(selected),
+            "coveredFiles": len(covered_task),
+            "coveragePct": round(len(covered_task) / len(selected) * 100, 1) if selected else None,
+        })
         mounted.append({
             "taskId": tid,
             "taskName": t.get("name") or tid,
             "status": t.get("status") or "",
-            "files": len(files),
+            "files": len(analyzed),
+            "selectedFiles": len(selected),
             "declared": {
                 "scopes": _json_list(t.get("scopes")) or ([t.get("scope")] if t.get("scope") else []),
                 "extensions": _json_list(t.get("extensions")),
@@ -217,6 +250,9 @@ def view_status(multi_db, project_id: str) -> dict:
             },
             "mountedAt": m["mounted_at"],
         })
+
+    # 任务行缺失/选择集为空 → 回退全量源文件口径(旧行为，保持健壮)
+    total_files = len(selected_all) or _total_source_files(project_db)
 
     # stale：存在未挂载的更新 done 任务(信息性标记，切换一律显式挂载)
     stale, unmounted_latest = False, None
@@ -245,6 +281,7 @@ def view_status(multi_db, project_id: str) -> dict:
             "totalFiles": total_files,
             "coveredFiles": len(covered),
             "coveragePct": coverage_pct,
+            "perTask": per_task,
         },
         "stale": stale,
         "unmountedLatest": unmounted_latest,
