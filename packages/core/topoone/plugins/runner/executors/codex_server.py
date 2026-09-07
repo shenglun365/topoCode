@@ -46,9 +46,13 @@ class _AppServerProcess:
     async def _start_locked(self) -> None:
         if self._proc and self._proc.returncode is None:
             return
+        env = dict(os.environ)
+        if self._codex_home:
+            os.makedirs(self._codex_home, exist_ok=True)
+            env["CODEX_HOME"] = self._codex_home  # 多实例隔离（各自 config.toml 指向不同模型）
         self._proc = await asyncio.create_subprocess_exec(
             self._bin, "app-server",
-            cwd=self._cwd,
+            cwd=self._cwd, env=env,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             limit=16 * 1024 * 1024,
@@ -148,7 +152,7 @@ class CodexServerExecutor:
     def __init__(self, id: str = "codex", codex_bin: str = "codex",
                  timeout: float = 3600.0, prompt_builder: Optional[object] = None,
                  approval_policy: str = "never", sandbox_mode: str = "workspace-write",
-                 model: str = ""):
+                 model: str = "", codex_home: str = ""):
         self.id = id
         binpath = shutil.which(codex_bin) or codex_bin
         self._bin = binpath
@@ -159,6 +163,7 @@ class CodexServerExecutor:
         self._approval_policy = approval_policy
         self._sandbox_mode = sandbox_mode
         self._model = model
+        self._codex_home = os.path.expanduser(codex_home) if codex_home else ""
         self._server: Optional[_AppServerProcess] = None
         self._active: dict[str, str] = {}  # sessionKey → threadId
 
@@ -275,9 +280,11 @@ class CodexServerExecutor:
             return False
 
     def env_check(self) -> dict:
+        home = self._codex_home or os.path.expanduser("~/.codex")
         return {"mode": "serve", "type": "codex-server", "bin": self._bin,
-                "authFile": os.path.isfile(os.path.expanduser("~/.codex/auth.json")),
-                "note": "未登录时执行将失败（codex login）"}
+                "codexHome": self._codex_home or "~/.codex",
+                "authFile": os.path.isfile(os.path.join(home, "auth.json")),
+                "note": "本地自定义 provider 无需登录（requires_openai_auth=false）"}
 
     async def inject(self, session_key: str, message: str) -> dict:
         thread_id = self._active.get(session_key)

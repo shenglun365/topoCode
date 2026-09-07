@@ -150,7 +150,7 @@ def _build_one(entry: dict, pb) -> Optional[object]:
                 id=eid, node_bin=cfg.get("node_bin", "node"),
                 sidecar_script=cfg.get("sidecar_script", ""),
                 provider_id=cfg.get("provider_id", ""), model_id=cfg.get("model_id", ""),
-                api_key=cfg.get("api_key", ""),
+                api_key=cfg.get("api_key", ""), base_url=cfg.get("base_url", ""),
                 max_iterations=int(cfg.get("max_iterations", 40)),
                 arch_url=cfg.get("arch_url", ARCH_BASE_URL), arch_token="",
                 timeout=float(cfg.get("timeout", 3600)), prompt_builder=pb)
@@ -166,6 +166,7 @@ def _build_one(entry: dict, pb) -> Optional[object]:
         if etype == "codex-server":
             return CodexServerExecutor(
                 id=eid, codex_bin=cfg.get("codex_bin", "codex"),
+                codex_home=cfg.get("codex_home", ""),
                 timeout=float(cfg.get("timeout", 3600)),
                 approval_policy=cfg.get("approval_policy", "never"),
                 sandbox_mode=cfg.get("sandbox_mode", "workspace-write"),

@@ -147,7 +147,7 @@ class ClineSdkExecutor:
 
     def __init__(self, id: str = "cline", node_bin: str = "node",
                  sidecar_script: str = "", provider_id: str = "", model_id: str = "",
-                 api_key: str = "", max_iterations: int = 40,
+                 api_key: str = "", base_url: str = "", max_iterations: int = 40,
                  arch_url: str = "", arch_token: str = "", timeout: float = 3600.0,
                  prompt_builder: Optional[object] = None):
         self.id = id
@@ -160,6 +160,7 @@ class ClineSdkExecutor:
         self._provider_id = provider_id
         self._model_id = model_id
         self._api_key = api_key
+        self._base_url = base_url
         self._max_iterations = max_iterations
         self._arch_url = arch_url or os.environ.get("ARCH_BASE_URL", "http://127.0.0.1:3470")
         self._arch_token = arch_token or _default_token()
@@ -211,6 +212,8 @@ class ClineSdkExecutor:
             params["modelId"] = self._model_id
         if self._api_key:
             params["apiKey"] = self._api_key
+        if self._base_url:
+            params["baseUrl"] = self._base_url
 
         try:
             result = await sc.call("run", params, timeout=self._timeout)
@@ -245,7 +248,8 @@ class ClineSdkExecutor:
         return {"mode": "embedded", "type": "cline-sdk", "node": self._node,
                 "sidecar": self._script,
                 "sidecarExists": os.path.isfile(self._script),
-                "providerId": self._provider_id or "cline(env)"}
+                "providerId": self._provider_id or "cline(env)",
+                "baseUrl": self._base_url or "(provider 默认)"}
 
     async def inject(self, session_key: str, message: str) -> dict:
         """追加消息到进行中的 cline 会话（S5 clarify 用；S1 仅注册表打通）。"""
