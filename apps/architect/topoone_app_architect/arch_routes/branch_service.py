@@ -181,6 +181,14 @@ def watch_and_land(task: dict, project: dict, root: str, tree_id: str,
                 "updatedAt": _ts(),
             })
             logger.info("[branch] exec=%s 落地结果: %s", task.get("id"), r)
+            if r.get("ok"):
+                # P4 开发简报: 落地 → 资产版本锚点 + 执行回执单元
+                try:
+                    from . import context_registry, dev_digest
+                    dev_digest.record_land_snapshot(task, r.get("commit") or "")
+                    context_registry.write_exec_report(task.get("id") or "", "done")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[branch] 落地后处理失败: %s", e)
         except Exception as e:  # noqa: BLE001
             logger.warning("[branch] 落地异常 exec=%s: %s", task.get("id"), e)
 

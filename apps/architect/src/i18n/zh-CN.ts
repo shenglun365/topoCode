@@ -436,6 +436,16 @@ export default {
     status: { idle: '待执行', verified: '已校验', committed: '已重基线' },
   },
   requirement: {
+  digest: {
+    title: '开发简报',
+    subtitle: '开发走向速览 · 条目可深链(资产 diff / 会话)',
+    gen7: '近7天',
+    gen30: '近30天',
+    genFailed: '生成失败',
+    empty: '暂无简报——点「近7天/近30天」从会话摘要与落地执行生成',
+    generatedAt: '生成于',
+    linkHint: '绿色=执行(→基线管理资产 diff) · 蓝色=会话 · 黄色=备案文档',
+  },
   session: {
     kind: {
       requirement: '需求', design: '方案', asset: '资产', execution: '执行',

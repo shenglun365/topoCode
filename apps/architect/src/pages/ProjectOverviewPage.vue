@@ -7,11 +7,63 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import { projectService } from '@/services/project-service'
+import { sessionService, type DigestInfo } from '@/services/session-service'
 import type { KbMatchResult, ProjectOverview, ProjectOverviewComponent } from '@/types'
 import KbLinkDialog from '@/components/project/KbLinkDialog.vue'
 import { useArchProjectStore } from '@/stores/project-store'
+import { useRouter } from 'vue-router'
+import {
+  SparklesIcon, ChatBubbleLeftRightIcon, MapIcon, ClipboardDocumentCheckIcon,
+} from '@heroicons/vue/24/outline'
 
 const { t } = useI18n()
+const router = useRouter()
+const project = useArchProjectStore()
+
+// ── P4 开发简报(驾驶舱) ──
+const digests = ref<DigestInfo[]>([])
+const digestIdx = ref(0)
+const digestBusy = ref(false)
+const digestError = ref('')
+const latestDigest = computed(() => digests.value[digestIdx.value] ?? null)
+const digestEntries = computed(() => latestDigest.value?.refs?.entries ?? [])
+
+async function loadDigests() {
+  try {
+    digests.value = await sessionService.digests(10)
+    digestIdx.value = 0
+  } catch {
+    digests.value = []
+  }
+}
+async function genDigest(sinceDays: number) {
+  digestBusy.value = true
+  digestError.value = ''
+  try {
+    await sessionService.generateDigest(sinceDays)
+    await loadDigests()
+  } catch (err) {
+    digestError.value = err instanceof Error ? err.message : t('digest.genFailed')
+  } finally {
+    digestBusy.value = false
+  }
+}
+function fmtDigestTs(ts?: number) {
+  return ts ? new Date(ts).toLocaleString() : '-'
+}
+/** 图文深链: exec→基线管理资产 diff; session/doc→会话中心定位。 */
+function openEntry(e: { type: string; conversationId?: string }) {
+  if (e.type === 'exec') {
+    router.push({ path: '/workbench/archmap', query: { view: 'merge', ...projectQuery() } })
+  } else if (e.conversationId) {
+    router.push({ path: '/workbench/sessions', query: { select: e.conversationId, ...projectQuery() } })
+  }
+}
+function projectQuery(): Record<string, string> {
+  const pid = project.project?.id
+  return pid ? { project: pid } : {}
+}
+loadDigests()
 
 const loading = ref(false)
 const overview = ref<ProjectOverview | null>(null)
@@ -186,6 +238,55 @@ function toggleAllComps() {
             <dd class="text-ctp-text font-mono text-xs">{{ overview.head.commit?.slice(0, 8) || t('common.na') }}</dd>
           </div>
         </dl>
+      </section>
+
+      <!-- ①·5 开发简报(P4 驾驶舱): 走向速览 + 图文深链 -->
+      <section class="panel p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <SparklesIcon class="w-4 h-4 text-ctp-yellow" />
+          <span class="text-sm font-medium text-ctp-text">{{ t('digest.title') }}</span>
+          <span class="text-[10px] text-ctp-overlay0">{{ t('digest.subtitle') }}</span>
+          <div class="flex-1" />
+          <select
+            v-if="digests.length"
+            v-model.number="digestIdx"
+            class="input !w-auto !py-0.5 text-xs"
+          >
+            <option v-for="(d, i) in digests" :key="d.id" :value="i">{{ d.title }}</option>
+          </select>
+          <button class="btn btn-sm btn-ghost" :disabled="digestBusy" @click="genDigest(7)">
+            <SparklesIcon class="h-3.5 w-3.5" :class="digestBusy ? 'animate-pulse' : ''" />
+            {{ t('digest.gen7') }}
+          </button>
+          <button class="btn btn-sm btn-ghost" :disabled="digestBusy" @click="genDigest(30)">
+            {{ t('digest.gen30') }}
+          </button>
+        </div>
+        <p v-if="digestError" class="text-xs text-ctp-red">{{ digestError }}</p>
+        <template v-if="latestDigest">
+          <pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-ctp-mantle/60 p-3 text-[11px] leading-relaxed text-ctp-subtext1">{{ latestDigest.contentMd }}</pre>
+          <div v-if="digestEntries.length" class="mt-2 flex flex-wrap gap-1.5">
+            <button
+              v-for="e in digestEntries.slice(0, 12)"
+              :key="`${e.type}-${e.execId || e.conversationId || e.docId || e.title}`"
+              class="chip cursor-pointer hover:brightness-125"
+              :class="e.type === 'exec' ? 'bg-ctp-green/15 text-ctp-green'
+                : e.type === 'session' ? 'bg-ctp-sky/15 text-ctp-sky'
+                : 'bg-ctp-peach/15 text-ctp-peach'"
+              :title="e.summary || e.branch || ''"
+              @click="openEntry(e)"
+            >
+              <MapIcon v-if="e.type === 'exec'" class="mr-0.5 inline h-3 w-3" />
+              <ChatBubbleLeftRightIcon v-else class="mr-0.5 inline h-3 w-3" />
+              {{ e.title }}{{ e.commit ? ` @${e.commit}` : '' }}
+            </button>
+          </div>
+          <p class="mt-1.5 text-[10px] text-ctp-overlay0">
+            {{ t('digest.generatedAt') }} {{ fmtDigestTs(latestDigest.updatedAt || latestDigest.createdAt) }}
+            · {{ t('digest.linkHint') }}
+          </p>
+        </template>
+        <p v-else class="py-4 text-center text-xs text-ctp-overlay0">{{ t('digest.empty') }}</p>
       </section>
 
       <!-- ② 知识库关联 -->

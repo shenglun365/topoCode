@@ -105,4 +105,32 @@ export const sessionService = {
   async removeDoc(id: string): Promise<void> {
     await apiDelete(`/session-docs/${id}`)
   },
+  // ── 开发简报(P4) ──
+  async generateDigest(sinceDays = 7): Promise<SessionDoc> {
+    return apiPost<SessionDoc>('/digest', { sinceDays })
+  },
+  async digests(limit = 10): Promise<DigestInfo[]> {
+    return apiGet<DigestInfo[]>(`/digest?limit=${limit}`)
+  },
+}
+
+export interface DigestEntry {
+  type: 'exec' | 'session' | 'doc'
+  execId?: string
+  conversationId?: string
+  docId?: string
+  title: string
+  summary?: string
+  branch?: string
+  commit?: string
+  landedAt?: number
+}
+
+export interface DigestInfo {
+  id: string
+  title: string
+  contentMd: string
+  refs?: { entries?: DigestEntry[]; sinceDays?: number; generatedAt?: number }
+  createdAt?: number
+  updatedAt?: number
 }

@@ -412,6 +412,16 @@ export default {
     status: { idle: 'Pending', verified: 'Verified', committed: 'Rebaselined' },
   },
   requirement: {
+  digest: {
+    title: 'Dev Digest',
+    subtitle: 'Development trajectory · entries deep-link to asset diff / sessions',
+    gen7: '7 days',
+    gen30: '30 days',
+    genFailed: 'Generate failed',
+    empty: 'No digest yet — generate from session summaries & landed executions',
+    generatedAt: 'Generated at',
+    linkHint: 'green=exec(→baseline asset diff) · blue=session · yellow=doc',
+  },
   session: {
     kind: {
       requirement: 'Requirement', design: 'Design', asset: 'Asset', execution: 'Exec',
