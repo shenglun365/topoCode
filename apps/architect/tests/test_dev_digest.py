@@ -16,6 +16,9 @@ class TestDevDigest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="topo-digest-")
         C.setup(data_dir=self.dir)
+        # build_app 内部 ctx.setup() 无参 → 回退 ARCH_DATA_DIR/默认 ~/.topocode；
+        # 必须钉住环境变量，否则测试读写真实项目库(污染 + 串数据)
+        os.environ["ARCH_DATA_DIR"] = self.dir
         from topoone_app_architect.server import build_app
         self.client = TestClient(build_app())
 
