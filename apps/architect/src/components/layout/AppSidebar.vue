@@ -72,11 +72,11 @@ const items = computed(() => ([
         :key="item.key"
         class="tree-item"
         :class="{ 'is-active': item.exact ? isOverviewActive() : isActive(item.path) }"
-        :title="t(`nav.flat.${item.key}`)"
+        :title="t(`nav.tree.flat.${item.key}`)"
         @click="nav(item.path, item.query)"
       >
         <component :is="item.icon" class="w-4 h-4" :class="item.color" />
-        <span v-if="!rail" class="flex-1 text-left">{{ t(`nav.flat.${item.key}`) }}</span>
+        <span v-if="!rail" class="flex-1 text-left">{{ t(`nav.tree.flat.${item.key}`) }}</span>
         <span
           v-if="!rail && item.chip && item.chip !== '—'"
           class="chip bg-ctp-surface0 text-ctp-subtext0"
