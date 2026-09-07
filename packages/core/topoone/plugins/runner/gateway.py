@@ -100,24 +100,34 @@ def _env_entries() -> list[dict]:
     return entries
 
 
-async def fetch_runtime_config() -> Optional[list[dict]]:
-    """从 architect 拉取执行器注册表（不可达/未配置 → None）。"""
+async def fetch_runtime_config(retries: int = 0, delay_s: float = 3.0) -> Optional[list[dict]]:
+    """从 architect 拉取执行器注册表（不可达/未配置 → None）。
+
+    retries>0 用于启动竞态（supervisor 同时拉起 runner 与 architect，
+    architect 未就绪时重试，避免静默回退内置池）。
+    """
     tk = _token()
     if not tk:
         return None
-    try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
-            r = await client.get(
-                f"{ARCH_BASE_URL}/api/architect/agent/executors/runtime",
-                headers={"Authorization": f"Bearer {tk}"})
-            if r.status_code != 200:
+    for attempt in range(retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                r = await client.get(
+                    f"{ARCH_BASE_URL}/api/architect/agent/executors/runtime",
+                    headers={"Authorization": f"Bearer {tk}"})
+                if r.status_code == 200:
+                    data = (r.json() or {}).get("data") or {}
+                    entries = data.get("executors")
+                    if isinstance(entries, list) and entries:
+                        return entries
+        except Exception as e:  # noqa: BLE001
+            if attempt >= retries:
+                logger.info("[gateway] architect 配置不可达（%s），用 env/内置默认", e)
+        else:
+            if attempt >= retries:
                 return None
-            data = (r.json() or {}).get("data") or {}
-            entries = data.get("executors")
-            return entries if isinstance(entries, list) and entries else None
-    except Exception as e:  # noqa: BLE001
-        logger.info("[gateway] architect 配置不可达（%s），用 env/内置默认", e)
-        return None
+        await asyncio.sleep(delay_s)
+    return None
 
 
 def resolve_entries(arch_entries: Optional[list[dict]]) -> list[dict]:
@@ -197,8 +207,8 @@ class AgentGateway:
     def __init__(self):
         self._session_executors: dict[str, object] = {}  # executorId → executor(有 inject/abort)
 
-    async def build_pool(self) -> tuple[ExecutorPool, list[dict]]:
-        entries = resolve_entries(await fetch_runtime_config())
+    async def build_pool(self, boot: bool = False) -> tuple[ExecutorPool, list[dict]]:
+        entries = resolve_entries(await fetch_runtime_config(retries=4 if boot else 0))
         pb = _prompt_builder()
         executors, default = [], None
         for e in entries:

@@ -52,15 +52,19 @@ def _get(url: str, timeout: float = 8.0):
 
 def codex_config_toml(model: str, base_url: str, name: str) -> str:
     """codex 0.147 本地 provider 配置（无需登录）。"""
+    # approval/sandbox 写顶层配置（0.147 turn/start 传入会被忽略；容器无 NET_ADMIN，
+    # bubblewrap 起不来 → 必须 danger-full-access 才能执行 shell）
     return (
         f'model = "{model}"\n'
         f'model_provider = "local"\n'
         f"model_context_window = {CTX_WINDOW}\n"
+        'approval_policy = "never"\n'
+        'sandbox_mode = "danger-full-access"\n'
         "\n"
         "[model_providers.local]\n"
         f'name = "{name}"\n'
         f'base_url = "{base_url}"\n'
-        'wire_api = "chat"\n'
+        'wire_api = "responses"\n'
     )
 
 
@@ -90,13 +94,13 @@ def registry_entries() -> list[dict]:
          "default": DEFAULT_EXECUTOR == "codex-27b",
          "config": {"codex_bin": "codex", "model": MODEL_27B,
                     "codex_home": os.path.join(DATA_DIR, "codex-home-27b"),
-                    "approval_policy": "never", "sandbox_mode": "workspace-write",
+                    "approval_policy": "never", "sandbox_mode": "danger-full-access",
                     "timeout": 3600}},
         {"id": "codex-35b", "type": "codex-server", "enabled": True,
          "default": DEFAULT_EXECUTOR == "codex-35b",
          "config": {"codex_bin": "codex", "model": MODEL_35B,
                     "codex_home": os.path.join(DATA_DIR, "codex-home-35b"),
-                    "approval_policy": "never", "sandbox_mode": "workspace-write",
+                    "approval_policy": "never", "sandbox_mode": "danger-full-access",
                     "timeout": 3600}},
     ]
 

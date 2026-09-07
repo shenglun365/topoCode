@@ -128,7 +128,7 @@ def init_runner() -> None:
     global state
     db = RunnerDB(RUNNER_DB)
     gateway = AgentGateway()
-    pool, _entries = asyncio.run(gateway.build_pool())
+    pool, _entries = asyncio.run(gateway.build_pool(boot=True))
     hub = EventHub()
     scheduler = TaskTreeScheduler(
         pool,

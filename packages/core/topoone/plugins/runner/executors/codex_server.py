@@ -33,9 +33,10 @@ _EVENT_DONE_HINTS = ("turn/completed", "turn/failed", "turn/cancelled")
 class _AppServerProcess:
     """常驻 codex app-server 子进程（行分隔 JSON-RPC）。"""
 
-    def __init__(self, codex_bin: str, cwd: str):
+    def __init__(self, codex_bin: str, cwd: str, codex_home: str = ""):
         self._bin = codex_bin
         self._cwd = cwd
+        self._codex_home = os.path.expanduser(codex_home) if codex_home else ""
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._lock = asyncio.Lock()
         self._req_id = 0
@@ -50,11 +51,13 @@ class _AppServerProcess:
         if self._codex_home:
             os.makedirs(self._codex_home, exist_ok=True)
             env["CODEX_HOME"] = self._codex_home  # 多实例隔离（各自 config.toml 指向不同模型）
+        run_dir = os.path.join(os.path.expanduser("~"), ".topocode", "runner")
+        os.makedirs(run_dir, exist_ok=True)
         self._proc = await asyncio.create_subprocess_exec(
             self._bin, "app-server",
             cwd=self._cwd, env=env,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=open(os.path.join(run_dir, "codex-appserver.log"), "ab"),  # noqa: SIM115
             limit=16 * 1024 * 1024,
         )
         self._reader = asyncio.create_task(self._read_loop())
@@ -163,13 +166,14 @@ class CodexServerExecutor:
         self._approval_policy = approval_policy
         self._sandbox_mode = sandbox_mode
         self._model = model
-        self._codex_home = os.path.expanduser(codex_home) if codex_home else ""
+        self._codex_home_cfg = codex_home
         self._server: Optional[_AppServerProcess] = None
         self._active: dict[str, str] = {}  # sessionKey → threadId
 
     def _get_server(self) -> _AppServerProcess:
         if self._server is None:
-            self._server = _AppServerProcess(self._bin, self._cwd)
+            self._server = _AppServerProcess(self._bin, self._cwd,
+                                             codex_home=self._codex_home_cfg)
         return self._server
 
     def _prompt(self, task, context: dict) -> str:
@@ -280,9 +284,10 @@ class CodexServerExecutor:
             return False
 
     def env_check(self) -> dict:
-        home = self._codex_home or os.path.expanduser("~/.codex")
+        home = (os.path.expanduser(self._codex_home_cfg) if self._codex_home_cfg
+                else os.path.expanduser("~/.codex"))
         return {"mode": "serve", "type": "codex-server", "bin": self._bin,
-                "codexHome": self._codex_home or "~/.codex",
+                "codexHome": self._codex_home_cfg or "~/.codex",
                 "authFile": os.path.isfile(os.path.join(home, "auth.json")),
                 "note": "本地自定义 provider 无需登录（requires_openai_auth=false）"}
 

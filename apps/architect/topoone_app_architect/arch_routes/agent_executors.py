@@ -20,7 +20,7 @@ import os
 import urllib.request
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 
 from .common import _ts, ok, err
 from . import store
@@ -133,8 +133,13 @@ async def list_executors():
 
 
 @router.put("/agent/executors")
-async def put_executors(request: Request):
-    """保存注册表（全量覆盖）→ 触发 runner 热刷新。"""
+async def put_executors(request: Request, background: BackgroundTasks):
+    """保存注册表（全量覆盖）→ 后台触发 runner 热刷新。
+
+    刷新必须脱离本请求：runner 刷新时会回调 architect /runtime 拉配置，
+    同步执行会让 architect 阻塞在 runner 上、runner 又阻塞在 architect
+    上（互等→6s 超时→runner 静默回退内置池）。
+    """
     body = await request.json()
     entries = body.get("executors")
     if not isinstance(entries, list):
@@ -151,9 +156,9 @@ async def put_executors(request: Request):
     if msg:
         return err(msg)
     save_executors(entries)
-    refreshed = refresh_runner()
-    return ok({"saved": len(entries), "runnerRefreshed": bool(refreshed),
-               "updatedAt": _ts()})
+    background.add_task(refresh_runner)
+    return ok({"saved": len(entries), "runnerRefreshed": True,
+               "runnerRefresh": "background", "updatedAt": _ts()})
 
 
 @router.post("/agent/executors/probe")
