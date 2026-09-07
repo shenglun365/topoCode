@@ -96,12 +96,7 @@ def _env_entries() -> list[dict]:
             "default": os.environ.get("RUNNER_DEFAULT_EXECUTOR") == "codex",
             "config": {"command": os.environ["CODEX_CMD"], "timeout": 600},
         })
-    if os.environ.get("CLAUDE_CMD"):
-        entries.append({
-            "id": "claude-code", "type": "cli", "enabled": True,
-            "default": os.environ.get("RUNNER_DEFAULT_EXECUTOR") == "claude-code",
-            "config": {"command": os.environ["CLAUDE_CMD"], "timeout": 600},
-        })
+    # claude-code 执行器暂不提供（产品决策 2026-09）
     return entries
 
 
