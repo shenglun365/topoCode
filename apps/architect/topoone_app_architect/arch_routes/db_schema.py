@@ -262,6 +262,22 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_docs_conv ON arch_docs(conversation_id, project_id);
 
+    -- 上下文注册表(P2)：会话派生的可检索单元(拉取式——architect 经 ctx.* 按需提取)。
+    -- 消息本体不复制(存对话消息表)，此处只留派生单元：工具轨迹/产物/决策/摘要/执行回执。
+    CREATE TABLE IF NOT EXISTS arch_context_units (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT DEFAULT '',
+        project_id TEXT DEFAULT '',
+        type TEXT DEFAULT 'note',          -- tool_call | artifact | decision | session_summary | execution_report | execution_brief | note
+        title TEXT DEFAULT '',
+        content TEXT DEFAULT '',           -- markdown 正文
+        refs TEXT,                         -- JSON: {modules:[], components:[], files:[], execIds:[], reqIds:[]}
+        importance INTEGER DEFAULT 0,      -- 0 普通 / 1 高(决策/摘要/回执)
+        created_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_ctx_units_conv ON arch_context_units(conversation_id, project_id);
+    CREATE INDEX IF NOT EXISTS idx_arch_ctx_units_type ON arch_context_units(type, project_id);
+
     CREATE TABLE IF NOT EXISTS arch_conversation_messages (
         id TEXT PRIMARY KEY,
         conversation_id TEXT NOT NULL,

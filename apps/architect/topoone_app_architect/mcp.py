@@ -60,6 +60,24 @@ def build_mcp(name: str = "topo-architect"):
     def map_graph(kind: str = "component", project: Optional[str] = None) -> str:
         """关系图（mermaid）：component=组件依赖图 / semantic=语义关系图。"""
         return run_tool("map.graph", {"kind": kind, "project": project})
+
+    @mcp.tool(name="ctx.search")
+    def ctx_search(query: str, type: str = "", conversation: str = "",  # noqa: A002
+                   limit: int = 20, project: Optional[str] = None) -> str:
+        """跨会话检索历史上下文（工具轨迹/产物/决策/摘要/执行回执/消息/备案文档）。"""
+        return run_tool("ctx.search", {"query": query, "type": type,
+                                       "conversation": conversation, "limit": limit,
+                                       "project": project})
+
+    @mcp.tool(name="ctx.get")
+    def ctx_get(conversation: str, project: Optional[str] = None) -> str:
+        """会话上下文包：摘要+关键单元+备案文档。"""
+        return run_tool("ctx.get", {"conversation": conversation, "project": project})
+
+    @mcp.tool(name="ctx.summarize")
+    def ctx_summarize(conversation: str) -> str:
+        """生成/刷新会话摘要（标题+结论/决策/待办）。"""
+        return run_tool("ctx.summarize", {"conversation": conversation})
     return mcp
 
 

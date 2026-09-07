@@ -612,6 +612,9 @@ async def patch_execution_task(task_id: str, request: Request):
     row = store.ExecutionTasksStore.update(task_id, {**body, "updatedAt": _ts()})
     if not row:
         return err(404, "Task not found")
+    if str(body.get("status") or "") in ("done", "failed", "stopped"):
+        from . import context_registry
+        context_registry.write_exec_report(task_id, str(body["status"]))
     return ok(row)
 
 
@@ -622,6 +625,8 @@ async def stop_execution_task(task_id: str):
     })
     if not row:
         return err(404, "Task not found")
+    from . import context_registry
+    context_registry.write_exec_report(task_id, "stopped")
     return ok(row)
 
 
@@ -642,6 +647,8 @@ async def accept_execution_task(task_id: str):
              (now, rid))
         )
     store.run_atomic(statements)
+    from . import context_registry
+    context_registry.write_exec_report(task_id, "done")
     return ok(store.ExecutionTasksStore.get(task_id))
 
 

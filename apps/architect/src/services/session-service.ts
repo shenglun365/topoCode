@@ -37,6 +37,15 @@ export interface SessionGroupsInfo {
   modules: string[]
 }
 
+export interface ContextUnit {
+  id: string
+  type: string
+  title: string
+  content: string
+  importance: number
+  createdAt?: number
+}
+
 export interface SessionDoc {
   id: string
   conversationId: string
@@ -79,6 +88,9 @@ export const sessionService = {
   },
   async summarize(id: string): Promise<ConversationMeta> {
     return apiPost<ConversationMeta>(`/sessions/${id}/summarize`)
+  },
+  async context(id: string): Promise<ContextUnit[]> {
+    return apiGet<ContextUnit[]>(`/sessions/${id}/context`)
   },
   // ── 备案文档 ──
   async docs(conversationId?: string): Promise<SessionDoc[]> {

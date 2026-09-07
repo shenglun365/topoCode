@@ -162,6 +162,7 @@ PROJECT_TABLES = frozenset({
     "arch_execution_tasks", "arch_agent_sessions", "arch_agent_messages",
     "arch_unit_tests", "arch_unit_test_sessions", "arch_unit_test_messages",
     "arch_conversations", "arch_conversation_messages", "arch_docs",
+    "arch_context_units",
     "arch_blueprints", "arch_tags", "arch_staging_scans",
     "arch_snapshot_records", "arch_kb_snapshots",
     "arch_semantic_assets", "arch_ast_cache", "arch_semantic_refs",

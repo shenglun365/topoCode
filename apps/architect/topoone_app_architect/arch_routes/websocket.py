@@ -108,6 +108,11 @@ def _chat_max_tokens() -> Optional[int]:
     return None
 
 
+# P2: 会话 agent 的 ctx.* 工具注册(幂等)
+from . import context_registry as _context_registry  # noqa: E402
+_context_registry.register_chat_tools()
+
+
 @router.websocket("/ws/kb-analysis")
 async def kb_analysis_ws(websocket: WebSocket):
     """需求分析 <=> KB agent 会话流(阶段A 自由对话流式 + 阶段D 统一会话持久化)。
@@ -403,15 +408,22 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     工具轮次(可能跨多轮 LLM 重算)期间前端零反馈是「检索中…」久挂的主因；
     这里在工具执行前后各推一条状态，前端据此显示实时进度而非静态等待。
     """
-    from . import req_agent
+    from . import context_registry, req_agent
     await websocket.send_json({"type": "tool_call", "requestId": request_id, "tool": name})
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
     summary = req_agent.tool_result_text(name, result)
+    ok = not (isinstance(result, dict) and result.get("error"))
     await websocket.send_json({
         "type": "tool_result", "requestId": request_id, "tool": name,
-        "ok": not (isinstance(result, dict) and result.get("error")),
+        "ok": ok,
         "summary": summary[:160],
     })
+    # P2 上下文注册表: 工具轨迹/产物 → 单元(会话级溯源)
+    from . import ctx as _ctx
+    try:
+        context_registry.record_tool_call(_ctx.get_conv() or "", name, args, ok, summary)
+    except Exception:
+        pass
     return {"name": name, "text": summary}
 
 

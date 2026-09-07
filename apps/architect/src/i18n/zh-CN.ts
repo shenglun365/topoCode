@@ -470,6 +470,13 @@ export default {
       newGroupPrompt: '新分组名称',
       deleteConfirm: '删除会话「{title}」？对话记录将一并删除。',
     },
+    context: {
+      title: '上下文',
+      empty: '暂无上下文单元(工具轨迹/摘要/回执随使用积累)',
+      'tool_call': '工具', artifact: '产物', decision: '决策',
+      session_summary: '摘要', execution_report: '回执',
+      execution_brief: '简报', note: '笔记',
+    },
     docs: {
       title: '备案文档',
       empty: '暂无备案文档，可从会话提取',

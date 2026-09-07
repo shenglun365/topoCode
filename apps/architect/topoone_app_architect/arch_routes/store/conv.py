@@ -276,6 +276,92 @@ class ConversationsStore:
 
 
 
+class ContextUnitsStore:
+    """上下文注册表(P2)：会话派生的可检索单元(拉取式供 architect/执行器提取)。"""
+
+    TABLE = "arch_context_units"
+
+    @classmethod
+    def all(cls, conversation_id: str = None, type_: str = None,
+            project_id: str = None, limit: int = 200) -> list[dict]:
+        sql = f"SELECT * FROM {cls.TABLE}"
+        conds, params = [], []
+        if conversation_id:
+            conds.append("conversation_id = ?")
+            params.append(conversation_id)
+        if type_:
+            conds.append("type = ?")
+            params.append(type_)
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(int(limit))
+        rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def search(cls, q: str, type_: str = None, conversation_id: str = None,
+               project_id: str = None, limit: int = 30) -> list[dict]:
+        """标题/正文 LIKE 检索(降序)。"""
+        sql = f"SELECT * FROM {cls.TABLE} WHERE (title LIKE ? OR content LIKE ?)"
+        like = f"%{q}%"
+        params = [like, like]
+        if type_:
+            sql += " AND type = ?"
+            params.append(type_)
+        if conversation_id:
+            sql += " AND conversation_id = ?"
+            params.append(conversation_id)
+        if project_id:
+            sql += " AND project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY importance DESC, created_at DESC LIMIT ?"
+        params.append(int(limit))
+        rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def get(cls, unit_id: str):
+        return _get(cls.TABLE, unit_id)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        now = int(__import__("time").time() * 1000)
+        payload = {
+            "id": data.get("id") or next_id("cu"),
+            "conversation_id": data.get("conversationId") or "",
+            "project_id": data.get("projectId") or "",
+            "type": data.get("type") or "note",
+            "title": data.get("title") or "",
+            "content": data.get("content") or "",
+            "refs": data.get("refs") or {},
+            "importance": int(data.get("importance") or 0),
+            "created_at": data.get("createdAt") or now,
+        }
+        _insert(cls.TABLE, payload)
+        return _row_to_api(payload)
+
+    @classmethod
+    def delete(cls, unit_id: str) -> bool:
+        db, found = _locate_db(cls.TABLE, unit_id)
+        if not found:
+            return False
+        cur = db.execute(f"DELETE FROM {cls.TABLE} WHERE id = ?", (unit_id,))
+        db.commit()
+        return cur.rowcount > 0
+
+    @classmethod
+    def delete_by_conversation(cls, conversation_id: str) -> None:
+        db, found = _locate_db(cls.TABLE, conversation_id)
+        if not found:
+            return
+        db.execute(f"DELETE FROM {cls.TABLE} WHERE conversation_id = ?", (conversation_id,))
+        db.commit()
+
+
 class DocsStore:
     """备案文档(会话派生总结)：需求快照/开发简报/笔记，随时生成随时增删。"""
 

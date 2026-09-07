@@ -446,6 +446,13 @@ export default {
       newGroupPrompt: 'New group name',
       deleteConfirm: 'Delete session "{title}"? Messages will be removed too.',
     },
+    context: {
+      title: 'Context',
+      empty: 'No context units yet (tool traces/summaries/reports accumulate in use)',
+      'tool_call': 'Tool', artifact: 'Artifact', decision: 'Decision',
+      session_summary: 'Summary', execution_report: 'Report',
+      execution_brief: 'Brief', note: 'Note',
+    },
     docs: {
       title: 'Archive Docs',
       empty: 'No docs yet — extract from conversation',

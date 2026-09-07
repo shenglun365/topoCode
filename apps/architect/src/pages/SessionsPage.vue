@@ -15,7 +15,7 @@ import {
 import TaskDetailView from '@/components/coding/TaskDetailView.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useArchTaskStore } from '@/stores/task-store'
-import { sessionService, type ConversationMeta, type SessionDoc } from '@/services/session-service'
+import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -26,6 +26,7 @@ const task = useArchTaskStore()
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
 const docs = ref<SessionDoc[]>([])
+const units = ref<ContextUnit[]>([])
 const selected = ref<ConversationMeta | null>(null)
 const loading = ref(false)
 const busyTip = ref('')
@@ -104,9 +105,12 @@ const grouped = computed<{ key: string; items: ConversationMeta[] }[]>(() => {
 async function select(c: ConversationMeta) {
   selected.value = c
   docs.value = []
+  units.value = []
   try {
-    docs.value = await sessionService.docs(c.id)
-  } catch { /* 无文档 */ }
+    const [d, u] = await Promise.all([sessionService.docs(c.id), sessionService.context(c.id)])
+    docs.value = d
+    units.value = u
+  } catch { /* 无文档/单元 */ }
   if (route.query.select !== c.id) {
     router.replace({ query: { ...route.query, select: c.id } })
   }
@@ -369,6 +373,27 @@ function statusClass(s: string) {
             </span>
           </button>
           <p v-if="!docs.length" class="py-1 text-[10px] text-ctp-overlay0">{{ t('session.docs.empty') }}</p>
+        </div>
+
+        <!-- 上下文单元(P2 注册表) -->
+        <div class="rounded-lg border border-ctp-surface0 bg-ctp-base/60 p-2.5">
+          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">
+            {{ t('session.context.title') }} ({{ units.length }})
+          </p>
+          <div
+            v-for="u in units.slice(0, 12)"
+            :key="u.id"
+            class="flex items-start gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-ctp-surface0"
+            :title="u.content"
+          >
+            <span
+              class="chip shrink-0"
+              :class="u.importance ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-surface1 text-ctp-overlay1'"
+            >{{ t(`session.context.${u.type}`) }}</span>
+            <span class="min-w-0 flex-1 truncate text-ctp-subtext1">{{ u.title }}</span>
+            <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(u.createdAt) }}</span>
+          </div>
+          <p v-if="!units.length" class="py-1 text-[10px] text-ctp-overlay0">{{ t('session.context.empty') }}</p>
         </div>
 
         <!-- 关联执行 -->

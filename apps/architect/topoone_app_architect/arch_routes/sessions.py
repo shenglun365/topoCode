@@ -191,49 +191,28 @@ async def session_messages(conv_id: str):
     return ok({"id": conv_id, "messages": store.ConversationsStore.messages(conv_id, limit=1000)})
 
 
-_TITLE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "title": {"type": "string", "description": "不超过 24 字的会话标题"},
-        "summary": {"type": "string", "description": "不超过 120 字的会话摘要(结论/决策/待办)"},
-    },
-    "required": ["title", "summary"],
-}
-
-
 @router.post("/sessions/{conv_id}/summarize")
 async def summarize_session(conv_id: str):
-    """生成/刷新会话标题与摘要(标题兜底: 首条用户消息截断)。"""
+    """生成/刷新会话标题与摘要(标题兜底: 首条用户消息截断) + session_summary 单元。"""
+    from . import context_registry
+    conv = context_registry.summarize_conversation(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    return ok(_conv_api(conv))
+
+
+@router.get("/sessions/{conv_id}/context")
+async def session_context(conv_id: str):
+    """会话上下文单元列表(会话中心详情「上下文」块)。"""
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
-    msgs = store.ConversationsStore.messages(conv_id, limit=30)
-    transcript = "\n".join(
-        f"[{'用户' if m.get('role') == 'user' else '助手'}] {(m.get('content') or '').strip()[:400]}"
-        for m in msgs if (m.get("content") or "").strip()
-    )
-    title, summary = "", ""
-    if transcript:
-        from . import req_agent
-        res = req_agent.llm_sync(
-            messages=[
-                {"role": "system", "content": "你是会话归档助手。根据对话记录生成简短标题与摘要，只输出结构化结果。"},
-                {"role": "user", "content": f"对话记录:\n{transcript[:6000]}"},
-            ],
-            mode="structured",
-            output_schema=_TITLE_SCHEMA,
-            max_tokens=512,
-        )
-        if res and isinstance(res.get("output"), dict):
-            title = str(res["output"].get("title") or "").strip()[:48]
-            summary = str(res["output"].get("summary") or "").strip()[:400]
-    if not title:
-        first_user = next((m.get("content") or "" for m in msgs if m.get("role") == "user"), "")
-        title = first_user.strip().replace("\n", " ")[:24] or (conv.get("title") or "会话")
-    if not summary:
-        summary = (conv.get("summary") or "").strip()
-    updated = store.ConversationsStore.update(conv_id, {"title": title, "summary": summary})
-    return ok(_conv_api(updated or conv))
+    units = store.ContextUnitsStore.all(conversation_id=conv_id, limit=100)
+    return ok([{
+        "id": u["id"], "type": u.get("type") or "note",
+        "title": u.get("title") or "", "content": (u.get("content") or "")[:400],
+        "importance": u.get("importance") or 0, "createdAt": u.get("createdAt"),
+    } for u in units])
 
 
 def _conv_api(conv: dict) -> dict:
