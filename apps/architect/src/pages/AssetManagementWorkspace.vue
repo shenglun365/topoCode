@@ -4,28 +4,24 @@ import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
-  ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
+  ChatBubbleOvalLeftEllipsisIcon, ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
   ChartBarSquareIcon, StopIcon, XMarkIcon, ArrowsRightLeftIcon, ChatBubbleLeftRightIcon,
   DocumentTextIcon, CheckIcon,
 } from '@heroicons/vue/24/outline'
-import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import { apiGet } from '@/services/api-client'
 import { useRouter } from 'vue-router'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
-import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { semanticAssetService, type AssetCompareResult, type BaselineDiff, type CoverageInfo, type ExtractPlanResult, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult, type SyncExtractJob, type UnownedCrossLink, type UnownedExtractJob, type UnownedFileEntry } from '@/services/semantic-asset-service'
 import { gitService, type GitLogEntry } from '@/services/git-service'
 import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
 import { namingService, type NamingConvention } from '@/services/naming-service'
 import { useSplitPane } from '@/composables/useSplitPane'
-import { useDiagramSkill } from '@/composables/useDiagramSkill'
-import { useChatProgress } from '@/composables/useChatProgress'
-import { readModelPref } from '@topo/web-core/shell'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
+import { useConversationStore } from '@/stores/conversation-store'
 import type { AssetDetail, AssetDiagramItem, ConversationDetail, GraphFileEntry, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
@@ -33,47 +29,50 @@ const router = useRouter()
 
 // ---- 对话模型: 统一用顶部工具栏选择(读同一 localStorage 键 topoone-model-architect, 透传后端) ----
 
-// ---- 左右栏分割(资产内容 | agent 对话) ----
+// ---- P1 全局会话栏: 聊天引擎在 conversation-store，页面经钩子响应工具事件 ----
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane()
-const turns = ref<KbAnalysisTurn[]>([])
-const busy = ref(false)
-const chatConvId = ref<string>('')
-const chatAbort = ref<AbortController | null>(null)
-function stopChat() { chatAbort.value?.abort() }
+const conv = useConversationStore()
 const historyOpen = ref(false)
-const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
-// 对话等待期进度反馈（动态忙碌文案 + 工具轨迹；详见 useChatProgress）
-const { busyLabel, toolTrail, begin: beginProgress, onChatEvent: onProgressEvent } = useChatProgress()
+/** 对话回合反应式视图(提取进度等页面写回合，dock 内同步渲染)。 */
+const turns = computed(() => conv.turns)
+/** 直连提取进度(原复用对话 busy/abort，会话引擎化后独立)。 */
+const extractBusy = ref(false)
+const extractAbort = ref<AbortController | null>(null)
 
-/** 从历史会话消息恢复 turns；返回 true 表示有可导入内容。 */
-function applyConversation(conv: ConversationDetail): boolean {
-  const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
-  if (!msgs.length) return false
-  turns.value = msgs.map((m) => ({ role: m.role, content: m.content, id: m.id }))
-  chatConvId.value = conv.id
-  return true
+/** 页面级工具事件反应：资产提取刷新 / 规约提案挂卡(dock 内卡片) / 提取后兜底刷新。 */
+const _unregChatHook = conv.registerChatHook((ev, ctx) => {
+  if (ev.type === 'tool_result' && ev.ok) {
+    if (ev.tool === 'asset.semantic.extract') markExtracted()
+    else if (ev.tool === 'convention.propose') void onConventionProposed(ctx.turnIndex)
+  } else if (ev.type === 'done') {
+    if (extractDirty) refreshAfterExtract()
+  }
+})
+onUnmounted(() => _unregChatHook())
+
+/** dock 内「刷新资产」卡事件(全局会话栏代发)。 */
+function _onDockRefreshAsset(e: Event) {
+  const id = (e as CustomEvent).detail as string
+  onRefreshAsset(id)
 }
+onMounted(() => window.addEventListener('arch:refresh-asset', _onDockRefreshAsset))
+onUnmounted(() => window.removeEventListener('arch:refresh-asset', _onDockRefreshAsset))
 
-/** 导入指定历史会话(资产管理)。 */
-async function importHistory(conv: ConversationDetail) {
-  busy.value = true
-  try {
-    applyConversation(conv)
-    historyOpen.value = false
-  } finally {
-    busy.value = false
+/** 确保 dock 当前是资产会话(非资产会话时新开)。 */
+function ensureAssetConversation() {
+  if (!conv.activeId || conv.activeKind !== 'asset') {
+    conv.newConversation('asset', t('assetMgmt.chatTitle'))
   }
 }
+function openAssetChat() {
+  ensureAssetConversation()
+}
 
-/** 对话流单条消息删除：本地移除 + 后端持久化删除(有 id 的已落库消息)。 */
-async function onDeleteTurn(index: number) {
-  const turn = turns.value[index]
-  if (!turn) return
-  const msgId = turn.id
-  turns.value.splice(index, 1)
-  if (msgId && chatConvId.value) {
-    requirementService.deleteMessage(chatConvId.value, msgId).catch(() => {})
-  }
+/** 导入指定历史会话(资产管理 → 全局会话栏)。 */
+function importHistory(detail: ConversationDetail) {
+  conv.applyConversation(detail)
+  conv.setDockOpen(true)
+  historyOpen.value = false
 }
 
 // ---- 资产内容区 ----
@@ -1366,118 +1365,17 @@ function refreshAfterExtract() {
   if (extractRefreshTimer) { clearTimeout(extractRefreshTimer); extractRefreshTimer = null }
   void Promise.all([loadSemantic(), refreshStatus(), loadOverview(), loadCoverage()])
 }
-/** 提案卡「前往需求方案」：跳会话中心并选中该需求会话。 */
-function onGotoRequirements(reqId: string) {
-  router.push({ path: '/workbench/requirements', query: { select: reqId } })
-}
-
-/** tool_result(req.propose, ok) → 拉取需求详情，挂提案卡到当前助手回合。 */
-async function onRequirementProposed(ev: any) {
-  try {
-    const m = String(ev.summary || '').match(/RQ-\d+/)
-    const reqId = m ? m[0] : ''
-    if (!reqId) return
-    const row = await apiGet<Record<string, any>>(`/requirements/${reqId}`)
-    if (!row?.id) return
-    const last = turns.value[turns.value.length - 1]
-    if (last && last.role === 'assistant') {
-      last.proposal = { id: row.id, title: row.title || '', desc: row.desc || '',
-                        priority: row.priority || 'P1', analysis: row.analysis }
-    }
-  } catch { /* 忽略：提案卡拉取失败不阻断对话 */ }
-}
-
 function markExtracted() {
   extractDirty = true
   if (extractRefreshTimer) clearTimeout(extractRefreshTimer)
   extractRefreshTimer = setTimeout(refreshAfterExtract, 1500)
 }
 
+/** 快捷提问(引用/询问按钮): 经全局会话栏发送(asset 场景)。 */
 function askAgent(text: string) {
-  if (busy.value || !text.trim()) return
-  turns.value.push({ role: 'user', content: text })
-  const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
-  busy.value = true
-  beginProgress()
-  const ac = new AbortController(); chatAbort.value = ac
-  chatStream([{ role: 'user', content: text }], {
-    conversationId: chatConvId.value || undefined,
-    kind: 'asset',
-    title: t('assetMgmt.chatTitle'),
-    modelId: readModelPref('architect') || undefined,
-    diagramSkill: diagramSkill.value,
-    skillScenarios: ['extract'],
-    signal: ac.signal,
-  }, (ev) => {
-    onProgressEvent(ev)
-    if (ev.conversationId) chatConvId.value = ev.conversationId
-    if (ev.type === 'chunk') {
-      turns.value[idx].content += ev.delta ?? ''
-    } else if (ev.type === 'reasoning') {
-      turns.value[idx].reasoning = (turns.value[idx].reasoning ?? '') + (ev.delta ?? '')
-    } else if (ev.type === 'tool_result' && ev.tool === 'asset.semantic.extract' && ev.ok) {
-      markExtracted()
-    } else if (ev.type === 'tool_result' && ev.tool === 'req.propose' && ev.ok) {
-      // S5：agent 形成需求提案 → 拉取需求挂提案卡（对话 → 需求方案闭环）
-      onRequirementProposed(ev)
-    } else if (ev.type === 'done') {
-      turns.value[idx].content = ev.content ?? turns.value[idx].content
-    } else if (ev.type === 'error') {
-      turns.value[idx].content = ev.message || t('requirement.chat.fallback')
-    }
-  }).finally(() => {
-    chatAbort.value = null
-    busy.value = false
-    if (extractDirty) refreshAfterExtract()
-  })
-}
-
-async function onSend(text: string) {
-  if (busy.value) return
-  seedConventionIds()
-  turns.value.push({ role: 'user', content: text })
-  const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
-  busy.value = true
-  beginProgress()
-  const ac = new AbortController(); chatAbort.value = ac
-  try {
-    const msgs = turns.value.slice(0, -1).map((t) => ({ role: t.role, content: t.content }))
-      await chatStream(msgs, {
-        conversationId: chatConvId.value || undefined,
-        kind: 'asset',
-        title: t('assetMgmt.chatTitle'),
-        modelId: readModelPref('architect') || undefined,
-        diagramSkill: diagramSkill.value,
-        // 手动输入也注入 extract 场景：指令化提取(组件ID 权威范围，确定执行)
-        skillScenarios: ['extract'],
-        signal: ac.signal,
-      }, (ev) => {
-      onProgressEvent(ev)
-      if (ev.conversationId) chatConvId.value = ev.conversationId
-      if (ev.type === 'chat_start') {
-        if (ev.userMessageId) turns.value[idx - 1].id = ev.userMessageId
-      } else if (ev.type === 'tool_result' && ev.tool === 'convention.propose' && ev.ok) {
-        onConventionProposed(idx)
-      } else if (ev.type === 'tool_result' && ev.tool === 'asset.semantic.extract' && ev.ok) {
-        markExtracted()
-      } else if (ev.type === 'chunk') {
-        turns.value[idx].content += ev.delta ?? ''
-      } else if (ev.type === 'reasoning') {
-        turns.value[idx].reasoning = (turns.value[idx].reasoning ?? '') + (ev.delta ?? '')
-      } else if (ev.type === 'done') {
-        turns.value[idx].content = ev.content ?? turns.value[idx].content
-        if (ev.messageId) turns.value[idx].id = ev.messageId
-      } else if (ev.type === 'error') {
-        turns.value[idx].content = ev.message || t('requirement.chat.fallback')
-      }
-    })
-  } catch (err: any) {
-    turns.value[idx].content = err?.message || t('requirement.chat.fallback')
-  } finally {
-    chatAbort.value = null
-    busy.value = false
-    if (extractDirty) refreshAfterExtract()
-  }
+  if (conv.busy || !text.trim()) return
+  ensureAssetConversation()
+  void conv.send(text, { skillScenarios: ['extract'] })
 }
 
 function onRefreshAsset(assetId: string) {
@@ -1582,11 +1480,11 @@ async function switchTier(tier: 'low' | 'mid' | 'high') {
 /** 按需提取：确定性直调 REST(不走对话模型——小模型可能不按工具协议执行而编造报告)。
  *  过程与结果以对话回合呈现；完成后刷新资产数据。 */
 async function askExtractComponent(key: string, name: string) {
-  if (busy.value) return
+  if (extractBusy.value) return
   turns.value.push({ role: 'user', content: t('assetMgmt.compExtractUser', { name, key }) })
   const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
-  busy.value = true
-  const ac = new AbortController(); chatAbort.value = ac
+  extractBusy.value = true
+  const ac = new AbortController(); extractAbort.value = ac
   try {
     const res = await semanticAssetService.extract(
       { type: 'comm', key },
@@ -1616,8 +1514,8 @@ async function askExtractComponent(key: string, name: string) {
       ? t('requirement.chat.semanticStopped')
       : (err?.message || t('assetMgmt.batchFailed'))
   } finally {
-    chatAbort.value = null
-    busy.value = false
+    extractAbort.value = null
+    extractBusy.value = false
   }
 }
 
@@ -1674,11 +1572,10 @@ async function copyCompRef(key: string, name: string, id: string) {
   }
 }
 
-/** 引用组件到对话输入框（预填不发送，用户可补充问题）。 */
-const chatDraft = ref<{ text: string; nonce: number } | null>(null)
-let draftNonce = 0
+// 引用组件到对话输入框（预填不发送，用户可补充问题）→ 全局会话栏。
 function referenceComp(name: string, id: string) {
-  chatDraft.value = { text: compRefText(name, id), nonce: ++draftNonce }
+  ensureAssetConversation()
+  conv.pushDraft(compRefText(name, id))
 }
 
 function referenceAsset(a: SemanticAsset) {
@@ -3063,35 +2960,24 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- 右：agent 对话区 -->
-      <div class="min-h-0 min-w-0 flex-1 flex flex-col gap-2">
-        <AnalysisChat
-          class="flex-1 min-h-0"
-          :turns="turns"
-          :busy="busy"
-          :busy-label="busyLabel"
-          :tool-trail="toolTrail"
-          :insert-draft="chatDraft"
-          :title="t('assetMgmt.chatTitle')"
-          :diagram-skill="diagramSkill"
-          @send="onSend"
-          @delete-turn="onDeleteTurn"
-          @refresh-asset="onRefreshAsset"
-          @toggle-diagram-skill="toggleDiagramSkill"
-          @convention-confirm="onConventionConfirm"
-          @convention-ignore="onConventionIgnore"
-          @goto-requirements="onGotoRequirements"
-          @stop="stopChat"
-        />
-        <p class="text-[10px] text-ctp-overlay0 leading-relaxed">
-          {{ t('assetMgmt.chatHint') }}
+      <!-- 右：全局会话栏入口(P1 决策2: 整个 architect 唯一对话栏) -->
+      <div class="flex min-h-0 w-40 shrink-0 flex-col items-center justify-center gap-2.5 px-2 text-ctp-overlay0">
+        <ChatBubbleOvalLeftEllipsisIcon class="h-8 w-8" />
+        <p class="text-center text-[11px] leading-relaxed">
+          {{ t('assetMgmt.chatMovedHint') }}
         </p>
+        <button class="btn btn-sm btn-blue" @click="openAssetChat">
+          <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />{{ t('assetMgmt.openChat') }}
+        </button>
+        <button class="btn btn-sm btn-ghost" @click="historyOpen = true">
+          <ClipboardDocumentListIcon class="h-3.5 w-3.5" />{{ t('assetMgmt.historyButton') }}
+        </button>
       </div>
     </div>
 
     <RequirementHistoryModal
       :open="historyOpen"
-      :active-conv-id="chatConvId"
+      :active-conv-id="conv.activeId"
       kind="asset"
       @close="historyOpen = false"
       @import="importHistory"

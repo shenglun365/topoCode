@@ -269,13 +269,13 @@ async def create_execution_task(request: Request):
         ("INSERT INTO arch_task_trees (id, plan_id, root, revision, history, updated_at)"
          " VALUES (?, ?, ?, 1, ?, ?)",
          (tree_id, plan_id, store._dumps(root), store._dumps([]), now)),
-        ("INSERT INTO arch_execution_tasks (id, plan_id, adapter, model, req_ids, connectivity, status, session_ids, base_commit, run_count, tree_revision, test_ids, amendments, stats, instance_id, task_branch, branch_mode, created_at, updated_at)"
-         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("INSERT INTO arch_execution_tasks (id, plan_id, adapter, model, req_ids, connectivity, status, session_ids, base_commit, run_count, tree_revision, test_ids, amendments, stats, instance_id, task_branch, branch_mode, conversation_id, created_at, updated_at)"
+         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
          (exec_id, plan_id, body.get("adapter", "opencode"), body.get("model"),
           store._dumps(req_ids), "ok", "created", store._dumps([]), plan["baseCommit"],
           1, 0, store._dumps(body.get("testIds", [])), store._dumps([]),
           store._dumps({"requests": 0, "tokensIn": 0, "tokensOut": 0, "bytesIn": 0, "bytesOut": 0}),
-          instance_id, task_branch, branch_mode, now, now)),
+          instance_id, task_branch, branch_mode, (body.get("conversationId") or "").strip(), now, now)),
     ]
     for r in reqs:
         statements.append(

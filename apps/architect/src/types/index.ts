@@ -914,6 +914,8 @@ export interface ExecutionTask {
   /** 任务分支: auto=arch/<task_id>，manual=人工指定。 */
   taskBranch?: string
   branchMode?: 'auto' | 'manual'
+  /** P1 会话中心: 执行作业归属的会话 id。 */
+  conversationId?: string
 }
 
 export type AgentStatus = 'idle' | 'planning' | 'working' | 'testing' | 'done' | 'failed' | 'stopped'

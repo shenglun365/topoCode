@@ -131,12 +131,17 @@ class ConversationsStore:
     MSG_TABLE = "arch_conversation_messages"
 
     @classmethod
-    def all(cls, kind: str = None, project_id: str = None, limit: int = 100):
+    def all(cls, kind: str = None, project_id: str = None, limit: int = 100,
+            kinds: list = None):
+        """会话列表。kind=单类过滤；kinds=多类过滤(会话中心全量口径含 asset)。"""
         sql = f"SELECT * FROM {cls.TABLE}"
         conds, params = [], []
         if kind:
             conds.append("kind = ?")
             params.append(kind)
+        elif kinds:
+            conds.append("kind IN (%s)" % ",".join("?" * len(kinds)))
+            params.extend(kinds)
         if project_id:
             conds.append("project_id = ?")
             params.append(project_id)
@@ -157,7 +162,7 @@ class ConversationsStore:
 
     @classmethod
     def create(cls, data: dict) -> dict:
-        """创建会话；缺省补 id/时间字段。"""
+        """创建会话；缺省补 id/时间字段。tags(JSON {modules,groups})/summary 会话中心用。"""
         now = int(__import__("time").time() * 1000)
         payload = {
             "id": data.get("id") or next_id("cv"),
@@ -166,6 +171,8 @@ class ConversationsStore:
             "req_id": data.get("reqId") or "",
             "title": data.get("title") or "",
             "status": data.get("status") or "active",
+            "tags": data.get("tags"),
+            "summary": data.get("summary") or "",
             "meta": data.get("meta"),
             "created_at": data.get("createdAt") or now,
             "updated_at": data.get("updatedAt") or now,
@@ -267,6 +274,68 @@ class ConversationsStore:
         return cur.rowcount > 0
 
 
+
+
+class DocsStore:
+    """备案文档(会话派生总结)：需求快照/开发简报/笔记，随时生成随时增删。"""
+
+    TABLE = "arch_docs"
+
+    @classmethod
+    def all(cls, project_id: str = None, conversation_id: str = None,
+            type_: str = None, limit: int = 200) -> list[dict]:
+        sql = f"SELECT * FROM {cls.TABLE}"
+        conds, params = [], []
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        if conversation_id:
+            conds.append("conversation_id = ?")
+            params.append(conversation_id)
+        if type_:
+            conds.append("type = ?")
+            params.append(type_)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def get(cls, doc_id: str):
+        return _get(cls.TABLE, doc_id)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        now = int(__import__("time").time() * 1000)
+        payload = {
+            "id": data.get("id") or next_id("doc"),
+            "project_id": data.get("projectId") or "",
+            "conversation_id": data.get("conversationId") or "",
+            "type": data.get("type") or "requirement_summary",
+            "title": data.get("title") or "",
+            "content_md": data.get("contentMd") or "",
+            "refs": data.get("refs"),
+            "created_at": data.get("createdAt") or now,
+            "updated_at": data.get("updatedAt") or now,
+        }
+        _insert(cls.TABLE, payload)
+        return _row_to_api(payload)
+
+    @classmethod
+    def update(cls, doc_id: str, data: dict) -> Optional[dict]:
+        data["updatedAt"] = int(__import__("time").time() * 1000)
+        return _update(cls.TABLE, doc_id, data)
+
+    @classmethod
+    def delete(cls, doc_id: str) -> bool:
+        db, found = _locate_db(cls.TABLE, doc_id)
+        if not found:
+            return False
+        cur = db.execute(f"DELETE FROM {cls.TABLE} WHERE id = ?", (doc_id,))
+        db.commit()
+        return cur.rowcount > 0
 
 
 class McpCallsStore:

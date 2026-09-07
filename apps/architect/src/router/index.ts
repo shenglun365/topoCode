@@ -27,15 +27,20 @@ const routes: RouteRecordRaw[] = [
         meta: { workbench: true, title: '项目概览' },
       },
       {
-        path: 'requirements',
-        name: 'Requirements',
-        component: () => import('@/pages/AgentWorkbench.vue'),
-        meta: { workbench: true, title: '需求工作台' },
+        path: 'sessions',
+        name: 'Sessions',
+        component: () => import('@/pages/SessionsPage.vue'),
+        meta: { workbench: true, title: '会话中心' },
       },
       {
-        // S6：深度表单分析已并入需求方案会话中心，旧路径重定向
+        // P1 会话中心：需求工作台退役，旧路径(含 ?select= 深链)重定向
+        path: 'requirements',
+        redirect: { path: '/workbench/sessions' },
+      },
+      {
+        // S6：深度表单分析已并入会话中心，旧路径重定向
         path: 'requirements/analysis',
-        redirect: { path: '/workbench/requirements' },
+        redirect: { path: '/workbench/sessions' },
       },
       {
         path: 'assets',

@@ -234,16 +234,33 @@ ARCH_PROJECT_TABLES_SQL = """
 
     CREATE TABLE IF NOT EXISTS arch_conversations (
         id TEXT PRIMARY KEY,
-        kind TEXT DEFAULT 'requirement',    -- requirement | design | execution | unit-test | generic
+        kind TEXT DEFAULT 'requirement',    -- requirement | design | asset | execution | unit-test | generic
         project_id TEXT DEFAULT '',
         req_id TEXT DEFAULT '',
         title TEXT DEFAULT '',
         status TEXT DEFAULT 'active',
+        tags TEXT,                          -- JSON: {modules:[], groups:[]} 会话分类(会话中心)
+        summary TEXT DEFAULT '',            -- 会话摘要(自动生成/手改；历史总结素材)
         meta TEXT,                          -- JSON: 自由对话上下文(范围/意图等)
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_arch_convs_kind ON arch_conversations(kind, project_id);
+
+    -- 备案文档(P1 会话中心)：会话派生的总结性文档(需求快照/开发简报/笔记)，
+    -- 非流程实体——随时生成、随时增删(裁决2)。
+    CREATE TABLE IF NOT EXISTS arch_docs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT DEFAULT '',
+        conversation_id TEXT DEFAULT '',    -- 来源会话(证据链)
+        type TEXT DEFAULT 'requirement_summary',  -- requirement_summary | dev_digest | note
+        title TEXT DEFAULT '',
+        content_md TEXT DEFAULT '',
+        refs TEXT,                          -- JSON: {execIds:[], assetVersions:{}, modules:[]}
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_docs_conv ON arch_docs(conversation_id, project_id);
 
     CREATE TABLE IF NOT EXISTS arch_conversation_messages (
         id TEXT PRIMARY KEY,
@@ -615,6 +632,13 @@ def _project_migrations(db) -> None:
         # S2 任务分支协议：落地提交与时间（幂等闸 + 验收 diff 锚点）
         ("branch_commit", "TEXT DEFAULT ''"),
         ("branch_landed_at", "INTEGER DEFAULT 0"),
+        # P1 会话中心：执行作业归属的会话(上下文构造/简报的关联键)
+        ("conversation_id", "TEXT DEFAULT ''"),
+    ])
+    _add_cols(db, "arch_conversations", [
+        # P1 会话中心：分类标签 + 摘要(全量持久化、历史总结素材)
+        ("tags", "TEXT"),
+        ("summary", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_agent_sessions", [
         ("instance_id", "TEXT DEFAULT ''"),

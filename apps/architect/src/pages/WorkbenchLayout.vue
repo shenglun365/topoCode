@@ -5,6 +5,7 @@ import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import GuidePanel from '@/components/project/GuidePanel.vue'
+import ConversationDock from '@/components/chat/ConversationDock.vue'
 
 const project = useArchProjectStore()
 const requirement = useArchRequirementStore()
@@ -23,5 +24,6 @@ onMounted(async () => {
 
 <template>
   <router-view />
+  <ConversationDock />
   <GuidePanel />
 </template>
