@@ -110,6 +110,19 @@ class OpenCodeServeManager:
         self._by_root[root] = sp
         return sp
 
+    def dispose_root(self, root: str) -> None:
+        """释放该根的 serve 实例(probe worktree 用完即清，防实例堆积)。"""
+        sp = self._by_root.pop(root, None)
+        if sp is None:
+            return
+        proc = getattr(sp, "proc", None)
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+        logger.info("[opencode] serve disposed root=%s", root)
+
 
 _MANAGER: Optional[OpenCodeServeManager] = None
 

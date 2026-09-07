@@ -229,6 +229,56 @@ def _conv_api(conv: dict) -> dict:
     }
 
 
+# ── P3: probe(方案草图) + 前置上下文构造 ────────────────────
+
+@router.post("/sessions/{conv_id}/probe")
+async def probe_session(conv_id: str, request: Request):
+    """会话内发起方案草图(probe): worktree 快照 + coding agent + 伪 diff，产物落单元。"""
+    from . import context_registry
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    body = await request.json()
+    instruction = (body.get("instruction") or "").strip()
+    if not instruction:
+        return err(400, "instruction 为空")
+    from .project import _resolve_project
+    try:
+        proj = _resolve_project(body.get("root") or None, conv.get("projectId") or None)
+    except Exception:
+        proj = None
+    root = body.get("root") or ((proj or {}).get("rootPath") or "")
+    if not root:
+        return err(400, "无法解析项目根(会话未绑定项目)")
+    result = context_registry.run_probe(
+        conv_id, instruction, root,
+        executor_id=(body.get("executorId") or "").strip(),
+        files=[str(f) for f in (body.get("files") or []) if str(f).strip()],
+        base_commit=(body.get("baseCommit") or "").strip(),
+        timeout_s=int(body.get("timeoutS") or 600))
+    if result.get("error"):
+        return err(502, result["error"])
+    return ok(result)
+
+
+@router.post("/sessions/{conv_id}/assemble")
+async def assemble_session(conv_id: str):
+    """前置上下文构造: 收集→裁剪→装配 dossier(裁决3)，落 execution_brief 单元。"""
+    from . import context_registry
+    reqs = []
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    if conv.get("reqId"):
+        r = store.RequirementsStore.get(conv["reqId"])
+        if r:
+            reqs = [r]
+    dossier = context_registry.assemble_dossier(conv_id, reqs=reqs)
+    if dossier is None:
+        return err(404, "会话不存在")
+    return ok({"conversationId": conv_id, "length": len(dossier), "dossier": dossier})
+
+
 # ── 备案文档(DocsStore): 会话派生的总结性文档 ──────────────────
 
 @router.get("/session-docs")

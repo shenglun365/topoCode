@@ -348,3 +348,174 @@ def register_chat_tools() -> None:
     def _ctx_summarize(conversation: str, project: Optional[str] = None,
                        root: Optional[str] = None) -> dict:
         return {"markdown": ctx_summarize(conversation)}
+
+
+# ── P3: probe(方案草图) + 前置上下文构造(Context Assembly) ──
+
+def run_probe(conv_id: str, instruction: str, root: str,
+              executor_id: str = "", files: Optional[list] = None,
+              base_commit: str = "", timeout_s: int = 600) -> dict:
+    """调 runner /api/probe(worktree 方案草图) → 产物落 artifact 单元。
+
+    probe 语义: 只读分析+伪 diff 表达方案；不建分支不提交(与 execute 分支协议互斥)。
+    """
+    import httpx
+    import os as _os
+    from .runner_gateway import get_runner
+
+    if not (instruction or "").strip():
+        return {"error": "instruction 为空"}
+    payload = {
+        "root": root,
+        "instruction": instruction.strip(),
+        "executorId": executor_id or "",
+        "files": files or [],
+        "baseCommit": base_commit or "HEAD",
+        "timeoutS": timeout_s,
+    }
+    # 环境变量调用时覆盖(get_runner 单例可能缓存旧 base_url；测试/多 runner 场景)
+    base = _os.environ.get("RUNNER_BASE_URL") or get_runner().base_url
+    try:
+        with httpx.Client(timeout=timeout_s + 60) as client:
+            r = client.post(f"{base}/api/probe", json=payload)
+            result = r.json() if r.status_code == 200 else {"error": f"runner {r.status_code}"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"runner 不可达: {e}"}
+    if result.get("ok"):
+        changed = result.get("changedFiles") or []
+        diff = (result.get("diff") or "")[:8000]
+        try:
+            store.ContextUnitsStore.create({
+                "conversationId": conv_id, "projectId": _project_of(conv_id),
+                "type": "artifact",
+                "title": f"方案草图: {instruction.strip()[:40]}",
+                "content": (f"{result.get('summary') or ''}\n\n"
+                            f"变更文件: {', '.join(changed) or '-'}\n\n```diff\n{diff}\n```"),
+                "refs": {"files": changed[:50]},
+                "importance": 1,
+            })
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[ctx-registry] probe 产物单元写入失败: %s", e)
+    return result
+
+
+_DOSSIER_BUDGET = 24000   # 字符预算(本地模型 256K 窗口留足余量)
+
+
+def _clip(text: str, limit: int) -> str:
+    text = (text or "").strip()
+    return text if len(text) <= limit else text[:limit] + "\n…(截断)"
+
+
+def assemble_dossier(conv_id: str, reqs: Optional[list] = None,
+                     root: str = "", project_id: str = "") -> Optional[str]:
+    """前置上下文构造(裁决3): 收集→裁剪→装配 dossier，并落 execution_brief 单元。
+
+    收集源: 会话摘要/标签 → 备案文档 → 高优上下文单元(方案草图/决策/执行回执)
+    → 需求三段 → 项目规约。整体受 _DOSSIER_BUDGET 预算约束(逐段截断)。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return None
+    pid = project_id or (conv.get("projectId") or "")
+    tags = _conv_tags(conv)
+    sections: List[tuple] = []   # (标题, 正文)
+
+    # 1) 会话基础
+    sections.append(("会话", (
+        f"{conv.get('title') or '-'}（类型 {conv.get('kind')}，模块: "
+        f"{', '.join(tags['modules']) or '-'}）\n"
+        f"摘要: {(conv.get('summary') or '').strip() or '(未生成)'}")))
+
+    # 2) 备案文档(需求/方案定型快照)
+    docs = store.DocsStore.all(conversation_id=conv_id, limit=5)
+    for d in docs[:3]:
+        sections.append((f"备案文档: {d.get('title') or '-'}",
+                         _clip(d.get("contentMd") or "", 6000)))
+
+    # 3) 高优上下文单元(方案草图/决策/摘要/回执；工具轨迹排除)
+    units = store.ContextUnitsStore.all(conversation_id=conv_id, limit=100)
+    picked = [u for u in units
+              if (u.get("importance") or 0) >= 1 and u.get("type") != "execution_brief"]
+    picked.sort(key=lambda u: (-(u.get("importance") or 0), -(u.get("createdAt") or 0)))
+    for u in picked[:6]:
+        sections.append((f"[{u.get('type')}] {u.get('title') or '-'}",
+                         _clip(u.get("content") or "", 3000)))
+
+    # 4) 需求三段(正式需求实体——执行的对象)
+    for r in (reqs or [])[:4]:
+        if r and r.get("desc"):
+            sections.append((f"需求: {r.get('title') or r.get('id')}",
+                             _clip(r.get("desc") or "", 5000)))
+
+    # 5) 项目规约(编码必须遵守)
+    if root or pid:
+        try:
+            from .asset_map_tools import run_tool
+            rules = run_tool("map.rules", {"project": pid or None})
+            sections.append(("项目规约(编码必须遵守)", _clip(rules, 4000)))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[dossier] 规约装配失败: %s", e)
+
+    # 装配(预算内逐段保留)
+    out = ["# 执行 dossier(前置上下文构造)", ""]
+    used = 0
+    for title, body in sections:
+        body = (body or "").strip()
+        if not body:
+            continue
+        block = f"## {title}\n\n{body}\n\n"
+        if used + len(block) > _DOSSIER_BUDGET:
+            block = block[: max(0, _DOSSIER_BUDGET - used)] + "\n…(预算截断)\n\n"
+        out.append(block)
+        used += len(block)
+        if used >= _DOSSIER_BUDGET:
+            break
+    dossier = "".join(out)
+    try:
+        store.ContextUnitsStore.create({
+            "conversationId": conv_id, "projectId": pid,
+            "type": "execution_brief",
+            "title": f"执行 dossier({len(dossier)} 字符)",
+            "content": dossier[:4000] + ("…(完整版见执行上下文)" if len(dossier) > 4000 else ""),
+            "refs": {"modules": tags.get("modules") or []},
+            "importance": 1,
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[dossier] execution_brief 单元写入失败: %s", e)
+    return dossier
+
+
+def register_probe_tool() -> None:
+    """注册 probe.run 会话 agent 工具(L2 方案草图: 对话中调 coding agent)。"""
+    from .req_agent import register_architect_tool
+
+    @register_architect_tool(
+        "probe.run",
+        "方案草图(probe): 调 coding agent 在 git worktree 快照上产出改动思路与伪 diff；"
+        "讨论方案可行性/让用户预览改动时使用；不产生真实分支/提交")
+    def _probe_run(instruction: str, files: str = "", executorId: str = "",
+                   timeoutS: int = 600, project: Optional[str] = None,
+                   root: Optional[str] = None) -> dict:
+        from . import ctx as _ctx
+        from .project import _resolve_project
+        conv_id = _ctx.get_conv() or ""
+        try:
+            proj = _resolve_project(root, project)
+        except Exception:
+            proj = None
+        wt_root = root or ((proj or {}).get("rootPath") or "")
+        if not wt_root:
+            return {"error": "无法解析项目根(root/project)"}
+        file_list = [f.strip() for f in (files or "").split(",") if f.strip()]
+        result = run_probe(conv_id, instruction, wt_root,
+                           executor_id=executorId, files=file_list,
+                           timeout_s=int(timeoutS))
+        if result.get("error"):
+            return result
+        changed = result.get("changedFiles") or []
+        diff = _clip(result.get("diff") or "", 3000)
+        md = (f"# 方案草图(probe)\n\n- 状态: {result.get('status')}\n"
+              f"- {result.get('summary') or ''}\n"
+              f"- 变更文件: {', '.join(changed) or '-'}\n\n```diff\n{diff}\n```")
+        return {"markdown": md}

@@ -389,6 +389,21 @@ async def run_execution_task(task_id: str):
     root, project = _resolve_root_project(reqs, {})
     context = tagent_se.make_se_context(reqs, root, project, task)
 
+    # P3 前置上下文构造(裁决3): 会话关联任务 → 装配 dossier 前置到根节点
+    # (执行器 prompt 直读 task.context；dossier 完整版落 execution_brief 单元留痕)
+    conv_id = (task.get("conversationId") or "").strip()
+    if conv_id:
+        try:
+            from . import context_registry
+            dossier = context_registry.assemble_dossier(conv_id, reqs=reqs,
+                                                        root=root or "",
+                                                        project_id=project or "")
+            if dossier:
+                for r in coding_tree.roots:
+                    r.context = [dossier] + list(r.context or [])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec] dossier 装配失败(忽略, 继续执行): %s", e)
+
     se = tagent_se.build_architect_se(
         get_gateway(), root=root, project=project,
         project_root=root or "",

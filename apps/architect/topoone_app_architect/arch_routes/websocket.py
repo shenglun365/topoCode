@@ -108,9 +108,10 @@ def _chat_max_tokens() -> Optional[int]:
     return None
 
 
-# P2: 会话 agent 的 ctx.* 工具注册(幂等)
+# P2/P3: 会话 agent 的 ctx.* + probe.run 工具注册(幂等)
 from . import context_registry as _context_registry  # noqa: E402
 _context_registry.register_chat_tools()
+_context_registry.register_probe_tool()
 
 
 @router.websocket("/ws/kb-analysis")

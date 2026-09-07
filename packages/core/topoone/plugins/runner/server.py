@@ -18,6 +18,8 @@ import json
 import logging
 import os
 import sqlite3
+import subprocess
+import time
 import uuid
 from typing import Optional
 
@@ -286,6 +288,107 @@ async def run_tree(tree_id: str):
     # 非阻塞：内部 run_async
     state.scheduler.run_async(tree_id)
     return {"progress": state.scheduler.progress(tree_id)}
+
+
+# ── P3 probe 模式(worktree 方案A)：方案草图——只读分析+伪diff，不建分支不落地 ──
+
+_PROBE_HARNESS = (
+    "【probe 方案草图模式】\n"
+    "- 你在 git worktree 快照中工作，改动不影响主工作区\n"
+    "- 禁止 git commit / branch / push / checkout 等仓库操作；只编辑文件表达方案\n"
+    "- 禁止运行构建/测试/安装依赖(worktree 无构建产物，属正常)\n"
+    "- 先读相关代码理解现状，再用最小文件改动表达方案(伪 diff)\n"
+    "- 结束时用 3-5 行总结改动思路与影响面\n"
+)
+
+
+def _git(args: list, cwd: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, check=check)
+
+
+@app.post("/api/probe")
+async def run_probe(request: Request):
+    """probe: worktree 快照上执行 coding agent 产出方案草图 + diff。
+
+    body: {root, baseCommit?, instruction, files?, executorId?, timeoutS?}
+    返回 {ok, status, changedFiles, diff, summary, worktree}。结束即清理 worktree。
+    """
+    body = await request.json()
+    root = os.path.abspath(body.get("root") or "")
+    instruction = (body.get("instruction") or "").strip()
+    if not root or not os.path.isdir(root):
+        return {"ok": False, "error": "root 无效"}
+    if not instruction:
+        return {"ok": False, "error": "instruction 为空"}
+    base = body.get("baseCommit") or "HEAD"
+    executor_id = (body.get("executorId") or "").strip()
+    files = [str(f) for f in (body.get("files") or []) if str(f).strip()]
+    timeout_s = min(max(int(body.get("timeoutS") or 900), 60), 3600)
+
+    probe_dir = os.path.join(STATE_DIR, "probes")
+    os.makedirs(probe_dir, exist_ok=True)
+    wt = os.path.join(probe_dir, f"probe-{int(time.time() * 1000)}")
+
+    def _cleanup_worktree() -> None:
+        _git(["worktree", "remove", "--force", wt], cwd=root, check=False)
+        _git(["worktree", "prune"], cwd=root, check=False)
+
+    r = _git(["worktree", "add", "--detach", wt, base], cwd=root, check=False)
+    if r.returncode != 0:
+        return {"ok": False, "error": f"worktree 创建失败: {r.stderr.strip()[:300]}"}
+
+    tree = CodingTaskTree.from_dict({"roots": [{
+        "id": "PROBE", "title": instruction[:120] or "方案草图",
+        "kind": "task", "files": files, "executor_id": executor_id,
+        "context": [_PROBE_HARNESS, instruction],
+    }]})
+    tree_id = state.scheduler.submit(tree, context={
+        "root": wt, "requirement": "probe: 方案草图", "branch": "", "baseCommit": base,
+    })
+    persist(tree_id)
+    state.scheduler.run_async(tree_id)
+
+    deadline = time.time() + timeout_s
+    progress: dict = {}
+    try:
+        while time.time() < deadline:
+            await asyncio.sleep(3.0)
+            progress = state.scheduler.progress(tree_id)
+            if progress.get("terminal"):
+                break
+        # diff 提取(未跟踪文件 intent-to-add 纳入)
+        _git(["add", "-A", "-N"], cwd=wt, check=False)
+        d = _git(["diff"], cwd=wt, check=False)
+        st = _git(["status", "--porcelain"], cwd=wt, check=False)
+        changed = [line[3:].strip() for line in st.stdout.splitlines() if line.strip()]
+        node = (progress.get("nodes") or [{}])[0]
+        add = del_ = 0
+        for line in d.stdout.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                add += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                del_ += 1
+        summary = (f"probe {'完成' if node.get('status') == 'done' else node.get('status')}; "
+                   f"{len(changed)} 个文件变更(+{add}/-{del_} 行)")
+        return {
+            "ok": node.get("status") == "done",
+            "status": node.get("status") or "unknown",
+            "treeId": tree_id,
+            "changedFiles": changed,
+            "diff": d.stdout[:200_000],
+            "summary": summary,
+            "worktree": wt,
+        }
+    finally:
+        _cleanup_worktree()
+        # opencode serve 按根托管 → worktree 专用实例即用即弃
+        try:
+            from .executors.opencode import manager
+            m = manager()
+            if m is not None:
+                m.dispose_root(wt)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def main():
