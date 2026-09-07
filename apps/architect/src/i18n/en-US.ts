@@ -411,7 +411,6 @@ export default {
     newBaseline: 'New baseline N+1 created',
     status: { idle: 'Pending', verified: 'Verified', committed: 'Rebaselined' },
   },
-  requirement: {
   digest: {
     title: 'Dev Digest',
     subtitle: 'Development trajectory · entries deep-link to asset diff / sessions',
@@ -471,6 +470,7 @@ export default {
     },
     execs: { title: 'Linked Executions', empty: 'No linked executions' },
   },
+  requirement: {
     title: 'Proposal Title',
     desc: '',
     tab: { proposal: 'Proposals', pool: 'Pool' },

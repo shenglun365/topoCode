@@ -435,7 +435,6 @@ export default {
     newBaseline: '新基线 N+1 已建立',
     status: { idle: '待执行', verified: '已校验', committed: '已重基线' },
   },
-  requirement: {
   digest: {
     title: '开发简报',
     subtitle: '开发走向速览 · 条目可深链(资产 diff / 会话)',
@@ -495,6 +494,7 @@ export default {
     },
     execs: { title: '关联执行', empty: '暂无关联执行' },
   },
+  requirement: {
     title: '提案标题',
     desc: '',
     degradedHint: '未绑定项目 · KB 能力降级：无既有资产检索与社区/摘要支撑，分析流程不变，信息与接口能力受限。',
