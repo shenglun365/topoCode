@@ -10,6 +10,7 @@ import { useArchProjectStore } from '@/stores/project-store'
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
+import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t } = useI18n()
@@ -415,6 +416,8 @@ onMounted(() => { void loadCgStatus() })
         </div>
       </div>
     </div>
+
+    <AgentExecutorsCard />
 
     <div class="panel overflow-hidden">
       <div class="panel-header">

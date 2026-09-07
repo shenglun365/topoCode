@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { devAuthProxyHooks } from '../../scripts/vite-dev-auth'
+
 import { resolve } from 'path'
 
 // M12：chat 子项目独立 vite 工程（单 entry：chat.html）。
@@ -8,8 +10,30 @@ import { resolve } from 'path'
 const SRC = resolve(__dirname, 'src')
 const DIST = resolve(__dirname, 'dist')
 
+// dev 便利：/chat?... → /chat/chat.html（302，与生产网关挂载路径对齐；
+// 纯 URL 重写会让相对模块路径落到站点根 404，故用重定向）
+function pageRewritePlugin() {
+  return {
+    name: 'page-rewrite',
+    configureServer(server: any) {
+      server.middlewares.use((req: any, res: any, next: any) => {
+        const url = req.url || ''
+        const pathname = url.split('?')[0]
+        if (pathname === '/chat') {
+          const qs = url.includes('?') ? '?' + url.split('?')[1] : ''
+          res.statusCode = 302
+          res.setHeader('Location', '/chat/chat.html' + qs)
+          res.end()
+          return
+        }
+        next()
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), pageRewritePlugin()],
   base: '/chat/',
   root: SRC,
   resolve: {
@@ -20,8 +44,8 @@ export default defineConfig({
     port: 5175,
     strictPort: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true, ws: true },
-      '/static': { target: 'http://127.0.0.1:3456', changeOrigin: true },
+      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true, ...devAuthProxyHooks(), ws: true },
+      '/static': { target: 'http://127.0.0.1:3456', changeOrigin: true, ...devAuthProxyHooks() },
     },
     hmr: { overlay: false },
   },

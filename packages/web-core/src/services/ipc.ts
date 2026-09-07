@@ -238,6 +238,22 @@ function createRealIPC() {
       },
     },
 
+    // ==================== 基线视图 ====================
+    view: {
+      status: async (params: { projectId: string }) => {
+        return await api.view.status(params)
+      },
+      summary: async (params: { projectId: string }) => {
+        return await api.view.summary(params)
+      },
+      mount: async (params: { projectId: string; taskId: string; force?: boolean }) => {
+        return await api.view.mount(params)
+      },
+      unmount: async (params: { projectId: string; taskId: string }) => {
+        return await api.view.unmount(params)
+      },
+    },
+
     // ==================== 代码分析 ====================
     analysis: {
       listTasks: async (projectId: string) => {

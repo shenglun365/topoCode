@@ -34,6 +34,8 @@ export interface KbAnalysisTurn {
   conventions?: NamingConvention[]
   /** 差异报告通知卡(验收触发后：L1/L2 通过率 + L3 待人工 + 前三差异摘要 + 前往验收)。 */
   acceptance?: AcceptanceReportDetail
+  /** 需求提案卡(资产地图对话 req.propose 产出：需求+方案+评估 → 提交需求方案)。 */
+  proposal?: { id: string; title: string; desc: string; priority: string; analysis?: Record<string, any> }
   /** 后端持久化消息 id(对话流单条删除用)。 */
   id?: string
 }

@@ -235,6 +235,36 @@ def _count_batched_source_files(task_id: str, project_db, project_root: str = ""
     return count
 
 
+# 代码解析产物表：清除这些表后任务可重新执行（状态重置 pending）
+_PARSE_CACHE_TABLES = {
+    "graph_node", "graph_edge", "graph_doc",
+    "community_hierarchy", "community_llm_results",
+    "ast_data", "dependencies", "call_chains",
+}
+
+
+def _reset_tasks_to_pending(task_store, project_id: str) -> int:
+    """把项目内非 running 任务重置为 pending（清除缓存后开放重新执行）。
+
+    running 任务不动；已是 pending 的跳过。返回重置数量。
+    """
+    count = 0
+    for task in task_store.list_tasks(project_id):
+        if task.get("status") in ("done", "error", "cancelled", "modified", "stopped"):
+            task_store.update_task_status(task["id"], "pending", progress=0, error="")
+            count += 1
+    return count
+
+
+def _with_fixed_report_types(report_types: list) -> list:
+    """报告类型补齐固定项：内部依赖分析(dependency) + 内部调用分析(callChain) 始终包含。"""
+    rt = list(report_types or [])
+    for t in ("dependency", "callChain"):
+        if t not in rt:
+            rt.append(t)
+    return rt
+
+
 def register_analysis_methods(server, multi_db: MultiDBManager):
     """将所有 analysis.* 方法注册到 RPC 服务器"""
 
@@ -336,7 +366,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "scopes": scopes or [],
             "extensions": extensions or [],
             "exclude_dirs": exclude_dirs or [],
-            "report_types": report_types or [],
+            # 内部依赖/内部调用分析为固定包含项（前端已不再展示该选项，始终勾选）
+            "report_types": _with_fixed_report_types(report_types or []),
             "pattern_type": pattern_type,
             "pattern": pattern,
         })
@@ -489,13 +520,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         except Exception as e:
             logger.warning(f"[analysis.clearProjectCache] storage stats refresh failed: {e}")
 
-        # 清除主库中的任务（连带 runs/reports/history）
+        # 任务保留：解析产物已清，状态重置为 pending —— 清除缓存后开放重新执行
+        # （跑完再次 done 收起按钮；可再次清除再次重跑。running 任务不动）
         task_store = TaskStore(multi_db.main_db)
-        tasks = task_store.list_tasks(project_id)
-        deleted_count = 0
-        for task in tasks:
-            task_store.delete_task(task["id"])
-            deleted_count += 1
+        reset_count = _reset_tasks_to_pending(task_store, project_id)
 
         # VACUUM 主库
         multi_db.main_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -507,11 +535,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         logger.info(
             f"[analysis.clearProjectCache] project={project_id}, "
-            f"deleted {deleted_count} tasks, cleared all AST/analysis data"
+            f"reset {reset_count} tasks to pending, cleared all AST/analysis data"
         )
         return {
             "projectId": project_id,
-            "deletedTasks": deleted_count,
+            "resetTasks": reset_count,
             "fileCount": file_count,
             "deletedTables": deleted_tables,
         }
@@ -564,7 +592,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             except Exception as e:
                 raise ValueError(f"Failed to clear table {table}: {e}")
         project_db.commit()
-        return {"table": table, "deleted": count}
+        # 清除的是代码解析产物表 → 任务状态重置 pending（清除缓存后开放重新执行）
+        reset = 0
+        if table in _PARSE_CACHE_TABLES:
+            task_store = TaskStore(multi_db.main_db)
+            reset = _reset_tasks_to_pending(task_store, project_id)
+        return {"table": table, "deleted": count, "resetTasks": reset}
 
     @server.register("analysis.stopTask")
     def stop_task(task_id=None, taskId=None):
@@ -1946,13 +1979,50 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         return {'crossEdges': cross_edges}
 
+    # 后台重建任务注册表（rebuildUnified 线程化：同步跑会阻塞事件循环 → health 探活失败被杀）
+    _REBUILD_JOBS: dict = {}
+
     @server.register("analysis.rebuildUnified")
-    def rebuild_unified(project_id=None, projectId=None):
+    def rebuild_unified(project_id=None, projectId=None, wait: bool = False):
         """组件统一：清库重算 UNIFIED 组件树（kb-unified-components-plan §5/§7 Stage 2）。
 
         对指定项目（缺省=全部有分析任务的项目）的最新分析任务重跑
         INCLUDE/CALL 社区 + UNIFIED 对齐合并；旧口径组件数据随重算清除。
+
+        默认后台执行（大项目双线重算 + 合并为 CPU 密集长任务，同步跑会阻塞
+        服务事件循环导致 health 探活超时被 supervisor 强杀）：立即返回
+        {jobId, status:"running"}，用 analysis.rebuildStatus(jobId) 轮询。
+        wait=true 同步执行到底（内部调用/测试用）。
         """
+        import threading as _threading
+        if not wait:
+            job_id = f"rb-{uuid.uuid4().hex[:8]}"
+            _REBUILD_JOBS[job_id] = {"status": "running", "projects": [], "done": [], "failed": []}
+
+            def _run_rebuild():
+                try:
+                    result = _rebuild_unified_impl(server, multi_db, project_id or projectId)
+                    _REBUILD_JOBS[job_id].update({"status": "done", "result": result})
+                except Exception as e:
+                    logger.error(f"[rebuildUnified] job {job_id} failed: {e}")
+                    _REBUILD_JOBS[job_id].update({"status": "error", "error": str(e)})
+
+            _threading.Thread(target=_run_rebuild, name=f"rebuild-{job_id}", daemon=True).start()
+            return {"jobId": job_id, "status": "running"}
+
+        return _rebuild_unified_impl(server, multi_db, project_id or projectId)
+
+    @server.register("analysis.rebuildStatus")
+    def rebuild_status(jobId: str = ""):
+        """rebuildUnified 后台任务状态轮询。"""
+        if not jobId:
+            raise ValueError("jobId is required")
+        job = _REBUILD_JOBS.get(jobId)
+        if not job:
+            return {"status": "unknown"}
+        return dict(job)
+
+    def _rebuild_unified_impl(server, multi_db, project_id=None):
         from topoone.engine.store.analysis_store import AnalysisStore
         from topoone.engine.store.task_store import TaskStore
         from topoone.plugins.community.community_analysis import analyze_communities
@@ -1961,7 +2031,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                     COMMUNITY_MIN_NODE_CALL)
 
         t_store = TaskStore(multi_db.main_db)
-        if pid := (project_id or projectId):
+        if pid := project_id:
             project_ids = [pid]
         else:
             rows = t_store._db.execute(
@@ -1970,30 +2040,30 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             project_ids = [r["project_id"] for r in rows]
 
         results = []
+        from topoone.engine.view_service import resolve_view_task_ids
         for pid in project_ids:
             try:
-                pdb = multi_db.get_project_db(pid)
-                row = pdb.fetchone(
-                    "SELECT task_id FROM graph_doc WHERE comm_lv LIKE 'L%' "
-                    "GROUP BY task_id ORDER BY MAX(rowid) DESC LIMIT 1"
-                )
-                if not row or not row["task_id"]:
-                    results.append({"project_id": pid, "skipped": "no graph data"})
+                # 重建对象 = 基线视图挂载任务（与对外 catalog/model 展示口径严格一致）
+                tids = resolve_view_task_ids(multi_db, pid)
+                if not tids:
+                    results.append({"project_id": pid,
+                                    "skipped": "baseline view has no mounted tasks"})
                     continue
-                tid = row["task_id"]
+                pdb = multi_db.get_project_db(pid)
                 store = AnalysisStore(pdb)
-                inc = analyze_communities(tid, store, "INCLUDE",
-                                          min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE)
-                call = analyze_communities(tid, store, "CALL",
-                                           min_node_cnt=COMMUNITY_MIN_NODE_CALL)
-                uni = analyze_unified(tid, store)
-                results.append({
-                    "project_id": pid, "task_id": tid,
-                    "include": inc.get("community_count"),
-                    "call": call.get("community_count"),
-                    "unified": uni.get("community_count"),
-                    "levels": uni.get("levels"),
-                })
+                for tid in tids:
+                    inc = analyze_communities(tid, store, "INCLUDE",
+                                              min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE)
+                    call = analyze_communities(tid, store, "CALL",
+                                               min_node_cnt=COMMUNITY_MIN_NODE_CALL)
+                    uni = analyze_unified(tid, store)
+                    results.append({
+                        "project_id": pid, "task_id": tid,
+                        "include": inc.get("community_count"),
+                        "call": call.get("community_count"),
+                        "unified": uni.get("community_count"),
+                        "levels": uni.get("levels"),
+                    })
             except Exception as e:
                 results.append({"project_id": pid, "error": str(e)})
         return {"success": True, "rebuilt": results}

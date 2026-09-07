@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { devAuthProxyHooks } from '../../scripts/vite-dev-auth'
+
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import { resolve } from 'path'
 
@@ -22,7 +24,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true, ws: true },
+      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true, ...devAuthProxyHooks(), ws: true },
       '/ws': { target: 'http://127.0.0.1:3456', changeOrigin: true, ws: true },
     },
   },

@@ -12,7 +12,7 @@ import json
 import logging
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +63,52 @@ async def execute_sql(body: dict):
         raise HTTPException(500, str(e))
 
 
+# 对外白名单：/zmq/{method} 面向外部调用方(architect 等)，仅暴露**任务无关**的稳定接口。
+# 任务管理(analysis.createTask/runTask/rebuildUnified/clearProjectCache...)为 KB 内部方法，
+# 仅限 KB 前端经 gateway /api/rpc 进程内调用；外部越权访问返回 403。
+EXTERNAL_METHODS = {
+    # 项目/视图（基线视图对外契约：view.* 任务挂载管理与状态）
+    "project.list",
+    "view.status", "view.summary", "view.mount", "view.unmount",
+    # 架构只读（经基线视图解析任务）
+    "architecture.catalog", "architecture.model",
+    # 版本/基线
+    "version.list", "version.get", "version.preview", "version.sync",
+    "version.diff", "version.materialize", "version.cleanup",
+}
+
+
+def _internal_token(request) -> str | None:
+    """读本机 serve token（与 gateway 同源），用于识别 KB 内部链路。"""
+    import os
+    base = os.environ.get("TOPOCODE_DB_DIR") or os.path.join(
+        os.path.expanduser("~"), ".topocode")
+    p = os.path.join(base, "token")
+    try:
+        if os.path.isfile(p):
+            with open(p) as f:
+                return (f.read().strip() or None)
+    except OSError:
+        pass
+    return None
+
+
 @app.post("/zmq/{method}")
-async def call_zmq_method(method: str, body: dict):
-    """Call a registered ZMQ method (for operations with side effects)"""
+async def call_zmq_method(method: str, request: Request, body: dict):
+    """Call a registered ZMQ method (for operations with side effects)
+
+    双面语义：
+    - **内部面**（gateway /api/rpc 代理，携带有效 X-KB-Internal 凭据）：全部方法可用；
+    - **外部面**（architect 等直连 /zmq）：仅限 EXTERNAL_METHODS 白名单（任务无关的稳定接口）。
+    """
     if not zmq_server:
         raise HTTPException(503, "ZMQ server not ready")
+
+    token = _internal_token(request)
+    internal = bool(token) and request.headers.get("X-KB-Internal") == token
+    if not internal and method not in EXTERNAL_METHODS:
+        raise HTTPException(
+            403, f"method '{method}' is internal to KB and not exposed to external callers")
 
     handler = zmq_server.methods.get(method)
     if not handler:

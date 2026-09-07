@@ -94,10 +94,25 @@ def _community_change(file_change: dict, files) -> str:
     return "same"
 
 
+def _resolve_view_task_ids(multi_db, project_id: str) -> list:
+    """基线视图挂载任务解析（未挂载 = 空列表，外部读取应为空）。"""
+    try:
+        from topoone.engine.view_service import resolve_view_task_ids
+        return resolve_view_task_ids(multi_db, project_id)
+    except Exception as e:
+        logger.warning("[architecture] view resolve failed: %s", e)
+        return []
+
+
 def build_architecture_model(multi_db, project_id: str, *,
                              task_id: str = "", level: str = "L1",
                              edge_type: str = "UNIFIED") -> dict:
-    """为 KB 项目构建真实架构模型。任务/社区缺失时返回空模型（不抛异常）。"""
+    """为 KB 项目构建真实架构模型。
+
+    任务来源：显式 task_id（内部消费方）＞ 基线视图挂载任务（对外契约）。
+    多个挂载任务分区拼凑项目全貌（comm_id 内嵌任务前缀，天然命名空间隔离）。
+    任务/社区缺失时返回空模型（不抛异常）。
+    """
     if not project_id:
         return _empty_model()
 
@@ -107,14 +122,8 @@ def build_architecture_model(multi_db, project_id: str, *,
         return _empty_model()
     root = project.get("root_path") or ""
 
-    # 最新 done 任务
-    tid = task_id
-    if not tid:
-        row = main_db.fetchone(
-            "SELECT id FROM analysis_tasks WHERE project_id = ? AND status = 'done' "
-            "ORDER BY created_at DESC LIMIT 1", (project_id,))
-        tid = row["id"] if row else None
-    if not tid:
+    tids = [task_id] if task_id else _resolve_view_task_ids(multi_db, project_id)
+    if not tids:
         return _empty_model()
 
     try:
@@ -126,30 +135,7 @@ def build_architecture_model(multi_db, project_id: str, *,
     et = (edge_type or "UNIFIED").upper()
     lv = (level or "L1").upper()
 
-    # ── 社区（L1 优先，空则 L0） ─────────────────────────────
-    rows = project_db.fetchall(
-        "SELECT comm_id, comm_lv, node_list, edge_list, description "
-        "FROM graph_doc WHERE task_id = ? AND edge_type = ? AND comm_lv = ? "
-        "ORDER BY quality_score DESC", (tid, et, lv))
-    if not rows and lv != "L0":
-        rows = project_db.fetchall(
-            "SELECT comm_id, comm_lv, node_list, edge_list, description "
-            "FROM graph_doc WHERE task_id = ? AND edge_type = ? AND comm_lv = 'L0' "
-            "ORDER BY quality_score DESC", (tid, et))
-    if not rows:
-        return _empty_model()
-
-    # ── LLM 名称/摘要/类型 ───────────────────────────────────
-    llm = {}
-    try:
-        for r in project_db.fetchall(
-                "SELECT comm_id, name, summary, component_type FROM community_llm_results "
-                "WHERE task_id = ? AND edge_type = ?", (tid, et)):
-            llm[r["comm_id"]] = r
-    except Exception:
-        pass
-
-    # ── 语言 ────────────────────────────────────────────────
+    # ── 语言（项目级，一次） ────────────────────────────────
     lang_of = {}
     try:
         for r in project_db.fetchall("SELECT file_path, language FROM source_files"):
@@ -157,41 +143,7 @@ def build_architecture_model(multi_db, project_id: str, *,
     except Exception:
         pass
 
-    # 文件 → 社区
-    file_comm = {}
-    # 社区 → 文件
-    comm_files: dict = {}
-    for row in rows:
-        cid = row["comm_id"]
-        try:
-            node_list = row.get("node_list")
-            files = json.loads(node_list) if isinstance(node_list, str) else (node_list or [])
-        except Exception:
-            files = []
-        rel_files = [_rel(root, f) for f in files]
-        rel_files = [f for f in rel_files if f]
-        comm_files[cid] = rel_files
-        for f in rel_files:
-            file_comm[f] = cid
-
-    # ── imports 跨社区边 → dependsOn ───────────────────────
-    dep_edges = []
-    try:
-        for r in project_db.fetchall(
-                "SELECT source_id, target_id FROM graph_edge "
-                "WHERE task_id = ? AND kind = 'imports'", (tid,)):
-            src = _rel(root, r["source_id"])
-            tgt = _rel(root, r["target_id"])
-            if src and tgt and file_comm.get(src) and file_comm.get(tgt):
-                dep_edges.append((file_comm[src], file_comm[tgt]))
-    except Exception:
-        pass
-    depends_on: dict = {}
-    for a, b in dep_edges:
-        if a != b:
-            depends_on.setdefault(a, set()).add(b)
-
-    # ── 版本差异 change ─────────────────────────────────────
+    # ── 版本差异 change（项目级，一次） ─────────────────────
     versions = []
     try:
         import topoone.engine.version_sync_service as vss
@@ -211,16 +163,72 @@ def build_architecture_model(multi_db, project_id: str, *,
         except Exception as e:
             logger.warning("[architecture.model] version diff failed: %s", e)
 
-    # ── 符号行号 → codeMappings ─────────────────────────────
+    # ── 逐挂载任务取社区，合并（视图分区不重叠 → file_comm 无冲突） ──
+    file_comm = {}
+    # 社区 → 文件
+    comm_files: dict = {}
+    depends_on: dict = {}
     line_of: dict = {}
-    try:
-        for r in project_db.fetchall(
-                "SELECT file_path, MIN(start_line) AS line FROM graph_node "
-                "WHERE task_id = ? AND kind != 'file' GROUP BY file_path", (tid,)):
-            rel = _rel(root, r["file_path"])
-            line_of[rel] = int(r["line"] or 1)
-    except Exception:
-        pass
+    merged_rows = []
+    merged_llm = {}
+    for tid in tids:
+        rows = project_db.fetchall(
+            "SELECT comm_id, comm_lv, node_list, edge_list, description "
+            "FROM graph_doc WHERE task_id = ? AND edge_type = ? AND comm_lv = ? "
+            "ORDER BY quality_score DESC", (tid, et, lv))
+        if not rows and lv != "L0":
+            rows = project_db.fetchall(
+                "SELECT comm_id, comm_lv, node_list, edge_list, description "
+                "FROM graph_doc WHERE task_id = ? AND edge_type = ? AND comm_lv = 'L0' "
+                "ORDER BY quality_score DESC", (tid, et))
+        if not rows:
+            continue
+        merged_rows.extend(rows)
+        try:
+            for r in project_db.fetchall(
+                    "SELECT comm_id, name, summary, component_type FROM community_llm_results "
+                    "WHERE task_id = ? AND edge_type = ?", (tid, et)):
+                merged_llm[r["comm_id"]] = r
+        except Exception:
+            pass
+        try:
+            for r in project_db.fetchall(
+                    "SELECT file_path, MIN(start_line) AS line FROM graph_node "
+                    "WHERE task_id = ? AND kind != 'file' GROUP BY file_path", (tid,)):
+                rel = _rel(root, r["file_path"])
+                line_of.setdefault(rel, int(r["line"] or 1))
+        except Exception:
+            pass
+        for row in rows:
+            cid = row["comm_id"]
+            try:
+                node_list = row.get("node_list")
+                files = json.loads(node_list) if isinstance(node_list, str) else (node_list or [])
+            except Exception:
+                files = []
+            rel_files = [_rel(root, f) for f in files]
+            rel_files = [f for f in rel_files if f]
+            comm_files[cid] = rel_files
+            for f in rel_files:
+                file_comm[f] = cid
+        # imports 跨社区边 → dependsOn
+        try:
+            for r in project_db.fetchall(
+                    "SELECT source_id, target_id FROM graph_edge "
+                    "WHERE task_id = ? AND kind = 'imports'", (tid,)):
+                src = _rel(root, r["source_id"])
+                tgt = _rel(root, r["target_id"])
+                if src and tgt and file_comm.get(src) and file_comm.get(tgt):
+                    a, b = file_comm[src], file_comm[tgt]
+                    if a != b:
+                        depends_on.setdefault(a, set()).add(b)
+        except Exception:
+            pass
+
+    rows = merged_rows
+    llm = merged_llm
+    if not rows:
+        return _empty_model()
 
     components = []
     code_mappings = []
@@ -282,58 +290,39 @@ def build_component_catalog(multi_db, project_id: str, *,
     """组件目录（选择器专用）：UNIFIED 单套组件树（L0/L1），
     附带父组件 / 文件数 / 类型等元数据。
 
-    返回 { components: [...], edgeTypes: [...], levels: [...] }，
+    任务来源：显式 task_id（内部消费方）＞ 基线视图挂载任务（对外契约）；
+    多个挂载任务分区拼凑项目全貌（comm_id 内嵌任务前缀，天然命名空间隔离）。
+
+    返回 { components, edgeTypes, levels, taskId, taskIds, view }，
     供 `/kb/assets/search` 做「按类型 / 层级」筛选与列表信息展示。
     """
     if not project_id:
-        return {"components": [], "edgeTypes": [], "levels": []}
+        return {"components": [], "edgeTypes": [], "levels": [], "taskId": "", "taskIds": []}
 
     main_db = multi_db.main_db
     project = main_db.fetchone("SELECT id, root_path FROM projects WHERE id = ?", (project_id,))
     if not project:
-        return {"components": [], "edgeTypes": [], "levels": []}
+        return {"components": [], "edgeTypes": [], "levels": [], "taskId": "", "taskIds": []}
     root = project.get("root_path") or ""
 
-    tid = task_id
-    if not tid:
-        row = main_db.fetchone(
-            "SELECT id FROM analysis_tasks WHERE project_id = ? AND status = 'done' "
-            "ORDER BY created_at DESC LIMIT 1", (project_id,))
-        tid = row["id"] if row else None
-    if not tid:
-        return {"components": [], "edgeTypes": [], "levels": []}
+    tids = [task_id] if task_id else _resolve_view_task_ids(multi_db, project_id)
+    if not tids:
+        return {"components": [], "edgeTypes": [], "levels": [],
+                "taskId": "", "taskIds": [],
+                "view": {"mountedTaskIds": [], "stale": False,
+                         "hint": "基线视图未挂载任务，请在 KB 端挂载分析任务"}}
 
     try:
         project_db = multi_db.get_project_db(project_id)
     except Exception as e:
         logger.warning("[architecture.catalog] project db unavailable: %s", e)
-        return {"components": [], "edgeTypes": [], "levels": []}
+        return {"components": [], "edgeTypes": [], "levels": [], "taskId": "", "taskIds": []}
 
     # ── 全量社区：UNIFIED 单套口径（组件统一，kb-unified-components-plan）──
     edge_types = ["UNIFIED"]
     levels = ["L0", "L1"]
-    rows = []
-    try:
-        rows = project_db.fetchall(
-            "SELECT comm_id, comm_lv, parent_comm_id, node_list, edge_list, "
-            "file_count, edge_count, node_count, description "
-            "FROM graph_doc WHERE task_id = ? AND edge_type = 'UNIFIED' "
-            "ORDER BY quality_score DESC",
-            (tid,))
-    except Exception:
-        pass
 
-    # ── LLM 名称 / 摘要 / 类型(按 comm_id 去重，忽略分析类型差异) ──
-    llm = {}
-    try:
-        for r in project_db.fetchall(
-                "SELECT comm_id, name, summary, component_type FROM community_llm_results "
-                "WHERE task_id = ?", (tid,)):
-            llm.setdefault(r["comm_id"], r)
-    except Exception:
-        pass
-
-    # ── 语言 ────────────────────────────────────────────────
+    # ── 语言（项目级，一次） ────────────────────────────────
     lang_of = {}
     try:
         for r in project_db.fetchall("SELECT file_path, language FROM source_files"):
@@ -341,7 +330,7 @@ def build_component_catalog(multi_db, project_id: str, *,
     except Exception:
         pass
 
-    # ── 版本差异 change ─────────────────────────────────────
+    # ── 版本差异 change（项目级，一次） ─────────────────────
     file_change = {}
     try:
         import topoone.engine.version_sync_service as vss
@@ -356,36 +345,63 @@ def build_component_catalog(multi_db, project_id: str, *,
     except Exception as e:
         logger.warning("[architecture.catalog] version diff failed: %s", e)
 
-    # ── 文件 → 社区 映射(按 comm_id，兼容跨分析类型重复文件) ──
+    # ── 逐挂载任务取社区/LLM 名/依赖边，合并（视图分区不重叠） ──
     file_comm: dict = {}
     comm_files: dict = {}
-    for row in rows:
-        cid = row["comm_id"]
-        try:
-            node_list = row.get("node_list")
-            files = json.loads(node_list) if isinstance(node_list, str) else (node_list or [])
-        except Exception:
-            files = []
-        rel_files = [_rel(root, f) for f in files]
-        rel_files = [f for f in rel_files if f]
-        comm_files[cid] = rel_files
-        for f in rel_files:
-            file_comm[f] = cid
-
-    # ── 依赖边(imports) → dependsOn ────────────────────────
     depends_on: dict = {}
-    try:
-        for r in project_db.fetchall(
-                "SELECT source_id, target_id FROM graph_edge "
-                "WHERE task_id = ? AND kind = 'imports'", (tid,)):
-            src = _rel(root, r["source_id"])
-            tgt = _rel(root, r["target_id"])
-            if src and tgt and file_comm.get(src) and file_comm.get(tgt):
-                a, b = file_comm[src], file_comm[tgt]
-                if a != b:
-                    depends_on.setdefault(a, set()).add(b)
-    except Exception:
-        pass
+    task_of_comm: dict = {}
+    merged_rows = []
+    merged_llm = {}
+    for tid in tids:
+        try:
+            rows = project_db.fetchall(
+                "SELECT comm_id, comm_lv, parent_comm_id, node_list, edge_list, "
+                "file_count, edge_count, node_count, description "
+                "FROM graph_doc WHERE task_id = ? AND edge_type = 'UNIFIED' "
+                "ORDER BY quality_score DESC",
+                (tid,))
+        except Exception:
+            rows = []
+        if not rows:
+            continue
+        merged_rows.extend(rows)
+        # LLM 名称 / 摘要 / 类型(按 comm_id 去重；comm_id 内嵌任务前缀，跨任务不冲突)
+        try:
+            for r in project_db.fetchall(
+                    "SELECT comm_id, name, summary, component_type FROM community_llm_results "
+                    "WHERE task_id = ?", (tid,)):
+                merged_llm.setdefault(r["comm_id"], r)
+        except Exception:
+            pass
+        for row in rows:
+            cid = row["comm_id"]
+            try:
+                node_list = row.get("node_list")
+                files = json.loads(node_list) if isinstance(node_list, str) else (node_list or [])
+            except Exception:
+                files = []
+            rel_files = [_rel(root, f) for f in files]
+            rel_files = [f for f in rel_files if f]
+            comm_files[cid] = rel_files
+            for f in rel_files:
+                file_comm[f] = cid
+            task_of_comm[cid] = tid
+        # imports 依赖边 → dependsOn
+        try:
+            for r in project_db.fetchall(
+                    "SELECT source_id, target_id FROM graph_edge "
+                    "WHERE task_id = ? AND kind = 'imports'", (tid,)):
+                src = _rel(root, r["source_id"])
+                tgt = _rel(root, r["target_id"])
+                if src and tgt and file_comm.get(src) and file_comm.get(tgt):
+                    a, b = file_comm[src], file_comm[tgt]
+                    if a != b:
+                        depends_on.setdefault(a, set()).add(b)
+        except Exception:
+            pass
+
+    rows = merged_rows
+    llm = merged_llm
 
     # ── 组件名 / 父组件名(LLM 名优先，缺失则按路径族推导) ──
     def _name(cid: str) -> str:
@@ -434,14 +450,17 @@ def build_component_catalog(multi_db, project_id: str, *,
             "fileCount": len(files),
             "nodeCount": int(row.get("node_count") or 0),
             "edgeCount": int(row.get("edge_count") or 0),
-            "taskId": tid,
+            "taskId": task_of_comm.get(cid, ""),
         })
 
+    from topoone.engine.view_service import view_summary
     return {
         "components": components,
         "edgeTypes": edge_types,
         "levels": levels,
-        "taskId": tid,
+        "taskId": tids[0] if len(tids) == 1 else "",
+        "taskIds": tids,
+        "view": view_summary(multi_db, project_id),
     }
 
 

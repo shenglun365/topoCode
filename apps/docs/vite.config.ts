@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { devAuthProxyHooks } from '../../scripts/vite-dev-auth'
+
 import { resolve } from 'path'
 
 // M11：docs 子项目独立 vite 工程（viewer + web-root 双 entry）。
@@ -9,20 +11,29 @@ import { resolve } from 'path'
 const SRC = resolve(__dirname, 'src')
 const DIST = resolve(__dirname, 'dist')
 
-// dev 便利：/doc · /code → viewer.html（与原 vite.web.config.ts 一致）
+// dev 便利：/doc · /code → viewer.html，/projects · /web-root → web-root.html
+// （302 到带 base 的真实入口：相对模块路径必须按 /docs/ 前缀解析，纯 URL 重写会导致
+//   ./entry-*.ts 落到站点根上 404；与生产网关挂载路径对齐）
 function pageRewritePlugin() {
   const REWRITES: Record<string, string> = {
-    '/doc': '/viewer.html',
-    '/code': '/viewer.html',
+    '/doc': '/docs/viewer.html',
+    '/code': '/docs/viewer.html',
+    '/projects': '/docs/web-root.html',
+    '/web-root': '/docs/web-root.html',
   }
   return {
     name: 'page-rewrite',
     configureServer(server: any) {
-      server.middlewares.use((req: any, _res: any, next: any) => {
+      server.middlewares.use((req: any, res: any, next: any) => {
         const url = req.url || ''
         const pathname = url.split('?')[0]
-        if (REWRITES[pathname]) {
-          req.url = REWRITES[pathname] + (url.includes('?') ? '?' + url.split('?')[1] : '')
+        const target = REWRITES[pathname]
+        if (target) {
+          const qs = url.includes('?') ? '?' + url.split('?')[1] : ''
+          res.statusCode = 302
+          res.setHeader('Location', target + qs)
+          res.end()
+          return
         }
         next()
       })
@@ -42,8 +53,8 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true, ws: true },
-      '/static': { target: 'http://127.0.0.1:3456', changeOrigin: true },
+      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true, ...devAuthProxyHooks(), ws: true },
+      '/static': { target: 'http://127.0.0.1:3456', changeOrigin: true, ...devAuthProxyHooks() },
     },
     hmr: { overlay: false },
   },

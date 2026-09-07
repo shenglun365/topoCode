@@ -9,6 +9,8 @@ import {
   DocumentTextIcon, CheckIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
+import { apiGet } from '@/services/api-client'
+import { useRouter } from 'vue-router'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
@@ -27,6 +29,7 @@ import { useArchArchitectureStore } from '@/stores/architecture-store'
 import type { AssetDetail, AssetDiagramItem, ConversationDetail, GraphFileEntry, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
+const router = useRouter()
 
 // ---- 对话模型: 统一用顶部工具栏选择(读同一 localStorage 键 topoone-model-architect, 透传后端) ----
 
@@ -1363,6 +1366,27 @@ function refreshAfterExtract() {
   if (extractRefreshTimer) { clearTimeout(extractRefreshTimer); extractRefreshTimer = null }
   void Promise.all([loadSemantic(), refreshStatus(), loadOverview(), loadCoverage()])
 }
+/** 提案卡「前往需求方案」：跳会话中心并选中该需求会话。 */
+function onGotoRequirements(reqId: string) {
+  router.push({ path: '/workbench/requirements', query: { select: reqId } })
+}
+
+/** tool_result(req.propose, ok) → 拉取需求详情，挂提案卡到当前助手回合。 */
+async function onRequirementProposed(ev: any) {
+  try {
+    const m = String(ev.summary || '').match(/RQ-\d+/)
+    const reqId = m ? m[0] : ''
+    if (!reqId) return
+    const row = await apiGet<Record<string, any>>(`/requirements/${reqId}`)
+    if (!row?.id) return
+    const last = turns.value[turns.value.length - 1]
+    if (last && last.role === 'assistant') {
+      last.proposal = { id: row.id, title: row.title || '', desc: row.desc || '',
+                        priority: row.priority || 'P1', analysis: row.analysis }
+    }
+  } catch { /* 忽略：提案卡拉取失败不阻断对话 */ }
+}
+
 function markExtracted() {
   extractDirty = true
   if (extractRefreshTimer) clearTimeout(extractRefreshTimer)
@@ -1393,6 +1417,9 @@ function askAgent(text: string) {
       turns.value[idx].reasoning = (turns.value[idx].reasoning ?? '') + (ev.delta ?? '')
     } else if (ev.type === 'tool_result' && ev.tool === 'asset.semantic.extract' && ev.ok) {
       markExtracted()
+    } else if (ev.type === 'tool_result' && ev.tool === 'req.propose' && ev.ok) {
+      // S5：agent 形成需求提案 → 拉取需求挂提案卡（对话 → 需求方案闭环）
+      onRequirementProposed(ev)
     } else if (ev.type === 'done') {
       turns.value[idx].content = ev.content ?? turns.value[idx].content
     } else if (ev.type === 'error') {
@@ -3053,6 +3080,7 @@ onUnmounted(() => {
           @toggle-diagram-skill="toggleDiagramSkill"
           @convention-confirm="onConventionConfirm"
           @convention-ignore="onConventionIgnore"
+          @goto-requirements="onGotoRequirements"
           @stop="stopChat"
         />
         <p class="text-[10px] text-ctp-overlay0 leading-relaxed">

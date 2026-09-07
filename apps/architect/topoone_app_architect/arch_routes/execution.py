@@ -5,6 +5,7 @@ POST /exec 为原子 commitBatch(经 store.run_atomic, WriteQueue 单事务)：
 合成/接收方案 → 生成任务树 → 建确认方案 → 创建执行任务 → 绑定需求 execId。
 """
 import logging
+import os
 import threading
 from typing import Optional
 from fastapi import APIRouter, Request
@@ -40,7 +41,8 @@ def _auto_acceptance_after_runner_done(task: dict, reqs: list,
             try:
                 _acc.run_acceptance(pid, root, project or "", pkg_id,
                                     trigger_type="runner_done",
-                                    ref=task.get("id") or "")
+                                    ref=task.get("id") or "",
+                                    base_commit=task.get("baseCommit") or "")
                 logger.info("[exec] runner_done 自动验收: task=%s pkg=%s",
                             task.get("id"), pkg_id)
             except Exception as e:
@@ -370,6 +372,18 @@ async def run_execution_task(task_id: str):
     if problems:
         return err(500, "任务树非法: " + "; ".join(problems))
 
+    # 执行器选择贯通：任务级 adapter 盖到无显式选择的叶节点
+    # （节点级 executor_id 优先；adapter 空/未注册 → 用池默认）
+    adapter = (task.get("adapter") or "").strip()
+    if adapter:
+        def _stamp(node) -> None:
+            if not node.executor_id and not node.is_container():
+                node.executor_id = adapter
+            for c in node.children:
+                _stamp(c)
+        for r in coding_tree.roots:
+            _stamp(r)
+
     reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
     reqs = [r for r in reqs if r]
     root, project = _resolve_root_project(reqs, {})
@@ -385,12 +399,43 @@ async def run_execution_task(task_id: str):
     if not tree_id:
         return err(502, "runner 不可达, 任务树提交失败")
 
+    # ── S2 任务分支协议 ──────────────────────────────────────
+    # dispatch 前：工程目录切任务分支（脏区拒绝）；树完成监视（done→commit+push 镜像）。
+    # root 不可解析（无绑定项目/降级环境）→ 跳过分支协议，保持旧行为。
+    branch_note = ""
+    project_row = None
+    if root and os.path.isdir(root):
+        try:
+            from . import project as project_routes
+            from . import branch_service
+            project_row = project_routes._resolve_project(root, project) or {}
+            task_branch = (task.get("taskBranch") or "").strip()
+            if (task.get("branchMode") or "auto") == "auto" and task_branch:
+                prep = await asyncio.to_thread(
+                    branch_service.prepare_task_branch,
+                    root, task_branch, task.get("baseCommit") or "")
+                if not prep.get("ok"):
+                    return err(409, f"任务分支准备失败: {prep.get('reason')}")
+                branch_note = task_branch
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec] 任务分支准备异常 exec=%s: %s", task_id, e)
+
     store.ExecutionTasksStore.update(task_id, {
         "runnerTreeId": tree_id, "status": "running",
         "runCount": (task.get("runCount") or 0) + 1, "updatedAt": _ts(),
     })
     progress = await asyncio.to_thread(runner.run, tree_id)
-    return ok({"treeId": tree_id, "progress": progress})
+
+    if project_row is not None:
+        try:
+            from . import branch_service
+            branch_service.watch_and_land(
+                store.ExecutionTasksStore.get(task_id) or task,
+                project_row, root or "", tree_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec] 分支落地监视启动失败 exec=%s: %s", task_id, e)
+
+    return ok({"treeId": tree_id, "progress": progress, "taskBranch": branch_note})
 
 
 @router.post("/exec/{task_id}/rejudge")

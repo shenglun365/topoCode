@@ -109,6 +109,8 @@ class BackendApp:
                                     module_manager=None, plugin_manager=self.plugin_manager)
         register_analysis_methods(self.server, self.multi_db)
         register_llm_methods(self.server, self.multi_db)
+        from topoone.engine.view_service import register_view_methods
+        register_view_methods(self.server, self.multi_db)
         logger.info(f"Registered {len(self.server.methods)} core methods")
 
         topoone_plugins_dir = _Path(__file__).resolve().parents[1] / "plugins"

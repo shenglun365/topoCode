@@ -287,6 +287,23 @@ MAIN_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_analysis_tasks_status ON analysis_tasks(status);
     CREATE INDEX IF NOT EXISTS idx_analysis_tasks_created ON analysis_tasks(created_at);
 
+    -- 基线视图：项目对外唯一生效视图（外部调用方零任务感知；任务显式挂载才对外可见）
+    CREATE TABLE IF NOT EXISTS project_views (
+        project_id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 1,
+        baseline_version_id TEXT DEFAULT '',
+        overlap_warned INTEGER NOT NULL DEFAULT 0,
+        published_at TEXT,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS view_mounts (
+        project_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        mounted_files INTEGER NOT NULL DEFAULT 0,
+        mounted_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (project_id, task_id)
+    );
+
     -- 任务配置变更历史
     CREATE TABLE IF NOT EXISTS task_config_history (
         id TEXT PRIMARY KEY,

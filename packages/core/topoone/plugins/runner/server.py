@@ -1,16 +1,14 @@
 """Coding Agent Runner — tAgent 任务树调度宿主（独立进程 :3458）。
 
 只做接线（INTEGRATION.md §2）：端点直接映射 TaskTreeScheduler 同名方法，无业务逻辑。
-- 启动即创建 ExecutorPool + TaskTreeScheduler；
+- 启动经 AgentGateway 组装 ExecutorPool（architect 注册表 > env 兼容 > 内置默认）；
 - 树状态持久化 runner.db（独立 SQLite，与主库隔离）→ 进程重启断点续跑；
-- WS 事件流：on_event=(tree_id, ev) → 按 tree 订阅推送 ev.to_dict()。
+- WS 事件流：on_event=(tree_id, ev) → 按 tree 订阅推送 ev.to_dict()；
+- 会话执行器（opencode 会话化 / cline sidecar / codex app-server）支持
+  /api/executors/refresh 热刷新与 /api/agent-sessions/{inject,abort}。
 
-执行器（env 配置）：
-  RUNNER_DEFAULT_EXECUTOR  默认执行器 id（opencode/codex/claude-code，默认 opencode）
-  OPENCODE_SERVE_URL       opencode serve 地址（默认 http://127.0.0.1:3478）
-  OPENCODE_API_KEY         opencode serve api key
-  CODEX_CMD / CLAUDE_CMD   CLI 兜底执行器命令模板（{prompt} 占位）
-  RUNNER_MAX_PARALLEL      最大并行节点数（默认 2）
+执行器配置：architect 系统管理（arch_collab_config["agent.executors"]）；
+旧 env（RUNNER_DEFAULT_EXECUTOR/OPENCODE_SERVE_URL/CODEX_CMD/CLAUDE_CMD）仍兼容。
 """
 
 from __future__ import annotations
@@ -29,7 +27,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from topocode_agent.orchestration import CodingTaskTree
 from topocode_agent.orchestration.scheduler import TaskTreeScheduler
-from topocode_agent.subagent import CliExecutor, ExecutorPool, ServeExecutor
+
+from .gateway import AgentGateway
 
 logger = logging.getLogger(__name__)
 
@@ -119,44 +118,7 @@ class RunnerState:
     pool: ExecutorPool
     scheduler: TaskTreeScheduler
     hub: EventHub
-
-
-def build_pool() -> ExecutorPool:
-    default_id = os.environ.get("RUNNER_DEFAULT_EXECUTOR", "opencode")
-    executors: list = []
-    default = None
-
-    if default_id == "opencode":
-        from topocode_agent.core.context import default_coding_prompt_builder
-        base_url = os.environ.get("OPENCODE_SERVE_URL", "http://127.0.0.1:3478")
-        default = ServeExecutor(
-            id="opencode", base_url=base_url,
-            api_key=os.environ.get("OPENCODE_API_KEY", ""),
-            timeout=float(os.environ.get("OPENCODE_TIMEOUT", "300")),
-            # C4：任务 prompt = 环境简报 + 任务规格 + 前置依赖状态栈 + 工作区未提交 diff
-            prompt_builder=default_coding_prompt_builder(
-                os.environ.get("RUNNER_PROJECT_ROOT", "")),
-        )
-    codex_cmd = os.environ.get("CODEX_CMD", "")
-    if codex_cmd:
-        ex = CliExecutor(id="codex", command=codex_cmd, timeout=600)
-        executors.append(ex)
-        if default is None:
-            default = ex
-    claude_cmd = os.environ.get("CLAUDE_CMD", "")
-    if claude_cmd:
-        ex = CliExecutor(id="claude-code", command=claude_cmd, timeout=600)
-        executors.append(ex)
-        if default is None:
-            default = ex
-    if default is None:
-        raise RuntimeError(
-            "runner: no default executor configured (set OPENCODE_SERVE_URL / CODEX_CMD / CLAUDE_CMD)")
-    return ExecutorPool(
-        default_executor=default,
-        executors=executors,
-        max_parallel=int(os.environ.get("RUNNER_MAX_PARALLEL", "2")),
-    )
+    gateway: AgentGateway
 
 
 state: RunnerState
@@ -165,7 +127,8 @@ state: RunnerState
 def init_runner() -> None:
     global state
     db = RunnerDB(RUNNER_DB)
-    pool = build_pool()
+    gateway = AgentGateway()
+    pool, _entries = asyncio.run(gateway.build_pool())
     hub = EventHub()
     scheduler = TaskTreeScheduler(
         pool,
@@ -175,6 +138,7 @@ def init_runner() -> None:
     )
     state = RunnerState()
     state.db, state.pool, state.scheduler, state.hub = db, pool, scheduler, hub
+    state.gateway = gateway
 
     # 重启恢复：未终态树重新 submit（保留原 id 与 status，未 done 节点自动续跑）
     for row in db.all_pending():
@@ -288,6 +252,33 @@ async def rejudge(tree_id: str, request: Request):
     state.scheduler.rejudge(tree_id, body.get("task_ids") or [])
     persist(tree_id)
     return {"ok": True}
+
+
+@app.post("/api/executors/refresh")
+async def refresh_executors():
+    """architect 配置保存后触发：重建执行器并原子换池。"""
+    entries = await state.gateway.apply_to(state.scheduler)
+    state.pool = state.scheduler._pool  # noqa: SLF001
+    return {"ok": True, "executors": state.pool.available(), "entries": entries}
+
+
+@app.get("/api/executors")
+async def list_executors():
+    return {"executors": state.pool.available(),
+            "health": await state.pool.health()}
+
+
+@app.post("/api/agent-sessions/inject")
+async def agent_session_inject(request: Request):
+    body = await request.json()
+    return await state.gateway.inject(body.get("sessionKey", ""),
+                                      body.get("message", ""))
+
+
+@app.post("/api/agent-sessions/abort")
+async def agent_session_abort(request: Request):
+    body = await request.json()
+    return await state.gateway.abort_session(body.get("sessionKey", ""))
 
 
 @app.post("/api/trees/{tree_id}/run")

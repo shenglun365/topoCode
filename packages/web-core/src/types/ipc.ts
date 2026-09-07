@@ -513,6 +513,14 @@ export interface IPCAPI {
     cleanup: (projectId: string, opts?: { keepVersions?: number }) => Promise<{ projectId: string; keepVersions: number; deleted: Record<string, number> }>
   }
 
+  // 基线视图(对外契约)：任务挂载管理与状态
+  view: {
+    status: (params: { projectId: string }) => Promise<KbViewStatus>
+    summary: (params: { projectId: string }) => Promise<KbViewSummary>
+    mount: (params: { projectId: string; taskId: string; force?: boolean }) => Promise<KbViewStatus>
+    unmount: (params: { projectId: string; taskId: string }) => Promise<KbViewStatus>
+  }
+
   // 分组管理
   group: {
     list: () => Promise<GroupNode[]>
@@ -1061,3 +1069,36 @@ export interface UpdateRequest {
 }
 
 export {} 
+
+/** 基线视图挂载明细(view.status.mounted 项) */
+export interface KbViewMount {
+  taskId: string
+  taskName: string
+  status: string
+  files: number
+  declared: { scopes: string[]; extensions: string[]; excludeDirs: string[] }
+  mountedAt: string
+}
+
+/** 基线视图全景(view.status) */
+export interface KbViewStatus {
+  projectId: string
+  viewVersion: number
+  baselineVersionId: string
+  overlapWarned: boolean
+  publishedAt: string
+  mounted: KbViewMount[]
+  coverage: { totalFiles: number; coveredFiles: number; coveragePct: number | null }
+  stale: boolean
+  unmountedLatest: { taskId: string; taskName: string; createdAt: string } | null
+}
+
+/** 基线视图摘要(view.summary / catalog.view) */
+export interface KbViewSummary {
+  mountedTaskIds: string[]
+  viewVersion: number
+  publishedAt: string
+  stale: boolean
+  coveragePct: number | null
+  hint?: string
+}

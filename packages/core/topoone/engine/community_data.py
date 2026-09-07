@@ -913,9 +913,13 @@ def get_community_graph_component(db, task_id: str, edge_type: str,
     file_comm = build_file_comm_map(rows, _rel)
 
     # graph_edge 跨社区边 + hash 解析 (一次查询，复用)
-    kind = "imports" if edge_type == "INCLUDE" else "calls"
-    all_ge = read_graph_edges(db, task_id, kind)
-    hash_to_path = resolve_call_symbols(db, task_id, all_ge, _rel) if edge_type == "CALL" else {}
+    # UNIFIED 单套: imports+calls 双物理边都参与跨社区关系；CALL/UNIFIED 均需符号→文件解析
+    if edge_type == "UNIFIED":
+        all_ge = read_graph_edges(db, task_id, "imports") + read_graph_edges(db, task_id, "calls")
+    else:
+        kind = "imports" if edge_type == "INCLUDE" else "calls"
+        all_ge = read_graph_edges(db, task_id, kind)
+    hash_to_path = resolve_call_symbols(db, task_id, all_ge, _rel) if edge_type in ("CALL", "UNIFIED") else {}
 
     cross_edges, cross_nodes = extract_cross_comm_file_edges(
         task_id, edge_type, file_comm, _rel,

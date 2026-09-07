@@ -90,6 +90,30 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
         allow_headers=["*"],
     )
     app.include_router(architect_router)
+    # 内置 Git HTTP 托管：无前缀 /git/{project}.git（remote worker clone/push 面）
+    from topoone_app_architect.arch_routes import git_host
+    app.include_router(git_host.router)
+    # MCP 服务（streamable HTTP）：资产地图对外暴露，/mcp
+    # （子应用 lifespan 不随挂载执行 → 会话任务组并入宿主 lifespan）
+    _mcp_lifespan = None
+    try:
+        from topoone_app_architect.mcp import mcp_http_app
+        _mcp_asgi, _mcp_lifespan = mcp_http_app()
+        app.mount("/mcp", _mcp_asgi)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("MCP HTTP 挂载失败（mcp 依赖缺失? pip install 'mcp<2'）: %s", e)
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lifespan(_app):
+        if _mcp_lifespan is not None:
+            async with _mcp_lifespan():
+                yield
+        else:
+            yield
+
+    app.router.lifespan_context = _lifespan
 
     @app.get("/health", include_in_schema=False)
     async def health():

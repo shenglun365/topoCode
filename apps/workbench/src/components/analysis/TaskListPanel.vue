@@ -21,6 +21,9 @@ import TaskDetailDialog from './TaskDetailDialog.vue'
 
 import type { AnalysisTask } from '@topo/web-core/types/ipc'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { ipc } from '@topo/web-core/services/ipc'
+import type { KbViewStatus } from '@topo/web-core/types/ipc'
+import { LinkIcon, LinkSlashIcon } from '@heroicons/vue/24/outline'
 import { displayDispatcher } from '@/services/display-dispatcher'
 import { createLogger } from '@topo/web-core/utils/logger'
 
@@ -48,6 +51,64 @@ const deleteConfirm = ref<string | null>(null)
 async function loadTasks() {
   if (props.projectId) {
     await analysisStore.loadTasks(props.projectId)
+    await loadViewStatus()
+  }
+}
+
+// ── 基线视图：任务挂载管理（对外唯一生效视图） ──
+const viewStatus = ref<KbViewStatus | null>(null)
+const viewBusyTask = ref<string | null>(null)
+
+async function loadViewStatus() {
+  if (!props.projectId || isResourceProject.value) {
+    viewStatus.value = null
+    return
+  }
+  try {
+    viewStatus.value = await ipc.view.status({ projectId: props.projectId })
+  } catch {
+    viewStatus.value = null
+  }
+}
+
+const mountedTaskIds = computed(() =>
+  new Set((viewStatus.value?.mounted || []).map(m => m.taskId)))
+
+async function onMountTask(taskId: string) {
+  if (!props.projectId) return
+  viewBusyTask.value = taskId
+  try {
+    viewStatus.value = await ipc.view.mount({ projectId: props.projectId, taskId })
+  } catch (err: any) {
+    alert(err?.message || String(err))
+    await loadViewStatus()
+  } finally {
+    viewBusyTask.value = null
+  }
+}
+
+async function onForceMountTask(taskId: string) {
+  if (!props.projectId) return
+  if (!window.confirm(t('analysis.viewForceConfirm'))) return
+  viewBusyTask.value = taskId
+  try {
+    viewStatus.value = await ipc.view.mount({ projectId: props.projectId, taskId, force: true })
+  } catch (err: any) {
+    alert(err?.message || String(err))
+  } finally {
+    viewBusyTask.value = null
+  }
+}
+
+async function onUnmountTask(taskId: string) {
+  if (!props.projectId) return
+  viewBusyTask.value = taskId
+  try {
+    viewStatus.value = await ipc.view.unmount({ projectId: props.projectId, taskId })
+  } catch (err: any) {
+    alert(err?.message || String(err))
+  } finally {
+    viewBusyTask.value = null
   }
 }
 
@@ -310,6 +371,39 @@ function getConfigSummary(task: AnalysisTask): string {
       </button>
     </div>
 
+    <!-- 基线视图状态（对外唯一生效视图：挂载任务 · 覆盖率 · stale） -->
+    <div
+      v-if="!isResourceProject && viewStatus"
+      class="view-status-bar"
+      :class="{ 'view-empty': !viewStatus.mounted.length }"
+    >
+      <LinkIcon class="w-3.5 h-3.5 shrink-0" />
+      <span class="stat-label">{{ t('analysis.viewTitle') }}:</span>
+      <template v-if="viewStatus.mounted.length">
+        <span class="stat-value">{{ t('analysis.viewMountedCount', { count: viewStatus.mounted.length }) }}</span>
+        <span class="view-divider" />
+        <span class="stat-label">{{ t('analysis.viewCoverage') }}</span>
+        <span
+          class="stat-value"
+          :class="{ 'view-cov-low': (viewStatus.coverage.coveragePct ?? 100) < 60 }"
+        >{{ viewStatus.coverage.coveragePct ?? '—' }}% ({{ viewStatus.coverage.coveredFiles }}/{{ viewStatus.coverage.totalFiles }})</span>
+        <span
+          v-if="viewStatus.overlapWarned"
+          class="view-warn"
+          :title="t('analysis.viewOverlapWarned')"
+        >⚠</span>
+      </template>
+      <span
+        v-else
+        class="view-warn"
+      >{{ t('analysis.viewEmptyHint') }}</span>
+      <span
+        v-if="viewStatus.stale"
+        class="view-stale"
+        :title="t('analysis.viewStaleHint')"
+      >{{ t('analysis.viewStale') }}</span>
+    </div>
+
     <!-- 统计摘要 -->
     <div class="task-stats">
       <span class="stat-item">
@@ -452,6 +546,29 @@ function getConfigSummary(task: AnalysisTask): string {
           >
             <PlayIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.runTask') }}</span>
+          </button>
+
+          <!-- 基线视图挂载：done 任务可挂载（对外生效）；已挂载可卸载 -->
+          <button
+            v-if="!isResourceProject && task.status === 'done' && mountedTaskIds.has(task.id)"
+            class="btn btn-ghost btn-xs"
+            :title="t('analysis.viewUnmount')"
+            :disabled="viewBusyTask === task.id"
+            @click="onUnmountTask(task.id)"
+          >
+            <LinkSlashIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.viewUnmount') }}</span>
+          </button>
+          <button
+            v-if="!isResourceProject && task.status === 'done' && !mountedTaskIds.has(task.id)"
+            class="btn btn-ghost btn-xs btn-primary"
+            :title="t('analysis.viewMount') + ' · ' + t('analysis.viewMountForceHint')"
+            :disabled="viewBusyTask === task.id"
+            @click="onMountTask(task.id)"
+            @click.shift="onForceMountTask(task.id)"
+          >
+            <LinkIcon class="w-3.5 h-3.5" />
+            <span>{{ viewBusyTask === task.id ? '…' : t('analysis.viewMount') }}</span>
           </button>
 
           <button
@@ -896,4 +1013,37 @@ function getConfigSummary(task: AnalysisTask): string {
   color: var(--text-muted);
   margin-left: calc(4px * var(--ui-scale, 1));
 }
+
+/* ── 基线视图状态条 ── */
+.view-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--bg-secondary, transparent);
+  flex-wrap: wrap;
+}
+.view-status-bar.view-empty {
+  border-color: var(--warning, #e0a03c);
+  background: color-mix(in srgb, var(--warning, #e0a03c) 8%, transparent);
+}
+.view-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+}
+.view-warn { color: var(--warning, #e0a03c); }
+.view-stale {
+  color: var(--warning, #e0a03c);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 11px;
+  cursor: help;
+}
+.view-cov-low { color: var(--warning, #e0a03c); }
+
 </style>

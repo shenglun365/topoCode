@@ -1288,6 +1288,13 @@ export interface ProjectOverview {
     kbSourceDir?: string
     kbRoot?: string
     linkVerifiedAt?: number
+    /** KB 服务是否可达(null=不可达/旧后端未返回，无法判定) */
+    kbReachable?: boolean | null
+    /** 绑定的 KB 项目是否仍存在(false=architect 已绑定但 KB 端已删除) */
+    kbExists?: boolean | null
+    kbProjectName?: string
+    /** 基线视图摘要(对外生效任务数/覆盖率/stale；architect 零任务感知) */
+    kbView?: { mounted: number; coveragePct: number | null; viewVersion: number; stale: boolean }
   }
   baseline: { id: string | null; commit: string; exists: boolean }
   diff: {

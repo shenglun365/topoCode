@@ -17,6 +17,7 @@ dependencies = [
   "fastapi==0.136.3",
   "uvicorn==0.48.0",
   "pyzmq==27.1.0",
+  "mcp>=1.2,<2",
 ]
 
 [tool.setuptools.packages.find]

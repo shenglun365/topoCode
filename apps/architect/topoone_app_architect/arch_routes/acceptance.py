@@ -243,7 +243,8 @@ def check_l2(item: Dict[str, Any],
 # ── 验收执行（触发 → 严 profile 提取 → L1/L2 事实落库） ─────────
 
 def run_acceptance(pid: str, root: str, project: str, package_id: str,
-                   trigger_type: str = "manual", ref: str = "") -> Dict[str, Any]:
+                   trigger_type: str = "manual", ref: str = "",
+                   base_commit: str = "") -> Dict[str, Any]:
     """触发验收：变更范围严 profile 提取 → 逐条目 L1/L2 机械比对 → 报告落库。
 
     条目 → verifying（等待设计者判定）；不自动判定、不自动激活 L3。
@@ -263,11 +264,17 @@ def run_acceptance(pid: str, root: str, project: str, package_id: str,
     if not items:
         raise ValueError("契约包没有可验收条目(confirmed/injected/verifying)")
 
-    # 1) 变更范围：git worktree diff vs baseline（非 git 回退 ast_cache）；
-    #    无变更 → 回退条目 target 文件（runner_done 但 diff 未落 git 的兜底）
-    diff = changed_files(root, project) if root else {"added": [], "modified": []}
-    files = sorted({_norm(f) for f in
-                    (diff.get("added") or []) + (diff.get("modified") or []) if f})
+    # 1) 变更范围：
+    #    S2 任务分支协议优先——base_commit 给定时用 git diff base...HEAD（工程目录
+    #    已在任务分支，worktree 落地后是干净的，脏 diff 不再可信）；
+    #    否则回退 git worktree diff vs baseline；仍无变更 → 条目 target 文件兜底。
+    if base_commit and root:
+        from .branch_service import branch_diff
+        files = sorted({_norm(f["path"]) for f in branch_diff(root, base_commit) if f.get("path")})
+    else:
+        diff = changed_files(root, project) if root else {"added": [], "modified": []}
+        files = sorted({_norm(f) for f in
+                        (diff.get("added") or []) + (diff.get("modified") or []) if f})
     if not files:
         files = sorted({_norm((it.get("target") or {}).get("file") or "")
                         for it in items if (it.get("target") or {}).get("file")})

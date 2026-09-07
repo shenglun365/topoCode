@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   PlusIcon, ChevronDownIcon, ChevronRightIcon, ChatBubbleLeftRightIcon,
   DocumentTextIcon, CheckCircleIcon, UsersIcon, XMarkIcon, ExclamationCircleIcon,
+  PlayIcon, BeakerIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import DesignPanel from '@/components/design/DesignPanel.vue'
+import TaskDetailView from '@/components/coding/TaskDetailView.vue'
+import AcceptancePanel from '@/components/unit-test/AcceptancePanel.vue'
+import { useArchAgentStore } from '@/stores/agent-store'
+import { useArchUnitTestStore } from '@/stores/unit-test-store'
 import { LIFECYCLE_ORDER, lifecycleLabelKey } from '@/config/lifecycle'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { requirementService } from '@/services/requirement-service'
@@ -26,13 +32,18 @@ import type { ConversationDetail, ReqLifecycle, ReqSession, ReqSessionGroups } f
  */
 
 const { t } = useI18n()
+const route = useRoute()
 const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
 const task = useArchTaskStore()
+const agentStore = useArchAgentStore()
+const unitTestStore = useArchUnitTestStore()
+agentStore.load()
+unitTestStore.load()
 
 const groups = ref<ReqSessionGroups | null>(null)
 const selectedId = ref('')
 const collapsed = ref<Record<string, boolean>>({})
-const rightTab = ref<'chat' | 'design'>('chat')
+const rightTab = ref<'chat' | 'design' | 'exec' | 'test'>('chat')
 
 const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
@@ -333,11 +344,23 @@ function onNiItem(item: NeedsInputItem) {
   }
 }
 
-onMounted(() => {
-  void loadSessions()
+onMounted(async () => {
+  await loadSessions()
   void task.load()
   void pollNeedsInput()
   niTimer = setInterval(() => void pollNeedsInput(), 5000)
+  // S5 深链：资产地图提案卡「前往需求方案」→ ?select=reqId 自动选中会话
+  const want = route.query.select as string | undefined
+  if (want) {
+    for (const lc of Object.keys(groups.value || {}) as ReqLifecycle[]) {
+      const hit = (groups.value?.[lc] || []).find(s => s.id === want)
+      if (hit) {
+        collapsed.value = {}
+        await selectSession(hit)
+        break
+      }
+    }
+  }
 })
 onUnmounted(() => {
   if (niTimer) clearInterval(niTimer)
@@ -450,6 +473,18 @@ onUnmounted(() => {
               <DocumentTextIcon class="h-3 w-3" />{{ t('workbench.tabs.design') }}
             </button>
             <button
+              class="btn btn-xs"
+              :class="rightTab === 'exec' ? 'btn-blue' : 'btn-ghost'"
+              :disabled="!selected.execId"
+              :title="selected.execId || t('workbench.tabs.execDisabled')"
+              @click="rightTab = 'exec'"
+            >
+              <PlayIcon class="h-3 w-3" />{{ t('workbench.tabs.exec') }}
+            </button>
+            <button class="btn btn-xs" :class="rightTab === 'test' ? 'btn-blue' : 'btn-ghost'" @click="rightTab = 'test'">
+              <BeakerIcon class="h-3 w-3" />{{ t('workbench.tabs.test') }}
+            </button>
+            <button
               v-if="selected.lifecycle === 'planning'"
               class="btn btn-xs btn-green"
               :disabled="finalizing"
@@ -499,11 +534,21 @@ onUnmounted(() => {
             @stop="stopChat"
           />
           <DesignPanel
-            v-else
+            v-else-if="rightTab === 'design'"
             :open="true"
             :inline="true"
             :req-id="selected.id"
           />
+          <!-- S5 会话中心：执行阶段内嵌（任务树/runner 进度/coding agent 会话/分支落地） -->
+          <TaskDetailView
+            v-else-if="rightTab === 'exec' && selected.execId"
+            :key="selected.execId"
+            :exec-id="selected.execId"
+          />
+          <!-- S5 会话中心：验证阶段内嵌（局部验收 L1/L2/L3 + 契约判定） -->
+          <div v-else-if="rightTab === 'test'" class="h-full overflow-auto">
+            <AcceptancePanel />
+          </div>
         </div>
       </template>
       <div v-else class="flex flex-1 flex-col items-center justify-center gap-2 text-ctp-overlay0">

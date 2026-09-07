@@ -150,12 +150,16 @@ async def update_conversation(conv_id: str, request: Request):
 @router.post("/requirements")
 async def create_requirement(request: Request):
     body = await request.json()
+    # S5：资产地图对话来源（对话中形成的提案卡提交时携带）
+    src_type = (body.get("sourceType") or "").strip()
+    src_conv = (body.get("sourceConversationId") or "").strip()
     req = {
         "id": body.get("id") or store.next_id("RQ"), "kind": body.get("kind", "user-story"), "tier": "raw",
         "location": "proposal", "title": body.get("title", ""),
         "priority": body.get("priority", "P2"), "status": "raw",
         "desc": body.get("desc", ""), "acceptance": body.get("acceptance", []),
         "traceTo": body.get("traceTo", []), "updatedAt": _ts(),
+        "sourceType": src_type, "sourceConversationId": src_conv,
     }
     store.RequirementsStore.create(req)
     return ok(store.RequirementsStore.get(req["id"]))

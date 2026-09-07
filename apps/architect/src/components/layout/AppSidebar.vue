@@ -3,32 +3,27 @@ import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  ClipboardDocumentListIcon, QueueListIcon,
+  ClipboardDocumentListIcon,
   ScaleIcon,
-  GlobeAltIcon, ShieldCheckIcon, ShieldExclamationIcon, MapIcon, Cog6ToothIcon,
-  ChevronDownIcon, ChevronRightIcon, BeakerIcon,
+  GlobeAltIcon, ShieldCheckIcon, ShieldExclamationIcon, Cog6ToothIcon,
+  ChevronDownIcon, ChevronRightIcon,
   ChevronDoubleLeftIcon, ChevronDoubleRightIcon,
 } from '@heroicons/vue/24/outline'
-import { useArchTaskStore } from '@/stores/task-store'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchMcpStore } from '@/stores/mcp-store'
 import { useArchMergeBaselineStore } from '@/stores/merge-baseline-store'
-import { useArchUnitTestStore } from '@/stores/unit-test-store'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
-const task = useArchTaskStore()
 const agent = useArchAgentStore()
 const spec = useArchSpecStore()
 const mcp = useArchMcpStore()
 const mergeBaseline = useArchMergeBaselineStore()
-const unitTest = useArchUnitTestStore()
 mcp.load()
 spec.load()
 mergeBaseline.load()
-unitTest.load()
 agent.load()
 
 const collapsed = ref<Record<string, boolean>>({})
@@ -114,27 +109,6 @@ function isOverviewActive() {
           <span v-if="!rail" class="flex-1 text-left">{{ t('nav.tree.requirements') }}</span>
         </button>
 
-        <button
-          class="tree-item"
-          :class="{ 'is-active': isActive('/workbench/execute') }"
-          :title="t('nav.tree.tasks')"
-          @click="nav('/workbench/execute')"
-        >
-          <QueueListIcon class="w-4 h-4 text-ctp-green" />
-          <span v-if="!rail" class="flex-1 text-left">{{ t('nav.tree.tasks') }}</span>
-          <span v-if="!rail" class="chip bg-ctp-surface0 text-ctp-subtext0">{{ task.doneCount }}/{{ task.totalCount }}</span>
-        </button>
-
-        <button
-          class="tree-item"
-          :class="{ 'is-active': isActive('/workbench/unit-test') }"
-          :title="t('nav.tree.unitTest')"
-          @click="nav('/workbench/unit-test')"
-        >
-          <BeakerIcon class="w-4 h-4 text-ctp-lavender" />
-          <span v-if="!rail" class="flex-1 text-left">{{ t('nav.tree.unitTest') }}</span>
-          <span v-if="!rail" class="chip bg-ctp-surface0 text-ctp-subtext0">{{ unitTest.tests.length }}</span>
-        </button>
       </template>
 
       <button
@@ -173,17 +147,7 @@ function isOverviewActive() {
 
         <button
           class="tree-item"
-          :class="{ 'is-active': isActive('/workbench/archmap') && route.query.view === 'impact' }"
-          :title="t('nav.tree.impact')"
-          @click="nav('/workbench/archmap', { view: 'impact' })"
-        >
-          <MapIcon class="w-4 h-4 text-ctp-mauve" />
-          <span v-if="!rail" class="flex-1 text-left">{{ t('nav.tree.impact') }}</span>
-          <span v-if="!rail" class="chip bg-ctp-surface0 text-ctp-subtext0">v0→v1</span>
-        </button>
-        <button
-          class="tree-item"
-          :class="{ 'is-active': isActive('/workbench/archmap') && route.query.view === 'merge' }"
+          :class="{ 'is-active': isActive('/workbench/archmap') }"
           :title="t('nav.tree.mergeBaseline')"
           @click="nav('/workbench/archmap', { view: 'merge' })"
         >

@@ -33,10 +33,9 @@ const routes: RouteRecordRaw[] = [
         meta: { workbench: true, title: '需求工作台' },
       },
       {
+        // S6：深度表单分析已并入需求方案会话中心，旧路径重定向
         path: 'requirements/analysis',
-        name: 'RequirementAnalysis',
-        component: () => import('@/pages/RequirementWorkspace.vue'),
-        meta: { workbench: true, title: '需求管理' },
+        redirect: { path: '/workbench/requirements' },
       },
       {
         path: 'assets',
@@ -58,13 +57,13 @@ const routes: RouteRecordRaw[] = [
         path: 'execute',
         name: 'Execute',
         component: () => import('@/pages/ExecutePage.vue'),
-        meta: { workbench: true, stepper: true, title: '任务执行' },
+        meta: { workbench: true, title: '任务执行' },
       },
       {
         path: 'unit-test',
         name: 'UnitTest',
         component: () => import('@/pages/UnitTestPage.vue'),
-        meta: { workbench: true, stepper: true, title: '单元测试' },
+        meta: { workbench: true, title: '单元测试' },
       },
       {
         path: 'coding',

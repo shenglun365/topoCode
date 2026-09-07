@@ -31,6 +31,7 @@ _subscribers: set = set()
 # P3.2 路由目标(默认本地拓扑，可用环境变量覆盖)
 _DEFAULT_ARCH_URL = os.environ.get("ARCH_BASE_URL", "http://127.0.0.1:3470").rstrip("/")
 _DEFAULT_MCP_URL = os.environ.get("MCP_BASE_URL", "http://127.0.0.1:3460").rstrip("/")
+_DEFAULT_RUNNER_URL = os.environ.get("RUNNER_BASE_URL", "http://127.0.0.1:3458").rstrip("/")
 
 
 async def _broadcast(payload: dict) -> None:
@@ -98,6 +99,18 @@ def _route_and_mark(msg: dict) -> dict:
                 ok_flag, detail = _http_post_json(url, payload.get("params") or {})
         else:
             detail = f"dst={dst or '*'} 仅持久化(监控/用户事件)"
+    elif dst == "coding":
+        # 主 Agent → 指定 coding agent 会话：追问/修正/amend（会话键 executor:taskId）
+        session_key = (payload.get("sessionKey") or "").strip()
+        if not session_key and payload.get("execId") and payload.get("taskId"):
+            session_key = f"{payload.get('adapter', 'opencode')}:{payload['taskId']}"
+        message = (payload.get("message") or payload.get("text") or "").strip()
+        if not session_key or not message:
+            ok_flag, detail = False, "dst=coding 缺少 sessionKey/message"
+        else:
+            url = f"{_DEFAULT_RUNNER_URL}/api/agent-sessions/inject"
+            ok_flag, detail = _http_post_json(url, {"sessionKey": session_key,
+                                                    "message": message})
     elif dst == "plan":
         # 双向协商：clarify/amend/answer → 注入 plan agent 需求会话(下一回合可见)
         req_id = (payload.get("reqId") or "").strip()

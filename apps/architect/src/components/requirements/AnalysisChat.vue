@@ -42,6 +42,7 @@ const emit = defineEmits<{
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
   'goto-acceptance': []
+  'goto-requirements': [reqId: string]
   stop: []
 }>()
 
@@ -733,6 +734,35 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- S5 需求提案卡（req.propose 产出：需求+方案+评估 → 前往需求方案） -->
+          <div
+            v-if="m.proposal"
+            class="mt-2 border border-ctp-green/30 bg-ctp-green/5 rounded-lg overflow-hidden"
+          >
+            <div class="flex items-center gap-1.5 px-2 py-1.5">
+              <SparklesIcon class="w-3.5 h-3.5 text-ctp-green shrink-0" />
+              <span class="chip !text-[9px] bg-ctp-green/15 text-ctp-green shrink-0">
+                {{ t('assetChat.proposal.title') }}
+              </span>
+              <span class="font-mono text-[10px] text-ctp-subtext0 shrink-0">{{ m.proposal.id }}</span>
+              <span class="text-xs font-medium truncate">{{ m.proposal.title }}</span>
+              <span
+                class="chip !px-1.5 !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0"
+              >{{ m.proposal.priority }}</span>
+              <span class="flex-1" />
+              <button
+                class="btn btn-xs btn-blue"
+                @click="emit('goto-requirements', m.proposal.id)"
+              >
+                <ArrowTopRightOnSquareIcon class="w-3 h-3" />{{ t('assetChat.proposal.goto') }}
+              </button>
+            </div>
+            <div
+              class="px-2 pb-2 text-[11px] text-ctp-subtext1 max-h-40 overflow-auto markdown-body"
+              style="white-space: pre-wrap"
+            >{{ (m.proposal.desc || '').slice(0, 600) }}{{ (m.proposal.desc || '').length > 600 ? '…' : '' }}</div>
           </div>
 
           <!-- A5 差异报告通知卡（验收触发后：摘要 + 前往验收；判定统一在验收区块） -->

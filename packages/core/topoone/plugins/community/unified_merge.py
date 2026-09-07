@@ -506,6 +506,9 @@ def merge_all(comms: Dict, inc_pairs: Set, call_pairs: Set, tau: float,
         out = []
         for idx, c in enumerate(new_comps):
             members = groups.get(idx, set())
+            if not members:
+                # 归属仲裁后零文件组件（候选全被更强组件夺走）——纯噪声，不入树
+                continue
             node = {"members": members, "evidence": c["evidence"],
                     "kind": c["kind"], "unassigned": [], "children": []}
             if level < max_depth and members:
@@ -583,8 +586,12 @@ def _save_unified(task_id: str, analysis_store, tree: Dict, inc_pairs: Set,
         nonlocal max_depth
         max_depth = max(max_depth, level)
         nodes = sorted(nodes, key=lambda x: sorted(x["members"]))
-        for i, n in enumerate(nodes):
-            cid = f"comm-{task_id[:8]}-uni-L{level}-{i:04d}"
+        for _i, n in enumerate(nodes):
+            if not n.get("members"):
+                continue  # 防御：零文件组件不落库
+            # cid 必须用全局递增计数（counts），enumerate 局部序号会跨父组件重复 →
+            # INSERT OR REPLACE 互相覆盖（children 大量丢失的根因）
+            cid = f"comm-{task_id[:8]}-uni-L{level}-{counts[level]:04d}"
             counts[level] += 1
             members = n["members"]
             meta = _evidence_metrics(members, n["evidence"], inc_pairs,

@@ -4,7 +4,6 @@ import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
-import WorkflowStepper from '@/components/layout/WorkflowStepper.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
@@ -17,7 +16,6 @@ const architecture = useArchArchitectureStore()
 const task = useArchTaskStore()
 
 const isWorkbench = computed(() => !!route.meta.workbench)
-const showStepper = computed(() => !!route.meta.stepper)
 
 async function syncProject() {
   await project.load()
@@ -43,9 +41,6 @@ watch(
     <div class="flex flex-1 min-h-0">
       <AppSidebar v-if="isWorkbench" />
       <main class="flex-1 min-w-0 flex flex-col bg-ctp-base">
-        <template v-if="showStepper">
-          <WorkflowStepper />
-        </template>
         <div class="flex-1 min-h-0 overflow-auto">
           <router-view />
         </div>

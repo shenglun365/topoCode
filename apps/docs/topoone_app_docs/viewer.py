@@ -353,6 +353,12 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
                 if n["id"]:
                     fp_to_id[fp] = n["id"]
 
+        # 符号 hash → 文件路径（calls 边端点为符号 id，需解析才能落到文件级图）
+        id_to_file = {}
+        for n in all_nodes:
+            if n["id"] and n["file_path"]:
+                id_to_file[n["id"]] = _rel(n["file_path"])
+
         kinds = ["imports", "calls"] if et == "UNIFIED" else ["imports" if et == "INCLUDE" else "calls"]
         ph = ",".join("?" * len(kinds))
         all_edges = pdb.fetchall(
@@ -360,8 +366,8 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
         )
         edge_set = set()
         for e in all_edges:
-            src = _rel(e["source_id"] or "")
-            tgt = _rel(e["target_id"] or "")
+            src = id_to_file.get(e["source_id"] or "") or _rel(e["source_id"] or "")
+            tgt = id_to_file.get(e["target_id"] or "") or _rel(e["target_id"] or "")
             if not src or not tgt or src not in node_map or tgt not in node_map:
                 continue
             if sc == "internal":

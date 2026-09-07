@@ -601,6 +601,9 @@ def _project_migrations(db) -> None:
         ("asset_invalidated", "INTEGER DEFAULT 0"),
         ("asset_invalidated_at", "INTEGER DEFAULT 0"),
         ("assigned_to", "TEXT DEFAULT ''"),
+        # S5 会话中心：需求来源（资产地图对话中形成 → 提交）
+        ("source_type", "TEXT DEFAULT ''"),
+        ("source_conversation_id", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_execution_tasks", [
         ("instance_id", "TEXT DEFAULT ''"),
@@ -609,6 +612,9 @@ def _project_migrations(db) -> None:
         ("asset_invalidated", "INTEGER DEFAULT 0"),
         ("runner_tree_id", "TEXT DEFAULT ''"),
         ("pending_rejudge", "TEXT DEFAULT ''"),
+        # S2 任务分支协议：落地提交与时间（幂等闸 + 验收 diff 锚点）
+        ("branch_commit", "TEXT DEFAULT ''"),
+        ("branch_landed_at", "INTEGER DEFAULT 0"),
     ])
     _add_cols(db, "arch_agent_sessions", [
         ("instance_id", "TEXT DEFAULT ''"),

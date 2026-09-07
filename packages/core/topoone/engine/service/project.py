@@ -2275,6 +2275,12 @@ def _remove_project_impl(server, main_db, multi_db: MultiDBManager, pid: str,
         except Exception:
             pass
     main_db.delete("projects", "id = ?", (pid,))
+    # 基线视图随项目删除（视图行 + 挂载记录）
+    try:
+        from topoone.engine.view_service import remove_project_view
+        remove_project_view(main_db, pid)
+    except Exception as e:
+        logger.warning("[remove] view cleanup failed for %s: %s", pid, e)
     _set("record", 100)
 
     if request_id:

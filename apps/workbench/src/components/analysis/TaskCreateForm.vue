@@ -46,7 +46,8 @@ const scope = ref('')
 const patternType = ref<'all' | 'glob' | 'regex'>('all')
 const pattern = ref('')
 const excludeDirs = ref('')
-const reportTypes = ref<string[]>(['dependency', 'callChain'])
+/** 报告类型固定为 内部依赖分析 + 内部调用分析：始终包含，不作为页面选项展示/操作 */
+const FIXED_REPORT_TYPES = ['dependency', 'callChain']
 const loading = ref(false)
 
 // Multi-select state (from FileStatsPanel)
@@ -54,12 +55,6 @@ const selectedScopes = ref<string[]>([])
 const selectedExtensions = ref<string[]>([])
 const manualExtensionInput = ref('')
 const fileStatsRef = ref<InstanceType<typeof FileStatsPanel> | null>(null)
-
-// Report type options
-const reportTypeOptions = [
-  { value: 'dependency', label: t('analysis.dependencyAnalysis') },
-  { value: 'callChain', label: t('analysis.callChainAnalysis') },
-]
 
 // Computed
 const isNewTask = computed(() => !props.taskId)
@@ -106,10 +101,6 @@ async function loadExistingTask() {
     if (excludeDirsData) {
       const dirs = Array.isArray(excludeDirsData) ? excludeDirsData : JSON.parse(excludeDirsData)
       excludeDirs.value = dirs.join(', ')
-    }
-    const reportTypesData = taskAny.reportTypes || taskAny.report_types
-    if (reportTypesData) {
-      reportTypes.value = Array.isArray(reportTypesData) ? reportTypesData : JSON.parse(reportTypesData)
     }
     const pt = taskAny.pattern_type
     if (pt && ['all', 'glob', 'regex'].includes(pt)) {
@@ -197,7 +188,7 @@ async function handleSubmit() {
         scopes: selectedScopes.value.length > 0 ? [...selectedScopes.value] : undefined,
         extensions: extArray.length > 0 ? [...extArray] : undefined,
         excludeDirs: excludeArray.length > 0 ? [...excludeArray] : undefined,
-        reportTypes: reportTypes.value.length > 0 ? [...reportTypes.value] : undefined,
+        reportTypes: [...FIXED_REPORT_TYPES],
         patternType: patternType.value !== 'all' ? patternType.value : undefined,
         pattern: pattern.value || undefined,
       } as any)
@@ -215,7 +206,7 @@ async function handleSubmit() {
         scopes: selectedScopes.value.length > 0 ? [...selectedScopes.value] : undefined,
         extensions: extArray.length > 0 ? [...extArray] : undefined,
         excludeDirs: excludeArray.length > 0 ? [...excludeArray] : undefined,
-        reportTypes: reportTypes.value.length > 0 ? [...reportTypes.value] : undefined,
+        reportTypes: [...FIXED_REPORT_TYPES],
         patternType: patternType.value !== 'all' ? patternType.value : undefined,
         pattern: pattern.value || undefined,
       }
@@ -469,42 +460,6 @@ function viewLogs() {
             >{{ d }}</span>
             <span
               v-if="!task?.excludeDirs?.length"
-              class="empty-tag"
-            >-</span>
-          </div>
-        </div>
-
-        <!-- Report types -->
-        <div class="form-section">
-          <label class="form-label">{{ t('analysis.reportTypes') }}</label>
-          <div
-            v-if="isEditMode || isNewTask"
-            class="checkbox-group"
-          >
-            <label
-              v-for="opt in reportTypeOptions"
-              :key="opt.value"
-              class="checkbox-item"
-            >
-              <input
-                v-model="reportTypes"
-                type="checkbox"
-                :value="opt.value"
-              >
-              <span>{{ opt.label }}</span>
-            </label>
-          </div>
-          <div
-            v-else
-            class="form-tags"
-          >
-            <span
-              v-for="r in (task?.reportTypes || [])"
-              :key="r"
-              class="form-tag"
-            >{{ r }}</span>
-            <span
-              v-if="!task?.reportTypes?.length"
               class="empty-tag"
             >-</span>
           </div>

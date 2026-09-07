@@ -94,6 +94,7 @@ export function createBrowserAPI(): any {
   const version = makeGroup('version', [
     'list', 'get', 'preview', 'sync', 'diff', 'materialize', 'cleanup', 'getDiffStats', 'checkout',
   ])
+  const view = makeGroup('view', ['status', 'summary', 'mount', 'unmount'])
   const group = {
     list: () => callRpc('group.list', {}),
     create: (name: string, parent_id: string | null) => callRpc('group.create', { name, parent_id }),
@@ -413,7 +414,7 @@ export function createBrowserAPI(): any {
   return {
     call: callRpc,
     project, version, group, analysis, knowledge, report, settings, model,
-    session, analysisSession, llm, promptTemplate, render, module, graph,
+    session, analysisSession, llm, promptTemplate, render, module, graph, view,
     system, backend, device, dialog, fs, plugin, log, update, crash,
     app, window: windowGroup,
     // 事件订阅（统一桥 /ws/events，按 topic 过滤）

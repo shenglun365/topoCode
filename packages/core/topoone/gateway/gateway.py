@@ -57,6 +57,7 @@ _CORE_RPC_ROUTES = {
     "project": "kb", "analysis": "kb", "group": "kb",
     "version": "kb", "module": "kb", "system": "kb", "plugin": "kb",
     "dir": "kb", "settings": "kb", "report": "kb", "model": "kb", "graph": "kb",
+    "view": "kb",
     "llm": "llm", "session": "llm", "analysisSession": "llm", "promptTemplate": "llm",
     "agent": "agent", "skill": "agent", "tool": "agent",
 }
@@ -200,7 +201,8 @@ _STRIP_RESP_HEADERS = ("content-encoding", "content-length", "transfer-encoding"
 
 
 async def _proxy(target: str, request: Request,
-                 path_override: str | None = None):
+                 path_override: str | None = None,
+                 extra_headers: dict | None = None):
     """把当前请求**流式**转发到 target（保留 method/query/body/headers）。
 
     用 httpx streaming：chat 的 SSE（text/event-stream）逐块透传不被缓冲；
@@ -216,6 +218,8 @@ async def _proxy(target: str, request: Request,
         url += "?" + str(request.query_params)
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in _STRIP_REQ_HEADERS}
+    if extra_headers:
+        headers.update(extra_headers)
     client = httpx.AsyncClient(timeout=httpx.Timeout(_PROXY_TIMEOUT, read=None))
     try:
         req = client.build_request(request.method, url, content=body or None, headers=headers)
@@ -277,8 +281,15 @@ async def rpc(method: str, request: Request):
     if not svc:
         raise HTTPException(404, f"method namespace '{ns}' not found")
     target = _SERVICE_URLS[svc]
-    # 服务端 data_api/zmq 执行端点为 POST /zmq/{method}
-    return await _proxy(target, request, path_override=f"/zmq/{method}")
+    # 服务端 data_api/zmq 执行端点为 POST /zmq/{method}。
+    # 注入内部凭据头：/api/rpc 是 KB 内部面（经网关鉴权），data_api 据此放行全部方法；
+    # 外部直连 /zmq 无此头 → 仅限对外白名单(EXTERNAL_METHODS)。
+    extra = {}
+    token = _read_token()
+    if token:
+        extra["X-KB-Internal"] = token
+    return await _proxy(target, request, path_override=f"/zmq/{method}",
+                        extra_headers=extra)
 
 
 # ── 上传：结构分析包（浏览器上传到服务器） ─────────────────────────

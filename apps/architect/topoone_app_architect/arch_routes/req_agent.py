@@ -781,6 +781,59 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
 # ── 需求定稿工具(plan 结论 → 结构化分析 + 转入待执行) ────────────────
 
 @register_architect_tool(
+    "req.propose",
+    "形成需求提案：在资产地图对话中，当讨论收敛为明确的改进/新增需求时调用，"
+    "把 需求+方案+评估 三段结构化产出为提案（进入需求方案的规划组，等待用户确认后续流程）。"
+    "参数：title(一句话需求)、requirementMd(需求描述：背景/目标/范围)、designMd(方案要点：技术路径/涉及组件与文件，"
+    "可引用对话中讨论的资产)、assessmentMd(评估：收益/风险/工作量估计 estMin 分钟)、priority(P0/P1/P2)。",
+)
+def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "",
+                     assessmentMd: str = "", priority: str = "P1",
+                     estMin: int = 0, root: Optional[str] = None,
+                     project: Optional[str] = None) -> Dict[str, Any]:
+    from . import ctx, store as _store
+    title = (title or "").strip()
+    if not title:
+        return {"ok": False, "error": "缺少需求标题"}
+    now = __import__("topoone_app_architect.arch_routes.common", fromlist=["_ts"])._ts()
+    req = {
+        "id": _store.next_id("RQ"), "kind": "user-story", "tier": "raw",
+        "location": "proposal", "title": title,
+        "priority": priority if priority in ("P0", "P1", "P2") else "P1",
+        "status": "raw",
+        "desc": requirementMd or "", "acceptance": [], "traceTo": [],
+        "updatedAt": now,
+        # 方案/评估并入 desc（Markdown 三段）+ analysis 摘要（供池准入）
+        "sourceType": "asset-chat",
+    }
+    try:
+        conv_id = ctx.get_conv()
+    except Exception:
+        conv_id = ""
+    if conv_id:
+        req["sourceConversationId"] = conv_id
+    sections = []
+    if requirementMd:
+        sections.append(f"## 需求\n\n{requirementMd}")
+    if designMd:
+        sections.append(f"## 方案\n\n{designMd}")
+    if assessmentMd:
+        sections.append(f"## 评估\n\n{assessmentMd}")
+    req["desc"] = "\n\n".join(sections) if sections else (requirementMd or title)
+    req["analysis"] = {
+        "functionalScope": [], "entityBoundary": [],
+        "assessmentSummary": (assessmentMd or "")[:500],
+        "assetScope": [], "estMin": int(estMin or 0),
+        "implementationPath": (designMd or "")[:500],
+        "changes": [], "steps": [],
+        "designMd": designMd or "",
+    }
+    _store.RequirementsStore.create(req)
+    return {"ok": True, "requirementId": req["id"], "title": title,
+            "hint": "提案已创建（规划组）；用户确认后在需求方案会话中继续"}
+
+
+@register_architect_tool(
     "req.finalize",
     "定稿：把 plan 结论固化为结构化需求分析并转入待执行。当需求讨论收敛、可明确范围/影响/实现路径时调用"
     "(调用后本会话需求状态→待执行，左栏会话移入「待执行」组)。"

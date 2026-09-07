@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import {computed, onMounted, ref} from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, CubeIcon, RocketLaunchIcon, SparklesIcon, ArrowRightIcon, ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchTaskStore } from '@/stores/task-store'
+import { apiGet } from '@/services/api-client'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { commitBatch } from '@/services/execution-batch'
 import type { ExecutionTask } from '@/types'
@@ -39,13 +40,27 @@ const selectedReqs = computed(() => picked.value.map((id) => requirement.byId(id
 const activeTask = computed(() => taskStore.activeTaskOf)
 const busy = computed(() => agent.running)
 
+// ── 执行器选择（S1 执行通道：任务级 adapter → 树节点 executor_id） ──
+interface ExecEntry { id: string; type: string; enabled: boolean; default: boolean }
+const executors = ref<ExecEntry[]>([])
+const adapterId = ref('')
+
+onMounted(async () => {
+  try {
+    const d = await apiGet<{ executors: ExecEntry[] }>('/agent/executors')
+    executors.value = (d.executors || []).filter((e) => e.enabled)
+    adapterId.value = executors.value.find((e) => e.default)?.id
+      || executors.value[0]?.id || ''
+  } catch { executors.value = [] }
+})
+
 async function start() {
   if (!picked.value.length || created.value) return
   const reqs = picked.value.map((id) => requirement.byId(id)!).filter(Boolean)
   if (!reqs.length) return
   created.value = true
-  // A7：执行走 runner、对话走 tAgent，adapter 字段已无实际用途(传空占位)。
-  const { exec } = await commitBatch(reqs, '')
+  // S1：adapter = 执行通道选择（runner ExecutorPool 按 id 路由）
+  const { exec } = await commitBatch(reqs, adapterId.value)
   emit('created', exec)
 }
 </script>
@@ -104,6 +119,14 @@ async function start() {
                   :class="prioColor[r.priority]"
                 >{{ r.priority }}</span>
               </span>
+            </div>
+            <div v-if="executors.length" class="mt-3 flex items-center gap-2">
+              <label class="text-xs text-ctp-overlay1">{{ t('execute.executor') }}</label>
+              <select v-model="adapterId" class="input !py-1 !text-xs w-52">
+                <option v-for="e in executors" :key="e.id" :value="e.id">
+                  {{ e.id }} ({{ e.type }})
+                </option>
+              </select>
             </div>
             <p
               v-else

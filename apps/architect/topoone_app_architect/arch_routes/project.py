@@ -765,6 +765,31 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
     diff = arch_git.diff_worktree(proj, base=baseline_head) if work_dir else {
         "filesChanged": 0, "added": 0, "modified": 0, "deleted": 0,
         "deletedHighRisk": False, "files": [], "byComponent": []}
+    # KB 绑定健康检测：architect 端已绑定，但 KB 端项目可能已被删除
+    # (kbReachable=None 表示 KB 服务不可达，无法判定；kbExists=False 才是"KB 端已删除")
+    kb_health = {"kbReachable": None, "kbExists": None, "kbProjectName": ""}
+    kb_view = {"mounted": 0, "coveragePct": None, "viewVersion": 0, "stale": False}
+    if proj.get("kbProjectId"):
+        rows = _kb_call("project.list")
+        kb_health["kbReachable"] = rows is not None
+        matched = next((p for p in (rows or []) if p.get("id") == proj["kbProjectId"]), None)
+        if rows is not None:
+            kb_health["kbExists"] = matched is not None
+        kb_health["kbProjectName"] = (matched or {}).get("name") or ""
+        # 基线视图摘要：对外生效任务数/覆盖率/stale（architect 不感知任务，仅看视图代际）
+        if matched is not None:
+            try:
+                from .kb_gateway import call_kb
+                summary = call_kb("view.summary", projectId=proj["kbProjectId"])
+            except Exception:
+                summary = None
+            if isinstance(summary, dict):
+                kb_view = {
+                    "mounted": len(summary.get("mountedTaskIds") or []),
+                    "coveragePct": summary.get("coveragePct"),
+                    "viewVersion": summary.get("viewVersion") or 0,
+                    "stale": bool(summary.get("stale")),
+                }
     return ok({
         "workDir": work_dir,
         # 仅真实远端 URL(git origin)；本地仓库为空串，仓库类型见 repoKind
@@ -781,6 +806,8 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
             "kbSourceDir": proj.get("kbSourceDir"),
             "kbRoot": proj.get("kbRoot"),
             "linkVerifiedAt": proj.get("linkVerifiedAt"),
+            **kb_health,
+            "kbView": kb_view,
         },
         "baseline": {
             "id": proj.get("baselineId"),
