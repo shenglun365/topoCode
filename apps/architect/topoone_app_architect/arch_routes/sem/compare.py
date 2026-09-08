@@ -43,7 +43,23 @@ _CAP_FILES = 500      # 单类变更文件清单上限(响应内)
 _CAP_ASSETS = 200     # 单桶资产清单上限
 _CAP_LINKS = 100      # 跨域联系边上限
 _CAP_SIDE_MD5 = 300   # 侧归属 md5 计算的变更文件数上限(超出退化为纯文件级推导)
-_CAP_PENDING = 100    # 待提取文件清单上限(响应内)
+_CAP_PENDING = 500    # 待提取文件清单上限(响应内; 与 count 保持一致, 提取闭环按钮按清单执行)
+
+# 可提取=代码扩展(与 KB 扫描 walker._EXT_MAP 同口径): 文档/配置/无扩展名文件
+# 永远提取不出语义资产, 混入 pending 会让「提取并重新对比」永远清不掉。
+_CODE_EXTS = {
+    ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+    ".py", ".pyw", ".java", ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".hxx",
+    ".go", ".rs", ".cs", ".swift", ".rb", ".rake", ".kt", ".kts", ".php", ".inc",
+    ".dart", ".scala", ".sc", ".lua", ".luau", ".m", ".mm", ".vue",
+}
+
+
+def _extractable(path: str) -> bool:
+    dot = path.rfind(".")
+    if dot <= path.rfind("/"):   # 无扩展名(或扩展名前是目录分隔) → 非代码
+        return False
+    return path[dot:].lower() in _CODE_EXTS
 _BLOB_MAX = 8 * 1024 * 1024
 
 OTHER = "__other__"
@@ -411,9 +427,11 @@ def compare_changes(root: Optional[str], project: Optional[str],
             continue
         stable_n += 1
 
-    # 待提取：目标侧存在(added/modified)的变更文件，没有任何资产锚定其目标侧内容
+    # 待提取：目标侧存在(added/modified)的变更文件，没有任何资产锚定其目标侧内容。
+    # 仅代码扩展(可提取)：文档/配置等永远无资产产出，混入会让提取闭环永不清零。
     pending_files = [f for f in sorted(added | modified)
-                     if tgt_md5.get(f) and not any(h == tgt_md5.get(f) for _, h in anchored.get(f, []))]
+                     if _extractable(f) and tgt_md5.get(f)
+                     and not any(h == tgt_md5.get(f) for _, h in anchored.get(f, []))]
 
     # ── 跨域联系：「其他」桶资产 → 组件内资产 的 relations(证据式, 合理联动) ──
     cross_links: List[dict] = []

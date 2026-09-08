@@ -705,15 +705,25 @@ async function extractPendingAndRecompare() {
   if (!files.length) return
   if (!window.confirm(t('assetMgmt.diff.extractConfirm', { n: files.length }))) return
   extractingPending.value = true
+  let extracted = 0
   try {
     const BATCH = 10
     for (let i = 0; i < files.length; i += BATCH) {
-      await semanticAssetService.extract({ type: 'files', files: files.slice(i, i + BATCH) })
+      const res = await semanticAssetService.extract({ type: 'files', files: files.slice(i, i + BATCH) })
+      extracted += res?.count ?? 0
     }
   } catch (e) {
+    // 失败即止：保留错误信息(不再自动重比冲掉)，用户可手动「重新对比」
     compareError.value = e instanceof Error && e.message ? e.message : t('assetMgmt.diff.cmpFailed')
+    extractingPending.value = false
+    return
   } finally {
     extractingPending.value = false
+  }
+  if (!extracted) {
+    // 全程零产出(清单多为不可提取文件 / LLM 不可用降级)：如实提示而非静默重比
+    compareError.value = t('assetMgmt.diff.extractZero')
+    return
   }
   await Promise.all([loadSemantic(), runCompare()])
 }

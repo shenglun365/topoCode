@@ -1569,6 +1569,7 @@ export default {
       extractRecompareHint: 'Extract semantic assets for changed files missing on the target side, then re-compare automatically',
       extracting: 'Extracting…',
       extractConfirm: 'Extract semantic assets for {n} changed files (LLM calls will be consumed), then re-compare. Continue?',
+      extractZero: 'Extraction finished with zero assets: the pending list may contain mostly non-extractable files, or the LLM model is unavailable (check the model selector / backend model config)',
       pendingFiles: 'Files pending extraction ({n})',
       pendingCommitHint: 'Target is a historical commit: extraction only works against the working tree — switch target back to it.',
       newAssets: 'New assets on target side',
