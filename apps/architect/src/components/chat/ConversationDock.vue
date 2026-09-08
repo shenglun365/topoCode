@@ -159,8 +159,8 @@ async function answerClarify() {
       ? 'relative flex h-full min-h-0 w-full flex-col bg-ctp-base'
       : 'fixed right-0 top-0 z-40 flex h-full w-[26rem] flex-col border-l border-ctp-surface0 bg-ctp-base shadow-2xl'"
   >
-    <!-- 头部: 标题 + kind + 会话切换(仅悬浮形态; inline 停靠由页面自身提供列表/新建入口) -->
-    <div v-if="!props.inline" class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
+    <!-- 头部: 标题(两种形态都有, 悬停可改) + 会话切换/新建/关闭(仅悬浮形态) -->
+    <div class="relative shrink-0 border-b border-ctp-surface0 px-3 py-1.5">
       <div class="flex items-center gap-2">
         <span class="chip shrink-0" :class="kindClass(conv.activeKind)">
           {{ t(`session.kind.${conv.activeKind}`) }}
@@ -192,28 +192,29 @@ async function answerClarify() {
             </span>
           </template>
         </span>
-        <button
-          class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
-          :title="t('session.dock.newChat')"
-          @click="newChat"
-        >
-          <PlusIcon class="h-4 w-4" />
-        </button>
-        <button
-          class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
-          :title="t('session.dock.switch')"
-          @click="listOpen = !listOpen"
-        >
-          <ChevronDownIcon class="h-4 w-4" />
-        </button>
-        <button
-          v-if="!props.inline"
-          class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
-          :title="t('common.close')"
-          @click="conv.setDockOpen(false)"
-        >
-          <XMarkIcon class="h-4 w-4" />
-        </button>
+        <template v-if="!props.inline">
+          <button
+            class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
+            :title="t('session.dock.newChat')"
+            @click="newChat"
+          >
+            <PlusIcon class="h-4 w-4" />
+          </button>
+          <button
+            class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
+            :title="t('session.dock.switch')"
+            @click="listOpen = !listOpen"
+          >
+            <ChevronDownIcon class="h-4 w-4" />
+          </button>
+          <button
+            class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
+            :title="t('common.close')"
+            @click="conv.setDockOpen(false)"
+          >
+            <XMarkIcon class="h-4 w-4" />
+          </button>
+        </template>
       </div>
 
       <!-- 会话切换浮层 -->
