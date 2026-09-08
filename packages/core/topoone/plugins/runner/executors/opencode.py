@@ -82,28 +82,43 @@ class OpenCodeServeManager:
                 if await self._healthy(sp.url):
                     return sp
                 await asyncio.sleep(1.0)
-        # 拉起（或复用已健康的外部 serve）
+        # 拉起（或复用已健康的外部 serve）；候选端口被占/启动失败自动换下一个
         port = await self._find_port()
         url = f"http://127.0.0.1:{port}"
         if not await self._healthy(url) and self._auto_start:
-            log = open(self._log_path(port), "ab")  # noqa: SIM115
-            proc = subprocess.Popen(
-                [self._bin, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
-                cwd=root, stdout=log, stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-            sp = ServeProc(root, url, port)
-            sp.proc = proc
-            for _ in range(30):
+            last_err = ""
+            for off in range(0, 24):
+                port = self._base_port + off
+                url = f"http://127.0.0.1:{port}"
                 if await self._healthy(url):
-                    self._by_root[root] = sp
-                    logger.info("[opencode] serve started pid=%s port=%s root=%s",
-                                proc.pid, port, root)
-                    return sp
-                if proc.poll() is not None:
-                    break
-                await asyncio.sleep(1.0)
-            raise RuntimeError(f"opencode serve 启动失败 port={port} root={root}（见 {self._log_path(port)}）")
+                    continue  # 已被占用（可能是别的项目的 serve）
+                log = open(self._log_path(port), "ab")  # noqa: SIM115
+                try:
+                    proc = subprocess.Popen(
+                        [self._bin, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
+                        cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    last_err = f"port {port}: {e}"
+                    continue
+                sp = ServeProc(root, url, port)
+                sp.proc = proc
+                for _ in range(30):
+                    if await self._healthy(url):
+                        self._by_root[root] = sp
+                        logger.info("[opencode] serve started pid=%s port=%s root=%s",
+                                    proc.pid, port, root)
+                        return sp
+                    if proc.poll() is not None:
+                        break
+                    await asyncio.sleep(1.0)
+                last_err = f"port {port} 启动失败（见 {self._log_path(port)}）"
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+            raise RuntimeError(f"opencode serve 启动失败 root={root}: {last_err}")
         if not await self._healthy(url):
             raise RuntimeError(f"opencode serve 不可达 {url} 且未启用自动拉起")
         sp = sp or ServeProc(root, url, port)
@@ -253,7 +268,13 @@ class OpenCodeSessionExecutor:
 
                 body: dict = {"parts": [{"type": "text", "text": prompt}]}
                 if self._model:
-                    body["model"] = self._model
+                    # opencode API 的 model 是 {providerID, modelID} 对象；
+                    # 配置里写 "provider/model" 字符串（provider 段可省略）
+                    if "/" in self._model:
+                        pid, mid = self._model.split("/", 1)
+                        body["model"] = {"providerID": pid, "modelID": mid}
+                    else:
+                        body["model"] = {"modelID": self._model}
                 r = await client.post(f"{url}/session/{session_id}/message", json=body)
                 r.raise_for_status()
                 data = r.json() or {}
