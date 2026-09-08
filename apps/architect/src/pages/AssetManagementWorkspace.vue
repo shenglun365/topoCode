@@ -2807,12 +2807,7 @@ onUnmounted(() => {
                       class="btn btn-xs btn-ghost"
                       :disabled="!!descLoading[a.id]"
                       @click="genDesc(a)"
-                    >
-                      <SparklesIcon
-                        class="w-3 h-3"
-                        :class="descLoading[a.id] ? 'animate-pulse' : ''"
-                      />{{ t('assetMgmt.genDesc') }}
-                    </button>
+                    >{{ t('assetMgmt.genDesc') }}</button>
                   </div>
                   <div v-if="a.detail?.fields?.length">
                     <div class="font-medium text-ctp-mauve mb-0.5">
