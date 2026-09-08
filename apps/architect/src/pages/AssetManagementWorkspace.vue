@@ -1293,6 +1293,33 @@ const detailLoading = reactive<Record<string, boolean>>({})
 
 const descLoading = reactive<Record<string, boolean>>({})
 
+/** 全部展开时行数可达数千，逐行 DOM 令布局/绘制过载 → 前缀窗口渲染：
+ * 只挂载前 renderCap 行，滚动接近底部由哨兵增量放行；筛选/搜索使行数收缩时
+ * 窗口自动收敛。与 scope/kind/搜索/树层级天然兼容(同源 semanticTreeRows)。 */
+const RENDER_INIT = 400
+const RENDER_STEP = 300
+const renderCap = ref(RENDER_INIT)
+const renderedTreeRows = computed(() => semanticTreeRows.value.slice(0, renderCap.value))
+watch(() => semanticTreeRows.value.length, (n) => {
+  if (n < renderCap.value) renderCap.value = Math.max(RENDER_INIT, n)
+})
+const semScrollEl = ref<HTMLElement | null>(null)
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+let capObserver: IntersectionObserver | null = null
+watch(loadMoreSentinel, (el) => {
+  capObserver?.disconnect()
+  if (!el) return
+  // root 每次重建：滚动容器随 tab 切换(v-else 分支)可能重挂载
+  capObserver = new IntersectionObserver((es) => {
+    if (es.some((e) => e.isIntersecting)) renderCap.value += RENDER_STEP
+  }, { root: semScrollEl.value ?? undefined, rootMargin: '800px 0px' })
+  capObserver.observe(el)
+})
+onUnmounted(() => {
+  capObserver?.disconnect()
+  capObserver = null
+})
+
 /** 按需生成功能摘要(分层口径: 批量提取不产 desc)。
  *  fresh 缓存由后端直返；腐烂(需更新)资产后端自动重生成。 */
 async function genDesc(a: SemanticAsset) {
@@ -2060,6 +2087,7 @@ onUnmounted(() => {
         </div>
         <div
           v-else
+          ref="semScrollEl"
           class="flex-1 min-h-0 overflow-auto p-2.5 space-y-1.5"
         >
           <!-- 资产概览：作用说明 + 分类/粒度/标签 + 现有资产数量 -->
@@ -2411,7 +2439,7 @@ onUnmounted(() => {
           <!-- 语义资产：按组件树文件树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
           <template v-if="tab === 'semantic'">
             <template
-              v-for="row in semanticTreeRows"
+              v-for="row in renderedTreeRows"
               :key="row.key"
             >
               <!-- 组件(目录)节点 -->
@@ -2421,7 +2449,7 @@ onUnmounted(() => {
                   :key="row.key + ':h'"
                 >
               <div
-                class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5"
+                class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5 tree-row"
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <button
@@ -2561,7 +2589,7 @@ onUnmounted(() => {
               <!-- 文件节点：独有文件，折叠其下资产 -->
               <div
                 v-else-if="row.t === 'file'"
-                class="flex items-center gap-1.5 px-1 py-0.5"
+                class="flex items-center gap-1.5 px-1 py-0.5 tree-row"
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <button
@@ -2662,7 +2690,7 @@ onUnmounted(() => {
               <!-- 资产卡片(挂文件下/组件直属) -->
               <div
                 v-else
-                class="mt-0.5"
+                class="mt-0.5 tree-row"
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <div
@@ -2956,6 +2984,11 @@ onUnmounted(() => {
               </div>
                 </div>
             </template>
+            <div
+              v-if="renderedTreeRows.length < semanticTreeRows.length"
+              ref="loadMoreSentinel"
+              class="text-center text-[10px] text-ctp-overlay0 py-2 font-mono"
+            >{{ t('assetMgmt.renderingMore', { done: renderedTreeRows.length, total: semanticTreeRows.length }) }}</div>
             <p
               v-if="!semanticTreeRows.length && !loading"
               class="text-xs text-ctp-overlay0 text-center py-8"
@@ -3199,3 +3232,11 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 树行离屏跳过布局/绘制(配合前缀窗口渲染): 浏览器不维护不可见行样式与合成 */
+.tree-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
+}
+</style>

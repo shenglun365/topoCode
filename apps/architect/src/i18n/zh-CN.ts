@@ -1980,6 +1980,7 @@ export default {
       entry: '入口',
     },
     emptySemantic: '暂无语义资产。点击「提取全部」从最新代码结构生成。',
+renderingMore: '已渲染 {done}/{total} · 滚动加载更多',
     emptyComponent: '暂无组件资产。',
     compScope: '组件范围',
     other: '其它',

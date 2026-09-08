@@ -1956,6 +1956,7 @@ export default {
       entry: 'Entry',
     },
     emptySemantic: 'No semantic assets yet. Click "Extract All" to generate them from the latest code.',
+renderingMore: 'Rendered {done}/{total} · scroll for more',
     emptyComponent: 'No component assets.',
     compScope: 'Component Scope',
     other: 'Other',
