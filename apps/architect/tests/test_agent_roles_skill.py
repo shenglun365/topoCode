@@ -34,7 +34,8 @@ class TestAgentRoles:
     def test_defaults_merge_and_override(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
         roles = R.get_roles()
-        assert {r["name"] for r in roles} == {"extract", "verify", "induce", "pseudo"}
+        assert {r["name"] for r in roles} == {"extract", "verify", "induce", "pseudo",
+                                              "evaluate", "mine"}
         R.set_roles([{"name": "extract", "modelId": "qwen-fast"},
                      {"name": "verify", "modelId": "deepseek-r1"},
                      {"name": "unknown-role", "modelId": "x"}])  # 未知 name 丢弃

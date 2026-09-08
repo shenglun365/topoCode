@@ -201,9 +201,49 @@ def strip_tool_blocks(text: str) -> str:
     return "".join(out).strip()
 
 
+# ── 工具审计结构预留(WS6-E): 完整 record schema 定义, 存储/UI 不在本期 ──
+# schema: {ts, tool, argsDigest, ok, resultDigest, conversationId, reqId,
+#          projectId, modelId, stage(工具推导: design/implement/evaluate/accept), latencyMs}
+# 未来落库: arch_tool_audit 表 / 复用 arch_mcp_calls; WS7 提炼器以此为原料源之一。
+def record_tool_audit(name: str, arguments: Dict[str, Any], ok: bool,
+                      result_summary: str = "", latency_ms: float = 0.0,
+                      project: str = "") -> Dict[str, Any]:
+    """工具调用审计记录(结构接口预留)。当前仅 debug 日志, 不落存储。"""
+    try:
+        from . import ctx as _actx
+        conv_id = _actx.get_conv() or ""
+        req_id = _actx.get_req() or ""
+    except Exception:
+        conv_id = req_id = ""
+    rec = {
+        "ts": _now_ms(), "tool": name,
+        "argsDigest": _digest(arguments), "ok": bool(ok),
+        "resultDigest": _digest(result_summary),
+        "conversationId": conv_id, "reqId": req_id,
+        "projectId": (project or ""), "modelId": get_model_preference(),
+        "latencyMs": round(latency_ms, 1),
+    }
+    logger.debug("[tool-audit] %s", json.dumps(rec, ensure_ascii=False)[:400])
+    return rec
+
+
+def _digest(v: Any, limit: int = 120) -> str:
+    s = json.dumps(v, ensure_ascii=False, default=str) if not isinstance(v, str) else v
+    s = " ".join((s or "").split())
+    return s[:limit]
+
+
+def _now_ms() -> int:
+    import time as _t
+    return int(_t.time() * 1000)
+
+
 def run_arch_tool(name: str, arguments: Dict[str, Any],
                   root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
-    """执行 architect 注册工具；缺失/异常返回 {error}。root/project 按签名自动注入。"""
+    """执行 architect 注册工具；缺失/异常返回 {error}。root/project 按签名自动注入。
+
+    执行环带审计 hook(WS6-E 结构预留)。
+    """
     entry = _ARCH_TOOLS.get(name)
     if not entry:
         return {"error": f"未知工具: {name}"}
@@ -214,11 +254,18 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
         kwargs["root"] = root
     if "project" in params and "project" not in kwargs:
         kwargs["project"] = project
+    t0 = _now_ms()
     try:
         result = fn(**kwargs)
+        ok = not (isinstance(result, dict) and result.get("error"))
+        record_tool_audit(name, arguments, ok,
+                          tool_result_text(name, result, limit=200),
+                          latency_ms=_now_ms() - t0, project=project or "")
         return result if isinstance(result, dict) else {"result": result}
     except Exception as e:
         logger.exception("[req_agent] tool %s failed", name)
+        record_tool_audit(name, arguments, False, str(e),
+                          latency_ms=_now_ms() - t0, project=project or "")
         return {"error": f"{name} 执行失败: {e}"}
 
 

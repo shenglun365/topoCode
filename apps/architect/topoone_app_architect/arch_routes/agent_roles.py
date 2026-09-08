@@ -32,6 +32,10 @@ DEFAULT_ROLES: List[Dict[str, Any]] = [
      "note": "中档模型——规约/术语提议"},
     {"name": "pseudo", "label": "伪码解释", "modelId": "",
      "note": "快模型——PseudoExplainer"},
+    {"name": "evaluate", "label": "方案/结果评估", "modelId": "",
+     "note": "强模型——评估报告 LLM 增强段(WS4 评估器机械段不依赖)"},
+    {"name": "mine", "label": "能力提炼", "modelId": "",
+     "note": "强模型——历史会话→规约/流程/技巧提案(WS7 提炼器)"},
 ]
 
 
