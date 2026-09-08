@@ -226,6 +226,10 @@ def tool_result_text(name: str, result: Any, limit: int = 3000) -> str:
     """工具结果 → 文本(截断，供下一轮 LLM 上下文)。"""
     if isinstance(result, dict) and "error" in result:
         return str(result.get("error"))
+    # 纯 Markdown 产物(map.*/probe 等工具)直通，免 json 转义噪音(\n 换行符等)
+    if isinstance(result, dict) and set(result.keys()) == {"markdown"}:
+        md = str(result.get("markdown") or "")
+        return md if len(md) <= limit else md[:limit] + "...(truncated)"
     s = json.dumps(result, ensure_ascii=False, default=str)
     return s if len(s) <= limit else s[:limit] + "...(truncated)"
 
@@ -410,17 +414,108 @@ def tool_project_ctx(root: Optional[str], project: Optional[str]) -> Dict[str, A
     }
 
 
+# ── 资产地图工具(map.*): 与对外 MCP 服务同源实现(Markdown 输出) ────────
+# 穷举/层级/统计/规约类提问(「有哪些组件」「L0/L1 模块」「资产统计」「编码规约」)的
+# 正确入口；kb.asset.search 是关键词检索(≤6 条命中)，不适合枚举型提问。
+
+@register_architect_tool(
+    "map.overview",
+    "资产地图总览(Markdown)：组件目录(名称/图层级/文件数/依赖出入)+语义资产分类统计+基线视图。"
+    "穷举/统计/层级类提问(如「有哪些组件」「L0/L1 模块」「资产总数」)先调此工具",
+)
+def tool_map_overview(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
+    from .asset_map_tools import run_tool
+    return {"markdown": run_tool("map.overview", {"project": project})}
+
+
+@register_architect_tool(
+    "map.component",
+    "组件档案(Markdown)：单个组件的图层级/文件清单/依赖出入/组件内语义资产",
+)
+def tool_map_component(root: Optional[str], project: Optional[str],
+                       name: str = "") -> Dict[str, Any]:
+    from .asset_map_tools import run_tool
+    if not (name or "").strip():
+        return {"error": "缺少组件名(name)"}
+    return {"markdown": run_tool("map.component", {"name": name.strip(), "project": project})}
+
+
+@register_architect_tool(
+    "map.assets",
+    "语义资产表列检索(Markdown 表格)：kind/level 过滤+关键词，返回 名称/文件/状态 清单。"
+    "需要浏览资产清单(而非前几条命中)时用",
+)
+def tool_map_assets(root: Optional[str], project: Optional[str], query: str = "",
+                    kind: str = "", level: str = "", limit: int = 30) -> Dict[str, Any]:
+    from .asset_map_tools import run_tool
+    return {"markdown": run_tool("map.assets", {"query": query, "kind": kind,
+                                                "level": level, "limit": limit,
+                                                "project": project})}
+
+
+@register_architect_tool(
+    "map.rules",
+    "项目规约全集(Markdown)：架构规约+编码规约+命名规约+词汇表，编码/方案评估必须遵守",
+)
+def tool_map_rules(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
+    from .asset_map_tools import run_tool
+    return {"markdown": run_tool("map.rules", {"project": project})}
+
+
+@register_architect_tool(
+    "map.graph",
+    "关系图(mermaid)：kind=component 组件依赖图 / kind=semantic 语义关系图",
+)
+def tool_map_graph(root: Optional[str], project: Optional[str],
+                   kind: str = "component") -> Dict[str, Any]:
+    from .asset_map_tools import run_tool
+    return {"markdown": run_tool("map.graph", {"kind": kind or "component",
+                                               "project": project})}
+
+
+@register_architect_tool(
+    "asset.semantic.stats",
+    "语义资产统计：总量/按六类(kind)/按粒度(level)/状态(active/stale/deleted/needsUpdate)。"
+    "「有多少资产」「各类数量」等统计类提问用",
+)
+def tool_semantic_stats(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
+    from .sem.engine import (SEMANTIC_KINDS, SEMANTIC_LEVELS, _lazy_reconcile,
+                             project_id_for)
+    from . import store
+    try:
+        _lazy_reconcile(root, project)
+        pid = project_id_for(root, project)
+        by_kind = {k: store.SemanticAssetsStore.count(pid, kind=k) for k in SEMANTIC_KINDS}
+        by_level = {lv: store.SemanticAssetsStore.count(pid, level=lv) for lv in SEMANTIC_LEVELS}
+        rows = store.SemanticAssetsStore.all_status(pid, limit=4000)
+        status: Dict[str, int] = {"active": 0, "stale": 0, "deleted": 0, "needsUpdate": 0}
+        for a in rows:
+            status[a.get("status") or "active"] = status.get(a.get("status") or "active", 0) + 1
+            if a.get("needsUpdate"):
+                status["needsUpdate"] += 1
+        return {"total": sum(by_kind.values()), "byKind": by_kind,
+                "byLevel": by_level, "status": status}
+    except Exception as e:
+        logger.warning("[req_agent] asset.semantic.stats failed: %s", e)
+        return {"error": str(e)}
+
+
 # ── 语义数据资产工具 ─────────────────────────────────────────────
 
 @register_architect_tool(
     "asset.semantic.search",
-    "检索当前项目已提取的语义数据资产(数据结构/处理流程/控制逻辑)，按关键词命中。返回资产(含 AST 锚点)。",
+    "检索当前项目已提取的语义数据资产(六类 entity/contract/state/rule/process/decision)，"
+    "支持 kind 类别 + level 粒度(business/implementation/logic) + scopes 组件范围过滤与关键词命中。"
+    "返回资产(含 AST 锚点)。",
 )
 def tool_semantic_search(root: Optional[str], project: Optional[str],
-                         text: str = "", kind: str = "") -> List[Dict[str, Any]]:
+                         text: str = "", kind: str = "", level: str = "",
+                         limit: int = 20, offset: int = 0,
+                         scopes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     from . import semantic_assets as S
     try:
-        return S.search(root, project, text, kind)
+        return S.search(root, project, text, kind, limit, offset,
+                        scopes=scopes, level=level)
     except Exception as e:
         logger.warning("[req_agent] asset.semantic.search failed: %s", e)
         return []
@@ -1119,7 +1214,16 @@ _CAPABILITY_DOC = (
     "- kb.baseline：读取当前项目 KB 基线(git 表示：分支/提交/基线版本)\n"
     "- kb.graph：遍历组件依赖图(依赖/被调用)，判断需求改动的影响链路\n"
     "- project.ctx：读取项目上下文(项目名/分支/基线 id/降级状态)\n"
-    "- asset.semantic.search：检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点)\n"
+    "- map.overview：资产地图总览——组件目录(含图层级 L0/L1/文件数/依赖)+资产统计；穷举/统计/层级类提问先看\n"
+    "- map.component：组件档案——单组件的层级/文件/依赖出入/组件内语义资产\n"
+    "- map.assets：语义资产表列检索——kind/level 过滤+关键词，Markdown 表格浏览清单\n"
+    "- map.rules：项目规约全集(架构+编码+命名规约+词汇表，编码/评估必须遵守)\n"
+    "- map.graph：关系图(mermaid)——component 组件依赖图 / semantic 语义关系图\n"
+    "- asset.semantic.search：检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点；支持 kind/level 过滤)\n"
+    "- asset.semantic.stats：语义资产统计(总量/按类别/按粒度/状态)\n"
+    "层级概念约定：组件带**图层级**(L0=底层原子社区，L1/L2=逐级聚合，见 map.overview 目录「层级」列)；"
+    "语义资产带**抽象粒度** level(business/implementation/logic)。"
+    "用户问「L0/L1 模块/组件」指组件图层级(用 map.*)，问资产「粒度/层次」指语义资产 level(用 asset.semantic.* 的 level 过滤)。\n"
     "- asset.semantic.extract：按指令从最新代码提取语义数据资产并落库(指令化唯一入口：comm 时 key=组件ID 为权威范围，确定执行)\n"
     "- asset.semantic.detail：读取单个语义资产的完整描述/结构化细节/AST 锚点\n"
     "- asset.semantic.mappings：查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」\n"
@@ -1153,7 +1257,13 @@ _CAPABILITY_DOC = (
     "- kb.baseline: {}\n"
     '- kb.graph: {"comp_ids": ["组件ID"]}\n'
     "- project.ctx: {}\n"
-    '- asset.semantic.search: {"text": "关键词", "kind": "entity|contract|state|rule|process|decision(可选)"}\n'
+    '- asset.semantic.search: {"text": "关键词", "kind": "entity|contract|state|rule|process|decision(可选)", "level": "business|implementation|logic(可选)", "limit": 20, "offset": 0, "scopes": ["comm-…(可选)"]}\n'
+    '- map.overview: {}\n'
+    '- map.component: {"name": "组件名或id"}\n'
+    '- map.assets: {"query": "关键词", "kind": "类别(可选)", "level": "粒度(可选)", "limit": 30}\n'
+    '- map.rules: {}\n'
+    '- map.graph: {"kind": "component|semantic"}\n'
+    '- asset.semantic.stats: {}\n'
     '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID(comm-…，先 kb.asset.search 取 id；未命中返回 error+候选清单须如实告知)", "files": [], "symbols": []}, "kinds": ["entity","contract","state","rule","process","decision"]}\n'
     '- asset.semantic.detail: {"asset_id": "sa-xxx"}\n'
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'

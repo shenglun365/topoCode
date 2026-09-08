@@ -23,7 +23,7 @@ TOOLS = [
     {"name": "map.overview", "desc": "项目资产地图总览（组件目录/资产统计/覆盖率/基线视图），写码前先看",
      "args": {"project": "项目 id（多项目时必填，可先 project.list）"}},
     {"name": "map.component", "desc": "组件档案：文件清单/语义资产/依赖出入", "args": {"name": "组件名或 id", "project": "项目 id"}},
-    {"name": "map.assets", "desc": "语义资产检索（kind/level/关键词）", "args": {"query": "关键词", "kind": "类别", "limit": "条数", "project": "项目 id"}},
+    {"name": "map.assets", "desc": "语义资产检索（kind/level/关键词）", "args": {"query": "关键词", "kind": "类别", "level": "粒度(business/implementation/logic)", "limit": "条数", "project": "项目 id"}},
     {"name": "map.rules", "desc": "规约全集：架构规约+编码规约+命名规约+词汇表（编码必须遵守）", "args": {"project": "项目 id"}},
     {"name": "map.graph", "desc": "关系图（mermaid）：component=组件依赖图 / semantic=语义关系图", "args": {"kind": "component|semantic", "project": "项目 id"}},
     {"name": "ctx.search", "desc": "跨会话检索历史上下文（单元/消息/备案文档；讨论关联结论先查这里）", "args": {"query": "关键词", "type": "单元类型", "conversation": "限定会话 id", "limit": "条数", "project": "项目 id"}},
@@ -174,16 +174,17 @@ def tool_component(name: str, project: Optional[str] = None) -> str:
     return "\n".join(out)
 
 
-def tool_assets(query: str = "", kind: str = "", limit: int = 30,
+def tool_assets(query: str = "", kind: str = "", level: str = "", limit: int = 30,
                 project: Optional[str] = None) -> str:
     proj = _resolve_project_entry(project)
     if not proj:
         return "# 语义资产\n\n无法唯一定位项目，请传 project 参数。"
     from . import store
     rows = store.SemanticAssetsStore.search(_pid_of(proj), text=query, kind=kind,
+                                            level=level,
                                             limit=min(int(limit or 30), 200)) or []
     out = [_md_header("语义资产检索", proj),
-           f"条件: query=`{query}` kind=`{kind}` → {len(rows)} 条\n"]
+           f"条件: query=`{query}` kind=`{kind}` level=`{level}` → {len(rows)} 条\n"]
     out.append("| kind | level | 名称 | 文件 | 状态 |")
     out.append("|---|---|---|---|---|")
     for a in rows:
@@ -282,6 +283,7 @@ def run_tool(name: str, args: dict) -> str:
                                                 args.get("project")),
         "map.assets": lambda: tool_assets(args.get("query") or "",
                                           args.get("kind") or "",
+                                          args.get("level") or "",
                                           int(args.get("limit") or 30),
                                           args.get("project")),
         "map.rules": lambda: tool_rules(args.get("project")),
