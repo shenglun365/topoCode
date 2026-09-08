@@ -64,7 +64,12 @@
           </button>
         </div>
 
-        <!-- 功能摘要(空则按需生成；与列表/图谱共用 desc 缓存) -->
+        <!-- 无资产文件：纯源码浏览提示 -->
+        <div
+          v-if="!assets.length"
+          class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow"
+        >{{ t('assetMgmt.fileCard.noAssets') }}</div>
+        <!-- 功能摘要(空则按需生成；与列表/图谱共用 desc 缓存) + 伪码 -->
         <template v-if="sel">
           <p
             v-if="sel.desc"
@@ -83,35 +88,38 @@
             :asset-id="sel.id"
             :initial="sel.pseudo || ''"
           />
+        </template>
 
-          <!-- 源码段(逐锚点) + 逐行解读(line-notes 与图谱卡共享 assetId 键缓存) -->
-          <div
-            v-for="(seg, i) in segs"
-            :key="`${seg.file}:${seg.startLine}`"
-            class="rounded-md border border-ctp-surface0 overflow-hidden"
-          >
+        <!-- 源码段(选中资产=逐锚点；无资产=文件头部窗口)；逐行解读仅资产模式 -->
+        <div
+          v-for="(seg, i) in segs"
+          :key="`${seg.file}:${seg.startLine}`"
+          class="rounded-md border border-ctp-surface0 overflow-hidden"
+        >
             <div class="flex items-center gap-1.5 px-2 py-1 bg-ctp-surface0/40">
               <span class="text-[10px] font-medium text-ctp-mauve truncate">
                 {{ t('assetMgmt.graph.sourceCode') }}
                 <span class="text-ctp-overlay1 font-normal font-mono">{{ shortPath(seg.file) }}:L{{ seg.startLine }}<span v-if="seg.symbol"> · {{ seg.symbol }}</span></span>
               </span>
               <span class="flex-1" />
-              <span
-                v-if="notesState[i]?.cached"
-                class="chip !text-[8px] bg-ctp-teal/15 text-ctp-teal shrink-0"
-                :title="t('assetMgmt.graph.lineNotesCachedTip')"
-              >{{ t('assetMgmt.graph.lineNotesCached') }}</span>
-              <button
-                class="btn btn-xs btn-ghost !text-[9px]"
-                :disabled="notesState[i]?.loading"
-                :title="t('assetMgmt.graph.lineNotesForce')"
-                @click="loadNotes(i, notesState[i]?.done)"
-              >
-                <SparklesIcon
-                  class="w-3 h-3"
-                  :class="notesState[i]?.loading ? 'animate-pulse' : ''"
-                />{{ t('assetMgmt.graph.lineNotes') }}
-              </button>
+              <template v-if="sel">
+                <span
+                  v-if="notesState[i]?.cached"
+                  class="chip !text-[8px] bg-ctp-teal/15 text-ctp-teal shrink-0"
+                  :title="t('assetMgmt.graph.lineNotesCachedTip')"
+                >{{ t('assetMgmt.graph.lineNotesCached') }}</span>
+                <button
+                  class="btn btn-xs btn-ghost !text-[9px]"
+                  :disabled="notesState[i]?.loading"
+                  :title="t('assetMgmt.graph.lineNotesForce')"
+                  @click="loadNotes(i, notesState[i]?.done)"
+                >
+                  <SparklesIcon
+                    class="w-3 h-3"
+                    :class="notesState[i]?.loading ? 'animate-pulse' : ''"
+                  />{{ t('assetMgmt.graph.lineNotes') }}
+                </button>
+              </template>
             </div>
             <pre class="m-0 px-2 py-1.5 text-[10px] leading-[1.5] font-mono overflow-x-auto bg-ctp-crust"><span
   v-for="l in seg.snippet?.lines ?? []"
@@ -141,7 +149,6 @@
               class="px-2 py-1 text-[9px] text-ctp-yellow"
             >{{ t('assetMgmt.graph.lineNotesDegraded') }}</div>
           </div>
-        </template>
       </div>
     </div>
   </div>
@@ -189,7 +196,13 @@ async function rebuild() {
   for (const k of Object.keys(notes)) delete notes[Number(k)]
   for (const k of Object.keys(notesState)) delete notesState[Number(k)]
   const a = sel.value
-  if (!a) return
+  if (!a) {
+    // 无资产文件：文件头部窗口(纯源码浏览, 无逐行解读)
+    segs.value = [{ file: props.file, startLine: 1, endLine: 400, symbol: '', snippet: null }]
+    const s0 = segs.value[0]!
+    s0.snippet = (await semanticAssetService.sourceSnippet(props.file, 1, undefined, 0, 399, 400)) ?? null
+    return
+  }
   const refs = (a.astRefs ?? []).filter((r) => r.file === props.file)
   segs.value = refs.map((r) => ({
     file: r.file, startLine: r.startLine, endLine: r.endLine, symbol: r.symbol, snippet: null,

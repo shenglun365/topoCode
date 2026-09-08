@@ -1963,6 +1963,7 @@ renderingMore: 'Rendered {done}/{total} · scroll for more',
     emptyComponent: 'No component assets.',
     fileCard: {
       view: 'View file source card',
+      noAssets: 'No semantic assets in this file yet',
       locate: 'Locate in list',
     },
     compScope: 'Scope Selection',

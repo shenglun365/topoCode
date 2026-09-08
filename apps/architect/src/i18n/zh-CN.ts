@@ -1987,6 +1987,7 @@ renderingMore: '已渲染 {done}/{total} · 滚动加载更多',
     emptyComponent: '暂无组件资产。',
     fileCard: {
       view: '查看文件源码资产卡',
+      noAssets: '该文件暂无语义资产',
       locate: '在列表定位',
     },
     compScope: '范围选择',

@@ -1209,7 +1209,7 @@ const fileCard = ref<{ file: string; assets: SemanticAsset[] } | null>(null)
 function openFileCard(file: string) {
   const seen = new Set<string>()
   const assets = items.value.filter((x) => !seen.has(x.id) && (x.astRefs ?? []).some((r) => r.file === file) && seen.add(x.id))
-  if (assets.length) fileCard.value = { file, assets }
+  fileCard.value = { file, assets }
 }
 /** 卡内「在列表定位」：按资产 id 过滤列表并关卡。 */
 function locateAsset(id: string) {
@@ -2655,9 +2655,8 @@ onUnmounted(() => {
                 >
                   <Squares2X2Icon class="w-3 h-3" />
                 </button>
-                <!-- 文件源码资产卡：复用图谱资产卡服务/缓存，列表内浮卡展示 -->
+                <!-- 文件源码资产卡：复用图谱资产卡服务/缓存，列表内浮卡展示(无资产文件=纯源码浏览) -->
                 <button
-                  v-if="row.n"
                   class="text-ctp-overlay0 hover:text-ctp-blue p-0.5 shrink-0"
                   :title="t('assetMgmt.fileCard.view')"
                   @click="openFileCard(row.file!)"
