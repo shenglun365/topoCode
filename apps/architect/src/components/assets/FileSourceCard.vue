@@ -7,9 +7,31 @@
       class="absolute inset-0 bg-ctp-crust/60"
       @click="emit('close')"
     />
-    <div class="relative z-10 w-[min(880px,94vw)] max-h-[86vh] flex flex-col rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl overflow-hidden">
-      <!-- 头部：文件名 + 资产数 + 关闭 -->
-      <div class="flex items-center gap-1.5 px-3 pt-2.5 pb-1.5 border-b border-ctp-surface0 shrink-0">
+    <div
+      ref="cardEl"
+      class="z-10 max-h-[86vh] flex flex-col rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl overflow-hidden"
+      :class="[cardPos ? 'absolute' : 'relative w-[min(880px,94vw)]', dragging ? 'cursor-grabbing select-none' : '']"
+      :style="{
+        ...(cardW ? { width: cardW + 'px' } : {}),
+        ...(cardPos ? { left: cardPos.x + 'px', top: cardPos.y + 'px' } : {}),
+      }"
+    >
+      <!-- 宽度拉伸把手(右缘) -->
+      <div
+        class="absolute top-0 bottom-0 right-0 w-1.5 cursor-ew-resize z-20"
+        :class="resizing ? 'bg-ctp-mauve/40' : 'hover:bg-ctp-mauve/25'"
+        @pointerdown="beginResize"
+        @pointermove="onResize"
+        @pointerup="endResize"
+      />
+      <!-- 头部：文件名 + 资产数 + 关闭(可拖动；双击复位) -->
+      <div
+        class="flex items-center gap-1.5 px-3 pt-2.5 pb-1.5 border-b border-ctp-surface0 shrink-0 cursor-move"
+        @pointerdown="beginDrag"
+        @pointermove="onDrag"
+        @pointerup="endDrag"
+        @dblclick="resetCard"
+      >
         <CodeBracketIcon class="w-3.5 h-3.5 text-ctp-blue shrink-0" />
         <span
           class="font-mono text-[11px] font-semibold text-ctp-text truncate"
@@ -199,6 +221,49 @@ const codeFontSize = computed(() => {
 })
 
 const copiedSeg = ref(-1)
+
+// ---- 浮卡拖动 + 宽度拉伸 ----
+const cardEl = ref<HTMLElement | null>(null)
+const cardPos = ref<{ x: number; y: number } | null>(null)
+const cardW = ref(0)
+const dragging = ref(false)
+const resizing = ref(false)
+let dragOff = { x: 0, y: 0 }
+let resizeStart = { x: 0, w: 0 }
+
+function beginDrag(e: PointerEvent) {
+  if ((e.target as HTMLElement).closest('button,input')) return
+  const el = cardEl.value
+  if (!el) return
+  dragging.value = true
+  const r = el.getBoundingClientRect()
+  if (!cardW.value) cardW.value = r.width
+  if (!cardPos.value) cardPos.value = { x: r.left, y: r.top }
+  dragOff = { x: e.clientX - cardPos.value.x, y: e.clientY - cardPos.value.y }
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+function onDrag(e: PointerEvent) {
+  if (!dragging.value) return
+  const el = cardEl.value
+  const w = el?.offsetWidth ?? 0
+  const x = Math.min(Math.max(e.clientX - dragOff.x, 8), window.innerWidth - w - 8)
+  const y = Math.min(Math.max(e.clientY - dragOff.y, 8), window.innerHeight - 48)
+  cardPos.value = { x, y }
+}
+function endDrag() { dragging.value = false }
+function beginResize(e: PointerEvent) {
+  const el = cardEl.value
+  if (!el) return
+  resizing.value = true
+  resizeStart = { x: e.clientX, w: el.offsetWidth }
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+function onResize(e: PointerEvent) {
+  if (!resizing.value) return
+  cardW.value = Math.min(Math.max(resizeStart.w + (e.clientX - resizeStart.x), 520), Math.round(window.innerWidth * 0.96))
+}
+function endResize() { resizing.value = false }
+function resetCard() { cardPos.value = null; cardW.value = 0 }
 async function copyLoc(i: number) {
   const seg = segs.value[i]
   const s2 = seg?.snippet
