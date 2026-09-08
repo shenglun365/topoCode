@@ -133,7 +133,9 @@ def _task_spec(file_: str, kind: str) -> str:
         "(field_semantics/step_semantics/branch_semantics/constraint_semantics/"
         "transition_semantics，键必须与种子完全一致)。\n"
         "严禁: 臆造种子与工具返回中不存在的符号/字段/条件/path/常量值；更改类别。\n"
-        "只输出 JSON 对象 {\"assets\": [...]}，不要 Markdown 代码块。"
+        "输出 JSON 对象 {\"assets\": [...]}，不要 Markdown 代码块。"
+        "每项必须带 symbol 字段=候选表中的 symbol 值逐字回填(对齐用，不可省略/改写)；"
+        "各项按候选表顺序输出。"
     )
 
 
@@ -303,6 +305,13 @@ def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: st
                                file_, kind, e)
         if res and isinstance(res.get("output"), dict):
             enrich = parse_enrichments(res["output"], names)
+            if not enrich:
+                # LLM 有结构化输出但 0 匹配：多半是 symbol 名对不上/输出被截断
+                # → 留样诊断(前 600 字符 + 期望符号样本)，不再无声归零
+                logger.warning(
+                    "[asset_extract] %s %s LLM 输出 0 匹配: 期望=%s 输出样例=%r",
+                    file_, kind, names[:3],
+                    str(res.get("output"))[:600])
         else:
             logger.warning("[asset_extract] %s %s LLM 无结构化输出(content_len=%d)",
                            file_, kind, len((res or {}).get("content") or ""))

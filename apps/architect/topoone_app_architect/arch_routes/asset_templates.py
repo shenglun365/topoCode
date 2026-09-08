@@ -400,20 +400,33 @@ def repair_hint(kind: str, issues: List[str], node: dict) -> str:
 
 def parse_enrichments(output: Any, symbol_names: List[str]
                       ) -> Dict[str, dict]:
-    """LLM 增强输出 → {symbol: enrichment}。symbol 不匹配候选表的条目丢弃。"""
+    """LLM 增强输出 → {symbol: enrichment}。symbol 不匹配候选表的条目丢弃。
+
+    symbol 缺失的兜底：模型(尤其小模型)偶发漏回 symbol 字段——提示词已按候选
+    表顺序列出且要求按序输出 → 对无 symbol 的条目按出现顺序对齐到尚未匹配的
+    候选名(两遍法：先收带 symbol 的，再按序分配余量)。
+    """
     if not isinstance(output, dict):
         return {}
+    want = [str(s) for s in symbol_names]
+    want_set = set(want)
     out: Dict[str, dict] = {}
-    want = {str(s) for s in symbol_names}
+    anonymous: List[dict] = []
     for a in output.get("assets") or []:
         if not isinstance(a, dict):
             continue
         sym = str(a.get("symbol") or "").strip()
         if not sym:
+            anonymous.append(a)
             continue
         # 容忍 qualified_name 与 name 两种写法
-        key = sym if sym in want else (sym.split("::")[-1] if sym.split("::")[-1] in want else sym)
-        if key not in want and sym not in want:
-            continue
-        out[key if key in want else sym] = a
+        key = sym if sym in want_set else (sym.split("::")[-1] if sym.split("::")[-1] in want_set else sym)
+        if key in want_set:
+            out[key] = a
+        else:
+            anonymous.append(a)
+    # 顺序对齐兜底：剩余候选名(保持候选表顺序) × 无 symbol 条目(按输出顺序)
+    remaining = [s for s in want if s not in out]
+    for a, sym in zip(anonymous, remaining):
+        out[sym] = a
     return out
