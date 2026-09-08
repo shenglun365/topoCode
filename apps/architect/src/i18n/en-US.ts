@@ -1903,6 +1903,7 @@ export default {
       pseudoRegen: 'Regenerate pseudo-code',
       genDesc: 'Generate summary',
       descPending: 'No summary yet — expand for on-demand generation',
+descPendingHint: 'Summary not generated — expand the card to generate it',
 descReady: 'Summary generated · expand for details',
 descReadyHint: 'Summary generated — expand the card to read the full text',
     pseudoLoading: 'Generating…',

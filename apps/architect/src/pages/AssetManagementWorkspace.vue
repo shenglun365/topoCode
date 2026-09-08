@@ -2809,12 +2809,15 @@ onUnmounted(() => {
                 </div>
                 <p
                   v-if="!expanded[a.id] && a.desc"
-                  class="px-2 pb-1.5 text-[10px] truncate text-ctp-teal"
+                  class="px-2 pb-1.5 text-[10px] truncate text-ctp-teal cursor-pointer hover:text-ctp-sky"
                   :title="t('assetMgmt.descReadyHint')"
+                  @click="toggle(a.id)"
                 >{{ t('assetMgmt.descReady') }}</p>
                 <p
                   v-else-if="!expanded[a.id]"
-                  class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap text-ctp-overlay0 italic"
+                  class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap text-ctp-overlay0 italic cursor-pointer hover:text-ctp-subtext0"
+                  :title="t('assetMgmt.descPendingHint')"
+                  @click="toggle(a.id)"
                 >
                   {{ t('assetMgmt.descPending') }}
                 </p>
