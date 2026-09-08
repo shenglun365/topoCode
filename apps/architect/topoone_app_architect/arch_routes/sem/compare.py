@@ -433,6 +433,17 @@ def compare_changes(root: Optional[str], project: Optional[str],
                      if _extractable(f) and tgt_md5.get(f)
                      and not any(h == tgt_md5.get(f) for _, h in anchored.get(f, []))]
 
+    # 通用提取闭环：pending 中「目标侧内容 == 工作区当前内容」的子集可经工作区
+    # 提取锚定(不限 target=worktree——任意 commit 对，只要该文件自 target 起未再
+    # 变更)；内容已分叉的文件提取无效(资产身份=canonicalKey，提取历史内容会
+    # 覆盖现役资产摘要，破坏性)，自动排除。
+    if pending_files and target != "worktree":
+        from .incremental import _file_md5
+        extractable = [f for f in pending_files
+                       if tgt_md5.get(f) and tgt_md5[f] == _file_md5(root, f)]
+    else:
+        extractable = list(pending_files)
+
     # ── 跨域联系：「其他」桶资产 → 组件内资产 的 relations(证据式, 合理联动) ──
     cross_links: List[dict] = []
     try:
@@ -472,7 +483,9 @@ def compare_changes(root: Optional[str], project: Optional[str],
                    "new": new_at_target, "newTotal": new_total,
                    "removed": removed, "removedTotal": removed_total,
                    "pending": {"count": len(pending_files),
-                               "files": pending_files[:_CAP_PENDING]}},
+                               "files": pending_files[:_CAP_PENDING],
+                               "extractable": extractable[:_CAP_PENDING],
+                               "extractableCount": len(extractable)}},
         "crossLinks": cross_links,
         "crossLinkCount": len(cross_links),
     }

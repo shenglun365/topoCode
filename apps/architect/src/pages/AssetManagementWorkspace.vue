@@ -699,9 +699,15 @@ async function runCompare() {
 
 // ---- 提取闭环：待提取文件(目标侧无资产匹配) → 按文件范围补提(分批) → 重新对比 ----
 const extractingPending = ref(false)
+/** 可经工作区提取锚定的待提取子集(目标侧内容==工作区内容；旧响应无此字段时回退全集)。 */
+const pendingExtractable = computed(() => {
+  const p = compareData.value?.assets.pending
+  if (!p) return []
+  return p.extractable?.length ? p.extractable : (p.extractableCount === 0 ? [] : p.files)
+})
 
 async function extractPendingAndRecompare() {
-  const files = compareData.value?.assets.pending.files ?? []
+  const files = pendingExtractable.value
   if (!files.length) return
   if (!window.confirm(t('assetMgmt.diff.extractConfirm', { n: files.length }))) return
   extractingPending.value = true
@@ -1724,14 +1730,17 @@ onUnmounted(() => {
         <span v-else-if="compareError" class="text-[10px] text-ctp-red truncate max-w-[40%]" :title="compareError">{{ compareError }}</span>
         <!-- 结果数字不再重复在此：统一在下方「对比结果明细」统计行(缓存态/资产变化/待提取) -->
         <template v-else-if="compareData && !compareData.noChanges">
-          <!-- 提取闭环：目标侧=工作区 且 有待提取文件 → 按文件范围补提 → 重新对比 -->
+          <!-- 提取闭环(通用)：pending 中「目标侧内容==工作区内容」的子集可经工作区提取锚定；
+               内容已分叉的自动排除(提取历史内容会覆盖现役资产摘要)。完成后自动重新对比 -->
           <button
-            v-if="compareData.assets.pending.count && compareData.targetIsWorktree && !extractingPending"
+            v-if="pendingExtractable.length && !extractingPending"
             class="btn btn-xs btn-blue !py-0.5 shrink-0"
-            :title="t('assetMgmt.diff.extractRecompareHint', { n: compareData.assets.pending.count })"
+            :title="pendingExtractable.length < compareData.assets.pending.count
+              ? t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length }) + ' ' + t('assetMgmt.diff.extractDiverged', { m: compareData.assets.pending.count - pendingExtractable.length })
+              : t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length })"
             @click="extractPendingAndRecompare"
           >
-            <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.diff.extractRecompare', { n: compareData.assets.pending.count }) }}
+            <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.diff.extractRecompare', { n: pendingExtractable.length }) }}
           </button>
           <span v-if="extractingPending" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.extracting') }}</span>
         </template>

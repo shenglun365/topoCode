@@ -1570,6 +1570,7 @@ export default {
       extracting: 'Extracting…',
       extractConfirm: 'Extract semantic assets for {n} changed files (LLM calls will be consumed), then re-compare. Continue?',
       extractZero: 'Extraction finished with zero assets: the pending list may contain mostly non-extractable files, or the LLM model is unavailable (check the model selector / backend model config)',
+      extractDiverged: 'The other {m} files diverged between the target side and the worktree; extraction would not apply (checkout that version required)',
       pendingFiles: 'Files pending extraction ({n})',
       pendingCommitHint: 'Target is a historical commit: extraction only works against the working tree — switch target back to it.',
       newAssets: 'New assets on target side',

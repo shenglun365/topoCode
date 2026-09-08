@@ -372,8 +372,8 @@ export interface AssetCompareResult {
     newTotal: number
     removed: AssetCompareAsset[]
     removedTotal: number
-    /** 目标侧存在但无资产匹配其内容 → 待提取(仅 worktree 目标可补提) */
-    pending: { count: number; files: string[] }
+    /** 目标侧存在但无资产匹配其内容 → 待提取(extractable=目标内容==工作区内容的子集, 可经工作区提取闭环) */
+    pending: { count: number; files: string[]; extractable?: string[]; extractableCount?: number }
   }
   crossLinks: AssetCompareCrossLink[]
   crossLinkCount: number

@@ -1595,6 +1595,7 @@ export default {
     extracting: '提取中…',
     extractConfirm: '将对 {n} 个变更文件提取语义资产(消耗 LLM 调用)，完成后重新对比。继续？',
     extractZero: '提取完成但未产出资产：待提取清单可能含大量不可提取文件，或 LLM 模型不可用(检查顶部模型选择/后端模型配置)',
+    extractDiverged: '其余 {m} 个文件目标侧内容与工作区已分叉，提取无效(需检出该版本)',
     pendingFiles: '待提取文件({n})',
     pendingCommitHint: '对比目标为历史提交：提取仅在「工作区」目标侧可用，切回工作区后可补提。',
     newAssets: '目标侧新增资产',
