@@ -300,6 +300,8 @@ export interface SyncExtractJob {
   startedAt?: number
   finishedAt?: number
   level?: string
+  /** 逐文件推进: 当前正在提取的文件(供 UI 进度展示) */
+  current?: string
   batch?: number
 }
 
@@ -343,6 +345,8 @@ export interface UnownedExtractJob {
   startedAt?: number
   finishedAt?: number
   level?: string
+  /** 逐文件推进: 当前正在提取的文件(供 UI 进度展示) */
+  current?: string
   batch?: number
   unowned?: number
   withAssets?: number

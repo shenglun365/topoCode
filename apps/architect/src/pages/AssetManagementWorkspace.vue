@@ -1683,7 +1683,9 @@ onUnmounted(() => {
            :class="syncExtracting ? 'btn-primary' : 'btn-primary'"
            :disabled="syncPlanLoading || syncExtracting"
            :title="syncExtracting
-             ? t('assetMgmt.sync.extractingHint', { saved: syncJob?.saved ?? 0 })
+             ? (syncJob?.current
+                ? t('assetMgmt.sync.extractingCurrent', { saved: syncJob?.saved ?? 0, current: syncJob.current })
+                : t('assetMgmt.sync.extractingHint', { saved: syncJob?.saved ?? 0 }))
              : t('assetMgmt.sync.hint')"
            @click="planSyncExtract"
          >

@@ -21,7 +21,6 @@ from .paths import _norm_path, project_id_for, resolve_root
 logger = logging.getLogger(__name__)
 
 _SYNC_CAP = 2000              # 快照清单上限(超大仓库防雪崩；超出部分下次同步)
-_SYNC_MAX_BATCHES = 400       # 循环保险丝(2000/批10 → 理论 ≤200 批)
 
 _jobs: Dict[str, dict] = {}   # pid → 作业状态(进程内，不落库)
 _jobs_lock = threading.Lock()
@@ -121,40 +120,48 @@ def extract_plan(root: Optional[str], project: Optional[str]) -> dict:
 
 def _snapshot_loop(pid: str, rid: str, project: Optional[str],
                    snapshot: List[str], batch: int, level: str) -> None:
+    """逐文件推进(LLM 在环后单文件 1~3 分钟，原批口径 10 文件/更会让进度
+    长时间凝固在 done=0)。每文件 done+1/saved 即时可见，单文件异常不拖累
+    整批；连续 ≥5 个文件系统性同错(范围/符号库类)熔断，如实上报。"""
     job = _jobs.get(pid) or {}
     try:
         from .engine import extract_scope
-        step = max(1, batch)
-        for i in range(0, len(snapshot), step):
+        consecutive_errors = 0
+        for f in snapshot:
             if job.get("stop"):
                 job["stopped"] = True
                 break
-            if i >= _SYNC_MAX_BATCHES * step:
-                break
-            files = snapshot[i:i + step]
+            job["current"] = f
             try:
-                res = extract_scope(rid, project, "files", "", files=files, level=level)
+                res = extract_scope(rid, project, "files", "", files=[f], level=level)
                 if isinstance(res, dict) and res.get("error"):
+                    consecutive_errors += 1
                     job["errors"] = (job.get("errors") or [])[-4:] + [
-                        {"files": files, "error": str(res.get("error"))[:200]}]
-                    break        # 范围/符号库类错误：继续批大概率同样失败，如实上报
-                job["saved"] = job.get("saved", 0) + (res.get("count") or 0)
+                        {"files": [f], "error": str(res.get("error"))[:200]}]
+                    if consecutive_errors >= 5:
+                        break
+                else:
+                    consecutive_errors = 0
+                    job["saved"] = job.get("saved", 0) + (res.get("count") or 0)
             except Exception as e:  # noqa: BLE001 — 作业线程必须吞异常保状态一致
-                logger.warning("[sync-extract] 作业异常: %s", e, exc_info=True)
+                logger.warning("[sync-extract] 作业异常(%s): %s", f, e, exc_info=True)
+                consecutive_errors += 1
                 job["errors"] = (job.get("errors") or [])[-4:] + [
-                    {"files": files, "error": str(e)[:200]}]
-                break
-            job["done"] = job.get("done", 0) + len(files)
-            job["batches"] = job.get("batches", 0) + 1
+                    {"files": [f], "error": str(e)[:200]}]
+                if consecutive_errors >= 5:
+                    break
+            finally:
+                job["done"] = job.get("done", 0) + 1
     finally:
         job["running"] = False
+        job["current"] = ""
         job["finishedAt"] = time.time()
 
 
 def _job_public(job: dict) -> dict:
     return {k: job.get(k) for k in
             ("running", "total", "done", "saved", "batches", "errors", "stopped",
-             "startedAt", "finishedAt", "level", "batch")}
+             "startedAt", "finishedAt", "level", "batch", "current")}
 
 
 def sync_extract_start(root: Optional[str], project: Optional[str],
