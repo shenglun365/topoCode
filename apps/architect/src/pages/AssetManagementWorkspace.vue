@@ -60,6 +60,14 @@ function _onDockRefreshAsset(e: Event) {
 onMounted(() => window.addEventListener('arch:refresh-asset', _onDockRefreshAsset))
 onUnmounted(() => window.removeEventListener('arch:refresh-asset', _onDockRefreshAsset))
 
+/** 会话内资产卡点击 → 联动: 打开语义图谱 tab 聚焦该资产(P4 图文评估联动)。 */
+function _onDockOpenAsset(e: Event) {
+  const id = (e as CustomEvent).detail as string
+  if (id) openGraphTab('asset', id, id)
+}
+onMounted(() => window.addEventListener('arch:open-asset', _onDockOpenAsset))
+onUnmounted(() => window.removeEventListener('arch:open-asset', _onDockOpenAsset))
+
 /** 确保 dock 当前是资产会话(非资产会话时新开)。 */
 function ensureAssetConversation() {
   if (!conv.activeId) conv.newConversation(t('assetMgmt.chatTitle'))

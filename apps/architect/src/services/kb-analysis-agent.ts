@@ -101,6 +101,8 @@ export interface ChatStreamEvent {
   ok?: boolean
   /** 工具进度(tool_result)：结果摘要(截断)。 */
   summary?: string
+  /** 工具进度(tool_result)：资产卡引用(评估报告等, 点击联动资产地图)。 */
+  assets?: Array<{ id: string; name: string; kind: string; level?: string; file?: string; status?: string }>
   /** 相位事件(status)：sync=降级同步通道 / sync_llm=降级通道 LLM 第 N 轮 /
    *  sync_tool=降级通道执行工具 / llm_round=工具回喂后再生成。 */
   phase?: string
@@ -189,6 +191,7 @@ export async function chatStream(
       onEvent({
         type: 'tool_result', tool: ev?.tool, ok: ev?.ok, summary: ev?.summary,
         conversationId: ev?.conversationId,
+        assets: Array.isArray(ev?.assets) ? ev.assets : undefined,
       })
     })
     ws.on('status', (ev: any) => {

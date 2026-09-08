@@ -113,6 +113,8 @@ from . import context_registry as _context_registry  # noqa: E402
 _context_registry.register_chat_tools()
 _context_registry.register_probe_tool()
 _context_registry.register_coding_task_tools()
+from . import evaluator as _evaluator  # noqa: E402
+_evaluator.register_evaluator_tools()
 
 
 @router.websocket("/ws/kb-analysis")
@@ -415,11 +417,15 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
     summary = req_agent.tool_result_text(name, result)
     ok = not (isinstance(result, dict) and result.get("error"))
-    await websocket.send_json({
+    event = {
         "type": "tool_result", "requestId": request_id, "tool": name,
         "ok": ok,
         "summary": summary[:160],
-    })
+    }
+    # 资产卡透传(评估报告等带资产引用的工具): 前端渲染可联动资产地图的卡片
+    if isinstance(result, dict) and isinstance(result.get("assets"), list) and result["assets"]:
+        event["assets"] = result["assets"][:12]
+    await websocket.send_json(event)
     # P2 上下文注册表: 工具轨迹/产物 → 单元(会话级溯源)
     from . import ctx as _ctx
     try:

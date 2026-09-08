@@ -57,6 +57,11 @@ const emit = defineEmits<{
 const editingTitle = ref(false)
 const titleDraft = ref('')
 
+/** 资产引用点击 → 联动资产地图(图谱节点/资产卡)。宿主页面监听 arch:open-asset。 */
+function openAssetRef(id: string) {
+  window.dispatchEvent(new CustomEvent('arch:open-asset', { detail: id }))
+}
+
 /** 阶段标注配色(设计/实现/评估/验收——消息级工具推导, 非会话分类)。 */
 function stageClass(stage: string) {
   if (stage === 'design') return 'bg-ctp-peach/15 text-ctp-peach'
@@ -624,7 +629,11 @@ onUnmounted(() => {
                 <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">
                   {{ assetKindLabel(a.kind) }}
                 </span>
-                <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
+                <span
+                  class="text-[11px] font-medium text-ctp-text truncate cursor-pointer hover:text-ctp-blue"
+                  :title="t('requirement.chat.assetOpen')"
+                  @click="openAssetRef(a.id)"
+                >{{ a.name }}</span>
                 <span
                   v-if="a.needsUpdate || a.status === 'stale'"
                   class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"

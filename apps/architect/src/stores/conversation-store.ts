@@ -9,6 +9,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { chatStream, stageOfTool, type ChatStreamEvent, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
+import type { SemanticAsset } from '@/types'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { requirementService } from '@/services/requirement-service'
 import { readModelPref } from '@topo/web-core/shell'
@@ -149,6 +150,7 @@ export const useConversationStore = defineStore('archConversation', () => {
           const stage = stageOfTool(ev.tool)
           if (stage) turns.value[idx].stage = stage
           if (ev.tool === 'req.propose' && ev.ok) void attachProposal(ev)
+          if (ev.assets?.length) turns.value[idx].assets = ev.assets as SemanticAsset[]
         } else if (ev.type === 'error') {
           turns.value[idx].content = ev.message || ''
         }
