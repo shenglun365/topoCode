@@ -2,7 +2,7 @@
 import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { kindChipClass } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
@@ -21,6 +21,10 @@ const props = defineProps<{
   insertDraft?: { text: string; nonce: number } | null
   /** 对话标题(缺省「需求分析对话」；资产管理等复用场景可覆盖)。 */
   title?: string
+  /** 头部标题可编辑: 悬停显示 手动修改/自动摘要 按钮(宿主接线保存/摘要)。 */
+  editable?: boolean
+  /** 自动摘要进行中(按钮转圈)。 */
+  titleSummarizing?: boolean
   /** 绘图增强(IR→代码)：开启后 agent 经 diagram.build 工具生成语法正确的图。 */
   diagramSkill?: boolean
   /** 期望固化(🧾)：开启后 agent 把可验证期望固化为契约条目草稿。 */
@@ -31,6 +35,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   send: [text: string]
+  rename: [title: string]
+  'summarize-title': []
   answers: [answers: Record<string, string>]
   'confirm-draft': []
   'delete-turn': [index: number]
@@ -46,6 +52,21 @@ const emit = defineEmits<{
   'goto-requirements': [reqId: string]
   stop: []
 }>()
+
+// ── 头部标题行内编辑 ──
+const editingTitle = ref(false)
+const titleDraft = ref('')
+function startTitleEdit() {
+  titleDraft.value = props.title || ''
+  editingTitle.value = true
+}
+function onTitleInput(e: Event) { titleDraft.value = (e.target as HTMLInputElement).value }
+function commitTitleEdit() {
+  if (!editingTitle.value) return
+  editingTitle.value = false
+  const t = titleDraft.value.trim()
+  if (t && t !== props.title) emit('rename', t)
+}
 
 const { t } = useI18n()
 const input = ref('')
@@ -435,8 +456,41 @@ onUnmounted(() => {
 <template>
   <div class="relative flex flex-col h-full min-h-0 border border-ctp-surface0 rounded-lg overflow-hidden bg-ctp-crust/30">
     <div class="panel-header shrink-0">
-      <span class="flex items-center gap-2">
-        <ChatBubbleLeftRightIcon class="w-4 h-4 text-ctp-blue" />{{ title ?? t('requirement.chat.title') }}
+      <span class="flex min-w-0 items-center gap-2">
+        <ChatBubbleLeftRightIcon class="w-4 h-4 shrink-0 text-ctp-blue" />
+        <input
+          v-if="editingTitle"
+          v-model="titleDraft"
+          class="input w-full min-w-0 max-w-72 !px-1.5 !py-0.5 text-xs"
+          @keydown.enter.prevent="commitTitleEdit"
+          @keydown.esc="editingTitle = false"
+          @blur="commitTitleEdit"
+        >
+        <span
+          v-else
+          class="group/t flex min-w-0 items-center gap-1"
+        >
+          <span class="min-w-0 truncate">{{ title ?? t('requirement.chat.title') }}</span>
+          <span
+            v-if="editable"
+            class="hidden shrink-0 items-center gap-0.5 group-hover/t:flex"
+          >
+            <button
+              class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface0 hover:text-ctp-blue"
+              :title="t('session.actions.rename')"
+              @click="startTitleEdit"
+            >
+              <PencilSquareIcon class="h-3 w-3" />
+            </button>
+            <button
+              class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface0 hover:text-ctp-blue"
+              :title="t('session.actions.summarize')"
+              @click="emit('summarize-title')"
+            >
+              <SparklesIcon class="h-3 w-3" :class="titleSummarizing ? 'animate-pulse' : ''" />
+            </button>
+          </span>
+        </span>
       </span>
     </div>
 

@@ -49,11 +49,18 @@ function startTitleEdit() {
 async function saveTitle() {
   if (!editingTitle.value) return
   editingTitle.value = false
-  const title = titleDraft.value.trim()
+  await commitTitle(titleDraft.value)
+}
+async function onRenameTitle(t: string) {
+  await commitTitle(t)
+}
+async function commitTitle(title: string) {
+  title = (title || '').trim()
   if (!title || title === conv.activeTitle) return
   conv.activeTitle = title
   if (conv.activeId) {
     try { await sessionService.update(conv.activeId, { title }) } catch { /* 保存失败保持本地 */ }
+    void loadRecent()
   }
 }
 async function summarizeTitle() {
@@ -159,8 +166,8 @@ async function answerClarify() {
       ? 'relative flex h-full min-h-0 w-full flex-col bg-ctp-base'
       : 'fixed right-0 top-0 z-40 flex h-full w-[26rem] flex-col border-l border-ctp-surface0 bg-ctp-base shadow-2xl'"
   >
-    <!-- 头部: 标题(两种形态都有, 悬停可改) + 会话切换/新建/关闭(仅悬浮形态) -->
-    <div class="relative shrink-0 border-b border-ctp-surface0 px-3 py-1.5">
+    <!-- 头部: 标题 + kind + 会话切换(仅悬浮形态; inline 停靠的标题编辑在对话面板 header 内) -->
+    <div v-if="!props.inline" class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
       <div class="flex items-center gap-2">
         <span class="chip shrink-0" :class="kindClass(conv.activeKind)">
           {{ t(`session.kind.${conv.activeKind}`) }}
@@ -277,6 +284,10 @@ async function answerClarify() {
         :tool-trail="conv.toolTrail"
         :insert-draft="conv.insertDraft"
         :title="conv.activeTitle || t('session.dock.untitled')"
+        :editable="!!conv.activeId && !conv.busy"
+        :title-summarizing="titleSummarizing"
+        @rename="onRenameTitle"
+        @summarize-title="summarizeTitle"
         :diagram-skill="conv.diagramSkill"
         @send="(text) => { conv.send(text, conv.activeKind === 'asset' ? { skillScenarios: ['extract'] } : undefined); onSent() }"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
