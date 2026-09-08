@@ -1719,13 +1719,7 @@ onUnmounted(() => {
           <option value="worktree">{{ t('assetMgmt.diff.worktree') }}</option>
           <option v-for="c in commitOptions" :key="`t-${c.oid}`" :value="c.oid">{{ c.oid.slice(0, 8) }} {{ c.subject.slice(0, 26) }}</option>
         </select>
-        <button
-          class="btn btn-ghost !py-0.5 !px-1.5 shrink-0"
-          :title="t('assetMgmt.diff.cmpRerun')"
-          @click="runCompare"
-        >
-          <ArrowPathIcon class="w-3 h-3" :class="compareLoading ? 'animate-spin' : ''" />
-        </button>
+        <!-- 重新对比按钮已删：选择即对比(@change)/提取闭环自带重比；工作区有新改动时重选目标即可触发 -->
         <span v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</span>
         <span v-else-if="compareError" class="text-[10px] text-ctp-red truncate max-w-[40%]" :title="compareError">{{ compareError }}</span>
         <!-- 结果数字不再重复在此：统一在下方「对比结果明细」统计行(缓存态/资产变化/待提取) -->
