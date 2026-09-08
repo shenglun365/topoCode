@@ -536,6 +536,7 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
       for (const f of uniqueFiles(c)) {
         const fk = c.id + '::' + f
         const list = byFile.get(f) ?? []
+        if (hideFileless.value && !list.length) continue
         rows.push({ key: 'f:' + fk, t: 'file', depth: depth + 1, file: f, n: list.length, fk })
         if (fileAssetsOpen(fk)) {
           for (const a of list) rows.push({ key: 'a:' + a.id + ':' + fk, t: 'asset', depth: depth + 2, a })
@@ -566,6 +567,7 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
       for (const f of [...fileAssets.keys()].sort()) {
         const fk = OTHER_KEY + '::' + f
         const list = fileAssets.get(f) ?? []
+        if (hideFileless.value && !list.length) continue
         rows.push({ key: 'f:' + fk, t: 'file', depth: 1, file: f, n: list.length,
                     fk, unowned: true, extractable: unownedEntry.get(f)?.extractable })
         if (fileAssetsOpen(fk)) {
@@ -1198,6 +1200,8 @@ const batchLast = ref('')
 /** clear 前的 dry-run 影响预览(需求池/未完成任务)。 */
 const batchPreview = ref<SemanticBatchResult | null>(null)
 
+/** 范围筛选 · 隐藏无资产文件：文件行(含未提取的未归属文件)无资产时不渲染。 */
+const hideFileless = ref(false)
 /** 当前组件范围：选中组件 id(空=全部) + 是否含「其它」。 */
 function targetScope() {
   const compIds = scopeSel.value.filter((id) => id !== OTHER_KEY)
@@ -2017,6 +2021,14 @@ onUnmounted(() => {
                   <span class="text-[9px] text-ctp-overlay0 truncate">{{ t('assetMgmt.unowned.desc') }}</span>
                 </div>
               </div>
+              <label class="flex items-center gap-1.5 border-t border-ctp-surface0 pt-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  class="accent-ctp-blue shrink-0"
+                  v-model="hideFileless"
+                >
+                <span class="text-[10px] text-ctp-subtext1">{{ t('assetMgmt.hideFileless') }}</span>
+              </label>
               <div class="flex items-center justify-between border-t border-ctp-surface0 pt-1.5">
                 <span class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.scopeHint') }}</span>
                 <button
