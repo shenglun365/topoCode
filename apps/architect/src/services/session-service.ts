@@ -22,6 +22,8 @@ export interface ConversationMeta {
   firstUserTime?: number
   createdAt?: number
   updatedAt?: number
+  /** 归属项目(scope=all 跨库列表用于能力提案等项目级操作)。 */
+  projectId?: string
 }
 
 export interface ConversationDetail {

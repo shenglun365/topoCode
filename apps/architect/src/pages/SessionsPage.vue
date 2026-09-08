@@ -9,13 +9,14 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ChatBubbleOvalLeftEllipsisIcon, MagnifyingGlassIcon, PlusIcon, ArrowPathIcon,
-  DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon,
+  DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
   FolderIcon, ClockIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import TaskDetailView from '@/components/coding/TaskDetailView.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
+import { apiGet, apiPost } from '@/services/api-client'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
 
@@ -189,6 +190,42 @@ async function newGroup() {
 
 // ── 备案文档 ──
 const extracting = ref(false)
+
+// ── WS7 能力提炼: 手动提炼 + 待审提案(采纳/忽略) ──
+interface CapabilityProposal {
+  id: string; type: string; title: string; content: string
+  scenarios?: string[]; reason?: string; status?: string
+}
+const proposals = ref<CapabilityProposal[]>([])
+const miningBusy = ref(false)
+async function loadProposals(pid: string) {
+  try {
+    proposals.value = await apiGet<CapabilityProposal[]>(`/capabilities/proposals?project=${pid}&status=pending`)
+  } catch { proposals.value = [] }
+}
+async function mine(c: ConversationMeta) {
+  if (!c.projectId || miningBusy.value) return
+  miningBusy.value = true
+  try {
+    const r = await apiPost<{ count: number; markdown?: string }>('/capabilities/mine', {
+      conversationId: c.id, project: c.projectId,
+    })
+    window.alert(t('session.mineDone', { n: r.count }))
+    await loadProposals(c.projectId)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e))
+  } finally {
+    miningBusy.value = false
+  }
+}
+async function decideProposal(p: CapabilityProposal, action: 'accept' | 'ignore') {
+  const pid = selected.value?.projectId
+  if (!pid) return
+  try {
+    await apiPost(`/capabilities/proposals/${p.id}`, { project: pid, action })
+    proposals.value = proposals.value.filter((x) => x.id !== p.id)
+  } catch { /* 失败保持列表 */ }
+}
 const viewingDoc = ref<SessionDoc | null>(null)
 async function extractDoc() {
   if (!selected.value || extracting.value) return
@@ -365,6 +402,37 @@ function statusClass(s: string) {
           <button class="btn btn-sm btn-ghost" :disabled="busyTip === selected.id" @click="summarize(selected)">
             <SparklesIcon class="h-3.5 w-3.5" :class="busyTip === selected.id ? 'animate-pulse' : ''" />{{ t('session.actions.summarize') }}
           </button>
+          <button
+            class="btn btn-sm btn-ghost"
+            :disabled="miningBusy || !selected.projectId"
+            :title="t('session.mineHint')"
+            @click="mine(selected)"
+          >
+            <SparklesIcon class="h-3.5 w-3.5" :class="miningBusy ? 'animate-pulse' : ''" />{{ t('session.mine') }}
+          </button>
+        </div>
+
+        <div v-if="proposals.length" class="rounded-lg border border-ctp-peach/30 bg-ctp-peach/5 p-2.5">
+          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.proposals') }} ({{ proposals.length }})</p>
+          <div
+            v-for="p in proposals"
+            :key="p.id"
+            class="mb-1.5 rounded border border-ctp-surface0 bg-ctp-base/60 p-2 last:mb-0"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach shrink-0">{{ p.type }}</span>
+              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ctp-text">{{ p.title }}</span>
+            </div>
+            <p class="mt-1 line-clamp-2 text-[10px] leading-relaxed text-ctp-subtext1">{{ p.content }}</p>
+            <div class="mt-1.5 flex items-center gap-1.5">
+              <button class="btn btn-sm btn-blue !px-2 !py-0.5 !text-[10px]" @click="decideProposal(p, 'accept')">
+                <CheckIcon class="h-3 w-3" />{{ t('session.proposalAccept') }}
+              </button>
+              <button class="btn btn-sm btn-ghost !px-2 !py-0.5 !text-[10px]" @click="decideProposal(p, 'ignore')">
+                {{ t('session.proposalIgnore') }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div v-if="selected.summary" class="rounded-lg border border-ctp-surface0 bg-ctp-base/60 p-2.5">

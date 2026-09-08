@@ -90,6 +90,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "firstUserTime": c.get("firstUserTime") or 0,
             "createdAt": c.get("createdAt"),
             "updatedAt": c.get("updatedAt"),
+            "projectId": c.get("projectId") or "",
         }
         if q and q.strip():
             ql = q.strip().lower()

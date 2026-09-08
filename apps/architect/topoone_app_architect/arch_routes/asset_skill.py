@@ -147,6 +147,30 @@ def skill_docs(root: Optional[str], project: Optional[str],
                 for c in convs:
                     lines.append(f"- {c.get('ruleText')}")
                 parts.append("\n".join(lines))
+        # WS7 能力闭环: 已采纳提案(流程/技巧/skill)按场景标签注入(静态注册→可增长)
+        try:
+            from .store import CapabilityProposalStore
+            accepted = CapabilityProposalStore.list(pid, status="accepted", limit=200)
+
+            def _scene_list(p):
+                raw = p.get("scenarios")
+                if isinstance(raw, list):
+                    return raw
+                try:
+                    import json as _json
+                    parsed = _json.loads(raw or "[]")
+                    return parsed if isinstance(parsed, list) else []
+                except Exception:
+                    return []
+            hits = [p for p in accepted
+                    if any(s in _scene_list(p) for s in scenarios)]
+            if hits:
+                lines = [f"### 提炼能力（设计者采纳, {len(hits)} 条）"]
+                for p in hits[:8]:
+                    lines.append(f"\n**[{p.get('type')}] {p.get('title')}**\n{p.get('content', '')[:600]}")
+                parts.append("\n".join(lines))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[asset-skill] 提炼能力注入失败: %s", e)
     except Exception as e:
         logger.warning("[asset-skill] 项目规约加载失败: %s", e)
     if not parts:

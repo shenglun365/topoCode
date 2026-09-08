@@ -423,6 +423,12 @@ export default {
   },
   session: {
     stage: { design: 'Design', implement: 'Implement', evaluate: 'Evaluate', accept: 'Accept' },
+    mine: 'Mine capabilities',
+    mineHint: 'Mine conventions/processes/tricks/skills proposals from this session (pending review)',
+    mineDone: 'Mining done: {n} new proposals (pending review)',
+    proposals: 'Capability proposals',
+    proposalAccept: 'Accept',
+    proposalIgnore: 'Ignore',
     status: { active: 'Active', waiting: 'Waiting', running: 'Running', done: 'Done', archived: 'Archived' },
     time: { all: 'All time', today: 'Today', week: 'This week', earlier: 'Earlier' },
     group: { all: 'All groups', custom: 'Custom groups', byModule: 'By module', new: 'New group' },

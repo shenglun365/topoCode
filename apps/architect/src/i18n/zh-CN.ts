@@ -447,6 +447,12 @@ export default {
   },
   session: {
     stage: { design: '设计', implement: '实现', evaluate: '评估', accept: '验收' },
+    mine: '提炼能力',
+    mineHint: '从会话提炼 规约/流程/技巧/skill 提案(待审)',
+    mineDone: '提炼完成：新增 {n} 条提案(待审)',
+    proposals: '能力提案',
+    proposalAccept: '采纳',
+    proposalIgnore: '忽略',
     status: { active: '进行中', waiting: '待回答', running: '运行中', done: '已完成', archived: '已归档' },
     time: { all: '全部时间', today: '今天', week: '本周', earlier: '更早' },
     group: { all: '全部分组', custom: '自定义分组', byModule: '按模块', new: '新建分组' },

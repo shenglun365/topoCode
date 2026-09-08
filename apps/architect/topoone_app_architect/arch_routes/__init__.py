@@ -16,6 +16,7 @@ from . import contracts
 from . import acceptance
 from . import naming
 from . import mainkb
+from . import capability_mining
 
 router = APIRouter(prefix="/api/architect")
 router.include_router(project.router)
@@ -43,6 +44,7 @@ router.include_router(contracts.router)
 router.include_router(acceptance.router)
 router.include_router(naming.router)
 router.include_router(mainkb.router)
+router.include_router(capability_mining.router)
 router.include_router(diagram.router)
 router.include_router(design.router)
 router.include_router(bus_routes.router)

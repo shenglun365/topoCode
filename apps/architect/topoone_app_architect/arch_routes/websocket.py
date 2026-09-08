@@ -115,6 +115,8 @@ _context_registry.register_probe_tool()
 _context_registry.register_coding_task_tools()
 from . import evaluator as _evaluator  # noqa: E402
 _evaluator.register_evaluator_tools()
+from . import capability_mining as _cap_mining  # noqa: E402
+_cap_mining.register_mining_tools()
 
 
 @router.websocket("/ws/kb-analysis")

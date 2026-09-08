@@ -474,6 +474,20 @@ ARCH_PROJECT_TABLES_SQL = """
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0
     );
+
+CREATE TABLE IF NOT EXISTS arch_capability_proposals (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    type TEXT NOT NULL,               -- convention | process | trick | skill
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    scenarios TEXT,                   -- JSON: 注入场景标签数组(extract/accept/…)
+    reason TEXT,
+    source_conversation_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | ignored
+    created_at INTEGER DEFAULT 0,
+    updated_at INTEGER DEFAULT 0
+);
     CREATE INDEX IF NOT EXISTS idx_arch_conv_proj ON arch_naming_conventions(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_arch_conv_scenario ON arch_naming_conventions(project_id, status, scenarios);
 

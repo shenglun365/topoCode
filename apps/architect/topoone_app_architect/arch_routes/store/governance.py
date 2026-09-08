@@ -1,6 +1,8 @@
 """store 拆分模块（A1-T3：纯移动）。"""
 from __future__ import annotations
 
+import json
+
 from .base import _delete, _dumps, _fetchall_routed, _get, _insert, _locate_db, _now_ms, _row_to_api, _target_db, _update
 
 class FrameworkConfigStore:
@@ -155,6 +157,53 @@ class UserOverlayStore:
         return _update(cls.TABLE, overlay_id, {"status": status})
 
 
+
+
+class CapabilityProposalStore:
+    """能力提案(WS7 提炼闭环): 规约/流程/技巧/skill 提案——pending 待审, 采纳后生效。"""
+
+    TABLE = "arch_capability_proposals"
+
+    @classmethod
+    def create(cls, project_id: str, type_: str, title: str, content: str,
+               scenarios: Optional[list] = None, reason: str = "",
+               source_conversation_id: str = "") -> dict:
+        now = _now_ms()
+        data = {"id": f"cap-{now}-{abs(hash(title + type_)) % 10 ** 6}",
+                "projectId": project_id, "type": type_, "title": title,
+                "content": content,
+                "scenarios": json.dumps(scenarios or [], ensure_ascii=False),
+                "reason": reason, "sourceConversationId": source_conversation_id,
+                "status": "pending", "createdAt": now, "updatedAt": now}
+        _insert(cls.TABLE, data)
+        return _row_to_api(data)
+
+    @classmethod
+    def list(cls, project_id: str, status: str = "", limit: int = 200) -> list[dict]:
+        where, params = ["project_id = ?"], [project_id]
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        rows, _m = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(where)} "
+            f"ORDER BY created_at DESC LIMIT {int(limit)}",
+            tuple(params), project_id or None)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def update(cls, row_id: str, patch: dict) -> Optional[dict]:
+        return _update(cls.TABLE, row_id, patch)
+
+    @classmethod
+    def get(cls, row_id: str, project_id: Optional[str] = None) -> Optional[dict]:
+        rows, _m = _fetchall_routed(
+            cls.TABLE, f"SELECT * FROM {cls.TABLE} WHERE id = ? LIMIT 1",
+            (row_id,), project_id or None)
+        row = _row_to_api(rows[0]) if rows else None
+        if row and project_id and row.get("projectId") != project_id:
+            return None
+        return row
 
 
 class NamingConventionStore:

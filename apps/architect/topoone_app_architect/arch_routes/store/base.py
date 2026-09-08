@@ -170,6 +170,7 @@ PROJECT_TABLES = frozenset({
     # M0 冻结 schema（plan-C-M0.md §6）
     "arch_framework_configs", "arch_name_tombstones", "arch_user_overlays",
     "arch_naming_conventions", "arch_glossary",
+    "arch_capability_proposals",
     "arch_contract_items", "arch_contract_packages",
     "arch_acceptance_reports", "arch_acceptance_facts", "arch_acceptance_opinions",
 })

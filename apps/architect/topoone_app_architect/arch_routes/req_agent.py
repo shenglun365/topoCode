@@ -1318,7 +1318,9 @@ _CAPABILITY_DOC = (
     "产出结构化方案(文件→行区间→意图+置信度)。「给需求拿方案」或先评估再执行时用\n"
     "- coding.task.execute：正式执行(主工作区+分支协议)——会话绑定需求后创建/交接执行任务运行。「给需求拿结果」「按方案执行」时用\n"
     "- capability.evaluate：图文评估——target=plan 评估会话最新方案(变更足迹×语义资产影响面+关系子图图)；"
-    "target=execution 评估执行结果(实际 diff 足迹 + 与方案的偏差集)。报告内资产卡可点击联动资产地图。方案确认前/执行完成后调用\n\n"
+    "target=execution 评估执行结果(实际 diff 足迹 + 与方案的偏差集)。报告内资产卡可点击联动资产地图。方案确认前/执行完成后调用\n"
+    "- capability.mine：能力提炼——扫描会话(消息+方案/回执单元)提炼 规约/流程/技巧/skill 提案入待审队列, "
+    "设计者采纳后生效(规约入规约库/skill 文档注入能力文档)。会话出现可复用模式时主动提议\n\n"
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
@@ -1368,6 +1370,7 @@ _CAPABILITY_DOC = (
     '- coding.task.plan: {"instruction": "要做什么(一句话)", "files"?: "相关文件,逗号分隔", "executorId"?: "opencode|cline|…", "timeoutS"?: 900}\n'
     '- coding.task.execute: {"adapter"?: "opencode(缺省)"}——需先 req.finalize 绑定需求\n'
     '- capability.evaluate: {"target": "plan|execution", "execId"?: "ex-…(execution 时必填)}\n'
+    '- capability.mine: {"conversation"?: "cv-…(缺省当前会话)}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
     "若无需检索即可直接回答，就不要调用工具。\n\n"
     "可处理范围：\n"
