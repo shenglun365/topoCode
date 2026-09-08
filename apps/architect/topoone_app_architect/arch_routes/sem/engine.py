@@ -3200,13 +3200,24 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
             return {}, f"输出无法解析({raw[:80]}…)", True
         out: Dict[int, str] = {}
         sub_end = sub_start + len(sub_codes) - 1
+        raw_notes: List[Tuple[int, str]] = []
         for item in (parsed.get("notes") or []) if isinstance(parsed, dict) else []:
             try:
                 ln, note = int(item.get("line")), str(item.get("note") or "").strip()
             except (TypeError, ValueError, AttributeError):
                 continue
-            if sub_start <= ln <= sub_end and note:
-                out[ln] = note[:120]
+            if note:
+                raw_notes.append((ln, note))
+        abs_hits = [(ln, n) for ln, n in raw_notes if sub_start <= ln <= sub_end]
+        if abs_hits:
+            out = dict(abs_hits)
+        elif raw_notes:
+            # 模型可能返回窗口内相对行号(1..窗口长) → 按偏移修正为绝对行号
+            lo = min(ln for ln, _ in raw_notes)
+            hi = max(ln for ln, _ in raw_notes)
+            if lo >= 1 and hi <= len(sub_codes):
+                out = {sub_start + ln - 1: n for ln, n in raw_notes if sub_start + ln - 1 <= sub_end}
+        out = {ln: n[:120] for ln, n in out.items()}
         return out, "", False
 
     # 优先整窗全量解读；超限/截断 → 窗口二分(1/2→1/4→1/8 封底)递归重试，合并各批注解

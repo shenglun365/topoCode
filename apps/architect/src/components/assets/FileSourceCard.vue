@@ -1,7 +1,7 @@
 <template>
   <!-- 文件源码资产卡：语义资产列表打开的独立浮卡(无图谱画布 → 无节点联动)。
        复用图谱资产卡的同批服务与缓存：source-snippet / line-notes(assetId 键,
-       与图谱卡共享落库缓存) / desc / PseudoExplainer 伪码组件。 -->
+       与图谱卡共享落库缓存) / desc。 -->
   <div class="fixed inset-0 z-50 flex items-center justify-center">
     <div
       class="absolute inset-0 bg-ctp-crust/60"
@@ -17,6 +17,11 @@
         >{{ shortPath(file) }}</span>
         <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0 font-mono">{{ assets.length }}</span>
         <span class="flex-1" />
+        <button
+          class="btn btn-xs btn-ghost !text-[9px] shrink-0"
+          :title="t('assetMgmt.fileCard.fullHint')"
+          @click="fullText = !fullText"
+        >{{ fullText ? t('assetMgmt.fileCard.segments') : t('assetMgmt.fileCard.full') }}</button>
         <button
           class="text-ctp-overlay0 hover:text-ctp-red p-0.5"
           :title="t('common.close')"
@@ -82,12 +87,6 @@
             @click="genDesc()"
           >{{ descLoading ? t('common.loading') : t('assetMgmt.genDesc') }}</button>
 
-          <!-- 伪码说明(与图谱资产卡同一组件/缓存) -->
-          <PseudoExplainer
-            :key="sel.id"
-            :asset-id="sel.id"
-            :initial="sel.pseudo || ''"
-          />
         </template>
 
         <!-- 源码段(选中资产=逐锚点；无资产=文件头部窗口)；逐行解读仅资产模式 -->
@@ -102,7 +101,7 @@
                 <span class="text-ctp-overlay1 font-normal font-mono">{{ shortPath(seg.file) }}:L{{ seg.startLine }}<span v-if="seg.symbol"> · {{ seg.symbol }}</span></span>
               </span>
               <span class="flex-1" />
-              <template v-if="sel">
+              <template v-if="sel && !fullText">
                 <span
                   v-if="notesState[i]?.cached"
                   class="chip !text-[8px] bg-ctp-teal/15 text-ctp-teal shrink-0"
@@ -125,7 +124,7 @@
   v-for="l in seg.snippet?.lines ?? []"
   :key="l.line"
   class="block"
-  :class="notes[i]?.[l.line] ? 'text-ctp-text' : 'text-ctp-subtext0'"
+  :class="segHl(i, l.line) ? 'bg-ctp-mauve/10 text-ctp-text border-l-2 border-ctp-mauve' : (notes[i]?.[l.line] ? 'text-ctp-text' : 'text-ctp-subtext0')"
 ><span class="inline-block w-8 select-none text-right mr-2 text-ctp-overlay0">{{ l.line }}</span>{{ l.code }}</span></pre>
             <div
               v-if="notes[i] && Object.keys(notes[i]).length"
@@ -163,13 +162,14 @@ import {
 import { semanticAssetService, type SourceSnippet } from '@/services/semantic-asset-service'
 import type { SemanticAsset } from '@/types'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
-import PseudoExplainer from './PseudoExplainer.vue'
 
 const props = defineProps<{ file: string; assets: SemanticAsset[] }>()
 const emit = defineEmits<{ close: []; goto: [id: string] }>()
 const { t } = useI18n()
 
 const selId = ref(props.assets[0]?.id ?? '')
+/** 源码视图切换: false=分段(锚点±10 行) / true=全文(整文件, 锚点区间高亮)。 */
+const fullText = ref(false)
 const sel = computed(() => props.assets.find((a) => a.id === selId.value) ?? null)
 const descLoading = ref(false)
 
@@ -183,12 +183,17 @@ function shortPath(p: string): string {
   return s
 }
 
-interface Seg { file: string; startLine: number; endLine: number; symbol: string; snippet: SourceSnippet | null }
+interface Seg { file: string; startLine: number; endLine: number; symbol: string; snippet: SourceSnippet | null; hl: [number, number][] }
 const segs = ref<Seg[]>([])
 const notes = reactive<Record<number, Record<number, string>>>({})
 const notesState = reactive<Record<number, { loading?: boolean; cached?: boolean; degraded?: boolean; error?: string; done?: boolean }>>({})
 
-watch(selId, () => { void rebuild() }, { immediate: true })
+watch([selId, fullText], () => { void rebuild() }, { immediate: true })
+
+/** 行是否在锚点高亮区间内。 */
+function segHl(i: number, line: number): boolean {
+  return (segs.value[i]?.hl ?? []).some(([a, b]) => line >= a && line <= b)
+}
 
 /** 重建源码段：取选中资产在本文件的锚点，逐段拉符号体源码窗口。 */
 async function rebuild() {
@@ -196,16 +201,26 @@ async function rebuild() {
   for (const k of Object.keys(notes)) delete notes[Number(k)]
   for (const k of Object.keys(notesState)) delete notesState[Number(k)]
   const a = sel.value
+  const refs = (a?.astRefs ?? []).filter((r) => r.file === props.file)
+  if (fullText.value) {
+    // 全文模式：整文件窗口, 选中资产的锚点区间高亮
+    segs.value = [{ file: props.file, startLine: 1, endLine: 0, symbol: '', snippet: null,
+                    hl: refs.map((r) => [r.startLine, r.endLine] as [number, number]) }]
+    const s0 = segs.value[0]!
+    s0.snippet = (await semanticAssetService.sourceSnippet(props.file, 1, undefined, 0, 99998, 99999)) ?? null
+    if (s0.snippet?.lines?.length) s0.endLine = s0.snippet.lines[s0.snippet.lines.length - 1]!.line
+    return
+  }
   if (!a) {
     // 无资产文件：文件头部窗口(纯源码浏览, 无逐行解读)
-    segs.value = [{ file: props.file, startLine: 1, endLine: 400, symbol: '', snippet: null }]
+    segs.value = [{ file: props.file, startLine: 1, endLine: 400, symbol: '', snippet: null, hl: [] }]
     const s0 = segs.value[0]!
     s0.snippet = (await semanticAssetService.sourceSnippet(props.file, 1, undefined, 0, 399, 400)) ?? null
     return
   }
-  const refs = (a.astRefs ?? []).filter((r) => r.file === props.file)
   segs.value = refs.map((r) => ({
     file: r.file, startLine: r.startLine, endLine: r.endLine, symbol: r.symbol, snippet: null,
+    hl: [[r.startLine, r.endLine]] as [number, number][],
   }))
   for (let i = 0; i < segs.value.length; i++) {
     const s = segs.value[i]!

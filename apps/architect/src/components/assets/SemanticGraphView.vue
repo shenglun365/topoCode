@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
-import PseudoExplainer from './PseudoExplainer.vue'
 import GraphMatrixWindow from './GraphMatrixWindow.vue'
 import AssetIndexWindow from './AssetIndexWindow.vue'
 import FileIndexWindow from './FileIndexWindow.vue'
@@ -2409,10 +2408,6 @@ onMounted(async () => {
             {{ t('common.loading') }}
           </div>
           </template>
-        </div>
-        <!-- 伪码级说明(分层口径)：line-notes 的进一步增强，用户点击触发(缓存放资产行) -->
-        <div v-if="sel" class="px-3 pb-2 shrink-0 border-t border-ctp-surface0 pt-1.5">
-          <PseudoExplainer :asset-id="sel.id" />
         </div>
         <!-- 锚点导航(>1 段时快速定位)；跨文件锚点以桃色+标注区分 -->
         <div v-if="selAnchors.length && segments.length > 1">
