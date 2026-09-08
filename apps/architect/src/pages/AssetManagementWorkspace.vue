@@ -1749,7 +1749,7 @@ onUnmounted(() => {
           >
             <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.diff.extractRecompare', { n: pendingExtractable.length }) }}
           </button>
-          <span v-if="extractingPending" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.extracting') }}</span>
+          <span v-if="extractingPending" class="inline-flex items-center gap-1 text-[10px] text-ctp-overlay0"><ArrowPathIcon class="w-3 h-3 animate-spin" />{{ t('assetMgmt.diff.extracting') }}</span>
         </template>
       </div>
     </div>
@@ -2388,7 +2388,7 @@ onUnmounted(() => {
                         >
                           <SparklesIcon class="w-2.5 h-2.5" />{{ t('assetMgmt.diff.extractRecompare', { n: compareData.assets.pending.count }) }}
                         </button>
-                        <span v-if="extractingPending" class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.diff.extracting') }}</span>
+                        <span v-if="extractingPending" class="inline-flex items-center gap-1 text-[9px] text-ctp-overlay0"><ArrowPathIcon class="w-2.5 h-2.5 animate-spin" />{{ t('assetMgmt.diff.extracting') }}</span>
                       </div>
                       <div v-for="f in compareData.assets.pending.files.slice(0, 30)" :key="f" class="font-mono text-[9px] text-ctp-subtext0 truncate" :title="f">{{ f }}</div>
                       <div v-if="compareData.assets.pending.files.length > 30" class="text-[9px] text-ctp-overlay0">+{{ compareData.assets.pending.files.length - 30 }}</div>
