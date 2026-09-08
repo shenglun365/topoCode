@@ -954,6 +954,29 @@ def tool_req_finalize(title: str = "", description: str = "",
         est = int(estMin or 0)
     except (TypeError, ValueError):
         est = 0
+    # ── WS5-B 定稿门禁: 涉及资产保鲜检查(过期→拦截, 先刷新再定稿) ──
+    scoped_ids = [str(x.get("assetId") or "").strip()
+                  for x in (assetScope or [])
+                  if isinstance(x, dict) and str(x.get("assetId") or "").strip()]
+    if scoped_ids:
+        try:
+            from .sem.engine import _lazy_reconcile
+            _lazy_reconcile(root, project)
+        except Exception:
+            pass
+        stale: List[str] = []
+        for aid in dict.fromkeys(scoped_ids):
+            # 只拦「存在且过期」: assetScope 可含 KB 组件 id(comm-…)等非语义资产, 不误伤
+            a = store.SemanticAssetsStore.get(aid)
+            if a and (a.get("status") == "stale" or a.get("needsUpdate")):
+                stale.append(f"{aid} {a.get('name', '')}")
+        if stale:
+            return {
+                "ok": False, "blocked": "stale_assets", "staleAssets": stale[:20],
+                "error": "定稿门禁: 涉及资产已过期(源码变更后未刷新), "
+                         "请先对下列资产逐个 asset.semantic.refresh, 全部新鲜后重新定稿: "
+                         + "; ".join(stale[:8]),
+            }
     analysis = {
         "functionalScope": functionalScope or [],
         "entityBoundary": entityBoundary or [],
@@ -1292,6 +1315,8 @@ _CAPABILITY_DOC = (
     '"source":"auto"}], "estMin": 90, "implementationPath": "…", "assessmentSummary": "…"}\n'
     '- execution.assign: {"target": "runner", "execId": "ex-xxx(缺省取需求已绑定任务)"} '
     '或 {"target": "mcp", "tool": "<mcp工具名>", "params": {…}}\n'
+    '- req.finalize 门禁: assetScope 涉及资产若过期(stale/needsUpdate)会被拦截——'
+    '先 asset.semantic.refresh 刷新再定稿\n'
     '- interaction.clarify: {"message": "<问题文本>"}\n'
     '- coding.task.plan: {"instruction": "要做什么(一句话)", "files"?: "相关文件,逗号分隔", "executorId"?: "opencode|cline|…", "timeoutS"?: 900}\n'
     '- coding.task.execute: {"adapter"?: "opencode(缺省)"}——需先 req.finalize 绑定需求\n'

@@ -113,6 +113,15 @@ def write_exec_report(task_id: str, status: str) -> None:
         ]
         if task.get("error"):
             lines.append(f"- 错误: {task['error'][:500]}")
+        # WS5-A: 会话有 plan 契约 → 引导结果评估(足迹×偏差, 处理/接纳由用户决策)
+        if conv_id and status in ("done", "failed", "stopped"):
+            try:
+                units = store.ContextUnitsStore.all(conversation_id=conv_id, limit=50) or []
+                if any((u.get("type") or "") == "plan" for u in units):
+                    lines.append(f"- 建议: 会话中调用 capability.evaluate(target=execution, "
+                                 f"execId={task_id}) 做结果评估(变更足迹×方案偏差)")
+            except Exception:  # noqa: BLE001
+                pass
         refs = {"execIds": [task_id], "reqIds": list(req_ids)}
         if conv_id:
             conv = store.ConversationsStore.get(conv_id) or {}
