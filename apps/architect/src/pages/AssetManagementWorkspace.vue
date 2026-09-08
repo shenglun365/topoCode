@@ -3281,6 +3281,7 @@ onUnmounted(() => {
     v-if="fileCard"
     :file="fileCard.file"
     :assets="fileCard.assets"
+    :compare-data="compareData"
     @close="fileCard = null"
     @goto="locateAsset"
   />

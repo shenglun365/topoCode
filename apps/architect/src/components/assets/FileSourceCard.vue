@@ -101,7 +101,16 @@
                 <span class="text-ctp-overlay1 font-normal font-mono">{{ shortPath(seg.file) }}:L{{ seg.startLine }}<span v-if="seg.symbol"> · {{ seg.symbol }}</span></span>
               </span>
               <span class="flex-1" />
-              <template v-if="sel && !fullText">
+              <button
+                class="text-ctp-overlay0 hover:text-ctp-text p-0.5 shrink-0"
+                :title="t('assetMgmt.graph.copyLoc')"
+                :disabled="!seg.snippet"
+                @click.stop="copyLoc(i)"
+              >
+                <CheckIcon v-if="copiedSeg === i" class="w-3 h-3 text-ctp-green" />
+                <ClipboardIcon v-else class="w-3 h-3" />
+              </button>
+              <template v-if="sel">
                 <span
                   v-if="notesState[i]?.cached"
                   class="chip !text-[8px] bg-ctp-teal/15 text-ctp-teal shrink-0"
@@ -120,7 +129,10 @@
                 </button>
               </template>
             </div>
-            <pre class="m-0 px-2 py-1.5 text-[10px] leading-[1.5] font-mono overflow-x-auto bg-ctp-crust"><template
+            <pre
+              class="m-0 px-2 py-1.5 leading-[1.5] font-mono overflow-x-auto bg-ctp-crust"
+              :style="{ fontSize: codeFontSize + 'px' }"
+            ><template
   v-for="l in seg.snippet?.lines ?? []"
   :key="l.line"
   ><div
@@ -144,13 +156,14 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  CodeBracketIcon, MapPinIcon, SparklesIcon, XMarkIcon,
+  CheckIcon, ClipboardIcon, CodeBracketIcon, MapPinIcon, SparklesIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import { semanticAssetService, type SourceSnippet } from '@/services/semantic-asset-service'
+import { semanticAssetService, type AssetCompareResult, type SourceSnippet } from '@/services/semantic-asset-service'
 import type { SemanticAsset } from '@/types'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
+import { useArchSettingsStore } from '@/stores/settings-store'
 
-const props = defineProps<{ file: string; assets: SemanticAsset[] }>()
+const props = defineProps<{ file: string; assets: SemanticAsset[]; compareData?: AssetCompareResult | null }>()
 const emit = defineEmits<{ close: []; goto: [id: string] }>()
 const { t } = useI18n()
 
@@ -160,6 +173,45 @@ const fullText = ref(false)
 const sel = computed(() => props.assets.find((a) => a.id === selId.value) ?? null)
 const descLoading = ref(false)
 
+// ---- 与语义图谱资产卡对齐的能力(diff 口径 / 代码字号 / 复制位置) ----
+
+/** 对比口径下源码取数参数：资产参与对比 → 目标侧内容 + git diff 逐行注解
+ * (与 SemanticGraphView.snippetOptsFor 同一逻辑)。 */
+function snippetOptsFor(assetId: string): { ref?: string; diffBase?: string } {
+  const c = props.compareData
+  if (!c || c.noChanges) return {}
+  let side = ''
+  for (const a of c.assets.changed) if (a.id === assetId) side = a.side || 'stale'
+  for (const a of c.assets.new) if (a.id === assetId) side = 'target'
+  for (const a of c.assets.removed) if (a.id === assetId) side = 'base'
+  if (!side) return {}
+  const ref = c.targetIsWorktree ? '' : c.target
+  return { ref: ref || undefined, diffBase: c.base || undefined }
+}
+
+/** 代码字号与全局设置联动(比工具栏字号小一号，与图谱卡同规则)。 */
+const settings = useArchSettingsStore()
+const FONT_STEPS = [13, 15, 18, 22, 26, 32]
+const codeFontSize = computed(() => {
+  const fs = Number(settings.fontSize) || 16
+  const below = FONT_STEPS.filter((x) => x < fs)
+  return Math.max(11, below.length ? below[below.length - 1]! : 11)
+})
+
+const copiedSeg = ref(-1)
+async function copyLoc(i: number) {
+  const seg = segs.value[i]
+  const s2 = seg?.snippet
+  if (!s2?.lines?.length) return
+  const start = s2.lines[0]!.line
+  const end = s2.lines[s2.lines.length - 1]!.line
+  const loc = `${seg!.file}:L${start}${end !== start ? `-L${end}` : ''}${seg!.symbol ? ' ' + seg!.symbol : ''}`
+  try {
+    await navigator.clipboard.writeText(loc)
+    copiedSeg.value = i
+    setTimeout(() => { if (copiedSeg.value === i) copiedSeg.value = -1 }, 1500)
+  } catch { /* 剪贴板不可用忽略 */ }
+}
 /** 源码路径展示：去开头 ./ 后从头省略目录段(保尾部)，完整路径悬停展示。 */
 function shortPath(p: string): string {
   let s = p.replace(/^\.\//, '')
@@ -194,7 +246,7 @@ async function rebuild() {
     segs.value = [{ file: props.file, startLine: 1, endLine: 0, symbol: '', snippet: null,
                     hl: refs.map((r) => [r.startLine, r.endLine] as [number, number]) }]
     const s0 = segs.value[0]!
-    s0.snippet = (await semanticAssetService.sourceSnippet(props.file, 1, undefined, 0, 99998, 99999)) ?? null
+    s0.snippet = (await semanticAssetService.sourceSnippet(props.file, 1, undefined, 0, 99998, 99999, snippetOptsFor(a.id))) ?? null
     if (s0.snippet?.lines?.length) s0.endLine = s0.snippet.lines[s0.snippet.lines.length - 1]!.line
     return
   }
@@ -205,6 +257,7 @@ async function rebuild() {
     s0.snippet = (await semanticAssetService.sourceSnippet(props.file, 1, undefined, 0, 399, 400)) ?? null
     return
   }
+  const opts = snippetOptsFor(a.id)
   segs.value = refs.map((r) => ({
     file: r.file, startLine: r.startLine, endLine: r.endLine, symbol: r.symbol, snippet: null,
     hl: [[r.startLine, r.endLine]] as [number, number][],
@@ -212,7 +265,7 @@ async function rebuild() {
   for (let i = 0; i < segs.value.length; i++) {
     const s = segs.value[i]!
     s.snippet = (await semanticAssetService.sourceSnippet(
-      s.file, s.startLine, s.symbol || undefined, 10, 10, 400,
+      s.file, s.startLine, s.symbol || undefined, 10, 10, 400, opts,
     )) ?? null
   }
 }
