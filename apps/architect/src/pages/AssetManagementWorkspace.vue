@@ -1816,20 +1816,16 @@ onUnmounted(() => {
             >
               <span class="chip !border-0 !rounded-none bg-transparent text-ctp-subtext0 font-mono text-[9px] px-2">{{ scopeSummary }}</span>
               <button
-                class="btn btn-xs !rounded-none !border-l !border-ctp-surface1 relative"
+                class="btn btn-xs !rounded-none !border-l !border-ctp-surface1"
                 :class="(filterOpen || scopeSel.length) ? 'btn-blue' : 'btn-ghost'"
                 :title="scopeSel.length ? t('assetMgmt.filterActive', { n: scopeSel.length }) : t('assetMgmt.scopeGroupHint')"
                 @click="filterOpen = !filterOpen; batchOpen = false"
               >
-                <AdjustmentsHorizontalIcon class="w-3 h-3" />{{ t('assetMgmt.filter') }}
+                <AdjustmentsHorizontalIcon class="w-3 h-3" />
                 <span
                   v-if="scopeSel.length"
                   class="chip !text-[8px] !py-0 bg-ctp-blue/25 text-ctp-blue font-mono"
                 >{{ scopeSel.length }}</span>
-                <span
-                  v-if="scopeSel.length && !filterOpen"
-                  class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-ctp-blue"
-                />
               </button>
             </div>
             <button
