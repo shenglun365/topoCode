@@ -6,10 +6,11 @@ import {
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ChatBubbleOvalLeftEllipsisIcon, ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
   ChartBarSquareIcon, StopIcon, XMarkIcon, ArrowsRightLeftIcon, ChatBubbleLeftRightIcon,
-  DocumentTextIcon, CheckIcon,
+  DocumentTextIcon, CheckIcon, CodeBracketIcon,
 } from '@heroicons/vue/24/outline'
 import { apiGet } from '@/services/api-client'
 import { kindChipClass } from '@/services/semantic-kind-style'
+import FileSourceCard from '@/components/assets/FileSourceCard.vue'
 import { useRouter } from 'vue-router'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
@@ -1202,6 +1203,20 @@ const batchPreview = ref<SemanticBatchResult | null>(null)
 
 /** 范围筛选 · 隐藏无资产文件：文件行(含未提取的未归属文件)无资产时不渲染。 */
 const hideFileless = ref(false)
+
+/** 文件源码资产卡：列表文件行打开(复用图谱卡同批服务/缓存，无图谱联动)。 */
+const fileCard = ref<{ file: string; assets: SemanticAsset[] } | null>(null)
+function openFileCard(file: string) {
+  const seen = new Set<string>()
+  const assets = items.value.filter((x) => !seen.has(x.id) && (x.astRefs ?? []).some((r) => r.file === file) && seen.add(x.id))
+  if (assets.length) fileCard.value = { file, assets }
+}
+/** 卡内「在列表定位」：按资产 id 过滤列表并关卡。 */
+function locateAsset(id: string) {
+  q.value = id
+  onSearch()
+  fileCard.value = null
+}
 /** 当前组件范围：选中组件 id(空=全部) + 是否含「其它」。 */
 function targetScope() {
   const compIds = scopeSel.value.filter((id) => id !== OTHER_KEY)
@@ -2637,6 +2652,15 @@ onUnmounted(() => {
                 >
                   <Squares2X2Icon class="w-3 h-3" />
                 </button>
+                <!-- 文件源码资产卡：复用图谱资产卡服务/缓存，列表内浮卡展示 -->
+                <button
+                  v-if="row.n"
+                  class="text-ctp-overlay0 hover:text-ctp-blue p-0.5 shrink-0"
+                  :title="t('assetMgmt.fileCard.view')"
+                  @click="openFileCard(row.file!)"
+                >
+                  <CodeBracketIcon class="w-3 h-3" />
+                </button>
                 <!-- 基线对比 · 文件级变化归属：需更新/新增/移除彩色计数 + 待提取/新增文件 -->
                 <template v-if="diffMode && row.file">
                   <span
@@ -3251,6 +3275,13 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  <FileSourceCard
+    v-if="fileCard"
+    :file="fileCard.file"
+    :assets="fileCard.assets"
+    @close="fileCard = null"
+    @goto="locateAsset"
+  />
 </template>
 
 <style scoped>
