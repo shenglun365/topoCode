@@ -120,33 +120,20 @@
                 </button>
               </template>
             </div>
-            <pre class="m-0 px-2 py-1.5 text-[10px] leading-[1.5] font-mono overflow-x-auto bg-ctp-crust"><span
+            <pre class="m-0 px-2 py-1.5 text-[10px] leading-[1.5] font-mono overflow-x-auto bg-ctp-crust"><template
   v-for="l in seg.snippet?.lines ?? []"
   :key="l.line"
-  class="block"
-  :class="segHl(i, l.line) ? 'bg-ctp-mauve/10 text-ctp-text border-l-2 border-ctp-mauve' : (notes[i]?.[l.line] ? 'text-ctp-text' : 'text-ctp-subtext0')"
-><span class="inline-block w-8 select-none text-right mr-2 text-ctp-overlay0">{{ l.line }}</span>{{ l.code }}</span></pre>
-            <div
-              v-if="notes[i] && Object.keys(notes[i]).length"
-              class="px-2 py-1 space-y-0.5 border-t border-ctp-surface0"
-            >
-              <div
-                v-for="(note, ln) in notes[i]"
-                :key="ln"
-                class="flex items-start gap-1.5 text-[10px]"
-              >
-                <span class="font-mono text-ctp-mauve shrink-0">L{{ ln }}</span>
-                <span class="text-ctp-subtext1">{{ note }}</span>
-              </div>
-            </div>
-            <div
-              v-if="notesState[i]?.error"
-              class="px-2 py-1 text-[9px] text-ctp-red"
-            >{{ t('assetMgmt.graph.lineNotesFailed') }} · {{ notesState[i]!.error }}</div>
-            <div
-              v-else-if="notesState[i]?.degraded"
-              class="px-2 py-1 text-[9px] text-ctp-yellow"
-            >{{ t('assetMgmt.graph.lineNotesDegraded') }}</div>
+  ><div
+  class="flex flex-wrap items-baseline gap-1.5"
+  :class="segHl(i, l.line) ? 'bg-ctp-mauve/10 border-l-2 border-ctp-mauve' : ''"
+><span class="select-none text-ctp-overlay0 shrink-0 w-8 text-right">{{ l.line }}</span> <span
+  :class="segHl(i, l.line) ? 'text-ctp-text font-semibold' : 'text-ctp-subtext0'"
+>{{ l.code }}</span><span
+  v-if="notes[i]?.[l.line]"
+  class="ml-auto shrink-0 max-w-[48%] truncate text-right italic"
+  :class="segHl(i, l.line) ? 'text-ctp-mauve' : 'text-ctp-overlay1'"
+  :title="notes[i]?.[l.line]"
+>{{ notes[i]?.[l.line] }}</span></div></template></pre>
           </div>
       </div>
     </div>
