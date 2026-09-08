@@ -841,9 +841,12 @@ def _inherit_names(pid: str, assets: List[dict]) -> List[dict]:
         old = by_key.get(ck)
         if old:
             old_name = old.get("name") or ""
-            if old_name and old_name != (a.get("name") or ""):
+            # 仅保护用户显式改名(rename_asset 留痕 renamedFrom/nameAlias)；
+            # 旧行若是旧批量管线的地板符号名，不阻塞新 LLM 业务名落库。
+            user_renamed = bool(old.get("renamedFrom") or old.get("nameAlias"))
+            if old_name and old_name != (a.get("name") or "") and user_renamed:
                 a = dict(a)
-                a["name"] = old_name  # 旧行名优先，re-extract 不覆盖用户改名
+                a["name"] = old_name  # 用户改名优先，re-extract 不覆盖
                 assets[i] = a
         else:
             f0 = (refs[0] or {}).get("file") or ""
@@ -1209,14 +1212,8 @@ def extract_scope(root: Optional[str], project: Optional[str],
         scope_key = "symbols:" + hashlib.md5(
             "\n".join(sorted(ctx.get("symbols") or symbols or [])).encode("utf-8")).hexdigest()[:16]
     saved = _save_assets(pid, scope_type or "project", scope_key or "_", all_assets, ctx)
-    # 节点简介(node_brief)：提取时按文件批量生成(LLM 路径)，失败静默(选中时可懒生成)
-    try:
-        if not degraded:
-            nb = node_briefs_after_extract(pid, saved, ctx, model_id=ctx.get("modelId"))
-            if nb:
-                logger.info("[semantic] node briefs 生成 %d/%d", nb, len(saved))
-    except Exception as e:
-        logger.warning("[semantic] node briefs after extract failed: %s", e)
+    # node_briefs 已移出批量流程(分层口径：中/重度解析一律按需用户触发)；
+    # 图谱打开节点时经 api_node_brief 懒生成。
     _stale = {}
     if _src in ('native', 'merged'):
         try:
@@ -1322,11 +1319,7 @@ def save_agent_assets(root: Optional[str], project: Optional[str],
                           scope_files[:40], scope_symbols[:40])
     ctx["source"] = ctx.get("source") or "live"
     saved = _save_assets(pid, "symbols", scope_key, accepted, ctx)
-    # 节点简介：对话式保存同样按文件批量补齐(单批，失败静默)
-    try:
-        node_briefs_after_extract(pid, saved, ctx)
-    except Exception as e:
-        logger.warning("[semantic] agent save node briefs failed: %s", e)
+    # node_briefs 改按需(用户触发)，不再随保存批量生成
     logger.info("[semantic] agent save project=%s saved=%d rejected=%d proposed=%d",
                 pid, len(saved), len(rejected), len(proposed))
     return {"count": len(saved), "saved": saved, "rejected": rejected,
@@ -2518,15 +2511,16 @@ def _structural_pseudo(a: dict) -> str:
 
 def generate_pseudo(asset_id: str, root: Optional[str] = None,
                     project: Optional[str] = None,
-                    model_id: Optional[str] = None) -> dict:
+                    model_id: Optional[str] = None, force: bool = False) -> dict:
     """查询时生成资产关联代码的伪码级说明；有效生命周期内缓存。
-    stale/needsUpdate → 视为失效重生成；LLM 不可用/无源码 → 结构化作确定性降级。"""
+    stale/needsUpdate → 视为失效重生成；LLM 不可用/无源码 → 结构化作确定性降级。
+    force=True: 忽略缓存强制重生成(用户点重新生成)。"""
     a = store.SemanticAssetsStore.get(asset_id)
     if not a:
         return {"pseudo": "", "cached": False, "degraded": True}
     fresh = (a.get("status") == "active") and not a.get("needsUpdate")
     cached = (a.get("pseudo") or "").strip()
-    if fresh and cached:
+    if fresh and cached and not force:
         return {"pseudo": cached, "cached": True, "degraded": False}
     # 注册项目按 id 解析 rootPath(同 line-notes；URL 可能只带 project)
     root = resolve_root(root, project)
@@ -2564,6 +2558,61 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
     except Exception as e:
         logger.warning("[semantic] pseudo 落库失败: %s", e)
     return {"pseudo": pseudo, "cached": False, "degraded": degraded}
+
+
+def generate_desc(asset_id: str, root: Optional[str] = None,
+                  project: Optional[str] = None,
+                  model_id: Optional[str] = None) -> dict:
+    """按需生成资产功能摘要(LLM)；有效生命周期内缓存；stale/needsUpdate → 重生成。
+
+    分层口径：批量提取不产 desc(只产名称+结构化种子)；用户在列表展开详情时
+    调本函数实时生成。生成失败返回 degraded=True + 空 desc(前端给重试按钮)，
+    不做确定性兜底(区别于伪码的结构性降级)。
+    """
+    a = store.SemanticAssetsStore.get(asset_id)
+    if not a:
+        return {"desc": "", "cached": False, "degraded": True}
+    fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    cached = (a.get("desc") or "").strip()
+    if fresh and cached:
+        return {"desc": cached, "cached": True, "degraded": False}
+    root = resolve_root(root, project)
+    snippet = _pseudo_source_snippet(root, a.get("astRefs") or [])
+    desc, degraded = "", True
+    if snippet:
+        try:
+            from ..req_agent import llm_sync, get_max_tokens_preference
+            from ..agent_roles import resolve_role_model
+            # 名称解析走 extract 角色；摘要同样跟随(显式传入优先)
+            model_id = resolve_role_model("extract", model_id)
+            detail_txt = json.dumps(a.get("detail") or {}, ensure_ascii=False)[:800]
+            sys_prompt = (
+                "你是代码语义资产功能摘要生成器。结构化种子(字段/调用链/分支/路由/常量)"
+                "均为确定性分析的 ground truth，你只负责语义层：一段自洽的白话说明——"
+                "它在本项目里做什么、边界在哪、为什么存在、关键输入/输出，"
+                "让不读代码的工程师也能直接看懂。不得臆造种子与源码中不存在的内容。"
+            )
+            user_prompt = (
+                f"类别: {a.get('kind')}\n符号: {', '.join(r.get('symbol') or '' for r in (a.get('astRefs') or [])[:2])}\n"
+                f"名称: {a.get('name')}\n结构化种子: {detail_txt}\n\n"
+                f"真实源码片段:\n{snippet}\n\n"
+                "请输出功能摘要(纯文本一段话，不要 Markdown 代码块)。"
+            )
+            res = llm_sync([{"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": user_prompt}],
+                           mode="chat", max_tokens=get_max_tokens_preference(), model_id=model_id)
+            if isinstance(res, dict):
+                desc = (res.get("content") or "").strip()
+        except Exception as e:
+            logger.warning("[semantic] desc LLM 失败: %s", e)
+            desc = ""
+    degraded = not bool(desc)
+    if desc:
+        try:
+            store.SemanticAssetsStore.update(asset_id, {"desc": desc})
+        except Exception as e:
+            logger.warning("[semantic] desc 落库失败: %s", e)
+    return {"desc": desc, "cached": False, "degraded": degraded}
 
 
 # ── AI 逐行解读(资产卡源码窗口：关键行用途说明，结合术语/规约) ──
@@ -3898,6 +3947,12 @@ def invalidate_assets_for_files(pid: str, files: List[str], *,
         c = "deleted" if change == "deleted" or any(not anchors[f] for f in hit) else change
         store.SemanticAssetsStore.set_needs_update(a["id"], True, change=c,
                                                    reason=reason or "文件变更")
+        # 缓存腐烂及时清除：失效资产的 LLM 文本层(desc/pseudo)一并清空，
+        # 下次按需查看时重生成(分层口径：批量不再产摘要/伪码)。
+        try:
+            store.SemanticAssetsStore.update(a["id"], {"desc": "", "pseudo": ""})
+        except Exception:
+            pass
         invalidated.append(a["id"])
     return invalidated
 
@@ -4767,10 +4822,19 @@ async def api_detail(asset_id: str, root: Optional[str] = None, project: Optiona
 
 @router.get("/kb/semantic/{asset_id}/pseudo")
 async def api_pseudo(asset_id: str, root: Optional[str] = None,
-                     project: Optional[str] = None, model_id: Optional[str] = None):
+                     project: Optional[str] = None, model_id: Optional[str] = None,
+                     force: bool = False):
     """查询时生成/返回资产关联代码的伪码级说明(有效生命周期内缓存)。"""
     # LLM 同步调用 offload 到线程(P0：async 内禁阻塞事件循环)
-    return ok(await asyncio.to_thread(generate_pseudo, asset_id, root, project, model_id))
+    return ok(await asyncio.to_thread(generate_pseudo, asset_id, root, project, model_id, force))
+
+
+@router.get("/kb/semantic/{asset_id}/desc")
+async def api_asset_desc(asset_id: str, root: Optional[str] = None,
+                         project: Optional[str] = None, model_id: Optional[str] = None):
+    """按需生成资产功能摘要(列表展开详情触发)；fresh 缓存直返，stale 重生成。"""
+    # LLM 同步调用 offload 到线程(同 api_pseudo)
+    return ok(await asyncio.to_thread(generate_desc, asset_id, root, project, model_id))
 
 
 @router.get("/kb/semantic/{asset_id}/node-brief")

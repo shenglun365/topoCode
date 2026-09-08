@@ -417,14 +417,13 @@ def parse_enrichments(output: Any, symbol_names: List[str]
             continue
         sym = str(a.get("symbol") or "").strip()
         if not sym:
-            anonymous.append(a)
+            anonymous.append(a)      # 无 symbol → 顺序对齐兜底候选
             continue
         # 容忍 qualified_name 与 name 两种写法
         key = sym if sym in want_set else (sym.split("::")[-1] if sym.split("::")[-1] in want_set else sym)
         if key in want_set:
             out[key] = a
-        else:
-            anonymous.append(a)
+        # 带 symbol 但对不上候选表 → 丢弃(疑似幻觉，不参与顺序对齐)
     # 顺序对齐兜底：剩余候选名(保持候选表顺序) × 无 symbol 条目(按输出顺序)
     remaining = [s for s in want if s not in out]
     for a, sym in zip(anonymous, remaining):

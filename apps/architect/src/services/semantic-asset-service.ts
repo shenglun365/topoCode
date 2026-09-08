@@ -520,10 +520,16 @@ export const semanticAssetService = {
   },
 
   /** 查询时生成/获取资产关联代码的伪码级说明(有效生命周期内缓存；stale 时重生成)。 */
-  async pseudo(assetId: string, modelId?: string): Promise<{ pseudo: string; cached: boolean; degraded: boolean }> {
-    const extra = modelId ? `model_id=${encodeURIComponent(modelId)}` : ''
+  async pseudo(assetId: string, opts?: { force?: boolean }): Promise<{ pseudo: string; cached: boolean; degraded: boolean }> {
+    const extra = opts?.force ? 'force=1' : ''
     return apiGet<{ pseudo: string; cached: boolean; degraded: boolean }>(
       `/kb/semantic/${assetId}/pseudo${qsWith(extra)}`)
+  },
+
+  /** 按需生成资产功能摘要(列表展开详情触发)；fresh 缓存直返，stale 重生成。 */
+  async assetDesc(assetId: string): Promise<{ desc: string; cached: boolean; degraded: boolean }> {
+    return apiGet<{ desc: string; cached: boolean; degraded: boolean }>(
+      `/kb/semantic/${assetId}/desc${qsWith('')}`)
   },
 
   /** 资产卡源码窗口关键行逐行用途说明(手动触发；落库缓存随资产生命周期；force 跳过缓存重生成)。 */

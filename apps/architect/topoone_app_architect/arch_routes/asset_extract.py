@@ -1,29 +1,26 @@
-"""实现层定向提取管线 —— 规则候选 → (文件×类型) 批量定向调用 → 种子⊕增强 →
-验收 → 工具补齐(确定性回提取) → 种子地板。
+"""实现层定向提取管线(分层版) —— 规则候选 → 名称批量解析(LLM, 10个/次) → 种子地板。
 
-与旧 `_llm_extract`(整包自由识别)的区别：
-  - 类别由规则定死(asset_rules)，LLM 不做识别/分类；
-  - 每 (文件×类型) 一次定向调用，prompt 为候选表(每候选一行结构摘要)+验收模板+工具清单；
-  - 骨架只来自种子/工具 ground truth，LLM 只贴语义(asset_templates.merge)；
-  - 验收不过 → 定向修复轮(≤1 次, 可工具) → 仍不过 → 种子原样落库(地板)。
+分层口径(产品定稿)：
+  - 批量提取只产 名称(LLM 业务命名, 一次 10 个轻提示词) + 结构化种子(ground truth)；
+  - 功能摘要(desc)不在批量流程生成——列表展开详情按需生成(/kb/semantic/asset-desc)；
+  - 伪码/逐行解读在图谱资产卡按需触发；缓存腐烂由失效链路清空。
+与旧管线的区别：退役 tAgent 多轮循环/修复轮/desc 富化——批量提速一个数量级。
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from typing import Dict, List, Optional
 
-from .asset_rules import RuleContext, business_value_score, candidates_for_file
+from .asset_rules import RuleContext, candidates_for_file
 from .asset_templates import (KIND_TEMPLATES, merge_seed_enrichment,
-                              parse_enrichments, render_summary_desc, repair_hint,
                               validate_kind)
 
 logger = logging.getLogger(__name__)
 
-# 每 (文件×类型) 送 LLM 的候选上限(按业务价值取 top-N；控制输出规模)。
-# 未入选者走确定性地板(规则汇总 desc，全量覆盖，不依赖 LLM)。
-_GROUP_LLM_CAP = 15
-# 每 (文件×类型) 候选材料 char 预算(控制输入规模；小模型上下文受限)。
-_GROUP_PROMPT_BUDGET = 8000
+# 名称批量解析的分块(一次 10 个候选；轻提示词短输出)。
+_NAME_CHUNK = 10
 # 每 (文件×类型) 落库资产上限(防超大文件爆炸)。
 _GROUP_CAP = 80
 
@@ -144,14 +141,14 @@ def _directed_prompt(file_: str, kind: str, cands: List[dict]) -> str:
 
 
 def _floor_asset(kind: str, node: dict, seed: dict, file_: str) -> dict:
-    """种子地板：LLM 增强缺失/未入选时，确定性种子原样成资产。
+    """种子地板：名称解析缺失时，确定性种子原样成资产。
 
-    desc 由 render_summary_desc 渲染(代码级白话，全量覆盖，不依赖 LLM)。
+    desc 留空(分层口径：功能摘要一律按需生成/asset-desc)，不批量渲染。
     """
     detail = merge_seed_enrichment(kind, seed, None)
     name = node.get("name") or node.get("qualified_name") or "?"
     return {"kind": kind, "level": "implementation", "name": name,
-            "desc": render_summary_desc(kind, node, detail),
+            "desc": "",
             "detail": detail,
             "astRefs": [{"file": node.get("file_path"), "symbol": node.get("qualified_name") or name,
                           "kind": _ast_kind_of(node), "startLine": int(node.get("start_line") or 0),
@@ -217,190 +214,94 @@ def _apply_tool_facts(kind: str, node: dict, seed: dict, facts: List[dict]) -> d
     return seed
 
 
-# ── 分组定向提取 ───────────────────────────────────────────────
+# ── 分组定向提取(分层版: 名称批量解析 + 种子地板) ──────────────
+
+
+def _batch_name_enrich(root: str, project: Optional[str], file_: str, kind: str,
+                       cands: List[dict], model_id: Optional[str]) -> Dict[str, dict]:
+    """名称批量解析(一次 10 个)：轻提示词直连 LLM(不经 tAgent 工具循环/多轮)。
+
+    只产业务 name；失败/解析不出 → 返回空(候选全部走地板符号名)，不影响提取主体。
+    """
+    from .kb_gateway import get_gateway
+    from .tagent_se import KbGatewayLLMClient
+    from topocode_agent.core.utils import extract_json_object
+
+    llm = KbGatewayLLMClient(get_gateway(), model_id=model_id or "")
+    out: Dict[str, dict] = {}
+    for i in range(0, len(cands), _NAME_CHUNK):
+        chunk = cands[i:i + _NAME_CHUNK]
+        lines = "\n".join(
+            f"- {c['node'].get('qualified_name') or c['node'].get('name')}"
+            f" @L{c['node'].get('start_line')}"
+            + (f"  // {(c['node'].get('docstring') or '').strip()[:60]}"
+               if (c['node'].get('docstring') or '').strip() else "")
+            for c in chunk)
+        user = (f"文件: {file_}\n类别: {kind}\n候选符号:\n{lines}\n\n"
+                "为每个符号起一个简洁业务名(中文，可作图节点标签，非符号名直译)。"
+                '只输出 JSON 对象 {"names": [{"symbol": "候选符号逐字回填", "name": "业务名"}]}，'
+                "不要 Markdown 代码块。")
+        try:
+            resp = asyncio.run(llm.chat(
+                [{"role": "user", "content": user}], max_tokens=600))
+        except Exception as e:
+            logger.warning("[asset_extract] %s 名称解析失败(走符号名): %s", file_, e)
+            return out
+        obj = extract_json_object(resp.content or "")
+        for it in (obj or {}).get("names") or []:
+            if not isinstance(it, dict):
+                continue
+            sym = str(it.get("symbol") or "").strip()
+            nm = str(it.get("name") or "").strip()
+            if not sym or not nm:
+                continue
+            # 模型常把候选行的 @L 行号后缀一并回填 → 归一化剥离
+            sym = re.sub(r"\s*@L\d+(-\d+)?$", "", sym).strip()
+            out[sym] = {"name": nm}
+            short = sym.split("::")[-1]   # 短名兜底(模型可能只回末段)
+            if short and short not in out:
+                out[short] = {"name": nm}
+    return out
 
 
 def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
                    kind: str, cands: List[dict], model_id: Optional[str],
                    use_llm: bool, context_manager=None,
                    rc: Optional["RuleContext"] = None) -> List[dict]:
-    from . import asset_tools
+    """单 (文件×类型) 组：名称批量解析 + 种子地板(确定性，无多轮/修复轮)。"""
     from .agent_roles import resolve_role_model
 
-    # tAgent 角色模型路由(§9/B1)：提取循环入口按 extract 角色取模型；
-    # 调用方已显式传入(如验收严 profile)则优先，未配置角色回退 None→全局偏好。
+    # 角色模型路由(§9/B1)：名称解析走 extract 角色；显式传入优先。
     model_id = resolve_role_model("extract", model_id)
 
-    out: List[dict] = []
     cands = cands[:_GROUP_CAP]
-
-    # 工具上下文一次设定，facts 跨轮累积(与工具同线程)。
-    asset_tools.set_extraction_context(root, project, ctx)
-    facts: List[dict] = asset_tools._tl.facts  # 同一列表对象，工具 append 可见
-    try:
-        return _extract_group_inner(root, project, ctx, file_, kind, cands,
-                                    model_id, use_llm, facts, rc,
-                                    context_manager=context_manager)
-    finally:
-        asset_tools.clear_extraction_context()
-
-
-def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: str,
-                         kind: str, cands: List[dict], model_id: Optional[str],
-                         use_llm: bool, facts: List[dict],
-                         rc: Optional["RuleContext"] = None,
-                         context_manager=None) -> List[dict]:
-    from .req_agent import get_max_tokens_preference
-    from . import tagent_extract
-
-    out: List[dict] = []
-    cands = cands[:_GROUP_CAP]
-    if rc is None:
-        node_by_id = {n.get("id"): n for n in ctx.get("nodes") or []}
-        rc = RuleContext(ctx.get("edges") or [], ctx.get("implDetails") or {},
-                         node_by_id, extra_names=ctx.get("calleeNames"))
-    # 送 LLM 的 top-N：按业务价值降序，受 char 预算 + 上限约束(控制上下文，
-    # 小模型只在"高价值 + 小 prompt"下高质量处理；未入选走确定性地板)。
-    if use_llm and cands:
-        scored = sorted(cands,
-                        key=lambda c: business_value_score(c["node"], c.get("kind") or kind, rc),
-                        reverse=True)
-        llm_part: List[dict] = []
-        used = 0
-        for c in scored:
-            cost = len(_candidate_lines([c], c.get("kind") or kind))
-            if llm_part and (used + cost > _GROUP_PROMPT_BUDGET
-                             or len(llm_part) >= _GROUP_LLM_CAP):
-                break
-            llm_part.append(c)
-            used += cost
-        llm_part.sort(key=lambda c: int(c["node"].get("start_line") or 0))
-    else:
-        llm_part = []
-
-    # 上下文编译循环：每 file×kind 组一实例；可外部注入共享 cm(跨文件累积场景)。
-    # 提取统一走 tAgent agentic_loop（双轨已取消，恒 tAgent）。
-    cm = context_manager
-    if cm is None and use_llm and llm_part:
-        cm = tagent_extract.build_extraction_context(
-            file_=file_, kind=kind, task_spec=_task_spec(file_, kind))
-
     enrich: Dict[str, dict] = {}
-    if use_llm and llm_part:
-        user_msg = _directed_prompt(file_, kind, llm_part)
-        names = [c["node"].get("qualified_name") or c["node"].get("name")
-                 for c in llm_part]
-        res = None
-        if cm is not None:
-            # tAgent agentic_loop + ContextManager(phase=kb_analysis, 可达性豁免)
-            try:
-                res = tagent_extract.run_extraction_agentic(
-                    sys_msg=_sys_base(), user_msg=user_msg,
-                    root=root, project=project, model_id=model_id,
-                    max_rounds=2, max_tokens=get_max_tokens_preference(),
-                    context_manager=cm, file_=file_, kind=kind,
-                    task_spec=_task_spec(file_, kind))
-            except Exception as e:
-                logger.warning("[asset_extract] %s %s 提取异常(tagent): %s",
-                               file_, kind, e)
-        if res and isinstance(res.get("output"), dict):
-            enrich = parse_enrichments(res["output"], names)
-            if not enrich:
-                # LLM 有结构化输出但 0 匹配：多半是 symbol 名对不上/输出被截断
-                # → 留样诊断(前 600 字符 + 期望符号样本)，不再无声归零
-                logger.warning(
-                    "[asset_extract] %s %s LLM 输出 0 匹配: 期望=%s 输出样例=%r",
-                    file_, kind, names[:3],
-                    str(res.get("output"))[:600])
-        else:
-            logger.warning("[asset_extract] %s %s LLM 无结构化输出(content_len=%d)",
-                           file_, kind, len((res or {}).get("content") or ""))
+    if use_llm and cands:
+        enrich = _batch_name_enrich(root, project, file_, kind, cands, model_id)
 
-    # 合并 + 验收
-    pending: List[dict] = []
+    assets: List[dict] = []
     for c in cands:
         n = c["node"]
         sym = n.get("qualified_name") or n.get("name") or ""
-        seed = _apply_tool_facts(kind, n, c["seed"], facts)
         en = enrich.get(sym) or enrich.get(n.get("name") or "")
-        detail = merge_seed_enrichment(kind, seed, en)
-        issues = validate_kind(kind, detail, seed)
-        if issues and use_llm:
-            pending.append({"_cand": c, "_seed": seed, "_en": en, "_issues": issues})
-        out.append({"_cand": c, "_seed": seed, "_en": en, "_detail": detail,
-                    "_issues": issues})
-
-    # 定向修复轮(仅对验收不过的候选)
-    if pending and use_llm:
-        try:
-            hints = "\n".join(repair_hint(kind, it["_issues"], it["_cand"]["node"])
-                              for it in pending)
-            syms = [(it["_cand"]["node"].get("qualified_name")
-                     or it["_cand"]["node"].get("name")) for it in pending]
-            repair_user = (
-                f"文件: {file_}，类别: {kind}。以下资产未通过验收，请仅针对它们重新输出完整资产"
-                f"(symbol/name/desc 及语义字段)：\n{hints}\n只输出 JSON 对象 "
-                f'{{"assets": [...]}}。')
-            res2 = None
-            if cm is not None:
-                # 复用同一 cm：继承首轮任务规格钉驻 + 工具结果工作集
-                res2 = tagent_extract.run_extraction_agentic(
-                    sys_msg="你是代码语义资产补齐器(修复轮)。",
-                    user_msg=repair_user,
-                    root=root, project=project, model_id=model_id,
-                    max_rounds=2, max_tokens=get_max_tokens_preference(),
-                    context_manager=cm)
-        except Exception as e:
-            logger.warning("[asset_extract] %s %s 修复轮异常: %s", file_, kind, e)
-            res2 = None
-        if res2 and isinstance(res2.get("output"), dict):
-            enrich2 = parse_enrichments(res2["output"], syms)
-            for it in pending:
-                n = it["_cand"]["node"]
-                sym = n.get("qualified_name") or n.get("name") or ""
-                en2 = enrich2.get(sym) or enrich2.get(n.get("name") or "")
-                if not en2:
-                    continue
-                seed2 = _apply_tool_facts(kind, n, it["_seed"], facts)
-                detail2 = merge_seed_enrichment(kind, seed2, en2)
-                issues2 = validate_kind(kind, detail2, seed2)
-                # 仅当修复结果更完整时采用
-                if len(issues2) < len(it["_issues"]):
-                    it["_seed"], it["_en"], it["_detail"], it["_issues"] = \
-                        seed2, en2, detail2, issues2
-
-    # 成资产(增强名优先，地板兜底)
-    assets: List[dict] = []
-    for it in out:
-        c, seed, en, detail, issues = (it["_cand"], it["_seed"], it["_en"],
-                                       it["_detail"], it["_issues"])
-        n = c["node"]
-        if en and (en.get("name") or "").strip():
-            name = str(en["name"]).strip()
-            desc = str(en.get("desc") or "").strip() or render_summary_desc(kind, n, detail)
-            inv = [str(x) for x in (en.get("invariants") or []) if str(x).strip()][:6]
-            if inv and not (detail.get("invariants") or []):
-                detail["invariants"] = inv
-            rels = _norm_llm_rels(en.get("relations"))
-            if rels:  # 追加跨资产关系(http 骨架关系已在 detail 中，不覆盖)
-                base = detail.get("relations") if kind == "contract" else []
-                detail["relations"] = list(base or []) + rels
-            asset = {"kind": kind, "level": "implementation", "name": name, "desc": desc,
-                     "detail": detail,
-                     "astRefs": [{"file": n.get("file_path"),
-                                  "symbol": n.get("qualified_name") or n.get("name"),
-                                  "kind": _ast_kind_of(n),
-                                  "startLine": int(n.get("start_line") or 0),
-                                  "endLine": int(n.get("end_line") or 0)}],
-                     "tags": _auto_tags(n, seed)}
-            if issues:
-                asset["meta"] = {"degraded": True, "issues": issues}
-        else:
-            asset = _floor_asset(kind, n, seed, n.get("file_path") or "")
+        detail = merge_seed_enrichment(kind, c["seed"], en)
+        issues = validate_kind(kind, detail, c["seed"])
+        name = (str(en.get("name")).strip() if en and (en.get("name") or "").strip()
+                else (sym or "?"))
+        asset = {"kind": kind, "level": "implementation", "name": name,
+                 "desc": "",   # 分层口径: 功能摘要按需生成(/kb/semantic/asset-desc)
+                 "detail": detail,
+                 "astRefs": [{"file": n.get("file_path"),
+                              "symbol": sym,
+                              "kind": _ast_kind_of(n),
+                              "startLine": int(n.get("start_line") or 0),
+                              "endLine": int(n.get("end_line") or 0)}],
+                 "tags": _auto_tags(n, c["seed"])}
+        if issues or not en:
+            asset["meta"] = {"degraded": not en, "issues": issues}
         assets.append(asset)
-    logger.info("[asset_extract] %s %s: cands=%d llm=%d enriched=%d degraded=%d",
-                file_, kind, len(cands), len(llm_part), len(enrich),
-                sum(1 for a in assets if a.get("meta", {}).get("degraded")))
+    logger.info("[asset_extract] %s %s: cands=%d named=%d floor=%d",
+                file_, kind, len(cands), len(enrich), len(cands) - len(enrich))
     return assets
 
 

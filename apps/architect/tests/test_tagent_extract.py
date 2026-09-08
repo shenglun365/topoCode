@@ -52,9 +52,9 @@ def _msgs_text(call_params):
     return json.dumps(call_params.get("messages") or [], ensure_ascii=False)
 
 
-# ── 双轨已取消：恒走 tAgent ──────────────────────────────────────
+# ── 分层口径：批量提取不再走 tAgent(名称直连批量, 10个/次) ─────────
 
-def test_extraction_always_uses_tagent(monkeypatch):
+def test_extraction_name_only_no_tagent(monkeypatch):
     called = {"tagent": 0, "legacy": 0}
 
     def fake_tagent(**kw):
@@ -63,18 +63,23 @@ def test_extraction_always_uses_tagent(monkeypatch):
 
     def fake_legacy(*a, **k):
         called["legacy"] += 1
-        return {"content": "", "output": None}
 
+    gw = FakeGateway([{"content": '{"names": [{"symbol": "Order", "name": "订单"}]}',
+                       "mode": "chat"}])
     monkeypatch.setattr(tagent_extract, "run_extraction_agentic", fake_tagent)
     monkeypatch.setattr(RA, "run_tools_loop", fake_legacy)
-    asset_extract._extract_group("/r", None, {}, "svc.py", "entity",
-                                 [_cand()], "m", True)
-    assert called == {"tagent": 1, "legacy": 0}
+    monkeypatch.setattr(KG, "get_gateway", lambda: gw)
+    assets = asset_extract._extract_group("/r", None, {}, "svc.py", "entity",
+                                          [_cand()], "m", True)
+    assert called == {"tagent": 0, "legacy": 0}   # tAgent/工具循环已退役
+    assert assets[0]["name"] == "订单"             # 名称直连批量生效
+    assert assets[0]["desc"] == ""                 # 功能摘要按需(不在批量流程)
 
 
 # ── 端到端：工具轮 + 上下文块 + 同线程 facts + JSON 增强 ───────────
 
-def test_extraction_end_to_end_tool_loop(tmp_path, monkeypatch):
+def test_extraction_name_enrichment_end_to_end(tmp_path, monkeypatch):
+    """端到端：名称批量解析(轻提示词直连, 单次调用) + 种子骨架 + desc 留空按需。"""
     src = tmp_path / "svc.py"
     src.write_text(
         "class Order:\n    def __init__(self):\n        self.id = 0\n"
@@ -85,36 +90,25 @@ def test_extraction_end_to_end_tool_loop(tmp_path, monkeypatch):
                       "docstring": "订单"}],
            "edges": [], "implDetails": {}}
     gw = FakeGateway([
-        {"content": '[TOOL_CALL: asset_read_source]\n'
-                    '{"file": "svc.py", "symbol": "Order"}\n[/TOOL_CALL]',
+        {"content": '{"names": [{"symbol": "Order", "name": "订单实体"}]}',
          "mode": "chat"},
-        {"content": '{"assets": [{"symbol": "Order", "name": "订单实体", '
-                    '"desc": "订单核心实体"}]}', "mode": "chat"},
     ])
     monkeypatch.setattr(KG, "get_gateway", lambda: gw)
 
     assets = asset_extract._extract_group(str(tmp_path), None, ctx, "svc.py",
                                           "entity", [_cand()], "m", True)
     assert len(assets) == 1
-    assert assets[0]["name"] == "订单实体"  # LLM 增强生效(非地板)
-    assert len(gw.calls) == 2              # 工具轮 + 终调
+    assert assets[0]["name"] == "订单实体"   # LLM 业务命名生效
+    assert assets[0]["desc"] == ""           # 功能摘要按需(asset-desc)
+    assert len(gw.calls) == 1                # 单次直连调用(无工具轮/修复轮)
 
     first = _msgs_text(gw.calls[0][1])
-    # system 含：基座提示 + 钉驻任务规格(底座) + TextFallback 工具注入
-    assert "你是代码语义资产补齐器" in first
-    assert "候选类别(规则定死" in first
-    assert "Available tools" in first
-    # 协议切换：TextFallback [TOOL_CALL: name] 格式，无旧 [TOOL_CALL]{"tool" 协议
-    assert "[TOOL_CALL: tool_name]" in first
-    assert '[TOOL_CALL]{"tool"' not in first
-
-    second = _msgs_text(gw.calls[1][1])
-    # 工具结果经 observe_tool_result 入清单 → 第二轮编译注入上下文块
-    assert "<<<TOPOCODE_CONTEXT>>>" in second
-    assert "<<<END_TOPOCODE_CONTEXT>>>" in second
-    # 工具确实执行且返回源码（thread-local ctx 同线程可见；否则报"符号未找到"）
-    assert "self.id = 0" in second
-    assert "符号未找到" not in second
+    # 名称解析提示词契约：候选符号 + names JSON 逐字回填 symbol
+    assert "候选符号" in first
+    assert 'names' in first   # names 契约(序列化后引号被转义)
+    assert "Order" in first
+    # 不再有 tAgent 工具协议注入
+    assert "[TOOL_CALL" not in first
 
 
 # ── build_extraction_context ─────────────────────────────────────
@@ -152,38 +146,23 @@ def test_reachability_protects_task_file_entry():
 
 # ── 共享 cm 注入：跨 (文件×类型) 组累积（长 cm 扩展口）─────────────
 
-def test_shared_cm_accumulates_across_groups(tmp_path, monkeypatch):
-    from topocode_agent.core.context import ContextManager
-
-    monkeypatch.delenv("TOPOCODE_CTX_ASSET", raising=False)
-    shared = ContextManager(phase="kb_analysis")
-    shared.pin_requirement("shared-spec-文本")
+def test_name_chunking_10_per_call(tmp_path, monkeypatch):
+    """名称批量解析分块：11 个候选 → 2 次 LLM 调用(10+1)，全部获得业务名。"""
+    cands = [_cand(f"S{i}", "f1.py") for i in range(11)]
     gw = FakeGateway([
-        {"content": '{"assets": [{"symbol": "A", "name": "实体A", "desc": "d"}]}',
+        {"content": '{"names": [' + ",".join(
+            f'{{"symbol": "S{i}", "name": "符号{i}"}}' for i in range(10)) + ']}',
          "mode": "chat"},
-        {"content": '{"assets": [{"symbol": "B", "name": "实体B", "desc": "d"}]}',
+        {"content": '{"names": [{"symbol": "S10", "name": "符号10"}]}',
          "mode": "chat"},
     ])
     monkeypatch.setattr(KG, "get_gateway", lambda: gw)
-    ctx = {"nodes": [{"id": "nA", "name": "A", "qualified_name": "A",
-                      "file_path": "f1.py", "kind": "class", "start_line": 1,
-                      "end_line": 2, "signature": "class A:", "docstring": ""},
-                     {"id": "nB", "name": "B", "qualified_name": "B",
-                      "file_path": "f2.py", "kind": "class", "start_line": 1,
-                      "end_line": 2, "signature": "class B:", "docstring": ""}],
-           "edges": [], "implDetails": {}}
-
-    a1 = asset_extract._extract_group(str(tmp_path), None, ctx, "f1.py",
-                                      "entity", [_cand("A", "f1.py")], "m", True,
-                                      shared)
-    a2 = asset_extract._extract_group(str(tmp_path), None, ctx, "f2.py",
-                                      "entity", [_cand("B", "f2.py")], "m", True,
-                                      shared)
-    assert a1[0]["name"] == "实体A" and a2[0]["name"] == "实体B"
-    assert len(gw.calls) == 2
-    assert shared.turn >= 2                          # 同一 cm 跨组累积轮次
-    # 第二组 system 仍含共享钉驻规格（底座常驻）
-    assert "shared-spec-文本" in _msgs_text(gw.calls[1][1])
+    ctx = {"nodes": [c["node"] for c in cands], "edges": [], "implDetails": {}}
+    assets = asset_extract._extract_group(str(tmp_path), None, ctx, "f1.py",
+                                          "entity", cands, "m", True)
+    assert len(assets) == 11
+    assert len(gw.calls) == 2                       # 10 + 1 分块
+    assert all(a["name"].startswith("符号") for a in assets)
 
 
 # ── 结构化输出解析健壮性 ─────────────────────────────────────────

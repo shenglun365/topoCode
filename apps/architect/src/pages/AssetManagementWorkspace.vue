@@ -12,7 +12,6 @@ import { apiGet } from '@/services/api-client'
 import { useRouter } from 'vue-router'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
-import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { semanticAssetService, type AssetCompareResult, type BaselineDiff, type CoverageInfo, type ExtractPlanResult, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult, type SyncExtractJob, type UnownedCrossLink, type UnownedExtractJob, type UnownedFileEntry } from '@/services/semantic-asset-service'
 import { gitService, type GitLogEntry } from '@/services/git-service'
@@ -1291,6 +1290,21 @@ function usable(a: SemanticAsset): boolean {
 // 展开卡懒加载 detail：列表(light 模式)不带 detail 大字段；首次展开时
 // 单查 /{id} 回填。detailDone 含"已确认无 detail"的行，避免重复请求。
 const detailLoading = reactive<Record<string, boolean>>({})
+
+const descLoading = reactive<Record<string, boolean>>({})
+
+/** 按需生成功能摘要(分层口径: 批量提取不产 desc)。
+ *  fresh 缓存由后端直返；腐烂(需更新)资产后端自动重生成。 */
+async function genDesc(a: SemanticAsset) {
+  if (descLoading[a.id]) return
+  descLoading[a.id] = true
+  try {
+    const r = await semanticAssetService.assetDesc(a.id)
+    a.desc = r.desc || ''
+  } catch { /* 失败留按钮可重试 */ } finally {
+    descLoading[a.id] = false
+  }
+}
 const detailDone = new Set<string>()
 async function toggle(id: string) {
   expanded[id] = !expanded[id]
@@ -1802,10 +1816,10 @@ onUnmounted(() => {
           >{{ t(`assetMgmt.treeLevel.${treeLevel}`) }}</button>
           <template v-if="tab === 'semantic'">
             <div
-              class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden"
+              class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-crust overflow-hidden"
               :title="t('assetMgmt.scopeGroupHint')"
             >
-              <span class="chip !border-0 !rounded-none bg-transparent text-ctp-subtext0 font-mono text-[9px] px-2">{{ scopeSummary }}</span>
+              <span class="chip !border-0 !rounded-none bg-transparent text-ctp-subtext0 font-mono !text-[11px] px-2">{{ scopeSummary }}</span>
               <button
                 class="btn btn-xs !rounded-none !border-l !border-ctp-surface1"
                 :class="(filterOpen || scopeSel.length) ? 'btn-blue' : 'btn-ghost'"
@@ -1816,8 +1830,8 @@ onUnmounted(() => {
               </button>
             </div>
             <button
-              class="btn btn-xs"
-              :class="batchOpen ? 'btn-blue' : 'btn-ghost'"
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer"
+              :class="batchOpen ? '!border-ctp-blue' : ''"
               :title="t('assetMgmt.batchClearAll')"
               @click="batchOpen = !batchOpen; filterOpen = false"
             >
@@ -2765,8 +2779,8 @@ onUnmounted(() => {
                     />
                   </button>
                 </div>
-                <p class="px-2 pb-1.5 text-[10px] text-ctp-subtext0 line-clamp-2 whitespace-pre-wrap">
-                  {{ a.desc }}
+                <p class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap" :class="a.desc ? 'text-ctp-subtext0' : 'text-ctp-overlay0 italic'">
+                  {{ a.desc || t('assetMgmt.descPending') }}
                 </p>
                 <div
                   v-if="expanded[a.id]"
@@ -2778,7 +2792,24 @@ onUnmounted(() => {
                   >
                     {{ t('assetMgmt.detailLoading') }}
                   </div>
-                  <PseudoExplainer :asset-id="a.id" :initial="a.pseudo" />
+                  <div class="flex items-start gap-1.5">
+                    <SparklesIcon class="w-3 h-3 shrink-0 mt-0.5 text-ctp-peach" />
+                    <p
+                      v-if="a.desc"
+                      class="flex-1 m-0 whitespace-pre-wrap text-ctp-subtext1"
+                    >{{ a.desc }}</p>
+                    <button
+                      v-else
+                      class="btn btn-xs btn-ghost"
+                      :disabled="!!descLoading[a.id]"
+                      @click="genDesc(a)"
+                    >
+                      <SparklesIcon
+                        class="w-3 h-3"
+                        :class="descLoading[a.id] ? 'animate-pulse' : ''"
+                      />{{ t('assetMgmt.genDesc') }}
+                    </button>
+                  </div>
                   <div v-if="a.detail?.fields?.length">
                     <div class="font-medium text-ctp-mauve mb-0.5">
                       {{ t('assetMgmt.fields') }}

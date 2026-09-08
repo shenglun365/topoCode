@@ -294,7 +294,7 @@ def test_extract_scope_heuristic(tmp_path, monkeypatch):
     ds = next(a for a in res["assets"] if a["kind"] == "entity")
     assert ds["astRefs"][0]["file"] == "order.py"
     assert ds["name"] == "Order"
-    assert "订单核心结构" in ds["desc"]
+    assert ds["desc"] == ""   # 分层口径: 批量提取只产名称+种子, 功能摘要按需
     # 锚定文件哈希签名(要求①)
     assert ds["anchorHashes"] == {"order.py": S._file_md5(str(proj), "order.py")}
     assert ds["needsUpdate"] == 0

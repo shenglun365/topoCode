@@ -284,7 +284,9 @@ def test_parse_enrichments_symbol_filter():
         {"name": "无符号", "desc": "d"},
     ]}
     got = T.parse_enrichments(out, ["pay", "Order"])
-    assert list(got) == ["pay"]
+    # symbol 命中 pay；ghost 丢弃；无 symbol 条目按顺序对齐到剩余候选 Order(兜底)
+    assert list(got) == ["pay", "Order"]
+    assert got["Order"]["name"] == "无符号"
 
 
 def test_render_summary_desc_kinds():
@@ -412,20 +414,21 @@ def test_extract_directed_floor(tmp_path, monkeypatch):
     assert by["pay"]["detail"]["branches"][0]["condition"] == "o.amount > 0"
 
 
-def test_floor_desc_is_code_grounded(tmp_path, monkeypatch):
-    """地板 desc 由规则汇总渲染(代码级白话), 不再是空模板。"""
+def test_floor_desc_left_empty_for_on_demand(tmp_path, monkeypatch):
+    """分层口径: 批量提取(含地板)不产 desc——功能摘要按需生成(asset-desc)。"""
     _ctx(tmp_path, monkeypatch)
     nodes = [_node("c1", "class", "Order", "m.py", 1, 2)]
     ctx = _mk_ctx(tmp_path, nodes)
     assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=False)
     a = assets[0]
     assert a["kind"] == "entity"
-    assert a["desc"].startswith("实体「Order」")
-    assert "字段" in a["desc"] and "amount" in a["desc"]  # 渲染出字段结构, 非"位于…"空模板
+    assert a["desc"] == ""                       # 批量只产名称+种子, 摘要留空
+    assert a["detail"]["fields"][0]["name"] == "amount"  # 结构化种子保留
 
 
 def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
-    """LLM 增强(tAgent 路径): 业务命名+语义注释合并进种子骨架; http 关系不可由 LLM 伪造。"""
+    """名称批量解析(直连 LLM, 10个/次)：业务命名合并进种子骨架；desc 留空按需；
+    http 关系不可由 LLM 伪造(仅种子路由)。"""
     _ctx(tmp_path, monkeypatch)
     nodes = [_node("f1", "function", "api_pay", "m.py", 1, 3, sig="(request: Request)")]
     ctx = _mk_ctx(tmp_path, nodes, impl={
@@ -433,28 +436,30 @@ def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
                  "routes": [{"path": "/pay", "methods": ["POST"], "handler": "api_pay",
                              "framework": "fastapi", "line": 1}],
                  "constants": []}})
-    calls = []
 
-    def _fake_tagent(**kw):
-        calls.append(kw.get("task_spec"))
-        return {"content": "", "output": {"assets": [{
-            "symbol": "api_pay", "name": "支付端点", "desc": "接收支付请求",
-            "invariants": ["幂等"],
-            "relations": [{"target": "/fake", "type": "http", "semantic": "伪造"},
-                          {"target": "Order", "type": "uses", "semantic": "扣款"}],
-        }]}}
+    class _GW:
+        def __init__(self):
+            self.calls = []
 
-    import topoone_app_architect.arch_routes.tagent_extract as TE
-    monkeypatch.setattr(TE, "run_extraction_agentic", _fake_tagent)
+        def call(self, method, timeout=None, **params):
+            self.calls.append((method, params))
+            if method != "llm.sync":
+                return None
+            return {"content": '{"names": [{"symbol": "api_pay", "name": "支付端点"}]}',
+                    "mode": "chat"}
+
+    gw = _GW()
+    import topoone_app_architect.arch_routes.kb_gateway as KG
+    monkeypatch.setattr(KG, "get_gateway", lambda: gw)
     assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=True)
-    assert len(calls) == 1  # 恒走 tAgent 路径
+    assert len(gw.calls) == 1  # 名称解析单次直连
     a = assets[0]
     assert a["name"] == "支付端点" and a["kind"] == "contract"
+    assert a["desc"] == ""                                    # 功能摘要按需(asset-desc)
     rels = a["detail"]["relations"]
     http = [r for r in rels if r.get("type") == "http"]
-    assert [r["target"] for r in http] == ["/pay"]          # 只有种子路由
-    assert any(r["target"] == "Order" for r in rels)          # 跨资产关系保留
-    assert a["detail"]["invariants"] == ["幂等"]
+    assert [r["target"] for r in http] == ["/pay"]            # 只有种子路由
+    assert not any(r.get("target") == "/fake" for r in rels)  # LLM 关系不再并入
 
 
 def test_extract_group_llm_failure_falls_to_floor(tmp_path, monkeypatch):
@@ -462,11 +467,16 @@ def test_extract_group_llm_failure_falls_to_floor(tmp_path, monkeypatch):
     _ctx(tmp_path, monkeypatch)
     nodes = [_node("c1", "class", "Order", "m.py", 1, 2)]
     ctx = _mk_ctx(tmp_path, nodes)
-    import topoone_app_architect.arch_routes.tagent_extract as TE
-    monkeypatch.setattr(TE, "run_extraction_agentic",
-                        lambda **k: {"content": "oops", "output": None})
+    class _GW:
+        def call(self, method, timeout=None, **params):
+            return {"content": "oops", "mode": "chat"}   # 非 JSON → 名称解析失败
+
+    import topoone_app_architect.arch_routes.kb_gateway as KG
+    monkeypatch.setattr(KG, "get_gateway", lambda: _GW())
     assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=True)
     assert len(assets) == 1 and assets[0]["kind"] == "entity"
+    assert assets[0]["name"] == "Order"                      # 地板符号名
+    assert assets[0]["desc"] == ""                           # 功能摘要按需
     assert assets[0]["detail"]["fields"] == [{"name": "amount", "type": "int"}]
 
 
