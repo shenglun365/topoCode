@@ -9,6 +9,7 @@ import { useRouter } from 'vue-router'
 import {
   XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
   ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
+  PencilSquareIcon, SparklesIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import { useConversationStore } from '@/stores/conversation-store'
@@ -32,8 +33,39 @@ const listOpen = ref(false)
 
 async function loadRecent() {
   try {
-    recent.value = await sessionService.list({ limit: 30 })
+    // scope=all: 跨全库汇总 — 与会话中心同口径(会话管理+资产管理统一视图)
+    recent.value = await sessionService.list({ limit: 30, scope: 'all' })
   } catch { /* 列表失败保持旧值 */ }
+}
+
+// ── 会话标题: 悬停 → 手动修改(行内输入框) / 自动摘要 ──
+const editingTitle = ref(false)
+const titleDraft = ref('')
+const titleSummarizing = ref(false)
+function startTitleEdit() {
+  titleDraft.value = conv.activeTitle || ''
+  editingTitle.value = true
+}
+async function saveTitle() {
+  if (!editingTitle.value) return
+  editingTitle.value = false
+  const title = titleDraft.value.trim()
+  if (!title || title === conv.activeTitle) return
+  conv.activeTitle = title
+  if (conv.activeId) {
+    try { await sessionService.update(conv.activeId, { title }) } catch { /* 保存失败保持本地 */ }
+  }
+}
+async function summarizeTitle() {
+  if (!conv.activeId || titleSummarizing.value) return
+  titleSummarizing.value = true
+  try {
+    const updated = await sessionService.summarize(conv.activeId, true)
+    conv.activeTitle = updated.title || conv.activeTitle
+    void loadRecent()
+  } catch { /* 摘要失败静默 */ } finally {
+    titleSummarizing.value = false
+  }
 }
 onMounted(() => {
   void loadRecent()
@@ -133,8 +165,32 @@ async function answerClarify() {
         <span class="chip shrink-0" :class="kindClass(conv.activeKind)">
           {{ t(`session.kind.${conv.activeKind}`) }}
         </span>
-        <span class="min-w-0 flex-1 truncate text-xs font-medium text-ctp-text">
-          {{ conv.activeTitle || t('session.dock.untitled') }}
+        <span class="group/t flex min-w-0 flex-1 items-center gap-1">
+          <input
+            v-if="editingTitle"
+            v-model="titleDraft"
+            class="input w-full min-w-0 !px-1.5 !py-0.5 text-xs"
+            @click.stop
+            @keydown.enter.prevent="saveTitle"
+            @keydown.esc="editingTitle = false"
+            @blur="saveTitle"
+          >
+          <template v-else>
+            <span class="min-w-0 truncate text-xs font-medium text-ctp-text">
+              {{ conv.activeTitle || t('session.dock.untitled') }}
+            </span>
+            <span
+              v-if="conv.activeId"
+              class="hidden shrink-0 items-center gap-0.5 group-hover/t:flex"
+            >
+              <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface0 hover:text-ctp-blue" :title="t('session.actions.rename')" @click.stop="startTitleEdit">
+                <PencilSquareIcon class="h-3 w-3" />
+              </button>
+              <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface0 hover:text-ctp-blue" :title="t('session.actions.summarize')" @click.stop="summarizeTitle">
+                <SparklesIcon class="h-3 w-3" :class="titleSummarizing ? 'animate-pulse' : ''" />
+              </button>
+            </span>
+          </template>
         </span>
         <button
           class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"

@@ -222,8 +222,14 @@ class ConversationsStore:
         return [_row_to_api(r) for r in rows]
 
     @classmethod
-    def summaries(cls, kind: str = None, project_id: str = None, limit: int = 100) -> list[dict]:
-        """会话摘要(用于历史导入列表): 会话头 + 消息数 + 首条用户消息预览。"""
+    def summaries(cls, kind: str = None, project_id: str = None, limit: int = 100,
+                  all_scopes: bool = False) -> list[dict]:
+        """会话摘要(用于历史导入列表): 会话头 + 消息数 + 首条用户消息预览。
+
+        all_scopes=True: 跨全库(主库+各项目库)扫描合并, 不受请求项目上下文限制
+        (会话中心统一视图)。"""
+        if all_scopes:
+            return cls._summaries_scan(kind=kind, limit=limit)
         sql = (f"SELECT c.*, "
                "(SELECT COUNT(*) FROM {msg} m WHERE m.conversation_id = c.id) AS msg_count, "
                "(SELECT MIN(m2.time) FROM {msg} m2 WHERE m2.conversation_id = c.id "
@@ -244,6 +250,27 @@ class ConversationsStore:
         params.append(int(limit))
         rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
         return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def _summaries_scan(cls, kind: str = None, limit: int = 100) -> list[dict]:
+        """全库扫描版 summaries(主库+各项目库), 按更新时间归并。"""
+        from .base import _scan_dbs
+        sql = (f"SELECT c.*, "
+               "(SELECT COUNT(*) FROM {msg} m WHERE m.conversation_id = c.id) AS msg_count, "
+               "(SELECT MIN(m2.time) FROM {msg} m2 WHERE m2.conversation_id = c.id "
+               " AND m2.role = 'user') AS first_user_time, "
+               "(SELECT m3.content FROM {msg} m3 WHERE m3.conversation_id = c.id "
+               " AND m3.role = 'user' ORDER BY m3.time ASC, m3.rowid ASC LIMIT 1) AS preview "
+               f"FROM {cls.TABLE} c").format(msg=cls.MSG_TABLE)
+        params: tuple = ()
+        if kind:
+            sql += " WHERE c.kind = ?"
+            params = (kind,)
+        out: list[dict] = []
+        for d in _scan_dbs():
+            out.extend(_row_to_api(r) for r in d.fetchall(sql, params))
+        out.sort(key=lambda r: (r.get("updatedAt") is None, r.get("updatedAt") or 0), reverse=True)
+        return out[: int(limit)]
 
     @classmethod
     def append_message(cls, msg: dict) -> dict:

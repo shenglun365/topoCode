@@ -65,11 +65,11 @@ function qs(params?: Record<string, string | number | undefined>): string {
 }
 
 export const sessionService = {
-  async list(params?: { kind?: string; q?: string; limit?: number }): Promise<ConversationMeta[]> {
+  async list(params?: { kind?: string; q?: string; limit?: number; scope?: string }): Promise<ConversationMeta[]> {
     return apiGet<ConversationMeta[]>(`/sessions${qs(params)}`)
   },
-  async groups(): Promise<SessionGroupsInfo> {
-    return apiGet<SessionGroupsInfo>('/sessions/groups')
+  async groups(scope?: string): Promise<SessionGroupsInfo> {
+    return apiGet<SessionGroupsInfo>(`/sessions/groups${scope ? `?scope=${scope}` : ''}`)
   },
   async saveGroups(groups: string[]): Promise<{ groups: string[] }> {
     return apiPut<{ groups: string[] }>('/sessions/groups', { groups })
@@ -86,8 +86,9 @@ export const sessionService = {
   async messages(id: string): Promise<ConversationDetail> {
     return apiGet<ConversationDetail>(`/sessions/${id}/messages`)
   },
-  async summarize(id: string): Promise<ConversationMeta> {
-    return apiPost<ConversationMeta>(`/sessions/${id}/summarize`)
+  /** force=1: 用户显式触发自动摘要(总是重生成标题); 缺省(系统自动)尊重手改标题。 */
+  async summarize(id: string, force = false): Promise<ConversationMeta> {
+    return apiPost<ConversationMeta>(`/sessions/${id}/summarize${force ? '?force=1' : ''}`)
   },
   async context(id: string): Promise<ContextUnit[]> {
     return apiGet<ContextUnit[]>(`/sessions/${id}/context`)

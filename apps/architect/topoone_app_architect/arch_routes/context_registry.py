@@ -139,17 +139,35 @@ _TITLE_SCHEMA = {
 }
 
 
-def summarize_conversation(conv_id: str) -> Optional[dict]:
-    """生成/刷新会话标题与摘要 → 落库 + session_summary 单元。返回更新后会话。"""
+def _conv_meta(conv: dict) -> dict:
+    """会话 meta 字段(JSON) → dict。"""
+    raw = conv.get("meta")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            raw = {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def summarize_conversation(conv_id: str, force: bool = False) -> Optional[dict]:
+    """生成/刷新会话标题与摘要 → 落库 + session_summary 单元。返回更新后会话。
+
+    标题保护: 用户手动改过标题(meta.titleEdited)后, 非 force(系统自动摘要)
+    不再覆盖标题(仅刷新摘要); force=1(用户显式点击自动摘要)总是重新生成。
+    """
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return None
+    meta = _conv_meta(conv)
+    title_edited = bool(meta.get("titleEdited"))
     msgs = store.ConversationsStore.messages(conv_id, limit=30)
     transcript = "\n".join(
         f"[{'用户' if m.get('role') == 'user' else '助手'}] {(m.get('content') or '').strip()[:400]}"
         for m in msgs if (m.get("content") or "").strip()
     )
     title, summary = "", ""
+    need_title = force or not title_edited
     if transcript:
         from . import req_agent
         res = req_agent.llm_sync(
@@ -162,14 +180,22 @@ def summarize_conversation(conv_id: str) -> Optional[dict]:
             max_tokens=512,
         )
         if res and isinstance(res.get("output"), dict):
-            title = str(res["output"].get("title") or "").strip()[:48]
+            if need_title:
+                title = str(res["output"].get("title") or "").strip()[:48]
             summary = str(res["output"].get("summary") or "").strip()[:400]
-    if not title:
-        first_user = next((m.get("content") or "" for m in msgs if m.get("role") == "user"), "")
-        title = first_user.strip().replace("\n", " ")[:24] or (conv.get("title") or "会话")
+    if need_title:
+        if not title:
+            first_user = next((m.get("content") or "" for m in msgs if m.get("role") == "user"), "")
+            title = first_user.strip().replace("\n", " ")[:24] or (conv.get("title") or "会话")
+    else:
+        # 手改标题保护: 系统自动摘要只刷新摘要, 标题维持用户所改
+        title = conv.get("title") or ""
     if not summary:
         summary = (conv.get("summary") or "").strip()
-    updated = store.ConversationsStore.update(conv_id, {"title": title, "summary": summary})
+    # 显式自动摘要生成的标题视同已定稿, 后续系统自动不再覆盖
+    if force and title:
+        meta["titleEdited"] = True
+    updated = store.ConversationsStore.update(conv_id, {"title": title, "summary": summary, "meta": meta})
     # 摘要单元(高优先级；refs 继承会话 tags)
     try:
         tags = _conv_tags(conv)

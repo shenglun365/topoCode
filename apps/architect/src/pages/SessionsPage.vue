@@ -46,7 +46,8 @@ const kindOptions = ['all', 'requirement', 'design', 'asset', 'execution', 'gene
 async function load() {
   loading.value = true
   try {
-    const [l, g] = await Promise.all([sessionService.list({ limit: 400 }), sessionService.groups()])
+    // scope=all: 跨全库(主库+各项目库)汇总 — 会话中心统一视图(会话管理+资产管理)
+    const [l, g] = await Promise.all([sessionService.list({ limit: 400, scope: 'all' }), sessionService.groups('all')])
     list.value = l
     groupsInfo.value = g
     void task.load()
@@ -136,16 +137,26 @@ function newConversation() {
 }
 
 // ── 行操作 ──
-async function rename(c: ConversationMeta) {
-  const title = window.prompt(t('session.actions.renamePrompt'), c.title)
+// ── 标题行内编辑(悬停标题 → 手动修改/自动摘要) ──
+const editingId = ref('')
+const titleDraft = ref('')
+function startEdit(c: ConversationMeta) {
+  editingId.value = c.id
+  titleDraft.value = c.title
+}
+async function saveEdit(c: ConversationMeta) {
+  if (editingId.value !== c.id) return
+  editingId.value = ''
+  const title = titleDraft.value.trim()
   if (!title || title === c.title) return
   await sessionService.update(c.id, { title })
   c.title = title
+  if (selected.value?.id === c.id) selected.value.title = title
 }
-async function summarize(c: ConversationMeta) {
+async function summarize(c: ConversationMeta, force = false) {
   busyTip.value = c.id
   try {
-    const updated = await sessionService.summarize(c.id)
+    const updated = await sessionService.summarize(c.id, force)
     Object.assign(c, updated)
     if (selected.value?.id === c.id) Object.assign(selected.value, updated)
   } finally {
@@ -294,7 +305,29 @@ function statusClass(s: string) {
             <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
-                <span class="truncate text-xs font-medium text-ctp-text">{{ c.title }}</span>
+                <input
+                  v-if="editingId === c.id"
+                  v-model="titleDraft"
+                  class="input w-full min-w-0 !px-1.5 !py-0.5 text-xs"
+                  @click.stop
+                  @keydown.enter.prevent="saveEdit(c)"
+                  @keydown.esc="editingId = ''"
+                  @blur="saveEdit(c)"
+                >
+                <span
+                  v-else
+                  class="group/t flex min-w-0 items-center gap-1"
+                >
+                  <span class="truncate text-xs font-medium text-ctp-text">{{ c.title }}</span>
+                  <span class="hidden shrink-0 items-center gap-0.5 group-hover/t:flex">
+                    <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.actions.rename')" @click.stop="startEdit(c)">
+                      <PencilSquareIcon class="h-3 w-3" />
+                    </button>
+                    <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.actions.summarize')" @click.stop="summarize(c, true)">
+                      <SparklesIcon class="h-3 w-3" :class="busyTip === c.id ? 'animate-pulse' : ''" />
+                    </button>
+                  </span>
+                </span>
                 <span
                   v-for="tag in [...c.tags.groups, ...c.tags.modules].slice(0, 3)"
                   :key="tag"
@@ -312,12 +345,6 @@ function statusClass(s: string) {
             <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
               <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.openInDock')" @click.stop="openInDock(c)">
                 <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />
-              </button>
-              <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.actions.summarize')" @click.stop="summarize(c)">
-                <SparklesIcon class="h-3.5 w-3.5" :class="busyTip === c.id ? 'animate-pulse' : ''" />
-              </button>
-              <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.actions.rename')" @click.stop="rename(c)">
-                <PencilSquareIcon class="h-3.5 w-3.5" />
               </button>
               <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-peach" :title="t('session.actions.editTags')" @click.stop="editTags(c)">
                 <TagIcon class="h-3.5 w-3.5" />

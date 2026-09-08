@@ -67,9 +67,13 @@ def _user_groups() -> list:
 
 
 @router.get("/sessions")
-async def list_sessions(kind: str = "", q: str = "", limit: int = 400):
-    """会话列表(全量会话 + 消息数/预览)。q: 标题/摘要模糊过滤(前端侧也过滤)。"""
-    rows = store.ConversationsStore.summaries(kind=kind or None, limit=limit)
+async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: str = ""):
+    """会话列表(全量会话 + 消息数/预览)。q: 标题/摘要模糊过滤(前端侧也过滤)。
+
+    scope=all: 跨全库(主库+各项目库)汇总 —— 会话中心统一视图, 不受 ?project= 限制。
+    """
+    rows = store.ConversationsStore.summaries(
+        kind=kind or None, limit=limit, all_scopes=(scope == "all"))
     items = []
     for c in rows:
         title = c.get("title") or f"{c.get('kind') or 'session'} 对话"
@@ -96,9 +100,9 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400):
 
 
 @router.get("/sessions/groups")
-async def list_groups():
-    """分组维度: 用户自定义分组 + 会话身上出现过的 modules/groups 并集。"""
-    convs = store.ConversationsStore.all(limit=400)
+async def list_groups(scope: str = ""):
+    """分组维度: 用户自定义分组 + 会话身上出现过的 modules/groups 并集(scope=all 跨全库)。"""
+    convs = store.ConversationsStore.summaries(limit=400, all_scopes=(scope == "all"))
     modules, groups = [], []
     for c in convs:
         t = _tags_of(c)
@@ -158,7 +162,16 @@ async def update_session(conv_id: str, request: Request):
         title = str(data.get("title") or "").strip()
         if not title:
             return err(400, "标题不能为空")
-        patch["title"] = title
+        if title != (conv.get("title") or ""):
+            patch["title"] = title
+            # 手动改名留痕: 后续系统自动摘要不再覆盖该标题
+            try:
+                meta = json.loads(conv.get("meta") or "{}") if isinstance(conv.get("meta"), str) else (conv.get("meta") or {})
+            except (TypeError, ValueError):
+                meta = {}
+            if isinstance(meta, dict):
+                meta["titleEdited"] = True
+                patch["meta"] = meta
     if "summary" in data:
         patch["summary"] = str(data.get("summary") or "")
     if "status" in data:
@@ -192,10 +205,13 @@ async def session_messages(conv_id: str):
 
 
 @router.post("/sessions/{conv_id}/summarize")
-async def summarize_session(conv_id: str):
-    """生成/刷新会话标题与摘要(标题兜底: 首条用户消息截断) + session_summary 单元。"""
+async def summarize_session(conv_id: str, force: int = 0):
+    """生成/刷新会话标题与摘要(标题兜底: 首条用户消息截断) + session_summary 单元。
+
+    force=1: 用户显式触发(悬停按钮) → 总是重新生成标题; 默认(系统自动)尊重手改标题。
+    """
     from . import context_registry
-    conv = context_registry.summarize_conversation(conv_id)
+    conv = context_registry.summarize_conversation(conv_id, force=bool(force))
     if not conv:
         return err(404, "会话不存在")
     return ok(_conv_api(conv))
