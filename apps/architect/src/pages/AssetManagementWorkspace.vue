@@ -2215,7 +2215,8 @@ onUnmounted(() => {
                     <span
                       v-for="k in kinds"
                       :key="k.value"
-                      class="chip bg-ctp-surface0 text-ctp-subtext0"
+                      class="chip"
+                      :class="kindChipClass(k.value)"
                     >{{ k.label }} · {{ overviewStats?.byKind?.[k.value] ?? 0 }}</span>
                   </div>
                 </div>
