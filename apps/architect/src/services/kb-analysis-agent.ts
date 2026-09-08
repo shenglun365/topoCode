@@ -19,9 +19,24 @@ import { ArchWs } from './ws-client'
  *
  * 全部由后端(LLM 驱动)处理；后端调用失败向上抛出——不复用本地 mock。
  */
+/** 消息级阶段标注(WS2): 由工具调用隐式推导，仅作过滤/回溯视角，不约束流转。 */
+export type ChatStage = 'design' | 'implement' | 'evaluate' | 'accept'
+
+/** 工具名 → 阶段推导(前向兼容: WS3+ 的 coding.task / evaluate / acceptance 工具落地即生效)。 */
+export function stageOfTool(tool: string): ChatStage | '' {
+  const t = tool || ''
+  if (/^probe\.run$|^coding\.task\.plan/.test(t)) return 'design'
+  if (/^coding\.task\.|^execution\./.test(t)) return 'implement'
+  if (/^capability\.evaluate$|^evaluate\./.test(t)) return 'evaluate'
+  if (/^acceptance\.|^contract\.propose$/.test(t)) return 'accept'
+  return ''
+}
+
 export interface KbAnalysisTurn {
   role: 'user' | 'assistant'
   content: string
+  /** 阶段标注(设计/实现/评估/验收)：本回合内工具调用推导。 */
+  stage?: ChatStage
   /** 推理内容(thinking)：独立于正文，前端可折叠展示。 */
   reasoning?: string
   questions?: QuestionItem[]
@@ -193,7 +208,6 @@ export async function chatStream(
       messages,
       ...currentProjectParams(),
       conversationId: opts.conversationId,
-      kind: opts.kind ?? 'requirement',
       reqId: opts.reqId,
       title: opts.title,
       modelId: opts.modelId,

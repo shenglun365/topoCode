@@ -154,8 +154,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     model_id = data.get("modelId") or data.get("model") or ""
     project = (data.get("project") or "").strip()
     root = (data.get("root") or "").strip()
-    kind = data.get("kind") or "requirement"
-    title = data.get("title") or f"{kind} 对话"
+    kind = data.get("kind") or "chat"
+    title = data.get("title") or ""
     diagram_skill = bool(data.get("diagramSkill") or data.get("diagram_skill"))
 
     # 请求级项目上下文(项目库路由；WS 无 HTTP 查询串，按消息载荷设置)

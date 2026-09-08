@@ -56,6 +56,14 @@ const emit = defineEmits<{
 // ── 头部标题行内编辑 ──
 const editingTitle = ref(false)
 const titleDraft = ref('')
+
+/** 阶段标注配色(设计/实现/评估/验收——消息级工具推导, 非会话分类)。 */
+function stageClass(stage: string) {
+  if (stage === 'design') return 'bg-ctp-peach/15 text-ctp-peach'
+  if (stage === 'implement') return 'bg-ctp-sky/15 text-ctp-sky'
+  if (stage === 'evaluate') return 'bg-ctp-yellow/15 text-ctp-yellow'
+  return 'bg-ctp-green/15 text-ctp-green'
+}
 function startTitleEdit() {
   titleDraft.value = props.title || ''
   editingTitle.value = true
@@ -532,6 +540,11 @@ onUnmounted(() => {
             >
               <BookOpenIcon class="w-2.5 h-2.5 inline" />{{ t('requirement.chat.kb') }}
             </span>
+            <span
+              v-if="m.stage"
+              class="chip !text-[9px]"
+              :class="stageClass(m.stage)"
+            >{{ t(`session.stage.${m.stage}`) }}</span>
             <span class="flex-1" />
             <button
               v-if="m.reasoning"

@@ -21,8 +21,9 @@ const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
   inline?: boolean
   /** 新建会话的默认类型(资产地图页传 asset)。 */
-  defaultKind?: string
-}>(), { inline: false, defaultKind: 'requirement' })
+  /** 页面级技能场景(如资产地图=['extract'])：随发送注入, 不再有会话类别。 */
+  skillScenarios?: string[]
+}>(), { inline: false })
 
 const { t } = useI18n()
 const router = useRouter()
@@ -80,13 +81,6 @@ onMounted(() => {
 })
 onUnmounted(() => { if (niTimer) clearInterval(niTimer) })
 
-function kindClass(kind: string) {
-  if (kind === 'asset') return 'bg-ctp-mauve/15 text-ctp-mauve'
-  if (kind === 'design') return 'bg-ctp-peach/15 text-ctp-peach'
-  if (kind === 'execution') return 'bg-ctp-green/15 text-ctp-green'
-  return 'bg-ctp-sky/15 text-ctp-sky'
-}
-
 function switchTo(meta: ConversationMeta) {
   listOpen.value = false
   void conv.openConversation(meta)
@@ -94,7 +88,7 @@ function switchTo(meta: ConversationMeta) {
 }
 function newChat() {
   listOpen.value = false
-  conv.newConversation(props.defaultKind || 'requirement')
+  conv.newConversation()
   void loadRecent()
 }
 function onGotoRequirements() {
@@ -169,9 +163,6 @@ async function answerClarify() {
     <!-- 头部: 标题 + kind + 会话切换(仅悬浮形态; inline 停靠的标题编辑在对话面板 header 内) -->
     <div v-if="!props.inline" class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
       <div class="flex items-center gap-2">
-        <span class="chip shrink-0" :class="kindClass(conv.activeKind)">
-          {{ t(`session.kind.${conv.activeKind}`) }}
-        </span>
         <span class="group/t flex min-w-0 flex-1 items-center gap-1">
           <input
             v-if="editingTitle"
@@ -236,7 +227,6 @@ async function answerClarify() {
           :class="c.id === conv.activeId ? 'bg-ctp-surface0' : ''"
           @click="switchTo(c)"
         >
-          <span class="chip shrink-0" :class="kindClass(c.kind)">{{ t(`session.kind.${c.kind}`) }}</span>
           <span class="min-w-0 flex-1 truncate text-ctp-text">{{ c.title }}</span>
           <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ c.msgCount }}</span>
         </button>
@@ -289,7 +279,7 @@ async function answerClarify() {
         @rename="onRenameTitle"
         @summarize-title="summarizeTitle"
         :diagram-skill="conv.diagramSkill"
-        @send="(text) => { conv.send(text, conv.activeKind === 'asset' ? { skillScenarios: ['extract'] } : undefined); onSent() }"
+        @send="(text) => { conv.send(text, props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : undefined); onSent() }"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
         @toggle-diagram-skill="conv.toggleDiagramSkill"

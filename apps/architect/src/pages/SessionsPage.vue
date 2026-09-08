@@ -38,10 +38,8 @@ const busyTip = ref('')
 
 // ── 过滤器 ──
 const q = ref('')
-const kindFilter = ref('all')
 const timeFilter = ref<'all' | 'today' | 'week' | 'earlier'>('all')
 const groupFilter = ref('')          // '' = 全部; group:<name> / module:<name>
-const kindOptions = ['all', 'requirement', 'design', 'asset', 'execution', 'generic']
 
 async function load() {
   loading.value = true
@@ -77,7 +75,6 @@ function timeBucket(c: ConversationMeta): 'today' | 'week' | 'earlier' {
 
 const filtered = computed(() => {
   let out = list.value
-  if (kindFilter.value !== 'all') out = out.filter((c) => c.kind === kindFilter.value)
   if (timeFilter.value !== 'all') out = out.filter((c) => timeBucket(c) === timeFilter.value)
   if (groupFilter.value.startsWith('group:')) {
     const g = groupFilter.value.slice(6)
@@ -133,7 +130,7 @@ function openInDock(c: ConversationMeta) {
   void conv.openConversation(c)
 }
 function newConversation() {
-  conv.newConversation('requirement')
+  conv.newConversation()
 }
 
 // ── 行操作 ──
@@ -215,12 +212,6 @@ async function removeDoc(doc: SessionDoc) {
 function fmt(ts?: number) {
   return ts ? new Date(ts).toLocaleString() : '—'
 }
-function kindClass(kind: string) {
-  if (kind === 'asset') return 'bg-ctp-mauve/15 text-ctp-mauve'
-  if (kind === 'design') return 'bg-ctp-peach/15 text-ctp-peach'
-  if (kind === 'execution') return 'bg-ctp-green/15 text-ctp-green'
-  return 'bg-ctp-sky/15 text-ctp-sky'
-}
 function statusClass(s: string) {
   if (s === 'running') return 'bg-ctp-green/15 text-ctp-green'
   if (s === 'waiting') return 'bg-ctp-yellow/15 text-ctp-yellow'
@@ -237,17 +228,6 @@ function statusClass(s: string) {
       <div class="relative w-56">
         <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
         <input v-model="q" class="input pl-8 text-xs" :placeholder="t('session.searchPlaceholder')">
-      </div>
-      <div class="flex items-center gap-1">
-        <button
-          v-for="k in kindOptions"
-          :key="k"
-          class="chip cursor-pointer"
-          :class="kindFilter === k ? 'bg-ctp-blue/20 text-ctp-blue' : 'bg-ctp-surface0 text-ctp-subtext0'"
-          @click="kindFilter = k"
-        >
-          {{ k === 'all' ? t('session.filter.all') : t(`session.kind.${k}`) }}
-        </button>
       </div>
       <select v-model="timeFilter" class="input !w-auto !py-1 text-xs">
         <option value="all">{{ t('session.time.all') }}</option>
@@ -301,7 +281,6 @@ function statusClass(s: string) {
             :class="selected?.id === c.id ? 'bg-ctp-surface0/70' : ''"
             @click="select(c)"
           >
-            <span class="chip shrink-0" :class="kindClass(c.kind)">{{ t(`session.kind.${c.kind}`) }}</span>
             <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -318,7 +297,7 @@ function statusClass(s: string) {
                   v-else
                   class="group/t flex min-w-0 items-center gap-1"
                 >
-                  <span class="truncate text-xs font-medium text-ctp-text">{{ c.title }}</span>
+                  <span class="truncate text-xs font-medium text-ctp-text">{{ c.title || t('session.dock.untitled') }}</span>
                   <span class="hidden shrink-0 items-center gap-0.5 group-hover/t:flex">
                     <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.actions.rename')" @click.stop="startEdit(c)">
                       <PencilSquareIcon class="h-3 w-3" />
@@ -368,9 +347,9 @@ function statusClass(s: string) {
     >
       <div class="sticky top-0 z-10 flex items-start gap-2 border-b border-ctp-surface0 bg-ctp-mantle/95 px-3 py-2 backdrop-blur">
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium text-ctp-text">{{ selected.title }}</p>
+          <p class="truncate text-sm font-medium text-ctp-text">{{ selected.title || t('session.dock.untitled') }}</p>
           <p class="text-[10px] text-ctp-overlay0">
-            {{ t(`session.kind.${selected.kind}`) }} · {{ selected.msgCount }} {{ t('session.msgUnit') }} · {{ fmt(selected.updatedAt) }}
+            {{ selected.msgCount }} {{ t('session.msgUnit') }} · {{ fmt(selected.updatedAt) }}
           </p>
         </div>
         <button class="rounded p-1 text-ctp-subtext0 hover:text-ctp-text" @click="selected = null">

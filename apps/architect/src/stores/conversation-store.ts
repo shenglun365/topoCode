@@ -8,7 +8,7 @@
  */
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { chatStream, type ChatStreamEvent, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
+import { chatStream, stageOfTool, type ChatStreamEvent, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { requirementService } from '@/services/requirement-service'
 import { readModelPref } from '@topo/web-core/shell'
@@ -31,7 +31,6 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   // ── 当前会话 ──
   const activeId = ref('')
-  const activeKind = ref('requirement')
   const activeTitle = ref('')
   const activeReqId = ref('')
   const activeMeta = ref<ConversationMeta | null>(null)
@@ -85,16 +84,14 @@ export const useConversationStore = defineStore('archConversation', () => {
     const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
     turns.value = msgs.map((m) => ({ role: m.role, content: m.content, id: m.id }))
     activeId.value = conv.id
-    if (conv.kind) activeKind.value = conv.kind
     if (typeof conv.reqId === 'string') activeReqId.value = conv.reqId
     if (conv.title) activeTitle.value = conv.title
   }
 
   /** 打开已有会话(dock 或会话中心触发): 载入持久化历史。 */
-  async function openConversation(meta: Pick<ConversationMeta, 'id' | 'kind' | 'reqId' | 'title'>) {
+  async function openConversation(meta: Pick<ConversationMeta, 'id' | 'reqId' | 'title'>) {
     resetChat()
     activeId.value = meta.id
-    activeKind.value = meta.kind || 'requirement'
     activeReqId.value = meta.reqId || ''
     activeTitle.value = meta.title || ''
     activeMeta.value = meta as ConversationMeta
@@ -105,11 +102,10 @@ export const useConversationStore = defineStore('archConversation', () => {
     } catch { /* 无历史 → 空对话 */ }
   }
 
-  /** 新会话(页面上下文决定 kind: 资产地图=asset 等)。 */
-  function newConversation(kind: string, title = '') {
+  /** 新会话(无类别——仅标题/摘要；阶段由消息级工具推导)。 */
+  function newConversation(title = '') {
     resetChat()
     activeId.value = ''
-    activeKind.value = kind
     activeReqId.value = ''
     activeTitle.value = title
     activeMeta.value = null
@@ -128,7 +124,6 @@ export const useConversationStore = defineStore('archConversation', () => {
       const msgs = turns.value.slice(0, -1).map((m) => ({ role: m.role, content: m.content }))
       await chatStream(msgs, {
         conversationId: activeId.value || undefined,
-        kind: activeKind.value,
         reqId: opts?.reqId ?? (activeReqId.value || undefined),
         title: activeTitle.value || undefined,
         modelId: readModelPref('architect') || undefined,
@@ -151,6 +146,8 @@ export const useConversationStore = defineStore('archConversation', () => {
           if (ev.messageId) turns.value[idx].id = ev.messageId
           void refreshActiveMeta()
         } else if (ev.type === 'tool_result') {
+          const stage = stageOfTool(ev.tool)
+          if (stage) turns.value[idx].stage = stage
           if (ev.tool === 'req.propose' && ev.ok) void attachProposal(ev)
         } else if (ev.type === 'error') {
           turns.value[idx].content = ev.message || ''
@@ -190,11 +187,9 @@ export const useConversationStore = defineStore('archConversation', () => {
     } catch { /* 列表刷新失败不影响对话 */ }
   }
 
-  const kindLabel = computed(() => activeKind.value)
-
   return {
     dockOpen, setDockOpen, toggleDock,
-    activeId, activeKind, activeTitle, activeReqId, activeMeta, kindLabel,
+    activeId, activeTitle, activeReqId, activeMeta,
     turns, busy, insertDraft, pushDraft,
     diagramSkill, toggleDiagramSkill,
     busyLabel, toolTrail,

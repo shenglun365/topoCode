@@ -62,9 +62,7 @@ onUnmounted(() => window.removeEventListener('arch:refresh-asset', _onDockRefres
 
 /** 确保 dock 当前是资产会话(非资产会话时新开)。 */
 function ensureAssetConversation() {
-  if (!conv.activeId || conv.activeKind !== 'asset') {
-    conv.newConversation('asset', t('assetMgmt.chatTitle'))
-  }
+  if (!conv.activeId) conv.newConversation(t('assetMgmt.chatTitle'))
 }
 /** 导入指定历史会话(资产管理 → 全局会话栏)。 */
 function importHistory(detail: ConversationDetail) {
@@ -3061,7 +3059,7 @@ onUnmounted(() => {
 
       <!-- 右：全局会话栏·inline 停靠(P1 决策2: 唯一对话栏——本页停靠形态) -->
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-        <ConversationDock inline default-kind="asset" />
+        <ConversationDock inline :skill-scenarios="['extract']" />
       </div>
     </div>
 

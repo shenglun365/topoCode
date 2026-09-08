@@ -422,10 +422,7 @@ export default {
     linkHint: 'green=exec(→baseline asset diff) · blue=session · yellow=doc',
   },
   session: {
-    kind: {
-      requirement: 'Requirement', design: 'Design', asset: 'Asset', execution: 'Exec',
-      'unit-test': 'Test', generic: 'General',
-    },
+    stage: { design: 'Design', implement: 'Implement', evaluate: 'Evaluate', accept: 'Accept' },
     status: { active: 'Active', waiting: 'Waiting', running: 'Running', done: 'Done', archived: 'Archived' },
     time: { all: 'All time', today: 'Today', week: 'This week', earlier: 'Earlier' },
     group: { all: 'All groups', custom: 'Custom groups', byModule: 'By module', new: 'New group' },
@@ -1024,10 +1021,10 @@ export default {
     },
     llm: {
       title: 'KB Model Config',
-      desc: 'Manually sync model configuration from KB; manually-configured models are never overwritten by re-import.',
+      desc: 'Manually sync model configuration from KB (re-import clears previously imported records and rebuilds); manually-configured models are never overwritten.',
       import: 'Import Model Config from KB',
       importing: 'Importing…',
-      importDone: 'Import done: {added} added / {updated} updated / {preserved} manual kept',
+      importDone: 'Import done: {added} rebuilt / {preserved} manual kept',
       importFail: 'KB unreachable or no models available',
       source: {
         imported: 'KB Import',

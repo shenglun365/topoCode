@@ -446,10 +446,7 @@ export default {
     linkHint: '绿色=执行(→基线管理资产 diff) · 蓝色=会话 · 黄色=备案文档',
   },
   session: {
-    kind: {
-      requirement: '需求', design: '方案', asset: '资产', execution: '执行',
-      'unit-test': '测试', generic: '通用',
-    },
+    stage: { design: '设计', implement: '实现', evaluate: '评估', accept: '验收' },
     status: { active: '进行中', waiting: '待回答', running: '运行中', done: '已完成', archived: '已归档' },
     time: { all: '全部时间', today: '今天', week: '本周', earlier: '更早' },
     group: { all: '全部分组', custom: '自定义分组', byModule: '按模块', new: '新建分组' },
@@ -1050,10 +1047,10 @@ export default {
     },
     llm: {
       title: 'KB 模型配置',
-      desc: '从 KB 手动导入模型配置；手动单独设置的模型不会被重复导入覆盖。',
+      desc: '从 KB 手动导入模型配置(重复导入清除原导入记录后重建)；手动单独设置的模型不会被覆盖。',
       import: '从 KB 导入模型配置',
       importing: '导入中…',
-      importDone: '导入完成：新增 {added} / 更新 {updated} / 保留手动 {preserved}',
+      importDone: '导入完成：重建 {added} 条 / 保留手动 {preserved} 条',
       importFail: 'KB 不可达或无可用模型',
       source: {
         imported: 'KB 导入',

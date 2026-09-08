@@ -76,7 +76,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
         kind=kind or None, limit=limit, all_scopes=(scope == "all"))
     items = []
     for c in rows:
-        title = c.get("title") or f"{c.get('kind') or 'session'} 对话"
+        title = c.get("title") or ""
         item = {
             "id": c["id"],
             "kind": c.get("kind") or "requirement",
