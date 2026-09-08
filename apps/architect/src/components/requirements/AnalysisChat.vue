@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
@@ -62,6 +62,7 @@ watch(() => props.insertDraft?.nonce ?? 0, (n) => {
   input.value = input.value ? `${input.value} ${text}` : text
   void nextTick(() => {
     inputRef.value?.focus()
+    manualHeight = false
     autoResize()
     const el = inputRef.value
     if (el) el.selectionStart = el.selectionEnd = el.value.length
@@ -94,26 +95,69 @@ function send() {
   nextTick(() => scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior: 'smooth' }))
 }
 
-const MAX_ROWS = 8
-/** 自适应高度：随内容加高，上限 8 行，超过显示滚动条。 */
+const MIN_ROWS = 2
+const MAX_ROWS = 6
+/** 读取行高与上下 padding(用于行数↔像素换算)。 */
+function inputMetrics(el: HTMLTextAreaElement) {
+  const cs = getComputedStyle(el)
+  return {
+    lineH: parseFloat(cs.lineHeight) || 16,
+    pad: (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0),
+  }
+}
+/** 用户拖拽把手进入手动高度模式(暂停自动伸缩)，发送后恢复。 */
+let manualHeight = false
+/** autoResize 施加高度时抑制 RO 回调(避免把自己的改动误判为手动拖拽)。 */
+let roSuppress = false
+let lastAppliedHeight = ''
+/** 自适应高度：随内容行数伸缩，默认/最矮 2 行、最高 6 行，超出滚动；手动拖拽后交由用户控制(仍限 2~6 行)。 */
 function autoResize() {
   const el = inputRef.value
   if (!el) return
-  const lineH = parseFloat(getComputedStyle(el).lineHeight) || 16
-  const pad = (parseFloat(getComputedStyle(el).paddingTop) || 0) + (parseFloat(getComputedStyle(el).paddingBottom) || 0)
+  if (manualHeight) {
+    // 手动模式：不改动用户拖出的高度，只维护滚动条
+    el.style.overflowY = el.scrollHeight > el.clientHeight + 1 ? 'auto' : 'hidden'
+    return
+  }
+  roSuppress = true
+  const { lineH, pad } = inputMetrics(el)
+  const min = lineH * MIN_ROWS + pad
   const max = lineH * MAX_ROWS + pad
   el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, max)}px`
-  el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden'
+  const h = Math.min(Math.max(el.scrollHeight, min), max)
+  el.style.height = `${h}px`
+  lastAppliedHeight = `${h}px`
+  el.style.overflowY = el.scrollHeight > max + 1 ? 'auto' : 'hidden'
 }
-/** 发送后回到默认一行高度。 */
-function resetInputHeight() {
+/** 手动拖拽检测：高度变化非 autoResize 所施加 → 进入手动模式(越界钳制回 2~6 行)。 */
+const inputResizeObserver = new ResizeObserver(() => {
   const el = inputRef.value
   if (!el) return
-  const lineH = parseFloat(getComputedStyle(el).lineHeight) || 16
-  const pad = (parseFloat(getComputedStyle(el).paddingTop) || 0) + (parseFloat(getComputedStyle(el).paddingBottom) || 0)
-  el.style.height = `${lineH + pad}px`
-  el.style.overflowY = 'hidden'
+  if (roSuppress) { roSuppress = false; return }
+  if (el.style.height === lastAppliedHeight) return
+  manualHeight = true
+  const { lineH, pad } = inputMetrics(el)
+  const min = lineH * MIN_ROWS + pad
+  const max = lineH * MAX_ROWS + pad
+  const h = parseFloat(el.style.height) || 0
+  if (h && (h < min || h > max)) {
+    roSuppress = true
+    lastAppliedHeight = `${Math.min(Math.max(h, min), max)}px`
+    el.style.height = lastAppliedHeight
+  }
+  el.style.overflowY = el.scrollHeight > el.clientHeight + 1 ? 'auto' : 'hidden'
+})
+onMounted(() => {
+  if (inputRef.value) {
+    inputResizeObserver.observe(inputRef.value)
+    autoResize()
+  }
+})
+onUnmounted(() => inputResizeObserver.disconnect())
+/** 发送后清空并回到默认两行高度(同时退出手动模式)。 */
+function resetInputHeight() {
+  manualHeight = false
+  autoResize()
 }
 /** Enter 发送；Ctrl/Cmd+Enter 手动插入换行(保证各浏览器一致)。 */
 function onInputKeydown(e: KeyboardEvent) {
@@ -978,8 +1022,8 @@ onUnmounted(() => {
       <textarea
         ref="inputRef"
         v-model="input"
-        rows="1"
-        class="input !py-2.5 text-xs resize-none"
+        rows="2"
+        class="input !py-2.5 text-xs resize-y min-h-0"
         :placeholder="t('requirement.chat.placeholder')"
         @input="autoResize"
         @keydown="onInputKeydown"

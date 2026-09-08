@@ -2779,7 +2779,11 @@ onUnmounted(() => {
                     />
                   </button>
                 </div>
-                <p class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap" :class="a.desc ? 'text-ctp-subtext0' : 'text-ctp-overlay0 italic'">
+                <p
+                  v-if="!expanded[a.id]"
+                  class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap"
+                  :class="a.desc ? 'text-ctp-subtext0' : 'text-ctp-overlay0 italic'"
+                >
                   {{ a.desc || t('assetMgmt.descPending') }}
                 </p>
                 <div
