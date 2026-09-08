@@ -10,8 +10,9 @@ import ConversationDock from '@/components/chat/ConversationDock.vue'
 
 const route = useRoute()
 const project = useArchProjectStore()
-/** 资产地图页自带 inline 停靠会话栏 → 该页不渲染全局悬浮形态。 */
-const showFloatingDock = () => route.path !== '/workbench/asset-mgmt'
+/** 资产地图/会话管理页自带 inline 停靠会话栏 → 这些页不渲染全局悬浮形态。 */
+const INLINE_DOCK_PAGES = new Set(['/workbench/asset-mgmt', '/workbench/sessions'])
+const showFloatingDock = () => !INLINE_DOCK_PAGES.has(route.path)
 const requirement = useArchRequirementStore()
 const architecture = useArchArchitectureStore()
 const task = useArchTaskStore()

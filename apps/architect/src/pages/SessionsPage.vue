@@ -16,12 +16,17 @@ import TaskDetailView from '@/components/coding/TaskDetailView.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
+import { useSplitPane } from '@/composables/useSplitPane'
+import ConversationDock from '@/components/chat/ConversationDock.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const conv = useConversationStore()
 const task = useArchTaskStore()
+
+// ── 布局: 左栏信息(列表+详情) / 右栏对话(inline 停靠)——与资产地图页同构 ──
+const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 62, min: 40, max: 78 })
 
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
@@ -215,54 +220,64 @@ function statusClass(s: string) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0">
-    <!-- 左: 会话列表 -->
-    <section class="flex min-h-0 min-w-0 flex-1 flex-col p-4">
-      <div class="mb-3 flex shrink-0 flex-wrap items-center gap-2">
-        <div class="relative w-56">
-          <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
-          <input v-model="q" class="input pl-8 text-xs" :placeholder="t('session.searchPlaceholder')">
-        </div>
-        <div class="flex items-center gap-1">
-          <button
-            v-for="k in kindOptions"
-            :key="k"
-            class="chip cursor-pointer"
-            :class="kindFilter === k ? 'bg-ctp-blue/20 text-ctp-blue' : 'bg-ctp-surface0 text-ctp-subtext0'"
-            @click="kindFilter = k"
-          >
-            {{ k === 'all' ? t('session.filter.all') : t(`session.kind.${k}`) }}
-          </button>
-        </div>
-        <select v-model="timeFilter" class="input !w-auto !py-1 text-xs">
-          <option value="all">{{ t('session.time.all') }}</option>
-          <option value="today">{{ t('session.time.today') }}</option>
-          <option value="week">{{ t('session.time.week') }}</option>
-          <option value="earlier">{{ t('session.time.earlier') }}</option>
-        </select>
-        <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
-          <option value="">{{ t('session.group.all') }}</option>
-          <optgroup v-if="groupsInfo.groups.length" :label="t('session.group.custom')">
-            <option v-for="g in groupsInfo.groups" :key="g" :value="`group:${g}`">{{ g }}</option>
-          </optgroup>
-          <optgroup v-if="groupsInfo.modules.length" :label="t('session.group.byModule')">
-            <option v-for="m in groupsInfo.modules" :key="m" :value="`module:${m}`">{{ m }}</option>
-          </optgroup>
-        </select>
-        <button class="btn btn-sm btn-ghost" :title="t('session.group.new')" @click="newGroup">
-          <FolderIcon class="h-3.5 w-3.5" />
-        </button>
-        <div class="ml-auto flex items-center gap-1.5">
-          <button class="btn btn-sm btn-ghost" :disabled="loading" @click="load">
-            <ArrowPathIcon class="h-3.5 w-3.5" :class="loading ? 'animate-spin' : ''" />
-          </button>
-          <button class="btn btn-sm btn-blue" @click="newConversation">
-            <PlusIcon class="h-3.5 w-3.5" />{{ t('session.newConversation') }}
-          </button>
-        </div>
+  <div class="flex h-full min-h-0 flex-col">
+    <!-- 顶栏: 搜索/过滤/操作(与资产地图页同构: 页头 + 分栏内容区) -->
+    <div class="flex shrink-0 flex-wrap items-center gap-2 px-5 pt-5">
+      <div class="relative w-56">
+        <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
+        <input v-model="q" class="input pl-8 text-xs" :placeholder="t('session.searchPlaceholder')">
       </div>
+      <div class="flex items-center gap-1">
+        <button
+          v-for="k in kindOptions"
+          :key="k"
+          class="chip cursor-pointer"
+          :class="kindFilter === k ? 'bg-ctp-blue/20 text-ctp-blue' : 'bg-ctp-surface0 text-ctp-subtext0'"
+          @click="kindFilter = k"
+        >
+          {{ k === 'all' ? t('session.filter.all') : t(`session.kind.${k}`) }}
+        </button>
+      </div>
+      <select v-model="timeFilter" class="input !w-auto !py-1 text-xs">
+        <option value="all">{{ t('session.time.all') }}</option>
+        <option value="today">{{ t('session.time.today') }}</option>
+        <option value="week">{{ t('session.time.week') }}</option>
+        <option value="earlier">{{ t('session.time.earlier') }}</option>
+      </select>
+      <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
+        <option value="">{{ t('session.group.all') }}</option>
+        <optgroup v-if="groupsInfo.groups.length" :label="t('session.group.custom')">
+          <option v-for="g in groupsInfo.groups" :key="g" :value="`group:${g}`">{{ g }}</option>
+        </optgroup>
+        <optgroup v-if="groupsInfo.modules.length" :label="t('session.group.byModule')">
+          <option v-for="m in groupsInfo.modules" :key="m" :value="`module:${m}`">{{ m }}</option>
+        </optgroup>
+      </select>
+      <button class="btn btn-sm btn-ghost" :title="t('session.group.new')" @click="newGroup">
+        <FolderIcon class="h-3.5 w-3.5" />
+      </button>
+      <div class="ml-auto flex items-center gap-1.5">
+        <button class="btn btn-sm btn-ghost" :disabled="loading" @click="load">
+          <ArrowPathIcon class="h-3.5 w-3.5" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <button class="btn btn-sm btn-blue" @click="newConversation">
+          <PlusIcon class="h-3.5 w-3.5" />{{ t('session.newConversation') }}
+        </button>
+      </div>
+    </div>
 
-      <div class="min-h-0 flex-1 overflow-auto panel">
+    <!-- 分栏内容区: 左=信息(会话列表+详情) / 右=对话(inline 停靠) -->
+    <div
+      ref="splitBoxRef"
+      class="min-h-0 min-w-0 flex-1 px-5 pb-5 pt-4"
+      :class="dragging ? 'cursor-col-resize select-none' : ''"
+    >
+      <div class="flex h-full min-h-0">
+        <!-- 左: 信息区 -->
+        <div class="flex h-full min-h-0 min-w-0" :style="{ width: splitPct + '%' }">
+          <!-- 左: 会话列表 -->
+          <section class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div class="min-h-0 flex-1 overflow-auto panel">
         <template v-for="g in grouped" :key="g.key || 'flat'">
           <div v-if="g.key" class="sticky top-0 z-10 flex items-center gap-1.5 bg-ctp-mantle/95 px-3 py-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1 backdrop-blur">
             <ClockIcon class="h-3 w-3" />{{ t(`session.time.${g.key}`) }}
@@ -418,6 +433,26 @@ function statusClass(s: string) {
         <TaskDetailView :key="openExecId" :exec-id="openExecId" />
       </div>
     </section>
+        </div>
+
+        <!-- 分割线(与资产地图页同款拖拽分割线) -->
+        <div
+          class="w-4 shrink-0 -mx-0.5 flex items-center justify-center cursor-col-resize select-none touch-none group"
+          :class="dragging ? 'cursor-col-resize' : ''"
+          @pointerdown="onSplitPointerDown"
+        >
+          <div
+            class="h-12 w-0.5 rounded-full bg-ctp-overlay1/40 transition-colors group-hover:bg-ctp-blue/60"
+            :class="dragging ? '!bg-ctp-blue/70' : ''"
+          />
+        </div>
+
+        <!-- 右: 对话栏·inline 停靠(P1 决策2: 唯一对话栏——与资产地图页同构: 左信息/右对话) -->
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ConversationDock inline default-kind="requirement" />
+        </div>
+      </div>
+    </div>
 
     <!-- 文档查看浮层 -->
     <div v-if="viewingDoc" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" @click.self="viewingDoc = null">
