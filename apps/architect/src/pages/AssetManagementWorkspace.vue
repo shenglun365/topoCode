@@ -1694,10 +1694,10 @@ onUnmounted(() => {
              : t('assetMgmt.sync.hint')"
            @click="planSyncExtract"
          >
-           <ArrowPathIcon
-             class="w-3.5 h-3.5"
-             :class="syncPlanLoading ? 'animate-spin' : ''"
-           />{{ syncExtracting
+            <ArrowPathIcon
+              class="w-3.5 h-3.5"
+              :class="syncPlanLoading || syncExtracting ? 'animate-spin' : ''"
+            />{{ syncExtracting
              ? t('assetMgmt.sync.extracting', { done: syncJob?.done ?? 0, total: syncJob?.total ?? 0 })
              : (syncPlanLoading ? t('assetMgmt.sync.planning') : t('assetMgmt.sync.button')) }}
          </button>
@@ -1816,13 +1816,13 @@ onUnmounted(() => {
           >{{ t(`assetMgmt.treeLevel.${treeLevel}`) }}</button>
           <template v-if="tab === 'semantic'">
             <div
-              class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-crust overflow-hidden"
+              class="inline-flex items-center h-[calc(1.5rem+2px)] rounded-md border border-ctp-surface1 bg-ctp-crust overflow-hidden"
               :title="t('assetMgmt.scopeGroupHint')"
             >
-              <span class="chip !border-0 !rounded-none bg-transparent text-ctp-subtext0 font-mono !text-[11px] px-2">{{ scopeSummary }}</span>
+              <span class="inline-flex items-center px-2 text-[11px] text-ctp-text">{{ scopeSummary }}</span>
               <button
-                class="btn btn-xs !rounded-none !border-l !border-ctp-surface1"
-                :class="(filterOpen || scopeSel.length) ? 'btn-blue' : 'btn-ghost'"
+                class="btn btn-xs !rounded-none !border-l !border-ctp-surface1 self-stretch"
+                :class="(filterOpen || scopeSel.length) ? 'btn-blue' : 'btn-ghost !text-ctp-text'"
                 :title="scopeSel.length ? t('assetMgmt.filterActive', { n: scopeSel.length }) : t('assetMgmt.scopeGroupHint')"
                 @click="filterOpen = !filterOpen; batchOpen = false"
               >
@@ -1830,7 +1830,7 @@ onUnmounted(() => {
               </button>
             </div>
             <button
-              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer"
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center h-[calc(1.5rem+2px)]"
               :class="batchOpen ? '!border-ctp-blue' : ''"
               :title="t('assetMgmt.batchClearAll')"
               @click="batchOpen = !batchOpen; filterOpen = false"
