@@ -1928,6 +1928,8 @@ export default {
     pseudoRegen: '重新生成伪码',
     genDesc: '生成功能摘要',
     descPending: '功能摘要未生成——展开详情可生成',
+descReady: '功能摘要已生成 · 展开详情查看',
+descReadyHint: '功能摘要已生成——展开详情可查看完整内容',
     pseudoDegraded: 'LLM 不可用，已用结构化降级说明',
     relations: '关联关系',
     states: '状态集合',

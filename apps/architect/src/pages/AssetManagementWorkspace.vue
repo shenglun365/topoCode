@@ -2808,11 +2808,15 @@ onUnmounted(() => {
                   </button>
                 </div>
                 <p
-                  v-if="!expanded[a.id]"
-                  class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap"
-                  :class="a.desc ? 'text-ctp-subtext0' : 'text-ctp-overlay0 italic'"
+                  v-if="!expanded[a.id] && a.desc"
+                  class="px-2 pb-1.5 text-[10px] truncate text-ctp-teal"
+                  :title="t('assetMgmt.descReadyHint')"
+                >{{ t('assetMgmt.descReady') }}</p>
+                <p
+                  v-else-if="!expanded[a.id]"
+                  class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap text-ctp-overlay0 italic"
                 >
-                  {{ a.desc || t('assetMgmt.descPending') }}
+                  {{ t('assetMgmt.descPending') }}
                 </p>
                 <div
                   v-if="expanded[a.id]"
