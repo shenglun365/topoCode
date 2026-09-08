@@ -127,8 +127,8 @@ async function answerClarify() {
       ? 'relative flex h-full min-h-0 w-full flex-col bg-ctp-base'
       : 'fixed right-0 top-0 z-40 flex h-full w-[26rem] flex-col border-l border-ctp-surface0 bg-ctp-base shadow-2xl'"
   >
-    <!-- 头部: 标题 + kind + 会话切换 -->
-    <div class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
+    <!-- 头部: 标题 + kind + 会话切换(仅悬浮形态; inline 停靠由页面自身提供列表/新建入口) -->
+    <div v-if="!props.inline" class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
       <div class="flex items-center gap-2">
         <span class="chip shrink-0" :class="kindClass(conv.activeKind)">
           {{ t(`session.kind.${conv.activeKind}`) }}
@@ -231,10 +231,6 @@ async function answerClarify() {
         @refresh-asset="emitRefreshAsset"
         @stop="conv.stop"
       />
-    </div>
-
-    <div class="shrink-0 border-t border-ctp-surface0 px-3 py-1 text-[10px] text-ctp-overlay0">
-      <ChatBubbleLeftRightIcon class="mr-1 inline h-3 w-3" />{{ t('session.dock.hint') }}
     </div>
   </aside>
 </template>
