@@ -21,6 +21,13 @@ export const KIND_CARD_CLASS = Object.fromEntries(
   Object.entries(KIND_COLORS).map(([k, c]) => [k, `bg-ctp-${c}/15 text-ctp-${c} border-ctp-${c}/40`]),
 ) as Record<SemanticAssetKind, string>
 
+/** 抽象粒度标签统一配色(business=peach / implementation=sky / logic=中性)。 */
+export function levelChipClass(level: string): string {
+  if (level === 'business') return 'bg-ctp-peach/15 text-ctp-peach'
+  if (level === 'implementation') return 'bg-ctp-sky/15 text-ctp-sky'
+  return 'bg-ctp-surface0 text-ctp-subtext0'
+}
+
 export function kindChipClass(kind: string): string {
   return KIND_CHIP_CLASS[kind as SemanticAssetKind] ?? 'bg-ctp-surface0 text-ctp-overlay1'
 }

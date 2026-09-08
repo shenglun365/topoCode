@@ -9,7 +9,7 @@ import {
   DocumentTextIcon, CheckIcon, CodeBracketIcon,
 } from '@heroicons/vue/24/outline'
 import { apiGet } from '@/services/api-client'
-import { kindChipClass } from '@/services/semantic-kind-style'
+import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'
 import { useRouter } from 'vue-router'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
@@ -2164,7 +2164,7 @@ onUnmounted(() => {
                     v-for="l in levels"
                     :key="l.value"
                     class="chip"
-                    :class="l.value === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : l.value === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
+                    :class="levelChipClass(l.value)"
                   >{{ l.label }}</span>
                 </div>
                 <p class="text-[10px] text-ctp-subtext0 leading-relaxed pt-1">
@@ -2229,7 +2229,8 @@ onUnmounted(() => {
                     <span
                       v-for="l in levels"
                       :key="l.value"
-                      class="chip bg-ctp-surface0 text-ctp-subtext0"
+                      class="chip"
+                      :class="levelChipClass(l.value)"
                     >{{ l.label }} · {{ overviewStats?.byLevel?.[l.value] ?? 0 }}</span>
                   </div>
                 </div>
@@ -2748,7 +2749,7 @@ onUnmounted(() => {
                   <span
                     v-if="a.level"
                     class="chip !text-[9px] shrink-0"
-                    :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
+                    :class="levelChipClass(a.level)"
                   >{{ t(`assetMgmt.level.${a.level}`) }}</span>
                   <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
                   <span

@@ -51,7 +51,7 @@
           <span
             v-if="sel.level"
             class="chip !text-[8px] shrink-0"
-            :class="sel.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : sel.level === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
+            :class="levelChipClass(sel.level)"
           >{{ t(`assetMgmt.level.${sel.level}`) }}</span>
           <span class="text-[11px] font-semibold text-ctp-text truncate">{{ sel.name }}</span>
           <span class="flex-1" />
@@ -155,7 +155,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { semanticAssetService, type SourceSnippet } from '@/services/semantic-asset-service'
 import type { SemanticAsset } from '@/types'
-import { kindChipClass } from '@/services/semantic-kind-style'
+import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import PseudoExplainer from './PseudoExplainer.vue'
 
 const props = defineProps<{ file: string; assets: SemanticAsset[] }>()
