@@ -23,6 +23,8 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
+_KB_TOKEN_CACHE = ""   # serve token 进程内缓存(读一次)
+
 
 class KbError(Exception):
     """KB 侧业务错误(HTTP 4xx/5xx，detail 即 message)。"""
@@ -34,6 +36,27 @@ class KbGateway:
         self.mcp_url = (mcp_url or os.environ.get("MCP_BASE_URL") or "http://127.0.0.1:3460").rstrip("/")
         self.timeout = timeout
 
+    @staticmethod
+    def _internal_token() -> str:
+        """读本机 serve token(与 gateway/data_api 同源)——/zmq 内部面凭据。
+
+        KB data_api 的 /zmq/{method} 双面鉴权：带 X-KB-Internal 的内部面全放行，
+        外部面仅 EXTERNAL_METHODS 白名单。architect 属内部链路(llm.sync/
+        analysis.parseFileAst 等)，不带令牌会被 403 拒绝(LLM 通道静默断链)。
+        """
+        global _KB_TOKEN_CACHE
+        if _KB_TOKEN_CACHE:
+            return _KB_TOKEN_CACHE
+        base = os.environ.get("TOPOCODE_DB_DIR") or os.path.join(
+            os.path.expanduser("~"), ".topocode")
+        p = os.path.join(base, "token")
+        try:
+            with open(p) as f:
+                _KB_TOKEN_CACHE = (f.read().strip() or "")
+        except Exception:
+            _KB_TOKEN_CACHE = ""
+        return _KB_TOKEN_CACHE
+
     # ── RPC(API)通道 ─────────────────────────────────────────────
 
     def call(self, kb_method: str, timeout: float = None, **params):
@@ -43,10 +66,12 @@ class KbGateway:
         """
         t = self.timeout if timeout is None else float(timeout)
         url = f"{self.base_url}/zmq/{kb_method}"
+        token = self._internal_token()
         req = urllib.request.Request(
             url,
             data=json.dumps(params).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json",
+                     **({"X-KB-Internal": token} if token else {})},
             method="POST",
         )
         try:

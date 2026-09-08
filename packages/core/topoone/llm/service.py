@@ -1318,6 +1318,18 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not model_id:
             raise ValueError("No model configured")
 
+        # 悬空 modelId 防护：角色注册表/偏好里残留的 id 若不在 model_configs，
+        # 直接 raise 会让 tAgent 提取/摘要整批静默退化(LLM 通道断链) → 警告并
+        # 回退默认模型。显式传入的有效 id 不受影响。
+        if not _get_model_by_id(multi_db, model_id):
+            logger.warning(f"[LLMService] llm.sync modelId 不存在: {model_id!r} → 回退默认模型")
+            configs = multi_db.main_db.fetchall(
+                "SELECT * FROM model_configs ORDER BY is_default DESC, name")
+            _defaults = [m for m in configs if m.get("is_default")]
+            model_id = _defaults[0]["id"] if _defaults else (configs[0]["id"] if configs else "")
+            if not model_id:
+                raise ValueError("No model configured")
+
         if not output_schema:
             content = await service.sync_chat(_msgs, model_id, max_tokens=max_tokens)
             return {"content": content, "mode": mode}
