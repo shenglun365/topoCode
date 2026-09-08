@@ -220,12 +220,13 @@ async def get_execution_task(task_id: str):
     return ok(row)
 
 
-@router.post("/exec")
-async def create_execution_task(request: Request):
-    """原子 commitBatch: 方案+任务树+执行任务+需求绑定 同事务。
-    每步失败整体回滚。返回 { plan, exec }。"""
-    body = await request.json()
-    req_ids = list(dict.fromkeys(body.get("reqIds", [])))
+async def commit_execution_batch(req_ids: list, body: Optional[dict] = None) -> tuple[dict, Optional[str]]:
+    """原子 commitBatch 内核(POST /exec 与会话工具共用): 方案+任务树+执行任务+需求绑定。
+
+    返回 ({"plan":…, "exec":…}, None) 或 ({}, 错误消息)。
+    """
+    body = body or {}
+    req_ids = list(dict.fromkeys(req_ids or []))
     reqs = [store.RequirementsStore.get(i) for i in req_ids]
     reqs = [r for r in reqs if r]
 
@@ -242,7 +243,7 @@ async def create_execution_task(request: Request):
         reqs, root=se_root, project=se_project,
         model_id=(body.get("modelId") or ""))
     if root is None:
-        return err(502, "SE 任务树生成失败: " + "; ".join(problems or ["LLM 未产出任务树"]))
+        return {}, "SE 任务树生成失败: " + "; ".join(problems or ["LLM 未产出任务树"])
     root["id"] = store.next_id("tp")
     plan["taskPlanId"] = root["id"]
 
@@ -287,7 +288,18 @@ async def create_execution_task(request: Request):
 
     plan_out = store.PlansStore.get(plan_id)
     exec_out = store.ExecutionTasksStore.get(exec_id)
-    return ok({"plan": plan_out, "exec": exec_out})
+    return {"plan": plan_out, "exec": exec_out}, None
+
+
+@router.post("/exec")
+async def create_execution_task(request: Request):
+    """原子 commitBatch: 方案+任务树+执行任务+需求绑定 同事务。
+    每步失败整体回滚。返回 { plan, exec }。"""
+    body = await request.json()
+    payload, error = await commit_execution_batch(body.get("reqIds", []), body)
+    if error:
+        return err(502, error)
+    return ok(payload)
 
 
 # ── Subagent 指派(P3.2: 经 agent-bus broker 交接) ────────────────────

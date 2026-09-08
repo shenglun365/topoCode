@@ -434,7 +434,8 @@ def _clip(text: str, limit: int) -> str:
 
 
 def assemble_dossier(conv_id: str, reqs: Optional[list] = None,
-                     root: str = "", project_id: str = "") -> Optional[str]:
+                     root: str = "", project_id: str = "",
+                     persist: bool = True) -> Optional[str]:
     """前置上下文构造(裁决3): 收集→裁剪→装配 dossier，并落 execution_brief 单元。
 
     收集源: 会话摘要/标签 → 备案文档 → 高优上下文单元(方案草图/决策/执行回执)
@@ -498,6 +499,8 @@ def assemble_dossier(conv_id: str, reqs: Optional[list] = None,
         if used >= _DOSSIER_BUDGET:
             break
     dossier = "".join(out)
+    if not persist:
+        return dossier
     try:
         store.ContextUnitsStore.create({
             "conversationId": conv_id, "projectId": pid,
@@ -545,3 +548,176 @@ def register_probe_tool() -> None:
               f"- {result.get('summary') or ''}\n"
               f"- 变更文件: {', '.join(changed) or '-'}\n\n```diff\n{diff}\n```")
         return {"markdown": md}
+
+
+# ── WS3: coding 任务通道(plan 只读方案 / execute 正式执行) ─────────────
+
+def run_plan_mode(conv_id: str, instruction: str, root: str,
+                  executor_id: str = "", files: Optional[list] = None,
+                  base_commit: str = "", timeout_s: int = 900) -> dict:
+    """调 runner /api/plan(只读分析) → 结构化方案落 artifact 单元(type=plan, importance=1)。
+
+    plan 契约: {files: [{path, lines: [{start,end,intent}], intent, confidence}],
+    summary, risks}；行号基于分析时点的 git 快照。
+    """
+    import httpx
+    import os as _os
+    from .runner_gateway import get_runner
+
+    payload = {
+        "root": root, "instruction": instruction.strip(),
+        "executorId": executor_id or "", "files": files or [],
+        "baseCommit": base_commit or "HEAD", "timeoutS": timeout_s,
+    }
+    base = _os.environ.get("RUNNER_BASE_URL") or get_runner().base_url
+    try:
+        with httpx.Client(timeout=timeout_s + 60) as client:
+            r = client.post(f"{base}/api/plan", json=payload)
+            result = r.json() if r.status_code == 200 else {"error": f"runner {r.status_code}"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"runner 不可达: {e}"}
+    if result.get("ok"):
+        plan = result.get("plan") or {}
+        touched = [str(f.get("path")) for f in (plan.get("files") or []) if f.get("path")]
+        try:
+            store.ContextUnitsStore.create({
+                "conversationId": conv_id, "projectId": _project_of(conv_id),
+                "type": "plan",
+                "title": f"实现方案: {instruction.strip()[:40]}",
+                "content": json.dumps(plan, ensure_ascii=False)[:8000],
+                "refs": {"files": touched[:50]},
+                "importance": 1,
+            })
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[coding-task] plan artifact 单元写入失败: %s", e)
+    return result
+
+
+def assemble_task_brief(conv_id: str, root: str = "", project_id: str = "") -> str:
+    """coding 任务上下文构造(WS3): dossier 基座(不落单元) + 涉及语义资产(文件→资产影响面)。
+
+    供 coding.task.plan 注入: 会话结论 + 需求三段 + 规约 + 影响面资产清单。
+    """
+    dossier = assemble_dossier(conv_id, root=root or "", project_id=project_id,
+                               persist=False) or ""
+    try:
+        pid = project_id or _project_of(conv_id)
+        units = store.ContextUnitsStore.all(conversation_id=conv_id, limit=100) or []
+        mentioned: list[str] = []
+        for u in units:
+            for f in (u.get("refs") or {}).get("files") or []:
+                f = str(f)
+                if f and f not in mentioned:
+                    mentioned.append(f)
+        lines: list[str] = []
+        if mentioned:
+            for a in store.SemanticAssetsStore.all(pid, limit=4000) or []:
+                af = (a.get("file") or "") or ((a.get("scope") or {}).get("key") or "")
+                if af and af in mentioned:
+                    lines.append(f"- {a.get('kind')}/{a.get('level') or ''} "
+                                 f"`{a.get('name')}` @ `{af}`")
+        section = "\n\n## 涉及语义资产(影响面)\n" + (
+            "\n".join(lines[:24]) if lines
+            else "(会话未锚定具体文件——按指令范围自行定位)")
+        return _clip(dossier, 12000) + section
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[coding-task] 影响面装配失败: %s", e)
+        return _clip(dossier, 12000)
+
+
+def register_coding_task_tools() -> None:
+    """注册 coding.task.plan / coding.task.execute 会话 agent 工具(WS3)。"""
+    from .req_agent import register_architect_tool
+
+    @register_architect_tool(
+        "coding.task.plan",
+        "生成实现方案(plan 模式, 只读分析): 装配任务上下文(会话结论+需求+规约+语义资产影响面)"
+        "交 coding agent 在隔离 git 快照上分析, 产出结构化方案(文件→行区间→意图+置信度), "
+        "不改动主工作区。产物落会话上下文单元(type=plan)供评估/执行引用。"
+        "「给需求拿方案」「先出方案评估再执行」时用此工具",
+    )
+    def _coding_task_plan(instruction: str, files: str = "", executorId: str = "",
+                          timeoutS: int = 900, project: Optional[str] = None,
+                          root: Optional[str] = None) -> dict:
+        from . import ctx as _ctx
+        from .project import _resolve_project
+        conv_id = _ctx.get_conv() or ""
+        try:
+            proj = _resolve_project(root, project)
+        except Exception:
+            proj = None
+        wt_root = root or ((proj or {}).get("rootPath") or "")
+        if not wt_root:
+            return {"error": "无法解析项目根(root/project)"}
+        file_list = [f.strip() for f in (files or "").split(",") if f.strip()]
+        full_instruction = instruction.strip()
+        if conv_id:
+            brief = assemble_task_brief(conv_id, project_id=(proj or {}).get("id") or "")
+            if brief:
+                full_instruction += f"\n\n---\n【任务上下文(参考，勿重复分析)】\n{brief}"
+        result = run_plan_mode(conv_id, full_instruction, wt_root,
+                               executor_id=executorId, files=file_list,
+                               timeout_s=int(timeoutS))
+        if result.get("error"):
+            return result
+        plan = result.get("plan") or {}
+        rows = ["| 文件 | 行区间 | 意图 | 置信度 |", "|---|---|---|---|"]
+        for f in (plan.get("files") or [])[:30]:
+            spans = "; ".join(
+                f"L{ln.get('start')}-L{ln.get('end')} {ln.get('intent', '')}"
+                for ln in (f.get("lines") or [])[:6]) or "—"
+            rows.append(f"| `{f.get('path')}` | {spans} | {f.get('intent', '')} "
+                        f"| {f.get('confidence', '')} |")
+        side = result.get("sideEffectFiles") or []
+        md = (f"# 实现方案(plan)\n\n- 状态: {result.get('status')} | {result.get('summary') or ''}\n"
+              f"- 方案: {plan.get('summary') or '(未产出)'}\n"
+              + ("\n" + "\n".join(rows) + "\n" if len(rows) > 2 else "")
+              + (f"\n风险: {'; '.join(plan.get('risks') or []) or '—'}\n" if plan else "")
+              + (f"\n⚠️ 只读约定被违反, 计划外变更: {', '.join(side[:10])}\n" if side else "")
+              + ("\n(计划文件未产出/解析失败, 可重试或换执行器)" if not result.get("planFileFound") else ""))
+        return {"markdown": md, "plan": plan or None}
+
+    @register_architect_tool(
+        "coding.task.execute",
+        "正式执行(主工作区+分支协议): 需会话已绑定需求(无则先 req.finalize 定稿)。"
+        "已绑定执行任务则直接交接运行; 否则原子创建(方案+SE任务树+执行任务)后运行。"
+        "「给需求拿结果」「按方案执行」时用此工具",
+    )
+    def _coding_task_execute(adapter: str = "opencode", project: Optional[str] = None,
+                             root: Optional[str] = None) -> dict:
+        import asyncio as _asyncio
+        from . import ctx as _ctx, store as _store
+        from .execution import assign_requirement, commit_execution_batch
+        req_id = _ctx.get_req()
+        if not req_id:
+            return {"error": "当前会话未绑定需求——请先在会话中收敛需求并调用 req.finalize 定稿, 再执行"}
+        req = _store.RequirementsStore.get(req_id)
+        if not req:
+            return {"error": f"需求 {req_id} 不存在"}
+        exec_id = (req.get("execId") or "")
+        if not exec_id:
+            body = {"adapter": adapter or "opencode",
+                    "conversationId": _ctx.get_conv() or "",
+                    "root": root or "", "project": project or ""}
+            try:
+                payload, error = _asyncio.run(commit_execution_batch([req_id], body))
+            except RuntimeError:
+                import asyncio as _aio_new
+                loop = _aio_new.new_event_loop()
+                try:
+                    payload, error = loop.run_until_complete(commit_execution_batch([req_id], body))
+                finally:
+                    loop.close()
+            if error:
+                return {"error": f"执行任务创建失败: {error}"}
+            exec_id = ((payload.get("exec") or {}).get("id")) or ""
+        row, e = assign_requirement(req_id, "runner", exec_id=exec_id)
+        if not row:
+            return {"error": (e[1] if e else "交接失败") or "交接失败"}
+        return {
+            "ok": True, "reqId": req_id, "execId": exec_id,
+            "status": row.get("status"), "assignedTo": row.get("assignedTo"),
+            "lifecycle": "executing",
+            "summary": f"执行任务 {exec_id} 已创建并交接运行(主工作区分支协议); "
+                       "进度在执行页查看, 完成后可回到会话做结果评估",
+        }

@@ -1244,6 +1244,9 @@ _CAPABILITY_DOC = (
     "- ctx.get：读取指定会话的上下文包(摘要+关键单元+备案文档清单)\n"
     "- ctx.summarize：生成/刷新会话摘要\n"
     "- probe.run：方案草图(probe)——调 coding agent 在代码快照上产出改动思路与伪 diff，供用户预览确认后再正式执行\n\n"
+    "- coding.task.plan：实现方案(plan 模式,只读)——装配任务上下文(会话结论+需求+规约+资产影响面)交 coding agent 隔离分析，"
+    "产出结构化方案(文件→行区间→意图+置信度)。「给需求拿方案」或先评估再执行时用\n"
+    "- coding.task.execute：正式执行(主工作区+分支协议)——会话绑定需求后创建/交接执行任务运行。「给需求拿结果」「按方案执行」时用\n\n"
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
@@ -1288,6 +1291,8 @@ _CAPABILITY_DOC = (
     '- execution.assign: {"target": "runner", "execId": "ex-xxx(缺省取需求已绑定任务)"} '
     '或 {"target": "mcp", "tool": "<mcp工具名>", "params": {…}}\n'
     '- interaction.clarify: {"message": "<问题文本>"}\n'
+    '- coding.task.plan: {"instruction": "要做什么(一句话)", "files"?: "相关文件,逗号分隔", "executorId"?: "opencode|cline|…", "timeoutS"?: 900}\n'
+    '- coding.task.execute: {"adapter"?: "opencode(缺省)"}——需先 req.finalize 绑定需求\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
     "若无需检索即可直接回答，就不要调用工具。\n\n"
     "可处理范围：\n"

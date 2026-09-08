@@ -112,6 +112,7 @@ def _chat_max_tokens() -> Optional[int]:
 from . import context_registry as _context_registry  # noqa: E402
 _context_registry.register_chat_tools()
 _context_registry.register_probe_tool()
+_context_registry.register_coding_task_tools()
 
 
 @router.websocket("/ws/kb-analysis")

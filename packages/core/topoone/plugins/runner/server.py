@@ -302,6 +302,52 @@ _PROBE_HARNESS = (
 )
 
 
+_PLAN_HARNESS = (
+    "【plan 只读分析模式】\n"
+    "- 你在 git worktree 快照中工作，改动不影响主工作区\n"
+    "- 禁止修改任何业务代码/配置文件；禁止 git commit/branch/push/checkout；禁止构建/测试/安装依赖\n"
+    "- 通读相关代码理解现状后，把结构化改动方案写入 __PLAN_FILE__ 文件(UTF-8, JSON)：\n"
+    '  {"files": [{"path": "相对路径", "lines": [{"start": 行号, "end": 行号, "intent": "此处要做什么"}],'
+    ' "intent": "该文件整体意图", "confidence": 0.0~1.0}], "summary": "一句话方案", "risks": ["风险…"]}\n'
+    "- 行号基于当前快照真实行号；新增文件 lines 可为空数组并在 intent 说明\n"
+    "- 除 __PLAN_FILE__ 外不得创建/改动任何文件\n"
+)
+
+
+def _extract_json_object(text: str):
+    """从模型产物中容错抽取首个平衡 JSON 对象(容忍围栏/前后缀文本)。"""
+    s = (text or "").strip()
+    if s.startswith("```"):
+        s = s.split("\n", 1)[1] if "\n" in s else s
+        s = s.rsplit("```", 1)[0]
+    i = s.find("{")
+    if i < 0:
+        return None
+    depth, in_str, esc = 0, False, False
+    for j in range(i, len(s)):
+        ch = s[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    import json as _json
+                    return _json.loads(s[i:j + 1])
+                except Exception:
+                    return None
+    return None
+
+
 def _git(args: list, cwd: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, check=check)
 
@@ -382,6 +428,109 @@ async def run_probe(request: Request):
     finally:
         _cleanup_worktree()
         # opencode serve 按根托管 → worktree 专用实例即用即弃
+        try:
+            from .executors.opencode import manager
+            m = manager()
+            if m is not None:
+                m.dispose_root(wt)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@app.post("/api/plan")
+async def run_plan_mode(request: Request):
+    """plan 只读分析: worktree 快照上 coding agent 产出结构化方案(文件→行区间→意图+置信度)。
+
+    body: {root, baseCommit?, instruction, files?, executorId?, timeoutS?}
+    输出通道=快照根下的 __PLAN_FILE__ 计划文件(所有 executor 通用)；
+    只读校验: 计划文件之外的变更计为 sideEffectFiles(违反只读约定, 如实上报)。
+    返回 {ok, status, plan, raw, sideEffectFiles, summary}。结束即清理 worktree。
+    """
+    body = await request.json()
+    root = os.path.abspath(body.get("root") or "")
+    instruction = (body.get("instruction") or "").strip()
+    if not root or not os.path.isdir(root):
+        return {"ok": False, "error": "root 无效"}
+    if not instruction:
+        return {"ok": False, "error": "instruction 为空"}
+    base = body.get("baseCommit") or "HEAD"
+    executor_id = (body.get("executorId") or "").strip()
+    files = [str(f) for f in (body.get("files") or []) if str(f).strip()]
+    timeout_s = min(max(int(body.get("timeoutS") or 900), 60), 3600)
+
+    plan_rel = ".topo-plan.json"
+    probe_dir = os.path.join(STATE_DIR, "probes")
+    os.makedirs(probe_dir, exist_ok=True)
+    wt = os.path.join(probe_dir, f"plan-{int(time.time() * 1000)}")
+
+    def _cleanup_worktree() -> None:
+        _git(["worktree", "remove", "--force", wt], cwd=root, check=False)
+        _git(["worktree", "prune"], cwd=root, check=False)
+
+    r = _git(["worktree", "add", "--detach", wt, base], cwd=root, check=False)
+    if r.returncode != 0:
+        return {"ok": False, "error": f"worktree 创建失败: {r.stderr.strip()[:300]}"}
+
+    tree = CodingTaskTree.from_dict({"roots": [{
+        "id": "PLAN", "title": instruction[:120] or "方案分析",
+        "kind": "task", "files": files, "executor_id": executor_id,
+        "context": [_PLAN_HARNESS.replace("__PLAN_FILE__", plan_rel), instruction],
+    }]})
+    tree_id = state.scheduler.submit(tree, context={
+        "root": wt, "requirement": "plan: 只读方案分析", "branch": "", "baseCommit": base,
+    })
+    persist(tree_id)
+    state.scheduler.run_async(tree_id)
+
+    deadline = time.time() + timeout_s
+    progress: dict = {}
+    try:
+        while time.time() < deadline:
+            await asyncio.sleep(3.0)
+            progress = state.scheduler.progress(tree_id)
+            if progress.get("terminal"):
+                break
+        node = (progress.get("nodes") or [{}])[0]
+        status = node.get("status") or "unknown"
+        # 执行器错误细节(progress 不带, 直接读节点对象; 诊断只读约定违反/模型失败等)
+        executor_error = ""
+        try:
+            tree_obj = state.scheduler._trees.get(tree_id)
+            if tree_obj:
+                leafs = [n for n in tree_obj.all_nodes() if n.id == "PLAN"]
+                executor_error = str(getattr(leafs[0], "error", "") or "")[:1000]
+        except Exception:  # noqa: BLE001
+            pass
+        # 计划文件读取 + 只读校验(未跟踪 intent-to-add 纳入 status)
+        plan_path = os.path.join(wt, plan_rel)
+        raw = ""
+        try:
+            with open(plan_path, "r", encoding="utf-8", errors="replace") as fh:
+                raw = fh.read()
+        except Exception:
+            pass
+        _git(["add", "-A", "-N"], cwd=wt, check=False)
+        st = _git(["status", "--porcelain"], cwd=wt, check=False)
+        changed = [line[3:].strip() for line in st.stdout.splitlines() if line.strip()]
+        side = [f for f in changed if f != plan_rel]
+        plan = _extract_json_object(raw) if raw else None
+        n_files = len((plan or {}).get("files") or [])
+        summary = (f"plan {status}; 方案覆盖 {n_files} 个文件"
+                   + (f"; ⚠️ 只读约定被违反({len(side)} 个计划外变更)" if side else ""))
+        return {
+            "ok": status == "done" and plan is not None,
+            "status": status,
+            "treeId": tree_id,
+            "executorError": executor_error,
+            "plan": plan,
+            "planFileFound": bool(raw),
+            "raw": raw[:20_000],
+            "sideEffectFiles": side,
+            "changedFiles": changed,
+            "summary": summary,
+        }
+    finally:
+        _cleanup_worktree()
         try:
             from .executors.opencode import manager
             m = manager()
