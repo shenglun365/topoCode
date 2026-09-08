@@ -306,11 +306,12 @@ _PLAN_HARNESS = (
     "【plan 只读分析模式】\n"
     "- 你在 git worktree 快照中工作，改动不影响主工作区\n"
     "- 禁止修改任何业务代码/配置文件；禁止 git commit/branch/push/checkout；禁止构建/测试/安装依赖\n"
-    "- 通读相关代码理解现状后，把结构化改动方案写入 __PLAN_FILE__ 文件(UTF-8, JSON)：\n"
+    "- 通读相关代码理解现状后，必须用 write_to_file 工具把结构化改动方案写入 __PLAN_FILE__ 文件(UTF-8, JSON)：\n"
     '  {"files": [{"path": "相对路径", "lines": [{"start": 行号, "end": 行号, "intent": "此处要做什么"}],'
     ' "intent": "该文件整体意图", "confidence": 0.0~1.0}], "summary": "一句话方案", "risks": ["风险…"]}\n'
     "- 行号基于当前快照真实行号；新增文件 lines 可为空数组并在 intent 说明\n"
     "- 除 __PLAN_FILE__ 外不得创建/改动任何文件\n"
+    "- 唯一交付物就是 __PLAN_FILE__ 文件本身；禁止只把方案写在回复文本里——写完文件后回复「done」即可\n"
 )
 
 
@@ -494,11 +495,13 @@ async def run_plan_mode(request: Request):
         status = node.get("status") or "unknown"
         # 执行器错误细节(progress 不带, 直接读节点对象; 诊断只读约定违反/模型失败等)
         executor_error = ""
+        agent_output = ""
         try:
             tree_obj = state.scheduler._trees.get(tree_id)
             if tree_obj:
                 leafs = [n for n in tree_obj.all_nodes() if n.id == "PLAN"]
                 executor_error = str(getattr(leafs[0], "error", "") or "")[:1000]
+                agent_output = str(getattr(leafs[0], "output", "") or "")
         except Exception:  # noqa: BLE001
             pass
         # 计划文件读取 + 只读校验(未跟踪 intent-to-add 纳入 status)
@@ -509,6 +512,10 @@ async def run_plan_mode(request: Request):
                 raw = fh.read()
         except Exception:
             pass
+        # 弱模型可能把方案只写在回复文本里——从 agent 输出兜底抽取
+        if not raw and agent_output:
+            raw = agent_output
+        plan_found_in_file = bool(raw) and os.path.isfile(plan_path)
         _git(["add", "-A", "-N"], cwd=wt, check=False)
         st = _git(["status", "--porcelain"], cwd=wt, check=False)
         changed = [line[3:].strip() for line in st.stdout.splitlines() if line.strip()]
@@ -516,6 +523,7 @@ async def run_plan_mode(request: Request):
         plan = _extract_json_object(raw) if raw else None
         n_files = len((plan or {}).get("files") or [])
         summary = (f"plan {status}; 方案覆盖 {n_files} 个文件"
+                   + ("" if plan_found_in_file or not plan else "; ⚠️ 方案取自回复文本(未写计划文件)")
                    + (f"; ⚠️ 只读约定被违反({len(side)} 个计划外变更)" if side else ""))
         return {
             "ok": status == "done" and plan is not None,
@@ -523,7 +531,7 @@ async def run_plan_mode(request: Request):
             "treeId": tree_id,
             "executorError": executor_error,
             "plan": plan,
-            "planFileFound": bool(raw),
+            "planFileFound": plan_found_in_file,
             "raw": raw[:20_000],
             "sideEffectFiles": side,
             "changedFiles": changed,

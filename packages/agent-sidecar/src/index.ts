@@ -19,7 +19,7 @@ import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as readline from "node:readline";
-import { Agent, createTool } from "@cline/sdk";
+import { Agent, createTool, createBuiltinTools } from "@cline/sdk";
 
 const execFileP = promisify(execFile);
 
@@ -134,6 +134,11 @@ async function doRun(params: RunParams) {
 
   const before = await gitStatus(cwd);
 
+  // 内置工具集(读/写/编辑/bash/搜索)——AgentRuntime 无任何默认工具,
+  // 不注入则模型只能"读空气"交白卷; 资产地图工具按需附加
+  const builtin = createBuiltinTools({ cwd }) as unknown[];
+  const tools = [...builtin, ...buildAssetTools(params)];
+
   const agent = new Agent({
     providerId: params.providerId || process.env.CLINE_PROVIDER_ID || "cline",
     modelId: params.modelId || process.env.CLINE_MODEL_ID || undefined,
@@ -141,7 +146,7 @@ async function doRun(params: RunParams) {
     maxIterations: params.maxIterations ?? 40,
     ...(params.systemPrompt ? { systemPrompt: params.systemPrompt } : {}),
     ...(params.baseUrl ? { baseUrl: params.baseUrl } : {}),
-    ...(params.archUrl ? { tools: buildAssetTools(params) as never } : {}),
+    tools: tools as never,
   } as never);
   running.set(taskId, agent);
 
