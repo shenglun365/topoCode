@@ -2033,7 +2033,7 @@ export default {
     resp: '职责',
     owns: '所属',
     deps: '依赖',
-    batch: '批量管理',
+    batchClearAll: '全量清除语义资产',
     batchHint: '对选定组件范围批量操作',
     batchClear: '清除',
     batchRunning: '处理中…',

@@ -2008,7 +2008,7 @@ export default {
     resp: 'Responsibilities',
     owns: 'Owns',
     deps: 'Depends',
-    batch: 'Batch',
+    batchClearAll: 'Purge all semantic assets',
     batchHint: 'Batch manage semantic assets in the selected component scope',
     batchClear: 'Clear',
     batchRunning: 'Processing…',

@@ -1835,10 +1835,10 @@ onUnmounted(() => {
             <button
               class="btn btn-xs"
               :class="batchOpen ? 'btn-blue' : 'btn-ghost'"
-              :title="t('assetMgmt.batch')"
+              :title="t('assetMgmt.batchClearAll')"
               @click="batchOpen = !batchOpen; filterOpen = false"
             >
-              <TrashIcon class="w-3 h-3" />{{ t('assetMgmt.batch') }}
+              <TrashIcon class="w-3 h-3" />
             </button>
 
             <!-- 点击浮层：批量清除(物理删除 选定组件范围) -->
