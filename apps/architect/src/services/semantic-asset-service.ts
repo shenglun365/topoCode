@@ -274,7 +274,7 @@ export interface AssetCompareCrossLink {
   semantic: string
 }
 
-/** 「校验并提取」变化量计划(校验阶段产物：reconcile 标准化 + 增量统计)。 */
+/** 「更新语义资产」变化量计划(校验阶段产物：reconcile 标准化 + 增量统计)。 */
 export interface ExtractPlanResult {
   added: number
   modified: number
@@ -444,13 +444,13 @@ export const semanticAssetService = {
     return await apiGet<UnownedExtractJob>(`/kb/semantic/unowned-extract-status${qsWith('')}`)
   },
 
-  /** 「校验并提取」校验阶段：变化量计划(reconcile 标准化 + 增量统计与样本)。 */
+  /** 「更新语义资产」校验阶段：变化量计划(reconcile 标准化 + 增量统计与样本)。 */
   async extractPlan(): Promise<ExtractPlanResult> {
     const { root, project } = currentProjectParams()
     return await apiPost<ExtractPlanResult>('/kb/semantic/extract-plan', { root, project })
   },
 
-  /** 「校验并提取」执行阶段：快照批量提取作业；action='stop' 请求停止。 */
+  /** 「更新语义资产」执行阶段：快照批量提取作业；action='stop' 请求停止。 */
   async syncExtract(action: 'start' | 'stop' = 'start', opts?: { batch?: number; level?: string }): Promise<{ started?: boolean; total?: number; reason?: string; message?: string; stopped?: boolean }> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/sync-extract', {

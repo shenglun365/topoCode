@@ -893,7 +893,7 @@ async function stopUnownedExtract() {
   void pollUnownedJobOnce()
 }
 
-// ---- 校验并提取：变化量计划 → 用户确认 → 快照批量作业(后端，页面关闭不影响) ----
+// ---- 更新语义资产(原「校验并提取」)：变化量计划 → 用户确认 → 快照批量作业(后端，页面关闭不影响) ----
 const syncPlan = ref<ExtractPlanResult | null>(null)
 const syncPlanOpen = ref(false)
 const syncPlanLoading = ref(false)

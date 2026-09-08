@@ -1856,10 +1856,10 @@ export default {
     reconciling: 'Checking…',
     historyButton: 'History',
     sync: {
-      button: 'Check & Extract',
+      button: 'Update Assets',
       hint: 'Check the delta against the latest working-dir code (added/modified/never-extracted/stale), then extract incrementally after confirmation — unchanged files are skipped',
       planning: 'Checking…',
-      planTitle: 'Check & Extract · Confirm Delta',
+      planTitle: 'Update Assets · Confirm Delta',
       planDesc: 'Compared the latest working-dir code with existing assets. The following delta needs extraction (unchanged files are skipped automatically):',
       rowAdded: 'Added files',
       rowModified: 'Modified files',
