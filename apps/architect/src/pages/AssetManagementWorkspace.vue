@@ -1718,16 +1718,8 @@ onUnmounted(() => {
         </button>
         <span v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</span>
         <span v-else-if="compareError" class="text-[10px] text-ctp-red truncate max-w-[40%]" :title="compareError">{{ compareError }}</span>
+        <!-- 结果数字不再重复在此：统一在下方「对比结果明细」统计行(缓存态/资产变化/待提取) -->
         <template v-else-if="compareData && !compareData.noChanges">
-          <span v-if="compareData.cached" class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay0">{{ t('assetMgmt.diff.cached') }}</span>
-          <span class="text-[10px] text-ctp-subtext1 font-semibold">{{ t('assetMgmt.diff.assetDelta') }}</span>
-          <span class="text-[10px] text-ctp-overlay1">{{ t('assetMgmt.diff.stableN', { n: compareData.assets.stable }) }}</span>
-          <span class="text-[10px] text-ctp-yellow">{{ t('assetMgmt.diff.changedN', { n: compareData.assets.changedTotal }) }}</span>
-          <span class="text-[10px] text-ctp-green">{{ t('assetMgmt.diff.newN', { n: compareData.assets.newTotal }) }}</span>
-          <span class="text-[10px] text-ctp-red">{{ t('assetMgmt.diff.removedN', { n: compareData.assets.removedTotal }) }}</span>
-          <span v-if="compareData.assets.pending.count" class="text-[10px] text-ctp-peach">{{ t('assetMgmt.diff.pendingN', { n: compareData.assets.pending.count }) }}</span>
-          <span v-if="compareData.newFileCount" class="text-[10px] text-ctp-green">{{ t('assetMgmt.diff.pendingNew', { n: compareData.newFileCount }) }}</span>
-          <span v-if="compareData.crossLinkCount" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.crossLinks', { n: compareData.crossLinkCount }) }}</span>
           <!-- 提取闭环：目标侧=工作区 且 有待提取文件 → 按文件范围补提 → 重新对比 -->
           <button
             v-if="compareData.assets.pending.count && compareData.targetIsWorktree && !extractingPending"
@@ -2324,9 +2316,12 @@ onUnmounted(() => {
                   <template v-else>
                     <div class="flex items-center gap-2 text-[10px] flex-wrap">
                       <span class="text-ctp-subtext1 font-semibold">{{ t('assetMgmt.diff.assetDelta') }}</span>
+                      <span v-if="compareData.cached" class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay0">{{ t('assetMgmt.diff.cached') }}</span>
                       <span class="text-ctp-overlay1">{{ t('assetMgmt.diff.stableN', { n: compareData.assets.stable }) }}</span>
                       <span class="text-ctp-yellow">{{ t('assetMgmt.diff.changedN', { n: compareData.assets.changedTotal }) }}</span>
-                      <span class="text-ctp-red">{{ t('assetMgmt.diff.removedN', { n: compareData.assets.removedTotal }) }}</span>
+                      <span v-if="compareData.assets.newTotal" class="text-ctp-green">{{ t('assetMgmt.diff.newN', { n: compareData.assets.newTotal }) }}</span>
+                      <span v-if="compareData.assets.removedTotal" class="text-ctp-red">{{ t('assetMgmt.diff.removedN', { n: compareData.assets.removedTotal }) }}</span>
+                      <span v-if="compareData.assets.pending.count" class="text-ctp-peach">{{ t('assetMgmt.diff.pendingN', { n: compareData.assets.pending.count }) }}</span>
                       <span v-if="compareData.newFileCount" class="text-ctp-green">{{ t('assetMgmt.diff.pendingNew', { n: compareData.newFileCount }) }}</span>
                     </div>
                     <div class="space-y-0.5">
