@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
 import PseudoExplainer from './PseudoExplainer.vue'
@@ -341,14 +342,7 @@ const KIND_TEXT: Record<string, string> = {
   entity: 'text-ctp-mauve', contract: 'text-ctp-yellow', state: 'text-ctp-sky',
   rule: 'text-ctp-peach', process: 'text-ctp-blue', decision: 'text-ctp-green',
 }
-const KIND_CHIP: Record<string, string> = {
-  entity: 'bg-ctp-mauve/15 text-ctp-mauve border-ctp-mauve/40',
-  contract: 'bg-ctp-yellow/15 text-ctp-yellow border-ctp-yellow/40',
-  state: 'bg-ctp-sky/15 text-ctp-sky border-ctp-sky/40',
-  rule: 'bg-ctp-peach/15 text-ctp-peach border-ctp-peach/40',
-  process: 'bg-ctp-blue/15 text-ctp-blue border-ctp-blue/40',
-  decision: 'bg-ctp-green/15 text-ctp-green border-ctp-green/40',
-}
+const KIND_CHIP: Record<string, string> = KIND_CARD_CLASS
 /** 锚点行底色(比纯文字色更醒目)。 */
 const KIND_BG: Record<string, string> = {
   entity: 'bg-ctp-mauve/15', contract: 'bg-ctp-yellow/15', state: 'bg-ctp-sky/15',
@@ -2151,14 +2145,7 @@ onMounted(async () => {
           <span class="text-[11px] font-semibold text-ctp-text truncate">{{ sel.name }}</span>
           <span
             class="chip !text-[9px] shrink-0"
-            :class="{
-              'bg-ctp-mauve/15 text-ctp-mauve': sel.kind === 'entity',
-              'bg-ctp-yellow/15 text-ctp-yellow': sel.kind === 'contract',
-              'bg-ctp-sky/15 text-ctp-sky': sel.kind === 'state',
-              'bg-ctp-peach/15 text-ctp-peach': sel.kind === 'rule',
-              'bg-ctp-blue/15 text-ctp-blue': sel.kind === 'process',
-              'bg-ctp-green/15 text-ctp-green': sel.kind === 'decision',
-            }"
+            :class="kindChipCls(sel.kind)"
            >{{ t(`assetMgmt.kind.${sel.kind}`) }}</span>
            <span
              v-if="isDiffNode(sel.id)"

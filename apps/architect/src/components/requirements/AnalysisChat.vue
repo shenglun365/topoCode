@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { kindChipClass } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
@@ -672,7 +673,7 @@ onUnmounted(() => {
               class="border border-ctp-teal/25 bg-ctp-teal/5 rounded-lg overflow-hidden"
             >
               <div class="flex items-center gap-1.5 px-2 py-1.5">
-                <span class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0">
+                <span class="chip !text-[9px] shrink-0" :class="kindChipClass(c.kind)">
                   {{ t(`assetMgmt.kind.${c.kind}`) }} · {{ c.level }}
                 </span>
                 <span class="font-mono text-[10px] text-ctp-subtext0 shrink-0">{{ c.id }}</span>

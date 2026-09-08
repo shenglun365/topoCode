@@ -9,6 +9,7 @@ import {
   DocumentTextIcon, CheckIcon,
 } from '@heroicons/vue/24/outline'
 import { apiGet } from '@/services/api-client'
+import { kindChipClass } from '@/services/semantic-kind-style'
 import { useRouter } from 'vue-router'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
@@ -2381,7 +2382,7 @@ onUnmounted(() => {
                       <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.diff.newAssets') }}</div>
                       <div v-for="a in compareData.assets.new.slice(0, 20)" :key="a.id" class="flex items-center gap-2 text-[10px] min-w-0">
                         <span class="truncate min-w-0 flex-1 text-ctp-text" :title="a.id">{{ a.name }}</span>
-                        <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0">{{ t(`assetMgmt.kind.${a.kind}`) }}</span>
+                        <span class="chip !text-[8px] shrink-0" :class="kindChipClass(a.kind)">{{ t(`assetMgmt.kind.${a.kind}`) }}</span>
                         <span class="font-mono text-[9px] text-ctp-overlay0 shrink-0" :title="a.component">{{ a.component === '__other__' ? t('assetMgmt.diff.otherBucket') : a.component }}</span>
                       </div>
                     </div>
@@ -2703,7 +2704,7 @@ onUnmounted(() => {
                     :is="kindIcon(a.kind)"
                     class="w-3.5 h-3.5 text-ctp-mauve shrink-0"
                   />
-                  <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">
+                  <span class="chip !text-[9px] shrink-0" :class="kindChipClass(a.kind)">
                     {{ t(`assetMgmt.kind.${a.kind}`) }}
                   </span>
                   <span
