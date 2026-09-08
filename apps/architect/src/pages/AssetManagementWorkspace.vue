@@ -2149,9 +2149,10 @@ onUnmounted(() => {
                     :key="k.value"
                     class="border border-ctp-surface0 rounded-md p-2"
                   >
-                    <div class="text-[10px] font-semibold text-ctp-text">
-                      {{ k.label }}
-                    </div>
+                    <span
+                      class="chip !text-[10px]"
+                      :class="kindChipClass(k.value)"
+                    >{{ k.label }}</span>
                     <div class="text-[9px] text-ctp-overlay0 mt-0.5">
                       {{ t(`assetMgmt.overview.kind.${k.value}`) }}
                     </div>
