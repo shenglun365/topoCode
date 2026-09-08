@@ -585,18 +585,9 @@ const semanticTreeRows = computed<TreeRow[]>(() => {
 
 const scopeSummary = computed(() => {
   if (!scopeSel.value.length) return t('assetMgmt.scopeAll')
-  // 共享资产会挂在多个组件下 → 按资产 id 去重计数
-  const sel = new Set(scopeSel.value)
-  const ids = new Set<string>()
-  for (const a of items.value) {
-    const cids = componentsOf(a)
-    if (!cids.length) {
-      if (sel.has(OTHER_KEY)) ids.add(a.id)
-      continue
-    }
-    if (cids.some((cid) => sel.has(cid))) ids.add(a.id)
-  }
-  return `${ids.size}/${items.value.length}`
+  // 命中/全量：分母用全库总数(stats)，而非过滤后的列表长(否则恒 x/x 无意义)
+  const total = overviewStats.value?.total ?? items.value.length
+  return `${items.value.length}/${total}`
 })
 
 /** 当前筛选的 scope 请求参数(组件 id + 「其它」哨兵)；空=全部。 */
@@ -1822,10 +1813,6 @@ onUnmounted(() => {
                 @click="filterOpen = !filterOpen; batchOpen = false"
               >
                 <AdjustmentsHorizontalIcon class="w-3 h-3" />
-                <span
-                  v-if="scopeSel.length"
-                  class="chip !text-[8px] !py-0 bg-ctp-blue/25 text-ctp-blue font-mono"
-                >{{ scopeSel.length }}</span>
               </button>
             </div>
             <button
