@@ -874,6 +874,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not task:
             raise ValueError(f"Task {tid} not found")
         project_root = _get_project_root(task["project_id"])
+        # 兜底：剥离语义文档 MD 中渲染期合成的元数据头部，
+        # 避免编辑保存时把「社区:/ID:」头部固化进 summary（重复累积）。
+        if summary:
+            try:
+                from topoone.engine.component_name_disambiguation import strip_doc_header
+                summary = strip_doc_header(summary)
+            except Exception as _e:
+                logger.warning("[analysis.saveCommunityResult] strip header failed: %s", _e)
         data = {
             "project_id": task["project_id"],
             "task_id": tid, "edge_type": et, "comm_lv": cl, "comm_id": cid,
@@ -935,6 +943,59 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         store = AnalysisStore(project_db)
         store.update_community_name(tid, et, cl, cid, name or "")
         return {"success": True}
+
+    # ==================== 组件命名消歧（独立流程，可按需反复运行） ====================
+
+    @server.register("analysis.scanComponentNameConflicts")
+    def scan_component_name_conflicts(task_id=None, taskId=None,
+                                      comm_ids=None, commIds=None):
+        """组件命名冲突排查（零 LLM）：归一化精确重复 + 相似度分组"""
+        tid = task_id or taskId
+        ids = comm_ids or commIds
+        if not tid:
+            raise ValueError("task_id is required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        from topoone.engine.component_name_disambiguation import scan_name_conflicts
+        result = scan_name_conflicts(project_db, tid, comm_ids=ids)
+        logger.info("[analysis.scanComponentNameConflicts] task=%s scanned=%d groups=%d dirty=%d",
+                    tid, result.get("scanned", 0), len(result.get("groups", [])),
+                    len(result.get("dirtySummaryCommIds", [])))
+        return result
+
+    @server.register("analysis.resolveComponentNameConflicts")
+    async def resolve_component_name_conflicts(task_id=None, taskId=None,
+                                               members=None, language=None, language_=None):
+        """对一组冲突组件做 LLM 消歧并写回（按组调用，前端逐组循环获得进度）"""
+        tid = task_id or taskId
+        keys = members or []
+        if not tid or not keys:
+            raise ValueError("task_id and members are required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        from topoone.engine.component_name_disambiguation import resolve_group
+        result = await resolve_group(multi_db, project_db, tid, keys,
+                                     language=language or language_ or "")
+        logger.info("[analysis.resolveComponentNameConflicts] task=%s renamed=%d failed=%d",
+                    tid, len(result.get("changes", [])), len(result.get("failed", [])))
+        return result
+
+    @server.register("analysis.cleanCommunitySummaries")
+    def clean_community_summaries(task_id=None, taskId=None):
+        """存量清理：剥离 community_llm_results.summary 内嵌的合成头部"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        from topoone.engine.component_name_disambiguation import clean_community_summaries as _clean
+        return _clean(project_db, tid)
 
     # ==================== 报告 Tab 接口 ====================
 

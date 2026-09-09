@@ -153,6 +153,9 @@ export function createBrowserAPI(): any {
     getCommunityResult: (params: any) => callRpc('analysis.getCommunityResult', params || {}),
     listCommunityResults: (taskId: string, edgeType: string) => callRpc('analysis.listCommunityResults', { taskId, edgeType }),
     updateCommunityName: (params: any) => callRpc('analysis.updateCommunityName', params || {}),
+    scanComponentNameConflicts: (params: any) => callRpc('analysis.scanComponentNameConflicts', params || {}),
+    resolveComponentNameConflicts: (params: any) => callRpc('analysis.resolveComponentNameConflicts', JSON.parse(JSON.stringify(params || {}))),
+    cleanCommunitySummaries: (params: any) => callRpc('analysis.cleanCommunitySummaries', params || {}),
     getCommunityFileGraph: (params: any) => callRpc('analysis.getCommunityFileGraph', params || {}),
     parseFileAst: (params: any) => callRpc('analysis.parseFileAst', params || {}),
     // 事件订阅（task.* → /ws/events）

@@ -7,6 +7,7 @@ import type { PageType } from '@/types'
 
 const routes: RouteRecordRaw[] = [
   // dev 模式：5173/ 显示统一首页（四模块入口）；生产构建（/app 主工作台）仍 redirect 到 /home
+  // 门户微路由：AppHome 顶部「全部设置/用户中心」链接指向 #/settings、#/user，宿主路由需等价承接
   ...(import.meta.env.DEV
     ? [
         {
@@ -14,6 +15,18 @@ const routes: RouteRecordRaw[] = [
           name: 'HomePortal',
           component: () => import('@/pages/HomePortal.vue'),
           meta: { title: 'nav.home', hideShell: true },
+        },
+        {
+          path: '/settings',
+          name: 'PortalSettings',
+          component: () => import('@topo/web-core/portal/settings/SettingsPage.vue'),
+          meta: { title: 'nav.settings', hideShell: true },
+        },
+        {
+          path: '/user',
+          name: 'PortalUser',
+          component: () => import('@topo/web-core/portal/user/UserCenterPage.vue'),
+          meta: { title: 'nav.userCenter', hideShell: true },
         },
       ]
     : [

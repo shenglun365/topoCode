@@ -1072,7 +1072,6 @@ export interface ArchLlmModelsResult {
 export interface ArchLlmImportResult {
   models: ArchLlmModel[]
   added: number
-  updated: number
   preserved: number
 }
 

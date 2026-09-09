@@ -179,7 +179,8 @@ export const useCommunityStore = defineStore('community', () => {
         for (const rRaw of [...(uniResults?.results || [])]) {
           const r = rRaw as Record<string, unknown>
           const id = (r.commId || r.comm_id) as string | undefined
-          if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
+          // 人工命名优先（name_manual 由 updateCommunityName 写入，消歧流程不改）
+          if (id) llmMap[id] = { ...r, name: r.name_manual || r.name }
         }
         const communities: CommunityItem[] = []
         if (uniLevels?.levels) {
@@ -267,7 +268,8 @@ export const useCommunityStore = defineStore('community', () => {
         for (const rRaw of [...(uniResults?.results || [])]) {
           const r = rRaw as Record<string, unknown>
           const id = (r.commId || r.comm_id) as string | undefined
-          if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
+          // 人工命名优先（name_manual 由 updateCommunityName 写入，消歧流程不改）
+          if (id) llmMap[id] = { ...r, name: r.name_manual || r.name }
         }
         const communities: CommunityItem[] = []
         if (uniLevels?.levels) {
@@ -1219,6 +1221,20 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
+  // ── 组件命名消歧（独立流程，可按需反复运行） ──────────────────
+  async function scanNameConflicts(taskId: string, commIds?: string[]) {
+    return await ipc.analysis.scanComponentNameConflicts({ taskId, commIds })
+  }
+
+  async function resolveNameConflicts(taskId: string, members: Array<{ commId: string; commLv: string; edgeType?: string }>, language = '') {
+    const safe = JSON.parse(JSON.stringify({ taskId, members, language }))
+    return await ipc.analysis.resolveComponentNameConflicts(safe)
+  }
+
+  async function cleanCommunitySummaries(taskId: string) {
+    return await ipc.analysis.cleanCommunitySummaries({ taskId })
+  }
+
   return {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
@@ -1231,5 +1247,6 @@ export const useCommunityStore = defineStore('community', () => {
     cancelAgentPolling, cancelAgentTask, ensureAgentPolling,
     getPreSummaryStatus, listPreSummaryFiles, startPreSummary, startPreSummaryPipeline,
     getFileSummary, getPreSummaryFileSource, deleteFileSummary, rerunFileSummary, startPipeline, getProgressStats,
+    scanNameConflicts, resolveNameConflicts, cleanCommunitySummaries,
   }
 })

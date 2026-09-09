@@ -62,6 +62,23 @@ export default {
     presummary: {
       started: '预摘要 P0→P1→P2 已启动{hint}。请到「任务」面板查看进度。',
     },
+    disambiguate: {
+      scanning: '正在排查组件命名冲突...',
+      scanned: '排查完成：{scanned} 个组件，发现 {count} 组命名冲突',
+      noConflicts: '排查完成：{scanned} 个组件，未发现命名冲突。',
+      groupHeader: '冲突组 {index}（{kind}，{count} 个）',
+      kindExact: '重名',
+      kindSimilar: '高相似',
+      lockedTag: '（人工命名，不改）',
+      fixing: '开始消歧 {count} 组（每组一次 LLM 调用）...',
+      groupDone: '组 {index}/{total}：重命名 {renamed} 个，失败 {failedCount} 个',
+      fixed: '消歧完成：共重命名 {renamed} 个组件',
+      changeLine: '「{old}」→「{new}」（{commId}）',
+      failLine: '{commId}：{reason}',
+      dirtySummary: '发现 {count} 个组件的语义文档含冗余头部，可执行「清理语义文档头部」处理。',
+      cleaned: '已清理 {cleaned} 个组件的语义文档冗余头部。',
+      noComponentsSelected: '当前选中的组件未参与任何命名冲突。',
+    },
     overview: {
       started: '架构概览生成任务已启动，请稍后查看结果...',
       pendingAnalysis: '组件分析尚未完成，无法生成架构概览。请先执行 /analyze 或 /pipeline 完成组件分析后再试。',
@@ -286,6 +303,7 @@ export default {
 {'|'} /overview [--force] [-L zh/en] {'|'} 生成整体架构概览 {'|'}
 {'|'} /pipeline [-j N] [--force] [-L zh/en] {'|'} 一键流水线：项目摘要→预摘要→组件分析→架构概览 {'|'}
 {'|'} /retry [--force] {'|'} 重新执行流水线 {'|'}
+{'|'} /disambiguate [--fix] [--clean] [-L zh/en] {'|'} 组件命名消歧（独立流程）。默认全量排查重名/相似名；--fix 逐组 LLM 消歧改名；--clean 清理语义文档冗余头部；有选中组件时仅处理选中组 {'|'}
 
 ## 交互模式
 - **自由对话**：输入 TopoCode 使用相关问题
@@ -315,5 +333,11 @@ export default {
 - **导入分析结果**：工具栏"导入"按钮，选择之前导出的 .zip 存档
 - **导出分析结果**：工具栏"导出"按钮，勾选要导出的任务后下载
 - **校验文件**：工具栏"校验"按钮，检查文件 hash 是否与分析数据一致
-- **清理缓存**：工具栏 ⚙️ 菜单 → 清理缓存，按类别选择性清除`,
+- **清理缓存**：工具栏 ⚙️ 菜单 → 清理缓存，按类别选择性清除
+
+### 5. AI 助手命令
+- \`/disambiguate\`：组件命名消歧（独立流程，可反复运行）。全量排查重名/相似名的组件并列出冲突组
+- \`/disambiguate --fix [-L zh/en]\`：逐组调用 LLM 消歧并改名，输出「旧名 → 新名」清单；有选中组件时仅处理选中组
+- \`/disambiguate --clean\`：清理组件语义文档中冗余累积的「社区/ID」头部
+- 输入 \`/help\` 查看全部命令`,
 }

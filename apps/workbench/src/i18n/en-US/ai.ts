@@ -62,6 +62,23 @@ export default {
     presummary: {
       started: 'Pre-summary P0→P1→P2 started{hint}. Check the Task panel for progress.',
     },
+    disambiguate: {
+      scanning: 'Scanning component name conflicts...',
+      scanned: 'Scan complete: {scanned} components, {count} conflict group(s) found',
+      noConflicts: 'Scan complete: {scanned} components, no name conflicts found.',
+      groupHeader: 'Group {index} ({kind}, {count})',
+      kindExact: 'duplicated',
+      kindSimilar: 'similar',
+      lockedTag: ' (manually named, kept)',
+      fixing: 'Resolving {count} group(s) (one LLM call per group)...',
+      groupDone: 'Group {index}/{total}: renamed {renamed}, {failedCount} failed',
+      fixed: 'Disambiguation complete: {renamed} component(s) renamed',
+      changeLine: '"{old}" → "{new}" ({commId})',
+      failLine: '{commId}: {reason}',
+      dirtySummary: '{count} component doc(s) contain redundant headers; run "Clean doc headers" to fix.',
+      cleaned: 'Cleaned redundant doc headers for {cleaned} component(s).',
+      noComponentsSelected: 'None of the selected components are involved in name conflicts.',
+    },
     overview: {
       started: 'Architecture overview generation task started, please check back later...',
       pendingAnalysis: 'Component analysis is not yet complete. Please run /analyze or /pipeline first.',
@@ -286,6 +303,7 @@ Keep responses concise and professional, using diagrams (Mermaid/PlantUML) for i
 {'|'} /overview [--force] [-L zh/en] {'|'} Generate overall architecture overview {'|'}
 {'|'} /pipeline [-j N] [--force] [-L zh/en] {'|'} One-click pipeline: project summary → pre-summary → component analysis → architecture overview {'|'}
 {'|'} /retry [--force] {'|'} Re-run pipeline {'|'}
+{'|'} /disambiguate [--fix] [--clean] [-L zh/en] {'|'} Component name disambiguation (standalone flow). Default: scan all duplicated/similar names; --fix rename per group via LLM; --clean strip redundant doc headers; with selected components only their groups are handled {'|'}
 
 ## Interaction Modes
 - **Free Chat**: Ask TopoCode usage-related questions
@@ -315,5 +333,11 @@ Keep responses concise and professional, using diagrams (Mermaid/PlantUML) for i
 - **Import** analysis results: Click the "Import" button, select a previously exported .zip archive
 - **Export** analysis results: Click the "Export" button, select tasks, and download
 - **Verify files**: Click the "Verify" button to check file hash consistency with analysis data
-- **Clear cache**: Toolbar ⚙️ menu → Clear cache, selectively clear by category`,
+- **Clear cache**: Toolbar ⚙️ menu → Clear cache, selectively clear by category
+
+### 5. AI Assistant Commands
+- \`/disambiguate\`: Component name disambiguation (standalone flow, re-runnable). Scans all duplicated/similar component names and lists conflict groups
+- \`/disambiguate --fix [-L zh/en]\`: Resolve conflicts group by group via LLM renaming, with an "old → new" change list; with selected components only their groups are handled
+- \`/disambiguate --clean\`: Strip redundantly accumulated "Community/ID" headers from component semantic docs
+- Type \`/help\` to see all commands`,
 }

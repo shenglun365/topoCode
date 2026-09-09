@@ -150,7 +150,7 @@ async def set_max_tokens_preference_route(request: Request):
 
 # ── LLM 模型配置: KB 导入 / 手动设置 ──────────────────────────────
 # 存储于 arch_collab_config 键 `llm.models`(JSON 列表)。每条含 `source`:
-#   - imported: 从 KB 手动导入(重复导入会刷新此部分)
+#   - imported: 从 KB 手动导入(重复导入全量重建此部分)
 #   - manual  : architect 单独手动设置(重复导入不会覆盖)
 
 _MODELS_KEY = "llm.models"
@@ -208,11 +208,10 @@ async def get_llm_models_route():
 
 @router.post("/llm/models/import")
 async def import_llm_models_route():
-    """手动同步：从 KB 导入模型配置。
+    """手动同步：从 KB 导入模型配置(全量重建导入)。
 
-    - 已存在的 manual(source=manual) 项整体保留，不被重复导入覆盖；
-    - 已存在同 identity 的 imported 项 → 刷新字段；
-    - 其余 → 新增为 imported。
+    - 每次导入先清除原有全部 imported(source=imported) 记录，再按 KB 当前列表重建；
+    - manual(source=manual) 项整体保留；identity 与手动项重复的 KB 项跳过(preserved)。
     """
     from .kb_gateway import call_kb
     raw = call_kb("settings.getModels")
@@ -222,38 +221,26 @@ async def import_llm_models_route():
 
     existing = get_llm_models()
     manual = {_model_identity(m): m for m in existing if m.get("source") == "manual"}
-    imported = [m for m in existing if m.get("source") == "imported"]
 
-    added, updated, preserved = 0, 0, 0
-    out_imported = []
-    seen: set = set()
+    added, preserved = 0, 0
+    out_imported: list = []
     for row in rows:
         model = _normalize_kb_model(row)
-        key = _model_identity(model)
-        if key in manual:
+        if _model_identity(model) in manual:
             preserved += 1
             continue
-        prev = next((m for m in imported if _model_identity(m) == key), None)
-        if prev:
-            merged = {**prev, **{k: v for k, v in model.items() if k != "source"},
-                      "updatedAt": _ts()}
-            out_imported.append(merged)
-            updated += 1
-        else:
-            out_imported.append(model)
-            added += 1
-        seen.add(key)
-
-    # 保留仍未被 KB 提及的历史 imported 项(避免误删)，但刷新已存在项
-    for m in imported:
-        if _model_identity(m) not in seen:
-            out_imported.append(m)
+        out_imported.append(model)
+        added += 1
 
     save_llm_models(list(manual.values()) + out_imported)
     store.CollabConfigStore.set("llm.modelImportedAt", str(_ts()))
+    # 当前选中模型若已不在重建后的列表中 → 清空偏好(回退主后端默认模型)
+    model_id = store.CollabConfigStore.get("llm.modelId", "")
+    if model_id and model_id not in {m.get("id") for m in out_imported + list(manual.values())}:
+        store.CollabConfigStore.set("llm.modelId", "")
     return ok({
         "models": list(manual.values()) + out_imported,
-        "added": added, "updated": updated, "preserved": preserved,
+        "added": added, "preserved": preserved,
     })
 
 

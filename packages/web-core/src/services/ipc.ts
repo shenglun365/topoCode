@@ -439,6 +439,15 @@ function createRealIPC() {
       updateCommunityName: async (params: any) => {
         return await api.analysis.updateCommunityName(params)
       },
+      scanComponentNameConflicts: async (params: any) => {
+        return await api.analysis.scanComponentNameConflicts(params)
+      },
+      resolveComponentNameConflicts: async (params: any) => {
+        return await api.analysis.resolveComponentNameConflicts(params)
+      },
+      cleanCommunitySummaries: async (params: any) => {
+        return await api.analysis.cleanCommunitySummaries(params)
+      },
       getCommunityFileGraph: async (params: any) => {
         return await api.analysis.getCommunityFileGraph(params)
       },

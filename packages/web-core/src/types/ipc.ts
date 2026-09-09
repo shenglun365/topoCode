@@ -620,6 +620,21 @@ export interface IPCAPI {
       nameManual: string | null;
     }> }>
     updateCommunityName: (params: { taskId: string; edgeType: string; commLv: string; commId: string; name: string }) => Promise<{ success: boolean }>
+    // 组件命名消歧（独立流程，可按需反复运行）
+    scanComponentNameConflicts: (params: { taskId: string; commIds?: string[] }) => Promise<{
+      scanned: number
+      groups: Array<{ kind: 'exact' | 'similar'; locked: boolean; members: Array<{
+        commId: string; commLv: string; edgeType: string; name: string; manual: boolean;
+        status: string; summaryClean: string; parentName: string
+      }> }>
+      dirtySummaryCommIds: string[]
+    }>
+    resolveComponentNameConflicts: (params: { taskId: string; members: Array<{ commId: string; commLv: string; edgeType?: string }>; language?: string }) => Promise<{
+      changes: Array<{ commId: string; commLv: string; edgeType: string; oldName: string; newName: string }>
+      failed: Array<{ commId: string; reason: string }>
+      skipped?: string
+    }>
+    cleanCommunitySummaries: (params: { taskId: string }) => Promise<{ cleaned: number; scanned: number }>
     getCommunityFileGraph: (params: { taskId: string; edgeType: string; commId: string }) => Promise<{
       nodes: Array<{ id: string; label: string; filePath: string }>
       edges: Array<{ source: string; target: string; direction?: string }>

@@ -191,6 +191,9 @@ export default { report: {
   system: 'System',
   communityHeading: '# Community: {name}',
   parentComponent: '## Parent Component\n{content}',
+  renameHint: 'Click to rename (manual name, never overwritten by auto-disambiguation)',
+  renamePlaceholder: 'New component name',
+  renameFailed: 'Rename failed',
   saveAsDoc: 'Save as Doc',
   // Sub-doc
   backToReport: 'Back to Report',

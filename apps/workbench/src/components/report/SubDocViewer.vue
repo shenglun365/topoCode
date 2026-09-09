@@ -15,6 +15,7 @@ import { useReportStore } from '@/stores/report-store'
 import { useCommunityStore } from '@/stores/community-store'
 import { ipc } from '@topo/web-core/services/ipc'
 import { communityLabel } from '@/utils/communityLabel'
+import { stripDocHeader } from '@/utils/docHeader'
 import SubDocToolbar from './SubDocToolbar.vue'
 import SubDocContent from './SubDocContent.vue'
 const { showId, componentId } = useComponentId('RP-010')
@@ -59,9 +60,15 @@ const editContent = ref('')
 const saveError = ref('')
 const isSaving = ref(false)
 
+/** 社区文档上下文（允许改名：写 name_manual，人工名优先级最高） */
+const isCommunityContext = computed(() =>
+  !!(props.parentCommId && props.taskId && props.parentEdgeType && props.parentLevel))
+
 function startEdit() {
   if (!doc.value) return
-  editContent.value = doc.value.content
+  // 编辑器只装剥离后的正文：渲染期合成的元数据头部（社区/ID/父组件/结构分析）
+  // 不可编辑、永不随正文回存（避免改名后头部重复累积）
+  editContent.value = stripDocHeader(doc.value.content)
   isEditing.value = true
 }
 
@@ -70,7 +77,8 @@ async function saveEdit() {
   isSaving.value = true
   saveError.value = ''
   try {
-    doc.value.content = editContent.value
+    // 保存前再剥离一次（后端 saveCommunityResult 亦有兜底）
+    doc.value.content = stripDocHeader(editContent.value)
     if (doc.value.id) {
       await ipc.report.updateSubDoc({ subDocId: doc.value.id, content: doc.value.content })
     }
@@ -91,10 +99,30 @@ async function saveEdit() {
       })
     }
     isEditing.value = false
+    // 重新加载：渲染层按结构化字段重新合成唯一头部，展示与库内数据保持一致
+    await loadDoc()
   } catch (e: any) {
     saveError.value = `${t('report.saveFailed')}: ${e.message || String(e)}`
   } finally {
     isSaving.value = false
+  }
+}
+
+// 手工改名：走结构化字段（name_manual），与正文编辑解耦
+async function renameCommunity(newName: string) {
+  if (!isCommunityContext.value || !newName.trim()) return
+  try {
+    await ipc.analysis.updateCommunityName({
+      taskId: props.taskId!, edgeType: props.parentEdgeType!,
+      commLv: props.parentLevel!, commId: props.parentCommId!,
+      name: newName.trim(),
+    })
+    if (doc.value) doc.value.title = newName.trim()
+    saveError.value = ''
+    // 刷新社区列表让组件树/标签同步显示新名
+    communityStore.loadCommunities(props.taskId!, props.projectId || '').catch(() => {})
+  } catch (e: any) {
+    saveError.value = `${t('report.renameFailed')}: ${e.message || String(e)}`
   }
 }
 
@@ -297,10 +325,12 @@ watch(
       v-else
       :title="doc?.title || ''"
       :can-open-in-browser="canOpenInBrowser"
+      :can-rename="isCommunityContext"
       @close="emit('close')"
       @refresh="loadDoc"
       @open-browser="openInBrowser"
       @edit="startEdit"
+      @rename="renameCommunity"
     />
 
     <!-- 保存错误提示 -->

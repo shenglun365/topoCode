@@ -133,13 +133,14 @@ const userInput = ref('')
 
 /* ---- 指令联想 ---- */
 const CMD_HISTORY_KEY = 'ai-command-history'
-const ARCH_CMDS = ['/select', '/presummary', '/analyze', '/analyze_components', '/overview', '/pipeline', '/retry']
+const ARCH_CMDS = ['/select', '/presummary', '/analyze', '/analyze_components', '/overview', '/pipeline', '/retry', '/disambiguate']
 
 const USER_COMMANDS = ['/help', t('aiAssistant.commands.help'), '/select', '/select --unanalyzed', '/select --l3',
   '/presummary', '/presummary --force',
   '/analyze', '/analyze --force', '/analyze_components', '/analyze_components --force',
   '/overview', '/overview --force',
-  '/pipeline', '/pipeline --force']
+  '/pipeline', '/pipeline --force',
+  '/disambiguate', '/disambiguate --fix', '/disambiguate --clean']
 
 function loadCommandHistory(): string[] {
   try { return JSON.parse(localStorage.getItem(CMD_HISTORY_KEY) || '[]') } catch { return [] }
@@ -493,6 +494,102 @@ async function handleSend() {
       addMessage('system', t('aiAssistant.presummary.started', { hint }))
       communityStore.startPreSummaryPipeline(taskId, ['P0', 'P1', 'P2'], 0, concurrency)
         .catch((e: any) => addMessage('system', t('aiAssistant.errors.startFailed', { msg: e.message || e })))
+      return
+    }
+    // /disambiguate [--fix] [--clean] [-L zh|en] — 组件命名消歧（独立流程，可反复运行）
+    if (/^\/disambiguate\b/i.test(text)) {
+      const VALID_DA_FLAGS = ['--fix', '--clean', '-L']
+      const tokens = text.split(/\s+/).slice(1)
+      const unknown = _validateFlags(tokens, VALID_DA_FLAGS)
+      if (unknown.length > 0) {
+        addMessage('user', text)
+        userInput.value = ''
+        addMessage('system', t('aiAssistant.errors.unknownFlags', { flags: unknown.join('、'), valid: VALID_DA_FLAGS.join(' ') }))
+        return
+      }
+      addMessage('user', text)
+      userInput.value = ''
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
+      const fix = /--fix/i.test(text)
+      const clean = /--clean/i.test(text)
+      const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
+
+      // --clean：仅清理存量语义文档内嵌的冗余头部
+      if (clean) {
+        try {
+          const r: any = await communityStore.cleanCommunitySummaries(taskId)
+          addMessage('system', t('aiAssistant.disambiguate.cleaned', { cleaned: r?.cleaned ?? 0 }))
+        } catch (e: any) {
+          addMessage('error', String(e?.message || e))
+        }
+        return
+      }
+
+      addMessage('system', t('aiAssistant.disambiguate.scanning'))
+      let scan: any = null
+      try {
+        scan = await communityStore.scanNameConflicts(taskId)
+      } catch (e: any) {
+        addMessage('error', String(e?.message || e))
+        return
+      }
+      let groups: any[] = scan?.groups || []
+      // 有选中组件时 → 仅保留与选中组件相交的冲突组
+      if (selectionStore.selectedCount > 0) {
+        const selIds = new Set(selectionStore.selectedList.map(r => r.id))
+        groups = groups.filter((g: any) => g.members.some((m: any) => selIds.has(m.commId)))
+        if (groups.length === 0) {
+          addMessage('system', t('aiAssistant.disambiguate.noComponentsSelected'))
+          return
+        }
+      }
+      if (groups.length === 0) {
+        addMessage('system', t('aiAssistant.disambiguate.noConflicts', { scanned: scan?.scanned ?? 0 }))
+        return
+      }
+      addMessage('system', t('aiAssistant.disambiguate.scanned', { scanned: scan?.scanned ?? 0, count: groups.length }))
+      groups.forEach((g: any, gi: number) => {
+        const kindLabel = g.kind === 'exact' ? t('aiAssistant.disambiguate.kindExact') : t('aiAssistant.disambiguate.kindSimilar')
+        const header = t('aiAssistant.disambiguate.groupHeader', { index: gi + 1, kind: kindLabel, count: g.members.length })
+        const lines = g.members.map((m: any) =>
+          `- ${m.name}${m.manual ? t('aiAssistant.disambiguate.lockedTag') : ''}（${m.commLv}，${m.commId}）`
+        ).join('\n')
+        addMessage('system', `${header}\n${lines}`)
+      })
+      if (scan?.dirtySummaryCommIds?.length) {
+        addMessage('system', t('aiAssistant.disambiguate.dirtySummary', { count: scan.dirtySummaryCommIds.length }))
+      }
+      if (!fix) return
+
+      addMessage('system', t('aiAssistant.disambiguate.fixing', { count: groups.length }))
+      let totalRenamed = 0
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi]
+        try {
+          const r: any = await communityStore.resolveNameConflicts(
+            taskId,
+            g.members.map((m: any) => ({ commId: m.commId, commLv: m.commLv, edgeType: m.edgeType })),
+            language,
+          )
+          const renamed = r?.changes?.length || 0
+          const failedCount = r?.failed?.length || 0
+          totalRenamed += renamed
+          addMessage('system', t('aiAssistant.disambiguate.groupDone', { index: gi + 1, total: groups.length, renamed, failedCount }))
+          for (const c of r?.changes || []) {
+            addMessage('system', t('aiAssistant.disambiguate.changeLine', { old: c.oldName, new: c.newName, commId: c.commId }))
+          }
+          for (const f of r?.failed || []) {
+            addMessage('system', t('aiAssistant.disambiguate.failLine', { commId: f.commId, reason: f.reason }))
+          }
+        } catch (e: any) {
+          addMessage('error', `${t('aiAssistant.disambiguate.groupDone', { index: gi + 1, total: groups.length, renamed: 0, failedCount: g.members.length })} (${String(e?.message || e)})`)
+        }
+      }
+      addMessage('system', t('aiAssistant.disambiguate.fixed', { renamed: totalRenamed }))
+      if (selectionStore.selecting) selectionStore.toggleSelecting()
+      // 刷新社区列表，让新名称立即生效
+      communityStore.loadCommunities(taskId, projectStore.selectedProjectId || '').catch(() => {})
       return
     }
       if (/^\/help$/i.test(text) || text === t('aiAssistant.commands.help')) {

@@ -124,7 +124,6 @@ async function importModels() {
     llmModels.value = data.models ?? []
     importMsg.value = t('config.llm.importDone', {
       added: data.added,
-      updated: data.updated,
       preserved: data.preserved,
     })
   } catch (e: any) {

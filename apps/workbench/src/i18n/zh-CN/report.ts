@@ -196,6 +196,9 @@ export default { report: {
   system: '系统',
   communityHeading: '# 社区: {name}',
   parentComponent: '## 父组件\n{content}',
+  renameHint: '点击修改组件名（人工命名，不会被自动消歧覆盖）',
+  renamePlaceholder: '输入新的组件名',
+  renameFailed: '重命名失败',
   saveAsDoc: '保存为文档',
   // 文件预摘要
   filePreSummary: '文件预摘要',

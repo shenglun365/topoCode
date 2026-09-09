@@ -368,7 +368,7 @@ def build_component_catalog(multi_db, project_id: str, *,
         # LLM 名称 / 摘要 / 类型(按 comm_id 去重；comm_id 内嵌任务前缀，跨任务不冲突)
         try:
             for r in project_db.fetchall(
-                    "SELECT comm_id, name, summary, component_type FROM community_llm_results "
+                    "SELECT comm_id, name, name_manual, summary, component_type FROM community_llm_results "
                     "WHERE task_id = ?", (tid,)):
                 merged_llm.setdefault(r["comm_id"], r)
         except Exception:
@@ -403,11 +403,15 @@ def build_component_catalog(multi_db, project_id: str, *,
     rows = merged_rows
     llm = merged_llm
 
-    # ── 组件名 / 父组件名(LLM 名优先，缺失则按路径族推导) ──
+    # ── 组件名 / 父组件名(LLM 名优先，缺失则按路径族推导；人工命名 name_manual 最高优先) ──
     def _name(cid: str) -> str:
         meta = llm.get(cid)
-        if meta and meta.get("name"):
-            return meta["name"]
+        if meta:
+            manual = (meta.get("name_manual") or "").strip()
+            if manual:
+                return manual
+            if meta.get("name"):
+                return meta["name"]
         return _derive_name(cid, comm_files.get(cid, []))
 
     def _summary(cid: str, desc: str = "") -> str:
@@ -433,9 +437,9 @@ def build_component_catalog(multi_db, project_id: str, *,
         components.append({
             "id": cid,
             "name": _name(cid),
-            # named=False 表示 KB 尚未解析(无 LLM 名，name 为路径族推导的临时名)，
+            # named=False 表示 KB 尚未解析(无 LLM/人工名，name 为路径族推导的临时名)，
             # 消费方可据此改显组件 id(如概览「组件变更情况」)。
-            "named": bool((llm.get(cid) or {}).get("name")),
+            "named": bool((llm.get(cid) or {}).get("name_manual") or (llm.get(cid) or {}).get("name")),
             "kind": _kind(cid, files),
             "desc": (_summary(cid, row.get("description") or "") or "").strip()[:400],
             "lang": _lang_from(lang_of, files),

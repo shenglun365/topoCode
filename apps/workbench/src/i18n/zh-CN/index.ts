@@ -52,7 +52,9 @@ export default {
   ...resource,
   ...render,
   ...report,
-  ...settings,
+  // portal 嵌套 settings 词表(设置中心页)与 workbench 扁平 settings 词表合并：
+  // portal 侧在后保证 tabs/models/general 等嵌套键完整；workbench 侧独有键(title/skills/plugins 等)保留
+  settings: { ...settings.settings, ...portalZh.settings },
   ...shell,
   ...theme,
   ...version,
