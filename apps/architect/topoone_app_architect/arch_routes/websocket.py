@@ -213,6 +213,13 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         _ctx.set_conv(conv_id)
     except Exception:
         pass
+    # 需求绑定兜底: 载荷未带 reqId 时回退会话记录的既有绑定——
+    # 刷新/重开会话后前端 activeReqId 丢失, NL「确认定稿」仍可凭记录绑定走通
+    try:
+        if not (data.get("reqId") or "") and conv and (conv.get("reqId") or ""):
+            _ctx.set_req(conv["reqId"])
+    except Exception:
+        pass
     user_msgs = [m for m in history if m.get("role") == "user" and (m.get("content") or "").strip()]
     last_user_msg_id = ""
     for m in user_msgs[-1:]:

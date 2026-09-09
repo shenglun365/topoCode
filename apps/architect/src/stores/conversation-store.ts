@@ -116,11 +116,19 @@ export const useConversationStore = defineStore('archConversation', () => {
    */
   async function rehydrateProposals(convId: string) {
     try {
-      const { apiGet } = await import('@/services/api-client')
+      const { apiGet, apiPatch } = await import('@/services/api-client')
       const rows = await apiGet<any[]>('/requirements')
       const mine = (rows || []).filter((r: any) =>
         r.sourceConversationId === convId && r.status !== 'cancelled')
       if (!mine.length || activeId.value !== convId) return
+      // 恢复会话↔需求绑定(刷新后 activeReqId 丢失会致 NL「确认定稿」失败):
+      // 优先未定稿提案, 兜底最新一条; 并 PATCH 落库绑定
+      const pending = mine.filter((r: any) => (r.location ?? '') === 'proposal')
+      const bind = pending[pending.length - 1] ?? mine[mine.length - 1]
+      if (bind?.id && !activeReqId.value) {
+        activeReqId.value = bind.id
+        apiPatch(`/requirements/conversations/${convId}`, { reqId: bind.id }).catch(() => {})
+      }
       for (const r of mine) {
         const proposal = {
           id: r.id, title: r.title, desc: r.desc || '', priority: r.priority || 'P1',
