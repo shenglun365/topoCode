@@ -234,6 +234,21 @@ def _scan_dbs() -> list:
     return dbs
 
 
+_HAS_PID_CACHE: dict = {}
+
+
+def _table_has_project_id(db, table: str) -> bool:
+    """表是否带 project_id 列(legacy 表/需求表等无此列, 全局桶探测跳过)。"""
+    key = (getattr(db, "db_path", ""), table)
+    if key not in _HAS_PID_CACHE:
+        try:
+            cols = [r[1] for r in db.conn.execute(f"PRAGMA table_info({table})")]
+        except Exception:  # noqa: BLE001
+            cols = []
+        _HAS_PID_CACHE[key] = "project_id" in cols
+    return _HAS_PID_CACHE[key]
+
+
 def _locate_db(table: str, row_id: str, project_id: Optional[str] = None):
     """定位行所在库(PK 探测)。返回 (db, found)。
 
@@ -247,8 +262,9 @@ def _locate_db(table: str, row_id: str, project_id: Optional[str] = None):
     mode, db = _route_read(table, project_id)
     if mode == "one":
         found = db.fetchone(f"SELECT id FROM {table} WHERE id = ?", (row_id,)) is not None
-        if not found:
+        if not found and _table_has_project_id(db, table):
             # 提升的全局桶行落在主库(project_id=__global__)——项目上下文下也要可寻址
+            # (仅对带 project_id 列的表; requirements 等靠"住在项目库"定位, 无该列)
             if _db().fetchone(f"SELECT id FROM {table} WHERE id = ? AND project_id = ?",
                               (row_id, GLOBAL_PID)):
                 return _db(), True
