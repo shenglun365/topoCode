@@ -275,6 +275,17 @@ export default {
       title: '需求提案',
       goto: '前往任务管理',
     },
+    extractPlan: {
+      button: '方案生成',
+      hint: '把方案生成指令填入输入框，可补充侧重后发送',
+      prompt: '请基于当前对话提炼待执行方案：收敛需求+方案+评估三段，生成需求提案。',
+      confirm: '确认存入',
+      confirmHint: '定稿入池（待执行），后续可在任务执行页对接 coding agent',
+      confirming: '存入中…',
+      confirmed: '已存入待执行，可在任务执行页创建执行任务',
+      confirmedChip: '已存入待执行',
+      confirmFailed: '存入失败，请重试或检查后端连接',
+    },
   },
 
   project: {
@@ -450,6 +461,8 @@ export default {
     mine: '提炼能力',
     mineHint: '从会话提炼 规约/流程/技巧/skill 提案(待审)',
     mineDone: '提炼完成：新增 {n} 条提案(待审)',
+    readyPlans: '待执行方案',
+    readyGo: '去执行',
     proposals: '能力提案',
     proposalAccept: '采纳',
         proposalIgnore: '忽略',

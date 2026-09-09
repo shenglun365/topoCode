@@ -65,6 +65,11 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
     planConfirmed: (s) => s.plans.some((p) => p.status === 'confirmed'),
   },
   actions: {
+    /** 强制重拉(会话中心确认存入后, 执行页需拿到最新池)。 */
+    async reload() {
+      this.loaded = false
+      await this.load()
+    },
     async load() {
       if (this.loaded) return
       this.loading = true

@@ -957,6 +957,8 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
     "req.propose",
     "形成需求提案：在资产地图对话中，当讨论收敛为明确的改进/新增需求时调用，"
     "把 需求+方案+评估 三段结构化产出为提案（进入需求方案的规划组，等待用户确认后续流程）。"
+    "触发词：用户要求 生成方案/方案生成/提炼方案/提炼待执行方案/提取任务上下文/转入执行 时调用本工具；"
+    "「方案生成」按钮预填的指令也是本工具。"
     "参数：title(一句话需求)、requirementMd(需求描述：背景/目标/范围)、designMd(方案要点：技术路径/涉及组件与文件，"
     "可引用对话中讨论的资产)、assessmentMd(评估：收益/风险/工作量估计 estMin 分钟)、priority(P0/P1/P2)。",
 )
@@ -1010,6 +1012,8 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     "req.finalize",
     "定稿：把 plan 结论固化为结构化需求分析并转入待执行。当需求讨论收敛、可明确范围/影响/实现路径时调用"
     "(调用后本会话需求状态→待执行，左栏会话移入「待执行」组)。"
+    "确认语义：会话中已生成提案后，用户表示 确认存入/同意/存入待执行/确认方案/可以执行 等确认意图时调用本工具。"
+    "参数 reqId 可选——多提案会话中用户指明确认某一条时传入对应 RQ 编号(缺省取会话绑定需求)。"
     "参数：title、description、functionalScope[str]、entityBoundary[str]、"
     "assetScope[{assetId,assetType,role,source}]、estMin(int 分钟)、implementationPath(str)、assessmentSummary(str)。",
 )
@@ -1020,11 +1024,12 @@ def tool_req_finalize(title: str = "", description: str = "",
                       estMin: Optional[int] = None,
                       implementationPath: str = "",
                       assessmentSummary: str = "",
+                      reqId: str = "",
                       root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx
-    req_id = ctx.get_req()
+    req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求，无法定稿"}
+        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法定稿"}
     row = store.RequirementsStore.get(req_id)
     if not row:
         return {"ok": False, "error": f"需求 {req_id} 不存在"}
@@ -1392,7 +1397,8 @@ _CAPABILITY_DOC = (
     '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
     '- req.finalize: {"title": "…", "description": "…", "functionalScope": ["…"], '
     '"entityBoundary": ["…"], "assetScope": [{"assetId":"…","assetType":"component","role":"core",'
-    '"source":"auto"}], "estMin": 90, "implementationPath": "…", "assessmentSummary": "…"}\n'
+    '"source":"auto"}], "estMin": 90, "implementationPath": "…", "assessmentSummary": "…", '
+    '"reqId"?: "RQ-xxx(多提案时指明确认哪条)"}\n'
     '- execution.assign: {"target": "runner", "execId": "ex-xxx(缺省取需求已绑定任务)"} '
     '或 {"target": "mcp", "tool": "<mcp工具名>", "params": {…}}\n'
     '- req.finalize 门禁: assetScope 涉及资产若过期(stale/needsUpdate)会被拦截——'

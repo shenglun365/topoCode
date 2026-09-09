@@ -65,6 +65,8 @@ export const useConversationStore = defineStore('archConversation', () => {
       const { apiGet } = await import('@/services/api-client')
       const row = await apiGet<Record<string, any>>(`/requirements/${reqId}`)
       if (!row?.id) return
+      // 绑定会话↔需求：自然语言「确认存入」经 agent req.finalize 时依赖此绑定
+      activeReqId.value = row.id
       const last = turns.value[turns.value.length - 1]
       if (last && last.role === 'assistant') {
         last.proposal = {

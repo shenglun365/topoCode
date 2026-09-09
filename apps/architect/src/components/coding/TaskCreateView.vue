@@ -46,6 +46,7 @@ const executors = ref<ExecEntry[]>([])
 const adapterId = ref('')
 
 onMounted(async () => {
+  void requirement.reload().catch(() => {})
   try {
     const d = await apiGet<{ executors: ExecEntry[] }>('/agent/executors')
     executors.value = (d.executors || []).filter((e) => e.enabled)

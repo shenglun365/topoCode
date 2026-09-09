@@ -7,6 +7,7 @@ import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
+import { apiPost } from '@/services/api-client'
 import type { SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
 
@@ -298,6 +299,42 @@ function showToast(text: string) {
   toastVisible.value = true
   if (toastTimer) clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2000)
+}
+
+// ── 方案生成：预填指令进输入框(用户可补充后自行发送；与对话指令同路径) ──
+const extractPlanPrompt = t('assetChat.extractPlan.prompt')
+function fillExtractPlan() {
+  input.value = input.value ? `${input.value} ${extractPlanPrompt}` : extractPlanPrompt
+  void nextTick(() => {
+    inputRef.value?.focus()
+    const el = inputRef.value
+    if (el) el.selectionStart = el.selectionEnd = el.value.length
+  })
+}
+
+// ── 提案卡确认存入：finalize 入池(待执行)；按钮自带 reqId, 多提案各自独立确认 ──
+const confirmingProposalId = ref('')
+async function confirmProposal(m: KbAnalysisTurn) {
+  const p = m.proposal
+  if (!p || p.confirmed || confirmingProposalId.value) return
+  confirmingProposalId.value = p.id
+  try {
+    const analysis = {
+      ...(p.analysis ?? {}),
+      implementationPath: p.analysis?.implementationPath || p.analysis?.designMd || '',
+    }
+    const row = await apiPost<Record<string, unknown>>(`/requirements/${p.id}/finalize`, { analysis })
+    if (row && (row as any).id) {
+      p.confirmed = true
+      showToast(t('assetChat.extractPlan.confirmed'))
+    } else {
+      showToast(t('assetChat.extractPlan.confirmFailed'))
+    }
+  } catch {
+    showToast(t('assetChat.extractPlan.confirmFailed'))
+  } finally {
+    confirmingProposalId.value = ''
+  }
 }
 
 // ---- 推理内容(thinking)折叠展示 ----
@@ -873,6 +910,21 @@ onUnmounted(() => {
                 class="chip !px-1.5 !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0"
               >{{ m.proposal.priority }}</span>
               <span class="flex-1" />
+              <span
+                v-if="m.proposal.confirmed"
+                class="chip !px-1.5 !text-[9px] bg-ctp-green/15 text-ctp-green shrink-0"
+              >
+                <CheckIcon class="w-3 h-3" />{{ t('assetChat.extractPlan.confirmedChip') }}
+              </span>
+              <button
+                v-else
+                class="btn btn-xs btn-green"
+                :disabled="confirmingProposalId === m.proposal.id"
+                :title="t('assetChat.extractPlan.confirmHint')"
+                @click="confirmProposal(m)"
+              >
+                <CheckIcon class="w-3 h-3" />{{ confirmingProposalId === m.proposal.id ? t('assetChat.extractPlan.confirming') : t('assetChat.extractPlan.confirm') }}
+              </button>
               <button
                 class="btn btn-xs btn-blue"
                 @click="emit('goto-requirements', m.proposal.id)"
@@ -1071,6 +1123,16 @@ onUnmounted(() => {
           stroke-linejoin="round"
         ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
         {{ t('requirement.chat.diagramSkill') }}
+      </button>
+      <button
+        class="btn btn-xs"
+        :class="props.diagramSkill ? 'btn-blue' : 'btn-ghost'"
+        :disabled="busy"
+        :title="t('assetChat.extractPlan.hint')"
+        @click="fillExtractPlan"
+      >
+        <SparklesIcon class="w-3.5 h-3.5" />
+        {{ t('assetChat.extractPlan.button') }}
       </button>
       <span v-if="props.showContractSkill === undefined || props.showContractSkill" class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.diagramSkillHint') }}</span>
       <button

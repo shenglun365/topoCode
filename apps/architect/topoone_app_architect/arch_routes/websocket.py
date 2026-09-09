@@ -188,6 +188,13 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         conv_id = conv["id"]
     else:
         conv = store.ConversationsStore.get(conv_id)
+        # 会话↔需求绑定回填：提案卡产生后前端 send 会带 reqId——补写进会话记录,
+        # 刷新/重开会话后 openConversation 携带 meta.reqId, 自然语言确认仍可用
+        if conv and (data.get("reqId") or "") and not (conv.get("reqId") or ""):
+            try:
+                conv = store.ConversationsStore.update(conv_id, {"reqId": data["reqId"]})
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[kb-chat] 回填 reqId 失败 conv=%s: %s", conv_id, e)
         if not conv:
             # 自愈降级（勿改回直接报 "conversation not found" 后 return）：
             # 浏览器 tab 内存里保留的 chatConvId 可能指向已不存在的会话

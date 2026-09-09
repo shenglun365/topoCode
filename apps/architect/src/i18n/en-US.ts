@@ -251,6 +251,17 @@ export default {
       title: 'Proposal',
       goto: 'Open tasks',
     },
+    extractPlan: {
+      button: 'Generate Plan',
+      hint: 'Fill the plan-generation prompt into the input box; append your focus before sending',
+      prompt: 'Please distill an executable plan from this conversation: converge requirement + design + assessment into a proposal.',
+      confirm: 'Confirm',
+      confirmHint: 'Finalize into the pending pool; wire to a coding agent on the execute page later',
+      confirming: 'Saving…',
+      confirmed: 'Saved to pending pool; create an execution task on the execute page',
+      confirmedChip: 'In pending pool',
+      confirmFailed: 'Save failed; retry or check backend connection',
+    },
   },
 
   project: {
@@ -426,6 +437,8 @@ export default {
     mine: 'Mine capabilities',
     mineHint: 'Mine conventions/processes/tricks/skills proposals from this session (pending review)',
     mineDone: 'Mining done: {n} new proposals (pending review)',
+    readyPlans: 'Pending plans',
+    readyGo: 'Execute',
     proposals: 'Capability proposals',
     proposalAccept: 'Accept',
         proposalIgnore: 'Ignore',

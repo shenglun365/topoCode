@@ -10,7 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ChatBubbleOvalLeftEllipsisIcon, MagnifyingGlassIcon, PlusIcon, ArrowPathIcon,
   DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
-  ArrowUpTrayIcon, ArrowDownTrayIcon,
+  ArrowUpTrayIcon, ArrowDownTrayIcon, BoltIcon,
   FolderIcon, ClockIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import TaskDetailView from '@/components/coding/TaskDetailView.vue'
@@ -20,6 +20,7 @@ import { sessionService, type ContextUnit, type ConversationMeta, type SessionDo
 import { apiGet, apiPost } from '@/services/api-client'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
+import type { Requirement } from '@/types'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -57,6 +58,7 @@ async function load() {
 }
 onMounted(async () => {
   await load()
+  void loadReadyReqs()
   // 深链 ?select=<convId|reqId>（兼容旧需求深链）
   const sel = typeof route.query.select === 'string' ? route.query.select : ''
   if (sel) {
@@ -267,6 +269,18 @@ function promoteCapability(p: CapabilityProposal) {
     .then(() => { proposals.value = proposals.value.filter((x) => x.id !== p.id); loadGlobal(pid) })
     .catch(() => {})
 }
+// ── 待执行方案(需求池已定稿：确认存入的提案在此等待对接 coding agent) ──
+const readyReqs = ref<Requirement[]>([])
+async function loadReadyReqs() {
+  try {
+    const rows = await apiGet<Requirement[]>('/requirements')
+    readyReqs.value = (rows || []).filter((r) => (r.location ?? 'pool') === 'pool'
+      && r.status === 'analyzed')
+  } catch { readyReqs.value = [] }
+}
+function goExecute(reqIds: string[]) {
+  router.push({ path: '/workbench/execute', query: { select: reqIds.join(',') } })
+}
 const viewingDoc = ref<SessionDoc | null>(null)
 async function extractDoc() {
   if (!selected.value || extracting.value) return
@@ -459,6 +473,29 @@ function statusClass(s: string) {
           >
             {{ t('session.archive') }}
           </button>
+        </div>
+
+        <div v-if="readyReqs.length" class="rounded-lg border border-ctp-green/30 bg-ctp-green/5 p-2.5">
+          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.readyPlans') }} ({{ readyReqs.length }})</p>
+          <div
+            v-for="r in readyReqs"
+            :key="r.id"
+            class="mb-1.5 rounded border border-ctp-surface0 bg-ctp-base/60 p-2 last:mb-0"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="font-mono text-[10px] text-ctp-overlay1 shrink-0">{{ r.id }}</span>
+              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ctp-text">{{ r.title }}</span>
+              <span class="chip !px-1.5 !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0">{{ r.priority }}</span>
+            </div>
+            <div class="mt-1.5 flex items-center justify-end">
+              <button
+                class="btn btn-xs btn-green"
+                @click="goExecute([r.id])"
+              >
+                <BoltIcon class="h-3 w-3" />{{ t('session.readyGo') }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div v-if="proposals.length" class="rounded-lg border border-ctp-peach/30 bg-ctp-peach/5 p-2.5">
