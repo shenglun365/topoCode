@@ -67,3 +67,13 @@ def test_spawn_execution_session_idempotent():
     assert a["kind"] == "execution" and a["status"] == "pending"
     msgs = store.ConversationsStore.messages(a["id"])
     assert msgs and "守卫测试需求" in msgs[0]["content"]
+
+
+def test_extract_proposal_fence():
+    from topoone_app_architect.arch_routes.req_agent import extract_proposal_fence
+    text = '前言\n```proposal\n{"title": "T", "designMd": "细节", "estMin": 30}\n```\n后记'
+    d = extract_proposal_fence(text)
+    assert d and d["title"] == "T" and d["estMin"] == 30
+    assert extract_proposal_fence("无围栏") is None
+    assert extract_proposal_fence("```json\n{\"a\":1}\n```") is None  # 非 proposal 围栏不认
+    assert extract_proposal_fence("```proposal\n{broken\n```") is None

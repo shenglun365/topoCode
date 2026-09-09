@@ -210,6 +210,25 @@ def fabricated_claim(text: str, tools_used) -> tuple:
     return None, None
 
 
+def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
+    """提取 ```proposal JSON 围栏(方案生成的确定性落库通道)。
+
+    生成类动作(产出提案)对部分模型而言"不需要工具"——它们更愿意直接把提案写成
+    JSON 输出而非发 [TOOL_CALL]。围栏协议把这一行为变成可靠路径：模型写围栏，
+    服务端解析后代为执行 req.propose 落库(WS 层发 tool_result 事件 → 前端方案卡)。
+    """
+    if not text or "```proposal" not in text:
+        return None
+    m = re.search(r"```proposal\s*\n?(\{.*?\})\s*```", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+        return data if isinstance(data, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def extract_tool_calls(text: str) -> List[Dict[str, Any]]:
     """从模型输出中解析工具调用块(闭合/未闭合均支持)。返回 [{tool, arguments}]；异常/缺失字段自动跳过。"""
     calls: List[Dict[str, Any]] = []
@@ -990,18 +1009,6 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
 
 # ── 需求定稿工具(plan 结论 → 结构化分析 + 转入待执行) ────────────────
 
-@register_architect_tool(
-    "req.propose",
-    "形成需求提案：讨论收敛为明确改进/新增需求，或设计者要求 生成方案/提炼方案/转入执行 时调用，"
-    "把 需求+方案+评估 结构化落库为提案(进入规划组，等待设计者确认)。"
-    "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节)，"
-    "约束四项(目标/允许范围/禁止改动/验收标准)可按对话留空，不编造。"
-    "必须实际调用本工具落库(结果含 requirementId)才算产出提案；不要在回复里手写提案 JSON。"
-    "需求提案不用 contract.propose 替代(那是 🧾 期望固化)。"
-    "参数：title、requirementMd(需求目标)、designMd(方案：逻辑与实现细节)、"
-    "allowedScopeMd/forbiddenScopeMd(允许增删改/一定不能动的模块·文件·资产节点，每行一项，可空)、"
-    "acceptanceMd(最终验收标准，每行一条，可空)、assessmentMd(评估)、estMin(分钟)、priority(P0/P1/P2)。",
-)
 def _md_lines(text: str) -> List[str]:
     """Markdown 行 → 数组(剥列表符/序号，去空行)。"""
     import re as _re
@@ -1013,6 +1020,19 @@ def _md_lines(text: str) -> List[str]:
     return out
 
 
+@register_architect_tool(
+    "req.propose",
+    "形成需求提案：讨论收敛为明确改进/新增需求，或设计者要求 生成方案/提炼方案/转入执行 时调用，"
+    "把 需求+方案+评估 结构化落库为提案(进入规划组，等待设计者确认)。"
+    "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节)，"
+    "约束四项(目标/允许范围/禁止改动/验收标准)可按对话留空，不编造。"
+    "产出通道二选一：① 输出 [TOOL_CALL] 调用本工具；②(推荐，更可靠) 在回复末尾输出"
+    " ```proposal 围栏，内容为本工具参数的 JSON——系统会自动解析落库并发方案卡。"
+    "需求提案不用 contract.propose 替代(那是 🧾 期望固化)。"
+    "参数：title、requirementMd(需求目标)、designMd(方案：逻辑与实现细节)、"
+    "allowedScopeMd/forbiddenScopeMd(允许增删改/一定不能动的模块·文件·资产节点，每行一项，可空)、"
+    "acceptanceMd(最终验收标准，每行一条，可空)、assessmentMd(评估)、estMin(分钟)、priority(P0/P1/P2)。",
+)
 def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "",
                      assessmentMd: str = "", priority: str = "P1",
                      estMin: int = 0,

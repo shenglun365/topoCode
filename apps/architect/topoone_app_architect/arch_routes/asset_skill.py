@@ -141,6 +141,13 @@ _BUILTIN_PLAN = """## 方案生成规约（plan 场景）
 - 范围与细节优先引用对话中讨论到的真实资产/文件
   （不确定时先 asset.semantic.search / code.read_symbols 取证，再落笔）。
 
+### 产出通道（推荐围栏）
+- 首选：把提案写成 ```proposal 围栏(JSON，字段同 req.propose 参数：title/requirementMd/
+  designMd/allowedScopeMd/forbiddenScopeMd/acceptanceMd/assessmentMd/estMin/priority)，
+  系统自动解析落库并出方案卡——生成类动作无需 [TOOL_CALL]；
+- 备选：输出 [TOOL_CALL] 调用 req.propose；
+- 只选其一，落库成功以系统返回的 RQ 编号为准。
+
 ### 产出纪律（防编造，重要）
 - 需求提案必须**实际调用 req.propose** 落库——工具结果返回 requirementId(RQ-…) 才算产出；
   严禁在回复里手写提案 JSON、或声称『已生成提案』——没有工具结果就没有提案；

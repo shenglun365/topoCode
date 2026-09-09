@@ -380,6 +380,23 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # 与前端逐字累积的内容严格一致，避免 done 覆盖造成跳变)。
     final_content = visible or assistant_text
 
+    # ── proposal 围栏自动落库: 模型直接输出 ```proposal JSON → 服务端代执行 ──
+    fence_args = req_agent.extract_proposal_fence(final_content)
+    if fence_args and "req.propose" not in tools_used:
+        logger.info("[kb-chat] proposal 围栏命中, 服务端代落库 conv=%s", conv_id)
+        try:
+            res = await _run_tool_with_progress(
+                websocket, request_id, "req.propose", fence_args, root, project)
+            tools_used.add("req.propose")
+            ok = bool(res.get("ok"))
+            notice = (f"\n\n✅ 已从提案草稿围栏自动落库：{str(res.get('text', ''))[:140]}"
+                      if ok else
+                      f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}")
+            final_content += notice
+            await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": notice})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[kb-chat] 围栏代落库失败: %s", e)
+
     # ── 防编造守卫: 声称的落库/执行动作必须有本回合真实工具调用佐证 ──
     claim, need = req_agent.fabricated_claim(final_content, tools_used)
     if claim:
@@ -481,7 +498,7 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
         context_registry.record_tool_call(_ctx.get_conv() or "", name, args, ok, summary)
     except Exception:
         pass
-    return {"name": name, "text": summary}
+    return {"name": name, "text": summary, "ok": ok}
 
 
 def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = False,
