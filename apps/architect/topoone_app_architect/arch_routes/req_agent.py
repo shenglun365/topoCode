@@ -959,16 +959,13 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
     "把 需求+方案+评估 结构化产出为提案（进入需求方案的规划组，等待用户确认后续流程）。"
     "触发词：用户要求 生成方案/方案生成/提炼方案/提炼待执行方案/提取任务上下文/转入执行 时调用本工具；"
     "「方案生成」按钮预填的指令也是本工具。"
-    "内容框架(必须涵盖)：①需求目标(requirementMd)；②允许增删改的模块/文件/数据资产节点范围(allowedScopeMd)；"
-    "③一定不能动的模块/文件/数据资产节点(forbiddenScopeMd，讨论中未提及也要显式给出默认保守边界)；"
-    "④最终验收标准(acceptanceMd；复杂需求的中间自测单测由 coding agent 按模型能力自行处理，不列入提案任务)；"
-    "⑤方案要点(designMd)；⑥评估(assessmentMd)。"
-    "参数：title(一句话需求)、requirementMd(需求目标：背景/目标/预期效果)、"
-    "allowedScopeMd(允许增删改的范围，每行一项：模块/文件路径/数据资产节点)、"
-    "forbiddenScopeMd(一定不能动的范围，每行一项)、"
-    "acceptanceMd(最终验收标准，每行一条可判定)、"
-    "designMd(方案要点：技术路径/涉及组件与文件，可引用对话中讨论的资产)、"
-    "assessmentMd(评估：收益/风险/工作量估计 estMin 分钟)、priority(P0/P1/P2)。",
+    "完整方案以 designMd 为核心：必须包含必要的逻辑表达与实现细节(技术路径/关键改动点/组件与文件/数据流向/边界条件等，"
+    "按需求复杂度充分展开)，不可只有标题式罗列。"
+    "以下四项是约束框架，按对话实际给出；对话未涉及或用户明确同意为空时留空，不要编造："
+    "①需求目标(requirementMd)；②允许增删改的模块/文件/数据资产节点范围(allowedScopeMd，每行一项)；"
+    "③一定不能动的模块/文件/数据资产节点(forbiddenScopeMd，每行一项)；"
+    "④最终验收标准(acceptanceMd，每行一条可判定；中间自测单测由 coding agent 按模型能力自行处理，不列入提案任务)。"
+    "另有评估 assessmentMd(收益/风险/工作量估计 estMin 分钟)、priority(P0/P1/P2)。",
 )
 def _md_lines(text: str) -> List[str]:
     """Markdown 行 → 数组(剥列表符/序号，去空行)。"""
