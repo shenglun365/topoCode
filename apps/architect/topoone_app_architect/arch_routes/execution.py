@@ -10,6 +10,7 @@ import threading
 from typing import Optional
 from fastapi import APIRouter, Request
 from .common import _ts, ok, err
+from .evaluator import set_deviation_disposition
 from . import store
 from .agent_roles import role_model_id
 
@@ -289,6 +290,16 @@ async def commit_execution_batch(req_ids: list, body: Optional[dict] = None) -> 
     plan_out = store.PlansStore.get(plan_id)
     exec_out = store.ExecutionTasksStore.get(exec_id)
     return {"plan": plan_out, "exec": exec_out}, None
+
+
+@router.post("/exec/{task_id}/disposition")
+async def api_deviation_disposition(task_id: str, request: Request):
+    body = await request.json()
+    result = set_deviation_disposition(task_id, str(body.get("action") or ""),
+                                       str(body.get("reason") or ""))
+    if result.get("error"):
+        return err(400, result["error"])
+    return ok(result)
 
 
 @router.post("/exec")

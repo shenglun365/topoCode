@@ -14,6 +14,21 @@
 # ── 主库(全局) ─────────────────────────────────────────────────
 
 ARCH_MAIN_TABLES_SQL = """
+    -- WS6-E 审计落库: 工具调用流水(全局表, project_id 供过滤)
+    CREATE TABLE IF NOT EXISTS arch_tool_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL,
+        tool TEXT NOT NULL,
+        args_digest TEXT DEFAULT '',
+        ok INTEGER DEFAULT 1,
+        result_digest TEXT DEFAULT '',
+        conversation_id TEXT DEFAULT '',
+        req_id TEXT DEFAULT '',
+        project_id TEXT DEFAULT '',
+        model_id TEXT DEFAULT '',
+        latency_ms REAL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_audit_ts ON arch_tool_audit(ts DESC);
     CREATE TABLE IF NOT EXISTS arch_projects (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL DEFAULT '',
@@ -648,6 +663,10 @@ def _project_migrations(db) -> None:
     ])
     _add_cols(db, "arch_capability_proposals", [
         ("origin_project_id", "TEXT DEFAULT ''"),
+    ])
+    # 偏差处置流: 执行任务上的处置记录(JSON: {action, reason, at, deviationDigest})
+    _add_cols(db, "arch_execution_tasks", [
+        ("deviation_disposition", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_requirements", [
         ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),

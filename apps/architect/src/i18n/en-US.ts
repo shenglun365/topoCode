@@ -435,6 +435,9 @@ export default {
     globalCounts: '{c} conventions · {a} assets',
     globalImport: 'Import',
     importHint: 'Copy from global layer into this project (cold start)',
+    archive: 'Archive',
+    archiveHint: 'End the session; prompts when minable content exists',
+    mineOnEnd: 'This session has minable content. Mine now?',
 
     status: { active: 'Active', waiting: 'Waiting', running: 'Running', done: 'Done', archived: 'Archived' },
     time: { all: 'All time', today: 'Today', week: 'This week', earlier: 'Earlier' },

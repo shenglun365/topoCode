@@ -186,7 +186,15 @@ async def update_session(conv_id: str, request: Request):
     if not patch:
         return err(400, "无可更新字段")
     updated = store.ConversationsStore.update(conv_id, patch)
-    return ok(_conv_api(updated or conv))
+    result = _conv_api(updated or conv)
+    # P5: 会话结束(归档/完成)即时提示可提炼内容(廉价启发: 消息数达标)
+    if patch.get("status") in ("archived", "done"):
+        try:
+            n = len(store.ConversationsStore.messages(conv_id, limit=200))
+            result["mineableHint"] = n >= 8
+        except Exception:
+            result["mineableHint"] = False
+    return ok(result)
 
 
 @router.delete("/sessions/{conv_id}")

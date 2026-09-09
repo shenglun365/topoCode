@@ -220,6 +220,18 @@ async function mine(c: ConversationMeta) {
     miningBusy.value = false
   }
 }
+async function archiveConversation(c: ConversationMeta) {
+  if (c.status === 'archived') return
+  try {
+    const r = await sessionService.update(c.id, { status: 'archived' })
+    c.status = 'archived'
+    // P5: 会话结束即时提示可提炼内容
+    if ((r as any)?.mineableHint && c.projectId) {
+      if (window.confirm(t('session.mineOnEnd'))) await mine(c)
+    }
+  } catch { /* 保持 */ }
+}
+
 async function decideProposal(p: CapabilityProposal, action: 'accept' | 'ignore') {
   const pid = selected.value?.projectId
   if (!pid) return
@@ -438,6 +450,14 @@ function statusClass(s: string) {
             @click="mine(selected)"
           >
             <SparklesIcon class="h-3.5 w-3.5" :class="miningBusy ? 'animate-pulse' : ''" />{{ t('session.mine') }}
+          </button>
+          <button
+            v-if="selected.status !== 'archived'"
+            class="btn btn-sm btn-ghost"
+            :title="t('session.archiveHint')"
+            @click="archiveConversation(selected)"
+          >
+            {{ t('session.archive') }}
           </button>
         </div>
 

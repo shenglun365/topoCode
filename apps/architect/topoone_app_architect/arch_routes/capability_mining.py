@@ -455,6 +455,63 @@ async def api_promote(request: Request):
     return ok(result)
 
 
+# ── P5 定时批量提炼(后台周期扫描, 产出 pending 提案交设计者裁决) ───────
+
+async def periodic_mine_loop(interval_h: float = 6.0, min_idle_h: float = 24.0,
+                             min_messages: int = 12) -> None:
+    """周期扫描: 各项目库中「静默超 min_idle_h 且消息数达标且尚无本会话提案」的
+    会话 → run_mine 落 pending(设计者裁决, 不自动生效)。异常吞掉, 下轮重试。"""
+    import asyncio as _aio
+    import time as _time
+    from .store import CapabilityProposalStore, ConversationsStore
+    from .store.base import _scan_dbs
+    from .store.conv import ConversationsStore as _CS
+    await _aio.sleep(60)  # 启动缓冲
+    while True:
+        try:
+            now = int(_time.time() * 1000)
+            for db in _scan_dbs():
+                try:
+                    rows = db.fetchall(
+                        "SELECT id, project_id, updated_at FROM arch_conversations "
+                        "WHERE status IN ('active', 'done') AND updated_at < ? "
+                        "ORDER BY updated_at DESC LIMIT 40",
+                        (now - int(min_idle_h * 3600 * 1000),))
+                except Exception:
+                    continue
+                for r in rows:
+                    conv_id, pid = r["id"], r["project_id"] or ""
+                    if not pid:
+                        continue
+                    try:
+                        existing = CapabilityProposalStore.list(pid, status="pending", limit=500) +                             CapabilityProposalStore.list(pid, status="accepted", limit=500)
+                        if any(p.get("sourceConversationId") == conv_id for p in existing):
+                            continue  # 本会话已提炼过
+                        msgs = ConversationsStore.messages(conv_id, limit=200)
+                        if len(msgs) < min_messages:
+                            continue
+                        result = run_mine(conv_id, project=pid)
+                        if result.get("proposals"):
+                            logger.info("[periodic-mine] %s → %d proposals",
+                                        conv_id, len(result["proposals"]))
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("[periodic-mine] %s skipped: %s", conv_id, e)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[periodic-mine] loop error: %s", e)
+        await _aio.sleep(interval_h * 3600)
+
+
+def start_periodic_mine() -> None:
+    """应用启动时挂载(app.on_event startup 调用)。"""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        loop.create_task(periodic_mine_loop())
+        logger.info("[periodic-mine] scheduled (6h)")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[periodic-mine] schedule failed: %s", e)
+
+
 @router.get("/capabilities/global")
 async def api_global_layer(project: str = ""):
     """主库全局桶概览(WS8-S3 消费侧): 提案明细 + 规约/资产计数。"""

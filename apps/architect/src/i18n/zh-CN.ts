@@ -459,6 +459,9 @@ export default {
     globalCounts: '规约 {c} · 资产 {a}',
     globalImport: '导入本项目',
     importHint: '从全局层复制为本项目条目(冷启动)',
+    archive: '归档',
+    archiveHint: '结束会话; 有可提炼内容时会提示',
+    mineOnEnd: '该会话有可提炼内容, 立即提炼?',
 
     status: { active: '进行中', waiting: '待回答', running: '运行中', done: '已完成', archived: '已归档' },
     time: { all: '全部时间', today: '今天', week: '本周', earlier: '更早' },

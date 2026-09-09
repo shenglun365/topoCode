@@ -47,3 +47,31 @@ async def delete_session(session_id: str):
 async def get_session_messages(session_id: str):
     msgs = store.AgentSessionsStore.messages(session_id)
     return ok(msgs)
+
+
+@router.get("/agent/tool-audit")
+async def tool_audit(project: str = "", tool: str = "", failed: int = -1,
+                     limit: int = 200):
+    """工具调用审计流水(WS6-E 落库查询面)。"""
+    from .store.base import _db
+    conds, params = ["1=1"], []
+    if project:
+        conds.append("project_id = ?")
+        params.append(project)
+    if tool:
+        conds.append("tool = ?")
+        params.append(tool)
+    if failed == 1:
+        conds.append("ok = 0")
+    elif failed == 0:
+        conds.append("ok = 1")
+    rows = _db().fetchall(
+        f"SELECT * FROM arch_tool_audit WHERE {' AND '.join(conds)} "
+        f"ORDER BY ts DESC LIMIT ?",
+        tuple(params + [max(1, min(int(limit), 1000))]))
+    return {"code": 0, "message": "ok", "data": [
+        {"ts": r["ts"], "tool": r["tool"], "ok": bool(r["ok"]),
+         "argsDigest": r["args_digest"], "resultDigest": r["result_digest"],
+         "conversationId": r["conversation_id"], "reqId": r["req_id"],
+         "projectId": r["project_id"], "modelId": r["model_id"],
+         "latencyMs": r["latency_ms"]} for r in rows]}

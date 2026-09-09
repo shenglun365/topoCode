@@ -290,15 +290,63 @@ def run_evaluate(conv_id: str, target: str = "plan", exec_id: str = "",
     ir = _diagram_ir(foot)
     if ir:
         md_lines += ["", "受影响资产关系子图:", "", ir]
+    disp = _read_disposition(task)
+    if disp:
+        md_lines += ["", f"**偏差处置**: {disp.get('action')}——{disp.get('reason') or '（无备注）'}"]
     return {"markdown": "\n".join(md_lines),
             "assets": [a for a in foot["assets"] if not a.get("neighbor")][:12],
             "deviation": {k: dev.get(k) for k in
-                          ("unplannedFiles", "outOfSpanLines", "untouchedPlannedFiles", "matchedFiles")}}
+                          ("unplannedFiles", "outOfSpanLines", "untouchedPlannedFiles", "matchedFiles")},
+            "disposition": disp or None}
+
+
+def _read_disposition(task: Optional[dict]) -> Optional[dict]:
+    raw = (task or {}).get("deviationDisposition") or ""
+    if not raw:
+        return None
+    try:
+        d = json.loads(raw)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def set_deviation_disposition(exec_id: str, action: str, reason: str = "") -> Dict[str, Any]:
+    """偏差处置(WS 闭环): accept(接受偏差, 放行验收) | waive(豁免计划外改动) | redo(打回重做)。"""
+    import json as _json
+    import time as _time
+    from .store import ExecutionTasksStore as ExecutionStore
+    action = (action or "").strip().lower()
+    if action not in ("accept", "waive", "redo"):
+        return {"error": "action 须为 accept|waive|redo"}
+    task = ExecutionStore.get(exec_id)
+    if not task:
+        return {"error": f"执行任务 {exec_id} 不存在"}
+    disp = {"action": action, "reason": (reason or "").strip(),
+            "at": int(_time.time() * 1000)}
+    ExecutionStore.update(exec_id, {"deviationDisposition": _json.dumps(disp, ensure_ascii=False)})
+    label = {"accept": "已接受偏差", "waive": "已豁免计划外改动", "redo": "已打回重做"}[action]
+    return {"status": "ok", "disposition": disp,
+            "markdown": f"偏差处置[{exec_id}]: **{label}**" + (f"——{disp['reason']}" if disp["reason"] else "")}
 
 
 def register_evaluator_tools() -> None:
     """注册 capability.evaluate 会话 agent 工具(WS4)。"""
     from .req_agent import register_architect_tool
+
+    @register_architect_tool(
+        "capability.disposition",
+        "偏差处置: 对执行任务 capability.evaluate 发现的偏差做裁决并留痕——"
+        "accept 接受偏差(放行验收) / waive 豁免计划外改动 / redo 打回重做。"
+        "评估报告存在偏差、需要设计者定夺时用",
+    )
+    def _capability_disposition(execId: str, action: str, reason: str = "",
+                                project: Optional[str] = None,
+                                root: Optional[str] = None) -> dict:
+        result = set_deviation_disposition((execId or "").strip(), action, reason)
+        if result.get("error"):
+            return result
+        return {"markdown": result["markdown"], "disposition": result["disposition"]}
 
     @register_architect_tool(
         "capability.evaluate",

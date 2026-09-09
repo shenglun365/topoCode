@@ -224,6 +224,17 @@ def record_tool_audit(name: str, arguments: Dict[str, Any], ok: bool,
         "latencyMs": round(latency_ms, 1),
     }
     logger.debug("[tool-audit] %s", json.dumps(rec, ensure_ascii=False)[:400])
+    try:
+        from .store.base import _insert_into, _db
+        _insert_into(_db(), "arch_tool_audit", {
+            "ts": rec["ts"], "tool": name,
+            "argsDigest": rec["argsDigest"], "ok": rec["ok"],
+            "resultDigest": rec["resultDigest"],
+            "conversationId": conv_id, "reqId": req_id,
+            "projectId": rec["projectId"], "modelId": rec["modelId"],
+            "latencyMs": rec["latencyMs"]})
+    except Exception as e:  # noqa: BLE001 — 审计不碍业务
+        logger.debug("[tool-audit] persist skipped: %s", e)
     return rec
 
 
