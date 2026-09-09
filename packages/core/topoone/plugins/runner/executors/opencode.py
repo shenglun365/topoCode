@@ -34,7 +34,7 @@ class ServeProc:
     """按项目根托管的 opencode serve 进程。"""
 
     def __init__(self, root: str, url: str, port: int):
-        self.root = root
+        self.root = os.path.abspath(root)
         self.url = url
         self.port = port
         self.proc: Optional[subprocess.Popen] = None  # None = 外部已起的 serve
@@ -92,38 +92,51 @@ class OpenCodeServeManager:
                 url = f"http://127.0.0.1:{port}"
                 if await self._healthy(url):
                     continue  # 已被占用（可能是别的项目的 serve）
-                log = open(self._log_path(port), "ab")  # noqa: SIM115
                 try:
-                    proc = subprocess.Popen(
-                        [self._bin, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
-                        cwd=root, stdout=log, stderr=subprocess.STDOUT,
-                        start_new_session=True,
-                    )
+                    return await self._spawn(root, port, url)
                 except Exception as e:  # noqa: BLE001
                     last_err = f"port {port}: {e}"
-                    continue
-                sp = ServeProc(root, url, port)
-                sp.proc = proc
-                for _ in range(30):
-                    if await self._healthy(url):
-                        self._by_root[root] = sp
-                        logger.info("[opencode] serve started pid=%s port=%s root=%s",
-                                    proc.pid, port, root)
-                        return sp
-                    if proc.poll() is not None:
-                        break
-                    await asyncio.sleep(1.0)
-                last_err = f"port {port} 启动失败（见 {self._log_path(port)}）"
-                try:
-                    proc.kill()
-                except Exception:  # noqa: BLE001
-                    pass
             raise RuntimeError(f"opencode serve 启动失败 root={root}: {last_err}")
         if not await self._healthy(url):
             raise RuntimeError(f"opencode serve 不可达 {url} 且未启用自动拉起")
+        # 外部 serve 可能属于别的项目根——复用会串工作区。注册表未命中(或旧条目
+        # 进程已死)时一律不复用未知 serve, 走自动拉起换端口
+        if (sp is None or (sp.proc is not None and sp.proc.poll() is not None)) \
+                and self._auto_start:
+            for off in range(0, 24):
+                port2 = self._base_port + off
+                url2 = f"http://127.0.0.1:{port2}"
+                if await self._healthy(url2):
+                    continue
+                return await self._spawn(root, port2, url2)
+            raise RuntimeError(f"opencode serve 无可用端口 root={root}")
         sp = sp or ServeProc(root, url, port)
         self._by_root[root] = sp
         return sp
+
+    async def _spawn(self, root: str, port: int, url: str) -> ServeProc:
+        log = open(self._log_path(port), "ab")  # noqa: SIM115
+        proc = subprocess.Popen(
+            [self._bin, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
+            cwd=root, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        sp = ServeProc(root, url, port)
+        sp.proc = proc
+        for _ in range(30):
+            if await self._healthy(url):
+                self._by_root[root] = sp
+                logger.info("[opencode] serve started pid=%s port=%s root=%s",
+                            proc.pid, port, root)
+                return sp
+            if proc.poll() is not None:
+                break
+            await asyncio.sleep(1.0)
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+        raise RuntimeError(f"opencode serve 启动失败 port={port} root={root}（见 {self._log_path(port)}）")
 
     def dispose_root(self, root: str) -> None:
         """释放该根的 serve 实例(probe worktree 用完即清，防实例堆积)。"""

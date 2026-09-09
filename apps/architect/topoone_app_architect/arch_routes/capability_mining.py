@@ -570,3 +570,15 @@ async def api_global_import(request: Request):
         _insert(table, row)
         imported.append({"kind": kind, "id": row["id"], "from": gid})
     return ok({"imported": imported, "count": len(imported)})
+
+
+# ── WS8-S5 KB 通用知识层接口位(预留, 构建时接通) ─────────────────────────
+
+async def promote_to_kb(kind: str, global_id: str) -> Dict[str, Any]:
+    """全局桶条目 → KB 通用知识层提升接口位。
+
+    KB 侧当前仅项目关联信息(用户确认), 通用知识层未来构建时在此接通;
+    届时仍需独立审批, _check_main_kb_policy 的主 KB 保护不受影响。
+    """
+    return {"status": "not_implemented",
+            "note": "KB 通用知识层未构建——接口位预留(见 docs/architect-reconstruction/global-promotion-design.md §6)"}
