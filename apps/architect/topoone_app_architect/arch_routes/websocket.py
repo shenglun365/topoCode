@@ -252,13 +252,14 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                                    "requestId": request_id or "", "userMessageId": last_user_msg_id})
         chat_start_sent = True
 
+    tools_used: set = set()  # 本回合实际执行的工具(防编造守卫佐证)
     while tool_round <= _MAX_TOOL_ROUNDS:
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
             loop_fell_back = True
             await _ensure_chat_start()
-            assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
+            assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model, tools_used=tools_used)
             break
         request_id = rid
         await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
@@ -305,7 +306,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
             await _ensure_chat_start()
-            assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
+            assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model, tools_used=tools_used)
             break
 
         # 本轮工具调用解析并在 architect 侧执行
@@ -325,13 +326,15 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                     msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
                 loop_fell_back = True
                 await _ensure_chat_start()
-                assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
+                assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model, tools_used=tools_used)
                 break
             tool_round += 1
             results: List[Dict[str, str]] = []
             for c in calls:
                 name = c.get("tool", "")
                 args = c.get("arguments", {})
+                if name:
+                    tools_used.add(name)
                 logger.info("[req_agent] kb chat tool round=%s call=%s",
                             tool_round, name)
                 results.append(await _run_tool_with_progress(
@@ -353,7 +356,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
     if not loop_fell_back and not assistant_text and not visible:
         await _ensure_chat_start()
-        assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model)
+        assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model, tools_used=tools_used)
 
     # 降级通道(llm.sync / 断流收尾)无逐字流 → 假流式补发；实时转发路径
     # visible 已含全部内容，跳过避免重复。断流后收尾的极端场景 partial
@@ -369,6 +372,33 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # done/落库以「本次回合实际可见文本」为准(含工具轮前的说明文字，
     # 与前端逐字累积的内容严格一致，避免 done 覆盖造成跳变)。
     final_content = visible or assistant_text
+
+    # ── 防编造守卫: 声称的落库/执行动作必须有本回合真实工具调用佐证 ──
+    claim, need = req_agent.fabricated_claim(final_content, tools_used)
+    if claim:
+        logger.warning("[kb-chat] 防编造守卫触发 conv=%s claim=%s need=%s", conv_id, claim, need)
+        msgs.append({"role": "assistant", "content": final_content})
+        msgs.append({"role": "user", "content": (
+            f"[系统守卫] 你上述回复声称「{claim}」，但本回合并未实际调用 {need} "
+            "（或引用了不存在的需求编号）——该表述为编造，不成立。现在二选一补救："
+            f"① 确需产出 → 立即输出 [TOOL_CALL] 调用 {need.split('|')[0]} 完成真实落库；"
+            "② 不应/无法产出 → 如实更正，说明该动作尚未发生。禁止再声称任何未执行的结果。")})
+        corr = await _sync_with_tools(websocket, msgs, root, project, eff_model,
+                                      max_rounds=2, tools_used=tools_used)
+        corr = req_agent.strip_tool_blocks(corr or "")
+        claim2, _ = req_agent.fabricated_claim(corr, tools_used)
+        if corr and not claim2:
+            for i in range(0, len(corr), 24):
+                d = corr[i:i + 24]
+                visible += d
+                await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": d})
+            final_content = visible
+        else:
+            notice = (f"\n\n> ⚠️ 系统守卫：上述回复中「{claim}」的表述未经实际工具调用，不成立。"
+                      "请重试，或改用界面操作（方案生成按钮/任务执行页）。")
+            final_content = visible + notice
+            await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": notice})
+
     if final_content:
         assistant_msg_id = store.next_id("m")
         store.ConversationsStore.append_message({
@@ -381,7 +411,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         await websocket.send_json({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
 
 
-async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds: int = 4) -> str:
+async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds: int = 4,
+                           tools_used: Optional[set] = None) -> str:
     """llm.sync 降级通道：走统一工具调用循环(req_agent.run_tools_loop)，
     避免「LLM 输出 [TOOL_CALL] 后无结果」。返回最终纯文本。
 
@@ -394,6 +425,8 @@ async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds:
     loop = asyncio.get_running_loop()
 
     def on_progress(event: str, detail: dict) -> None:
+        if event == "tool" and detail.get("tool") and tools_used is not None:
+            tools_used.add(detail["tool"])
         payload = {"type": "status", "phase": f"sync_{event}"}
         payload.update(detail or {})
         try:

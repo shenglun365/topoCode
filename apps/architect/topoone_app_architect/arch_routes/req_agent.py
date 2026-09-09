@@ -173,6 +173,43 @@ def _tool_call_regions(text: str) -> List[tuple]:
     return regions
 
 
+# ── 防编造守卫: 声称的落库/执行动作必须有本回合真实工具调用佐证 ──────────
+
+_FABRIC_RULES = [
+    # (完成语正则, 佐证工具集, 描述)。提案类规则遇「提及已存在的 RQ 编号」视为
+    # 历史回顾不触发(真实回顾必然引用既有编号)；自造编号由下方 ID 存在性检查兜住。
+    (re.compile(r"(已生成|已创建|已产出|已形成|已落库|已保存)[^。\n]{0,24}提案|提案已(生成|创建|落库|保存)"),
+     ("req.propose",), "已生成/落库需求提案"),
+    (re.compile(r"已定稿|定稿成功|已转入待执行|已存入待执行|已固化[^。\n]{0,10}待执行"),
+     ("req.finalize",), "定稿入池(转入待执行)"),
+    (re.compile(r"执行任务已创建|已创建[^。\n]{0,12}执行任务|已(开始|进入)执行|已交由 ?coding|已委派给 ?(runner|coding)"),
+     ("coding.task.execute", "execution.assign"), "创建执行任务/开始执行"),
+]
+
+
+def fabricated_claim(text: str, tools_used) -> tuple:
+    """判定文本是否编造了未执行的动作。
+
+    返回 (动作描述, 佐证工具名串) 或 (None, None)。
+    - 动作完成语 + 佐证工具不在本回合调用集合 → 编造(提案类带既有 RQ 编号=回顾, 放行)
+    - 引用的 RQ- 编号在需求库不存在 → 编造(自造编号, 如 RQ-WS-REDIS-001)
+    """
+    if not text:
+        return None, None
+    used = tools_used or set()
+    mentioned = set(re.findall(r"\bRQ-[A-Za-z0-9][A-Za-z0-9_-]*", text))
+    existing = {rid for rid in mentioned if store.RequirementsStore.get(rid)}
+    for rx, tools, label in _FABRIC_RULES:
+        if not rx.search(text) or any(t in used for t in tools):
+            continue
+        if "提案" in label and (mentioned & existing):
+            continue  # 引用既有提案编号 → 历史回顾而非本轮产出声称
+        return label, "|".join(tools)
+    for rid in mentioned - existing:
+        return f"引用不存在的需求编号 {rid}", "req.propose"
+    return None, None
+
+
 def extract_tool_calls(text: str) -> List[Dict[str, Any]]:
     """从模型输出中解析工具调用块(闭合/未闭合均支持)。返回 [{tool, arguments}]；异常/缺失字段自动跳过。"""
     calls: List[Dict[str, Any]] = []
@@ -1111,9 +1148,18 @@ def tool_req_finalize(title: str = "", description: str = "",
         "status": "analyzed",
         "location": "pool",
     })
+    exec_conv_id = ""
+    try:
+        from .requirements import spawn_execution_session
+        conv = spawn_execution_session(store.RequirementsStore.get(req_id))
+        exec_conv_id = (conv or {}).get("id") or ""
+    except Exception:
+        pass
     return {
         "ok": True, "reqId": req_id, "status": "analyzed", "location": "pool",
-        "lifecycle": "ready", "summary": "已定稿，需求转入待执行(可指派 subagent 执行)。",
+        "lifecycle": "ready", "execConvId": exec_conv_id,
+        "summary": (f"已定稿，需求转入待执行；已生成独立待执行会话 {exec_conv_id}。"
+                    if exec_conv_id else "已定稿，需求转入待执行(可指派 subagent 执行)。"),
     }
 
 

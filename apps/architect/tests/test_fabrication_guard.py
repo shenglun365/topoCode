@@ -1,0 +1,69 @@
+"""防编造守卫 + 待执行会话生成。"""
+from topoone_app_architect.arch_routes.req_agent import fabricated_claim
+from topoone_app_architect.arch_routes import store
+
+
+def test_claim_propose_no_tool():
+    claim, need = fabricated_claim("已生成结构化需求提案 RQ-WS-REDIS-001", set())
+    assert claim and "req.propose" in need
+
+
+def _ensure_req(rid: str, title: str = "守卫测试") -> None:
+    if not store.RequirementsStore.get(rid):
+        store.RequirementsStore.create({
+            "id": rid, "kind": "user-story", "tier": "raw", "location": "proposal",
+            "title": title, "priority": "P1", "status": "raw",
+            "desc": "", "acceptance": [], "traceTo": [],
+        })
+
+
+def test_claim_propose_with_tool_ok():
+    _ensure_req("RQ-GUARD-OK")
+    claim, _ = fabricated_claim("已生成需求提案 RQ-GUARD-OK", {"req.propose"})
+    assert claim is None
+
+
+def test_invented_id():
+    # 提及不存在的编号 → 编造(自造编号兜底)
+    claim, need = fabricated_claim("提案 RQ-TOTALLY-FAKE-99 已确认", {"req.finalize"})
+    assert claim and "RQ-TOTALLY-FAKE-99" in claim and "req.propose" in need
+
+
+def test_recap_existing_id_ok():
+    # 引用既有编号的历史回顾 → 放行
+    _ensure_req("RQ-GUARD-RECAP")
+    claim, _ = fabricated_claim("你之前的提案已创建（RQ-GUARD-RECAP），等待确认。", set())
+    assert claim is None
+
+
+def test_claim_finalize():
+    claim, need = fabricated_claim("方案已定稿，转入待执行。", set())
+    assert claim and "req.finalize" in need
+    claim, _ = fabricated_claim("方案已定稿，转入待执行。", {"req.finalize"})
+    assert claim is None
+
+
+def test_claim_execute():
+    claim, need = fabricated_claim("执行任务已创建，已交由 coding agent。", set())
+    assert claim and ("coding.task.execute" in need or "execution.assign" in need)
+
+
+def test_plain_answer_ok():
+    assert fabricated_claim("nginx-http-core 组件的名称如上所述。", set()) == (None, None)
+
+
+def test_spawn_execution_session_idempotent():
+    req = {
+        "id": "RQ-GUARD-1", "title": "守卫测试需求",
+        "analysis": {"implementationPath": "p", "forbiddenScope": ["core/"],
+                     "acceptance": ["构建通过"]},
+        "sourceConversationId": "",
+    }
+    c1 = store.ConversationsStore.create  # noqa: F841  (确保 store 可用)
+    from topoone_app_architect.arch_routes.requirements import spawn_execution_session
+    a = spawn_execution_session(req)
+    b = spawn_execution_session(req)
+    assert a and b and a["id"] == b["id"]
+    assert a["kind"] == "execution" and a["status"] == "pending"
+    msgs = store.ConversationsStore.messages(a["id"])
+    assert msgs and "守卫测试需求" in msgs[0]["content"]

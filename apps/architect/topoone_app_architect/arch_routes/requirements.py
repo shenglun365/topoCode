@@ -1,5 +1,6 @@
 """Requirements CRUD + status machine routes (sqlite-backed)."""
 import re
+from typing import Optional
 from fastapi import APIRouter, Request
 from .common import _ts, ok, err
 from .knowledge import KB_NOTE
@@ -201,6 +202,45 @@ async def cancel_requirement(req_id: str):
     return ok(row)
 
 
+def spawn_execution_session(req: dict) -> Optional[dict]:
+    """确认定稿 → 生成独立「待执行」会话(kind=execution, status=pending, 绑定需求)。
+
+    幂等：同需求已存在待执行会话则直接返回既有。设计者确认(按钮 REST 或会话内
+    req.finalize)后，会话中心出现独立条目，等待任务执行页对接 coding agent。
+    """
+    if not req or not req.get("id"):
+        return None
+    rid = req["id"]
+    for c in store.ConversationsStore.by_req(rid, limit=50):
+        if (c.get("kind") or "") == "execution":
+            return c
+    origin_id = req.get("sourceConversationId") or ""
+    origin = store.ConversationsStore.get(origin_id) if origin_id else None
+    a = req.get("analysis") or {}
+    lines = [f"方案 **{(req.get('title') or rid)}**（{rid}）已确认定稿，进入待执行队列。"]
+    if a.get("implementationPath"):
+        lines.append(f"\n**实现路径**：{str(a['implementationPath'])[:300]}")
+    forbid = a.get("forbiddenScope") or []
+    if forbid:
+        lines.append("\n**禁止改动（一定不能动）**：\n" + "\n".join(f"- {x}" for x in forbid[:8]))
+    acc = a.get("acceptance") or []
+    if acc:
+        lines.append("\n**验收标准**：\n" + "\n".join(f"- {x}" for x in acc[:8]))
+    lines.append("\n**下一步**：任务执行页「新建任务」勾选该需求 → 选择执行器(cline/codex/opencode) "
+                 "→ 创建执行任务对接 coding agent。")
+    conv = store.ConversationsStore.create({
+        "kind": "execution", "projectId": (origin or {}).get("projectId") or "",
+        "reqId": rid, "title": f"待执行｜{(req.get('title') or rid)[:36]}",
+        "status": "pending",
+        "meta": {"sourceConversationId": origin_id} if origin_id else {},
+    })
+    store.ConversationsStore.append_message({
+        "id": store.next_id("m"), "conversationId": conv["id"], "role": "assistant",
+        "time": _ts(), "content": "\n".join(lines),
+    })
+    return conv
+
+
 @router.post("/requirements/{req_id}/finalize")
 async def finalize_requirement(req_id: str, request: Request):
     body = await request.json()
@@ -210,7 +250,12 @@ async def finalize_requirement(req_id: str, request: Request):
     })
     if not row:
         return err(404, "Not found")
-    return ok(row)
+    exec_conv = None
+    try:
+        exec_conv = spawn_execution_session(row)
+    except Exception:
+        pass
+    return ok({**row, "execConvId": (exec_conv or {}).get("id")})
 
 
 @router.post("/requirements/{req_id}/direct")
