@@ -319,6 +319,12 @@ def _analysis_text(reqs) -> str:
             bits.append("功能范围: " + ", ".join(map(str, a["functionalScope"])))
         if a.get("implementationPath"):
             bits.append("实现路径: " + str(a["implementationPath"]))
+        if a.get("allowedScope"):
+            bits.append("允许增删改范围: " + "; ".join(map(str, a["allowedScope"][:20])))
+        if a.get("forbiddenScope"):
+            bits.append("禁止改动(一定不能动): " + "; ".join(map(str, a["forbiddenScope"][:20])))
+        if a.get("acceptance"):
+            bits.append("最终验收标准: " + "; ".join(map(str, a["acceptance"][:20])))
         if bits:
             parts.append(f"[{r.get('title', '')}]\n" + "\n".join(bits))
     return "\n\n".join(parts) or "（无分析结论）"
@@ -461,6 +467,16 @@ def make_se_context(reqs, root: str, project: Optional[str],
         "project": project or "",
         "root": root or "",
     }
+    # 改动边界与验收(方案框架): list 值随 coding prompt L1 简报下发
+    allowed = [str(x) for r in (reqs or []) for x in ((r.get("analysis") or {}).get("allowedScope") or [])]
+    forbidden = [str(x) for r in (reqs or []) for x in ((r.get("analysis") or {}).get("forbiddenScope") or [])]
+    acceptance = [str(x) for r in (reqs or []) for x in ((r.get("analysis") or {}).get("acceptance") or [])]
+    if allowed:
+        ctx["allowedScope"] = allowed[:40]
+    if forbidden:
+        ctx["forbiddenScope"] = forbidden[:40]
+    if acceptance:
+        ctx["acceptance"] = acceptance[:40]
     if task:
         if task.get("taskBranch"):
             ctx["branch"] = task["taskBranch"]

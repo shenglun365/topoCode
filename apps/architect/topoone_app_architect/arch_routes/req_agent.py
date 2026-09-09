@@ -956,15 +956,37 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
 @register_architect_tool(
     "req.propose",
     "形成需求提案：在资产地图对话中，当讨论收敛为明确的改进/新增需求时调用，"
-    "把 需求+方案+评估 三段结构化产出为提案（进入需求方案的规划组，等待用户确认后续流程）。"
+    "把 需求+方案+评估 结构化产出为提案（进入需求方案的规划组，等待用户确认后续流程）。"
     "触发词：用户要求 生成方案/方案生成/提炼方案/提炼待执行方案/提取任务上下文/转入执行 时调用本工具；"
     "「方案生成」按钮预填的指令也是本工具。"
-    "参数：title(一句话需求)、requirementMd(需求描述：背景/目标/范围)、designMd(方案要点：技术路径/涉及组件与文件，"
-    "可引用对话中讨论的资产)、assessmentMd(评估：收益/风险/工作量估计 estMin 分钟)、priority(P0/P1/P2)。",
+    "内容框架(必须涵盖)：①需求目标(requirementMd)；②允许增删改的模块/文件/数据资产节点范围(allowedScopeMd)；"
+    "③一定不能动的模块/文件/数据资产节点(forbiddenScopeMd，讨论中未提及也要显式给出默认保守边界)；"
+    "④最终验收标准(acceptanceMd；复杂需求的中间自测单测由 coding agent 按模型能力自行处理，不列入提案任务)；"
+    "⑤方案要点(designMd)；⑥评估(assessmentMd)。"
+    "参数：title(一句话需求)、requirementMd(需求目标：背景/目标/预期效果)、"
+    "allowedScopeMd(允许增删改的范围，每行一项：模块/文件路径/数据资产节点)、"
+    "forbiddenScopeMd(一定不能动的范围，每行一项)、"
+    "acceptanceMd(最终验收标准，每行一条可判定)、"
+    "designMd(方案要点：技术路径/涉及组件与文件，可引用对话中讨论的资产)、"
+    "assessmentMd(评估：收益/风险/工作量估计 estMin 分钟)、priority(P0/P1/P2)。",
 )
+def _md_lines(text: str) -> List[str]:
+    """Markdown 行 → 数组(剥列表符/序号，去空行)。"""
+    import re as _re
+    out = []
+    for ln in (text or "").splitlines():
+        t = _re.sub(r"^\s*(?:[-*+]|\d+[.)])\s*", "", ln).strip()
+        if t:
+            out.append(t)
+    return out
+
+
 def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "",
                      assessmentMd: str = "", priority: str = "P1",
-                     estMin: int = 0, root: Optional[str] = None,
+                     estMin: int = 0,
+                     allowedScopeMd: str = "", forbiddenScopeMd: str = "",
+                     acceptanceMd: str = "",
+                     root: Optional[str] = None,
                      project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx, store as _store
     title = (title or "").strip()
@@ -989,9 +1011,15 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
         req["sourceConversationId"] = conv_id
     sections = []
     if requirementMd:
-        sections.append(f"## 需求\n\n{requirementMd}")
+        sections.append(f"## 需求目标\n\n{requirementMd}")
+    if allowedScopeMd:
+        sections.append(f"## 允许增删改范围\n\n{allowedScopeMd}")
+    if forbiddenScopeMd:
+        sections.append(f"## 禁止改动(一定不能动)\n\n{forbiddenScopeMd}")
     if designMd:
         sections.append(f"## 方案\n\n{designMd}")
+    if acceptanceMd:
+        sections.append(f"## 最终验收标准\n\n{acceptanceMd}")
     if assessmentMd:
         sections.append(f"## 评估\n\n{assessmentMd}")
     req["desc"] = "\n\n".join(sections) if sections else (requirementMd or title)
@@ -1002,6 +1030,10 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
         "implementationPath": (designMd or "")[:500],
         "changes": [], "steps": [],
         "designMd": designMd or "",
+        # 方案框架: 改动边界与验收(→ SE 任务树/coding prompt L1 简报)
+        "allowedScope": _md_lines(allowedScopeMd)[:40],
+        "forbiddenScope": _md_lines(forbiddenScopeMd)[:40],
+        "acceptance": _md_lines(acceptanceMd)[:40],
     }
     _store.RequirementsStore.create(req)
     return {"ok": True, "requirementId": req["id"], "title": title,
@@ -1015,7 +1047,9 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     "确认语义：会话中已生成提案后，用户表示 确认存入/同意/存入待执行/确认方案/可以执行 等确认意图时调用本工具。"
     "参数 reqId 可选——多提案会话中用户指明确认某一条时传入对应 RQ 编号(缺省取会话绑定需求)。"
     "参数：title、description、functionalScope[str]、entityBoundary[str]、"
-    "assetScope[{assetId,assetType,role,source}]、estMin(int 分钟)、implementationPath(str)、assessmentSummary(str)。",
+    "assetScope[{assetId,assetType,role,source}]、estMin(int 分钟)、implementationPath(str)、assessmentSummary(str)、"
+    "allowedScope[str](允许增删改的模块/文件/数据资产节点)、forbiddenScope[str](一定不能动的)、"
+    "acceptance[str](最终验收标准)。",
 )
 def tool_req_finalize(title: str = "", description: str = "",
                       functionalScope: Optional[List[str]] = None,
@@ -1024,6 +1058,9 @@ def tool_req_finalize(title: str = "", description: str = "",
                       estMin: Optional[int] = None,
                       implementationPath: str = "",
                       assessmentSummary: str = "",
+                      allowedScope: Optional[List[str]] = None,
+                      forbiddenScope: Optional[List[str]] = None,
+                      acceptance: Optional[List[str]] = None,
                       reqId: str = "",
                       root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx
@@ -1069,6 +1106,9 @@ def tool_req_finalize(title: str = "", description: str = "",
         "implementationPath": implementationPath or "",
         "changes": [],
         "steps": [],
+        "allowedScope": allowedScope or [],
+        "forbiddenScope": forbiddenScope or [],
+        "acceptance": acceptance or [],
     }
     store.RequirementsStore.update(req_id, {
         "title": (title or "").strip() or row.get("title") or req_id,

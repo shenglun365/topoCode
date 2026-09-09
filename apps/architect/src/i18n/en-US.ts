@@ -254,7 +254,7 @@ export default {
     extractPlan: {
       button: 'Generate Plan',
       hint: 'Fill the plan-generation prompt into the input box; append your focus before sending',
-      prompt: 'Please distill an executable plan from this conversation: converge requirement + design + assessment into a proposal.',
+      prompt: 'Please distill an executable plan from this conversation into a proposal covering: (1) requirement goal; (2) modules/files/data-asset nodes allowed for add/modify/delete; (3) modules/files/data-asset nodes that must NOT be touched; (4) final acceptance criteria (intermediate self-test unit tests are left to the coding agent, not listed as tasks).',
       confirm: 'Confirm',
       confirmHint: 'Finalize into the pending pool; wire to a coding agent on the execute page later',
       confirming: 'Saving…',
