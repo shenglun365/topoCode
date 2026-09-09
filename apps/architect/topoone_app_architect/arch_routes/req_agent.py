@@ -1393,10 +1393,9 @@ _CAPABILITY_DOC = (
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
-    "硬性规则(执行类指令)：凡用户要求『提取/抽取语义资产』或给出组件ID(comm-…)要求提取/刷新/保存时，"
-    "你的第一条回复必须是对应的 asset.semantic.* 工具调用块；工具结果是同步返回的真实执行结果。"
-    "严禁在不调用工具的情况下输出『提取报告/结果摘要/新鲜度检查/产出条数』等编造结论——"
-    "你没有调用工具就没有任何执行结果，如实说明需要调用工具即可。\n"
+    "硬性规则(防编造)：凡是会改数据或有真实执行结果的指令(提取/刷新/保存/定稿/委派执行等)，"
+    "必须实际调用对应工具拿到同步返回的结果，再如实转述；"
+    "严禁不调用工具就输出『已启动/报告/条数/检查结果』等编造结论。\n"
     "各工具的参数：\n"
     '- kb.asset.search: {"text": "检索关键词", "preferred": ["资产ID(可选)"]}\n'
     '- kb.code_mappings: {"asset_ids": ["资产ID"]}\n'
@@ -1410,28 +1409,22 @@ _CAPABILITY_DOC = (
     '- map.rules: {}\n'
     '- map.graph: {"kind": "component|semantic"}\n'
     '- asset.semantic.stats: {}\n'
-    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID(comm-…，先 kb.asset.search 取 id；未命中返回 error+候选清单须如实告知)", "files": [], "symbols": []}, "kinds": ["entity","contract","state","rule","process","decision"]}\n'
+    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key"?, "files"?, "symbols"?}, "kinds"?}(工作流见 extract 技能)\n'
     '- asset.semantic.detail: {"asset_id": "sa-xxx"}\n'
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
     "- asset.semantic.reconcile: {}\n"
     '- asset.semantic.refresh: {"asset_id": "sa-xxx"}\n'
     '- code.read_symbols: {"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行}\n'
-    '- asset.semantic.save: {"assets": [{"name": "…", "kind": "entity|contract|state|rule|process|decision", '
-    '"level"?: "implementation", "desc"?: "…", "detail"?: {…}, '
-    '"astRefs": [{"file": "…", "symbol": "…", "startLine": n, "endLine": n}]}]}\n'
+    '- asset.semantic.save: {"assets": [{"name", "kind", "level"?, "desc"?, "detail"?, "astRefs"[{file,symbol,startLine,endLine}]}]}\n'
     '- asset.semantic.update: {"assetId": "sa-xxx", "patch": {"name"?: "新名", "desc"?: "新描述"}}\n'
     '- asset.semantic.merge: {"intoId": "sa-xxx", "targetIds": ["sa-yyy"], "targetName"?: "合并后名称"}\n'
     '- asset.semantic.split: {"assetId": "sa-xxx", "parts": [{"name": "…", "anchorKeys": ["file:symbol"], "desc"?: "…"}]}\n'
     '- convention.propose: {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}\n'
-    '- contract.propose: {"items": [{"kind": "…", "level"?: "implementation", "target": {"file"?: "…", "symbol"?: "…"}, '
-    '"behavior"?: {"steps": [{"order": 1, "semantic": "…"}], "branches": [{"condition": "…", "semantic": "…"}]}, '
-    '"zAxis"?: [{"category": "…", "text": "…"}], "acceptance"?: {"mode"?: "auto", "criteria"?: "…"}, '
-    '"origin": {"quote": "设计者原话(必填)"}, "reqId"?: "…"}]}\n'
+    '- contract.propose: {"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)\n'
     '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
-    '- req.finalize: {"title": "…", "description": "…", "functionalScope": ["…"], '
-    '"entityBoundary": ["…"], "assetScope": [{"assetId":"…","assetType":"component","role":"core",'
-    '"source":"auto"}], "estMin": 90, "implementationPath": "…", "assessmentSummary": "…", '
-    '"reqId"?: "RQ-xxx(多提案时指明确认哪条)"}\n'
+    '- req.finalize: {"title", "description", "functionalScope"[], "entityBoundary"[], '
+    '"assetScope"[{assetId,assetType,role,source}], "estMin", "implementationPath", "assessmentSummary", '
+    '"allowedScope"[], "forbiddenScope"[], "acceptance"[], "reqId"?}(定稿纪律见 plan 技能)\n'
     '- execution.assign: {"target": "runner", "execId": "ex-xxx(缺省取需求已绑定任务)"} '
     '或 {"target": "mcp", "tool": "<mcp工具名>", "params": {…}}\n'
     '- req.finalize 门禁: assetScope 涉及资产若过期(stale/needsUpdate)会被拦截——'

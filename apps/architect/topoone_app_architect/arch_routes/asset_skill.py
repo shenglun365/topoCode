@@ -4,7 +4,7 @@
 当前场景相关片段——builtin 规约(按场景切分) + 项目规约库(arch_naming_conventions
 按 scenarios 标签过滤)。禁止默认全量注入。
 
-场景：extract(对话式提取) / accept(验收比对) / naming(命名治理) / plan(方案生成) / general。
+场景：extract(对话式提取) / accept(验收比对) / naming(命名治理) / plan(方案生成) / coding(coding agent 委派) / capability(评估与提炼) / general。
 注入点：websocket._build_chat_messages → chat_system_prompt(skill_docs=…)。
 """
 import logging
@@ -79,9 +79,45 @@ _BUILTIN_CONTRACT = """## 期望固化规约（contract 场景，🧾 开启时�
 - `acceptance.criteria`：把期望写成可判定的标准（Given/When/Then 或自由文本）；
 - kind/level 必须在当前框架值域内（越域会被拒绝并返回原因）。
 
+### 参数完整示例
+- contract.propose: {"items": [{"kind": "…", "level"?: "implementation", "target": {"file"?: "…", "symbol"?: "…"}, "behavior"?: {"steps": [{"order": 1, "semantic": "…"}], "branches": [{"condition": "…", "semantic": "…"}]}, "zAxis"?: [{"category": "…", "text": "…"}], "acceptance"?: {"mode"?: "auto", "criteria"?: "…"}, "origin": {"quote": "设计者原话(必填)"}, "reqId"?: "…"}]}
+
 ### 边界
 - 你只产**草稿**：确认/打回/通过全由设计者在界面上操作，你不代判；
 - 一次提议 1-3 条为宜，逐条可确认；不要为凑数固化模糊期望。
+"""
+
+
+_BUILTIN_CODING = """## coding agent 委派规约（coding 场景）
+
+### 三条委派通道（按意图选择，不混用）
+- probe.run 方案草图：在代码快照上产出改动思路与伪 diff，供设计者预览确认——
+  「先看看大概怎么改」用这个，只读、不落工作区；
+- coding.task.plan 实现方案（只读）：装配任务上下文(会话结论+需求+规约+资产影响面)交
+  coding agent 隔离分析，产出结构化方案(文件→行区间→意图+置信度)——「给需求拿方案」用；
+- coding.task.execute 正式执行：主工作区+分支协议，「按方案执行/拿结果」用——
+  **前提**：会话已 req.finalize 定稿绑定需求；未定稿先引导定稿，不要绕过。
+
+### 纪律
+- 委派前如实告知设计者将调用哪个通道、哪个 executor，重大动作(正式执行)先征得同意；
+- coding agent 的返回是它的真实产出：如实转述结论与不确定点，不代其许诺、不代判验收；
+- 失败/超时不隐瞒，报告错误原文并给出下一步建议(重试/换 executor/改走任务执行页)；
+- 正式执行的后续判定走 capability.evaluate(execution) 与人工验收，不在对话里口头宣布"完成"。
+"""
+
+
+_BUILTIN_CAPABILITY = """## 能力评估与提炼规约（capability 场景）
+
+### capability.evaluate 图文评估
+- target=plan：评估会话最新方案(变更足迹×语义资产影响面+关系子图)——方案确认前调用，
+  评估结论只作参考意见，通过与否由设计者决定；
+- target=execution：评估执行结果(实际 diff 足迹+与方案偏差集)——执行完成后调用；
+- 如实转述报告中的机械比对事实与 L3 参考意见，不自行加权下结论；报告内资产卡可联动资产地图。
+
+### capability.mine 能力提炼
+- 会话出现可复用模式(命名规约/处理流程/排查技巧/skill 用法)时，可主动提议提炼；
+- 提炼产出进待审队列，设计者采纳后才生效(规约入规约库/skill 文档注入)——
+  你只提议，不代采纳；一次提炼 1-3 条为宜，不为凑数提炼模糊内容。
 """
 
 
@@ -141,6 +177,8 @@ def _builtin_for(scenario: str) -> str:
         "contract": _BUILTIN_CONTRACT,
         "linenote": _BUILTIN_LINENOTE,
         "plan": _BUILTIN_PLAN,
+        "coding": _BUILTIN_CODING,
+        "capability": _BUILTIN_CAPABILITY,
     }.get(scenario, "")
 
 
