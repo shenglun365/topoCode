@@ -83,7 +83,10 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   function applyConversation(conv: { id: string; reqId?: string; kind?: string; title?: string; messages?: { id?: string; role: 'user' | 'assistant'; content: string }[] }) {
     const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
-    turns.value = msgs.map((m) => ({ role: m.role, content: m.content, id: m.id }))
+    // 旧会话可能累积了重复的页面引导消息——相邻同文 assistant 消息折叠为一条
+    turns.value = msgs
+      .map((m) => ({ role: m.role, content: m.content, id: m.id }))
+      .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content))
     activeId.value = conv.id
     if (typeof conv.reqId === 'string') activeReqId.value = conv.reqId
     if (conv.title) activeTitle.value = conv.title

@@ -1679,7 +1679,10 @@ watch(q, () => {
 
 onMounted(async () => {
   await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage(), loadUnownedFiles(), loadUnownedLinks()])
-  turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
+  // 引导消息只在对话为空时种一次(turns 是全局 store, 页面反复挂载不重复种)
+  if (turns.value.length === 0) {
+    turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
+  }
   // 批量提取是后端作业：页面重开(此前关闭)也要接管进度轮询
   void pollUnownedJobOnce().then(() => {
     if (unownedJob.value?.running) startUnownedJobPolling()
