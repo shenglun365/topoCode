@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ChatBubbleOvalLeftEllipsisIcon, MagnifyingGlassIcon, PlusIcon, ArrowPathIcon,
   DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
+  ArrowUpTrayIcon, ArrowDownTrayIcon,
   FolderIcon, ClockIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import TaskDetailView from '@/components/coding/TaskDetailView.vue'
@@ -115,6 +116,7 @@ async function select(c: ConversationMeta) {
     docs.value = d
     units.value = u
   } catch { /* 无文档/单元 */ }
+  if (c.projectId) loadGlobal(c.projectId)
   if (route.query.select !== c.id) {
     router.replace({ query: { ...route.query, select: c.id } })
   }
@@ -223,8 +225,35 @@ async function decideProposal(p: CapabilityProposal, action: 'accept' | 'ignore'
   if (!pid) return
   try {
     await apiPost(`/capabilities/proposals/${p.id}`, { project: pid, action })
-    proposals.value = proposals.value.filter((x) => x.id !== p.id)
+    if (action === 'accept') p.status = 'accepted'  // 保留在列, 出现「提升」入口
+    else proposals.value = proposals.value.filter((x) => x.id !== p.id)
   } catch { /* 失败保持列表 */ }
+}
+
+// ── WS8 主库全局层(消费侧): 概览 + 冷启动导入 ──
+interface GlobalProposal extends CapabilityProposal { originProjectId?: string }
+const globalLayer = ref<{ proposals: GlobalProposal[]; conventions: number; assets: number } | null>(null)
+async function loadGlobal(pid: string) {
+  try {
+    globalLayer.value = await apiGet(`/capabilities/global?project=${pid}`)
+  } catch { globalLayer.value = null }
+}
+async function importGlobal(item: { kind: string; id: string }) {
+  const pid = selected.value?.projectId
+  if (!pid) return
+  try {
+    await apiPost('/capabilities/global/import', { project: pid, items: [item] })
+    if (globalLayer.value) {
+      globalLayer.value.proposals = globalLayer.value.proposals.filter((x) => x.id !== item.id)
+    }
+  } catch { /* 保持 */ }
+}
+function promoteCapability(p: CapabilityProposal) {
+  const pid = selected.value?.projectId
+  if (!pid) return
+  apiPost('/capabilities/promote', { project: pid, kind: 'capability', id: p.id })
+    .then(() => { proposals.value = proposals.value.filter((x) => x.id !== p.id); loadGlobal(pid) })
+    .catch(() => {})
 }
 const viewingDoc = ref<SessionDoc | null>(null)
 async function extractDoc() {
@@ -431,7 +460,42 @@ function statusClass(s: string) {
               <button class="btn btn-sm btn-ghost !px-2 !py-0.5 !text-[10px]" @click="decideProposal(p, 'ignore')">
                 {{ t('session.proposalIgnore') }}
               </button>
+              <button
+                v-if="p.status === 'accepted'"
+                class="btn btn-sm btn-ghost !px-2 !py-0.5 !text-[10px] text-ctp-mauve"
+                :title="t('session.promoteHint')"
+                @click="promoteCapability(p)"
+              >
+                <ArrowUpTrayIcon class="h-3 w-3" />{{ t('session.promote') }}
+              </button>
             </div>
+          </div>
+        </div>
+
+        <div v-if="globalLayer" class="rounded-lg border border-ctp-mauve/30 bg-ctp-mauve/5 p-2.5">
+          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">
+            {{ t('session.globalLayer') }}
+            <span class="ml-1 normal-case text-ctp-subtext0">
+              {{ t('session.globalCounts', { c: globalLayer.conventions, a: globalLayer.assets }) }}
+            </span>
+          </p>
+          <div
+            v-for="p in globalLayer.proposals"
+            :key="p.id"
+            class="mb-1.5 rounded border border-ctp-surface0 bg-ctp-base/60 p-2 last:mb-0"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ p.type }}</span>
+              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ctp-text">{{ p.title }}</span>
+            </div>
+            <p class="mt-1 line-clamp-2 text-[10px] leading-relaxed text-ctp-subtext1">{{ p.content }}</p>
+            <button
+              class="btn btn-sm btn-ghost mt-1.5 !px-2 !py-0.5 !text-[10px]"
+              :title="t('session.importHint')"
+              @click="importGlobal({ kind: 'capability', id: p.id })"
+            >
+              <ArrowDownTrayIcon class="h-3 w-3" />{{ t('session.globalImport') }}
+            </button>
           </div>
         </div>
 

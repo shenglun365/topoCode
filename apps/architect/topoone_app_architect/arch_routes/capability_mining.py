@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Request
 
 from .common import err, ok
+from .store.base import _row_to_api
 
 logger = logging.getLogger(__name__)
 
@@ -266,3 +267,249 @@ async def api_decide(proposal_id: str, request: Request):
     if result.get("error"):
         return err(400, result["error"])
     return ok(result)
+
+
+# ── WS8-S2 认知产出→主库全局桶提升(冲突预检+origin 留痕) ────────────────
+
+def _norm_text(s: str) -> str:
+    """语义指纹归一: 去空白/标点、小写(冲突比对用)。"""
+    import re as _re
+    return _re.sub(r"[\s\W_]+", "", (s or "").lower())
+
+
+def _unique_global_id(table: str, base_id: str) -> str:
+    """全局桶 id 去重(force 并存时 g-<id> 可能已存在)。"""
+    from .store.base import _db
+    gid = f"g-{base_id}"
+    if _db().fetchone(f"SELECT id FROM {table} WHERE id = ?", (gid,)) is None:
+        return gid
+    import time as _t
+    return f"g-{base_id}-{int(_t.time() * 1000) % 10 ** 8}"
+
+
+def _global_rows(table: str, status_cond: str = "") -> List[Dict[str, Any]]:
+    from .store.base import GLOBAL_PID, _db
+    sql = f"SELECT * FROM {table} WHERE project_id = ?"
+    if status_cond:
+        sql += f" AND {status_cond}"
+    return [_row for _row in _db().fetchall(sql, (GLOBAL_PID,))]
+
+
+def promote_to_global(project: str, kind: str, ref_id: str,
+                      decision: str = "") -> Dict[str, Any]:
+    """项目认知产出提升到主库全局桶(WS8 设计稿 §4/§5)。
+
+    kind: asset(语义资产, 剥锚点只留语义) | convention(命名规约) | capability(已采纳提案)。
+    decision: ""(预检, 无冲突即提升) | force(冲突并存, 资产名加后缀) | merge(并入既有全局条目)。
+    冲突三选一: duplicate(重复, 提示跳过) / conflict(同语义, 报告双方) / promoted。
+    """
+    import time as _time
+    from .store import base as _sbase
+    from .store import NamingConventionStore, SemanticAssetsStore, CapabilityProposalStore
+    now = int(_time.time() * 1000)
+    decision = (decision or "").strip().lower()
+
+    if kind == "convention":
+        src = NamingConventionStore.get(ref_id, project)
+        if not src:
+            return {"error": f"规约 {ref_id} 不存在"}
+        norm = _norm_text(src.get("ruleText", ""))
+        for g in _global_rows("arch_naming_conventions", "status = 'active'"):
+            if _norm_text(g["rule_text"] or "") == norm:
+                if decision == "force":
+                    break
+                return {"status": "duplicate",
+                        "markdown": f"全局层已有等价规约（{g['id']}），无需提升"}
+        gid = _unique_global_id("arch_naming_conventions", ref_id)
+        _sbase._insert_global("arch_naming_conventions", {
+            "id": gid, "scope": "global", "ruleText": src.get("ruleText", ""),
+            "appliesKinds": src.get("appliesKinds") or [],
+            "scenarios": src.get("scenarios") or ["general"],
+            "source": "promoted", "author": src.get("author") or "",
+            "originProjectId": project, "status": "active",
+            "createdAt": now, "updatedAt": now})
+        return {"status": "promoted", "globalId": gid,
+                "markdown": f"规约已提升到主库全局桶（{gid}）"}
+
+    if kind == "capability":
+        src = CapabilityProposalStore.get(ref_id, project)
+        if not src:
+            return {"error": f"能力提案 {ref_id} 不存在"}
+        if (src.get("status") or "") != "accepted":
+            return {"error": "仅已采纳(accepted)的提案可提升——先在提案队列采纳"}
+        for g in _global_rows("arch_capability_proposals", "status = 'promoted'"):
+            if (g["title"] or "").strip() == (src.get("title") or "").strip():
+                if decision != "force":
+                    return {"status": "duplicate",
+                            "markdown": f"全局层已有同名能力（{g['id']}），无需提升"}
+                break
+        gid = _unique_global_id("arch_capability_proposals", ref_id)
+        _sbase._insert_global("arch_capability_proposals", {
+            "id": gid, "type": src.get("type", "trick"),
+            "title": src.get("title", ""), "content": src.get("content", ""),
+            "scenarios": src.get("scenarios") or [],
+            "reason": (src.get("reason") or "") + f" [promoted from {project}]",
+            "sourceConversationId": src.get("sourceConversationId") or "",
+            "status": "promoted", "createdAt": now, "updatedAt": now})
+        return {"status": "promoted", "globalId": gid,
+                "markdown": f"能力已提升到主库全局桶（{gid}）"}
+
+    if kind == "asset":
+        src = SemanticAssetsStore.get(ref_id)
+        if not src:
+            return {"error": f"语义资产 {ref_id} 不存在"}
+        norm_name = _norm_text(src.get("name", ""))
+        canon = (src.get("canonicalKey") or "").strip().lower()
+        hit = None
+        for g in _global_rows("arch_semantic_assets", "status = 'active'"):
+            g_canon = (g["canonical_key"] or "").strip().lower() if g["canonical_key"] else ""
+            if (canon and g_canon and canon == g_canon) or \
+               (_norm_text(g["name"] or "") == norm_name):
+                hit = g
+                break
+        if hit is not None and decision not in ("force", "merge"):
+            return {"status": "conflict", "globalId": hit["id"],
+                    "markdown": (f"全局层已有同语义资产 {hit['name']}（{hit['id']}）\n"
+                                 f"- 全局: {hit['id']} {(hit['desc'] or '')[:80]}\n"
+                                 f"- 本项目: {src.get('id')} {(src.get('desc') or '')[:80]}\n"
+                                 "decision=merge(并入全局, 补充描述) / force(并存, 名称加后缀)"),
+                    "conflict": {"global": {"id": hit["id"], "desc": hit["desc"] or ""},
+                                 "local": {"id": src.get("id"), "desc": src.get("desc") or ""}}}
+        gid = _unique_global_id("arch_semantic_assets", ref_id)
+        if hit is not None and decision == "merge":
+            _sbase._update("arch_semantic_assets", hit["id"],
+                           {"desc": hit["desc"] or src.get("desc", ""), "updatedAt": now})
+            return {"status": "merged", "globalId": hit["id"],
+                    "markdown": f"描述已并入全局资产 {hit['id']}"}
+        name = src.get("name", "")
+        if hit is not None and decision == "force":
+            name = f"{name}.{project[-6:]}"
+        meta = src.get("meta") or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        meta["originProjectId"] = project
+        meta["originAssetId"] = src.get("id")
+        meta["promotedAt"] = now
+        _sbase._insert_global("arch_semantic_assets", {
+            "id": gid, "kind": src.get("kind", "entity"),
+            "level": src.get("level", "business"), "name": name,
+            "desc": src.get("desc", ""), "scopeType": src.get("scopeType") or "global",
+            "scopeKey": src.get("scopeKey") or "", "source": "promoted",
+            "originProjectId": project,
+            "status": "active", "meta": meta,
+            "astRefs": [], "anchorHashes": [],   # 剥锚点: 跨项目无意义, 只留语义
+            "canonicalKey": src.get("canonicalKey") or "",
+            "createdAt": now, "updatedAt": now})
+        return {"status": "promoted", "globalId": gid,
+                "markdown": f"语义资产已提升到主库全局桶（{gid}, 锚点已剥离）"}
+
+    return {"error": f"未知提升类型 kind={kind}(asset|convention|capability)"}
+
+
+def register_promote_tools() -> None:
+    """注册 capability.promote 会话 agent 工具(WS8-S2)。"""
+    from .req_agent import register_architect_tool
+
+    @register_architect_tool(
+        "capability.promote",
+        "提升到主库: 把项目内验证成熟的 认知产出(语义资产/命名规约/已采纳能力提案) "
+        "提升到主库全局桶, 供跨项目检索复用。冲突时报告双方差异, 由设计者裁决"
+        "(merge 并入/force 并存)。项目产出经反复验证、具跨项目通用性时用",
+    )
+    def _capability_promote(kind: str, id: str, decision: str = "",
+                            project: Optional[str] = None,
+                            root: Optional[str] = None) -> dict:
+        from .project import _resolve_project
+        try:
+            proj = _resolve_project(root, project)
+        except Exception:
+            proj = None
+        pid = (proj or {}).get("id") or project or ""
+        if not pid:
+            return {"error": "无法解析项目(project)"}
+        result = promote_to_global(pid, (kind or "").strip(), (id or "").strip(),
+                                   decision)
+        if result.get("error"):
+            return result
+        return {"markdown": result.get("markdown", ""), **{
+            k: v for k, v in result.items() if k in ("status", "globalId")}}
+
+
+register_promote_tools()
+
+
+@router.post("/capabilities/promote")
+async def api_promote(request: Request):
+    body = await request.json()
+    project = str(body.get("project") or "")
+    if not project:
+        return err(400, "缺少 project")
+    result = promote_to_global(project, str(body.get("kind") or ""),
+                               str(body.get("id") or ""),
+                               str(body.get("decision") or ""))
+    if result.get("error"):
+        return err(400, result["error"])
+    return ok(result)
+
+
+@router.get("/capabilities/global")
+async def api_global_layer(project: str = ""):
+    """主库全局桶概览(WS8-S3 消费侧): 提案明细 + 规约/资产计数。"""
+    from .store.base import GLOBAL_PID, _db
+    props = []
+    for r in _db().fetchall(
+            "SELECT * FROM arch_capability_proposals WHERE project_id = ? "
+            "AND status = 'promoted' ORDER BY created_at DESC LIMIT 100", (GLOBAL_PID,)):
+        props.append(_srow_to_api(r))
+    counts = {}
+    for t in ("arch_naming_conventions", "arch_semantic_assets"):
+        counts[t] = _db().fetchone(
+            f"SELECT count(*) AS c FROM {t} WHERE project_id = ? AND status = 'active'",
+            (GLOBAL_PID,))["c"]
+    return ok({"proposals": props,
+               "conventions": counts["arch_naming_conventions"],
+               "assets": counts["arch_semantic_assets"]})
+
+
+@router.post("/capabilities/global/import")
+async def api_global_import(request: Request):
+    """冷启动导入(WS8-S4): 全局条目复制为本项目库条目(origin 留痕, 可参与本项目锚定)。"""
+    body = await request.json()
+    project = str(body.get("project") or "")
+    items = body.get("items") or []
+    if not project or not items:
+        return err(400, "缺少 project/items")
+    from .store.base import GLOBAL_PID, _db, _insert, _update, _now_ms
+    imported = []
+    for it in items[:50]:
+        kind, gid = str(it.get("kind") or ""), str(it.get("id") or "")
+        table = {"convention": "arch_naming_conventions",
+                 "asset": "arch_semantic_assets",
+                 "capability": "arch_capability_proposals"}.get(kind)
+        if not table or not gid:
+            continue
+        g = _db().fetchone(f"SELECT * FROM {table} WHERE id = ? AND project_id = ?",
+                           (gid, GLOBAL_PID))
+        if g is None:
+            continue
+        row = _row_to_api(g)
+        now = _now_ms()
+        row["id"] = f"imp-{gid}"
+        row["projectId"] = project
+        row["status"] = "accepted" if kind == "capability" else "active"
+        if kind == "convention":
+            row["source"] = "imported"
+        if kind == "asset":
+            row["source"] = "imported"
+            row["astRefs"] = []
+            row["anchorHashes"] = []
+            row["needsUpdate"] = 0
+        row["originProjectId"] = str(g["origin_project_id"] or "").replace(GLOBAL_PID, "global")
+        row["createdAt"] = now
+        row["updatedAt"] = now
+        _insert(table, row)
+        imported.append({"kind": kind, "id": row["id"], "from": gid})
+    return ok({"imported": imported, "count": len(imported)})

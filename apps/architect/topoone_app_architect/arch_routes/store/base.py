@@ -175,6 +175,9 @@ PROJECT_TABLES = frozenset({
     "arch_acceptance_reports", "arch_acceptance_facts", "arch_acceptance_opinions",
 })
 
+# WS8 认知层→主库提升: 主库全局桶哨兵 project_id(设计稿 global-promotion-design.md)
+GLOBAL_PID = "__global__"
+
 
 def _resolve_pid(project_id: Optional[str] = None, data: Optional[dict] = None) -> Optional[str]:
     """项目定位: 显式参数 > 请求上下文(contextvar) > 载荷 projectId > None(主库默认桶)。"""
@@ -244,6 +247,11 @@ def _locate_db(table: str, row_id: str, project_id: Optional[str] = None):
     mode, db = _route_read(table, project_id)
     if mode == "one":
         found = db.fetchone(f"SELECT id FROM {table} WHERE id = ?", (row_id,)) is not None
+        if not found:
+            # 提升的全局桶行落在主库(project_id=__global__)——项目上下文下也要可寻址
+            if _db().fetchone(f"SELECT id FROM {table} WHERE id = ? AND project_id = ?",
+                              (row_id, GLOBAL_PID)):
+                return _db(), True
         return db, found
     if mode == "empty":
         return _target_db(table, project_id), False
@@ -269,7 +277,7 @@ def _fetchall_routed(table: str, sql: str, params: tuple,
 
 # ── 通用 CRUD(项目表自动路由) ──────────────────────────────────
 
-def _insert(table: str, data: dict) -> None:
+def _insert_into(db, table: str, data: dict) -> None:
     cols = []
     params = []
     vals = []
@@ -277,12 +285,23 @@ def _insert(table: str, data: dict) -> None:
         cols.append(_to_snake(k))
         params.append("?")
         vals.append(_dumps(v))
-    db = _target_db(table, data=data)
     db.execute(
         f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(params)})",
         tuple(vals),
     )
     db.commit()
+
+
+def _insert(table: str, data: dict) -> None:
+    _insert_into(_target_db(table, data=data), table, data)
+
+
+def _insert_global(table: str, data: dict) -> dict:
+    """写入主库全局桶(WS8 提升通道专用): project_id 强制 __global__。"""
+    data = dict(data)
+    data["projectId"] = GLOBAL_PID
+    _insert_into(_db(), table, data)
+    return data
 
 
 def _update(table: str, row_id: str, data: dict) -> Optional[dict]:
@@ -334,6 +353,26 @@ def _get(table: str, row_id: str, project_id: Optional[str] = None) -> Optional[
         return None
     row = db.fetchone(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
     return _row_to_api(row) if row else None
+
+
+def _fetchall_plus_global(table: str, project_id: str, where: str = "1=1",
+                          params: tuple = (), order: str = "id",
+                          limit: int = 200) -> list[dict]:
+    """项目库行 + 主库全局桶行合并(项目行在前, WS8 消费侧只读合并)。
+
+    where 由调用方给出(不含 project 过滤); 全局桶行 project_id=__global__。
+    """
+    if table not in PROJECT_TABLES or not project_id:
+        return []
+    base = (f"SELECT * FROM {table} WHERE ({where}) AND project_id = ? "
+            f"ORDER BY {order} LIMIT {int(limit)}")
+    out: list[dict] = []
+    from .. import ctx
+    db = ctx.project_db(project_id, create=False)
+    if db is not None:
+        out.extend(_row_to_api(r) for r in db.fetchall(base, (*params, project_id)))
+    out.extend(_row_to_api(r) for r in _db().fetchall(base, (*params, GLOBAL_PID)))
+    return out
 
 
 def get_by_id(table: str, row_id: str, project_id: Optional[str] = None) -> Optional[dict]:

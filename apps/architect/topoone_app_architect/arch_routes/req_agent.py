@@ -558,14 +558,34 @@ def tool_semantic_stats(root: Optional[str], project: Optional[str]) -> Dict[str
 def tool_semantic_search(root: Optional[str], project: Optional[str],
                          text: str = "", kind: str = "", level: str = "",
                          limit: int = 20, offset: int = 0,
-                         scopes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+                         scopes: Optional[List[str]] = None,
+                         includeGlobal: bool = False) -> List[Dict[str, Any]]:
     from . import semantic_assets as S
     try:
-        return S.search(root, project, text, kind, limit, offset,
+        rows = S.search(root, project, text, kind, limit, offset,
                         scopes=scopes, level=level)
     except Exception as e:
         logger.warning("[req_agent] asset.semantic.search failed: %s", e)
-        return []
+        rows = []
+    # WS8-S4: includeGlobal 时合并主库全局桶(按需开关, R7 禁全量注入)
+    if includeGlobal and text.strip():
+        try:
+            from .store.base import GLOBAL_PID, _db, _row_to_api
+            like = f"%{text.strip()}%"
+            grows = _db().fetchall(
+                "SELECT * FROM arch_semantic_assets WHERE project_id = ? "
+                "AND status = 'active' AND (name LIKE ? OR desc LIKE ?) LIMIT ?",
+                (GLOBAL_PID, like, like, max(3, int(limit) // 4)))
+            have = {r.get("id") for r in rows}
+            for g in grows:
+                d = _row_to_api(g)
+                if d.get("id") in have:
+                    continue
+                d["scopeGlobal"] = True
+                rows.append(d)
+        except Exception as e:
+            logger.debug("[req_agent] global layer merge skipped: %s", e)
+    return rows
 
 
 @register_architect_tool(
@@ -1289,7 +1309,7 @@ _CAPABILITY_DOC = (
     "- map.assets：语义资产表列检索——kind/level 过滤+关键词，Markdown 表格浏览清单\n"
     "- map.rules：项目规约全集(架构+编码+命名规约+词汇表，编码/评估必须遵守)\n"
     "- map.graph：关系图(mermaid)——component 组件依赖图 / semantic 语义关系图\n"
-    "- asset.semantic.search：检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点；支持 kind/level 过滤)\n"
+    "- asset.semantic.search：检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点；支持 kind/level 过滤；includeGlobal=true 时合并主库全局层通用资产)\n"
     "- asset.semantic.stats：语义资产统计(总量/按类别/按粒度/状态)\n"
     "层级概念约定：组件带**图层级**(L0=底层原子社区，L1/L2=逐级聚合，见 map.overview 目录「层级」列)；"
     "语义资产带**抽象粒度** level(business/implementation/logic)。"

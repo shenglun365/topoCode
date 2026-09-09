@@ -115,6 +115,29 @@ def _builtin_for(scenario: str) -> str:
     }.get(scenario, "")
 
 
+def _merge_global_conventions(convs: list, pid: str, scenario: str) -> list:
+    """WS8-S4: 合并主库全局桶规约(场景匹配, 归一文本去重, 全局行缀后)。"""
+    try:
+        from .store.base import GLOBAL_PID, _db, _row_to_api
+        rows = _db().fetchall(
+            "SELECT * FROM arch_naming_conventions WHERE project_id = ? "
+            "AND status = 'active' AND scenarios LIKE ? ORDER BY updated_at DESC LIMIT 50",
+            (GLOBAL_PID, f'%"{scenario}"%'))
+    except Exception:
+        return convs
+    import re as _re
+
+    def _norm(x):
+        return _re.sub(r"[\s\W_]+", "", (x or "").lower())
+    seen = {_norm(c.get("ruleText")) for c in convs}
+    for r in rows:
+        d = _row_to_api(r)
+        if _norm(d.get("ruleText")) in seen:
+            continue
+        convs.append(d)
+    return convs
+
+
 def skill_docs(root: Optional[str], project: Optional[str],
                scenarios: List[str]) -> str:
     """按场景拼接 skill 文档：builtin 规约 + 项目规约库（按场景标签过滤）。
@@ -134,18 +157,22 @@ def skill_docs(root: Optional[str], project: Optional[str],
         pid = project_id_for(root, project)
         if "extract" in scenarios or "naming" in scenarios:
             convs = NamingConventionStore.list(pid, scenario="extract")
+            convs = _merge_global_conventions(convs, pid, "extract")
             if convs:
                 lines = ["### 项目命名规约（设计者固化）"]
                 for c in convs:
-                    lines.append(f"- {c.get('ruleText')}")
+                    tag = "（全局）" if str(c.get("id", "")).startswith("g-") else ""
+                    lines.append(f"- {c.get('ruleText')}{tag}")
                 parts.append("\n".join(lines))
         # A1 经验回写：验收场景注入历史打回归纳出的经验规约（防同类失败复发）
         if "accept" in scenarios:
             convs = NamingConventionStore.list(pid, scenario="accept")
+            convs = _merge_global_conventions(convs, pid, "accept")
             if convs:
                 lines = ["### 验收经验规约（来自历史打回，设计者固化）"]
                 for c in convs:
-                    lines.append(f"- {c.get('ruleText')}")
+                    tag = "（全局）" if str(c.get("id", "")).startswith("g-") else ""
+                    lines.append(f"- {c.get('ruleText')}{tag}")
                 parts.append("\n".join(lines))
         # WS7 能力闭环: 已采纳提案(流程/技巧/skill)按场景标签注入(静态注册→可增长)
         try:

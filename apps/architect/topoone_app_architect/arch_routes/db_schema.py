@@ -485,6 +485,7 @@ CREATE TABLE IF NOT EXISTS arch_capability_proposals (
     reason TEXT,
     source_conversation_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | ignored
+    origin_project_id TEXT DEFAULT '',  -- WS8: 全局桶行来源项目
     created_at INTEGER DEFAULT 0,
     updated_at INTEGER DEFAULT 0
 );
@@ -639,6 +640,14 @@ def _project_migrations(db) -> None:
         ("voided_by", "TEXT DEFAULT ''"),
         ("voided_framework_version", "INTEGER DEFAULT 0"),
         ("stale_by_framework", "INTEGER DEFAULT 0"),
+        # WS8 提升通道: 全局桶行记录来源项目
+        ("origin_project_id", "TEXT DEFAULT ''"),
+    ])
+    _add_cols(db, "arch_naming_conventions", [
+        ("origin_project_id", "TEXT DEFAULT ''"),
+    ])
+    _add_cols(db, "arch_capability_proposals", [
+        ("origin_project_id", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_requirements", [
         ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),
