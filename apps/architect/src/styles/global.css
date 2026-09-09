@@ -171,6 +171,7 @@
     --tw-prose-quotes: rgb(var(--ctp-subtext0));
     --tw-prose-code: rgb(var(--ctp-pink));
     --tw-prose-pre-bg: rgb(var(--ctp-crust));
+    --tw-prose-pre-code: rgb(var(--ctp-text));
     --tw-prose-bullets: rgb(var(--ctp-overlay0));
     --tw-prose-hr: rgb(var(--ctp-surface1));
     --tw-prose-th-borders: rgb(var(--ctp-surface1));
@@ -178,6 +179,7 @@
   }
   .md-body pre {
     @apply bg-ctp-crust border border-ctp-surface0;
+    color: rgb(var(--ctp-text)); /* prose-invert 固定白字——显式跟随主题(亮色底配深字) */
   }
   .md-body code:not(pre code) {
     @apply bg-ctp-surface0 px-1 py-0.5 rounded text-[0.85em];
