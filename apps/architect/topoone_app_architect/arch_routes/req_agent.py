@@ -955,17 +955,13 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
 
 @register_architect_tool(
     "req.propose",
-    "形成需求提案：在资产地图对话中，当讨论收敛为明确的改进/新增需求时调用，"
-    "把 需求+方案+评估 结构化产出为提案（进入需求方案的规划组，等待用户确认后续流程）。"
-    "触发词：用户要求 生成方案/方案生成/提炼方案/提炼待执行方案/提取任务上下文/转入执行 时调用本工具；"
-    "「方案生成」按钮预填的指令也是本工具。"
-    "完整方案以 designMd 为核心：必须包含必要的逻辑表达与实现细节(技术路径/关键改动点/组件与文件/数据流向/边界条件等，"
-    "按需求复杂度充分展开)，不可只有标题式罗列。"
-    "以下四项是约束框架，按对话实际给出；对话未涉及或用户明确同意为空时留空，不要编造："
-    "①需求目标(requirementMd)；②允许增删改的模块/文件/数据资产节点范围(allowedScopeMd，每行一项)；"
-    "③一定不能动的模块/文件/数据资产节点(forbiddenScopeMd，每行一项)；"
-    "④最终验收标准(acceptanceMd，每行一条可判定；中间自测单测由 coding agent 按模型能力自行处理，不列入提案任务)。"
-    "另有评估 assessmentMd(收益/风险/工作量估计 estMin 分钟)、priority(P0/P1/P2)。",
+    "形成需求提案：讨论收敛为明确改进/新增需求，或设计者要求 生成方案/提炼方案/转入执行 时调用，"
+    "把 需求+方案+评估 结构化落库为提案(进入规划组，等待设计者确认)。"
+    "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节)，"
+    "约束四项(目标/允许范围/禁止改动/验收标准)可按对话留空，不编造。"
+    "参数：title、requirementMd(需求目标)、designMd(方案：逻辑与实现细节)、"
+    "allowedScopeMd/forbiddenScopeMd(允许增删改/一定不能动的模块·文件·资产节点，每行一项，可空)、"
+    "acceptanceMd(最终验收标准，每行一条，可空)、assessmentMd(评估)、estMin(分钟)、priority(P0/P1/P2)。",
 )
 def _md_lines(text: str) -> List[str]:
     """Markdown 行 → 数组(剥列表符/序号，去空行)。"""

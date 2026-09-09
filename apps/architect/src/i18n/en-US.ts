@@ -254,7 +254,7 @@ export default {
     extractPlan: {
       button: 'Generate Plan',
       hint: 'Fill the plan-generation prompt into the input box; append your focus before sending',
-      prompt: 'Please distill an executable plan from this conversation into a proposal. The design must contain complete logic and implementation details (technical path, key changes, components & files, data flow, edge cases — expanded as complexity demands); supplement it with the constraint frame: requirement goal; modules/files/data-asset nodes allowed for add/modify/delete; nodes that must NOT be touched; final acceptance criteria (intermediate self-tests are left to the coding agent). Constraint items may be left empty if not discussed or if I agree — do not invent them.',
+      prompt: 'Please distill an executable plan from this conversation into a proposal.',
       confirm: 'Confirm',
       confirmHint: 'Finalize into the pending pool; wire to a coding agent on the execute page later',
       confirming: 'Saving…',

@@ -4,7 +4,7 @@
 当前场景相关片段——builtin 规约(按场景切分) + 项目规约库(arch_naming_conventions
 按 scenarios 标签过滤)。禁止默认全量注入。
 
-场景：extract(对话式提取) / accept(验收比对) / naming(命名治理) / general。
+场景：extract(对话式提取) / accept(验收比对) / naming(命名治理) / plan(方案生成) / general。
 注入点：websocket._build_chat_messages → chat_system_prompt(skill_docs=…)。
 """
 import logging
@@ -85,6 +85,34 @@ _BUILTIN_CONTRACT = """## 期望固化规约（contract 场景，🧾 开启时�
 """
 
 
+_BUILTIN_PLAN = """## 方案生成规约（plan 场景）
+
+### 何时产出方案
+- 触发：设计者要求 生成方案/方案生成/提炼方案/提炼待执行方案/转入执行，
+  或使用「方案生成」按钮预填的指令；讨论自然收敛出明确改进/新增需求时，
+  也可先简述方案骨架征得同意后再产出。
+
+### 提案产出（req.propose）
+- 完整方案以 designMd 为核心：必要的逻辑表达与实现细节——技术路径、关键改动点、
+  涉及组件与文件、数据流向、边界条件，按需求复杂度充分展开；禁止标题式罗列；
+- 约束框架四项按对话实际给出，未讨论或设计者明确同意为空时留空，不编造：
+  ① requirementMd 需求目标；
+  ② allowedScopeMd 允许增删改的模块/文件/数据资产节点（每行一项）；
+  ③ forbiddenScopeMd 一定不能动的模块/文件/数据资产节点（每行一项）；
+  ④ acceptanceMd 最终验收标准（每行一条可判定）——中间自测单测由 coding agent
+  按模型能力自行处理，不列入提案任务；
+- assessmentMd 给收益/风险/estMin(分钟)；priority 按影响面定 P0/P1/P2；
+- 范围与细节优先引用对话中讨论到的真实资产/文件
+  （不确定时先 asset.semantic.search / code.read_symbols 取证，再落笔）。
+
+### 确认与入库（边界）
+- 提案落库进入规划组，方案卡带「确认存入」按钮；设计者表示 确认存入/同意/存入待执行
+  等确认意图 → 调 req.finalize 定稿入池（会话多提案时用 reqId 指明确认哪条）；
+- 定稿后需求转「待执行」，由设计者在任务执行页对接 coding agent；
+  你不代为定稿、不代建执行任务、不替设计者做通过判定。
+"""
+
+
 _BUILTIN_LINENOTE = """## 代码逐行解读规约（linenote 场景）
 
 ### 目标
@@ -112,6 +140,7 @@ def _builtin_for(scenario: str) -> str:
         "naming": _BUILTIN_NAMING,
         "contract": _BUILTIN_CONTRACT,
         "linenote": _BUILTIN_LINENOTE,
+        "plan": _BUILTIN_PLAN,
     }.get(scenario, "")
 
 
