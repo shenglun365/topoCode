@@ -959,6 +959,8 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
     "把 需求+方案+评估 结构化落库为提案(进入规划组，等待设计者确认)。"
     "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节)，"
     "约束四项(目标/允许范围/禁止改动/验收标准)可按对话留空，不编造。"
+    "必须实际调用本工具落库(结果含 requirementId)才算产出提案；不要在回复里手写提案 JSON。"
+    "需求提案不用 contract.propose 替代(那是 🧾 期望固化)。"
     "参数：title、requirementMd(需求目标)、designMd(方案：逻辑与实现细节)、"
     "allowedScopeMd/forbiddenScopeMd(允许增删改/一定不能动的模块·文件·资产节点，每行一项，可空)、"
     "acceptanceMd(最终验收标准，每行一条，可空)、assessmentMd(评估)、estMin(分钟)、priority(P0/P1/P2)。",

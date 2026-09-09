@@ -106,6 +106,41 @@ export const useConversationStore = defineStore('archConversation', () => {
       const detail = await sessionService.messages(meta.id)
       applyConversation({ ...detail, reqId: meta.reqId })
     } catch { /* 无历史 → 空对话 */ }
+    void rehydrateProposals(meta.id)
+  }
+
+  /**
+   * 历史会话还原方案卡：req.propose 产物不在落库消息里(工具块落库前已剥离，
+   * 卡片原是纯前端实时挂载)——按需求的 sourceConversationId 拉回并挂到对应
+   * 助手回合；确认态随需求状态(已定稿入池 → 显示「已存入待执行」)。
+   */
+  async function rehydrateProposals(convId: string) {
+    try {
+      const { apiGet } = await import('@/services/api-client')
+      const rows = await apiGet<any[]>('/requirements')
+      const mine = (rows || []).filter((r: any) =>
+        r.sourceConversationId === convId && r.status !== 'cancelled')
+      if (!mine.length || activeId.value !== convId) return
+      for (const r of mine) {
+        const proposal = {
+          id: r.id, title: r.title, desc: r.desc || '', priority: r.priority || 'P1',
+          analysis: r.analysis || {},
+          confirmed: (r.location ?? 'proposal') === 'pool' && r.status === 'analyzed',
+        }
+        // 挂到内容中提到该 RQ 编号的最后一条助手消息; 没提到则兜底最后一条空位助手消息
+        let target = -1
+        for (let i = turns.value.length - 1; i >= 0; i--) {
+          const t = turns.value[i]
+          if (t.role === 'assistant' && (t.content || '').includes(r.id)) { target = i; break }
+        }
+        if (target < 0) {
+          for (let i = turns.value.length - 1; i >= 0; i--) {
+            if (turns.value[i].role === 'assistant' && !turns.value[i].proposal) { target = i; break }
+          }
+        }
+        if (target >= 0) turns.value[target].proposal = proposal
+      }
+    } catch { /* 还原失败不影响历史展示 */ }
   }
 
   /** 新会话(无类别——仅标题/摘要；阶段由消息级工具推导)。 */
