@@ -397,6 +397,27 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 围栏代落库失败: %s", e)
 
+    # ── 意图未执行守卫: 宣布要调工具却零 [TOOL_CALL] 收尾 → 追问一轮 ──
+    if not tools_used:
+        intent = req_agent.announced_tool_intent(final_content)
+        if intent:
+            logger.warning("[kb-chat] 意图未执行守卫触发 conv=%s intent=%s", conv_id, intent)
+            msgs.append({"role": "assistant", "content": final_content})
+            msgs.append({"role": "user", "content": (
+                "[系统守卫] 你宣布要调用工具，但本回合没有输出任何 [TOOL_CALL] 块就结束了回合"
+                "——不会有任何\"等待\"发生，检索也没有发生。现在立即输出你要执行的第一批工具调用块，"
+                '格式: [TOOL_CALL]{"tool":"工具名","arguments":{…}}[/TOOL_CALL]，'
+                "一次一个；除工具块外不要输出任何说明文字、不要说「请等待」。")})
+            corr = await _sync_with_tools(websocket, msgs, root, project, eff_model,
+                                          max_rounds=3, tools_used=tools_used)
+            corr = req_agent.strip_tool_blocks(corr or "")
+            if corr:
+                for i in range(0, len(corr), 24):
+                    d = corr[i:i + 24]
+                    visible += d
+                    await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": d})
+                final_content = visible
+
     # ── 防编造守卫: 声称的落库/执行动作必须有本回合真实工具调用佐证 ──
     claim, need = req_agent.fabricated_claim(final_content, tools_used)
     if claim:

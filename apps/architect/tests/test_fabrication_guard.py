@@ -77,3 +77,10 @@ def test_extract_proposal_fence():
     assert extract_proposal_fence("无围栏") is None
     assert extract_proposal_fence("```json\n{\"a\":1}\n```") is None  # 非 proposal 围栏不认
     assert extract_proposal_fence("```proposal\n{broken\n```") is None
+
+
+def test_announced_tool_intent():
+    from topoone_app_architect.arch_routes.req_agent import announced_tool_intent
+    assert announced_tool_intent("请等待我完成上述检索...") != ""
+    assert announced_tool_intent("我将立即执行以下检索") != ""
+    assert announced_tool_intent("结论：nginx-http-core 是组件名。") == ""

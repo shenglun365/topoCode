@@ -210,6 +210,30 @@ def fabricated_claim(text: str, tools_used) -> tuple:
     return None, None
 
 
+_INTENT_PATTERNS = [
+    re.compile(r"请等待我完成"),
+    re.compile(r"我将(立即)?(执行|检索|调用|读取)"),
+    re.compile(r"(我|让我)先(检索|查看|读取|调用|确认)"),
+    re.compile(r"即将(调用|执行|检索)"),
+    re.compile(r"正在(调用|执行|检索)以下工具"),
+]
+
+
+def announced_tool_intent(text: str) -> str:
+    """检测『宣布要调工具却没有 [TOOL_CALL] 就结束回合』的空承诺文本。
+
+    命中返回意图短语(供守卫纠正提示引用)，否则 None。供 WS 层在
+    本回合零工具调用时判定是否追问一轮。
+    """
+    if not text:
+        return ""
+    for rx in _INTENT_PATTERNS:
+        m = rx.search(text)
+        if m:
+            return m.group(0)
+    return ""
+
+
 def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
     """提取 ```proposal JSON 围栏(方案生成的确定性落库通道)。
 
