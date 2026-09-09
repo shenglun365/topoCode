@@ -154,7 +154,7 @@ export const useConversationStore = defineStore('archConversation', () => {
   }
 
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子。 */
-  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[] }) {
+  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string }) {
     if (busy.value || !text.trim()) return
     turns.value.push({ role: 'user', content: text })
     const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
@@ -165,6 +165,7 @@ export const useConversationStore = defineStore('archConversation', () => {
       const msgs = turns.value.slice(0, -1).map((m) => ({ role: m.role, content: m.content }))
       await chatStream(msgs, {
         conversationId: activeId.value || undefined,
+        kind: opts?.kind ?? (activeMeta.value as any)?.kind ?? undefined,
         reqId: opts?.reqId ?? (activeReqId.value || undefined),
         title: activeTitle.value || undefined,
         modelId: readModelPref('architect') || undefined,

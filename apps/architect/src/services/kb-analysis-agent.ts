@@ -114,7 +114,7 @@ export interface ChatStreamEvent {
 export interface ChatStreamOptions {
   /** 沿用已有会话(续聊)时传入；缺省后端新建。 */
   conversationId?: string
-  /** 会话归类(requirement/design/...)，阶段D 统一表 kind。 */
+  /** 会话归类(requirement/asset/design/...)，阶段D 统一表 kind——首条消息创建会话时落库。 */
   kind?: string
   /** 关联需求 id。 */
   reqId?: string
@@ -211,6 +211,7 @@ export async function chatStream(
       messages,
       ...currentProjectParams(),
       conversationId: opts.conversationId,
+      kind: opts.kind,
       reqId: opts.reqId,
       title: opts.title,
       modelId: opts.modelId,

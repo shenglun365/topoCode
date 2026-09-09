@@ -20,8 +20,9 @@ import { namingService } from '@/services/naming-service'
 const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
   inline?: boolean
-  /** 新建会话的默认类型(资产地图页传 asset)。 */
-  /** 页面级技能场景(如资产地图=['extract'])：随发送注入, 不再有会话类别。 */
+  /** 新建会话的默认类型(资产地图页传 asset, 会话中心传 requirement)——首条消息创建会话时落库。 */
+  defaultKind?: string
+  /** 页面级技能场景(如资产地图=['extract'])：随发送注入。 */
   skillScenarios?: string[]
 }>(), { inline: false })
 
@@ -279,7 +280,7 @@ async function answerClarify() {
         @rename="onRenameTitle"
         @summarize-title="summarizeTitle"
         :diagram-skill="conv.diagramSkill"
-        @send="(text) => { conv.send(text, props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : undefined); onSent() }"
+        @send="(text) => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}) }); onSent() }"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
         @toggle-diagram-skill="conv.toggleDiagramSkill"
