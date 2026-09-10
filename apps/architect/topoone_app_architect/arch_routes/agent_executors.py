@@ -84,6 +84,20 @@ def save_executors(entries: list[dict]) -> None:
     store.CollabConfigStore.set(CONFIG_KEY, json.dumps(entries, ensure_ascii=False))
 
 
+def _normalize(entries: list[dict]) -> list[dict]:
+    """旧数据兜底: PR2 之前的存量注册项缺 host 字段 → 默认 local。
+
+    不兜底会导致: GET 返回 host=None(前端下拉显示空) 且 PUT 校验
+    e.get("host", "local") 命中已存在的 None 值而误判非法。
+    """
+    for e in entries:
+        if not e.get("host"):
+            e["host"] = "local"
+        if "enabled" not in e:
+            e["enabled"] = True
+    return entries
+
+
 def _validate(entries: list[dict]) -> Optional[str]:
     ids = set()
     defaults = 0
@@ -166,7 +180,7 @@ def refresh_runner() -> bool:
 @router.get("/agent/executors")
 async def list_executors():
     """注册表（脱敏）+ runner 运行态（若可达）。"""
-    entries = load_executors()
+    entries = _normalize(load_executors())
     runtime = _get_runner("/api/executors")
     return ok({
         "executors": _mask(entries),
@@ -188,6 +202,7 @@ async def put_executors(request: Request, background: BackgroundTasks):
     if not isinstance(entries, list):
         return err("executors 必须为列表")
     # 与已存密钥合并（前端提交 ****** 视为不变）
+    _normalize(entries)
     old = {e.get("id"): e for e in load_executors()}
     for e in entries:
         cfg = e.get("config") or {}
