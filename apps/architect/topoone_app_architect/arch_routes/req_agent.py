@@ -212,7 +212,7 @@ def fabricated_claim(text: str, tools_used) -> tuple:
 
 _INTENT_PATTERNS = [
     re.compile(r"请等待我完成"),
-    re.compile(r"我将(立即)?(执行|检索|调用|读取)"),
+    re.compile(r"我将(立即)?(执行|检索|调用|读取|开始|编写|创建)"),
     re.compile(r"(我|让我)先(检索|查看|读取|调用|确认)"),
     re.compile(r"即将(调用|执行|检索)"),
     re.compile(r"正在(调用|执行|检索)以下工具"),

@@ -106,3 +106,13 @@ def test_md_lines_tolerates_list():
     row = store.RequirementsStore.get(r["requirementId"])
     assert row["analysis"]["allowedScope"] == ["src/a", "src/b"]
     store.RequirementsStore.update(r["requirementId"], {"status": "cancelled"})
+
+
+def test_intent_patterns_cover_start_and_tool_announce():
+    """PR 守卫补强: 「我将立即开始/我将调用工具 X」类宣布必须命中。"""
+    from topoone_app_architect.arch_routes.req_agent import announced_tool_intent
+    assert announced_tool_intent("我将立即开始代码编写与文件创建工作") != ""
+    assert announced_tool_intent("我将调用工具 `req.finalize` 完成归档") != ""
+    assert announced_tool_intent("我将开始创建模块目录结构") != ""
+    # 纯结论性文本不命中
+    assert announced_tool_intent("已完成模块创建, 构建通过。") == ""

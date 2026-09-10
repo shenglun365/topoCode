@@ -321,6 +321,19 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         chat_start_sent = True
 
     tools_used: set = set()  # 本回合实际执行的工具(防编造守卫佐证)
+    # 安全发送: 客户端断连后吞掉发送异常, 服务端继续消费流/守卫/落库——
+    # 避免回合中断且历史整段丢失(实测断连即丢整回合)
+    client_gone = False
+
+    async def send_ev(payload: dict) -> None:
+        nonlocal client_gone
+        if client_gone:
+            return
+        try:
+            await websocket.send_json(payload)
+        except Exception:  # noqa: BLE001
+            client_gone = True
+
     while tool_round <= _MAX_TOOL_ROUNDS:
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
@@ -330,7 +343,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             assistant_text = await _sync_with_tools(websocket, msgs, root, project, eff_model, tools_used=tools_used)
             break
         request_id = rid
-        await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
+        await send_ev({"type": "chat_start", "conversationId": conv_id,
                                    "requestId": rid, "userMessageId": last_user_msg_id})
         chat_start_sent = True
         round_text = ""
@@ -344,19 +357,19 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 out = live.feed(text)
                 if out:
                     visible += out
-                    await websocket.send_json({"type": "chunk", "requestId": rid, "delta": out})
+                    await send_ev({"type": "chunk", "requestId": rid, "delta": out})
             elif event_type == "reasoning":
                 # 推理内容单独转发(不混入正文)；前端可折叠展示思考过程
                 text = payload.get("text") or ""
                 if text:
-                    await websocket.send_json({"type": "reasoning", "conversationId": conv_id,
+                    await send_ev({"type": "reasoning", "conversationId": conv_id,
                                                "delta": text})
             elif event_type == "done":
                 round_text = payload.get("content") or round_text
                 break
             elif event_type == "error":
                 round_ok = False
-                await websocket.send_json({"type": "error", "requestId": rid,
+                await send_ev({"type": "error", "requestId": rid,
                                            "message": payload.get("message", "")})
                 break
         else:
@@ -369,7 +382,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             rem = live.flush(req_agent.strip_tool_blocks(round_text))
             if rem:
                 visible += rem
-                await websocket.send_json({"type": "chunk", "requestId": rid, "delta": rem})
+                await send_ev({"type": "chunk", "requestId": rid, "delta": rem})
         if not round_ok:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
@@ -412,7 +425,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                 msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
             # 工具结果回喂后的再生成无任何信号会让前端进度条「卡死」观感——显式报相
-            await websocket.send_json({"type": "status", "phase": "llm_round",
+            await send_ev({"type": "status", "phase": "llm_round",
                                        "round": tool_round + 1})
             continue
 
@@ -434,7 +447,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         for i in range(0, len(assistant_text), CHUNK_SIZE):
             d = assistant_text[i:i + CHUNK_SIZE]
             visible += d
-            await websocket.send_json({"type": "chunk", "requestId": request_id,
+            await send_ev({"type": "chunk", "requestId": request_id,
                                        "delta": d})
 
     # done/落库以「本次回合实际可见文本」为准(含工具轮前的说明文字，
@@ -454,23 +467,33 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                       if ok else
                       f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}")
             final_content += notice
-            await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": notice})
+            await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 围栏代落库失败: %s", e)
 
     # ── 意图未执行守卫: 宣布要调工具却收尾悬置 → 追问一轮 ──
-    # 零工具回合: 任意意图短语即追问; 有工具回合: 仅「请等待…」类悬置收尾才追问
+    # 零工具回合: 任意意图短语即追问; 有工具回合: 最终答案段(assistant_text,
+    # 即结束循环的无工具轮)宣布工具而未执行也追问——此前轮次的宣布已被
+    # 真实工具调用兑现, 查全文会误报, 故只查末段
     pending_wait = "请等待" in final_content
-    if not tools_used or pending_wait:
-        intent = "请等待" if pending_wait else req_agent.announced_tool_intent(final_content)
-        if intent:
+    intent = ""
+    if pending_wait:
+        intent = "请等待"
+    elif not tools_used:
+        intent = req_agent.announced_tool_intent(final_content)
+    elif assistant_text:
+        intent = req_agent.announced_tool_intent(assistant_text)
+    if intent:
             logger.warning("[kb-chat] 意图未执行守卫触发 conv=%s intent=%s", conv_id, intent)
             msgs.append({"role": "assistant", "content": final_content})
             msgs.append({"role": "user", "content": (
                 "[系统守卫] 你宣布要调用工具，但本回合没有输出任何 [TOOL_CALL] 块就结束了回合"
-                "——不会有任何\"等待\"发生，检索也没有发生。现在立即输出你要执行的第一批工具调用块，"
+                "——不会有任何\"等待\"发生，动作也没有发生。二选一："
+                "① 立即输出你要执行的第一批工具调用块，"
                 '格式: [TOOL_CALL]{"tool":"工具名","arguments":{…}}[/TOOL_CALL]，'
-                "一次一个；除工具块外不要输出任何说明文字、不要说「请等待」。")})
+                "一次一个；除工具块外不要输出任何说明文字。"
+                "② 若该动作确实不能现在执行（需要用户确认/信息不足），用一句话明确说明缺什么，"
+                "不要宣布将要执行。")})
             corr = await _sync_with_tools(websocket, msgs, root, project, eff_model,
                                           max_rounds=3, tools_used=tools_used)
             corr = req_agent.strip_tool_blocks(corr or "")
@@ -478,7 +501,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 for i in range(0, len(corr), 24):
                     d = corr[i:i + 24]
                     visible += d
-                    await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": d})
+                    await send_ev({"type": "chunk", "requestId": request_id, "delta": d})
                 final_content = visible
 
     # ── 防编造守卫: 声称的落库/执行动作必须有本回合真实工具调用佐证 ──
@@ -499,13 +522,13 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             for i in range(0, len(corr), 24):
                 d = corr[i:i + 24]
                 visible += d
-                await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": d})
+                await send_ev({"type": "chunk", "requestId": request_id, "delta": d})
             final_content = visible
         else:
             notice = (f"\n\n> ⚠️ 系统守卫：上述回复中「{claim}」的表述未经实际工具调用，不成立。"
                       "请重试，或改用界面操作（方案生成按钮/任务执行页）。")
             final_content = visible + notice
-            await websocket.send_json({"type": "chunk", "requestId": request_id, "delta": notice})
+            await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
 
     if final_content:
         assistant_msg_id = store.next_id("m")
@@ -517,14 +540,14 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
         except Exception:  # noqa: BLE001
             pass
-        await websocket.send_json({"type": "done", "conversationId": conv_id,
+        await send_ev({"type": "done", "conversationId": conv_id,
                                    "content": final_content, "messageId": assistant_msg_id})
     else:
         try:
             store.ConversationsStore.update(conv_id, {"reviewState": "error"})
         except Exception:  # noqa: BLE001
             pass
-        await websocket.send_json({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
+        await send_ev({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
 
 
 async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds: int = 4,
@@ -574,6 +597,14 @@ def _check_tool_whitelist(name: str) -> Optional[str]:
     return f"角色工具白名单拒绝: {name} 不在本会话角色允许的工具集内"
 
 
+async def _ws_send(websocket, payload: dict) -> None:
+    """尽力发送: 连接断开时吞异常(工具进度不因断连炸出回合)。"""
+    try:
+        await websocket.send_json(payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _run_tool_with_progress(websocket, request_id: str, name: str, args: dict,
                                   root: str, project: str) -> Dict[str, str]:
     """执行单个 architect 工具，并向前端推送 tool_call/tool_result 进度事件。
@@ -582,10 +613,10 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     这里在工具执行前后各推一条状态，前端据此显示实时进度而非静态等待。
     """
     from . import context_registry, req_agent
-    await websocket.send_json({"type": "tool_call", "requestId": request_id, "tool": name})
+    await _ws_send(websocket, {"type": "tool_call", "requestId": request_id, "tool": name})
     denied = _check_tool_whitelist(name)
     if denied:
-        await websocket.send_json({"type": "tool_result", "requestId": request_id,
+        await _ws_send(websocket, {"type": "tool_result", "requestId": request_id,
                                    "tool": name, "ok": False, "summary": denied[:160]})
         return {"name": name, "text": denied, "ok": False}
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
@@ -599,7 +630,7 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     # 资产卡透传(评估报告等带资产引用的工具): 前端渲染可联动资产地图的卡片
     if isinstance(result, dict) and isinstance(result.get("assets"), list) and result["assets"]:
         event["assets"] = result["assets"][:12]
-    await websocket.send_json(event)
+    await _ws_send(websocket, event)
     # P2 上下文注册表: 工具轨迹/产物 → 单元(会话级溯源)
     from . import ctx as _ctx
     try:
