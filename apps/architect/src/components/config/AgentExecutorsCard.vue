@@ -557,7 +557,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             </div>
             <div v-if="detected[keyOf(e)]?.length && showDetected[keyOf(e)]" class="grid grid-cols-1 sm:grid-cols-2 gap-1">
               <label
-                v-for="dm in detected[e.id]"
+                v-for="dm in detected[keyOf(e)]"
                 :key="dm.model"
                 class="flex items-center gap-1.5 text-[11px] cursor-pointer"
                 :title="`${dm.url} · ${dm.kind}`"
