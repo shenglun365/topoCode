@@ -411,7 +411,7 @@ async function answerClarify() {
     <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
     <div
       v-if="showInfo && conv.activeId"
-      class="max-h-72 shrink-0 space-y-2 overflow-auto border-b border-ctp-surface0 bg-ctp-mantle/60 p-2.5 text-xs"
+      class="absolute right-2 top-11 z-50 max-h-72 w-[calc(100%-1rem)] space-y-2 overflow-auto rounded-lg border border-ctp-surface1 bg-ctp-mantle p-2.5 text-xs shadow-xl"
     >
       <div v-if="readyReqs.length" class="rounded-lg border border-ctp-green/30 bg-ctp-green/5 p-2">
         <p class="mb-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.readyPlans') }} ({{ readyReqs.length }})</p>
