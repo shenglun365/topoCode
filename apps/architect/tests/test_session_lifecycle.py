@@ -308,3 +308,21 @@ def test_agent_chat_reply_extra_context(client, monkeypatch):
     assert out == "代码回答"
     assert captured["question"] == "这个函数怎么改?"
     assert "executor" in captured["ctx"] and "上一轮" in captured["ctx"]
+
+
+def test_parse_oc_config_models():
+    """opencode /config → 模型条目(local/cloud 分类)。"""
+    from topoone_app_architect.arch_routes.agent_executors import _parse_oc_config
+    cfg = {"provider": {
+        "AMD-GPU-8200": {"options": {"baseURL": "http://192.168.1.76:8200/v1"},
+                         "models": {"Qwen3.8-27B": {}, "Qwen3.6-27B": {}}},
+        "siliconflow": {"options": {"baseURL": "https://api.siliconflow.cn/v1"},
+                        "models": {"DeepSeek-V4": {}}},
+        "no-url": {"models": {"x": {}}},
+    }}
+    out = _parse_oc_config(cfg)
+    got = {(m["model"], m["kind"]) for m in out}
+    assert ("AMD-GPU-8200/Qwen3.8-27B", "local") in got
+    assert ("siliconflow/DeepSeek-V4", "cloud") in got
+    assert not any(m["model"].startswith("no-url") for m in out)
+    assert all(m["url"] for m in out)

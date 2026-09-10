@@ -144,6 +144,52 @@ async function probe(e: ExecEntry) {
   }
 }
 
+/** 手动拉起 opencode serve(脱离会话常驻)。 */
+async function startServe(e: ExecEntry) {
+  probing.value[e.id] = t('config.executors.starting')
+  try {
+    const d = await apiPost<{ status: string; port?: number; url?: string; note?: string; detail?: string }>(
+      '/agent/executors/start', { entry: e })
+    probing.value[e.id] = d.status === 'ok'
+      ? `✓ ${d.url} —— ${d.note}`
+      : `✗ ${d.detail || 'fail'}`
+    await load()
+  } catch (err: any) {
+    probing.value[e.id] = `✗ ${err?.message || err}`
+  }
+}
+
+/** 检测 opencode 可用模型(serve /config 的 provider×models)并合并进实例模型表。 */
+const detecting = ref('')
+async function detectModels(e: ExecEntry) {
+  detecting.value = e.id
+  try {
+    const d = await apiPost<{ status: string; models?: { name: string; model: string; url: string; kind: string }[]; note?: string; detail?: string }>(
+      '/agent/executors/models/detect', { entry: e })
+    if (d.status !== 'ok' || !d.models) {
+      probing.value[e.id] = `✗ ${d.detail || 'fail'}`
+      return
+    }
+    if (!Array.isArray(e.config.models)) e.config.models = []
+    const known = new Map(e.config.models.map((m) => [m.model, m]))
+    for (const dm of d.models) {
+      const prev = known.get(dm.model)
+      if (prev) {
+        prev.url = prev.url || dm.url
+        continue
+      }
+      const row: ExecModel = { id: `m${Date.now()}${e.config.models.length}`, name: dm.name, model: dm.model, url: dm.url, apiKey: '', maxTokens: 0 }
+      e.config.models.push(row)
+      known.set(dm.model, row)
+    }
+    probing.value[e.id] = `✓ ${t('config.executors.modelsDetected', { n: d.models.length })}${d.note ? ` —— ${d.note}` : ''}`
+  } catch (err: any) {
+    probing.value[e.id] = `✗ ${err?.message || err}`
+  } finally {
+    detecting.value = ''
+  }
+}
+
 const runnerReachable = computed(() => !!runtime.value?.executors)
 
 const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'bool' | 'select'; options?: string[] }[]> = {
@@ -250,6 +296,13 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             {{ t('config.executors.health') }}
           </span>
           <div class="flex-1" />
+          <button
+            v-if="e.type === 'opencode'"
+            class="btn !py-0.5 !px-2 !text-[11px]"
+            @click="startServe(e)"
+          >
+            {{ t('config.executors.startServe') }}
+          </button>
           <button class="btn !py-0.5 !px-2 !text-[11px]" @click="probe(e)">
             {{ t('config.executors.probe') }}
           </button>
@@ -319,6 +372,14 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
           <div class="flex items-center gap-2">
             <span class="text-[10px] text-ctp-overlay1">{{ t('config.executors.modelsTitle') }}</span>
             <div class="flex-1" />
+            <button
+              v-if="e.type === 'opencode'"
+              class="btn !py-0 !px-2 !text-[10px]"
+              :disabled="detecting === e.id"
+              @click="detectModels(e)"
+            >
+              {{ detecting === e.id ? t('config.executors.detecting') : t('config.executors.detectModels') }}
+            </button>
             <button class="btn !py-0 !px-2 !text-[10px]" @click="addModel(e)">
               <PlusIcon class="w-3 h-3" />{{ t('config.executors.addModel') }}
             </button>

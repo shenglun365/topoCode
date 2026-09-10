@@ -1153,6 +1153,11 @@ export default {
       mKey: 'API Key',
       mMaxTokens: 'max_tokens',
       modelProbe: '测试',
+      startServe: '拉起服务',
+      starting: '拉起中…',
+      detectModels: '检测模型',
+      detecting: '检测中…',
+      modelsDetected: '已检测到 {n} 个可用模型并同步到实例模型表',
     },
     llm: {
       title: 'Architect 实例模型（本机）',

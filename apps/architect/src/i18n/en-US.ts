@@ -1127,6 +1127,11 @@ export default {
       mKey: 'API Key',
       mMaxTokens: 'max_tokens',
       modelProbe: 'Test',
+      startServe: 'Start Serve',
+      starting: 'Starting…',
+      detectModels: 'Detect Models',
+      detecting: 'Detecting…',
+      modelsDetected: 'Detected {n} available models and synced to the model table',
     },
     llm: {
       title: 'Architect instance models (local)',

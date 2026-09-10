@@ -15,6 +15,9 @@ runner 启动经 GET /agent/executors/runtime 拉取（X-Internal token）；
 from __future__ import annotations
 
 import json
+import urllib.parse
+import subprocess
+import shutil
 import logging
 import os
 import urllib.request
@@ -271,6 +274,112 @@ async def probe_executor(request: Request):
     except Exception as e:  # noqa: BLE001
         return ok({"status": "fail", "detail": str(e),
                    "note": "serve 未运行属正常（执行时自动拉起）"})
+
+
+def _oc_bin() -> str:
+    return shutil.which("opencode") or "opencode"
+
+
+def _oc_healthy(port: int) -> bool:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/global/health", timeout=3) as r:
+            return r.status == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _start_opencode_serve(cfg: dict) -> dict:
+    """手动拉起 opencode serve(脱离本进程会话, 与 runner 同款命令/日志布局)。
+
+    端口从 base_port 起探活分配(健康端口视为占用, 跳过); 已在运行则直接返回。
+    """
+    base = int(cfg.get("base_port") or 3478)
+    for off in range(0, 24):
+        if _oc_healthy(base + off):
+            return {"status": "ok", "port": base + off,
+                    "url": f"http://127.0.0.1:{base + off}",
+                    "note": "serve 已在运行"}
+    port = base
+    for off in range(0, 24):
+        if not _oc_healthy(base + off):
+            port = base + off
+            break
+    log_dir = os.path.join(os.path.expanduser("~"), ".topocode", "runner")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, f"opencode-serve-{port}.log")
+    log = open(log_path, "ab")  # noqa: SIM115
+    proc = subprocess.Popen(
+        [_oc_bin(), "serve", "--port", str(port), "--hostname", "127.0.0.1"],
+        cwd=cfg.get("cwd") or os.path.expanduser("~"),
+        stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    import time as _t
+    for _ in range(25):
+        if _oc_healthy(port):
+            return {"status": "ok", "port": port, "url": f"http://127.0.0.1:{port}",
+                    "pid": proc.pid, "log": log_path, "note": "serve 已拉起"}
+        if proc.poll() is not None:
+            break
+        _t.sleep(1.0)
+    try:
+        proc.kill()
+    except Exception:  # noqa: BLE001
+        pass
+    return {"status": "fail", "detail": f"serve 启动失败 port={port}（见 {log_path}）"}
+
+
+def _parse_oc_config(cfg_json: dict) -> list:
+    """/config → 模型条目[{name, model, url, kind}](kind: local/cloud)。
+
+    只取带 baseURL 的 provider(自建/局域网/显式配置); kind 按地址性质划分。
+    """
+    out = []
+    for prov, pc in (cfg_json.get("provider") or {}).items():
+        base = ((pc.get("options") or {}).get("baseURL") or "").rstrip("/")
+        models = pc.get("models") or {}
+        if not base or not models:
+            continue
+        host = urllib.parse.urlparse(base).hostname or ""
+        private = host in ("localhost", "127.0.0.1") or host.startswith("192.168.")             or host.startswith("10.") or host.startswith("172.")
+        for m in models:
+            out.append({"name": m, "model": f"{prov}/{m}", "url": base,
+                        "kind": "local" if private else "cloud"})
+    return out
+
+
+def _detect_opencode_models(cfg: dict) -> dict:
+    """检测 opencode 可用模型: ensure serve → GET /config → provider×models。"""
+    started = _start_opencode_serve(cfg)
+    if started.get("status") != "ok":
+        return started
+    port = started["port"]
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/config", timeout=10) as r:
+            cfg_json = json.loads(r.read().decode())
+    except Exception as e:  # noqa: BLE001
+        return {"status": "fail", "detail": f"/config 读取失败: {e}"}
+    models = _parse_oc_config(cfg_json)
+    return {"status": "ok", "port": port, "models": models,
+            "note": started.get("note", "")}
+
+
+@router.post("/agent/executors/start")
+async def start_executor(request: Request):
+    """手动拉起执行器(opencode serve)。"""
+    body = await request.json()
+    entry = body.get("entry") or {}
+    if entry.get("type") != "opencode":
+        return err("仅 opencode 执行器支持手动拉起(其余类型在执行时按需启动)")
+    return ok(_start_opencode_serve(entry.get("config") or {}))
+
+
+@router.post("/agent/executors/models/detect")
+async def detect_executor_models(request: Request):
+    """检测执行器可用模型(opencode: serve /config 的 provider×models)。"""
+    body = await request.json()
+    entry = body.get("entry") or {}
+    if entry.get("type") != "opencode":
+        return err("仅 opencode 执行器支持模型检测")
+    return ok(_detect_opencode_models(entry.get("config") or {}))
 
 
 def _probe_llm_model(url: str, model: str, api_key: str = "") -> dict:
