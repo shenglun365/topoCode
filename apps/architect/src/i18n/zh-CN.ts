@@ -1058,7 +1058,7 @@ export default {
     title: '系统管理',
     desc: '系统级配置的查看与管理，包括外接 coding agent 适配器与从 KB 导入的模型配置。',
     roles: {
-      title: '角色模型映射',
+      title: '分析任务模型映射',
       save: '保存映射',
       saving: '保存中…',
       saved: '已保存',
@@ -1066,12 +1066,12 @@ export default {
       hint: '为不同类型的认知工作指定不同模型：以调用参数即时生效，不影响其它页面的全局模型选择。',
       modelMissing: '不在实例模型表中',
       items: {
-        extract: { label: '提取', note: '识别接口与语义结构，速度快、成本低的模型即可' },
-        verify: { label: '验收比对', note: '对照验收标准逐条核对，建议精度更高的模型' },
-        induce: { label: '归纳', note: '从样本中提炼规约与术语，中档模型即可' },
-        pseudo: { label: '伪码解释', note: '把实现细节转写为易懂的伪代码说明' },
-        evaluate: { label: '方案评估', note: '对执行方案与结果出具评估意见，建议强模型' },
-        mine: { label: '能力提炼', note: '从历史会话中沉淀可复用的规约与技巧，建议强模型' },
+        extract: { label: '提取', note: '识别接口与语义结构，快模型即可。触发：资产管理对话式提取、符号语义提取' },
+        verify: { label: '验收比对', note: '对照验收标准逐条核对，建议强模型。触发：资产规约验收、执行结果验收' },
+        induce: { label: '归纳', note: '从样本中提炼规约与术语，中档模型即可。触发：命名治理（认知编辑前的命名提议）' },
+        pseudo: { label: '伪码解释', note: '把实现细节转写为易懂的伪代码说明，快模型即可。触发：资产语义详情的伪码解释' },
+        evaluate: { label: '方案评估', note: '对执行方案与结果出具评估意见，建议强模型。触发：执行页方案/结果评估' },
+        mine: { label: '能力提炼', note: '从历史会话中沉淀可复用的规约与技巧，建议强模型。触发：能力提炼（定时批量/手动）' },
       },
     },
 
@@ -1079,7 +1079,7 @@ export default {
       instance: 'Architect 实例设置（模型）',
       executors: 'Coding Agent 执行器',
       sessionRoles: '会话角色设置',
-      roleModels: '角色模型映射',
+      roleModels: '分析任务模型映射',
       other: '其他配置',
     },
 

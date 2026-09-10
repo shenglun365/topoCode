@@ -1032,7 +1032,7 @@ export default {
     title: 'System Management',
     desc: 'View and manage system-level configuration, including external coding agent adapters and model config imported from KB.',
     roles: {
-      title: 'Role → Model Mapping',
+      title: 'Analysis Task Model Mapping',
       save: 'Save Mapping',
       saving: 'Saving…',
       saved: 'Saved',
@@ -1040,12 +1040,12 @@ export default {
       hint: 'Assign different models to different kinds of cognitive work. Applied per call without affecting the global model selection of other pages.',
       modelMissing: 'not in instance models',
       items: {
-        extract: { label: 'Extraction', note: 'Identify interfaces and semantic structure; a fast, low-cost model suffices' },
-        verify: { label: 'Acceptance Check', note: 'Verify against acceptance criteria item by item; a stronger model is recommended' },
-        induce: { label: 'Induction', note: 'Derive specs and terms from samples; a mid-tier model suffices' },
-        pseudo: { label: 'Pseudocode', note: 'Rewrite implementation details into readable pseudocode' },
-        evaluate: { label: 'Plan Evaluation', note: 'Review plans and results with assessment notes; a strong model is recommended' },
-        mine: { label: 'Capability Mining', note: 'Distill reusable specs and techniques from past conversations; a strong model is recommended' },
+        extract: { label: 'Extraction', note: 'Identify interfaces and semantic structure; fast model suffices. Triggered by: asset-conversation extraction, symbol semantic extraction' },
+        verify: { label: 'Acceptance Check', note: 'Verify against acceptance criteria item by item; strong model recommended. Triggered by: asset-spec acceptance, execution-result acceptance' },
+        induce: { label: 'Induction', note: 'Derive specs and terms from samples; mid-tier model suffices. Triggered by: naming governance (pre-edit naming proposals)' },
+        pseudo: { label: 'Pseudocode', note: 'Rewrite implementation details into readable pseudocode; fast model suffices. Triggered by: pseudocode view in asset semantic details' },
+        evaluate: { label: 'Plan Evaluation', note: 'Review plans and results with assessment notes; strong model recommended. Triggered by: plan/result evaluation on the execution page' },
+        mine: { label: 'Capability Mining', note: 'Distill reusable specs and techniques from past conversations; strong model recommended. Triggered by: capability mining (scheduled/manual)' },
       },
     },
 
@@ -1053,7 +1053,7 @@ export default {
       instance: 'Architect Instance (Models)',
       executors: 'Coding Agent Executors',
       sessionRoles: 'Session Roles',
-      roleModels: 'Role → Model Mapping',
+      roleModels: 'Analysis Task Model Mapping',
       other: 'General',
     },
 
