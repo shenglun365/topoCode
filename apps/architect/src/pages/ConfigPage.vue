@@ -12,6 +12,7 @@ import { backendUp } from '@/services/backend'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
 import SessionRolesCard from '@/components/config/SessionRolesCard.vue'
+import AssetLocksCard from '@/components/config/AssetLocksCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t } = useI18n()
@@ -442,6 +443,8 @@ onMounted(() => { void loadCgStatus() })
     <SessionRolesCard />
 
     <AgentExecutorsCard />
+
+    <AssetLocksCard />
 
     <div class="panel overflow-hidden">
       <div class="panel-header">

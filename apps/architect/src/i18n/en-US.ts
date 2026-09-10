@@ -1053,6 +1053,21 @@ export default {
     acceptanceMax: 'Max acceptance',
     p0SubsetMax: 'P0 subset cap',
     codingRules: 'Coding Rules',
+    locks: {
+      title: 'Parallel asset locks',
+      desc: 'Parallel tasks in one project must not modify the same data asset: strict = hard block (task blocked); warn = warn-and-proceed. Granularity: file or component (semantic asset). Out-of-scope changes are reported at task completion.',
+      save: 'Save policy',
+      saved: 'Lock policy saved',
+      mode: 'Conflict mode:',
+      strict: 'strict (block)',
+      warn: 'warn (proceed)',
+      granularity: 'Granularity:',
+      file: 'File',
+      component: 'Component',
+      current: 'Current locks:',
+      empty: 'No locks held (acquired on task start, auto-released on completion)',
+    },
+
     sessionRoles: {
       title: 'Session roles',
       desc: 'architect is the single built-in role (default for new sessions); executor roles bind executor instances — create multiple with distinct names. Each role has skill scenarios and a tool whitelist.',

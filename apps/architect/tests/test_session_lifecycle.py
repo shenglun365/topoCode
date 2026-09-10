@@ -195,3 +195,34 @@ def test_handoff_creates_locked_new_session(client, monkeypatch):
     # 新会话(锁定)不能再直接 PATCH roleId
     r = client.patch(f"/api/architect/sessions/{new_id}", json={"roleId": "architect"}, headers=h)
     assert r.status_code == 400
+
+
+def test_asset_lock_acquire_release_two_level(client, monkeypatch):
+    """PR5: strict 冲突 blocked / warn 放行 / 终态释放。"""
+    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect.arch_routes import execution as EX
+    h = _auth(client)
+    store.RequirementsStore.create({
+        "id": "RQ-LK", "title": "锁", "desc": "d", "location": "pool",
+        "analysis": {"allowedScope": ["src/a.ts", "src/b.ts"], "changes": []}})
+    t1 = {"id": "ex-lk1", "planId": "pl", "reqIds": ["RQ-LK"], "status": "created"}
+    t2 = {"id": "ex-lk2", "planId": "pl", "reqIds": ["RQ-LK"], "status": "created"}
+    # strict(默认): t1 取锁成功
+    r1 = EX.acquire_task_locks(t1)
+    assert r1["ok"] and r1["acquired"] == 2
+    # t2 同资源 → 冲突 blocked
+    r2 = EX.acquire_task_locks(t2)
+    assert not r2["ok"] and len(r2["conflicts"]) == 2
+    # 切 warn → 放行(记录冲突但 ok)
+    client.put("/api/architect/exec/lock-policy", json={"mode": "warn"}, headers=h)
+    r3 = EX.acquire_task_locks(t2)
+    assert r3["ok"] and len(r3["conflicts"]) == 2
+    # 释放
+    rr = EX.release_task_locks(t1)
+    assert rr["released"] >= 2
+    rr2 = EX.acquire_task_locks(t2)   # warn 下无冲突了
+    assert rr2["ok"] and not rr2["conflicts"]
+    EX.release_task_locks(t2)
+    # 策略读写
+    pol = client.get("/api/architect/exec/lock-policy", headers=h).json()["data"]
+    assert pol["mode"] == "warn" and pol["granularity"] in ("file", "component")

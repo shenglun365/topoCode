@@ -1079,6 +1079,21 @@ export default {
     acceptanceMax: '验收上限(条)',
     p0SubsetMax: 'P0 子集上限',
     codingRules: '编码规约',
+    locks: {
+      title: '并行执行资产锁',
+      desc: '同项目并行任务不能同时修改相同数据资产：strict=冲突硬阻断(任务 blocked)；warn=警告放行(记录)。粒度可选文件级或组件级(语义资产)。超范围改动在任务终态事后告警。',
+      save: '保存策略',
+      saved: '锁策略已保存',
+      mode: '冲突策略:',
+      strict: 'strict 硬阻断',
+      warn: 'warn 警告放行',
+      granularity: '粒度:',
+      file: '文件级',
+      component: '组件级',
+      current: '当前持锁:',
+      empty: '暂无持锁(并行任务启动时获取, 终态自动释放)',
+    },
+
     sessionRoles: {
       title: '会话角色设置',
       desc: 'architect 系统角色唯一不可删(新会话默认)；executor 角色绑定执行器实例，可建多个以名称区分。角色拥有技能场景与工具白名单配置。',

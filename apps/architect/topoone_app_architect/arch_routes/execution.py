@@ -18,6 +18,156 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+# ── PR5 并行执行资产锁: 同项目并行任务不得同时改相同数据资产 ──
+
+_LOCK_POLICY_KEY = "exec.lockPolicy"
+
+
+def _lock_policy() -> dict:
+    """两级用户可调: mode strict(冲突硬阻断)/warn(警告放行); granularity file/component。"""
+    import json as _json
+    raw = store.CollabConfigStore.get(_LOCK_POLICY_KEY, "")
+    pol = {}
+    try:
+        pol = _json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001
+        pol = {}
+    return {
+        "mode": pol.get("mode") if pol.get("mode") in ("strict", "warn") else "strict",
+        "granularity": pol.get("granularity") if pol.get("granularity") in ("file", "component") else "file",
+    }
+
+
+@router.get("/exec/lock-policy")
+async def get_lock_policy():
+    return ok(_lock_policy())
+
+
+@router.put("/exec/lock-policy")
+async def put_lock_policy(request: Request):
+    body = await request.json()
+    import json as _json
+    pol = _lock_policy()
+    if body.get("mode") in ("strict", "warn"):
+        pol["mode"] = body["mode"]
+    if body.get("granularity") in ("file", "component"):
+        pol["granularity"] = body["granularity"]
+    store.CollabConfigStore.set(_LOCK_POLICY_KEY, _json.dumps(pol, ensure_ascii=False))
+    return ok(pol)
+
+
+def _declared_resources(reqs: list, granularity: str) -> list:
+    """资源声明: 需求 analysis.allowedScope + changes 资源(文件) / assetScope(组件)。"""
+    out: list = []
+    for r in reqs or []:
+        a = r.get("analysis") or {}
+        if granularity == "component":
+            out.extend(str(x.get("assetId") or "") for x in a.get("assetScope") or []
+                       if str(x.get("assetId") or "").startswith("sa-"))
+        else:
+            out.extend(str(x or "").strip() for x in a.get("allowedScope") or [] if x)
+            out.extend(str(c.get("resource") or "").strip()
+                       for c in a.get("changes") or [] if c.get("resource"))
+    seen, uniq = set(), []
+    for x in out:
+        if x and x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return uniq
+
+
+def _task_project_id(task: dict, reqs: list) -> str:
+    """锁归属项目 id: 经请求级上下文/需求反解(执行任务行无 project 列)。"""
+    try:
+        from . import ctx as _ctx
+        pid = _ctx.get_project()
+        if pid:
+            return pid
+    except Exception:  # noqa: BLE001
+        pass
+    _root, project = _resolve_root_project(reqs, {})
+    if project:
+        return project
+    for r in reqs:
+        if r.get("projectId"):
+            return r["projectId"]
+    return ""
+
+
+def acquire_task_locks(task: dict) -> dict:
+    """任务启动前取锁: strict 冲突→任务 blocked; warn 冲突→放行并提示。"""
+    pol = _lock_policy()
+    reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+    reqs = [r for r in reqs if r]
+    pid = _task_project_id(task, reqs)
+    resources = _declared_resources(reqs, pol["granularity"])
+    if not resources:
+        return {"ok": True, "acquired": 0, "conflicts": [], "policy": pol}
+    holder = task.get("id") or ""
+    conflicts = store.AssetLocksStore.conflicts(pid, resources, exclude_holder=holder)
+    if conflicts and pol["mode"] == "strict":
+        store.ExecutionTasksStore.update(holder, {"status": "blocked", "updatedAt": _ts()})
+        return {"ok": False, "acquired": 0, "conflicts": conflicts, "policy": pol}
+    now = _ts()
+    for res in resources:
+        store._insert("arch_asset_locks", {
+            "id": store.next_id("lk"), "project_id": pid,
+            "resource": res, "granularity": pol["granularity"],
+            "holder": holder, "holder_title": (task.get("planId") or ""),
+            "acquired_at": now,
+        })
+    return {"ok": True, "acquired": len(resources), "conflicts": conflicts, "policy": pol}
+
+
+def release_task_locks(task: dict) -> dict:
+    """终态释放锁 + 事后校验(实际改动 git diff vs 声明资源, 超范围告警)。"""
+    holder = task.get("id") or ""
+    reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+    pid = _task_project_id(task, reqs)
+    released = 0
+    for lk in store.AssetLocksStore.all(pid):
+        if lk.get("holder") == holder:
+            try:
+                store._db().execute(
+                    "DELETE FROM arch_asset_locks WHERE id = ?", (lk["id"],))
+                released += 1
+            except Exception:  # noqa: BLE001
+                pass
+    if released:
+        try:
+            store._db().commit()
+        except Exception:  # noqa: BLE001
+            pass
+    # 事后校验: 任务分支/base_commit..HEAD 的改动文件 vs 声明文件
+    overrun: list = []
+    try:
+        root, _p = _resolve_root_project(
+            [store.RequirementsStore.get(i) for i in task.get("reqIds") or []], {})
+        base = (task.get("baseCommit") or "").strip()
+        if root and base and os.path.isdir(root):
+            import subprocess
+            r = subprocess.run(["git", "diff", "--name-only", f"{base}..HEAD"],
+                               capture_output=True, text=True, cwd=root, timeout=30)
+            changed = {ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()}
+            pol = _lock_policy()
+            reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+            declared = set(_declared_resources(reqs, "file"))
+            if changed and declared:
+                overrun = sorted(x for x in changed if x not in declared)[:50]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[exec] 事后校验失败 task=%s: %s", holder, e)
+    if overrun:
+        logger.warning("[exec] 超范围改动告警 task=%s: %s", holder, ", ".join(overrun[:10]))
+    return {"ok": True, "released": released, "outOfScope": overrun}
+
+
+@router.get("/exec/locks")
+async def list_locks(project: str = ""):
+    pid = project or ""
+    locks = store.AssetLocksStore.all(pid)
+    return ok({"locks": locks, "policy": _lock_policy()})
+
+
 def _project_exec_conv(task: dict, lifecycle: str = "", review: str = "") -> None:
     """PR3 双体系投影: 执行任务状态 → 关联会话双维度回写。
 
@@ -478,6 +628,13 @@ async def run_execution_task(task_id: str):
         except Exception as e:  # noqa: BLE001
             logger.warning("[exec] dossier 装配失败(忽略, 继续执行): %s", e)
 
+    # PR5 并行资产锁: 提交前取锁(strict 冲突 → blocked 直接返回)
+    lock_res = acquire_task_locks(task)
+    if not lock_res.get("ok"):
+        holders = "; ".join(
+            f"{c.get('resource')}@{c.get('holder')}" for c in lock_res.get("conflicts") or [])
+        return err(409, f"资产锁冲突({lock_res['policy']['mode']}): {holders}")
+
     se = tagent_se.build_architect_se(
         get_gateway(), root=root, project=project,
         project_root=root or "",
@@ -708,6 +865,10 @@ async def patch_execution_task(task_id: str, request: Request):
         context_registry.write_exec_report(task_id, str(body["status"]))
         _project_exec_conv(row, lifecycle="active",
                            review="error" if str(body["status"]) in ("failed", "stopped") else "unread")
+    try:
+        release_task_locks(row if "done_row" not in marker else done_row)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[exec] 锁释放失败 task=%s: %s", task_id, e)
     return ok(row)
 
 
@@ -721,6 +882,10 @@ async def stop_execution_task(task_id: str):
     from . import context_registry
     context_registry.write_exec_report(task_id, "stopped")
     _project_exec_conv(row, lifecycle="active", review="error")
+    try:
+        release_task_locks(row if "done_row" not in marker else done_row)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[exec] 锁释放失败 task=%s: %s", task_id, e)
     return ok(row)
 
 
@@ -745,6 +910,10 @@ async def accept_execution_task(task_id: str):
     context_registry.write_exec_report(task_id, "done")
     done_row = store.ExecutionTasksStore.get(task_id)
     _project_exec_conv(done_row, lifecycle="active", review="unread")
+    try:
+        release_task_locks(row if "done_row" not in marker else done_row)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[exec] 锁释放失败 task=%s: %s", task_id, e)
     return ok(done_row)
 
 
