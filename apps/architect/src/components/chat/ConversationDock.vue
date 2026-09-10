@@ -139,6 +139,48 @@ async function openRoleSwitch() {
   roleSwitchOpen.value = true
 }
 
+/** PR4 交接: 锁定会话换绑 → 标准化摘要生成新会话(绑目标 executor 角色)。 */
+const handoffOpen = ref(false)
+const handoffMsg = ref('')
+const handoffBusy = ref(false)
+const handoffTarget = ref('')
+const handoffArchive = ref(true)
+const handoffEligible = computed(() =>
+  !!conv.activeId && roleLocked.value && (conv.activeMeta as any)?.status !== 'archived')
+
+async function openHandoff() {
+  handoffMsg.value = ''
+  handoffTarget.value = ''
+  try {
+    const roles = await apiGet<RoleRow[]>('/session-roles')
+    executorRoles.value = roles.filter((r) => r.kind === 'executor')
+    handoffTarget.value = executorRoles.value[0]?.id || ''
+  } catch (e: any) {
+    handoffMsg.value = e?.message || String(e)
+  }
+  handoffOpen.value = true
+}
+
+async function runHandoff() {
+  if (!conv.activeId || !handoffTarget.value || handoffBusy.value) return
+  handoffBusy.value = true
+  handoffMsg.value = ''
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    const d = await apiPost<{ newConvId: string }>(`/sessions/${conv.activeId}/handoff`,
+      { targetRoleId: handoffTarget.value, archiveOrigin: handoffArchive.value })
+    handoffOpen.value = false
+    const list = await sessionService.list({ limit: 30, scope: 'all' })
+    const meta = list.find((c) => c.id === d.newConvId)
+    if (meta) await conv.openConversation(meta)
+    void loadRecent()
+  } catch (e: any) {
+    handoffMsg.value = e?.message || String(e)
+  } finally {
+    handoffBusy.value = false
+  }
+}
+
 async function switchRole(role: RoleRow) {
   if (!conv.activeId || roleSwitching.value) return
   roleSwitching.value = true
@@ -301,6 +343,11 @@ async function answerClarify() {
         class="btn !py-0 !px-2 !text-[10px]"
         @click="openRoleSwitch"
       >{{ t('session.role.bind') }}</button>
+      <button
+        v-if="handoffEligible"
+        class="btn !py-0 !px-2 !text-[10px]"
+        @click="openHandoff"
+      >{{ t('session.role.handoff') }}</button>
     </div>
 
     <!-- 澄清应答横幅 -->
@@ -362,6 +409,38 @@ async function answerClarify() {
             <p v-if="!executorRoles.length" class="text-[11px] text-ctp-overlay1">
               {{ t('session.role.noExecutors') }}
             </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- PR4 交接对话框: 生成新会话绑目标角色 -->
+      <div
+        v-if="handoffOpen"
+        class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
+        @click.self="handoffOpen = false"
+      >
+        <div class="panel w-full max-w-sm">
+          <div class="panel-header">
+            <span>{{ t('session.role.handoffTitle') }}</span>
+            <button class="btn btn-xs btn-ghost" @click="handoffOpen = false">
+              <XMarkIcon class="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div class="p-3 space-y-2">
+            <p class="text-[11px] text-ctp-subtext0">{{ t('session.role.handoffHint') }}</p>
+            <p v-if="handoffMsg" class="text-[11px] text-ctp-yellow break-all">{{ handoffMsg }}</p>
+            <select v-model="handoffTarget" class="input !py-1 text-xs w-full">
+              <option v-for="r in executorRoles" :key="r.id" :value="r.id">{{ r.name }}（{{ r.executorId || '—' }}）</option>
+            </select>
+            <label class="flex items-center gap-1.5 text-[11px] text-ctp-subtext1">
+              <input v-model="handoffArchive" type="checkbox" class="accent-ctp-blue">
+              {{ t('session.role.handoffArchive') }}
+            </label>
+            <button
+              class="btn btn-primary w-full !py-1.5 text-xs"
+              :disabled="!handoffTarget || handoffBusy"
+              @click="runHandoff"
+            >{{ handoffBusy ? t('common.saving') : t('session.role.handoffGo') }}</button>
           </div>
         </div>
       </div>

@@ -158,3 +158,40 @@ def test_exec_conv_projection_and_mirror(client):
     msgs = store.ConversationsStore.messages(conv_id)
     assert any(m.get("content") == "执行回答" for m in msgs)
     assert store.ConversationsStore.get(conv_id)["reviewState"] == "unread"
+
+
+def test_handoff_creates_locked_new_session(client, monkeypatch):
+    """PR4 交接: 规范化会话 → 新会话绑目标角色(生而锁定) + 原会话指向。"""
+    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect.arch_routes import context_registry as CR
+    # dossier 需 LLM 的段落裁剪纯本地拼装, 但 root 解析可能走 KB → 打桩兜底
+    monkeypatch.setattr(CR, "assemble_dossier", lambda *a, **k: "【测试交接档案】需求: X; 方案: Y")
+    h = _auth(client)
+    store.SessionRolesStore.upsert({"id": "exec-h", "name": "交接目标", "executorId": "opencode"})
+    c = client.post("/api/architect/sessions", json={"kind": "generic", "title": "原会话"}, headers=h).json()["data"]
+    # 未绑定需求 → 拒绝
+    r = client.post(f"/api/architect/sessions/{c['id']}/handoff",
+                    json={"targetRoleId": "exec-h"}, headers=h)
+    assert r.status_code == 400
+    store.RequirementsStore.create({"id": "RQ-HO", "title": "交接需求", "desc": "d", "location": "pool"})
+    store.ConversationsStore.update(c["id"], {"reqId": "RQ-HO"})
+    r = client.post(f"/api/architect/sessions/{c['id']}/handoff",
+                    json={"targetRoleId": "exec-h", "archiveOrigin": True}, headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()["data"]
+    new_id = d["newConvId"]
+    new_conv = store.ConversationsStore.get(new_id)
+    assert new_conv["roleId"] == "exec-h" and new_conv["roleLocked"]
+    assert new_conv["reqId"] == "RQ-HO" and new_conv["reviewState"] == "unread"
+    msgs = store.ConversationsStore.messages(new_id)
+    assert any("交接摘要" in (m.get("content") or "") for m in msgs)
+    # 原会话归档 + handoffTo
+    origin = store.ConversationsStore.get(c["id"])
+    assert origin["status"] == "archived" and "handoffTo" in (origin.get("meta") or "")
+    # 归档会话不能再交接
+    r = client.post(f"/api/architect/sessions/{c['id']}/handoff",
+                    json={"targetRoleId": "exec-h"}, headers=h)
+    assert r.status_code == 400
+    # 新会话(锁定)不能再直接 PATCH roleId
+    r = client.patch(f"/api/architect/sessions/{new_id}", json={"roleId": "architect"}, headers=h)
+    assert r.status_code == 400

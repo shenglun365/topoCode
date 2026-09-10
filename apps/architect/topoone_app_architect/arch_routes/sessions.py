@@ -371,6 +371,96 @@ def _conv_api(conv: dict) -> dict:
     }
 
 
+# ── PR4 交接机制: 角色锁定后的换绑路径(标准化摘要 → 干净新会话绑新角色) ──
+
+@router.post("/sessions/{conv_id}/handoff")
+async def handoff_session(conv_id: str, request: Request):
+    """交接: 装配对齐当前代码状态的交接摘要 → 创建新会话绑定目标 executor 角色。
+
+    - 原会话保留(可选归档, body.archiveOrigin=true); meta.handoffTo 指向新会话。
+    - 新会话: 同 kind/同需求绑定, roleId=目标, role_locked=1(生而锁定——再换仍走交接),
+      种子消息=交接摘要(dossier: 需求三段+关键结论+资产锚点+git 基线)。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    if (conv.get("status") or "active") == "archived":
+        return err(400, "归档会话只读——归档会话的提炼/复制即可引用, 无需交接")
+    body = await request.json()
+    target_id = str(body.get("targetRoleId") or "").strip()
+    role = store.SessionRolesStore.get(target_id) if target_id else None
+    if not role:
+        return err(404, f"目标角色不存在: {target_id}")
+    if (role.get("kind") or "") != "executor":
+        return err(400, "交接目标必须是 executor 角色")
+    if target_id == (conv.get("roleId") or "architect"):
+        return err(400, "目标角色与当前角色相同, 无需交接")
+
+    req_id = conv.get("reqId") or ""
+    reqs = [store.RequirementsStore.get(req_id)] if req_id else []
+    reqs = [r for r in reqs if r]
+    if not reqs:
+        return err(400, "交接需要会话已绑定规范化需求(先「方案生成→确认存入」)")
+
+    # 交接摘要: dossier(会话摘要/备案文档/高优上下文单元/需求三段/项目规约) + git 基线
+    from .context_registry import assemble_dossier
+    from .execution import _resolve_root_project, _real_base_commit
+    root, project = _resolve_root_project(reqs, {})
+    dossier = assemble_dossier(conv_id, reqs=reqs, root=root or "",
+                               project_id=project or "", persist=False) or ""
+    base_commit = _real_base_commit(root)
+    role_name = role.get("name") or target_id
+    brief_lines = [
+        f"**交接摘要**（原会话 {conv_id} → 角色 {role_name}）",
+        "",
+        "以下上下文由原会话标准化整理生成, 已对齐当前代码状态, 可直接开始执行:",
+    ]
+    if base_commit:
+        brief_lines.append(f"- 代码基线: git `{base_commit[:12]}`")
+    if dossier:
+        brief_lines.append("")
+        brief_lines.append(dossier)
+    brief = "\n".join(brief_lines)
+
+    meta = {"handoffFrom": conv_id, "sourceConversationId": conv_id}
+    exec_id = ""
+    try:
+        origin_meta = json.loads(conv.get("meta") or "{}") if isinstance(conv.get("meta"), str) else (conv.get("meta") or {})
+        if isinstance(origin_meta, dict) and origin_meta.get("execId"):
+            exec_id = origin_meta["execId"]
+            meta["execId"] = exec_id
+    except (TypeError, ValueError):
+        pass
+    new_conv = store.ConversationsStore.create({
+        "kind": conv.get("kind") or "execution",
+        "projectId": conv.get("projectId") or "",
+        "reqId": req_id,
+        "title": f"{role_name}｜{(conv.get('title') or req_id)[:28]}",
+        "status": "active", "reviewState": "unread",
+        "roleId": target_id, "roleLocked": True,
+        "meta": meta,
+    })
+    store.ConversationsStore.append_message({
+        "id": store.next_id("m"), "conversationId": new_conv["id"],
+        "role": "assistant", "time": _ts(),
+        "content": brief,
+    })
+    # 原会话: 指向新会话 + 可选归档
+    origin_patch = {"reviewState": "read"}
+    origin_meta = dict(meta)
+    origin_meta.pop("execId", None)
+    origin_meta["handoffTo"] = new_conv["id"]
+    origin_patch["meta"] = json.dumps(origin_meta, ensure_ascii=False)
+    if body.get("archiveOrigin"):
+        origin_patch["status"] = "archived"
+    store.ConversationsStore.update(conv_id, origin_patch)
+    return ok({
+        "newConvId": new_conv["id"], "conversation": _conv_api(
+            store.ConversationsStore.get(new_conv["id"]) or new_conv),
+        "archivedOrigin": bool(body.get("archiveOrigin")),
+    })
+
+
 # ── P3: probe(方案草图) + 前置上下文构造 ────────────────────
 
 @router.post("/sessions/{conv_id}/probe")
