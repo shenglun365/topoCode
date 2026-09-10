@@ -152,10 +152,15 @@ function toggleSkill(role: SessionRole, skill: string) {
       >
         <div class="flex items-center gap-2 flex-wrap">
           <span v-if="r.builtin" class="chip bg-ctp-mauve/15 text-ctp-mauve">{{ t('config.sessionRoles.builtin') }}</span>
-          <input v-model="r.id" class="input !py-0.5 !text-xs font-mono w-36" :disabled="r.kind === 'architect'" :title="t('config.sessionRoles.idHint')">
-          <input v-model="r.name" class="input !py-0.5 !text-xs w-36" :placeholder="t('config.sessionRoles.namePh')">
-          <span v-if="r.kind === 'architect'" class="text-[10px] text-ctp-overlay0">{{ t('config.sessionRoles.architectModelHint') }}</span>
+          <!-- architect: 纯信息展示(不可编辑); executor: 可编辑输入 -->
+          <template v-if="r.kind === 'architect'">
+            <span class="font-mono font-semibold text-ctp-text">{{ r.id }}</span>
+            <span class="text-ctp-subtext0">{{ r.name }}</span>
+            <span class="text-[10px] text-ctp-overlay0">{{ t('config.sessionRoles.architectModelHint') }}</span>
+          </template>
           <template v-else>
+            <input v-model="r.id" class="input !py-0.5 !text-xs font-mono w-36" :title="t('config.sessionRoles.idHint')">
+            <input v-model="r.name" class="input !py-0.5 !text-xs w-36" :placeholder="t('config.sessionRoles.namePh')">
             <select v-model="r.executorId" class="input !py-0.5 !text-xs w-40">
               <option value="">{{ t('config.sessionRoles.pickExecutor') }}</option>
               <option v-for="e in executors" :key="e.id" :value="e.id">
@@ -168,7 +173,12 @@ function toggleSkill(role: SessionRole, skill: string) {
             </select>
           </template>
           <div class="flex-1" />
-          <button class="btn btn-primary !py-0.5 !px-2.5 !text-[11px]" :disabled="savingId === r.id" @click="save(r)">
+          <button
+            v-if="r.kind !== 'architect'"
+            class="btn btn-primary !py-0.5 !px-2.5 !text-[11px]"
+            :disabled="savingId === r.id"
+            @click="save(r)"
+          >
             {{ savingId === r.id ? t('config.sessionRoles.saving') : t('config.sessionRoles.save') }}
           </button>
           <button
