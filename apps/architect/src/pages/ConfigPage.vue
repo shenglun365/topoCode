@@ -35,7 +35,7 @@ agent.load()
 
 const sessions = computed(() => agent.sessions)
 
-// ── M1 tAgent 角色模型映射（plan-C §9；per-call 生效，不写全局 llm 配置） ──
+// ── 分析任务模型映射（原 M1 角色模型映射；per-call 生效，不写全局 llm 配置） ──
 interface AgentRole { name: string; label: string; modelId: string; note?: string }
 const roles = ref<AgentRole[]>([])
 const rolesSaving = ref(false)
