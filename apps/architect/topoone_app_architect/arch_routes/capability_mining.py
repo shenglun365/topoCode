@@ -474,7 +474,7 @@ async def periodic_mine_loop(interval_h: float = 6.0, min_idle_h: float = 24.0,
                 try:
                     rows = db.fetchall(
                         "SELECT id, project_id, updated_at FROM arch_conversations "
-                        "WHERE status IN ('active', 'done') AND updated_at < ? "
+                        "WHERE status IN ('active', 'archived') AND updated_at < ? "
                         "ORDER BY updated_at DESC LIMIT 40",
                         (now - int(min_idle_h * 3600 * 1000),))
                 except Exception:

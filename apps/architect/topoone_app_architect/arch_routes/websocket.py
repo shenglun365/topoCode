@@ -241,6 +241,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         skill_scenarios = []
     # PR-A 角色能力 enforcement: executor 角色会话 → 技能场景以角色配置为准、
     # 工具白名单收紧(空=全量); architect 角色不受限。
+    _role = None
     try:
         _role = store.SessionRolesStore.get(
             (conv.get("roleId") or "architect")) if conv else None

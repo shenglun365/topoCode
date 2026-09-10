@@ -78,7 +78,8 @@ async def requirement_injection(req_id: str, request: Request):
     tag = {"coding": "执行 subagent", "runner": "执行 subagent",
            "plan": "plan agent", "user": "用户", "mcp": "外部 subagent"}.get(src, src or "subagent")
     convs = store.ConversationsStore.by_req(req_id)
-    conv = convs[0] if convs else None
+    # PR 复查: 归档会话只读——subagent 消息注入优先非归档会话
+    conv = next((c for c in convs if (c.get("status") or "active") != "archived"), None)
     conv_id = conv["id"] if conv else ""
     if not conv_id:
         conv = store.ConversationsStore.create({
