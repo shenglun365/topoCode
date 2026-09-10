@@ -159,18 +159,30 @@ function toggleSkill(role: SessionRole, skill: string) {
             <span class="text-[10px] text-ctp-overlay0">{{ t('config.sessionRoles.architectModelHint') }}</span>
           </template>
           <template v-else>
-            <input v-model="r.id" class="input !py-0.5 !text-xs font-mono w-36" :title="t('config.sessionRoles.idHint')">
-            <input v-model="r.name" class="input !py-0.5 !text-xs w-36" :placeholder="t('config.sessionRoles.namePh')">
-            <select v-model="r.executorId" class="input !py-0.5 !text-xs w-40">
-              <option value="">{{ t('config.sessionRoles.pickExecutor') }}</option>
-              <option v-for="e in executors" :key="e.id" :value="e.id">
-                {{ e.id }}（{{ e.host === 'remote' ? t('config.executors.hostRemote') : t('config.executors.hostLocal') }}）
-              </option>
-            </select>
-            <select v-model="r.modelId" class="input !py-0.5 !text-xs w-36" :disabled="!execModels(r).length">
-              <option value="">{{ t('config.sessionRoles.pickModel') }}</option>
-              <option v-for="m in execModels(r)" :key="m.id || m.name" :value="m.name">{{ m.name }}</option>
-            </select>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[10px] text-ctp-overlay1">{{ t('config.sessionRoles.roleIdLabel') }}</span>
+              <input v-model="r.id" class="input !py-0.5 !text-xs font-mono w-36" :title="t('config.sessionRoles.idHint')">
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[10px] text-ctp-overlay1">{{ t('config.sessionRoles.roleNameLabel') }}</span>
+              <input v-model="r.name" class="input !py-0.5 !text-xs w-36" :placeholder="t('config.sessionRoles.namePh')">
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[10px] text-ctp-overlay1">{{ t('config.sessionRoles.execInstanceLabel') }}</span>
+              <select v-model="r.executorId" class="input !py-0.5 !text-xs w-40">
+                <option value="">{{ t('config.sessionRoles.pickExecutor') }}</option>
+                <option v-for="e in executors" :key="e.id" :value="e.id">
+                  {{ e.id }}（{{ e.host === 'remote' ? t('config.executors.hostRemote') : t('config.executors.hostLocal') }}）
+                </option>
+              </select>
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[10px] text-ctp-overlay1">{{ t('config.sessionRoles.instModelLabel') }}</span>
+              <select v-model="r.modelId" class="input !py-0.5 !text-xs w-36" :disabled="!execModels(r).length">
+                <option value="">{{ t('config.sessionRoles.pickModel') }}</option>
+                <option v-for="m in execModels(r)" :key="m.id || m.name" :value="m.name">{{ m.name }}</option>
+              </select>
+            </label>
           </template>
           <div class="flex-1" />
           <button
