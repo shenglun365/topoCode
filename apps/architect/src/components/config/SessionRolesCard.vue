@@ -31,6 +31,14 @@ interface SessionRole {
 }
 
 const { t } = useI18n()
+// 行 key 与 r.id 解耦: 输入 id 不再触发整行重建(焦点丢失根因)
+const roleKeys = new WeakMap<SessionRole, number>()
+let roleKeySeq = 0
+const keyOf = (r: SessionRole): number => {
+  let k = roleKeys.get(r)
+  if (!k) { k = ++roleKeySeq; roleKeys.set(r, k) }
+  return k
+}
 const roles = ref<SessionRole[]>([])
 const executors = ref<ExecEntry[]>([])
 const loading = ref(false)
@@ -147,7 +155,7 @@ function toggleSkill(role: SessionRole, skill: string) {
 
       <div
         v-for="r in roles"
-        :key="r.id"
+        :key="keyOf(r)"
         class="border border-ctp-surface0 rounded-lg p-2.5 space-y-2"
         :class="{ 'border-ctp-mauve/30': r.builtin }"
       >
