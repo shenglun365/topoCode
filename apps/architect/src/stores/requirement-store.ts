@@ -14,7 +14,7 @@ function locationOf(r: Requirement): 'proposal' | 'pool' {
 function enrichAnalysis(rep?: RequirementAnalysis): RequirementAnalysis | undefined {
   if (!rep) return undefined
   const mappings = useArchArchitectureStore().codeMappings
-  rep.assetScope.forEach((a) => {
+  ;(rep.assetScope ?? []).forEach((a) => {
     if (!a.file) a.file = mappings.find((m) => m.targetId === a.assetId)?.file
     if (!a.keyNode && a.role === 'core') {
       const cm = mappings.find((m) => m.targetId === a.assetId)
@@ -22,9 +22,9 @@ function enrichAnalysis(rep?: RequirementAnalysis): RequirementAnalysis | undefi
     }
   })
   if (!rep.assessment) {
-    const core = rep.assetScope.filter((a) => a.role === 'core').length
+    const core = (rep.assetScope ?? []).filter((a) => a.role === 'core').length
     rep.assessment = {
-      necessity: { grade: core ? 'high' : 'medium', reason: rep.feasibility.ok ? '与既有核心链路直接相关，具备明确业务价值' : '需先确认业务背景与范围' },
+      necessity: { grade: core ? 'high' : 'medium', reason: rep.feasibility?.ok ? '与既有核心链路直接相关，具备明确业务价值' : '需先确认业务背景与范围' },
       atomicity: { independent: core <= 3, reason: core <= 3 ? '核心资产收敛，可独立交付、与其他需求解耦' : '跨资产较多，建议拆分为多个可独立验收的需求' },
       acceptability: { ok: true, reason: '可转化为功能用例 + 边界用例进行验收' },
     }
