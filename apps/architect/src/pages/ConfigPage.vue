@@ -55,6 +55,8 @@ const roleLabel = (r: AgentRole) =>
   te(`config.roles.items.${r.name}.label`) ? t(`config.roles.items.${r.name}.label`) : r.label
 const roleNote = (r: AgentRole) =>
   te(`config.roles.items.${r.name}.note`) ? t(`config.roles.items.${r.name}.note`) : (r.note || '')
+const roleTrigger = (r: AgentRole) =>
+  te(`config.roles.items.${r.name}.trigger`) ? t(`config.roles.items.${r.name}.trigger`) : ''
 
 async function saveRoles() {
   rolesSaving.value = true
@@ -527,7 +529,13 @@ onMounted(() => { void loadCgStatus() })
           class="flex items-center gap-3 px-4 py-2.5 text-xs"
         >
           <span class="w-20 font-semibold text-ctp-text shrink-0">{{ roleLabel(r) }}</span>
-          <span class="flex-1 text-[10px] text-ctp-overlay1 leading-snug">{{ roleNote(r) }}</span>
+          <span class="flex-1 text-[10px] leading-snug">
+            <span class="text-ctp-overlay1">{{ roleNote(r) }}</span>
+            <span
+              v-if="roleTrigger(r)"
+              class="ml-1 inline-block rounded bg-ctp-peach/15 px-1.5 py-px align-baseline text-ctp-peach"
+            >⚡ {{ t('config.roles.triggerLabel') }}{{ roleTrigger(r) }}</span>
+          </span>
           <select v-model="r.modelId" class="input !py-1 !px-2 !text-[11px] w-64 font-mono">
             <option value="">{{ t('config.roles.modelPlaceholder') }}</option>
             <option
