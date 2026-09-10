@@ -182,6 +182,27 @@ async def list_locks(project: str = ""):
     return ok({"locks": locks, "policy": _lock_policy()})
 
 
+def _log_exec_event(task: dict, text: str, review: str = "") -> None:
+    """统一时间线: 执行生命周期事件以消息沉淀进关联会话。
+
+    中间资产(任务/状态/锁/告警/指派)的叙事全部进会话消息流, 供复用/
+    分析/总结; 失败静默(事件回写不阻断主流程)。
+    """
+    conv_id = (task.get("conversationId") or "").strip()
+    if not conv_id or not store.ConversationsStore.get(conv_id):
+        return
+    try:
+        store.ConversationsStore.append_message({
+            "id": store.next_id("m"), "conversationId": conv_id,
+            "role": "assistant", "time": _ts(),
+            "content": text,
+        })
+        if review:
+            store.ConversationsStore.update(conv_id, {"reviewState": review})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[exec] 事件回写失败 conv=%s: %s", conv_id, e)
+
+
 def _project_exec_conv(task: dict, lifecycle: str = "", review: str = "") -> None:
     """PR3 双体系投影: 执行任务状态 → 关联会话双维度回写。
 
@@ -684,8 +705,11 @@ async def run_execution_task(task_id: str):
         "runnerTreeId": tree_id, "status": "running",
         "runCount": (task.get("runCount") or 0) + 1, "updatedAt": _ts(),
     })
-    _project_exec_conv(store.ExecutionTasksStore.get(task_id) or task,
-                       lifecycle="running", review="read")
+    running_row = store.ExecutionTasksStore.get(task_id) or task
+    _project_exec_conv(running_row, lifecycle="running", review="read")
+    _log_exec_event(running_row,
+                    f"🚀 **执行启动**（第 {running_row.get('runCount') or 1} 次）· 任务 `{task_id}`"
+                    + (f" · 分支 `{branch_note}`" if branch_note else ""))
     progress = await asyncio.to_thread(runner.run, tree_id)
 
     if project_row is not None:
@@ -871,10 +895,23 @@ async def run_execution_tests(task_id: str, request: Request):
 @router.patch("/exec/{task_id}")
 async def patch_execution_task(task_id: str, request: Request):
     body = await request.json()
+    prev = store.ExecutionTasksStore.get(task_id) or {}
     row = store.ExecutionTasksStore.update(task_id, {**body, "updatedAt": _ts()})
     if not row:
         return err(404, "Task not found")
-    if str(body.get("status") or "") in ("done", "failed", "stopped"):
+    new_status = str(body.get("status") or "")
+    if new_status and new_status != (prev.get("status") or ""):
+        if new_status in ("done", "failed", "stopped"):
+            mark = {"done": "✅", "failed": "❌", "stopped": "⏹"}.get(new_status, "⚙️")
+            _log_exec_event(row, f"{mark} **执行结束**：{prev.get('status')} → {new_status}"
+                            + ("（可验收）" if new_status == "done" else ""),
+                            review="unread" if new_status == "done" else "error")
+        elif new_status in ("blocked", "accepting"):
+            _log_exec_event(row, f"⏸ **执行暂停**：{new_status}——等待授权/澄清/补充信息",
+                            review="awaiting_reply")
+        else:
+            _log_exec_event(row, f"⚙️ 状态变更：{prev.get('status')} → {new_status}")
+    if new_status in ("done", "failed", "stopped"):
         from . import context_registry
         context_registry.write_exec_report(task_id, str(body["status"]))
         _project_exec_conv(row, lifecycle="active",
@@ -899,6 +936,7 @@ async def stop_execution_task(task_id: str):
     from . import context_registry
     context_registry.write_exec_report(task_id, "stopped")
     _project_exec_conv(row, lifecycle="active", review="error")
+    _log_exec_event(row, "⏹ **已手动停止**", review="error")
     try:
         release_task_locks(row if "done_row" not in marker else done_row)
     except Exception as e:  # noqa: BLE001
@@ -927,6 +965,8 @@ async def accept_execution_task(task_id: str):
     context_registry.write_exec_report(task_id, "done")
     done_row = store.ExecutionTasksStore.get(task_id)
     _project_exec_conv(done_row, lifecycle="active", review="unread")
+    _log_exec_event(done_row, "✅ **验收通过**：任务 done，关联需求转入 done（交付完成）",
+                    review="unread")
     try:
         release_task_locks(row if "done_row" not in marker else done_row)
     except Exception as e:  # noqa: BLE001

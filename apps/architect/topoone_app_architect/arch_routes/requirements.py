@@ -263,6 +263,18 @@ async def finalize_requirement(req_id: str, request: Request):
         exec_conv = spawn_execution_session(row)
     except Exception:
         pass
+    # 统一时间线: 按钮定稿也回写来源会话
+    try:
+        origin_id = row.get("sourceConversationId") or ""
+        if origin_id and store.ConversationsStore.get(origin_id):
+            store.ConversationsStore.append_message({
+                "id": store.next_id("m"), "conversationId": origin_id,
+                "role": "assistant", "time": _ts(),
+                "content": f"📄 **`{req_id}` 已定稿入池**（待执行方案就绪）"
+                           + (f" · 待执行会话 `{(exec_conv or {}).get('id')}` 已创建" if exec_conv else ""),
+            })
+    except Exception:  # noqa: BLE001
+        pass
     return ok({**row, "execConvId": (exec_conv or {}).get("id")})
 
 

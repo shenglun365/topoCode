@@ -1140,6 +1140,12 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
         "acceptance": _md_lines(acceptanceMd)[:40],
     }
     _store.RequirementsStore.create(req)
+    try:
+        log_conv_event(conv_id,
+                       f"📝 **需求提案已创建**：`{req['id']}` {title}（提案侧，尚未定稿；"
+                       "用户确认后调用 req.finalize 入池）")
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "requirementId": req["id"], "title": title,
             "hint": "提案已创建（规划组）；用户确认后在需求方案会话中继续"}
 
@@ -1227,6 +1233,12 @@ def tool_req_finalize(title: str = "", description: str = "",
         exec_conv_id = (conv or {}).get("id") or ""
     except Exception:
         pass
+    try:
+        log_conv_event(ctx.get_conv(),
+                       f"📄 **`{req_id}` 已定稿入池**（待执行方案就绪）"
+                       + (f" · 待执行会话 `{exec_conv_id}` 已创建" if exec_conv_id else ""))
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "ok": True, "reqId": req_id, "status": "analyzed", "location": "pool",
         "lifecycle": "ready", "execConvId": exec_conv_id,
@@ -1257,6 +1269,12 @@ def tool_execution_assign(target: str = "", execId: str = "",
     row, e = assign_requirement(req_id, target, exec_id=execId, tool=tool, params=params)
     if not row:
         return {"ok": False, "error": e[1]}
+    try:
+        log_conv_event(ctx.get_conv(),
+                       f"📮 **已指派执行**：`{req_id}` → {row.get('assignedTo')}"
+                       + (f"（任务 `{execId}`）" if execId else "") + "，需求进入执行中")
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "ok": True, "reqId": req_id, "status": row.get("status"),
         "assignedTo": row.get("assignedTo"), "lifecycle": "executing",
@@ -1341,6 +1359,24 @@ _MAX_TOKENS_KEY = "llm.maxTokens"
 # LLM 同步调用超时(秒)：本地大模型结构化提取/工具循环耗时可能远超 KB 默认 10s，
 # 与 model_configs.timeout 对齐(默认 300s)，可用 LLM_SYNC_TIMEOUT 覆盖。
 _LLM_CALL_TIMEOUT = float(os.environ.get("LLM_SYNC_TIMEOUT", "300"))
+
+
+def log_conv_event(conv_id: str, text: str) -> None:
+    """统一时间线: 中间资产事件(提案/定稿/指派)以消息沉淀进来源会话。
+
+    失败静默——事件回写不阻断工具主流程。
+    """
+    if not conv_id:
+        return
+    try:
+        from .common import _ts
+        store.ConversationsStore.append_message({
+            "id": store.next_id("m"), "conversationId": conv_id,
+            "role": "assistant", "time": _ts(),
+            "content": text,
+        })
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def get_model_preference() -> str:
