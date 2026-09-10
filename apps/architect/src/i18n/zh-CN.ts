@@ -1134,6 +1134,7 @@ export default {
       roleNameLabel: '角色名称（展示用, 自定义）',
       execInstanceLabel: '执行器实例名称（选哪个 coding agent 实例）',
       instModelLabel: '实例内模型（该实例模型白名单中的一个）',
+      architectSkillsNote: 'architect 固定拥有全部技能与工具(此处不配置)。技能/工具勾选仅对 executor 角色生效',
       architectModelHint: '模型在「Architect 实例设置（模型）」指定(取默认模型), 不需要执行器',
       architectProtected: 'architect 是系统内置角色，不可删除',
     },

@@ -1108,6 +1108,7 @@ export default {
       roleNameLabel: 'Role name (display, custom)',
       execInstanceLabel: 'Executor instance (which coding-agent instance)',
       instModelLabel: 'Instance model (one of the instance whitelist)',
+      architectSkillsNote: 'architect always has all skills and tools (not configurable here). Skill/tool selection only applies to executor roles',
       architectModelHint: 'Model is set in "Architect Instance (Models)" (default model); no executor needed',
       architectProtected: 'architect is the built-in role and cannot be deleted',
     },

@@ -209,8 +209,18 @@ function toggleSkill(role: SessionRole, skill: string) {
           </button>
         </div>
 
-        <!-- 能力配置: 技能场景 + 工具白名单 -->
-        <div class="flex flex-wrap items-center gap-1.5">
+        <!-- 能力配置: 技能场景 + 工具白名单(仅 executor 可配置; architect 固定全量) -->
+        <div v-if="r.kind === 'architect'" class="flex flex-wrap items-center gap-1.5">
+          <span class="text-[10px] text-ctp-overlay1">{{ t('config.sessionRoles.skills') }}</span>
+          <span
+            v-for="sk in (r.skillPool ?? [])"
+            :key="sk"
+            class="chip !text-[10px] bg-ctp-surface0/60 text-ctp-overlay1"
+            :title="r.skillIntros?.[sk] || sk"
+          >{{ sk }}</span>
+          <span class="text-[10px] text-ctp-overlay0">{{ t('config.sessionRoles.architectSkillsNote') }}</span>
+        </div>
+        <div v-else class="flex flex-wrap items-center gap-1.5">
           <span class="text-[10px] text-ctp-overlay1">{{ t('config.sessionRoles.skills') }}</span>
           <button
             v-for="sk in (r.skillPool ?? ['extract', 'plan', 'coding', 'capability', 'accept', 'naming', 'contract', 'linenote'])"
@@ -222,16 +232,18 @@ function toggleSkill(role: SessionRole, skill: string) {
           >
             {{ sk }}
           </button>
-          <span class="ml-2 text-[10px] text-ctp-overlay1" :title="t('config.sessionRoles.toolsHint')">{{ t('config.sessionRoles.tools') }}</span>
-          <input
-            :value="(r.tools ?? []).join(', ')"
-            class="input !py-0.5 !text-[11px] font-mono flex-1 min-w-48"
-            :placeholder="t('config.sessionRoles.toolsPh')"
-            @change="(ev: any) => { r.tools = String(ev.target.value || '').split(',').map((x: string) => x.trim()).filter(Boolean) }"
-          >
+          <template v-if="r.kind !== 'architect'">
+            <span class="ml-2 text-[10px] text-ctp-overlay1" :title="t('config.sessionRoles.toolsHint')">{{ t('config.sessionRoles.tools') }}</span>
+            <input
+              :value="(r.tools ?? []).join(', ')"
+              class="input !py-0.5 !text-[11px] font-mono flex-1 min-w-48"
+              :placeholder="t('config.sessionRoles.toolsPh')"
+              @change="(ev: any) => { r.tools = String(ev.target.value || '').split(',').map((x: string) => x.trim()).filter(Boolean) }"
+            >
+          </template>
         </div>
-        <!-- 已选技能简介 -->
-        <div v-if="(r.skills ?? []).length" class="space-y-0.5 border-t border-ctp-surface0/60 pt-1.5">
+        <!-- 已选技能简介(仅 executor) -->
+        <div v-if="r.kind !== 'architect' && (r.skills ?? []).length" class="space-y-0.5 border-t border-ctp-surface0/60 pt-1.5">
           <div
             v-for="sk in r.skills"
             :key="sk"
