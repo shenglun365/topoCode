@@ -1173,6 +1173,8 @@ export default {
       installing: '安装中…',
       modelsCount: '个模型',
       whitelistHint: '勾选=允许 architect 调用; 未勾选的模型即使服务里已配置也不会被调用',
+      hideList: '隐藏列表',
+      showList: '显示列表',
       detectHint: '尚未检测——点击「检测模型」读取 opencode 服务内可用模型',
       clineHint: '可用模型与 Architect 实例模型保持一致',
       syncInstanceModels: '同步实例模型',

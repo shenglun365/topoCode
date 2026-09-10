@@ -84,6 +84,7 @@ async function installAgent(name: string) {
 /** ── 实例模型(白名单)检测/同步 ── */
 const modelProbing = ref<Record<string, string>>({})   // key: `${execId}/${modelName}`
 const detected = ref<Record<string, { name: string; model: string; url: string; kind: string }[]>>({})
+const showDetected = ref<Record<string, boolean>>({})
 const detecting = ref('')
 const llmModels = ref<ArchLlmModel[]>([])
 
@@ -202,12 +203,26 @@ async function detectModels(e: ExecEntry) {
       probing.value[e.id] = `✗ ${d.detail || 'fail'}`
       return
     }
-    detected.value[e.id] = d.models
+    const k = keyOf(e)
+    detected.value[k] = d.models
+    showDetected.value[k] = true
     if (!Array.isArray(e.config.models)) e.config.models = []
     probing.value[e.id] = `✓ ${t('config.executors.modelsDetected', { n: d.models.length })}`
   } catch (err: any) {
     probing.value[e.id] = `✗ ${err?.message || err}`
   } finally { detecting.value = '' }
+}
+
+/** 检测面板三态: 未检测=检测模型 → 成功后=隐藏列表 ⇄ 显示列表 */
+function toggleDetectPanel(e: ExecEntry) {
+  const k = keyOf(e)
+  if (!detected.value[k]?.length) { detectModels(e); return }
+  showDetected.value[k] = !showDetected.value[k]
+}
+function detectBtnLabel(e: ExecEntry): string {
+  const k = keyOf(e)
+  if (!detected.value[k]?.length) return t('config.executors.detectModels')
+  return showDetected.value[k] ? t('config.executors.hideList') : t('config.executors.showList')
 }
 
 function isChecked(e: ExecEntry, model: string): boolean {
@@ -536,11 +551,11 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
               <span class="text-[10px] text-ctp-overlay1">{{ t('config.executors.modelsTitle') }}</span>
               <span class="text-[10px] text-ctp-overlay0">{{ t('config.executors.whitelistHint') }}</span>
               <div class="flex-1" />
-              <button class="btn !py-0 !px-2 !text-[10px]" :disabled="detecting === e.id" @click="detectModels(e)">
-                {{ detecting === e.id ? t('config.executors.detecting') : t('config.executors.detectModels') }}
+              <button class="btn !py-0 !px-2 !text-[10px]" :disabled="detecting === e.id" @click="toggleDetectPanel(e)">
+                {{ detecting === e.id ? t('config.executors.detecting') : detectBtnLabel(e) }}
               </button>
             </div>
-            <div v-if="detected[e.id]?.length" class="grid grid-cols-1 sm:grid-cols-2 gap-1">
+            <div v-if="detected[keyOf(e)]?.length && showDetected[keyOf(e)]" class="grid grid-cols-1 sm:grid-cols-2 gap-1">
               <label
                 v-for="dm in detected[e.id]"
                 :key="dm.model"
@@ -560,7 +575,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                 >{{ dm.kind }}</span>
               </label>
             </div>
-            <div v-else class="text-[10px] text-ctp-overlay0">{{ t('config.executors.detectHint') }}</div>
+            <div v-else-if="!detected[keyOf(e)]?.length" class="text-[10px] text-ctp-overlay0">{{ t('config.executors.detectHint') }}</div>
           </div>
 
           <!-- ══ cline 专属: 与 architect 实例模型保持一致 ══ -->

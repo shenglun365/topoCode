@@ -1147,6 +1147,8 @@ export default {
       installing: 'Installing…',
       modelsCount: ' models',
       whitelistHint: 'Checked = callable by architect; unchecked models are never invoked even if configured in the service',
+      hideList: 'Hide List',
+      showList: 'Show List',
       detectHint: 'Not detected yet — click "Detect Models" to read available models from the opencode service',
       clineHint: 'Available models mirror the Architect instance models',
       syncInstanceModels: 'Sync instance models',
