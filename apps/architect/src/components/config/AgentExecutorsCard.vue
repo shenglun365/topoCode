@@ -216,39 +216,29 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
       <div
         v-for="(e, i) in entries"
         :key="e.id"
-        class="border border-ctp-surface0 rounded-lg p-2.5 space-y-2"
+        class="border border-ctp-surface0 rounded-lg overflow-hidden"
         :class="{ 'opacity-50': !e.enabled }"
       >
-        <div class="flex items-center gap-2 flex-wrap">
+        <!-- 身份栏: id / 类型 / 部署 + 状态与操作 -->
+        <div class="flex items-center gap-2 px-2.5 py-2 bg-ctp-surface0/40">
           <input
             v-model="e.id"
-            class="input !py-0.5 !text-xs font-mono w-32"
+            class="input !py-0.5 !text-xs font-mono w-28"
             :title="t('config.executors.idHint')"
           >
           <select
             v-model="e.type"
-            class="input !py-0.5 !text-xs w-52"
+            class="input !py-0.5 !text-xs w-48"
             @change="onTypeChange(e)"
           >
             <option v-for="ty in TYPES" :key="ty.value" :value="ty.value">
               {{ ty.label }}
             </option>
           </select>
-          <select v-model="e.host" class="input !py-0.5 !text-xs w-20" :title="t('config.executors.hostHint')">
+          <select v-model="e.host" class="input !py-0.5 !text-xs w-16" :title="t('config.executors.hostHint')">
             <option value="local">{{ t('config.executors.hostLocal') }}</option>
             <option value="remote">{{ t('config.executors.hostRemote') }}</option>
           </select>
-          <label class="flex items-center gap-1 text-[11px] text-ctp-subtext1">
-            <input v-model="e.enabled" type="checkbox" class="accent-ctp-blue">{{ t('config.executors.enabled') }}
-          </label>
-          <label class="flex items-center gap-1 text-[11px]" :title="t('config.executors.defaultHint')">
-            <input
-              type="radio"
-              name="exec-default"
-              :checked="e.default"
-              @change="setDefault(i)"
-            >{{ t('config.executors.default') }}
-          </label>
           <span
             v-if="healthOf(e.id) !== null"
             class="chip"
@@ -269,66 +259,98 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
           </button>
         </div>
 
-        <div v-if="typeFields[e.type]?.length" class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          <label
-            v-for="f in typeFields[e.type]"
-            :key="f.key"
-            class="flex flex-col gap-0.5"
-          >
-            <span class="text-[10px] text-ctp-overlay1">{{ f.label }}</span>
-            <select
-              v-if="f.kind === 'select'"
-              v-model="e.config[f.key]"
-              class="input !py-0.5 !text-[11px]"
-            >
-              <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
-            </select>
-            <input
-              v-else-if="f.kind === 'bool'"
-              v-model="e.config[f.key]"
-              type="checkbox"
-              class="accent-ctp-blue self-start mt-1"
-            >
-            <input
-              v-else
-              v-model="e.config[f.key]"
-              :type="f.kind === 'num' ? 'number' : 'text'"
-              class="input !py-0.5 !text-[11px] font-mono"
-              :class="{ 'w-24': f.kind === 'num' }"
-            >
+        <!-- 开关行: 启用 / 默认 / 探活结果 -->
+        <div class="flex items-center gap-4 px-2.5 py-1.5 text-[11px] text-ctp-subtext1 border-t border-ctp-surface0/60">
+          <label class="flex items-center gap-1">
+            <input v-model="e.enabled" type="checkbox" class="accent-ctp-blue">{{ t('config.executors.enabled') }}
           </label>
+          <label class="flex items-center gap-1" :title="t('config.executors.defaultHint')">
+            <input
+              type="radio"
+              name="exec-default"
+              :checked="e.default"
+              @change="setDefault(i)"
+            >{{ t('config.executors.default') }}
+          </label>
+          <div class="flex-1" />
+          <div class="flex items-center gap-3 text-[10px] text-ctp-overlay0 font-mono min-w-0">
+            <span v-if="modelProbing[`${e.id}/_`]" class="truncate">{{ modelProbing[`${e.id}/_`] }}</span>
+            <span v-if="probing[e.id]" class="truncate" :title="probing[e.id]">{{ probing[e.id] }}</span>
+          </div>
         </div>
-        <!-- 实例内模型(下沉配置: 连通性可测) -->
-        <div v-if="e.config.models" class="border-t border-ctp-surface0/70 pt-2 space-y-1.5">
+
+        <!-- 连接参数(随类型) -->
+        <div v-if="typeFields[e.type]?.length" class="px-2.5 py-2 border-t border-ctp-surface0/60">
+          <div class="text-[10px] text-ctp-overlay1 mb-1.5">{{ t('config.executors.connTitle') }}</div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <label
+              v-for="f in typeFields[e.type]"
+              :key="f.key"
+              class="flex flex-col gap-0.5"
+            >
+              <span class="text-[10px] text-ctp-overlay1">{{ f.label }}</span>
+              <select
+                v-if="f.kind === 'select'"
+                v-model="e.config[f.key]"
+                class="input !py-0.5 !text-[11px]"
+              >
+                <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <input
+                v-else-if="f.kind === 'bool'"
+                v-model="e.config[f.key]"
+                type="checkbox"
+                class="accent-ctp-blue self-start mt-1"
+              >
+              <input
+                v-else
+                v-model="e.config[f.key]"
+                :type="f.kind === 'num' ? 'number' : 'text'"
+                class="input !py-0.5 !text-[11px] font-mono"
+              >
+            </label>
+          </div>
+        </div>
+
+        <!-- 实例模型(表格化: 表头 + 行) -->
+        <div v-if="e.config.models" class="px-2.5 py-2 border-t border-ctp-surface0/60 space-y-1.5">
           <div class="flex items-center gap-2">
             <span class="text-[10px] text-ctp-overlay1">{{ t('config.executors.modelsTitle') }}</span>
+            <div class="flex-1" />
             <button class="btn !py-0 !px-2 !text-[10px]" @click="addModel(e)">
               <PlusIcon class="w-3 h-3" />{{ t('config.executors.addModel') }}
             </button>
           </div>
+          <div class="hidden lg:grid grid-cols-[7rem_10rem_minmax(0,1fr)_8rem_5rem_4.5rem] gap-1.5 text-[10px] text-ctp-overlay0">
+            <span>{{ t('config.executors.mName') }}</span>
+            <span>{{ t('config.executors.mModel') }}</span>
+            <span>{{ t('config.executors.mUrl') }}</span>
+            <span>{{ t('config.executors.mKey') }}</span>
+            <span>{{ t('config.executors.mMaxTokens') }}</span>
+            <span />
+          </div>
           <div
             v-for="(m, mi) in e.config.models"
             :key="m.id || mi"
-            class="flex flex-wrap items-center gap-1.5"
+            class="grid grid-cols-2 lg:grid-cols-[7rem_10rem_minmax(0,1fr)_8rem_5rem_4.5rem] gap-1.5 items-center"
           >
-            <input v-model="m.name" class="input !py-0.5 !text-[11px] w-24" :placeholder="t('config.executors.mName')">
-            <input v-model="m.model" class="input !py-0.5 !text-[11px] font-mono w-36" :placeholder="t('config.executors.mModel')">
-            <input v-model="m.url" class="input !py-0.5 !text-[11px] font-mono flex-1 min-w-40" :placeholder="t('config.executors.mUrl')">
-            <input v-model="m.apiKey" type="password" class="input !py-0.5 !text-[11px] font-mono w-28" :placeholder="t('config.executors.mKey')" autocomplete="off">
-            <input v-model.number="m.maxTokens" type="number" class="input !py-0.5 !text-[11px] w-20" :placeholder="t('config.executors.mMaxTokens')">
-            <button class="btn !py-0 !px-2 !text-[10px]" @click="probeModel(e, m)">
-              {{ t('config.executors.modelProbe') }}
-            </button>
-            <button class="btn !py-0 !px-1.5 !text-[10px] text-ctp-red" @click="removeModel(e, mi)">
-              <TrashIcon class="w-3 h-3" />
-            </button>
-            <div v-if="modelProbing[`${e.id}/${m.name || m.model || '?'}`]" class="w-full text-[10px] text-ctp-overlay0 font-mono break-all">
+            <input v-model="m.name" class="input !py-0.5 !text-[11px]" :placeholder="t('config.executors.mName')">
+            <input v-model="m.model" class="input !py-0.5 !text-[11px] font-mono" :placeholder="t('config.executors.mModel')">
+            <input v-model="m.url" class="input !py-0.5 !text-[11px] font-mono col-span-2 lg:col-span-1" :placeholder="t('config.executors.mUrl')">
+            <input v-model="m.apiKey" type="password" class="input !py-0.5 !text-[11px] font-mono" :placeholder="t('config.executors.mKey')" autocomplete="off">
+            <input v-model.number="m.maxTokens" type="number" class="input !py-0.5 !text-[11px]" :placeholder="t('config.executors.mMaxTokens')">
+            <div class="flex items-center gap-1 justify-end">
+              <button class="btn !py-0 !px-2 !text-[10px]" :title="t('config.executors.modelProbe')" @click="probeModel(e, m)">
+                {{ t('config.executors.modelProbe') }}
+              </button>
+              <button class="btn !py-0 !px-1.5 !text-[10px] text-ctp-red" @click="removeModel(e, mi)">
+                <TrashIcon class="w-3 h-3" />
+              </button>
+            </div>
+            <div class="col-span-full text-[10px] text-ctp-overlay0 font-mono break-all">
               {{ modelProbing[`${e.id}/${m.name || m.model || '?'}`] }}
             </div>
           </div>
-        </div>
-        <div v-if="probing[e.id]" class="text-[10px] text-ctp-overlay0 font-mono break-all">
-          {{ probing[e.id] }}
         </div>
       </div>
 

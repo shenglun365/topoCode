@@ -1117,6 +1117,7 @@ export default {
       hostHint: 'Local = in-process direct; Remote = connect over network',
       hostLocal: 'Local',
       hostRemote: 'Remote',
+      connTitle: 'Connection',
       modelsTitle: 'Instance models (referenced by name):',
       addModel: 'Add model',
       mName: 'Name',

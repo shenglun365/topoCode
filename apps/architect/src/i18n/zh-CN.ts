@@ -1143,6 +1143,7 @@ export default {
       hostHint: '本机=architect 进程内直连; 远程=经网络连接远端实例',
       hostLocal: '本机',
       hostRemote: '远程',
+      connTitle: '连接参数',
       modelsTitle: '实例模型(角色经名称引用):',
       addModel: '加模型',
       mName: '名称',
