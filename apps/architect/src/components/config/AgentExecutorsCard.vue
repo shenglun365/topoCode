@@ -360,7 +360,9 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
           </span>
           <span class="font-mono text-[10px] text-ctp-overlay0 truncate" :title="meta.doc">{{ meta.doc }}</span>
           <div class="flex-1" />
+          <!-- 一键安装与检测联动: 仅在「已检测且未安装」时出现, 避免误点击 -->
           <button
+            v-if="envInfo?.[name] && !envInfo[name].installed"
             class="btn !py-0 !px-2 !text-[10px]"
             :disabled="installing === name"
             @click="installAgent(name)"
