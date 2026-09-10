@@ -544,6 +544,7 @@ onUnmounted(() => {
           </span>
         </span>
       </span>
+      <slot name="header-extra" />
     </div>
 
     <div

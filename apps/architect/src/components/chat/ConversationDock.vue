@@ -406,29 +406,7 @@ async function answerClarify() {
       </div>
     </div>
 
-    <!-- PR3 角色条: 当前角色 + (首次)绑定执行角色入口 -->
-    <div v-if="conv.activeId" class="flex shrink-0 items-center gap-1.5 border-b border-ctp-surface0 px-3 py-1.5">
-      <span class="chip !text-[10px]" :class="activeRoleId === 'architect' ? 'bg-ctp-surface0/60 text-ctp-subtext1' : 'bg-ctp-peach/15 text-ctp-peach'">
-        {{ roleNames[activeRoleId] || activeRoleId }}
-      </span>
-      <span v-if="roleLocked" class="text-[10px] text-ctp-overlay0" :title="t('session.role.lockedHint')">🔒</span>
-      <div class="flex-1" />
-      <button
-        v-if="roleSwitchEligible"
-        class="btn !py-0 !px-2 !text-[10px]"
-        @click="openRoleSwitch"
-      >{{ t('session.role.bind') }}</button>
-      <button
-        v-if="handoffEligible"
-        class="btn !py-0 !px-2 !text-[10px]"
-        @click="openHandoff"
-      >{{ t('session.role.handoff') }}</button>
-      <button
-        class="btn !py-0 !px-2 !text-[10px]"
-        :class="showInfo ? 'btn-blue' : ''"
-        @click="toggleInfo"
-      >{{ t('session.infoToggle') }}</button>
-    </div>
+
 
     <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
     <div
@@ -612,6 +590,30 @@ async function answerClarify() {
         @refresh-asset="emitRefreshAsset"
         @stop="conv.stop"
       >
+        <template #header-extra>
+          <div v-if="conv.activeId" class="ml-auto flex shrink-0 items-center gap-1.5">
+            <span
+              class="chip !text-[10px]"
+              :class="activeRoleId === 'architect' ? 'bg-ctp-surface0/60 text-ctp-subtext1' : 'bg-ctp-peach/15 text-ctp-peach'"
+            >{{ roleNames[activeRoleId] || activeRoleId }}</span>
+            <span v-if="roleLocked" class="text-[10px] text-ctp-overlay0" :title="t('session.role.lockedHint')">🔒</span>
+            <button
+              v-if="roleSwitchEligible"
+              class="btn !py-0 !px-2 !text-[10px]"
+              @click="openRoleSwitch"
+            >{{ t('session.role.bind') }}</button>
+            <button
+              v-if="handoffEligible"
+              class="btn !py-0 !px-2 !text-[10px]"
+              @click="openHandoff"
+            >{{ t('session.role.handoff') }}</button>
+            <button
+              class="btn !py-0 !px-2 !text-[10px]"
+              :class="showInfo ? 'btn-blue' : ''"
+              @click="toggleInfo"
+            >{{ t('session.infoToggle') }}</button>
+          </div>
+        </template>
         <template #toolbar-extra>
           <button
             class="btn btn-xs"
