@@ -283,6 +283,7 @@ async function answerClarify() {
         @rename="onRenameTitle"
         @summarize-title="summarizeTitle"
         :diagram-skill="conv.diagramSkill"
+        :read-only="(conv.activeMeta as any)?.status === 'archived'"
         @send="(text) => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}) }); onSent() }"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"

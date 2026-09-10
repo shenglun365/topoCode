@@ -228,11 +228,14 @@ def spawn_execution_session(req: dict) -> Optional[dict]:
         lines.append("\n**验收标准**：\n" + "\n".join(f"- {x}" for x in acc[:8]))
     lines.append("\n**下一步**：任务执行页「新建任务」勾选该需求 → 选择执行器(cline/codex/opencode) "
                  "→ 创建执行任务对接 coding agent。")
+    meta = {"pendingExec": True}
+    if origin_id:
+        meta["sourceConversationId"] = origin_id
     conv = store.ConversationsStore.create({
         "kind": "execution", "projectId": (origin or {}).get("projectId") or "",
         "reqId": rid, "title": f"待执行｜{(req.get('title') or rid)[:36]}",
-        "status": "pending",
-        "meta": {"sourceConversationId": origin_id} if origin_id else {},
+        "status": "active", "reviewState": "unread",
+        "meta": meta,
     })
     store.ConversationsStore.append_message({
         "id": store.next_id("m"), "conversationId": conv["id"], "role": "assistant",

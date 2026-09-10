@@ -28,6 +28,8 @@ const props = defineProps<{
   titleSummarizing?: boolean
   /** 绘图增强(IR→代码)：开启后 agent 经 diagram.build 工具生成语法正确的图。 */
   diagramSkill?: boolean
+  /** 归档只读: 禁用输入与发送(读取/复制/提炼仍可用)。 */
+  readOnly?: boolean
   /** 期望固化(🧾)：开启后 agent 把可验证期望固化为契约条目草稿。 */
   contractSkill?: boolean
   /** 是否显示 🧾 开关(仅需求方案对话显示；资产管理/工作台不显示)。 */
@@ -1163,7 +1165,8 @@ onUnmounted(() => {
         v-model="input"
         rows="2"
         class="input !py-2.5 text-xs resize-y min-h-0"
-        :placeholder="t('requirement.chat.placeholder')"
+        :disabled="props.readOnly"
+        :placeholder="props.readOnly ? t('session.readOnlyHint') : t('requirement.chat.placeholder')"
         @input="autoResize"
         @keydown="onInputKeydown"
       />
@@ -1178,7 +1181,7 @@ onUnmounted(() => {
       <button
         v-else
         class="btn btn-primary !py-2.5 shrink-0 whitespace-nowrap"
-        :disabled="!input.trim()"
+        :disabled="!input.trim() || props.readOnly"
         @click="send"
       >
         <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}

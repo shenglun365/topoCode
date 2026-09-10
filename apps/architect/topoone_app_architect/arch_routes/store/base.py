@@ -64,6 +64,7 @@ _JSON_COLUMNS = {
     "applies_kinds", "scenarios", "alias", "origin", "target", "behavior",
     "z_axis", "item_ids", "asset_refs", "component_refs",
     "framework_snapshot", "evidence", "trigger_info", "summary",
+    'skills', 'tools', 'permissions',
 }
 
 
@@ -173,6 +174,8 @@ PROJECT_TABLES = frozenset({
     "arch_capability_proposals",
     "arch_contract_items", "arch_contract_packages",
     "arch_acceptance_reports", "arch_acceptance_facts", "arch_acceptance_opinions",
+    # PR1 双维度状态机/角色体系: 并行执行资产锁(项目库)
+    "arch_asset_locks",
 })
 
 # WS8 认知层→主库提升: 主库全局桶哨兵 project_id(设计稿 global-promotion-design.md)

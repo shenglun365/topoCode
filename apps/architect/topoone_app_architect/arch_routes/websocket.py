@@ -188,6 +188,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         conv_id = conv["id"]
     else:
         conv = store.ConversationsStore.get(conv_id)
+        if conv and (conv.get("status") or "active") == "archived":
+            # PR1: 归档会话只读——拒绝继续对话(读取/复制/提炼经 REST 与只读工具仍开放)
+            await websocket.send_json({"type": "error", "requestId": request_id,
+                                       "message": "会话已归档(只读)：不可继续对话。可复制到新会话或提炼引用。"})
+            return
         # 会话↔需求绑定回填：提案卡产生后前端 send 会带 reqId——补写进会话记录,
         # 刷新/重开会话后 openConversation 携带 meta.reqId, 自然语言确认仍可用
         if conv and (data.get("reqId") or "") and not (conv.get("reqId") or ""):
@@ -452,9 +457,17 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             "id": assistant_msg_id, "conversationId": conv_id,
             "role": "assistant", "time": _ts(), "content": final_content,
         })
+        try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
+            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+        except Exception:  # noqa: BLE001
+            pass
         await websocket.send_json({"type": "done", "conversationId": conv_id,
                                    "content": final_content, "messageId": assistant_msg_id})
     else:
+        try:
+            store.ConversationsStore.update(conv_id, {"reviewState": "error"})
+        except Exception:  # noqa: BLE001
+            pass
         await websocket.send_json({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
 
 

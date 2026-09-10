@@ -43,6 +43,7 @@ const busyTip = ref('')
 const q = ref('')
 const timeFilter = ref<'all' | 'today' | 'week' | 'earlier'>('all')
 const groupFilter = ref('')          // '' = 全部; group:<name> / module:<name>
+const statusFilter = ref('all')      // PR1 生命周期过滤: all | active | running | archived
 
 async function load() {
   loading.value = true
@@ -80,6 +81,7 @@ function timeBucket(c: ConversationMeta): 'today' | 'week' | 'earlier' {
 const filtered = computed(() => {
   let out = list.value
   if (timeFilter.value !== 'all') out = out.filter((c) => timeBucket(c) === timeFilter.value)
+  if (statusFilter.value !== 'all') out = out.filter((c) => (c.status || 'active') === statusFilter.value)
   if (groupFilter.value.startsWith('group:')) {
     const g = groupFilter.value.slice(6)
     out = out.filter((c) => c.tags.groups.includes(g))
@@ -305,11 +307,16 @@ function fmt(ts?: number) {
   return ts ? new Date(ts).toLocaleString() : '—'
 }
 function statusClass(s: string) {
-  if (s === 'running') return 'bg-ctp-green/15 text-ctp-green'
-  if (s === 'waiting') return 'bg-ctp-yellow/15 text-ctp-yellow'
+  if (s === 'running') return 'bg-ctp-blue/15 text-ctp-blue'
   if (s === 'archived') return 'bg-ctp-surface0 text-ctp-overlay0'
-  if (s === 'done') return 'bg-ctp-blue/15 text-ctp-blue'
-  return 'bg-ctp-surface0 text-ctp-subtext0'
+  return 'bg-ctp-green/15 text-ctp-green'          // active 活跃(可运行)
+}
+/** 查看状态徽标(第二维度): 未读=蓝 / 待回复=黄 / 报错=红 / 已读=不显示。 */
+function reviewClass(rs?: string) {
+  if (rs === 'unread') return 'bg-ctp-blue/20 text-ctp-blue'
+  if (rs === 'awaiting_reply') return 'bg-ctp-yellow/20 text-ctp-yellow'
+  if (rs === 'error') return 'bg-ctp-red/20 text-ctp-red'
+  return ''
 }
 </script>
 
@@ -326,6 +333,12 @@ function statusClass(s: string) {
         <option value="today">{{ t('session.time.today') }}</option>
         <option value="week">{{ t('session.time.week') }}</option>
         <option value="earlier">{{ t('session.time.earlier') }}</option>
+      </select>
+      <select v-model="statusFilter" class="input !w-auto !py-1 text-xs">
+        <option value="all">{{ t('session.statusFilter.all') }}</option>
+        <option value="active">{{ t('session.status.active') }}</option>
+        <option value="running">{{ t('session.status.running') }}</option>
+        <option value="archived">{{ t('session.status.archived') }}</option>
       </select>
       <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
         <option value="">{{ t('session.group.all') }}</option>
@@ -374,6 +387,8 @@ function statusClass(s: string) {
             @click="select(c)"
           >
             <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
+            <span v-if="c.pendingExec" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">{{ t('session.pendingExec') }}</span>
+            <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
                 <input

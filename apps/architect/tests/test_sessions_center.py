@@ -31,12 +31,12 @@ class TestSessionsCenter(unittest.TestCase):
 
         r = self.client.patch(f"/api/architect/sessions/{conv['id']}",
                               json={"tags": {"modules": ["pay"], "groups": ["迭代一"]},
-                                    "title": "支付模块讨论(改)", "status": "done"})
+                                    "title": "支付模块讨论(改)", "reviewState": "unread"})
         self.assertEqual(r.status_code, 200)
         data = r.json()["data"]
         self.assertEqual(data["title"], "支付模块讨论(改)")
         self.assertEqual(data["tags"]["modules"], ["pay"])
-        self.assertEqual(data["status"], "done")
+        self.assertEqual(data["reviewState"], "unread")
 
         r = self.client.get("/api/architect/sessions", params={"q": "支付模块"})
         self.assertIn(conv["id"], [x["id"] for x in r.json()["data"]])

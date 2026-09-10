@@ -452,7 +452,11 @@ export default {
     archiveHint: 'End the session; prompts when minable content exists',
     mineOnEnd: 'This session has minable content. Mine now?',
 
-    status: { active: 'Active', pending: 'Pending execution', waiting: 'Waiting', running: 'Running', done: 'Done', archived: 'Archived' },
+    status: { active: 'Active', running: 'Running', archived: 'Archived' },
+    review: { read: 'Read', unread: 'Unread', awaiting_reply: 'Awaiting reply', error: 'Error' },
+    pendingExec: 'Pending exec',
+    readOnlyHint: 'Archived (read-only) — read/copy/mine only',
+    statusFilter: { all: 'All statuses' },
     time: { all: 'All time', today: 'Today', week: 'This week', earlier: 'Earlier' },
     group: { all: 'All groups', custom: 'Custom groups', byModule: 'By module', new: 'New group' },
     filter: { all: 'All' },

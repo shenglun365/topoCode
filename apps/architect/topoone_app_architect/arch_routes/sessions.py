@@ -21,7 +21,20 @@ router = APIRouter()
 # 会话中心全量口径(含资产/设计对话; execution/unit-test 会话由对应域自持, 此处也收录)
 SESSION_KINDS = ["requirement", "design", "asset", "execution", "unit-test", "generic"]
 
+# PR1 双维度状态机: 生命周期(status) + 查看状态(review_state)
+LIFECYCLES = ("active", "running", "archived")          # archived 不可逆终态
+REVIEW_STATES = ("read", "unread", "awaiting_reply", "error")
+
 _GROUPS_KEY = "session.groups"      # 用户自定义分组(collab config, JSON 数组)
+
+
+def _pending_exec(c) -> bool:
+    """待执行标记(meta.pendingExec): 确认定稿生成的待执行会话(active 生命周期)。"""
+    try:
+        meta = json.loads(c.get("meta") or "{}") if isinstance(c.get("meta"), str) else (c.get("meta") or {})
+        return bool(isinstance(meta, dict) and meta.get("pendingExec"))
+    except (TypeError, ValueError):
+        return False
 
 
 def _tags_of(conv: dict) -> dict:
@@ -83,6 +96,9 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "reqId": c.get("reqId") or "",
             "title": title,
             "status": c.get("status") or "active",
+            "reviewState": c.get("reviewState") or "read",
+            "roleId": c.get("roleId") or "architect",
+            "pendingExec": _pending_exec(c),
             "tags": _tags_of(c),
             "summary": c.get("summary") or "",
             "msgCount": c.get("msgCount") or 0,
@@ -146,6 +162,7 @@ async def create_session(request: Request):
         "projectId": data.get("projectId") or "",
         "title": title or f"{kind} 会话",
         "status": "active",
+        "roleId": data.get("roleId") or "architect",
         "tags": _norm_tags(data) or {"modules": [], "groups": []},
         "meta": data.get("meta") or {},
     })
@@ -177,9 +194,16 @@ async def update_session(conv_id: str, request: Request):
         patch["summary"] = str(data.get("summary") or "")
     if "status" in data:
         status = str(data.get("status") or "").strip()
-        if status not in ("active", "waiting", "running", "done", "archived"):
-            return err(400, f"非法状态: {status}")
+        if status not in LIFECYCLES:
+            return err(400, f"非法生命周期状态: {status}(active|running|archived)")
+        if (conv.get("status") or "active") == "archived" and status != "archived":
+            return err(400, "归档不可逆：归档会话只读，请复制到新会话继续")
         patch["status"] = status
+    if "reviewState" in data:
+        rs = str(data.get("reviewState") or "").strip()
+        if rs not in REVIEW_STATES:
+            return err(400, f"非法查看状态: {rs}(read|unread|awaiting_reply|error)")
+        patch["reviewState"] = rs
     tags = _norm_tags(data)
     if tags is not None:
         patch["tags"] = tags
@@ -187,8 +211,8 @@ async def update_session(conv_id: str, request: Request):
         return err(400, "无可更新字段")
     updated = store.ConversationsStore.update(conv_id, patch)
     result = _conv_api(updated or conv)
-    # P5: 会话结束(归档/完成)即时提示可提炼内容(廉价启发: 消息数达标)
-    if patch.get("status") in ("archived", "done"):
+    # P5: 会话归档即时提示可提炼内容(廉价启发: 消息数达标)
+    if patch.get("status") == "archived":
         try:
             n = len(store.ConversationsStore.messages(conv_id, limit=200))
             result["mineableHint"] = n >= 8
@@ -247,6 +271,10 @@ def _conv_api(conv: dict) -> dict:
         "reqId": conv.get("reqId") or "",
         "title": conv.get("title") or "",
         "status": conv.get("status") or "active",
+        "reviewState": conv.get("reviewState") or "read",
+        "roleId": conv.get("roleId") or "architect",
+        "roleLocked": bool(conv.get("roleLocked")),
+        "pendingExec": _pending_exec(conv),
         "tags": _tags_of(conv),
         "summary": conv.get("summary") or "",
         "createdAt": conv.get("createdAt"),

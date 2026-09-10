@@ -124,6 +124,93 @@ class UnitTestSessionsStore:
 
 
 
+class SessionRolesStore:
+    """会话执行角色(主库全局表; architect 系统种子 builtin=1 不可删)。"""
+
+    TABLE = "arch_session_roles"
+
+    @classmethod
+    def all(cls):
+        rows = _db().fetchall(f"SELECT * FROM {cls.TABLE} ORDER BY created_at ASC")
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def get(cls, role_id: str):
+        row = _db().fetchone(f"SELECT * FROM {cls.TABLE} WHERE id = ?", (role_id,))
+        return _row_to_api(row) if row else None
+
+    @classmethod
+    def upsert(cls, data: dict) -> dict:
+        now = int(__import__("time").time() * 1000)
+        payload = {
+            "id": data.get("id") or data.get("name", "").strip().lower().replace(" ", "-"),
+            "name": data.get("name") or "",
+            "kind": data.get("kind") or "executor",
+            "executorId": data.get("executorId") or "",
+            "modelId": data.get("modelId") or "",
+            "skills": data.get("skills"),
+            "tools": data.get("tools"),
+            "permissions": data.get("permissions"),
+            "builtin": 1 if data.get("builtin") else 0,
+            "updatedAt": now,
+        }
+        existing = cls.get(payload["id"])
+        if existing:
+            # 内置角色只允许改能力配置(skills/tools/permissions), 不许改绑定
+            if existing.get("builtin"):
+                payload["kind"] = existing["kind"]
+                payload["executorId"] = existing.get("executorId") or ""
+            cols = list(payload)
+            db = _db()
+            db.execute(
+                f"UPDATE {cls.TABLE} SET {', '.join(f'{_to_snake(c)} = ?' for c in cols)} WHERE id = ?",
+                (*[_dumps(payload[c]) for c in cols], payload["id"]))
+            db.commit()
+            return cls.get(payload["id"])
+        payload["createdAt"] = now
+        cols = list(payload)
+        db = _db()
+        db.execute(
+            f"INSERT INTO {cls.TABLE} ({', '.join(_to_snake(c) for c in cols)}) "
+            f"VALUES ({', '.join('?' * len(cols))})",
+            tuple(_dumps(payload[c]) for c in cols))
+        db.commit()
+        return payload
+
+    @classmethod
+    def delete(cls, role_id: str) -> bool:
+        row = cls.get(role_id)
+        if not row or row.get("builtin"):
+            return False
+        db = _db()
+        cur = db.execute(f"DELETE FROM {cls.TABLE} WHERE id = ?", (role_id,))
+        db.commit()
+        return cur.rowcount > 0
+
+
+class AssetLocksStore:
+    """并行执行资产锁(项目库; PR5 acquire/release 使用, PR1 先落表)。"""
+
+    TABLE = "arch_asset_locks"
+
+    @classmethod
+    def all(cls, project_id: str = ""):
+        return _all(cls.TABLE, project_id=project_id)
+
+    @classmethod
+    def conflicts(cls, project_id: str, resources: list, exclude_holder: str = "") -> list:
+        """资源清单与现有锁的冲突(排除自己持有的)。"""
+        if not resources:
+            return []
+        out = []
+        for lk in cls.all(project_id):
+            if lk.get("holder") == exclude_holder:
+                continue
+            if lk.get("resource") in resources:
+                out.append(lk)
+        return out
+
+
 class ConversationsStore:
     """统一会话(阶段D 主干)：requirement/design/execution/unit-test 共用一张表+消息表。"""
 
@@ -171,6 +258,9 @@ class ConversationsStore:
             "req_id": data.get("reqId") or "",
             "title": data.get("title") or "",
             "status": data.get("status") or "active",
+            "review_state": data.get("reviewState") or "read",
+            "role_id": data.get("roleId") or "architect",
+            "role_locked": 1 if data.get("roleLocked") else 0,
             "tags": data.get("tags"),
             "summary": data.get("summary") or "",
             "meta": data.get("meta"),

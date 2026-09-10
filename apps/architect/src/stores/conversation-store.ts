@@ -135,6 +135,11 @@ export const useConversationStore = defineStore('archConversation', () => {
       applyConversation({ ...detail, reqId: meta.reqId })
     } catch { /* 无历史 → 空对话 */ }
     void rehydrateProposals(meta.id)
+    // PR1 双维度: 打开会话 → 标记已读(归档会话跳过)
+    if ((meta as any).status !== 'archived') {
+      sessionService.update(meta.id, { reviewState: 'read' }).catch(() => { /* 标记失败无碍 */ })
+      if (activeMeta.value) activeMeta.value = { ...activeMeta.value, reviewState: 'read' } as ConversationMeta
+    }
   }
 
   /**
@@ -224,6 +229,10 @@ export const useConversationStore = defineStore('archConversation', () => {
         } else if (ev.type === 'done') {
           arr[idx].content = ev.content ?? arr[idx].content
           if (ev.messageId) arr[idx].id = ev.messageId
+          // 用户正观看的会话流式完成 → 保持已读(后端落库时置了 unread)
+          if (ev.conversationId && ev.conversationId === activeId.value) {
+            sessionService.update(ev.conversationId, { reviewState: 'read' }).catch(() => { /* 无碍 */ })
+          }
           void refreshActiveMeta()
         } else if (ev.type === 'tool_result') {
           const stage = stageOfTool(ev.tool)

@@ -64,7 +64,9 @@ def test_spawn_execution_session_idempotent():
     a = spawn_execution_session(req)
     b = spawn_execution_session(req)
     assert a and b and a["id"] == b["id"]
-    assert a["kind"] == "execution" and a["status"] == "pending"
+    # PR1 双维度: 待执行会话 = active + unread + meta.pendingExec 标记
+    assert a["kind"] == "execution" and a["status"] == "active"
+    assert "pendingExec" in (a.get("meta") or "")
     msgs = store.ConversationsStore.messages(a["id"])
     assert msgs and "守卫测试需求" in msgs[0]["content"]
 

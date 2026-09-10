@@ -14,7 +14,14 @@ export interface ConversationMeta {
   kind: string
   reqId: string
   title: string
+  /** 生命周期: active | running | archived(不可逆) */
   status: string
+  /** 查看状态: read | unread | awaiting_reply | error */
+  reviewState?: string
+  /** 执行角色(默认 architect) */
+  roleId?: string
+  /** 待执行标记(确认定稿生成的会话) */
+  pendingExec?: boolean
   tags: SessionTags
   summary: string
   msgCount: number
@@ -79,7 +86,7 @@ export const sessionService = {
   async create(body: { kind: string; title?: string; tags?: SessionTags }): Promise<ConversationMeta> {
     return apiPost<ConversationMeta>('/sessions', body)
   },
-  async update(id: string, patch: Partial<Pick<ConversationMeta, 'title' | 'status' | 'summary'> & { tags: SessionTags }>): Promise<ConversationMeta> {
+  async update(id: string, patch: Partial<Pick<ConversationMeta, 'title' | 'status' | 'summary' | 'reviewState'> & { tags: SessionTags }>): Promise<ConversationMeta> {
     return apiPatch<ConversationMeta>(`/sessions/${id}`, patch)
   },
   async remove(id: string): Promise<void> {

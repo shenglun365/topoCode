@@ -476,7 +476,11 @@ export default {
     archiveHint: '结束会话; 有可提炼内容时会提示',
     mineOnEnd: '该会话有可提炼内容, 立即提炼?',
 
-    status: { active: '进行中', pending: '待执行', waiting: '待回答', running: '运行中', done: '已完成', archived: '已归档' },
+    status: { active: '活跃', running: '运行中', archived: '已归档' },
+    review: { read: '已读', unread: '未读', awaiting_reply: '待回复', error: '报错' },
+    pendingExec: '待执行',
+    readOnlyHint: '会话已归档(只读)——可阅读/复制/提炼，不可继续对话',
+    statusFilter: { all: '全部状态' },
     time: { all: '全部时间', today: '今天', week: '本周', earlier: '更早' },
     group: { all: '全部分组', custom: '自定义分组', byModule: '按模块', new: '新建分组' },
     filter: { all: '全部' },

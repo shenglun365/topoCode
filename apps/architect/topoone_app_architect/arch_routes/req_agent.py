@@ -329,6 +329,12 @@ def _now_ms() -> int:
     return int(_t.time() * 1000)
 
 
+# 归档会话上禁止的动作类工具(生成/落库/定稿/指派); 检索与读取类不在此列
+_ARCHIVED_DENY_TOOLS = {
+    "req.propose", "req.finalize", "execution.assign", "contract.propose",
+}
+
+
 def run_arch_tool(name: str, arguments: Dict[str, Any],
                   root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
     """执行 architect 注册工具；缺失/异常返回 {error}。root/project 按签名自动注入。
@@ -338,6 +344,18 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
     entry = _ARCH_TOOLS.get(name)
     if not entry:
         return {"error": f"未知工具: {name}"}
+    # PR1 归档只读: 归档会话上拒绝动作类工具(落库/定稿/指派); 检索/读取/提炼放行
+    if name in _ARCHIVED_DENY_TOOLS:
+        try:
+            from . import ctx as _ctx
+            conv_id = _ctx.get_conv()
+            if conv_id:
+                from . import store as _store
+                conv = _store.ConversationsStore.get(conv_id)
+                if conv and (conv.get("status") or "active") == "archived":
+                    return {"error": f"会话已归档(只读)：{name} 不可执行。可读取/复制/提炼。"}
+        except Exception:  # noqa: BLE001
+            pass
     fn = entry["handler"]
     kwargs = dict(arguments or {})
     params = inspect.signature(fn).parameters
@@ -1269,6 +1287,14 @@ def tool_interaction_clarify(message: str = "",
                             {"reqId": req_id, "message": message})
     if pub is None:
         return {"ok": False, "error": "agent-bus broker 不可达，无法发布提问"}
+    # PR1 双维度: agent 明确请求用户输入 → 查看状态=待回复
+    try:
+        conv_id = ctx.get_conv()
+        if conv_id:
+            from . import store as _store
+            _store.ConversationsStore.update(conv_id, {"reviewState": "awaiting_reply"})
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "ok": True, "reqId": req_id, "messageId": pub.get("id"),
         "summary": "已向用户提问(工作台「需要你输入」可见)；继续当前回合的其它工作，"
