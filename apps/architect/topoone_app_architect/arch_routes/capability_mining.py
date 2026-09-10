@@ -243,6 +243,21 @@ async def api_mine(request: Request):
                       root=body.get("root"), project=body.get("project"))
     if result.get("error"):
         return err(400, result["error"])
+    # 统一时间线: 提炼报告沉淀为关联会话消息(复用/分析/总结可见)
+    try:
+        conv_id = str(body.get("conversationId") or "")
+        from . import store
+        if conv_id and store.ConversationsStore.get(conv_id):
+            store.ConversationsStore.append_message({
+                "id": store.next_id("m"), "conversationId": conv_id,
+                "role": "assistant", "time": int(_time.time() * 1000),
+                "content": "🧠 **能力提炼完成**，新增提案 "
+                           + str(len(result.get("proposals") or [])) + " 条（待审）\n\n"
+                           + str(result.get("markdown") or "")[:2000],
+            })
+            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+    except Exception:  # noqa: BLE001
+        pass
     return ok({"count": len(result.get("proposals") or []),
                "markdown": result.get("markdown"),
                "proposals": result.get("proposals") or []})
