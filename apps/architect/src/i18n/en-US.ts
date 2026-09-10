@@ -2136,6 +2136,8 @@ renderingMore: 'Rendered {done}/{total} · scroll for more',
     nextPage: 'Next',
     history: {
       title: 'Chat History',
+      newConversation: 'Import as new conversation',
+      newConversationHint: 'Start a fresh conversation with the selected asset',
       hint: 'Saved asset-management conversations. "Import" restores a conversation to keep confirming asset specs; "Delete" removes it.',
       loading: 'Loading…',
       empty: 'No conversations yet. Asset-management chats are persisted here for later.',
