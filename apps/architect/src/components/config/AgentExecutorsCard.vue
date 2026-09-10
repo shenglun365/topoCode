@@ -199,6 +199,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'permission', label: '权限策略', kind: 'select', options: ['auto', 'ask'] },
     { key: 'timeout', label: '超时(秒)', kind: 'num' },
     { key: 'model', label: '模型(可选)' },
+    { key: 'cwd', label: '工作目录(拉起用, 空=家目录; 执行时 runner 仍按项目根另起)' },
   ],
   'remote-agent': [
     { key: 'agent_url', label: '远端 serve URL' },
