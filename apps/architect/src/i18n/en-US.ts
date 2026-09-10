@@ -1038,6 +1038,7 @@ export default {
       saved: 'Saved',
       modelPlaceholder: 'Model id (empty = follow default model)',
       hint: 'Assign different models to different kinds of cognitive work. Applied per call without affecting the global model selection of other pages.',
+      modelMissing: 'not in instance models',
       items: {
         extract: { label: 'Extraction', note: 'Identify interfaces and semantic structure; a fast, low-cost model suffices' },
         verify: { label: 'Acceptance Check', note: 'Verify against acceptance criteria item by item; a stronger model is recommended' },

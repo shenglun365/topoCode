@@ -1064,6 +1064,7 @@ export default {
       saved: '已保存',
       modelPlaceholder: '模型 id（留空 = 跟随缺省模型）',
       hint: '为不同类型的认知工作指定不同模型：以调用参数即时生效，不影响其它页面的全局模型选择。',
+      modelMissing: '不在实例模型表中',
       items: {
         extract: { label: '提取', note: '识别接口与语义结构，速度快、成本低的模型即可' },
         verify: { label: '验收比对', note: '对照验收标准逐条核对，建议精度更高的模型' },

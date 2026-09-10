@@ -528,11 +528,16 @@ onMounted(() => { void loadCgStatus() })
         >
           <span class="w-20 font-semibold text-ctp-text shrink-0">{{ roleLabel(r) }}</span>
           <span class="flex-1 text-[10px] text-ctp-overlay1 leading-snug">{{ roleNote(r) }}</span>
-          <input
-            v-model="r.modelId"
-            class="input !py-1 !px-2 !text-[11px] w-56 font-mono"
-            :placeholder="t('config.roles.modelPlaceholder')"
-          >
+          <select v-model="r.modelId" class="input !py-1 !px-2 !text-[11px] w-64 font-mono">
+            <option value="">{{ t('config.roles.modelPlaceholder') }}</option>
+            <option
+              v-if="r.modelId && !llmModels.some((m) => m.id === r.modelId)"
+              :value="r.modelId"
+            >{{ r.modelId }}（{{ t('config.roles.modelMissing') }}）</option>
+            <option v-for="m in llmModels" :key="m.id" :value="m.id">
+              {{ m.name }}（{{ m.model }}@{{ m.url }}）
+            </option>
+          </select>
         </div>
       </div>
       <p class="px-4 pb-3 text-[10px] text-ctp-overlay0 leading-relaxed">
