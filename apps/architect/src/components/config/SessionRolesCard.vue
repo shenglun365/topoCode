@@ -27,6 +27,7 @@ interface SessionRole {
   builtin?: boolean
   executorLabel?: string
   skillPool?: string[]
+  skillIntros?: Record<string, string>
 }
 
 const { t } = useI18n()
@@ -216,6 +217,7 @@ function toggleSkill(role: SessionRole, skill: string) {
             :key="sk"
             class="chip !text-[10px] cursor-pointer"
             :class="r.skills?.includes(sk) ? 'bg-ctp-blue/20 text-ctp-blue' : 'bg-ctp-surface0/60 text-ctp-overlay1'"
+            :title="r.skillIntros?.[sk] || sk"
             @click="toggleSkill(r, sk)"
           >
             {{ sk }}
@@ -227,6 +229,17 @@ function toggleSkill(role: SessionRole, skill: string) {
             :placeholder="t('config.sessionRoles.toolsPh')"
             @change="(ev: any) => { r.tools = String(ev.target.value || '').split(',').map((x: string) => x.trim()).filter(Boolean) }"
           >
+        </div>
+        <!-- 已选技能简介 -->
+        <div v-if="(r.skills ?? []).length" class="space-y-0.5 border-t border-ctp-surface0/60 pt-1.5">
+          <div
+            v-for="sk in r.skills"
+            :key="sk"
+            class="text-[10px] leading-snug text-ctp-overlay0"
+          >
+            <span class="font-mono text-ctp-subtext1">{{ sk }}</span>
+            <span class="mx-1">·</span>{{ r.skillIntros?.[sk] || '—' }}
+          </div>
         </div>
       </div>
 

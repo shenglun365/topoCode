@@ -154,6 +154,18 @@ async def put_groups(request: Request):
 
 _ROLE_SKILL_POOL = ["extract", "plan", "coding", "capability", "accept", "naming", "contract", "linenote"]
 
+# 技能场景简介(功能/使用场景一句话, 前端 tooltip+已选说明展示)
+_SKILL_INTROS = {
+    "extract": "对话式语义提取——从对话/代码中识别接口、实体与语义结构。用于需求澄清、资产盘点。",
+    "plan": "方案生成——产出执行方案与任务分解。用于需求入池后的设计阶段。",
+    "coding": "coding agent 委派——把编码任务委派给绑定的执行器实例。executor 角色默认启用。",
+    "capability": "能力评估与提炼——执行结果图文评估、从历史会话沉淀规约与技巧。",
+    "accept": "验收比对——对照验收标准逐条核对交付物。建议搭配强模型。",
+    "naming": "命名治理——实体/接口命名规范化与冲突检测。用于认知编辑前审计。",
+    "contract": "接口契约——契约条款生成与一致性校验。用于跨模块/跨团队接口对齐。",
+    "linenote": "代码逐行解读——为存量代码生成逐行讲解与知识沉淀。",
+}
+
 
 @router.get("/session-roles")
 async def list_session_roles():
@@ -169,6 +181,7 @@ async def list_session_roles():
         r = dict(r)
         r["executorLabel"] = ex_names.get(r.get("executorId") or "", "")
         r["skillPool"] = _ROLE_SKILL_POOL
+        r["skillIntros"] = _SKILL_INTROS
         out.append(r)
     return ok(out)
 
