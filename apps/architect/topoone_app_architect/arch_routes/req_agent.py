@@ -1033,12 +1033,22 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
 
 # ── 需求定稿工具(plan 结论 → 结构化分析 + 转入待执行) ────────────────
 
-def _md_lines(text: str) -> List[str]:
-    """Markdown 行 → 数组(剥列表符/序号，去空行)。"""
+def _md_lines(text) -> List[str]:
+    """Markdown 行/JSON 数组 → 数组(剥列表符/序号，去空行)。
+
+    容忍模型把 allowedScopeMd 等字段传成 JSON 数组(自然行为)——逐项字符串化后
+    同样剥前缀；非字符串标量(数字等)也直接字符串化。
+    """
     import re as _re
-    out = []
-    for ln in (text or "").splitlines():
-        t = _re.sub(r"^\s*(?:[-*+]|\d+[.)])\s*", "", ln).strip()
+    if isinstance(text, (list, tuple)):
+        items: List[Any] = list(text)
+    elif isinstance(text, str):
+        items = text.splitlines()
+    else:
+        items = [str(text)] if text not in (None, "") else []
+    out: List[str] = []
+    for ln in items:
+        t = _re.sub(r"^\s*(?:[-*+]|\d+[.)])\s*", "", str(ln)).strip()
         if t:
             out.append(t)
     return out

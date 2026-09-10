@@ -397,9 +397,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 围栏代落库失败: %s", e)
 
-    # ── 意图未执行守卫: 宣布要调工具却零 [TOOL_CALL] 收尾 → 追问一轮 ──
-    if not tools_used:
-        intent = req_agent.announced_tool_intent(final_content)
+    # ── 意图未执行守卫: 宣布要调工具却收尾悬置 → 追问一轮 ──
+    # 零工具回合: 任意意图短语即追问; 有工具回合: 仅「请等待…」类悬置收尾才追问
+    pending_wait = "请等待" in final_content
+    if not tools_used or pending_wait:
+        intent = "请等待" if pending_wait else req_agent.announced_tool_intent(final_content)
         if intent:
             logger.warning("[kb-chat] 意图未执行守卫触发 conv=%s intent=%s", conv_id, intent)
             msgs.append({"role": "assistant", "content": final_content})

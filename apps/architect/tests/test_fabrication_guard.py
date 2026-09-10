@@ -84,3 +84,23 @@ def test_announced_tool_intent():
     assert announced_tool_intent("请等待我完成上述检索...") != ""
     assert announced_tool_intent("我将立即执行以下检索") != ""
     assert announced_tool_intent("结论：nginx-http-core 是组件名。") == ""
+
+
+def test_md_lines_tolerates_list():
+    from topoone_app_architect.arch_routes.req_agent import _md_lines
+    assert _md_lines(["- a.ts", "2. b/", "c"]) == ["a.ts", "b/", "c"]
+    assert _md_lines("x\n- y") == ["x", "y"]
+    assert _md_lines(None) == []
+    assert _md_lines(123) == ["123"]
+    # req.propose 全链: 数组字段不再崩
+    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect.arch_routes import req_agent as R
+    r = R.run_arch_tool("req.propose", {
+        "title": "数组字段冒烟", "designMd": "d",
+        "allowedScopeMd": ["src/a", "src/b"], "forbiddenScopeMd": ["core/"],
+        "acceptanceMd": ["构建通过"],
+    }, None, None)
+    assert r.get("ok"), r
+    row = store.RequirementsStore.get(r["requirementId"])
+    assert row["analysis"]["allowedScope"] == ["src/a", "src/b"]
+    store.RequirementsStore.update(r["requirementId"], {"status": "cancelled"})
