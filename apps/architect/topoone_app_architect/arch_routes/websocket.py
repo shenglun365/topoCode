@@ -253,6 +253,46 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             _TOOL_WHITELIST.set(None)
     except Exception:  # noqa: BLE001
         _TOOL_WHITELIST.set(None)
+    # PR-B executor 会话路由: 对话直达 coding agent(tAgent 代码问答, agentic_loop +
+    # KB/代码工具), 跳过 architect 工具循环/守卫——executor 会话以代码执行为中心。
+    if _role and (_role.get("kind") or "") == "executor":
+        question = (user_msgs[-1].get("content", "") if user_msgs else "").strip()
+        exec_id_b = ""
+        try:
+            req_id_b = (conv.get("reqId") or "") or (data.get("reqId") or "")
+            if req_id_b:
+                for _t in store.ExecutionTasksStore.all():
+                    if req_id_b in (_t.get("reqIds") or []):
+                        exec_id_b = _t.get("id") or ""
+                        break
+        except Exception:  # noqa: BLE001
+            pass
+        hist_lines = [f"{m.get('role')}: {(m.get('content') or '')[:200]}"
+                      for m in history[-6:] if (m.get("content") or "").strip()]
+        extra_ctx = (f"会话角色: {_role.get('name') or _role.get('id')}(executor, 技能: "
+                     f"{', '.join(_role.get('skills') or []) or '未限制'})\n"
+                     f"最近对话:\n" + "\n".join(hist_lines))
+        reply = await _agent_chat_reply({"taskId": exec_id_b}, question, extra_ctx)
+        final_b = reply or "(coding agent 暂不可达: KB/LLM 网关无响应——稍后重试, 或在设置页检查模型连通性)"
+        assistant_msg_id_b = store.next_id("m")
+        store.ConversationsStore.append_message({
+            "id": assistant_msg_id_b, "conversationId": conv_id,
+            "role": "assistant", "time": _ts(), "content": final_b,
+        })
+        try:
+            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+        except Exception:  # noqa: BLE001
+            pass
+        await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
+                                   "requestId": "", "userMessageId": last_user_msg_id})
+        for i in range(0, len(final_b), 96):
+            await websocket.send_json({"type": "chunk", "requestId": "",
+                                       "delta": final_b[i:i + 96]})
+            await asyncio.sleep(0.01)
+        await websocket.send_json({"type": "done", "conversationId": conv_id,
+                                   "content": final_b, "messageId": assistant_msg_id_b})
+        return
+
     msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
                                 skill_scenarios=[str(s) for s in skill_scenarios])
 
@@ -650,6 +690,15 @@ async def coding_agent_ws(websocket: WebSocket):
                     "createdAt": now,
                     "updatedAt": now,
                 }
+                # PR-F: 确保执行任务有统一会话(无则建)——会话为唯一消息源
+                try:
+                    from .execution import _ensure_exec_conv
+                    task_row = store.ExecutionTasksStore.get(exec_data.get("id", "")) or {}
+                    _reqs = [store.RequirementsStore.get(i) for i in task_row.get("reqIds") or []]
+                    _ensure_exec_conv(task_row or exec_data, {"title": plan_title},
+                                      [r for r in _reqs if r])
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[coding-agent] 统一会话确保失败(忽略): %s", e)
                 store.AgentSessionsStore.create(session)
                 init_msg = {
                     "id": store.next_id("m"),
@@ -657,9 +706,7 @@ async def coding_agent_ws(websocket: WebSocket):
                     "time": now,
                     "content": f"创建会话 · 执行方案「{plan_title}」(任务 {exec_data.get('id', '')}, 第 {exec_data.get('runCount', 1)} 次)",
                 }
-                store.AgentSessionsStore.append_message({**init_msg, "sessionId": session_id})
-                # PR3 双体系合并: agent 会话消息镜像到执行任务的统一会话(会话中心可见)
-                _mirror_agent_message(exec_data.get("id", ""), init_msg)
+                _write_task_conv_message(exec_data.get("id", ""), "user", init_msg["content"])
                 session["messages"] = [init_msg]
                 # A7：会话仅落库；对话经 tAgent 代码问答(见 session.message)，不再对接 opencode。
                 await websocket.send_json({"type": "session_created", "session": session})
@@ -674,8 +721,7 @@ async def coding_agent_ws(websocket: WebSocket):
                 user_msg = {
                     "id": store.next_id("m"), "role": "user", "time": _ts(), "content": content,
                 }
-                store.AgentSessionsStore.append_message({**user_msg, "sessionId": session_id})
-                _mirror_agent_message(session.get("taskId") or "", user_msg)
+                _write_task_conv_message(session.get("taskId") or "", "user", content)
                 store.AgentSessionsStore.update(session_id, {"updatedAt": _ts()})
                 # A7：tAgent 代码问答(替换 opencode 直连)。KB/LLM 不可达 → reply=None，仅落库回显用户消息。
                 if content:
@@ -693,8 +739,8 @@ async def coding_agent_ws(websocket: WebSocket):
                         pass
                     if reply:
                         m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(), "content": reply}
-                        store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
-                        _mirror_agent_message(session.get("taskId") or "", m, from_assistant=True)
+                        _write_task_conv_message(session.get("taskId") or "", "assistant", reply,
+                                                 from_assistant=True)
                         await websocket.send_json({"type": "message", **m})
                 await websocket.send_json({"type": "message", **user_msg})
 
@@ -710,20 +756,29 @@ async def coding_agent_ws(websocket: WebSocket):
         logger.exception(f"Coding agent WS error: {e}")
 
 
-def _mirror_agent_message(task_id: str, msg: dict, from_assistant: bool = False) -> None:
-    """PR3 双体系合并: agent 会话消息镜像进执行任务关联的统一会话。
-
-    assistant 回复同时把会话置 unread(会话中心角标); 失败静默(镜像不阻断主流程)。
-    """
+def _task_conv_id(task_id: str) -> str:
+    """执行任务关联的统一会话 id(无任务/未关联 → 空串)。"""
     try:
         task = store.ExecutionTasksStore.get(task_id) if task_id else None
         conv_id = (task.get("conversationId") or "").strip() if task else ""
-        if not conv_id or not store.ConversationsStore.get(conv_id):
+        return conv_id if (conv_id and store.ConversationsStore.get(conv_id)) else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _write_task_conv_message(task_id: str, role: str, content: str,
+                             from_assistant: bool = False) -> None:
+    """PR-F 统一消息源: coding agent 会话消息直接写统一会话(唯一存储)。
+
+    assistant 回复同时置 unread(会话中心角标); 失败静默(不阻断对话主流程)。
+    """
+    try:
+        conv_id = _task_conv_id(task_id)
+        if not conv_id:
             return
         store.ConversationsStore.append_message({
             "id": store.next_id("m"), "conversationId": conv_id,
-            "role": msg.get("role") or ("assistant" if from_assistant else "user"),
-            "time": msg.get("time") or _ts(), "content": msg.get("content") or "",
+            "role": role, "time": _ts(), "content": content,
         })
         if from_assistant:
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
@@ -733,7 +788,8 @@ def _mirror_agent_message(task_id: str, msg: dict, from_assistant: bool = False)
 
 # ── A7: tAgent 代码问答辅助 ─────────────────────────────────────
 
-async def _agent_chat_reply(session: dict, content: str) -> Optional[str]:
+async def _agent_chat_reply(session: dict, content: str,
+                            extra_context: str = "") -> Optional[str]:
     """A7: tAgent 代码问答(替换 opencode 直连)。
 
     解析会话关联的执行任务 → root/project → chat_reply(agentic_loop + KB/代码工具) → 回答。
@@ -755,6 +811,8 @@ async def _agent_chat_reply(session: dict, content: str) -> Optional[str]:
             f"需求: {'; '.join(titles) if titles else '无'}\n"
             "说明: 用户正在与该任务的实现会话对话，问题可能涉及该任务要实现的代码。"
         )
+    if extra_context:
+        task_context = (task_context + "\n" + extra_context) if task_context else extra_context
     try:
         return await asyncio.to_thread(
             tagent_chat.chat_reply,

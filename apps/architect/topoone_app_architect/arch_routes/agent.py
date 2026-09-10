@@ -13,11 +13,23 @@ from . import store
 router = APIRouter()
 
 
+def _conv_messages_of(session: dict) -> list[dict]:
+    """PR-F 统一消息源: 优先读执行任务关联会话消息; 无关联(旧会话)回退旧存储。"""
+    from .websocket import _task_conv_id
+    conv_id = _task_conv_id(session.get("taskId") or "")
+    if conv_id:
+        msgs = store.ConversationsStore.messages(conv_id, limit=500)
+        if msgs:
+            return [{"id": m.get("id"), "role": m.get("role"), "time": m.get("time"),
+                     "content": m.get("content") or ""} for m in msgs]
+    return store.AgentSessionsStore.messages(session.get("id") or "")
+
+
 def _with_messages(session_id: str):
     session = store.AgentSessionsStore.get(session_id)
     if not session:
         return None
-    session["messages"] = store.AgentSessionsStore.messages(session_id)
+    session["messages"] = _conv_messages_of(session)
     return session
 
 
@@ -45,8 +57,10 @@ async def delete_session(session_id: str):
 
 @router.get("/agent/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
-    msgs = store.AgentSessionsStore.messages(session_id)
-    return ok(msgs)
+    session = store.AgentSessionsStore.get(session_id)
+    if not session:
+        return err(404, "Session not found")
+    return ok(_conv_messages_of(session))
 
 
 @router.get("/agent/tool-audit")

@@ -133,7 +133,7 @@ def test_exec_conv_projection_and_mirror(client):
     """PR3 双体系: commitBatch 自动建统一执行会话 + 终态投影 + 消息镜像。"""
     from topoone_app_architect.arch_routes import store
     from topoone_app_architect.arch_routes import execution as EX
-    from topoone_app_architect.arch_routes.websocket import _mirror_agent_message
+    from topoone_app_architect.arch_routes.websocket import _write_task_conv_message
     store.RequirementsStore.create({"id": "RQ-PJ", "title": "投影", "desc": "d",
                                     "location": "pool", "analysis": {}})
     task = {"id": "ex-pj", "planId": "pl-1", "reqIds": ["RQ-PJ"], "status": "created",
@@ -154,7 +154,7 @@ def test_exec_conv_projection_and_mirror(client):
     # 直接构造已关联任务
     db_task = store.ExecutionTasksStore.create({"id": "ex-pj2", "planId": "pl-1",
         "reqIds": ["RQ-PJ"], "status": "running", "conversationId": conv_id})
-    _mirror_agent_message("ex-pj2", {"role": "assistant", "content": "执行回答"}, from_assistant=True)
+    _write_task_conv_message("ex-pj2", "assistant", "执行回答", from_assistant=True)
     msgs = store.ConversationsStore.messages(conv_id)
     assert any(m.get("content") == "执行回答" for m in msgs)
     assert store.ConversationsStore.get(conv_id)["reviewState"] == "unread"
@@ -268,3 +268,43 @@ def test_blocked_accepting_projects_awaiting_reply(client):
     EX._project_exec_conv({"id": "ex-aw", "conversationId": "cv-aw"},
                           lifecycle="active", review="awaiting_reply")
     assert store.ConversationsStore.get("cv-aw")["reviewState"] == "awaiting_reply"
+
+
+def test_unified_agent_session_messages(client, monkeypatch):
+    """PR-F: coding agent 会话消息以统一会话为唯一源(写/读一致)。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect.arch_routes.websocket import _write_task_conv_message, _task_conv_id
+    from topoone_app_architect.arch_routes.agent import _conv_messages_of
+    store.ConversationsStore.create({"id": "cv-uf", "kind": "execution", "title": "统一"})
+    store.ExecutionTasksStore.create({"id": "ex-uf", "planId": "pl", "reqIds": [],
+                                      "status": "running", "conversationId": "cv-uf"})
+    assert _task_conv_id("ex-uf") == "cv-uf"
+    _write_task_conv_message("ex-uf", "user", "怎么改 a.ts?")
+    _write_task_conv_message("ex-uf", "assistant", "先看入口…", from_assistant=True)
+    # agent 会话面板读统一会话
+    sess = {"id": "sess-uf", "taskId": "ex-uf"}
+    msgs = _conv_messages_of(sess)
+    assert [m["content"] for m in msgs] == ["怎么改 a.ts?", "先看入口…"]
+    assert store.ConversationsStore.get("cv-uf")["reviewState"] == "unread"
+
+
+def test_agent_chat_reply_extra_context(client, monkeypatch):
+    """PR-B: executor 路由复用 _agent_chat_reply 且携带会话角色/最近对话上下文。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import websocket as WS
+    captured = {}
+
+    def fake_chat_reply(*, question, root, project, task_context="", model_id="", max_rounds=4):
+        captured["question"] = question
+        captured["ctx"] = task_context
+        return "代码回答"
+
+    import topoone_app_architect.arch_routes.tagent_chat as TC
+    monkeypatch.setattr(TC, "chat_reply", fake_chat_reply)
+    out = asyncio.run(WS._agent_chat_reply(
+        {"taskId": ""}, "这个函数怎么改?",
+        "会话角色: 执行A(executor)\n最近对话:\nuser: 上一轮"))
+    assert out == "代码回答"
+    assert captured["question"] == "这个函数怎么改?"
+    assert "executor" in captured["ctx"] and "上一轮" in captured["ctx"]
