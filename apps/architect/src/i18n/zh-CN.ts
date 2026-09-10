@@ -1122,6 +1122,7 @@ export default {
       copyInject: '拷贝注入指令',
       copyInjectHint: '生成该角色的 skills/工具/权限注入指令并拷贝——粘贴到远端 agent 执行(外部执行器注入通道)',
       copied: '已拷贝到剪贴板, 粘贴到远端 agent 即可',
+      architectProtected: 'architect 是系统内置角色，不可删除',
     },
 
     executors: {

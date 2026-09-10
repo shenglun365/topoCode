@@ -82,6 +82,11 @@ async function save(role: SessionRole) {
 }
 
 async function remove(role: SessionRole) {
+  if (role.builtin || role.kind === 'architect' || role.id === 'architect') {
+    msg.value = t('config.sessionRoles.architectProtected')
+    setTimeout(() => { msg.value = '' }, 4000)
+    return
+  }
   msg.value = ''
   try {
     await apiDelete(`/session-roles/${role.id}`)
@@ -166,13 +171,13 @@ function toggleSkill(role: SessionRole, skill: string) {
             {{ savingId === r.id ? t('config.sessionRoles.saving') : t('config.sessionRoles.save') }}
           </button>
           <button
-            v-if="!r.builtin"
+            v-if="r.kind !== 'architect'"
             class="btn !py-0.5 !px-2 !text-[11px]"
             :title="t('config.sessionRoles.copyInjectHint')"
             @click="copyInjection(r)"
           >{{ t('config.sessionRoles.copyInject') }}</button>
           <button
-            v-if="!r.builtin"
+            v-if="r.kind !== 'architect'"
             class="btn !py-0.5 !px-2 !text-[11px] text-ctp-red"
             @click="remove(r)"
           >

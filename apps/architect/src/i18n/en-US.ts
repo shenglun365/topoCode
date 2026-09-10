@@ -1096,6 +1096,7 @@ export default {
       copyInject: 'Copy inject prompt',
       copyInjectHint: 'Copy a skill/tool/permission injection prompt for this role — paste into a remote agent',
       copied: 'Copied to clipboard',
+      architectProtected: 'architect is the built-in role and cannot be deleted',
     },
 
     executors: {
