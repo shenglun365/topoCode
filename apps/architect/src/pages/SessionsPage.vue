@@ -4,7 +4,7 @@
  * 组织维度: 时间/模块/自定义分组(元数据)；流程视图=过滤器。
  * 详情: 摘要/备案文档/关联执行；对话本体在全局会话栏(ConversationDock)。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -15,27 +15,21 @@ import {
 } from '@heroicons/vue/24/outline'
 import TaskDetailView from '@/components/coding/TaskDetailView.vue'
 import { useConversationStore } from '@/stores/conversation-store'
-import { useArchTaskStore } from '@/stores/task-store'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
 import { apiGet, apiPost } from '@/services/api-client'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
-import type { Requirement } from '@/types'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const conv = useConversationStore()
-const task = useArchTaskStore()
 
 // ── 布局: 左栏信息(列表+详情) / 右栏对话(inline 停靠)——与资产地图页同构 ──
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 62, min: 40, max: 78 })
 
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
-const docs = ref<SessionDoc[]>([])
-const units = ref<ContextUnit[]>([])
-const selected = ref<ConversationMeta | null>(null)
 const loading = ref(false)
 const busyTip = ref('')
 
@@ -63,19 +57,17 @@ async function load() {
     void loadRoles()
     list.value = l
     groupsInfo.value = g
-    void task.load()
   } finally {
     loading.value = false
   }
 }
 onMounted(async () => {
   await load()
-  void loadReadyReqs()
-  // 深链 ?select=<convId|reqId>（兼容旧需求深链）
+  // 深链 ?select=<convId|reqId>（兼容旧需求深链）→ 直接在对话栏打开
   const sel = typeof route.query.select === 'string' ? route.query.select : ''
   if (sel) {
     const meta = list.value.find((c) => c.id === sel || (sel.startsWith('RQ-') && c.reqId === sel))
-    if (meta) select(meta)
+    if (meta) openInDock(meta)
   }
 })
 
@@ -121,29 +113,6 @@ const grouped = computed<{ key: string; items: ConversationMeta[] }[]>(() => {
     .map((k) => ({ key: k, items: buckets[k] }))
 })
 
-// ── 选择与详情 ──
-async function select(c: ConversationMeta) {
-  selected.value = c
-  docs.value = []
-  units.value = []
-  try {
-    const [d, u] = await Promise.all([sessionService.docs(c.id), sessionService.context(c.id)])
-    docs.value = d
-    units.value = u
-  } catch { /* 无文档/单元 */ }
-  if (c.projectId) loadGlobal(c.projectId)
-  if (route.query.select !== c.id) {
-    router.replace({ query: { ...route.query, select: c.id } })
-  }
-}
-watch(() => route.query.select, (sel) => {
-  if (!sel && selected.value) selected.value = null
-})
-
-const linkedExecs = computed(() =>
-  selected.value ? task.executionTasks.filter((e) => e.conversationId === selected.value?.id) : [])
-const openExecId = ref('')
-
 function openInDock(c: ConversationMeta) {
   void conv.openConversation(c)
 }
@@ -166,14 +135,12 @@ async function saveEdit(c: ConversationMeta) {
   if (!title || title === c.title) return
   await sessionService.update(c.id, { title })
   c.title = title
-  if (selected.value?.id === c.id) selected.value.title = title
 }
 async function summarize(c: ConversationMeta, force = false) {
   busyTip.value = c.id
   try {
     const updated = await sessionService.summarize(c.id, force)
     Object.assign(c, updated)
-    if (selected.value?.id === c.id) Object.assign(selected.value, updated)
   } finally {
     busyTip.value = ''
   }
@@ -195,7 +162,6 @@ async function removeSession(c: ConversationMeta) {
   if (!window.confirm(t('session.actions.deleteConfirm', { title: c.title }))) return
   await sessionService.remove(c.id)
   list.value = list.value.filter((x) => x.id !== c.id)
-  if (selected.value?.id === c.id) selected.value = null
 }
 async function newGroup() {
   const name = window.prompt(t('session.actions.newGroupPrompt'))
@@ -205,114 +171,6 @@ async function newGroup() {
   groupsInfo.value = { ...groupsInfo.value, groups: names }
 }
 
-// ── 备案文档 ──
-const extracting = ref(false)
-
-// ── WS7 能力提炼: 手动提炼 + 待审提案(采纳/忽略) ──
-interface CapabilityProposal {
-  id: string; type: string; title: string; content: string
-  scenarios?: string[]; reason?: string; status?: string
-}
-const proposals = ref<CapabilityProposal[]>([])
-const miningBusy = ref(false)
-async function loadProposals(pid: string) {
-  try {
-    proposals.value = await apiGet<CapabilityProposal[]>(`/capabilities/proposals?project=${pid}&status=pending`)
-  } catch { proposals.value = [] }
-}
-async function mine(c: ConversationMeta) {
-  if (!c.projectId || miningBusy.value) return
-  miningBusy.value = true
-  try {
-    const r = await apiPost<{ count: number; markdown?: string }>('/capabilities/mine', {
-      conversationId: c.id, project: c.projectId,
-    })
-    window.alert(t('session.mineDone', { n: r.count }))
-    await loadProposals(c.projectId)
-  } catch (e) {
-    window.alert(e instanceof Error ? e.message : String(e))
-  } finally {
-    miningBusy.value = false
-  }
-}
-async function archiveConversation(c: ConversationMeta) {
-  if (c.status === 'archived') return
-  try {
-    const r = await sessionService.update(c.id, { status: 'archived' })
-    c.status = 'archived'
-    // P5: 会话结束即时提示可提炼内容
-    if ((r as any)?.mineableHint && c.projectId) {
-      if (window.confirm(t('session.mineOnEnd'))) await mine(c)
-    }
-  } catch { /* 保持 */ }
-}
-
-async function decideProposal(p: CapabilityProposal, action: 'accept' | 'ignore') {
-  const pid = selected.value?.projectId
-  if (!pid) return
-  try {
-    await apiPost(`/capabilities/proposals/${p.id}`, { project: pid, action })
-    if (action === 'accept') p.status = 'accepted'  // 保留在列, 出现「提升」入口
-    else proposals.value = proposals.value.filter((x) => x.id !== p.id)
-  } catch { /* 失败保持列表 */ }
-}
-
-// ── WS8 主库全局层(消费侧): 概览 + 冷启动导入 ──
-interface GlobalProposal extends CapabilityProposal { originProjectId?: string }
-const globalLayer = ref<{ proposals: GlobalProposal[]; conventions: number; assets: number } | null>(null)
-async function loadGlobal(pid: string) {
-  try {
-    globalLayer.value = await apiGet(`/capabilities/global?project=${pid}`)
-  } catch { globalLayer.value = null }
-}
-async function importGlobal(item: { kind: string; id: string }) {
-  const pid = selected.value?.projectId
-  if (!pid) return
-  try {
-    await apiPost('/capabilities/global/import', { project: pid, items: [item] })
-    if (globalLayer.value) {
-      globalLayer.value.proposals = globalLayer.value.proposals.filter((x) => x.id !== item.id)
-    }
-  } catch { /* 保持 */ }
-}
-function promoteCapability(p: CapabilityProposal) {
-  const pid = selected.value?.projectId
-  if (!pid) return
-  apiPost('/capabilities/promote', { project: pid, kind: 'capability', id: p.id })
-    .then(() => { proposals.value = proposals.value.filter((x) => x.id !== p.id); loadGlobal(pid) })
-    .catch(() => {})
-}
-// ── 待执行方案(需求池已定稿：确认存入的提案在此等待对接 coding agent) ──
-const readyReqs = ref<Requirement[]>([])
-async function loadReadyReqs() {
-  try {
-    const rows = await apiGet<Requirement[]>('/requirements')
-    readyReqs.value = (rows || []).filter((r) => (r.location ?? 'pool') === 'pool'
-      && r.status === 'analyzed')
-  } catch { readyReqs.value = [] }
-}
-function goExecute(reqIds: string[]) {
-  router.push({ path: '/workbench/execute', query: { select: reqIds.join(',') } })
-}
-const viewingDoc = ref<SessionDoc | null>(null)
-async function extractDoc() {
-  if (!selected.value || extracting.value) return
-  extracting.value = true
-  try {
-    const doc = await sessionService.docFromConversation(selected.value.id, selected.value.title)
-    docs.value.unshift(doc)
-  } catch (err) {
-    window.alert(err instanceof Error ? err.message : t('session.docs.extractFailed'))
-  } finally {
-    extracting.value = false
-  }
-}
-async function removeDoc(doc: SessionDoc) {
-  if (!window.confirm(t('session.docs.deleteConfirm'))) return
-  await sessionService.removeDoc(doc.id)
-  docs.value = docs.value.filter((d) => d.id !== doc.id)
-  if (viewingDoc.value?.id === doc.id) viewingDoc.value = null
-}
 
 function fmt(ts?: number) {
   return ts ? new Date(ts).toLocaleString() : '—'
@@ -394,8 +252,8 @@ function reviewClass(rs?: string) {
             v-for="c in g.items"
             :key="c.id"
             class="group flex cursor-pointer items-center gap-2 border-b border-ctp-surface0/60 px-3 py-2 hover:bg-ctp-surface0/40"
-            :class="selected?.id === c.id ? 'bg-ctp-surface0/70' : ''"
-            @click="select(c)"
+            :class="conv.activeId === c.id ? 'bg-ctp-surface0/70' : ''"
+            @click="openInDock(c)"
           >
             <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
             <span v-if="c.pendingExec" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">{{ t('session.pendingExec') }}</span>
@@ -463,202 +321,7 @@ function reviewClass(rs?: string) {
       </div>
     </section>
 
-    <!-- 右: 会话详情 -->
-    <section
-      v-if="selected"
-      class="hidden w-[24rem] shrink-0 flex-col overflow-auto border-l border-ctp-surface0 bg-ctp-mantle/40 lg:flex"
-    >
-      <div class="sticky top-0 z-10 flex items-start gap-2 border-b border-ctp-surface0 bg-ctp-mantle/95 px-3 py-2 backdrop-blur">
-        <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium text-ctp-text">{{ selected.title || t('session.dock.untitled') }}</p>
-          <p class="text-[10px] text-ctp-overlay0">
-            {{ selected.msgCount }} {{ t('session.msgUnit') }} · {{ fmt(selected.updatedAt) }}
-          </p>
-        </div>
-        <button class="rounded p-1 text-ctp-subtext0 hover:text-ctp-text" @click="selected = null">
-          <XMarkIcon class="h-4 w-4" />
-        </button>
-      </div>
 
-      <div class="space-y-3 p-3">
-        <div class="flex items-center gap-1.5">
-          <button class="btn btn-sm btn-blue flex-1" @click="openInDock(selected)">
-            <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />{{ t('session.openInDock') }}
-          </button>
-          <button class="btn btn-sm btn-ghost" :disabled="busyTip === selected.id" @click="summarize(selected)">
-            <SparklesIcon class="h-3.5 w-3.5" :class="busyTip === selected.id ? 'animate-pulse' : ''" />{{ t('session.actions.summarize') }}
-          </button>
-          <button
-            class="btn btn-sm btn-ghost"
-            :disabled="miningBusy || !selected.projectId"
-            :title="t('session.mineHint')"
-            @click="mine(selected)"
-          >
-            <SparklesIcon class="h-3.5 w-3.5" :class="miningBusy ? 'animate-pulse' : ''" />{{ t('session.mine') }}
-          </button>
-          <button
-            v-if="selected.status !== 'archived'"
-            class="btn btn-sm btn-ghost"
-            :title="t('session.archiveHint')"
-            @click="archiveConversation(selected)"
-          >
-            {{ t('session.archive') }}
-          </button>
-        </div>
-
-        <div v-if="readyReqs.length" class="rounded-lg border border-ctp-green/30 bg-ctp-green/5 p-2.5">
-          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.readyPlans') }} ({{ readyReqs.length }})</p>
-          <div
-            v-for="r in readyReqs"
-            :key="r.id"
-            class="mb-1.5 rounded border border-ctp-surface0 bg-ctp-base/60 p-2 last:mb-0"
-          >
-            <div class="flex items-center gap-1.5">
-              <span class="font-mono text-[10px] text-ctp-overlay1 shrink-0">{{ r.id }}</span>
-              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ctp-text">{{ r.title }}</span>
-              <span class="chip !px-1.5 !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0">{{ r.priority }}</span>
-            </div>
-            <div class="mt-1.5 flex items-center justify-end">
-              <button
-                class="btn btn-xs btn-green"
-                @click="goExecute([r.id])"
-              >
-                <BoltIcon class="h-3 w-3" />{{ t('session.readyGo') }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="proposals.length" class="rounded-lg border border-ctp-peach/30 bg-ctp-peach/5 p-2.5">
-          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.proposals') }} ({{ proposals.length }})</p>
-          <div
-            v-for="p in proposals"
-            :key="p.id"
-            class="mb-1.5 rounded border border-ctp-surface0 bg-ctp-base/60 p-2 last:mb-0"
-          >
-            <div class="flex items-center gap-1.5">
-              <span class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach shrink-0">{{ p.type }}</span>
-              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ctp-text">{{ p.title }}</span>
-            </div>
-            <p class="mt-1 line-clamp-2 text-[10px] leading-relaxed text-ctp-subtext1">{{ p.content }}</p>
-            <div class="mt-1.5 flex items-center gap-1.5">
-              <button class="btn btn-sm btn-blue !px-2 !py-0.5 !text-[10px]" @click="decideProposal(p, 'accept')">
-                <CheckIcon class="h-3 w-3" />{{ t('session.proposalAccept') }}
-              </button>
-              <button class="btn btn-sm btn-ghost !px-2 !py-0.5 !text-[10px]" @click="decideProposal(p, 'ignore')">
-                {{ t('session.proposalIgnore') }}
-              </button>
-              <button
-                v-if="p.status === 'accepted'"
-                class="btn btn-sm btn-ghost !px-2 !py-0.5 !text-[10px] text-ctp-mauve"
-                :title="t('session.promoteHint')"
-                @click="promoteCapability(p)"
-              >
-                <ArrowUpTrayIcon class="h-3 w-3" />{{ t('session.promote') }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="globalLayer" class="rounded-lg border border-ctp-mauve/30 bg-ctp-mauve/5 p-2.5">
-          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">
-            {{ t('session.globalLayer') }}
-            <span class="ml-1 normal-case text-ctp-subtext0">
-              {{ t('session.globalCounts', { c: globalLayer.conventions, a: globalLayer.assets }) }}
-            </span>
-          </p>
-          <div
-            v-for="p in globalLayer.proposals"
-            :key="p.id"
-            class="mb-1.5 rounded border border-ctp-surface0 bg-ctp-base/60 p-2 last:mb-0"
-          >
-            <div class="flex items-center gap-1.5">
-              <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ p.type }}</span>
-              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ctp-text">{{ p.title }}</span>
-            </div>
-            <p class="mt-1 line-clamp-2 text-[10px] leading-relaxed text-ctp-subtext1">{{ p.content }}</p>
-            <button
-              class="btn btn-sm btn-ghost mt-1.5 !px-2 !py-0.5 !text-[10px]"
-              :title="t('session.importHint')"
-              @click="importGlobal({ kind: 'capability', id: p.id })"
-            >
-              <ArrowDownTrayIcon class="h-3 w-3" />{{ t('session.globalImport') }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="selected.summary" class="rounded-lg border border-ctp-surface0 bg-ctp-base/60 p-2.5">
-          <p class="mb-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.summary') }}</p>
-          <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-ctp-subtext1">{{ selected.summary }}</p>
-        </div>
-
-        <!-- 备案文档 -->
-        <div class="rounded-lg border border-ctp-surface0 bg-ctp-base/60 p-2.5">
-          <div class="mb-1.5 flex items-center gap-1.5">
-            <p class="flex-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.docs.title') }}</p>
-            <button class="btn btn-sm btn-ghost !px-1.5 !py-0.5" :disabled="extracting" @click="extractDoc">
-              <DocumentArrowDownIcon class="h-3 w-3" :class="extracting ? 'animate-pulse' : ''" />
-            </button>
-          </div>
-          <button
-            v-for="d in docs"
-            :key="d.id"
-            class="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] text-ctp-subtext1 hover:bg-ctp-surface0"
-            @click="viewingDoc = d"
-          >
-            <DocumentArrowDownIcon class="h-3 w-3 shrink-0 text-ctp-overlay0" />
-            <span class="min-w-0 flex-1 truncate">{{ d.title }}</span>
-            <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(d.updatedAt) }}</span>
-            <span class="shrink-0 text-ctp-overlay0 hover:text-ctp-red" @click.stop="removeDoc(d)">
-              <TrashIcon class="h-3 w-3" />
-            </span>
-          </button>
-          <p v-if="!docs.length" class="py-1 text-[10px] text-ctp-overlay0">{{ t('session.docs.empty') }}</p>
-        </div>
-
-        <!-- 上下文单元(P2 注册表) -->
-        <div class="rounded-lg border border-ctp-surface0 bg-ctp-base/60 p-2.5">
-          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">
-            {{ t('session.context.title') }} ({{ units.length }})
-          </p>
-          <div
-            v-for="u in units.slice(0, 12)"
-            :key="u.id"
-            class="flex items-start gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-ctp-surface0"
-            :title="u.content"
-          >
-            <span
-              class="chip shrink-0"
-              :class="u.importance ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-surface1 text-ctp-overlay1'"
-            >{{ t(`session.context.${u.type}`) }}</span>
-            <span class="min-w-0 flex-1 truncate text-ctp-subtext1">{{ u.title }}</span>
-            <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(u.createdAt) }}</span>
-          </div>
-          <p v-if="!units.length" class="py-1 text-[10px] text-ctp-overlay0">{{ t('session.context.empty') }}</p>
-        </div>
-
-        <!-- 关联执行 -->
-        <div class="rounded-lg border border-ctp-surface0 bg-ctp-base/60 p-2.5">
-          <p class="mb-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.execs.title') }}</p>
-          <button
-            v-for="e in linkedExecs"
-            :key="e.id"
-            class="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] hover:bg-ctp-surface0"
-            @click="openExecId = openExecId === e.id ? '' : e.id"
-          >
-            <span class="chip bg-ctp-green/15 text-ctp-green">{{ e.id }}</span>
-            <span class="chip bg-ctp-surface1 text-ctp-subtext0">{{ t(`execute.status.${e.status}`) || e.status }}</span>
-            <span class="ml-auto text-[10px] text-ctp-overlay0">{{ fmt(e.updatedAt) }}</span>
-          </button>
-          <p v-if="!linkedExecs.length" class="py-1 text-[10px] text-ctp-overlay0">{{ t('session.execs.empty') }}</p>
-        </div>
-      </div>
-
-      <!-- 执行详情内嵌 -->
-      <div v-if="openExecId" class="min-h-0 flex-1 border-t border-ctp-surface0">
-        <TaskDetailView :key="openExecId" :exec-id="openExecId" />
-      </div>
-    </section>
         </div>
 
         <!-- 分割线(与资产地图页同款拖拽分割线) -->
@@ -680,17 +343,5 @@ function reviewClass(rs?: string) {
       </div>
     </div>
 
-    <!-- 文档查看浮层 -->
-    <div v-if="viewingDoc" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" @click.self="viewingDoc = null">
-      <div class="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-ctp-surface1 bg-ctp-base shadow-2xl">
-        <div class="flex shrink-0 items-center gap-2 border-b border-ctp-surface0 px-4 py-2.5">
-          <p class="flex-1 truncate text-sm font-medium text-ctp-text">{{ viewingDoc.title }}</p>
-          <button class="rounded p-1 text-ctp-subtext0 hover:text-ctp-text" @click="viewingDoc = null">
-            <XMarkIcon class="h-4 w-4" />
-          </button>
-        </div>
-        <pre class="flex-1 overflow-auto whitespace-pre-wrap px-4 py-3 text-xs leading-relaxed text-ctp-subtext1">{{ viewingDoc.contentMd }}</pre>
-      </div>
-    </div>
   </div>
 </template>

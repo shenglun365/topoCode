@@ -16,7 +16,8 @@ import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { busService, type NeedsInputItem } from '@/services/bus-service'
 import { namingService } from '@/services/naming-service'
-import { apiGet } from '@/services/api-client'
+import { apiGet, apiPost } from '@/services/api-client'
+import { useArchTaskStore } from '@/stores/task-store'
 
 const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
@@ -32,9 +33,78 @@ const props = withDefaults(defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 const conv = useConversationStore()
+const task = useArchTaskStore()
 
 const recent = ref<ConversationMeta[]>([])
 const listOpen = ref(false)
+
+// ── 会话信息面板(原会话管理右栏功能并入): 待执行方案/摘要/提炼/归档/提案/关联执行 ──
+const showInfo = ref(false)
+const readyReqs = ref<{ id: string; title: string; priority?: string }[]>([])
+const mining = ref(false)
+const proposals = ref<{ id: string; title: string; status?: string }[]>([])
+
+async function loadReady() {
+  try {
+    const rows = await apiGet<{ id: string; title: string; location?: string; status?: string }[]>('/requirements')
+    readyReqs.value = (rows || [])
+      .filter((r) => (r.location ?? 'pool') === 'pool' && r.status === 'analyzed')
+      .map((r) => ({ id: r.id, title: r.title, priority: (r as any).priority }))
+  } catch { readyReqs.value = [] }
+}
+function goExecute(reqIds: string[]) {
+  router.push({ path: '/workbench/execute', query: { select: reqIds.join(',') } })
+}
+function activeProject(): string {
+  return ((conv.activeMeta as any)?.projectId || '') as string
+}
+async function loadProposals(pid: string) {
+  try {
+    proposals.value = await apiGet<any[]>(`/capabilities/proposals?project=${pid}&status=pending`)
+  } catch { proposals.value = [] }
+}
+async function mineActive() {
+  const pid = activeProject()
+  if (!conv.activeId || !pid || mining.value) return
+  mining.value = true
+  try {
+    const r = await apiPost<{ count: number }>('/capabilities/mine', { conversationId: conv.activeId, project: pid })
+    window.alert(t('session.mineDone', { n: r.count }))
+    await loadProposals(pid)
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : String(e))
+  } finally { mining.value = false }
+}
+async function archiveActive() {
+  if (!conv.activeId || (conv.activeMeta as any)?.status === 'archived') return
+  try {
+    const r = await sessionService.update(conv.activeId, { status: 'archived' } as any)
+    ;(conv.activeMeta as any).status = 'archived'
+    if ((r as any)?.mineableHint && activeProject()) {
+      if (window.confirm(t('session.mineOnEnd'))) await mineActive()
+    }
+  } catch { /* 保持 */ }
+}
+async function decideProposal(p: { id: string; status?: string }, action: 'accept' | 'ignore') {
+  const pid = activeProject()
+  if (!pid) return
+  try {
+    await apiPost(`/capabilities/proposals/${p.id}`, { project: pid, action })
+    if (action === 'accept') p.status = 'accepted'
+    else proposals.value = proposals.value.filter((x) => x.id !== p.id)
+  } catch { /* 失败保持 */ }
+}
+const linkedExecs = computed(() =>
+  conv.activeId ? task.executionTasks.filter((e) => e.conversationId === conv.activeId) : [])
+async function toggleInfo() {
+  showInfo.value = !showInfo.value
+  if (showInfo.value) {
+    void loadReady()
+    void task.load()
+    const pid = activeProject()
+    if (pid) void loadProposals(pid)
+  }
+}
 
 async function loadRecent() {
   try {
@@ -353,6 +423,74 @@ async function answerClarify() {
         class="btn !py-0 !px-2 !text-[10px]"
         @click="openHandoff"
       >{{ t('session.role.handoff') }}</button>
+      <button
+        class="btn !py-0 !px-2 !text-[10px]"
+        :class="showInfo ? 'btn-blue' : ''"
+        @click="toggleInfo"
+      >{{ t('session.infoToggle') }}</button>
+    </div>
+
+    <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
+    <div
+      v-if="showInfo && conv.activeId"
+      class="max-h-72 shrink-0 space-y-2 overflow-auto border-b border-ctp-surface0 bg-ctp-mantle/60 p-2.5 text-xs"
+    >
+      <div v-if="readyReqs.length" class="rounded-lg border border-ctp-green/30 bg-ctp-green/5 p-2">
+        <p class="mb-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.readyPlans') }} ({{ readyReqs.length }})</p>
+        <div
+          v-for="r in readyReqs"
+          :key="r.id"
+          class="mb-1 rounded border border-ctp-surface0 bg-ctp-base/60 p-1.5 last:mb-0"
+        >
+          <div class="flex items-center gap-1.5">
+            <span class="shrink-0 font-mono text-[10px] text-ctp-overlay1">{{ r.id }}</span>
+            <span class="min-w-0 flex-1 truncate text-[11px] text-ctp-text">{{ r.title }}</span>
+          </div>
+          <div class="mt-1 flex justify-end">
+            <button class="btn btn-xs btn-green" @click="goExecute([r.id])">{{ t('session.readyGo') }}</button>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button class="btn btn-xs btn-blue flex-1" :disabled="titleSummarizing" @click="summarizeTitle">
+          {{ titleSummarizing ? '…' : t('session.actions.summarize') }}
+        </button>
+        <button class="btn btn-xs btn-ghost flex-1" :disabled="mining" @click="mineActive">
+          {{ mining ? '…' : t('session.mine') }}
+        </button>
+        <button
+          class="btn btn-xs btn-ghost flex-1"
+          :disabled="(conv.activeMeta as any)?.status === 'archived'"
+          :title="t('session.archiveHint')"
+          @click="archiveActive"
+        >{{ t('session.archive') }}</button>
+      </div>
+      <div v-if="proposals.length" class="rounded-lg border border-ctp-peach/30 bg-ctp-peach/5 p-2">
+        <p class="mb-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.proposals') }} ({{ proposals.length }})</p>
+        <div
+          v-for="p in proposals"
+          :key="p.id"
+          class="mb-1 rounded border border-ctp-surface0 bg-ctp-base/60 p-1.5 last:mb-0"
+        >
+          <p class="truncate text-[11px] text-ctp-text">{{ p.title }}</p>
+          <div class="mt-1 flex justify-end gap-1">
+            <button class="btn btn-xs btn-green" @click="decideProposal(p, 'accept')">{{ t('session.proposalAccept') }}</button>
+            <button class="btn btn-xs btn-ghost" @click="decideProposal(p, 'ignore')">{{ t('session.proposalIgnore') }}</button>
+          </div>
+        </div>
+      </div>
+      <div class="rounded-lg border border-ctp-surface0 bg-ctp-base/60 p-2">
+        <p class="mb-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">{{ t('session.execs.title') }}</p>
+        <p v-if="!linkedExecs.length" class="py-0.5 text-[10px] text-ctp-overlay0">{{ t('session.execs.empty') }}</p>
+        <div
+          v-for="e in linkedExecs"
+          :key="e.id"
+          class="flex items-center gap-1.5 py-0.5 text-[11px]"
+        >
+          <span class="font-mono text-ctp-overlay1">{{ e.id }}</span>
+          <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0">{{ t(`execute.status.${e.status}`) || e.status }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- 澄清应答横幅 -->
