@@ -283,10 +283,32 @@ def _oc_bin() -> str:
     return shutil.which("opencode") or "opencode"
 
 
-def _oc_healthy(port: int) -> bool:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """禁跟随重定向: 端口扫描时 302 必须视为"不是 opencode"。
+
+    实测: 同数据目录下其它工具(Java jar :3491)对 /global/health 返回 302,
+    urllib 默认自动跟随 → 落到 200/PNG, 被误判为 opencode serve。
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
+        return None
+
+
+_OPENER_NORED = urllib.request.build_opener(_NoRedirect)
+
+
+def _oc_ready(port: int) -> bool:
+    """真就绪 = /global/health 直返 200(不跟随重定向) 且 /config 为合法 JSON。"""
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/global/health", timeout=3) as r:
-            return r.status == 200
+        with _OPENER_NORED.open(f"http://127.0.0.1:{port}/global/health", timeout=3) as r:
+            if r.status != 200:
+                return False
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        with _OPENER_NORED.open(f"http://127.0.0.1:{port}/config", timeout=3) as r:
+            json.loads(r.read().decode("utf-8"))
+        return True
     except Exception:  # noqa: BLE001
         return False
 
@@ -298,13 +320,13 @@ def _start_opencode_serve(cfg: dict, cwd: str = "") -> dict:
     """
     base = int(cfg.get("base_port") or 3478)
     for off in range(0, 24):
-        if _oc_healthy(base + off):
+        if _oc_ready(base + off):
             return {"status": "ok", "port": base + off,
                     "url": f"http://127.0.0.1:{base + off}",
                     "note": "serve 已在运行"}
     port = base
     for off in range(0, 24):
-        if not _oc_healthy(base + off):
+        if not _oc_ready(base + off):
             port = base + off
             break
     log_dir = os.path.join(os.path.expanduser("~"), ".topocode", "runner")
@@ -317,7 +339,7 @@ def _start_opencode_serve(cfg: dict, cwd: str = "") -> dict:
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     import time as _t
     for _ in range(25):
-        if _oc_healthy(port):
+        if _oc_ready(port):
             return {"status": "ok", "port": port, "url": f"http://127.0.0.1:{port}",
                     "pid": proc.pid, "log": log_path, "note": "serve 已拉起"}
         if proc.poll() is not None:
@@ -355,11 +377,22 @@ def _detect_opencode_models(cfg: dict, cwd: str = "") -> dict:
     if started.get("status") != "ok":
         return started
     port = started["port"]
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/config", timeout=10) as r:
-            cfg_json = json.loads(r.read().decode())
-    except Exception as e:  # noqa: BLE001
-        return {"status": "fail", "detail": f"/config 读取失败: {e}"}
+    cfg_json = None
+    last_err = ""
+    raw = b""
+    for _ in range(3):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/config", timeout=10) as r:
+                raw = r.read()
+            cfg_json = json.loads(raw.decode("utf-8"))
+            break
+        except Exception as e:  # noqa: BLE001
+            head = f"; 头字节 {raw[:8].hex()}" if raw else ""
+            last_err = f"{e}{head}"
+            import time as _t
+            _t.sleep(1.0)
+    if cfg_json is None:
+        return {"status": "fail", "detail": f"/config 读取失败(重试 3 次): {last_err}"}
     models = _parse_oc_config(cfg_json)
     return {"status": "ok", "port": port, "models": models,
             "note": started.get("note", "")}
