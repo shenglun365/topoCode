@@ -126,8 +126,10 @@ function addEntry() {
   expandedId.value = `agent-${n}`
 }
 
-function removeEntry(i: number) {
+async function removeEntry(i: number) {
+  // 删除即持久化(全量覆盖保存), 避免"看起来删了实际没发请求"的误解
   entries.value.splice(i, 1)
+  await save()
 }
 
 function setDefault(idx: number) {
