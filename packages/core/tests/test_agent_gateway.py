@@ -288,3 +288,31 @@ class TestRemoteAgentExecutor(unittest.IsolatedAsyncioTestCase):
             cur = sp.run(["git", "branch", "--show-current"], cwd=root,
                          capture_output=True, text=True).stdout.strip()
             self.assertEqual(cur, "arch/R1")
+
+
+class TestModelWhitelistClamp(unittest.TestCase):
+    """运行时模型白名单钳制: config.model 不在白名单→回退首项。"""
+
+    def test_clamp_fallback_to_first(self):
+        cfg = gw._clamp_model({
+            "model": "gpt-x-premium",  # 不在白名单 → 必须被钳掉
+            "models": [{"name": "Qwen3.8-27B", "model": "AMD-8200/Qwen3.8-27B"},
+                       {"name": "Qwen3.6-27B", "model": "AMD-8200/Qwen3.6-27B"}],
+        })
+        self.assertEqual(cfg["model"], "AMD-8200/Qwen3.8-27B")
+
+    def test_clamp_keeps_allowed(self):
+        cfg = gw._clamp_model({
+            "model": "AMD-8200/Qwen3.6-27B",
+            "models": [{"name": "Qwen3.8-27B", "model": "AMD-8200/Qwen3.8-27B"},
+                       {"name": "Qwen3.6-27B", "model": "AMD-8200/Qwen3.6-27B"}],
+        })
+        self.assertEqual(cfg["model"], "AMD-8200/Qwen3.6-27B")
+
+    def test_clamp_empty_model_picks_first(self):
+        cfg = gw._clamp_model({"model": "", "models": [{"name": "m1", "model": "p/m1"}]})
+        self.assertEqual(cfg["model"], "p/m1")
+
+    def test_clamp_no_whitelist_noop(self):
+        cfg = {"model": "anything", "models": []}
+        self.assertEqual(gw._clamp_model(cfg)["model"], "anything")

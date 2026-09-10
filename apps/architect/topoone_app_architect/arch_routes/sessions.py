@@ -187,6 +187,19 @@ async def put_session_role(request: Request):
     if not existing and str(data.get("kind") or "") == "executor":
         if not str(data.get("executorId") or "").strip():
             return err(400, "executor 角色必须绑定执行器实例(executorId)")
+    # 模型白名单校验: modelId 必须属于绑定执行器实例的模型表
+    # (运行时只在实例白名单内调用模型, 防止旁路高付费模型)
+    model_id = str(data.get("modelId") or "").strip()
+    if model_id and str(data.get("executorId") or "").strip():
+        from .agent_executors import load_executors
+        ex = next((e for e in load_executors()
+                   if e.get("id") == str(data.get("executorId")).strip()), None)
+        if not ex:
+            return err(400, f"执行器实例不存在: {data.get('executorId')}")
+        allowed = {str(m.get(k)) for m in (ex.get("config") or {}).get("models") or []
+                   for k in ("name", "model") if m.get(k)}
+        if allowed and model_id not in allowed:
+            return err(400, f"模型 {model_id} 不在执行器实例模型白名单内, 可选: {', '.join(sorted(allowed)[:8])}")
     role = store.SessionRolesStore.upsert({
         "id": rid, "name": name,
         "kind": data.get("kind") or ("architect" if rid == "architect" else "executor"),

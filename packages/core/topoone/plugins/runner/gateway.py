@@ -139,12 +139,37 @@ def resolve_entries(arch_entries: Optional[list[dict]]) -> list[dict]:
     return [dict(e) for e in BUILTIN_DEFAULT]
 
 
+def _clamp_model(cfg: dict) -> dict:
+    """模型白名单钳制(cfg.models 非空时生效)。
+
+    运行时只在实例模型白名单内取模型: entry.config.model 不在白名单
+    (或为空)→ 回退白名单首项。杜绝旁路调用 opencode/codex 服务里已配置
+    但 architect 未纳入的模型(避免误消耗高付费 API)。
+    """
+    models = cfg.get("models") or []
+    if not isinstance(models, list) or not models:
+        return cfg
+    allowed = set()
+    for m in models:
+        if isinstance(m, dict):
+            for k in ("name", "model"):
+                if m.get(k):
+                    allowed.add(str(m[k]))
+    cur = str(cfg.get("model") or "").strip()
+    if cur in allowed:
+        return cfg
+    first = models[0] if isinstance(models[0], dict) else {}
+    cfg["model"] = first.get("model") or first.get("name") or ""
+    return cfg
+
+
 def _build_one(entry: dict, pb) -> Optional[object]:
     eid = (entry.get("id") or "").strip()
     etype = entry.get("type") or ""
     cfg = entry.get("config") or {}
     if not eid:
         return None
+    cfg = _clamp_model(dict(cfg))
     try:
         if etype == "opencode":
             return OpenCodeSessionExecutor(

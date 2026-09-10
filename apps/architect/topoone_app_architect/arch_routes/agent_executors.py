@@ -288,7 +288,7 @@ def _oc_healthy(port: int) -> bool:
         return False
 
 
-def _start_opencode_serve(cfg: dict) -> dict:
+def _start_opencode_serve(cfg: dict, cwd: str = "") -> dict:
     """手动拉起 opencode serve(脱离本进程会话, 与 runner 同款命令/日志布局)。
 
     端口从 base_port 起探活分配(健康端口视为占用, 跳过); 已在运行则直接返回。
@@ -310,7 +310,7 @@ def _start_opencode_serve(cfg: dict) -> dict:
     log = open(log_path, "ab")  # noqa: SIM115
     proc = subprocess.Popen(
         [_oc_bin(), "serve", "--port", str(port), "--hostname", "127.0.0.1"],
-        cwd=cfg.get("cwd") or os.path.expanduser("~"),
+        cwd=cwd or cfg.get("cwd") or os.path.expanduser("~"),
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     import time as _t
     for _ in range(25):
@@ -346,9 +346,9 @@ def _parse_oc_config(cfg_json: dict) -> list:
     return out
 
 
-def _detect_opencode_models(cfg: dict) -> dict:
+def _detect_opencode_models(cfg: dict, cwd: str = "") -> dict:
     """检测 opencode 可用模型: ensure serve → GET /config → provider×models。"""
-    started = _start_opencode_serve(cfg)
+    started = _start_opencode_serve(cfg, cwd)
     if started.get("status") != "ok":
         return started
     port = started["port"]
@@ -362,14 +362,119 @@ def _detect_opencode_models(cfg: dict) -> dict:
             "note": started.get("note", "")}
 
 
+def _bin_version(bin_name: str, args: tuple = ("--version",)) -> str:
+    """二进制存在则取版本(截断), 不存在返回空串。"""
+    path = shutil.which(bin_name)
+    if not path:
+        return ""
+    try:
+        out = subprocess.run([path, *args], capture_output=True, text=True, timeout=15)
+        return (out.stdout or out.stderr).strip().splitlines()[0][:80] if (out.stdout or out.stderr) else path
+    except Exception:  # noqa: BLE001
+        return path
+
+
+INSTALL_CMDS = {
+    "opencode": "npm install -g opencode-ai",
+    "codex": "npm install -g @openai/codex",
+}
+
+
+def _env_detect() -> dict:
+    """检测已适配的 coding agent 安装状态(未适配类型不检)。
+
+    opencode/codex: which + --version; cline: node + 内置 sidecar 产物。
+    """
+    sidecar = _default_sidecar_path()
+    node = _bin_version("node")
+    oc = _bin_version("opencode")
+    cx = _bin_version("codex")
+    return {
+        "opencode": {"installed": bool(oc), "version": oc,
+                     "installCmd": INSTALL_CMDS["opencode"]},
+        "codex": {"installed": bool(cx), "version": cx,
+                  "installCmd": INSTALL_CMDS["codex"]},
+        "cline": {"installed": bool(node) and os.path.isfile(sidecar),
+                  "version": node, "sidecar": sidecar,
+                  "sidecarExists": os.path.isfile(sidecar),
+                  "installCmd": "npm run build -w packages/agent-sidecar（topoOne-ui 仓库根）"},
+    }
+
+
+@router.get("/agent/executors/env")
+async def executors_env():
+    """环境检测: 当前安装了哪些已适配 coding agent。"""
+    return ok(_env_detect())
+
+
+@router.post("/agent/executors/install")
+async def install_executor(request: Request):
+    """一键辅助安装(同步执行, 长超时; 返回输出尾部)。"""
+    body = await request.json()
+    agent = str(body.get("agent") or "").strip()
+    if agent not in ("opencode", "codex", "cline"):
+        return err("仅支持 opencode/codex/cline")
+    if agent == "cline":
+        # sidecar 随仓库分发: 定位 topoOne-ui 仓库根执行 workspace 构建
+        root = ""
+        probe = os.path.expanduser("~/topoCodeProj/topoOne-ui")
+        if os.path.isfile(os.path.join(probe, "package.json")):
+            root = probe
+        if not root:
+            return err("未定位到 topoOne-ui 仓库根, 请手动执行: npm run build -w packages/agent-sidecar")
+        cmd = ["npm", "run", "build", "-w", "packages/agent-sidecar"]
+    else:
+        cmd = ["npm", "install", "-g", "opencode-ai" if agent == "opencode" else "@openai/codex"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=root or None)
+        tail = "\n".join(((out.stdout or "") + (out.stderr or "")).strip().splitlines()[-8:])
+        okv = out.returncode == 0
+    except subprocess.TimeoutExpired:
+        return ok({"status": "fail", "detail": "安装超时(300s), 请检查网络后重试或手动安装"})
+    except Exception as e:  # noqa: BLE001
+        return ok({"status": "fail", "detail": str(e)})
+    return ok({"status": "ok" if okv else "fail",
+               "detail": ("安装完成" if okv else f"退出码 {out.returncode}") + (f"\n{tail}" if tail else "")})
+
+
 @router.post("/agent/executors/start")
 async def start_executor(request: Request):
-    """手动拉起执行器(opencode serve)。"""
+    """手动拉起执行器(opencode serve)。cwd=项目源码目录(前端传入, 不可改)。"""
     body = await request.json()
     entry = body.get("entry") or {}
     if entry.get("type") != "opencode":
         return err("仅 opencode 执行器支持手动拉起(其余类型在执行时按需启动)")
-    return ok(_start_opencode_serve(entry.get("config") or {}))
+    return ok(_start_opencode_serve(entry.get("config") or {},
+                                    str(body.get("cwd") or "").strip()))
+
+
+@router.post("/agent/executors/stop")
+async def stop_executor(request: Request):
+    """关闭手动拉起的 opencode serve。
+
+    安全: 仅精确匹配 "opencode serve --port <port>" 特征的进程, 严禁误杀。
+    """
+    body = await request.json()
+    entry = body.get("entry") or {}
+    if entry.get("type") != "opencode":
+        return err("仅 opencode 执行器支持此操作")
+    port = int((entry.get("config") or {}).get("base_port") or 3478)
+    pattern = f"opencode serve --port {port}"
+    try:
+        pg = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True, timeout=10)
+        pids = [x for x in (pg.stdout or "").split() if x.strip().isdigit()]
+    except Exception as e:  # noqa: BLE001
+        return ok({"status": "fail", "detail": str(e)})
+    if not pids:
+        return ok({"status": "fail", "detail": f"未发现运行中的 {pattern} 进程"})
+    killed = []
+    for pid in pids:
+        try:
+            os.kill(int(pid), 15)
+            killed.append(pid)
+        except Exception:  # noqa: BLE001
+            pass
+    return ok({"status": "ok", "detail": f"已停止 {len(killed)} 个进程(port={port})"})
 
 
 @router.post("/agent/executors/models/detect")
@@ -379,7 +484,8 @@ async def detect_executor_models(request: Request):
     entry = body.get("entry") or {}
     if entry.get("type") != "opencode":
         return err("仅 opencode 执行器支持模型检测")
-    return ok(_detect_opencode_models(entry.get("config") or {}))
+    return ok(_detect_opencode_models(entry.get("config") or {},
+                                      str(body.get("cwd") or "").strip()))
 
 
 def _probe_llm_model(url: str, model: str, api_key: str = "") -> dict:
