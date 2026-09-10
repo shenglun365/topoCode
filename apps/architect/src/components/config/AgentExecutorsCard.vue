@@ -42,7 +42,16 @@ const loading = ref(false)
 const saving = ref(false)
 const savedMsg = ref('')
 const probing = ref<Record<string, string>>({})
-const expandedId = ref('')
+// 展开状态绑对象身份 + v-for 用稳定 key(非 e.id):
+// 输入 id 时不触发行重建/详情收起(页面状态精准控制)
+const expandedEntry = ref<ExecEntry | null>(null)
+const entryKeys = new WeakMap<ExecEntry, number>()
+let keySeq = 0
+const keyOf = (e: ExecEntry): number => {
+  let k = entryKeys.get(e)
+  if (!k) { k = ++keySeq; entryKeys.set(e, k) }
+  return k
+}
 
 /** ── 环境检测 + 一键安装 ── */
 const envInfo = ref<Record<string, any> | null>(null)
@@ -98,6 +107,10 @@ async function load() {
     entries.value = d.executors ?? []
     runtime.value = d.runtime
     llmModels.value = llm.models ?? []
+    // 重载后按 id 找回展开中的条目(id 未变则保持展开)
+    if (expandedEntry.value) {
+      expandedEntry.value = entries.value.find((x) => x.id === expandedEntry.value?.id) ?? null
+    }
   } catch {
     entries.value = []
   } finally {
@@ -123,7 +136,7 @@ function addEntry() {
     id: `agent-${n}`, type: 'opencode', host: 'local', enabled: true, default: false,
     config: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800, models: [] },
   })
-  expandedId.value = `agent-${n}`
+  expandedEntry.value = entries.value[entries.value.length - 1]
 }
 
 async function removeEntry(i: number) {
@@ -136,8 +149,8 @@ function setDefault(idx: number) {
   entries.value.forEach((e, i) => { e.default = i === idx })
 }
 
-function toggleExpand(id: string) {
-  expandedId.value = expandedId.value === id ? '' : id
+function toggleExpand(e: ExecEntry) {
+  expandedEntry.value = expandedEntry.value === e ? null : e
 }
 
 function onTypeChange(e: ExecEntry) {
@@ -383,16 +396,16 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
       <!-- 执行器概要条目(点击展开详情) -->
       <div
         v-for="(e, i) in entries"
-        :key="e.id"
+        :key="keyOf(e)"
         class="border border-ctp-surface0 rounded-lg overflow-hidden"
         :class="{ 'opacity-50': !e.enabled }"
       >
         <!-- 概要行 -->
         <div
           class="flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-ctp-surface0/40"
-          @click="toggleExpand(e.id)"
+          @click="toggleExpand(e)"
         >
-          <component :is="expandedId === e.id ? ChevronDownIcon : ChevronRightIcon" class="w-3.5 h-3.5 text-ctp-overlay1 shrink-0" />
+          <component :is="expandedEntry === e ? ChevronDownIcon : ChevronRightIcon" class="w-3.5 h-3.5 text-ctp-overlay1 shrink-0" />
           <span class="font-mono font-semibold text-ctp-text">{{ e.id }}</span>
           <span class="text-[11px] text-ctp-subtext0 truncate">{{ typeLabelOf(e.type) }}</span>
           <span class="chip bg-ctp-surface0 text-ctp-subtext1">{{ e.host === 'remote' ? t('config.executors.hostRemote') : t('config.executors.hostLocal') }}</span>
@@ -416,7 +429,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
         </div>
 
         <!-- 详情(展开) -->
-        <div v-if="expandedId === e.id" class="border-t border-ctp-surface0/60">
+        <div v-if="expandedEntry === e" class="border-t border-ctp-surface0/60">
           <!-- 身份编辑行 -->
           <div class="flex items-center gap-2 px-2.5 py-2 bg-ctp-surface0/40">
             <input
