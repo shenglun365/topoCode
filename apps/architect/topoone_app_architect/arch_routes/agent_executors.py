@@ -525,23 +525,61 @@ async def detect_executor_models(request: Request):
 
 
 def _probe_llm_model(url: str, model: str, api_key: str = "") -> dict:
-    """模型连通性测试: OpenAI 兼容。先 GET /models(廉价), 失败再 1-token 对话。"""
+    """模型连通性测试: OpenAI 兼容。先 GET /models(廉价), 失败再 1-token 对话。
+
+    模型拣择匹配(llama-server 等 OpenAI 兼容服务 /models 返回裸 id,
+    白名单存 opencode 的 provider/model 全名): 全名 → 裸名 → 段后缀 三级匹配。
+    """
     base = (url or "").rstrip("/")
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     if not base:
         return {"status": "fail", "detail": "缺少模型服务 url"}
+
+    def _match(mid: str) -> bool:
+        low, full, b = mid.lower(), model.lower(), model.rsplit("/", 1)[-1].lower()
+        return low == full or low == b or low.endswith("/" + b) or low.rsplit("/", 1)[-1] == b
+
+    def _pick(cands: list[str]) -> str:
+        """四级拣择: 全名/裸名精确 → 段后缀 → 子串(兼容 gguf 路径/别名)。"""
+        full, b = model.lower(), model.rsplit("/", 1)[-1].lower()
+        for mid in cands:
+            if mid.lower() in (full, b):
+                return mid
+        for mid in cands:
+            low = mid.lower()
+            if low.endswith("/" + b) or low.rsplit("/", 1)[-1] == b:
+                return mid
+        for mid in cands:
+            if b in mid.lower():
+                return mid
+        return ""
+
     try:
         req = urllib.request.Request(f"{base}/models", headers=headers)
         with urllib.request.urlopen(req, timeout=6) as r:
-            body = r.read().decode()[:4096]
-            hit = model in body
-            return {"status": "ok",
-                    "detail": f"{base}/models HTTP {r.status}" + ("" if hit else f"(列表未见 {model}, 仍可达)")}
+            body = r.read().decode("utf-8", "replace")[:16384]
+            cands: list[str] = []
+            try:
+                payload = json.loads(body)
+                entries = payload.get("data") or payload.get("models") or []
+                for m in entries:
+                    if isinstance(m, dict):
+                        cands.extend(str(m.get(k) or "") for k in ("id", "name", "model") if m.get(k))
+                    elif isinstance(m, str):
+                        cands.append(m)
+            except Exception:  # noqa: BLE001
+                pass
+            if cands:
+                matched = _pick(cands)
+                suffix = f"(命中 {matched})" if matched else f"(列表未见 {model}, 仍可达)"
+            else:
+                suffix = "" if (model in body or model.rsplit("/", 1)[-1] in body) else f"(列表未见 {model}, 仍可达)"
+            return {"status": "ok", "detail": f"{base}/models HTTP {r.status}{suffix}"}
     except Exception as e1:  # noqa: BLE001
         try:
-            payload = json.dumps({"model": model, "messages": [
+            payload = json.dumps({"model": model.rsplit("/", 1)[-1], "messages": [
                 {"role": "user", "content": "ping"}], "max_tokens": 1}).encode()
             req = urllib.request.Request(
                 f"{base}/chat/completions", data=payload, headers=headers, method="POST")
