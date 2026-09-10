@@ -36,6 +36,34 @@ export const useConversationStore = defineStore('archConversation', () => {
   const activeReqId = ref('')
   const activeMeta = ref<ConversationMeta | null>(null)
 
+  // ── 场景隔离: 会话中心/资产管理各自保留最后对话状态, 互不影响 ──
+  // dock 挂 scope prop → setScope 切换工作区: 当前状态存快照, 目标场景恢复快照。
+  interface ScopeSnapshot {
+    activeId: string; activeTitle: string; activeReqId: string
+    activeMeta: ConversationMeta | null; turns: KbAnalysisTurn[]
+  }
+  const scope = ref('sessions')
+  const scopeCache = new Map<string, ScopeSnapshot>()
+  function setScope(next: string) {
+    if (next === scope.value) return
+    scopeCache.set(scope.value, {
+      activeId: activeId.value, activeTitle: activeTitle.value,
+      activeReqId: activeReqId.value, activeMeta: activeMeta.value,
+      turns: turns.value,
+    })
+    scope.value = next
+    const snap = scopeCache.get(next)
+    if (snap) {
+      activeId.value = snap.activeId; activeTitle.value = snap.activeTitle
+      activeReqId.value = snap.activeReqId; activeMeta.value = snap.activeMeta
+      turns.value = snap.turns
+    } else {
+      resetChat()
+      activeId.value = ''; activeTitle.value = ''
+      activeReqId.value = ''; activeMeta.value = null
+    }
+  }
+
   // ── 聊天状态(原 AgentWorkbench/AssetMgmt 本地状态统一化) ──
   const turns = ref<KbAnalysisTurn[]>([])
   const busy = ref(false)
@@ -56,8 +84,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     insertDraft.value = { text, nonce: ++draftNonce }
   }
 
-  /** 提案卡: tool_result(req.propose) → 拉取需求详情挂到当前助手回合。 */
-  async function attachProposal(ev: ChatStreamEvent) {
+  /** 提案卡: tool_result(req.propose) → 拉取需求详情挂到当前助手回合(arr=流式回合所在数组, 场景切换安全)。 */
+  async function attachProposal(ev: ChatStreamEvent, arr: KbAnalysisTurn[]) {
     try {
       const m = String(ev.summary || '').match(/RQ-\d+/)
       const reqId = m ? m[0] : ''
@@ -67,7 +95,7 @@ export const useConversationStore = defineStore('archConversation', () => {
       if (!row?.id) return
       // 绑定会话↔需求：自然语言「确认存入」经 agent req.finalize 时依赖此绑定
       activeReqId.value = row.id
-      const last = turns.value[turns.value.length - 1]
+      const last = arr[arr.length - 1]
       if (last && last.role === 'assistant') {
         last.proposal = {
           id: row.id, title: row.title, desc: row.desc, priority: row.priority,
@@ -164,13 +192,15 @@ export const useConversationStore = defineStore('archConversation', () => {
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子。 */
   async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string }) {
     if (busy.value || !text.trim()) return
-    turns.value.push({ role: 'user', content: text })
-    const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
+    // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里
+    const arr = turns.value
+    arr.push({ role: 'user', content: text })
+    const idx = arr.push({ role: 'assistant', content: '' }) - 1
     busy.value = true
     beginProgress()
     const ac = new AbortController(); abortCtl.value = ac
     try {
-      const msgs = turns.value.slice(0, -1).map((m) => ({ role: m.role, content: m.content }))
+      const msgs = arr.slice(0, -1).map((m) => ({ role: m.role, content: m.content }))
       await chatStream(msgs, {
         conversationId: activeId.value || undefined,
         kind: opts?.kind ?? (activeMeta.value as any)?.kind ?? undefined,
@@ -186,26 +216,26 @@ export const useConversationStore = defineStore('archConversation', () => {
         // 页面钩子(资产提取/规约提议等页面反应)
         for (const fn of hooks) fn(ev, { turnIndex: idx })
         if (ev.type === 'chat_start') {
-          if (ev.userMessageId && idx >= 1 && !turns.value[idx - 1].id) turns.value[idx - 1].id = ev.userMessageId
+          if (ev.userMessageId && idx >= 1 && !arr[idx - 1].id) arr[idx - 1].id = ev.userMessageId
         } else if (ev.type === 'chunk') {
-          turns.value[idx].content += ev.delta ?? ''
+          arr[idx].content += ev.delta ?? ''
         } else if (ev.type === 'reasoning') {
-          turns.value[idx].reasoning = (turns.value[idx].reasoning ?? '') + (ev.delta ?? '')
+          arr[idx].reasoning = (arr[idx].reasoning ?? '') + (ev.delta ?? '')
         } else if (ev.type === 'done') {
-          turns.value[idx].content = ev.content ?? turns.value[idx].content
-          if (ev.messageId) turns.value[idx].id = ev.messageId
+          arr[idx].content = ev.content ?? arr[idx].content
+          if (ev.messageId) arr[idx].id = ev.messageId
           void refreshActiveMeta()
         } else if (ev.type === 'tool_result') {
           const stage = stageOfTool(ev.tool)
-          if (stage) turns.value[idx].stage = stage
-          if (ev.tool === 'req.propose' && ev.ok) void attachProposal(ev)
-          if (ev.assets?.length) turns.value[idx].assets = ev.assets as SemanticAsset[]
+          if (stage) arr[idx].stage = stage
+          if (ev.tool === 'req.propose' && ev.ok) void attachProposal(ev, arr)
+          if (ev.assets?.length) arr[idx].assets = ev.assets as SemanticAsset[]
         } else if (ev.type === 'error') {
-          turns.value[idx].content = ev.message || ''
+          arr[idx].content = ev.message || ''
         }
       })
     } catch (err) {
-      turns.value[idx].content = (err instanceof Error ? err.message : '') || ''
+      arr[idx].content = (err instanceof Error ? err.message : '') || ''
     } finally {
       abortCtl.value = null
       busy.value = false
@@ -240,6 +270,7 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   return {
     dockOpen, setDockOpen, toggleDock,
+    scope, setScope,
     activeId, activeTitle, activeReqId, activeMeta,
     turns, busy, insertDraft, pushDraft,
     diagramSkill, toggleDiagramSkill,

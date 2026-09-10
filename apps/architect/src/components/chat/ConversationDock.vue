@@ -24,6 +24,8 @@ const props = withDefaults(defineProps<{
   defaultKind?: string
   /** 页面级技能场景(如资产地图=['extract'])：随发送注入。 */
   skillScenarios?: string[]
+  /** 场景标识(sessions=会话中心 / asset=资产管理)：对话状态按场景隔离互不影响。 */
+  scope?: string
 }>(), { inline: false })
 
 const { t } = useI18n()
@@ -77,6 +79,7 @@ async function summarizeTitle() {
   }
 }
 onMounted(() => {
+  if (props.scope) conv.setScope(props.scope)
   void loadRecent()
   niTimer = setInterval(() => void pollNeedsInput(), 5000)
 })

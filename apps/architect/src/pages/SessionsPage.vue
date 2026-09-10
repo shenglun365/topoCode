@@ -644,7 +644,7 @@ function statusClass(s: string) {
 
         <!-- 右: 对话栏·inline 停靠(P1 决策2: 唯一对话栏——与资产地图页同构: 左信息/右对话) -->
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ConversationDock inline default-kind="requirement" :skill-scenarios="['plan', 'coding', 'capability']" />
+          <ConversationDock inline scope="sessions" default-kind="requirement" :skill-scenarios="['plan', 'coding', 'capability']" />
         </div>
       </div>
     </div>
