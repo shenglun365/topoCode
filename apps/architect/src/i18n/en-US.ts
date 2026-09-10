@@ -1037,7 +1037,15 @@ export default {
       saving: 'Saving…',
       saved: 'Saved',
       modelPlaceholder: 'Model id (empty = follow default model)',
-      hint: 'Different cognitive work binds different models/APIs: extraction on a fast model (the API layer adjudicates naming), acceptance comparison on a strong model, induction on mid-tier. Applied per-call without affecting the global model selection of other pages.',
+      hint: 'Assign different models to different kinds of cognitive work. Applied per call without affecting the global model selection of other pages.',
+      items: {
+        extract: { label: 'Extraction', note: 'Identify interfaces and semantic structure; a fast, low-cost model suffices' },
+        verify: { label: 'Acceptance Check', note: 'Verify against acceptance criteria item by item; a stronger model is recommended' },
+        induce: { label: 'Induction', note: 'Derive specs and terms from samples; a mid-tier model suffices' },
+        pseudo: { label: 'Pseudocode', note: 'Rewrite implementation details into readable pseudocode' },
+        evaluate: { label: 'Plan Evaluation', note: 'Review plans and results with assessment notes; a strong model is recommended' },
+        mine: { label: 'Capability Mining', note: 'Distill reusable specs and techniques from past conversations; a strong model is recommended' },
+      },
     },
 
     otherConfig: 'Other Configuration',

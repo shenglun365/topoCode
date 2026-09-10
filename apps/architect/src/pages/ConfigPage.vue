@@ -15,7 +15,7 @@ import SessionRolesCard from '@/components/config/SessionRolesCard.vue'
 import AssetLocksCard from '@/components/config/AssetLocksCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const agent = useArchAgentStore()
 const spec = useArchSpecStore()
 const collab = useArchCollabStore()
@@ -39,6 +39,12 @@ async function loadRoles() {
     roles.value = []
   }
 }
+
+// 角色文案走 i18n(按 name), 后端兜底
+const roleLabel = (r: AgentRole) =>
+  te(`config.roles.items.${r.name}.label`) ? t(`config.roles.items.${r.name}.label`) : r.label
+const roleNote = (r: AgentRole) =>
+  te(`config.roles.items.${r.name}.note`) ? t(`config.roles.items.${r.name}.note`) : (r.note || '')
 
 async function saveRoles() {
   rolesSaving.value = true
@@ -489,8 +495,8 @@ onMounted(() => { void loadCgStatus() })
           :key="r.name"
           class="flex items-center gap-3 px-4 py-2.5 text-xs"
         >
-          <span class="w-20 font-semibold text-ctp-text shrink-0">{{ r.label }}</span>
-          <span class="flex-1 text-[10px] text-ctp-overlay1 leading-snug">{{ r.note }}</span>
+          <span class="w-20 font-semibold text-ctp-text shrink-0">{{ roleLabel(r) }}</span>
+          <span class="flex-1 text-[10px] text-ctp-overlay1 leading-snug">{{ roleNote(r) }}</span>
           <input
             v-model="r.modelId"
             class="input !py-1 !px-2 !text-[11px] w-56 font-mono"
