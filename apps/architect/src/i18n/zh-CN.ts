@@ -1150,6 +1150,7 @@ export default {
       savedNoRunner: '已保存（runner 不可达，重启后生效）',
       runnerHint: 'runner :3458 运行态',
       hostHint: '本机=architect 进程内直连; 远程=经网络连接远端实例',
+      builtin: '内嵌',
       hostLocal: '本机',
       hostRemote: '远程',
       connTitle: '连接参数',

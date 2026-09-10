@@ -268,6 +268,11 @@ async function probe(e: ExecEntry) {
   }
 }
 
+/** 内嵌执行器(architect 自主模式): 不可删除、id 锁定。 */
+function isBuiltinExec(e: ExecEntry): boolean {
+  return e.id === 'cline'
+}
+
 const runnerReachable = computed(() => !!runtime.value?.executors)
 const srcDir = computed(() => project.project?.rootPath || '')
 
@@ -389,6 +394,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
           <span class="font-mono font-semibold text-ctp-text">{{ e.id }}</span>
           <span class="text-[11px] text-ctp-subtext0 truncate">{{ typeLabelOf(e.type) }}</span>
           <span class="chip bg-ctp-surface0 text-ctp-subtext1">{{ e.host === 'remote' ? t('config.executors.hostRemote') : t('config.executors.hostLocal') }}</span>
+          <span v-if="isBuiltinExec(e)" class="chip bg-ctp-mauve/15 text-ctp-mauve">{{ t('config.executors.builtin') }}</span>
           <span
             v-if="healthOf(e.id) !== null"
             class="chip"
@@ -414,6 +420,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             <input
               v-model="e.id"
               class="input !py-0.5 !text-xs font-mono w-28"
+              :disabled="isBuiltinExec(e)"
               :title="t('config.executors.idHint')"
             >
             <select
@@ -444,6 +451,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
               {{ t('config.executors.probe') }}
             </button>
             <button
+              v-if="!isBuiltinExec(e)"
               class="btn !py-0.5 !px-2 !text-[11px] text-ctp-red"
               @click="removeEntry(i)"
             >

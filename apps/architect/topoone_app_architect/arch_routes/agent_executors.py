@@ -214,6 +214,9 @@ async def put_executors(request: Request, background: BackgroundTasks):
             if cfg.get(k) == "******" and old_cfg.get(k):
                 cfg[k] = old_cfg[k]
     _merge_secret_models(entries, old)
+    # 内嵌执行器保护: cline(architect 自主模式 sidecar)不可删除
+    if "cline" in old and "cline" not in {e.get("id") for e in entries}:
+        return err(400, "cline 为内嵌执行器(architect 自主模式), 不可删除")
     msg = _validate(entries)
     if msg:
         return err(msg)

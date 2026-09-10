@@ -1124,6 +1124,7 @@ export default {
       savedNoRunner: 'Saved (runner unreachable, effective after restart)',
       runnerHint: 'runner :3458 runtime',
       hostHint: 'Local = in-process direct; Remote = connect over network',
+      builtin: 'Built-in',
       hostLocal: 'Local',
       hostRemote: 'Remote',
       connTitle: 'Connection',
