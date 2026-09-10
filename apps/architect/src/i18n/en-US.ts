@@ -1104,6 +1104,7 @@ export default {
       copyInject: 'Copy inject prompt',
       copyInjectHint: 'Copy a skill/tool/permission injection prompt for this role — paste into a remote agent',
       copied: 'Copied to clipboard',
+      architectModelHint: 'Model is set in "Architect Instance (Models)" (default model); no executor needed',
       architectProtected: 'architect is the built-in role and cannot be deleted',
     },
 

@@ -152,9 +152,10 @@ function toggleSkill(role: SessionRole, skill: string) {
       >
         <div class="flex items-center gap-2 flex-wrap">
           <span v-if="r.builtin" class="chip bg-ctp-mauve/15 text-ctp-mauve">{{ t('config.sessionRoles.builtin') }}</span>
-          <input v-model="r.id" class="input !py-0.5 !text-xs font-mono w-36" :disabled="!!r.builtin" :title="t('config.sessionRoles.idHint')">
+          <input v-model="r.id" class="input !py-0.5 !text-xs font-mono w-36" :disabled="r.kind === 'architect'" :title="t('config.sessionRoles.idHint')">
           <input v-model="r.name" class="input !py-0.5 !text-xs w-36" :placeholder="t('config.sessionRoles.namePh')">
-          <template v-if="!r.builtin">
+          <span v-if="r.kind === 'architect'" class="text-[10px] text-ctp-overlay0">{{ t('config.sessionRoles.architectModelHint') }}</span>
+          <template v-else>
             <select v-model="r.executorId" class="input !py-0.5 !text-xs w-40">
               <option value="">{{ t('config.sessionRoles.pickExecutor') }}</option>
               <option v-for="e in executors" :key="e.id" :value="e.id">
