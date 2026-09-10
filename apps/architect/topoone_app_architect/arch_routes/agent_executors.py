@@ -231,10 +231,20 @@ async def probe_executor(request: Request):
         if etype in ("opencode", "serve-generic"):
             url = (cfg.get("base_url") or f"http://127.0.0.1:{cfg.get('base_port', 3478)}").rstrip("/")
             path = "/global/health" if etype == "opencode" else "/health"
-            with urllib.request.urlopen(f"{url}{path}", timeout=3) as r:
-                return ok({"status": "ok" if r.status == 200 else "fail",
-                           "detail": f"{url} HTTP {r.status}",
-                           "note": "serve 未运行属正常（执行时自动拉起）"})
+            try:
+                with urllib.request.urlopen(f"{url}{path}", timeout=3) as r:
+                    return ok({"status": "ok" if r.status == 200 else "fail",
+                               "detail": f"{url} HTTP {r.status}"})
+            except Exception as e:  # noqa: BLE001
+                # 连接拒绝 = serve 未运行: auto_start 开启属预期状态(执行时自动拉起),
+                # 单独标记 stopped 而非 fail, 前端以中性样式展示
+                refused = "Connection refused" in str(e) or isinstance(
+                    getattr(getattr(e, "reason", None), "errno", None), int) and getattr(
+                    getattr(e, "reason", None), "errno", 0) == 111
+                if refused and etype == "opencode" and cfg.get("auto_start"):
+                    return ok({"status": "stopped", "detail": f"{url} 未运行",
+                               "note": "auto_start 已开启——执行时自动拉起，无需手动启动"})
+                raise
         if etype == "cline-sdk":
             script = cfg.get("sidecar_script") or _default_sidecar_path()
             exists = os.path.isfile(script)

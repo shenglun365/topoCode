@@ -134,9 +134,11 @@ async function save() {
 async function probe(e: ExecEntry) {
   probing.value[e.id] = '…'
   try {
-    const d = await apiPost<{ status: string; detail: string }>('/agent/executors/probe',
+    const d = await apiPost<{ status: string; detail: string; note?: string }>('/agent/executors/probe',
       { entry: e })
-    probing.value[e.id] = `${d.status === 'ok' ? '✓' : '✗'} ${d.detail}`
+    // ok=✓ / stopped=未运行但 auto_start 属预期 / fail=✗
+    const mark = d.status === 'ok' ? '✓' : d.status === 'stopped' ? '○' : '✗'
+    probing.value[e.id] = `${mark} ${d.detail}${d.note ? ` —— ${d.note}` : ''}`
   } catch (err: any) {
     probing.value[e.id] = `✗ ${err?.message || err}`
   }
