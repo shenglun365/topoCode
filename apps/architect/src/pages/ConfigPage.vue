@@ -5,7 +5,6 @@ import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, Adj
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchSpecStore } from '@/stores/spec-store'
-import { useArchCollabStore } from '@/stores/collaboration-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
@@ -28,7 +27,7 @@ const TABS = [
 const activeTab = ref<string>('instance')
 const agent = useArchAgentStore()
 const spec = useArchSpecStore()
-const collab = useArchCollabStore()
+
 const project = useArchProjectStore()
 spec.load()
 agent.load()
@@ -80,11 +79,6 @@ const statusColor: Record<string, string> = {
   done: 'bg-ctp-green/15 text-ctp-green',
   failed: 'bg-ctp-red/15 text-ctp-red',
 }
-
-const collabModes = computed(() => {
-  const keys = ['main-agent', 'mcp-server', 'spec-assist', 'migration'] as const
-  return keys.map((k) => ({ key: k, label: t(`execute.mode.${k}`) }))
-})
 
 const granularityFields = [
   { key: 'estMinMin' as const },
@@ -274,7 +268,7 @@ onMounted(() => { void loadCgStatus() })
     </div>
 
     <!-- ═══ tab: 其他配置(其他 + 资产锁 + CodeGraph 同属此 tab, 分散两处 v-show) ═══ -->
-    <div v-show="activeTab === 'other'" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    <div v-show="activeTab === 'other'" class="space-y-4">
       <div class="panel overflow-hidden">
         <div class="panel-header">
           <span class="flex items-center gap-2">
@@ -282,19 +276,6 @@ onMounted(() => { void loadCgStatus() })
           </span>
         </div>
         <div class="p-3 space-y-3 text-xs">
-          <div class="border border-ctp-surface0 rounded-lg p-3">
-            <div class="text-ctp-overlay1 mb-1.5">
-              {{ t('config.collabDefault') }}
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <span
-                v-for="m in collabModes"
-                :key="m.key"
-                class="chip"
-                :class="collab.mode === m.key ? 'bg-ctp-mauve/15 text-ctp-mauve ring-1 ring-ctp-mauve/40' : 'bg-ctp-surface0 text-ctp-subtext0'"
-              >{{ m.label }}</span>
-            </div>
-          </div>
           <div class="border border-ctp-surface0 rounded-lg p-3">
             <div class="flex items-center gap-2">
               <span class="text-ctp-overlay1">{{ t('config.specVersion') }}</span>
