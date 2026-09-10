@@ -6,6 +6,9 @@ from fastapi.testclient import TestClient
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ARCH_DATA_DIR", str(tmp_path))
+    from topoone_app_architect.arch_routes import ctx as C
+    C._db = None; C._kb = None; C._data_dir = None
+    C._project_dbs.clear()
     from topoone_app_architect import server as _srv
     app = _srv.build_app(data_dir=str(tmp_path / "arch"))
     return TestClient(app)

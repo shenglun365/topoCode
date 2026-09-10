@@ -150,6 +150,73 @@ async def put_groups(request: Request):
     return ok({"groups": names})
 
 
+# ── PR2 角色管理: architect 系统角色(唯一/不可删) + executor 绑执行器实例 ──
+
+_ROLE_SKILL_POOL = ["extract", "plan", "coding", "capability", "accept", "naming", "contract", "linenote"]
+
+
+@router.get("/session-roles")
+async def list_session_roles():
+    roles = store.SessionRolesStore.all()
+    # 附执行器实例名(便于前端展示绑定对象)
+    try:
+        from .agent_executors import load_executors
+        ex_names = {e.get("id"): e.get("id") for e in load_executors()}
+    except Exception:  # noqa: BLE001
+        ex_names = {}
+    out = []
+    for r in roles:
+        r = dict(r)
+        r["executorLabel"] = ex_names.get(r.get("executorId") or "", "")
+        r["skillPool"] = _ROLE_SKILL_POOL
+        out.append(r)
+    return ok(out)
+
+
+@router.put("/session-roles")
+async def put_session_role(request: Request):
+    """新增/更新角色(upsert)。内置 architect 角色仅允许改能力配置。"""
+    data = await request.json()
+    rid = str(data.get("id") or "").strip()
+    name = str(data.get("name") or "").strip()
+    if not rid or not name:
+        return err(400, "角色 id 与名称必填")
+    if rid == "architect" and str(data.get("kind") or "executor") != "architect":
+        return err(400, "architect 为系统内置角色, kind 不可改")
+    existing = store.SessionRolesStore.get(rid)
+    if not existing and str(data.get("kind") or "") == "executor":
+        if not str(data.get("executorId") or "").strip():
+            return err(400, "executor 角色必须绑定执行器实例(executorId)")
+    role = store.SessionRolesStore.upsert({
+        "id": rid, "name": name,
+        "kind": data.get("kind") or ("architect" if rid == "architect" else "executor"),
+        "executorId": data.get("executorId") or "",
+        "modelId": data.get("modelId") or "",
+        "skills": data.get("skills") or [],
+        "tools": data.get("tools") or [],
+        "permissions": data.get("permissions") or {},
+    })
+    return ok(role)
+
+
+@router.delete("/session-roles/{role_id}")
+async def delete_session_role(role_id: str):
+    """删除角色(内置 architect 拒绝; 被会话引用中的角色拒绝)。"""
+    role = store.SessionRolesStore.get(role_id)
+    if not role:
+        return err(404, "角色不存在")
+    if role.get("builtin"):
+        return err(400, "architect 为系统内置角色, 不可删除")
+    # 会话引用校验: 有活跃(未归档)会话使用该角色 → 拒绝删除
+    used = [c for c in store.ConversationsStore.all(limit=400)
+            if (c.get("roleId") or "architect") == role_id
+            and (c.get("status") or "active") != "archived"]
+    if used:
+        return err(400, f"仍有 {len(used)} 个未归档会话使用该角色, 不可删除")
+    store.SessionRolesStore.delete(role_id)
+    return ok({"deleted": True, "id": role_id})
+
+
 @router.post("/sessions")
 async def create_session(request: Request):
     data = await request.json()
@@ -157,12 +224,15 @@ async def create_session(request: Request):
     if kind not in SESSION_KINDS:
         kind = "requirement"
     title = (data.get("title") or "").strip()
+    role_id = data.get("roleId") or "architect"
+    if role_id != "architect" and not store.SessionRolesStore.get(role_id):
+        return err(400, f"角色不存在: {role_id}")
     conv = store.ConversationsStore.create({
         "kind": kind,
         "projectId": data.get("projectId") or "",
         "title": title or f"{kind} 会话",
         "status": "active",
-        "roleId": data.get("roleId") or "architect",
+        "roleId": role_id,
         "tags": _norm_tags(data) or {"modules": [], "groups": []},
         "meta": data.get("meta") or {},
     })

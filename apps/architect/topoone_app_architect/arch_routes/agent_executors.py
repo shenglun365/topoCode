@@ -46,6 +46,27 @@ DEFAULT_EXECUTORS = [
 
 _TYPES = {"opencode", "cline-sdk", "cli", "serve-generic", "codex-server", "remote-agent", "mock"}
 _SECRET_KEYS = {"api_key"}
+_HOSTS = {"local", "remote"}
+
+
+def _norm_models(raw) -> list:
+    """实例内模型列表归一化: [{id, name, model, url, apiKey?, maxTokens?}]。"""
+    out = []
+    for i, m in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(m, dict):
+            continue
+        name = str(m.get("name") or "").strip()
+        model = str(m.get("model") or "").strip()
+        if not name or not model:
+            continue
+        out.append({
+            "id": m.get("id") or f"m{i + 1}",
+            "name": name, "model": model,
+            "url": str(m.get("url") or "").strip(),
+            "apiKey": str(m.get("apiKey") or "").strip(),
+            "maxTokens": int(m.get("maxTokens") or 0),
+        })
+    return out
 
 
 def load_executors() -> list[dict]:
@@ -75,6 +96,13 @@ def _validate(entries: list[dict]) -> Optional[str]:
         ids.add(eid)
         if e.get("type") not in _TYPES:
             return f"未知执行器类型: {e.get('type')}"
+        if e.get("host", "local") not in _HOSTS:
+            return f"非法 host: {e.get('host')}(local|remote)"
+        cfg = e.get("config") or {}
+        cfg["models"] = _norm_models(cfg.get("models"))
+        names = [m["name"] for m in cfg["models"]]
+        if len(names) != len(set(names)):
+            return f"执行器 {eid} 模型名称重复"
         if e.get("default"):
             defaults += 1
     if defaults > 1:
@@ -89,8 +117,23 @@ def _mask(entries: list[dict]) -> list[dict]:
         for k in _SECRET_KEYS:
             if cfg.get(k):
                 cfg[k] = "******"
+        cfg["models"] = [
+            {**m, "apiKey": "******"} if m.get("apiKey") else m
+            for m in cfg.get("models") or []
+        ]
         out.append({**e, "config": cfg})
     return out
+
+
+def _merge_secret_models(entries: list, old: dict) -> None:
+    """前端提交 ****** 视为不变: 与已存密钥合并。"""
+    for e in entries:
+        old_models = {m.get("name"): m for m in ((old.get(e.get("id")) or {}).get("config") or {}).get("models") or []}
+        for m in (e.get("config") or {}).get("models") or []:
+            if m.get("apiKey") == "******":
+                prev = old_models.get(m.get("name")) or {}
+                if prev.get("apiKey"):
+                    m["apiKey"] = prev["apiKey"]
 
 
 def _post_runner(path: str, payload: dict | None = None, timeout: float = 8.0) -> Optional[dict]:
@@ -152,6 +195,7 @@ async def put_executors(request: Request, background: BackgroundTasks):
         for k in _SECRET_KEYS:
             if cfg.get(k) == "******" and old_cfg.get(k):
                 cfg[k] = old_cfg[k]
+    _merge_secret_models(entries, old)
     msg = _validate(entries)
     if msg:
         return err(msg)
@@ -202,6 +246,44 @@ async def probe_executor(request: Request):
     except Exception as e:  # noqa: BLE001
         return ok({"status": "fail", "detail": str(e),
                    "note": "serve 未运行属正常（执行时自动拉起）"})
+
+
+def _probe_llm_model(url: str, model: str, api_key: str = "") -> dict:
+    """模型连通性测试: OpenAI 兼容。先 GET /models(廉价), 失败再 1-token 对话。"""
+    base = (url or "").rstrip("/")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    if not base:
+        return {"status": "fail", "detail": "缺少模型服务 url"}
+    try:
+        req = urllib.request.Request(f"{base}/models", headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as r:
+            body = r.read().decode()[:4096]
+            hit = model in body
+            return {"status": "ok",
+                    "detail": f"{base}/models HTTP {r.status}" + ("" if hit else f"(列表未见 {model}, 仍可达)")}
+    except Exception as e1:  # noqa: BLE001
+        try:
+            payload = json.dumps({"model": model, "messages": [
+                {"role": "user", "content": "ping"}], "max_tokens": 1}).encode()
+            req = urllib.request.Request(
+                f"{base}/chat/completions", data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return {"status": "ok", "detail": f"{base}/chat/completions HTTP {r.status}"}
+        except Exception as e2:  # noqa: BLE001
+            return {"status": "fail", "detail": f"/models: {e1} | /chat/completions: {e2}"}
+
+
+@router.post("/agent/executors/model-probe")
+async def model_probe(request: Request):
+    """实例内模型连通性测试。Body: { url, model, apiKey? }。"""
+    body = await request.json() or {}
+    url = str(body.get("url") or "").strip()
+    model = str(body.get("model") or "").strip()
+    if not model:
+        return err(400, "缺少 model")
+    return ok(_probe_llm_model(url, model, str(body.get("apiKey") or "")))
 
 
 @router.get("/agent/executors/runtime")

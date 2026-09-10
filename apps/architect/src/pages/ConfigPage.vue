@@ -11,6 +11,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
+import SessionRolesCard from '@/components/config/SessionRolesCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t } = useI18n()
@@ -180,6 +181,19 @@ async function removeManualModel(id: string) {
 }
 
 loadLlm()
+
+// ── architect 实例模型连通性测试(模型下沉实例, 逐条可测) ──
+const llmProbing = ref<Record<string, string>>({})
+async function probeLlm(m: ArchLlmModel) {
+  llmProbing.value[m.id] = '…'
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    const d = await apiPost<{ status: string; detail: string }>('/llm/models/probe', { modelId: m.id })
+    llmProbing.value[m.id] = `${d.status === 'ok' ? '✓' : '✗'} ${d.detail}`
+  } catch (e: any) {
+    llmProbing.value[m.id] = `✗ ${e?.message || e}`
+  }
+}
 // ── 符号源(CodeGraph)开关：三档 + 状态(KV 持久化) ──
 const cgStatus = ref<CodegraphStatus | null>(null)
 const cgSaving = ref(false)
@@ -393,6 +407,15 @@ onMounted(() => { void loadCgStatus() })
               </div>
             </div>
             <div class="flex-1" />
+            <span
+              v-if="llmProbing[m.id]"
+              class="text-[10px] font-mono"
+              :class="llmProbing[m.id].startsWith('✓') ? 'text-ctp-green' : 'text-ctp-overlay0'"
+            >{{ llmProbing[m.id] }}</span>
+            <button
+              class="btn !py-0 !px-2 !text-[10px]"
+              @click="probeLlm(m)"
+            >{{ t('config.executors.modelProbe') }}</button>
             <button
               v-if="m.source === 'manual'"
               class="btn !py-0.5 !px-2 !text-[11px] text-ctp-red"
@@ -415,6 +438,8 @@ onMounted(() => { void loadCgStatus() })
         </div>
       </div>
     </div>
+
+    <SessionRolesCard />
 
     <AgentExecutorsCard />
 

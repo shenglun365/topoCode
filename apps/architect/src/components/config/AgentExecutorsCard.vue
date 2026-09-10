@@ -13,12 +13,15 @@ import {
 } from '@heroicons/vue/24/outline'
 import { apiGet, apiPut, apiPost } from '@/services/api-client'
 
+interface ExecModel { id: string; name: string; model: string; url: string; apiKey: string; maxTokens: number }
 interface ExecEntry {
   id: string
   type: string
+  /** 本机 | 远程(连接层按 host 路由) */
+  host: 'local' | 'remote'
   enabled: boolean
   default: boolean
-  config: Record<string, any>
+  config: Record<string, any> & { models?: ExecModel[] }
 }
 
 const { t } = useI18n()
@@ -28,6 +31,7 @@ const loading = ref(false)
 const saving = ref(false)
 const savedMsg = ref('')
 const probing = ref<Record<string, string>>({})
+const modelProbing = ref<Record<string, string>>({})   // key: `${execId}/${modelName}`
 
 const TYPES = [
   { value: 'opencode', label: 'opencode (serve 会话)' },
@@ -63,8 +67,8 @@ function addEntry() {
   let n = 1
   while (used.has(`agent-${n}`)) n++
   entries.value.push({
-    id: `agent-${n}`, type: 'opencode', enabled: true, default: false,
-    config: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800 },
+    id: `agent-${n}`, type: 'opencode', host: 'local', enabled: true, default: false,
+    config: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800, models: [] },
   })
 }
 
@@ -78,15 +82,35 @@ function setDefault(idx: number) {
 
 function onTypeChange(e: ExecEntry) {
   const defaults: Record<string, Record<string, any>> = {
-    opencode: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800, model: '' },
-    'remote-agent': { agent_url: '', api_key: '', git_remote: 'auto', timeout: 3600 },
-    'codex-server': { codex_bin: 'codex', approval_policy: 'never', sandbox_mode: 'workspace-write', timeout: 3600, model: '' },
-    'cline-sdk': { node_bin: 'node', sidecar_script: '', provider_id: 'openai-compatible', model_id: '', base_url: '', api_key: '', max_iterations: 40 },
+    opencode: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800, models: [] },
+    'remote-agent': { agent_url: '', api_key: '', git_remote: 'auto', timeout: 3600, models: [] },
+    'codex-server': { codex_bin: 'codex', approval_policy: 'never', sandbox_mode: 'workspace-write', timeout: 3600, models: [] },
+    'cline-sdk': { node_bin: 'node', sidecar_script: '', provider_id: 'openai-compatible', model_id: '', base_url: '', api_key: '', max_iterations: 40, models: [] },
     cli: { command: '', timeout: 600 },
     'serve-generic': { base_url: '', api_key: '' },
     mock: {},
   }
   e.config = { ...(defaults[e.type] || {}) }
+}
+
+/** ── 实例内模型(模型完全下沉进连接实例, 角色经 modelId 引用) ── */
+function addModel(e: ExecEntry) {
+  if (!Array.isArray(e.config.models)) e.config.models = []
+  e.config.models.push({ id: `m${e.config.models.length + 1}`, name: '', model: '', url: '', apiKey: '', maxTokens: 0 })
+}
+function removeModel(e: ExecEntry, i: number) {
+  e.config.models?.splice(i, 1)
+}
+async function probeModel(e: ExecEntry, m: ExecModel) {
+  const key = `${e.id}/${m.name || m.model || '?'}`
+  modelProbing.value[key] = '…'
+  try {
+    const d = await apiPost<{ status: string; detail: string }>('/agent/executors/model-probe',
+      { url: m.url, model: m.model, apiKey: m.apiKey })
+    modelProbing.value[key] = `${d.status === 'ok' ? '✓' : '✗'} ${d.detail}`
+  } catch (err: any) {
+    modelProbing.value[key] = `✗ ${err?.message || err}`
+  }
 }
 
 async function save() {
@@ -210,6 +234,10 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
               {{ ty.label }}
             </option>
           </select>
+          <select v-model="e.host" class="input !py-0.5 !text-xs w-20" :title="t('config.executors.hostHint')">
+            <option value="local">{{ t('config.executors.hostLocal') }}</option>
+            <option value="remote">{{ t('config.executors.hostRemote') }}</option>
+          </select>
           <label class="flex items-center gap-1 text-[11px] text-ctp-subtext1">
             <input v-model="e.enabled" type="checkbox" class="accent-ctp-blue">{{ t('config.executors.enabled') }}
           </label>
@@ -269,6 +297,35 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
               :class="{ 'w-24': f.kind === 'num' }"
             >
           </label>
+        </div>
+        <!-- 实例内模型(下沉配置: 连通性可测) -->
+        <div v-if="e.config.models" class="border-t border-ctp-surface0/70 pt-2 space-y-1.5">
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-ctp-overlay1">{{ t('config.executors.modelsTitle') }}</span>
+            <button class="btn !py-0 !px-2 !text-[10px]" @click="addModel(e)">
+              <PlusIcon class="w-3 h-3" />{{ t('config.executors.addModel') }}
+            </button>
+          </div>
+          <div
+            v-for="(m, mi) in e.config.models"
+            :key="m.id || mi"
+            class="flex flex-wrap items-center gap-1.5"
+          >
+            <input v-model="m.name" class="input !py-0.5 !text-[11px] w-24" :placeholder="t('config.executors.mName')">
+            <input v-model="m.model" class="input !py-0.5 !text-[11px] font-mono w-36" :placeholder="t('config.executors.mModel')">
+            <input v-model="m.url" class="input !py-0.5 !text-[11px] font-mono flex-1 min-w-40" :placeholder="t('config.executors.mUrl')">
+            <input v-model="m.apiKey" type="password" class="input !py-0.5 !text-[11px] font-mono w-28" :placeholder="t('config.executors.mKey')" autocomplete="off">
+            <input v-model.number="m.maxTokens" type="number" class="input !py-0.5 !text-[11px] w-20" :placeholder="t('config.executors.mMaxTokens')">
+            <button class="btn !py-0 !px-2 !text-[10px]" @click="probeModel(e, m)">
+              {{ t('config.executors.modelProbe') }}
+            </button>
+            <button class="btn !py-0 !px-1.5 !text-[10px] text-ctp-red" @click="removeModel(e, mi)">
+              <TrashIcon class="w-3 h-3" />
+            </button>
+            <div v-if="modelProbing[`${e.id}/${m.name || m.model || '?'}`]" class="w-full text-[10px] text-ctp-overlay0 font-mono break-all">
+              {{ modelProbing[`${e.id}/${m.name || m.model || '?'}`] }}
+            </div>
+          </div>
         </div>
         <div v-if="probing[e.id]" class="text-[10px] text-ctp-overlay0 font-mono break-all">
           {{ probing[e.id] }}

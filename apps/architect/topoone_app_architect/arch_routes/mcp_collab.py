@@ -282,6 +282,26 @@ async def delete_llm_model_route(model_id: str):
     return ok({"id": model_id})
 
 
+@router.post("/llm/models/probe")
+async def probe_llm_model_route(request: Request):
+    """architect 实例模型连通性测试。Body: { url, model, apiKey? | modelId?(取已存条目) }。"""
+    body = await request.json() or {}
+    url = str(body.get("url") or "").strip()
+    model = str(body.get("model") or "").strip()
+    api_key = str(body.get("apiKey") or "").strip()
+    mid = str(body.get("modelId") or "").strip()
+    if mid and not (url and model):
+        target = next((m for m in get_llm_models() if m.get("id") == mid), None)
+        if not target:
+            return err(404, "模型条目不存在")
+        url = target.get("url") or ""
+        model = target.get("model") or ""
+    if not model:
+        return err(400, "缺少 model")
+    from .agent_executors import _probe_llm_model
+    return ok(_probe_llm_model(url, model, api_key))
+
+
 @router.get("/collab/interactions")
 async def list_interactions():
     return ok(store.InteractionsStore.all())
