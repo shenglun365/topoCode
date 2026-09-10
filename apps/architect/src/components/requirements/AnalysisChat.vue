@@ -1136,6 +1136,7 @@ onUnmounted(() => {
         <SparklesIcon class="w-3.5 h-3.5" />
         {{ t('assetChat.extractPlan.button') }}
       </button>
+      <slot name="toolbar-extra" />
       <span v-if="props.showContractSkill === undefined || props.showContractSkill" class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.diagramSkillHint') }}</span>
       <button
         v-if="props.showContractSkill"

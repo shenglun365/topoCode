@@ -611,7 +611,29 @@ async function answerClarify() {
         @convention-ignore="onConventionIgnore"
         @refresh-asset="emitRefreshAsset"
         @stop="conv.stop"
-      />
+      >
+        <template #toolbar-extra>
+          <button
+            class="btn btn-xs"
+            :class="titleSummarizing ? 'btn-blue' : 'btn-ghost'"
+            :disabled="titleSummarizing || !conv.activeId"
+            :title="t('session.actions.summarize')"
+            @click="summarizeTitle"
+          >{{ titleSummarizing ? '…' : t('session.actions.summarize') }}</button>
+          <button
+            class="btn btn-xs btn-ghost"
+            :disabled="mining || !activeProject()"
+            :title="t('session.mineOnEnd')"
+            @click="mineActive"
+          >{{ mining ? '…' : t('session.mine') }}</button>
+          <button
+            class="btn btn-xs btn-ghost"
+            :disabled="!conv.activeId || (conv.activeMeta as any)?.status === 'archived'"
+            :title="t('session.archiveHint')"
+            @click="archiveActive"
+          >{{ t('session.archive') }}</button>
+        </template>
+      </AnalysisChat>
     </div>
   </aside>
 </template>
