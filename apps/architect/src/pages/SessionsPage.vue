@@ -45,11 +45,22 @@ const timeFilter = ref<'all' | 'today' | 'week' | 'earlier'>('all')
 const groupFilter = ref('')          // '' = 全部; group:<name> / module:<name>
 const statusFilter = ref('all')      // PR1 生命周期过滤: all | active | running | archived
 
+// PR3 角色徽标: 会话列表显示 executor 角色名
+const roleMap = ref<Record<string, string>>({})
+async function loadRoles() {
+  try {
+    const { apiGet } = await import('@/services/api-client')
+    const roles = await apiGet<{ id: string; name: string; kind: string }[]>('/session-roles')
+    roleMap.value = Object.fromEntries((roles ?? []).map((r) => [r.id, r.name]))
+  } catch { /* 角色加载失败只影响徽标 */ }
+}
+
 async function load() {
   loading.value = true
   try {
     // scope=all: 跨全库(主库+各项目库)汇总 — 会话中心统一视图(会话管理+资产管理)
     const [l, g] = await Promise.all([sessionService.list({ limit: 400, scope: 'all' }), sessionService.groups('all')])
+    void loadRoles()
     list.value = l
     groupsInfo.value = g
     void task.load()
@@ -388,6 +399,11 @@ function reviewClass(rs?: string) {
           >
             <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
             <span v-if="c.pendingExec" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">{{ t('session.pendingExec') }}</span>
+            <span
+              v-if="c.roleId && c.roleId !== 'architect'"
+              class="chip shrink-0 bg-ctp-peach/15 text-ctp-peach"
+              :title="t('session.roleTitle')"
+            >{{ roleMap[c.roleId] || c.roleId }}</span>
             <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -659,7 +675,7 @@ function reviewClass(rs?: string) {
 
         <!-- 右: 对话栏·inline 停靠(P1 决策2: 唯一对话栏——与资产地图页同构: 左信息/右对话) -->
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ConversationDock inline scope="sessions" default-kind="requirement" :skill-scenarios="['plan', 'coding', 'capability']" />
+          <ConversationDock inline scope="sessions" default-kind="generic" :skill-scenarios="['plan', 'coding', 'capability']" />
         </div>
       </div>
     </div>

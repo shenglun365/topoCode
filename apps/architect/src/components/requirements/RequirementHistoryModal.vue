@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ClipboardDocumentListIcon, XMarkIcon, ArrowDownTrayIcon, TrashIcon, CheckIcon } from '@heroicons/vue/24/outline'
+import { ClipboardDocumentListIcon, XMarkIcon, ArrowDownTrayIcon, TrashIcon, CheckIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import type { ConversationDetail, ConversationSummary } from '@/types'
 import { requirementService } from '@/services/requirement-service'
 
 const props = defineProps<{ open: boolean; activeConvId?: string; kind?: string }>()
-const emit = defineEmits<{ close: []; import: [conv: ConversationDetail] }>()
+const emit = defineEmits<{ close: []; import: [conv: ConversationDetail]; 'import-new': [] }>()
 
 const { t } = useI18n()
 
@@ -21,7 +21,7 @@ const isAsset = () => kind() === 'asset'
 const labels = computed(() => {
   if (isAsset()) {
     return {
-      title: t('assetMgmt.history.title'),
+      title: t('assetMgmt.history.title'),  // PR3: 会话导入(首项新建 + architect 会话列表)
       hint: t('assetMgmt.history.hint'),
       empty: t('assetMgmt.history.empty'),
       import: t('assetMgmt.history.import'),
@@ -45,7 +45,8 @@ async function load() {
   if (!props.open) return
   loading.value = true
   try {
-    items.value = await requirementService.conversations(kind())
+    // PR3 会话导入: 只列 architect 角色会话(executor 会话经会话中心/任务页管理)
+    items.value = await requirementService.conversations(kind(), isAsset() ? 'architect' : '')
   } catch {
     items.value = []
   } finally {
@@ -113,6 +114,19 @@ function fmtTime(ts?: number): string {
         <p class="text-[11px] text-ctp-subtext0">
           {{ labels.hint }}
         </p>
+
+        <!-- PR3 会话导入: 第一项=新建会话(默认 architect 角色) -->
+        <button
+          v-if="isAsset()"
+          class="flex items-center gap-2 rounded-lg border border-ctp-blue/30 bg-ctp-blue/10 px-3 py-2 text-left hover:bg-ctp-blue/20 transition-colors"
+          @click="emit('import-new')"
+        >
+          <PlusIcon class="w-4 h-4 shrink-0 text-ctp-blue" />
+          <div class="min-w-0">
+            <div class="text-xs text-ctp-text truncate">{{ t('assetMgmt.history.newConversation') }}</div>
+            <div class="text-[10px] text-ctp-subtext0">{{ t('assetMgmt.history.newConversationHint') }}</div>
+          </div>
+        </button>
 
         <div
           v-if="loading"

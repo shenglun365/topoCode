@@ -456,6 +456,16 @@ export default {
     review: { read: 'Read', unread: 'Unread', awaiting_reply: 'Awaiting reply', error: 'Error' },
     pendingExec: 'Pending exec',
     readOnlyHint: 'Archived (read-only) — read/copy/mine only',
+    role: {
+      bind: 'Bind executor role',
+      bindTitle: 'Switch to executor role',
+      bindHint: 'First switch locks the role; the requirement must be finalized into the pool (normalized).',
+      switched: 'Role switched: {name}',
+      lockedHint: 'Role locked: use handoff to create a new session for another role',
+      executorOf: 'Executor',
+      noExecutors: 'No executor roles yet — add one in Settings',
+      roleTitle: 'Session role',
+    },
     statusFilter: { all: 'All statuses' },
     time: { all: 'All time', today: 'Today', week: 'This week', earlier: 'Earlier' },
     group: { all: 'All groups', custom: 'Custom groups', byModule: 'By module', new: 'New group' },
@@ -770,7 +780,10 @@ export default {
       executeNow: 'Execute Now',
     },
     history: {
-      title: 'Import History Chat',
+      newConversation: 'New conversation',
+      newConversationHint: 'Start a blank analysis session (architect role)',
+
+      title: 'Session import',
       hint: 'Temp chats not yet saved as a proposal. Choose "Import" to restore and continue; saving a proposal turns the temp id formal and it can be resumed by that id.',
       loading: 'Loading…',
       empty: 'No temp chats. Unsaved requirement chats are kept here for later.',

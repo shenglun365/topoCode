@@ -627,6 +627,8 @@ async def coding_agent_ws(websocket: WebSocket):
                     "content": f"创建会话 · 执行方案「{plan_title}」(任务 {exec_data.get('id', '')}, 第 {exec_data.get('runCount', 1)} 次)",
                 }
                 store.AgentSessionsStore.append_message({**init_msg, "sessionId": session_id})
+                # PR3 双体系合并: agent 会话消息镜像到执行任务的统一会话(会话中心可见)
+                _mirror_agent_message(exec_data.get("id", ""), init_msg)
                 session["messages"] = [init_msg]
                 # A7：会话仅落库；对话经 tAgent 代码问答(见 session.message)，不再对接 opencode。
                 await websocket.send_json({"type": "session_created", "session": session})
@@ -642,6 +644,7 @@ async def coding_agent_ws(websocket: WebSocket):
                     "id": store.next_id("m"), "role": "user", "time": _ts(), "content": content,
                 }
                 store.AgentSessionsStore.append_message({**user_msg, "sessionId": session_id})
+                _mirror_agent_message(session.get("taskId") or "", user_msg)
                 store.AgentSessionsStore.update(session_id, {"updatedAt": _ts()})
                 # A7：tAgent 代码问答(替换 opencode 直连)。KB/LLM 不可达 → reply=None，仅落库回显用户消息。
                 if content:
@@ -660,6 +663,7 @@ async def coding_agent_ws(websocket: WebSocket):
                     if reply:
                         m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(), "content": reply}
                         store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
+                        _mirror_agent_message(session.get("taskId") or "", m, from_assistant=True)
                         await websocket.send_json({"type": "message", **m})
                 await websocket.send_json({"type": "message", **user_msg})
 
@@ -673,6 +677,27 @@ async def coding_agent_ws(websocket: WebSocket):
         logger.info("Coding agent WebSocket disconnected")
     except Exception as e:
         logger.exception(f"Coding agent WS error: {e}")
+
+
+def _mirror_agent_message(task_id: str, msg: dict, from_assistant: bool = False) -> None:
+    """PR3 双体系合并: agent 会话消息镜像进执行任务关联的统一会话。
+
+    assistant 回复同时把会话置 unread(会话中心角标); 失败静默(镜像不阻断主流程)。
+    """
+    try:
+        task = store.ExecutionTasksStore.get(task_id) if task_id else None
+        conv_id = (task.get("conversationId") or "").strip() if task else ""
+        if not conv_id or not store.ConversationsStore.get(conv_id):
+            return
+        store.ConversationsStore.append_message({
+            "id": store.next_id("m"), "conversationId": conv_id,
+            "role": msg.get("role") or ("assistant" if from_assistant else "user"),
+            "time": msg.get("time") or _ts(), "content": msg.get("content") or "",
+        })
+        if from_assistant:
+            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ── A7: tAgent 代码问答辅助 ─────────────────────────────────────

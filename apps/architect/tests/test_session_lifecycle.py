@@ -102,3 +102,59 @@ def test_asset_locks_conflict(client):
     conflicts = store.AssetLocksStore.conflicts("p1", ["src/a.ts", "src/b.ts"])
     assert len(conflicts) == 1 and conflicts[0]["holder"] == "exec-1"
     assert store.AssetLocksStore.conflicts("p1", ["src/a.ts"], exclude_holder="exec-1") == []
+
+
+def test_role_switch_rules(client):
+    """PR3 角色切换: 规范化门槛 + 单向锁定。"""
+    from topoone_app_architect.arch_routes import store
+    h = _auth(client)
+    store.SessionRolesStore.upsert({"id": "exec-x", "name": "执行X", "executorId": "opencode"})
+    c = client.post("/api/architect/sessions", json={"kind": "generic", "title": "切换"}, headers=h).json()["data"]
+    # 未绑定需求 → 拒绝(未规范化)
+    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-x"}, headers=h)
+    assert r.status_code == 400 and "规范化" in r.json()["message"]
+    # 绑定需求但未入池 → 拒绝
+    store.RequirementsStore.create({"id": "RQ-SW", "title": "t", "location": "proposal"})
+    client.patch(f"/api/architect/sessions/{c['id']}", json=None, headers=h) if False else None
+    store.ConversationsStore.update(c["id"], {"reqId": "RQ-SW"})
+    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-x"}, headers=h)
+    assert r.status_code == 400
+    # 入池 → 切换成功且锁定
+    store.RequirementsStore.update("RQ-SW", {"location": "pool"})
+    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-x"}, headers=h)
+    assert r.json()["data"]["roleId"] == "exec-x" and r.json()["data"]["roleLocked"]
+    # 再换(即使另一角色) → 锁定拒绝
+    store.SessionRolesStore.upsert({"id": "exec-y", "name": "执行Y", "executorId": "cline"})
+    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-y"}, headers=h)
+    assert r.status_code == 400 and "锁定" in r.json()["message"]
+
+
+def test_exec_conv_projection_and_mirror(client):
+    """PR3 双体系: commitBatch 自动建统一执行会话 + 终态投影 + 消息镜像。"""
+    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect.arch_routes import execution as EX
+    from topoone_app_architect.arch_routes.websocket import _mirror_agent_message
+    store.RequirementsStore.create({"id": "RQ-PJ", "title": "投影", "desc": "d",
+                                    "location": "pool", "analysis": {}})
+    task = {"id": "ex-pj", "planId": "pl-1", "reqIds": ["RQ-PJ"], "status": "created",
+            "conversationId": ""}
+    # 自动建会话
+    conv_id = EX._ensure_exec_conv(task, {"title": "投影方案"}, [{"id": "RQ-PJ", "projectId": ""}])
+    conv = store.ConversationsStore.get(conv_id)
+    assert conv["kind"] == "execution" and "执行｜" in conv["title"]
+    # run 投影
+    EX._project_exec_conv({**task, "conversationId": conv_id}, lifecycle="running", review="read")
+    assert store.ConversationsStore.get(conv_id)["status"] == "running"
+    # 终态投影
+    EX._project_exec_conv({**task, "conversationId": conv_id}, lifecycle="active", review="error")
+    row = store.ConversationsStore.get(conv_id)
+    assert row["status"] == "active" and row["reviewState"] == "error"
+    # 消息镜像
+    store.ExecutionTasksStore.create if False else None
+    # 直接构造已关联任务
+    db_task = store.ExecutionTasksStore.create({"id": "ex-pj2", "planId": "pl-1",
+        "reqIds": ["RQ-PJ"], "status": "running", "conversationId": conv_id})
+    _mirror_agent_message("ex-pj2", {"role": "assistant", "content": "执行回答"}, from_assistant=True)
+    msgs = store.ConversationsStore.messages(conv_id)
+    assert any(m.get("content") == "执行回答" for m in msgs)
+    assert store.ConversationsStore.get(conv_id)["reviewState"] == "unread"

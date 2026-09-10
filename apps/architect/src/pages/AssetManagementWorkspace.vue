@@ -79,6 +79,13 @@ function importHistory(detail: ConversationDetail) {
   historyOpen.value = false
 }
 
+/** PR3 会话导入·新建: 资产场景新开空白会话(默认 architect 角色)。 */
+function onImportNewConversation() {
+  conv.newConversation(t('assetMgmt.chatTitle'))
+  conv.setDockOpen(true)
+  historyOpen.value = false
+}
+
 // ---- 资产内容区 ----
 type AssetTab = 'overview' | 'semantic' | 'component' | 'graph'
 const tab = ref<AssetTab>('overview')
@@ -3078,6 +3085,7 @@ onUnmounted(() => {
       :open="historyOpen"
       :active-conv-id="conv.activeId"
       kind="asset"
+      @import-new="onImportNewConversation"
       @close="historyOpen = false"
       @import="importHistory"
     />

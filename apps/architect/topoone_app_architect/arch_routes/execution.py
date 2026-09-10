@@ -18,6 +18,49 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _project_exec_conv(task: dict, lifecycle: str = "", review: str = "") -> None:
+    """PR3 双体系投影: 执行任务状态 → 关联会话双维度回写。
+
+    lifecycle: active|running|archived; review: read|unread|awaiting_reply|error。
+    会话不存在/未关联 → 静默跳过(任务可无会话运行)。
+    """
+    conv_id = (task.get("conversationId") or "").strip()
+    if not conv_id or not store.ConversationsStore.get(conv_id):
+        return
+    patch: dict = {}
+    if lifecycle:
+        patch["status"] = lifecycle
+    if review:
+        patch["reviewState"] = review
+    if patch:
+        try:
+            store.ConversationsStore.update(conv_id, patch)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec] 会话投影失败 conv=%s: %s", conv_id, e)
+
+
+def _ensure_exec_conv(task: dict, plan: dict, reqs: list) -> str:
+    """PR3: 执行任务无关联会话 → 自动创建统一执行会话(会话中心可见)。
+
+    显式传入的 conversationId(深链选择会话)一律尊重不覆盖——即使查不到
+    (可能在他项目库, 由请求级上下文路由)。
+    """
+    conv_id = (task.get("conversationId") or "").strip()
+    if conv_id:
+        return conv_id
+    req0 = reqs[0] if reqs else {}
+    conv = store.ConversationsStore.create({
+        "kind": "execution",
+        "projectId": (req0.get("projectId") or ""),
+        "reqId": req0.get("id") or "",
+        "title": f"执行｜{(plan.get('title') or task.get('id') or '')[:34]}",
+        "status": "active", "reviewState": "read",
+        "meta": {"execId": task.get("id") or ""},
+    })
+    store.ExecutionTasksStore.update(task.get("id") or "", {"conversationId": conv["id"]})
+    return conv["id"]
+
+
 def _auto_acceptance_after_runner_done(task: dict, reqs: list,
                                        root: str, project: str) -> None:
     """M3-6: runner 完成（verify 触发）→ 自动局部验收(trigger=runner_done)。
@@ -289,7 +332,15 @@ async def commit_execution_batch(req_ids: list, body: Optional[dict] = None) -> 
 
     plan_out = store.PlansStore.get(plan_id)
     exec_out = store.ExecutionTasksStore.get(exec_id)
-    return {"plan": plan_out, "exec": exec_out}, None
+    # PR3 双体系合并: 无关联会话 → 自动建统一执行会话(会话中心单视图)
+    if exec_out:
+        try:
+            conv_id = _ensure_exec_conv(exec_out, plan_out or plan, reqs)
+            exec_out = store.ExecutionTasksStore.get(exec_id) or exec_out
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec] 自动会话失败 exec=%s: %s", exec_id, e)
+            conv_id = ""
+    return {"plan": plan_out, "exec": exec_out, "conversationId": conv_id}, None
 
 
 @router.post("/exec/{task_id}/disposition")
@@ -462,6 +513,8 @@ async def run_execution_task(task_id: str):
         "runnerTreeId": tree_id, "status": "running",
         "runCount": (task.get("runCount") or 0) + 1, "updatedAt": _ts(),
     })
+    _project_exec_conv(store.ExecutionTasksStore.get(task_id) or task,
+                       lifecycle="running", review="read")
     progress = await asyncio.to_thread(runner.run, tree_id)
 
     if project_row is not None:
@@ -653,6 +706,8 @@ async def patch_execution_task(task_id: str, request: Request):
     if str(body.get("status") or "") in ("done", "failed", "stopped"):
         from . import context_registry
         context_registry.write_exec_report(task_id, str(body["status"]))
+        _project_exec_conv(row, lifecycle="active",
+                           review="error" if str(body["status"]) in ("failed", "stopped") else "unread")
     return ok(row)
 
 
@@ -665,6 +720,7 @@ async def stop_execution_task(task_id: str):
         return err(404, "Task not found")
     from . import context_registry
     context_registry.write_exec_report(task_id, "stopped")
+    _project_exec_conv(row, lifecycle="active", review="error")
     return ok(row)
 
 
@@ -687,7 +743,9 @@ async def accept_execution_task(task_id: str):
     store.run_atomic(statements)
     from . import context_registry
     context_registry.write_exec_report(task_id, "done")
-    return ok(store.ExecutionTasksStore.get(task_id))
+    done_row = store.ExecutionTasksStore.get(task_id)
+    _project_exec_conv(done_row, lifecycle="active", review="unread")
+    return ok(done_row)
 
 
 @router.post("/exec/{task_id}/amendments")

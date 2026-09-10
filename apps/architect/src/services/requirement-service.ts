@@ -33,10 +33,11 @@ export const requirementService = {
     return apiPatch<Requirement>(`/requirements/${id}`, data)
   },
   /** 历史会话摘要(仅临时/未绑定提案)。kind 缺省 requirement(资产管理会话传 'asset')。 */
-  async conversations(kind = 'requirement'): Promise<ConversationSummary[]> {
+  async conversations(kind = 'requirement', role = ''): Promise<ConversationSummary[]> {
     const { project } = currentProjectParams()
     const qs = new URLSearchParams({ kind })
     if (project) qs.set('project', project)
+    if (role) qs.set('role', role)
     return apiGet<ConversationSummary[]>(`/requirements/conversations?${qs.toString()}`)
   },
   /** 按会话 id 拉取详情+消息(导入)。 */

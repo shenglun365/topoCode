@@ -16,6 +16,7 @@ import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { busService, type NeedsInputItem } from '@/services/bus-service'
 import { namingService } from '@/services/naming-service'
+import { apiGet } from '@/services/api-client'
 
 const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
@@ -104,6 +105,54 @@ function onSent() { void loadRecent() }
 /** dock 内「刷新资产」卡事件 → 资产地图页监听的全局事件。 */
 function emitRefreshAsset(id: string) {
   window.dispatchEvent(new CustomEvent('arch:refresh-asset', { detail: id }))
+}
+
+// ── PR3 角色条: 会话执行角色徽标 + 首次绑定执行角色(切换即锁定) ──
+interface RoleRow { id: string; name: string; kind: string; executorId: string }
+const roleNames = ref<Record<string, string>>({})
+const roleSwitchOpen = ref(false)
+const roleSwitchMsg = ref('')
+const roleSwitching = ref(false)
+const executorRoles = ref<RoleRow[]>([])
+const activeRoleId = computed(() => ((conv.activeMeta as any)?.roleId as string) || 'architect')
+const roleLocked = computed(() => !!((conv.activeMeta as any)?.roleLocked))
+const roleSwitchEligible = computed(() =>
+  activeRoleId.value === 'architect' && !!conv.activeId
+  && (conv.activeMeta as any)?.status !== 'archived')
+
+async function loadRoleNames() {
+  try {
+    const roles = await apiGet<RoleRow[]>('/session-roles')
+    roleNames.value = Object.fromEntries(roles.map((r) => [r.id, r.name]))
+  } catch { /* 徽标降级显示 id */ }
+}
+onMounted(() => { void loadRoleNames() })
+
+async function openRoleSwitch() {
+  roleSwitchMsg.value = ''
+  try {
+    const roles = await apiGet<RoleRow[]>('/session-roles')
+    executorRoles.value = roles.filter((r) => r.kind === 'executor')
+  } catch (e: any) {
+    roleSwitchMsg.value = e?.message || String(e)
+  }
+  roleSwitchOpen.value = true
+}
+
+async function switchRole(role: RoleRow) {
+  if (!conv.activeId || roleSwitching.value) return
+  roleSwitching.value = true
+  roleSwitchMsg.value = ''
+  try {
+    const updated = await sessionService.update(conv.activeId, { roleId: role.id } as any)
+    conv.activeMeta = { ...(conv.activeMeta as ConversationMeta), roleId: role.id, roleLocked: true } as ConversationMeta
+    roleSwitchMsg.value = t('session.role.switched', { name: updated.title || role.name })
+    roleSwitchOpen.value = false
+  } catch (e: any) {
+    roleSwitchMsg.value = e?.message || String(e)
+  } finally {
+    roleSwitching.value = false
+  }
 }
 
 // 命名规约提议卡(资产对话): 确认固化 / 忽略(原资产页逻辑迁至 dock)
@@ -240,6 +289,20 @@ async function answerClarify() {
       </div>
     </div>
 
+    <!-- PR3 角色条: 当前角色 + (首次)绑定执行角色入口 -->
+    <div v-if="conv.activeId" class="flex shrink-0 items-center gap-1.5 border-b border-ctp-surface0 px-3 py-1.5">
+      <span class="chip !text-[10px]" :class="activeRoleId === 'architect' ? 'bg-ctp-surface0/60 text-ctp-subtext1' : 'bg-ctp-peach/15 text-ctp-peach'">
+        {{ roleNames[activeRoleId] || activeRoleId }}
+      </span>
+      <span v-if="roleLocked" class="text-[10px] text-ctp-overlay0" :title="t('session.role.lockedHint')">🔒</span>
+      <div class="flex-1" />
+      <button
+        v-if="roleSwitchEligible"
+        class="btn !py-0 !px-2 !text-[10px]"
+        @click="openRoleSwitch"
+      >{{ t('session.role.bind') }}</button>
+    </div>
+
     <!-- 澄清应答横幅 -->
     <div
       v-if="pendingClarify"
@@ -270,6 +333,39 @@ async function answerClarify() {
 
     <!-- 对话主体 -->
     <div class="min-h-0 flex-1">
+      <!-- PR3 角色切换对话框 -->
+      <div
+        v-if="roleSwitchOpen"
+        class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
+        @click.self="roleSwitchOpen = false"
+      >
+        <div class="panel w-full max-w-sm">
+          <div class="panel-header">
+            <span>{{ t('session.role.bindTitle') }}</span>
+            <button class="btn btn-xs btn-ghost" @click="roleSwitchOpen = false">
+              <XMarkIcon class="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div class="p-3 space-y-2">
+            <p class="text-[11px] text-ctp-subtext0">{{ t('session.role.bindHint') }}</p>
+            <p v-if="roleSwitchMsg" class="text-[11px] text-ctp-yellow break-all">{{ roleSwitchMsg }}</p>
+            <button
+              v-for="r in executorRoles"
+              :key="r.id"
+              class="w-full rounded-lg border border-ctp-surface1 px-3 py-2 text-left hover:border-ctp-blue/40 transition-colors"
+              :disabled="roleSwitching"
+              @click="switchRole(r)"
+            >
+              <div class="text-xs text-ctp-text">{{ r.name }}</div>
+              <div class="text-[10px] text-ctp-subtext0">{{ t('session.role.executorOf') }}: {{ r.executorId || '—' }}</div>
+            </button>
+            <p v-if="!executorRoles.length" class="text-[11px] text-ctp-overlay1">
+              {{ t('session.role.noExecutors') }}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <AnalysisChat
         class="h-full"
         :turns="conv.turns"

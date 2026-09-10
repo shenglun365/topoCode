@@ -51,18 +51,23 @@ def _conv_bound(conv: dict) -> bool:
 
 
 @router.get("/requirements/conversations")
-async def list_conversations(project_id: str = "", kind: str = "requirement"):
+async def list_conversations(project_id: str = "", kind: str = "requirement",
+                             role: str = ""):
     """历史会话摘要列表(仅返回临时/未绑定提案的会话，供导入或删除)。
 
     kind: 会话归类(requirement | asset | design | ...)，按需筛选；缺省 requirement。
+    role: PR3 会话导入——按执行角色过滤(如 role=architect 只列分析会话)。
     """
     convs = store.ConversationsStore.summaries(kind=kind or "requirement", project_id=project_id or None)
     items = []
     for c in convs:
         if _conv_bound(c):
             continue
+        if role and (c.get("roleId") or "architect") != role:
+            continue
         items.append({
             "id": c["id"], "kind": c.get("kind"), "reqId": c.get("reqId", ""),
+            "roleId": c.get("roleId") or "architect",
             "title": c.get("title") or f"{c.get('kind') or 'requirement'} 对话",
             "msgCount": c.get("msgCount") or 0,
             "preview": (c.get("preview") or "").strip()[:160],

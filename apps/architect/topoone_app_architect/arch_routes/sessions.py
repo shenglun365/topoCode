@@ -274,6 +274,25 @@ async def update_session(conv_id: str, request: Request):
         if rs not in REVIEW_STATES:
             return err(400, f"非法查看状态: {rs}(read|unread|awaiting_reply|error)")
         patch["reviewState"] = rs
+    # PR3 角色切换: architect→executor 单向一次(切换即锁定); 再换走交接(P4)
+    if "roleId" in data and (data.get("roleId") or "architect") != (conv.get("roleId") or "architect"):
+        target = str(data.get("roleId") or "").strip()
+        role = store.SessionRolesStore.get(target)
+        if not role:
+            return err(400, f"角色不存在: {target}")
+        if (role.get("kind") or "executor") != "executor":
+            return err(400, "只能切换到 executor 角色系统角色 architect 不可指定")
+        if conv.get("roleLocked"):
+            return err(400, "会话角色已锁定(首次切换后不可再改)：请用交接指令生成新会话再绑定新角色")
+        if (conv.get("status") or "active") == "archived":
+            return err(400, "归档会话只读，不可切换角色")
+        # 规范化门槛: 会话绑定需求且已定稿入池(location=pool)
+        req_id = conv.get("reqId") or ""
+        req = store.RequirementsStore.get(req_id) if req_id else None
+        if not req or (req.get("location") or "") != "pool":
+            return err(400, "需求未规范化：请先在会话中「方案生成→确认存入」定稿入池，再切换执行角色")
+        patch["roleId"] = target
+        patch["roleLocked"] = True
     tags = _norm_tags(data)
     if tags is not None:
         patch["tags"] = tags

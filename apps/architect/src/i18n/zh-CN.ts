@@ -480,6 +480,16 @@ export default {
     review: { read: '已读', unread: '未读', awaiting_reply: '待回复', error: '报错' },
     pendingExec: '待执行',
     readOnlyHint: '会话已归档(只读)——可阅读/复制/提炼，不可继续对话',
+    role: {
+      bind: '绑定执行角色',
+      bindTitle: '切换到执行角色',
+      bindHint: '首次切换后角色锁定(不可再改)；需求须已定稿入池(规范化)。切换后本会话进入执行态。',
+      switched: '已切换角色：{name}',
+      lockedHint: '角色已锁定：再换角色请用交接生成新会话',
+      executorOf: '执行器',
+      noExecutors: '暂无 executor 角色——请到设置页「会话角色设置」新增',
+      roleTitle: '会话执行角色',
+    },
     statusFilter: { all: '全部状态' },
     time: { all: '全部时间', today: '今天', week: '本周', earlier: '更早' },
     group: { all: '全部分组', custom: '自定义分组', byModule: '按模块', new: '新建分组' },
@@ -796,7 +806,10 @@ export default {
       executeNow: '立即执行',
     },
     history: {
-      title: '历史会话导入',
+      newConversation: '新建会话',
+      newConversationHint: '开一个空白分析会话(默认 architect 角色)',
+
+      title: '会话导入',
       hint: '以下为尚未保存为提案的临时会话。选择「导入」可恢复之前的对话继续分析；保存提案后，临时提案 id 会转为正式，并可通过提案 id 自动恢复。',
       loading: '加载中…',
       empty: '暂无临时会话。未保存的需求分析会话会保留在这里，供下次继续。',
