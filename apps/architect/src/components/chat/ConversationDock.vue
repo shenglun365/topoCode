@@ -323,6 +323,11 @@ async function answerClarify() {
           @click="switchTo(c)"
         >
           <span class="min-w-0 flex-1 truncate text-ctp-text">{{ c.title }}</span>
+          <span
+            v-if="c.reviewState && c.reviewState !== 'read'"
+            class="h-1.5 w-1.5 shrink-0 rounded-full"
+            :class="c.reviewState === 'error' ? 'bg-ctp-red' : c.reviewState === 'awaiting_reply' ? 'bg-ctp-yellow' : 'bg-ctp-blue'"
+          />
           <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ c.msgCount }}</span>
         </button>
         <p v-if="!recent.length" class="px-2 py-3 text-center text-xs text-ctp-overlay0">

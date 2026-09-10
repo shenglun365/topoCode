@@ -158,6 +158,20 @@ def release_task_locks(task: dict) -> dict:
         logger.warning("[exec] 事后校验失败 task=%s: %s", holder, e)
     if overrun:
         logger.warning("[exec] 超范围改动告警 task=%s: %s", holder, ", ".join(overrun[:10]))
+        # PR-E: 会话内可见的超范围告警(事后校验)——设计者审阅的实体证据
+        try:
+            conv_id = (task.get("conversationId") or "").strip()
+            if conv_id and store.ConversationsStore.get(conv_id):
+                store.ConversationsStore.append_message({
+                    "id": store.next_id("m"), "conversationId": conv_id,
+                    "role": "assistant", "time": _ts(),
+                    "content": "⚠️ **超范围改动告警**（任务终态事后校验）\n以下文件在本次执行中被改动, "
+                               "但不在需求声明的允许范围内, 请审阅:\n" +
+                               "\n".join(f"- `{f}`" for f in overrun[:20]),
+                })
+                store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+        except Exception:  # noqa: BLE001
+            pass
     return {"ok": True, "released": released, "outOfScope": overrun}
 
 
@@ -865,6 +879,9 @@ async def patch_execution_task(task_id: str, request: Request):
         context_registry.write_exec_report(task_id, str(body["status"]))
         _project_exec_conv(row, lifecycle="active",
                            review="error" if str(body["status"]) in ("failed", "stopped") else "unread")
+    elif str(body.get("status") or "") in ("blocked", "accepting"):
+        # PR-C: runner 待输入(需授权/澄清/补充信息) → 关联会话待回复(黄色角标)
+        _project_exec_conv(row, lifecycle="active", review="awaiting_reply")
     try:
         release_task_locks(row if "done_row" not in marker else done_row)
     except Exception as e:  # noqa: BLE001

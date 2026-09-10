@@ -92,6 +92,30 @@ async function remove(role: SessionRole) {
   }
 }
 
+/** 外部(远程)执行器: 生成并拷贝 skills/工具/权限注入指令(到远端 agent 粘贴执行)。 */
+const copyHint = ref('')
+async function copyInjection(role: SessionRole) {
+  const ex = executors.value.find((x) => x.id === role.executorId)
+  const lines = [
+    `# 角色注入: ${role.name} (${role.id})`,
+    ex ? `# 执行器: ${ex.id} (${ex.type} @ ${ex.host === 'remote' ? '远程' : '本机'})` : '',
+    '## 允许的技能场景',
+    ...(role.skills?.length ? role.skills.map((x) => `- ${x}`) : ['- (未限制)']),
+    '## 工具白名单',
+    ...(role.tools?.length ? role.tools.map((x) => `- ${x}`) : ['- (未限制)']),
+    '## 权限配置',
+    `- ${JSON.stringify(role.permissions ?? {})}`,
+    '请以以上配置作为你的能力边界执行后续任务。',
+  ].filter(Boolean)
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'))
+    copyHint.value = t('config.sessionRoles.copied')
+  } catch {
+    copyHint.value = lines.join('\n')
+  }
+  setTimeout(() => { copyHint.value = '' }, 6000)
+}
+
 function toggleSkill(role: SessionRole, skill: string) {
   role.skills = role.skills?.includes(skill)
     ? role.skills.filter((s) => s !== skill)
@@ -143,6 +167,12 @@ function toggleSkill(role: SessionRole, skill: string) {
           </button>
           <button
             v-if="!r.builtin"
+            class="btn !py-0.5 !px-2 !text-[11px]"
+            :title="t('config.sessionRoles.copyInjectHint')"
+            @click="copyInjection(r)"
+          >{{ t('config.sessionRoles.copyInject') }}</button>
+          <button
+            v-if="!r.builtin"
             class="btn !py-0.5 !px-2 !text-[11px] text-ctp-red"
             @click="remove(r)"
           >
@@ -172,6 +202,7 @@ function toggleSkill(role: SessionRole, skill: string) {
         </div>
       </div>
 
+      <div v-if="copyHint" class="text-[10px] font-mono text-ctp-overlay0 break-all whitespace-pre-wrap max-h-24 overflow-auto">{{ copyHint }}</div>
       <div v-if="!roles.length && !loading" class="text-ctp-overlay1">
         {{ t('config.roles.empty') }}
       </div>

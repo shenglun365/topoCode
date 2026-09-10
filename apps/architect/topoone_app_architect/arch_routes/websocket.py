@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import contextvars
 import os
 import urllib.request
 from typing import Dict, List, Optional
@@ -238,6 +239,20 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     skill_scenarios = data.get("skillScenarios") or []
     if not isinstance(skill_scenarios, list):
         skill_scenarios = []
+    # PR-A 角色能力 enforcement: executor 角色会话 → 技能场景以角色配置为准、
+    # 工具白名单收紧(空=全量); architect 角色不受限。
+    try:
+        _role = store.SessionRolesStore.get(
+            (conv.get("roleId") or "architect")) if conv else None
+        if _role and (_role.get("kind") or "") == "executor":
+            role_skills = [str(x) for x in (_role.get("skills") or []) if x]
+            if role_skills:
+                skill_scenarios = role_skills
+            _TOOL_WHITELIST.set([str(x) for x in (_role.get("tools") or []) if x] or None)
+        else:
+            _TOOL_WHITELIST.set(None)
+    except Exception:  # noqa: BLE001
+        _TOOL_WHITELIST.set(None)
     msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
                                 skill_scenarios=[str(s) for s in skill_scenarios])
 
@@ -507,6 +522,17 @@ async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds:
     return res.get("content", "") if isinstance(res, dict) else ""
 
 
+# PR-A 角色工具白名单(请求级 contextvar: executor 角色会话限制可调工具集)
+_TOOL_WHITELIST = contextvars.ContextVar("arch_tool_whitelist", default=None)
+
+
+def _check_tool_whitelist(name: str) -> Optional[str]:
+    wl = _TOOL_WHITELIST.get()
+    if not wl or name in wl:
+        return None
+    return f"角色工具白名单拒绝: {name} 不在本会话角色允许的工具集内"
+
+
 async def _run_tool_with_progress(websocket, request_id: str, name: str, args: dict,
                                   root: str, project: str) -> Dict[str, str]:
     """执行单个 architect 工具，并向前端推送 tool_call/tool_result 进度事件。
@@ -516,6 +542,11 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     """
     from . import context_registry, req_agent
     await websocket.send_json({"type": "tool_call", "requestId": request_id, "tool": name})
+    denied = _check_tool_whitelist(name)
+    if denied:
+        await websocket.send_json({"type": "tool_result", "requestId": request_id,
+                                   "tool": name, "ok": False, "summary": denied[:160]})
+        return {"name": name, "text": denied, "ok": False}
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
     summary = req_agent.tool_result_text(name, result)
     ok = not (isinstance(result, dict) and result.get("error"))

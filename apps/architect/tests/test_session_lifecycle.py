@@ -226,3 +226,45 @@ def test_asset_lock_acquire_release_two_level(client, monkeypatch):
     # 策略读写
     pol = client.get("/api/architect/exec/lock-policy", headers=h).json()["data"]
     assert pol["mode"] == "warn" and pol["granularity"] in ("file", "component")
+
+
+def test_conv_read_tool_includes_archived(client):
+    """PR-D: conv.read 只读工具可读归档会话。"""
+    from topoone_app_architect.arch_routes import req_agent as R
+    from topoone_app_architect.arch_routes import store
+    store.ConversationsStore.create({"id": "cv-arch1", "kind": "generic",
+                                     "title": "归档读", "status": "archived"})
+    store.ConversationsStore.append_message({"id": "m1", "conversationId": "cv-arch1",
+                                             "role": "user", "time": 1, "content": "历史提问"})
+    r = R.run_arch_tool("conv.read", {"convId": "cv-arch1"}, None, None)
+    assert r.get("ok") and r["lifecycle"] == "archived"
+    assert any(m["content"] == "历史提问" for m in r["messages"])
+
+
+def test_tool_whitelist_contextvar(client):
+    """PR-A: 角色工具白名单 contextvar 拒绝未授权工具。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import websocket as WS
+    sent = []
+    class _FakeWS:
+        async def send_json(self, obj):
+            sent.append(obj)
+    WS._TOOL_WHITELIST.set(["kb.asset.search"])
+
+    async def _run():
+        return await WS._run_tool_with_progress(
+            _FakeWS(), "req-propose-x", "req.propose",
+            {"title": "x", "designMd": "d"}, None, None)
+    res = asyncio.run(_run())
+    assert res["ok"] is False and "白名单拒绝" in res["text"]
+    WS._TOOL_WHITELIST.set(None)
+
+
+def test_blocked_accepting_projects_awaiting_reply(client):
+    """PR-C: 任务 blocked/accepting → 关联会话 awaiting_reply。"""
+    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect.arch_routes import execution as EX
+    store.ConversationsStore.create({"id": "cv-aw", "kind": "execution", "title": "t"})
+    EX._project_exec_conv({"id": "ex-aw", "conversationId": "cv-aw"},
+                          lifecycle="active", review="awaiting_reply")
+    assert store.ConversationsStore.get("cv-aw")["reviewState"] == "awaiting_reply"

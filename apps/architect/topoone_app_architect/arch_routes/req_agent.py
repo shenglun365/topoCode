@@ -1264,6 +1264,37 @@ def tool_execution_assign(target: str = "", execId: str = "",
     }
 
 
+# ── 会话只读工具(PR-D: 归档会话可被 agent 读取/引用; 不在任何动作黑名单) ──
+
+@register_architect_tool(
+    "conv.read",
+    "读取会话(含归档)用于回顾/提炼/引用到新会话: 返回标题/状态/角色/最近消息。"
+    "归档会话只读——历史回顾、交接引用、提炼总结用本工具, 不能向其发送消息。"
+    "参数：convId(会话 id)、limit?(消息条数, 默认 20)。",
+)
+def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
+    from . import store as _store
+    cid = (convId or "").strip()
+    if not cid:
+        return {"error": "缺少 convId"}
+    conv = _store.ConversationsStore.get(cid)
+    if not conv:
+        return {"error": f"会话不存在: {cid}"}
+    msgs = _store.ConversationsStore.messages(cid, limit=max(1, min(int(limit or 20), 100)))
+    return {
+        "ok": True, "convId": cid,
+        "title": conv.get("title") or "", "kind": conv.get("kind") or "",
+        "lifecycle": conv.get("status") or "active",
+        "roleId": conv.get("roleId") or "architect",
+        "summary": (conv.get("summary") or "")[:400],
+        "messages": [
+            {"role": m.get("role"), "content": (m.get("content") or "")[:600]}
+            for m in msgs[-int(limit or 20):]
+        ],
+        "summaryText": f"会话 {cid}「{conv.get('title') or ''}」({conv.get('status')})共 {len(msgs)} 条消息已读取",
+    }
+
+
 # ── 澄清提问工具(plan agent → 用户，经 broker 总线，「需要你输入」可见) ──
 
 @register_architect_tool(

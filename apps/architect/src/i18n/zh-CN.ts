@@ -1111,6 +1111,9 @@ export default {
       saving: '保存中…',
       saved: '角色已保存',
       empty: '暂无角色',
+      copyInject: '拷贝注入指令',
+      copyInjectHint: '生成该角色的 skills/工具/权限注入指令并拷贝——粘贴到远端 agent 执行(外部执行器注入通道)',
+      copied: '已拷贝到剪贴板, 粘贴到远端 agent 即可',
     },
 
     executors: {
@@ -1142,7 +1145,7 @@ export default {
       modelProbe: '测试',
     },
     llm: {
-      title: 'KB 模型配置',
+      title: 'Architect 实例模型（本机）',
       desc: '从 KB 手动导入模型配置(重复导入清除原导入记录后重建)；手动单独设置的模型不会被覆盖。',
       import: '从 KB 导入模型配置',
       importing: '导入中…',

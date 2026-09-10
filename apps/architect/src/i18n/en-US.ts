@@ -1085,6 +1085,9 @@ export default {
       saving: 'Saving…',
       saved: 'Role saved',
       empty: 'No roles',
+      copyInject: 'Copy inject prompt',
+      copyInjectHint: 'Copy a skill/tool/permission injection prompt for this role — paste into a remote agent',
+      copied: 'Copied to clipboard',
     },
 
     executors: {
@@ -1116,7 +1119,7 @@ export default {
       modelProbe: 'Test',
     },
     llm: {
-      title: 'KB Model Config',
+      title: 'Architect instance models (local)',
       desc: 'Manually sync model configuration from KB (re-import clears previously imported records and rebuilds); manually-configured models are never overwritten.',
       import: 'Import Model Config from KB',
       importing: 'Importing…',
