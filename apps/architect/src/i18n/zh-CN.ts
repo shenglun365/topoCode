@@ -1074,6 +1074,14 @@ export default {
       },
     },
 
+    tabs: {
+      instance: 'Architect 实例设置（模型）',
+      executors: 'Coding Agent 执行器',
+      sessionRoles: '会话角色设置',
+      roleModels: '角色模型映射',
+      other: '其他配置',
+    },
+
     otherConfig: '其他配置',
     collabDefault: '协作模式',
     specVersion: '规约版本',

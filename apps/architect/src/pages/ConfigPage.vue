@@ -16,6 +16,16 @@ import AssetLocksCard from '@/components/config/AssetLocksCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t, te } = useI18n()
+
+// ── 设置页子 tab ──
+const TABS = [
+  { key: 'instance', label: 'config.tabs.instance' },
+  { key: 'executors', label: 'config.tabs.executors' },
+  { key: 'sessionRoles', label: 'config.tabs.sessionRoles' },
+  { key: 'roleModels', label: 'config.tabs.roleModels' },
+  { key: 'other', label: 'config.tabs.other' },
+] as const
+const activeTab = ref<string>('instance')
 const agent = useArchAgentStore()
 const spec = useArchSpecStore()
 const collab = useArchCollabStore()
@@ -250,7 +260,19 @@ onMounted(() => { void loadCgStatus() })
       :desc="t('config.desc')"
     />
 
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    <!-- 子 tab 导航 -->
+    <div class="flex flex-wrap gap-1.5">
+      <button
+        v-for="tb in TABS"
+        :key="tb.key"
+        class="btn !py-1.5 !px-4 !text-xs"
+        :class="activeTab === tb.key ? 'btn-primary' : 'btn-ghost'"
+        @click="activeTab = tb.key"
+      >{{ t(tb.label) }}</button>
+    </div>
+
+    <!-- ═══ tab: 其他配置(其他 + 资产锁 + CodeGraph 同属此 tab, 分散两处 v-show) ═══ -->
+    <div v-show="activeTab === 'other'" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
       <div class="panel overflow-hidden">
         <div class="panel-header">
           <span class="flex items-center gap-2">
@@ -318,6 +340,8 @@ onMounted(() => { void loadCgStatus() })
       </div>
     </div>
 
+    <!-- ═══ tab: Architect 实例设置(模型) ═══ -->
+    <div v-show="activeTab === 'instance'">
     <div class="panel overflow-hidden">
       <div class="panel-header">
         <span class="flex items-center gap-2">
@@ -445,18 +469,22 @@ onMounted(() => { void loadCgStatus() })
         </div>
       </div>
     </div>
+    </div>
 
-    <SessionRolesCard />
+    <!-- ═══ tab: 会话角色设置 ═══ -->
+    <div v-show="activeTab === 'sessionRoles'">
+      <SessionRolesCard />
+    </div>
 
-    <AgentExecutorsCard />
+    <!-- ═══ tab: Coding Agent 执行器(实例 + 活动会话) ═══ -->
+    <div v-show="activeTab === 'executors'" class="space-y-4">
+      <AgentExecutorsCard />
 
-    <AssetLocksCard />
-
-    <div class="panel overflow-hidden">
-      <div class="panel-header">
-        <span class="flex items-center gap-2">
-          <CpuChipIcon class="w-4 h-4 text-ctp-blue" />{{ t('config.activeSessions') }}
-        </span>
+      <div class="panel overflow-hidden">
+        <div class="panel-header">
+          <span class="flex items-center gap-2">
+            <CpuChipIcon class="w-4 h-4 text-ctp-blue" />{{ t('config.activeSessions') }}
+          </span>
         <span class="text-[11px] text-ctp-overlay1">{{ sessions.length }}</span>
       </div>
       <div class="divide-y divide-ctp-surface0">
@@ -468,14 +496,17 @@ onMounted(() => { void loadCgStatus() })
           <span class="font-mono text-ctp-subtext1">{{ s.adapter }}</span>
           <span class="font-mono text-[10px] text-ctp-overlay1">{{ s.taskId }}</span>
           <div class="flex-1" />
-          <span
-            class="chip"
-            :class="statusColor[s.status]"
-          >{{ t(`coding.status.${s.status}`) }}</span>
+            <span
+              class="chip"
+              :class="statusColor[s.status]"
+            >{{ t(`coding.status.${s.status}`) }}</span>
+          </div>
         </div>
       </div>
     </div>
-    <!-- M1 tAgent 角色模型映射：不同认知工作绑不同模型/API（per-call 生效） -->
+
+    <!-- ═══ tab: 角色模型映射 ═══ -->
+    <div v-show="activeTab === 'roleModels'">
     <div class="panel overflow-hidden">
       <div class="panel-header">
         <span class="flex items-center gap-2">
@@ -508,9 +539,14 @@ onMounted(() => { void loadCgStatus() })
         {{ t('config.roles.hint') }}
       </p>
     </div>
+    </div>
 
-    <!-- 符号源(CodeGraph)开关：语义提取的符号数据来源 -->
-    <div class="panel overflow-hidden">
+    <!-- ═══ tab: 其他配置(续)——并行执行资产锁 + 符号源 ═══ -->
+    <div v-show="activeTab === 'other'" class="space-y-4">
+      <AssetLocksCard />
+
+      <!-- 符号源(CodeGraph)开关：语义提取的符号数据来源 -->
+      <div class="panel overflow-hidden">
       <div class="panel-header">
         <span class="flex items-center gap-2">
           <AdjustmentsHorizontalIcon class="w-4 h-4 text-ctp-teal" />{{ t('config.cg.title') }}
@@ -567,6 +603,7 @@ onMounted(() => { void loadCgStatus() })
       <p class="px-4 pb-3 text-[10px] text-ctp-overlay0 leading-relaxed">
         {{ cgStatus?.mode === 'off' ? t('config.cg.hintOff') : cgStatus?.mode === 'on' ? t('config.cg.hintOn') : t('config.cg.hintAuto') }}
       </p>
+      </div>
     </div>
   </div>
 </template>

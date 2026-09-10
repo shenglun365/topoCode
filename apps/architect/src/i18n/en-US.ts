@@ -1048,6 +1048,14 @@ export default {
       },
     },
 
+    tabs: {
+      instance: 'Architect Instance (Models)',
+      executors: 'Coding Agent Executors',
+      sessionRoles: 'Session Roles',
+      roleModels: 'Role → Model Mapping',
+      other: 'General',
+    },
+
     otherConfig: 'Other Configuration',
     collabDefault: 'Collaboration Mode',
     specVersion: 'Spec Version',
