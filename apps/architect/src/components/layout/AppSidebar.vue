@@ -49,13 +49,13 @@ function isOverviewActive() {
   return route.path === '/workbench' || route.path === '/workbench/'
 }
 
-/** P1 会话中心：扁平导航(单层) —— 项目概览/会话管理/项目规约/资产地图/基线管理/MCP/系统管理 */
+/** P1 会话中心：扁平导航(单层) —— 项目概览/项目规约/资产地图/基线管理/会话管理/MCP/系统管理 */
 const items = computed(() => ([
   { key: 'overview', path: '/workbench/', icon: GlobeAltIcon, color: 'text-ctp-mauve', exact: true, chip: '' },
-  { key: 'sessions', path: '/workbench/sessions', icon: ChatBubbleLeftRightIcon, color: 'text-ctp-sky', chip: '' },
   { key: 'spec', path: '/workbench/assets', query: { tab: 'spec' }, icon: ShieldCheckIcon, color: 'text-ctp-peach', chip: String(spec.ruleCount || '') },
   { key: 'assetMap', path: '/workbench/asset-mgmt', icon: MapIcon, color: 'text-ctp-mauve', chip: '' },
   { key: 'baseline', path: '/workbench/archmap', query: { view: 'merge' }, icon: ShieldExclamationIcon, color: 'text-ctp-sapphire', chip: baselineSyncChip.value },
+  { key: 'sessions', path: '/workbench/sessions', icon: ChatBubbleLeftRightIcon, color: 'text-ctp-sky', chip: '' },
   { key: 'mcp', path: '/workbench/mcp', icon: Squares2X2Icon, color: 'text-ctp-sky', chip: String(mcp.calls.length || '') },
   { key: 'config', path: '/workbench/config', icon: Cog6ToothIcon, color: 'text-ctp-lavender', chip: '' },
 ]))
