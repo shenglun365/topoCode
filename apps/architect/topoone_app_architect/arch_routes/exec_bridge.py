@@ -87,7 +87,8 @@ def is_running(conv_id: str) -> bool:
     return bool(st and not st["stopped"] and not st["task"].done())
 
 
-def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] = None) -> Dict[str, Any]:
+def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] = None,
+                    branch_name: str = "") -> Dict[str, Any]:
     """触发实施: 组装 instruction(调用方已备) → runner 建作业 → 启动泵 → 返回 ack 文案。"""
     from .execution import conv_root_project
     conv_id = conv["id"]
@@ -97,7 +98,7 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
     if not root:
         return "无法解析项目根(会话未绑定项目/需求)，无法启动实施。"
     rid = (conv.get("reqId") or "")
-    branch = f"exec/{(rid or conv_id).replace('RQ-', 'rq').lower()}-{_ts()%100000}"
+    branch = (branch_name or "").strip() or f"exec/{(rid or conv_id).replace('RQ-', 'rq').lower()}-{_ts()%100000}"
     payload = {"root": root, "instruction": instruction, "branchName": branch}
     # 执行器提示(模型/端口等, 来自角色绑定执行器配置)
     for k_src, k_dst in (("model", "model"), ("basePort", "basePort"),

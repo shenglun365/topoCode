@@ -1434,7 +1434,10 @@ def tool_req_amend(reqId: str = "",
         changed.append("评估摘要")
     if not changed:
         return {"ok": False, "error": "未提供任何调整字段(参数均可选, 至少传一项)"}
-    store.RequirementsStore.update(req_id, {"analysis": analysis})
+    store.RequirementsStore.update(req_id, {
+        "analysis": analysis,
+        "updatedAt": __import__("topoone_app_architect.arch_routes.common", fromlist=["_ts"])._ts(),
+    })
     try:
         log_conv_event(ctx.get_conv(),
                        f"✏️ **方案已调整**（{req_id}）：{'、'.join(changed)}"

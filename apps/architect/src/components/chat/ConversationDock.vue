@@ -376,7 +376,7 @@ async function answerClarify() {
       class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-ctp-surface0 bg-ctp-mauve/5 px-3 py-1.5 text-[10px] text-ctp-overlay1"
     >
       <span class="text-ctp-mauve">⚡ 触发词</span>
-      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">执行方案</code> 启动实施</span>
+      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">执行方案</code> 预览 → <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">确认执行</code> 启动</span>
       <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">方案调整</code> 修订规约</span>
       <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">停止执行</code> / <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">查看差异</code></span>
     </div>

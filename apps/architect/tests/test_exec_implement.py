@@ -148,3 +148,90 @@ def test_spawn_seed_message_with_triggers_and_project(tmp_path, monkeypatch):
     assert "任务执行页" not in seed                           # 死路指引已移除
     # projectId 落对库(消息与会话同库——messages 能读到即为证明)
     assert any("触发词" in m.get("content", "") for m in msgs)
+
+
+# ── 两段式执行确认 ────────────────────────────────────────────────────
+
+def _mk_conv_fixture(tmp_path, monkeypatch, rid=None, title="T-确认"):
+    """建需求+待执行会话, 返回 (camelCase 会话行, 真实 rid)。"""
+    _setup(tmp_path, monkeypatch)
+    res = req_agent.run_arch_tool(
+        "req.propose", {"title": title, "requirementMd": "目标",
+                        "designMd": "方案甲", "acceptanceMd": "编译通过"},
+        root=None, project=None)
+    assert res.get("ok"), res
+    rid = res["requirementId"]
+    reqs_mod.spawn_execution_session(req_agent.store.RequirementsStore.get(rid))
+    convs = req_agent.store.ConversationsStore.by_req(rid, limit=5)
+    conv = next(c for c in convs if c.get("kind") == "execution")
+    return conv, rid
+
+
+def test_two_stage_confirm_preview_then_start(tmp_path, monkeypatch):
+    """执行方案→预览(不建作业); 确认执行→建作业+计数; 规约变更→预览刷新。"""
+    import asyncio
+    conv, _rid = _mk_conv_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import websocket as ws
+    from topoone_app_architect.arch_routes import exec_bridge
+
+    started = {}
+    monkeypatch.setattr(exec_bridge, "start_implement",
+                        lambda conv, instruction, executor_hint=None, branch_name="":
+                        started.update(instruction=instruction, branch=branch_name)
+                        or "🚀 已启动")
+
+    # ① 首次触发 → 预览, 不建作业
+    out1 = asyncio.run(ws._executor_implement(conv, None))
+    assert "执行预览" in out1 and "确认执行" in out1
+    assert not started, "预览阶段不应启动作业"
+    meta1 = req_agent.store.ConversationsStore.get(conv["id"])["meta"]
+    assert meta1["execPending"]["instruction"]
+
+    # ② 确认执行 → 建作业, pending 清除, 计数+1
+    out2 = asyncio.run(ws._executor_implement(conv, None, confirmed=True))
+    assert started and "方案甲" in started["instruction"]
+    meta2 = req_agent.store.ConversationsStore.get(conv["id"])["meta"]
+    assert not meta2.get("execPending")
+    assert meta2["execJobCount"] == 1
+
+    # ③ 再次执行 → 新预览 + 已有实施记录提醒; 确认 → 第二次作业
+    out3 = asyncio.run(ws._executor_implement(conv, None))
+    assert "已有 1 次实施记录" in out3
+    asyncio.run(ws._executor_implement(conv, None, confirmed=True))
+    meta3 = req_agent.store.ConversationsStore.get(conv["id"])["meta"]
+    assert meta3["execJobCount"] == 2
+
+
+def test_confirm_stale_spec_forces_repreview(tmp_path, monkeypatch):
+    """预览后规约被方案调整 → 确认时不启动, 自动按最新规约刷新预览。"""
+    import asyncio
+    conv, rid91 = _mk_conv_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import websocket as ws
+    from topoone_app_architect.arch_routes import exec_bridge
+
+    started = {}
+    monkeypatch.setattr(exec_bridge, "start_implement",
+                        lambda conv, instruction, executor_hint=None, branch_name="":
+                        started.update(instruction=instruction) or "🚀 已启动")
+    monkeypatch.setattr("topoone_app_architect.arch_routes.execution.conv_root_project",
+                        lambda conv: (str(tmp_path), "proj-t"))
+
+    asyncio.run(ws._executor_implement(conv, None))          # 预览 v1
+    # 方案调整(规约变更)
+    req_agent.run_arch_tool("req.amend", {"reqId": rid91, "designMd": "方案乙(改)"},
+                            root=None, project=None)
+    conv = req_agent.store.ConversationsStore.get(conv["id"])   # 重取(模拟下一条消息现取行)
+    out = asyncio.run(ws._executor_implement(conv, None, confirmed=True))
+    assert not started, "规约变更后旧预览不得直接启动"
+    assert "已按最新规约刷新" in out
+    assert "方案乙" in out or "执行预览" in out
+    # 重新确认 → 启动, 指令含新方案
+    asyncio.run(ws._executor_implement(conv, None, confirmed=True))
+    assert started and "方案乙(改)" in started["instruction"]
+
+
+def test_confirm_trigger_regex():
+    from topoone_app_architect.arch_routes.websocket import _CONFIRM_TRIG_RE
+    assert _CONFIRM_TRIG_RE.fullmatch("确认执行")
+    assert _CONFIRM_TRIG_RE.fullmatch("确认执行！")
+    assert not _CONFIRM_TRIG_RE.fullmatch("不确认执行")

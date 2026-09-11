@@ -52,6 +52,7 @@ def _is_impl_intent(question: str) -> bool:
 
 _AMEND_TRIG_RE = re.compile(
     r"调整(方案|需求|规约)|(方案|需求|规约)调整|修改(方案|需求|规约)")
+_CONFIRM_TRIG_RE = re.compile(r"(确认执行|确认启动|确认，执行|确认。执行)[!！。.]?")
 _STOP_TRIG_RE = re.compile(r"(停止执行|中止执行|终止执行)[!！。.]?")
 _DIFF_TRIG_RE = re.compile(r"(查看差异|看下差异|查看 diff|看 diff)[?？!！。.]?", re.I)
 
@@ -313,9 +314,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         stop_hit = bool(_STOP_TRIG_RE.fullmatch(question))
         diff_hit = bool(_DIFF_TRIG_RE.fullmatch(question))
         job_live = exec_bridge.is_running(conv_id)
-        if impl_hit and not job_live:
-            final_b = await _executor_implement(conv, _role)
-        elif stop_hit:
+        confirm_hit = bool(_CONFIRM_TRIG_RE.fullmatch(question))
+        if stop_hit:
             final_b = exec_bridge.stop(conv_id)
         elif diff_hit:
             final_b = _exec_diff_text(conv)
@@ -323,6 +323,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             final_b = ("实施作业运行中——执行工程师的提问会直接出现在本会话，"
                        "直接发送消息即可转达（作业等待输入时自动送达）。"
                        "发送「停止执行」可中止，「查看差异」看当前改动。")
+        elif confirm_hit or (impl_hit and not job_live):
+            final_b = await _executor_implement(conv, _role, confirmed=confirm_hit)
         elif amend_hit:
             final_b = None  # 落到下方 architect 主流程(带 req.amend 收敛)
         else:
@@ -876,15 +878,110 @@ def _executor_hint(role: Optional[dict]) -> Optional[dict]:
     return None
 
 
-async def _executor_implement(conv: dict, role: Optional[dict]) -> str:
-    """实施触发词 → 组装指令 → runner 建作业 + 桥接泵启动。返回 ack 文案。"""
+_EXEC_PENDING_TTL_MS = 30 * 60 * 1000   # 执行预览有效期(超时重建)
+
+
+def _meta_get(conv: dict) -> dict:
+    import json as _json
+    meta = (conv or {}).get("meta")
+    if isinstance(meta, dict):
+        return meta          # row_to_api 已解析
+    try:
+        return _json.loads(meta or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _meta_set(conv_id: str, meta: dict) -> None:
+    import json as _json
+    store.ConversationsStore.update(conv_id, {"meta": _json.dumps(meta, ensure_ascii=False)})
+
+
+def _spec_updated_at(rid: str) -> int:
+    return int((store.RequirementsStore.get(rid) or {}).get("updatedAt") or 0)
+
+
+def _executor_preview_card(conv: dict, instruction: str, pending: dict) -> str:
+    """执行预览卡: 即将按哪版规约实施(方案摘要/边界/验收/分支), 待确认。"""
+    rid = (conv or {}).get("reqId") or ""
+    r = store.RequirementsStore.get(rid) or {}
+    a = r.get("analysis") or {}
+    import datetime as _dt
+    upd = _dt.datetime.fromtimestamp((pending.get("specUpdatedAt") or 0) / 1000).strftime("%m-%d %H:%M") \
+        if pending.get("specUpdatedAt") else "未知"
+    design = str(a.get("designMd") or a.get("implementationPath") or "")[:400]
+    parts = [
+        "📋 **执行预览**（回复「**确认执行**」启动作业；「方案调整」可先修订规约）",
+        f"- 需求：{r.get('title') or rid}（{rid}）",
+        f"- 规约版本：{upd}" + ("（最新）" if not pending.get("stale") else "（⚠️ 预览后规约已变更，本卡已按最新规约刷新）"),
+        f"- 分支：`{pending.get('branchName') or ''}`",
+        f"- 允许改动 {len(a.get('allowedScope') or [])} 项 / 禁止改动 {len(a.get('forbiddenScope') or [])} 项 / 验收标准 {len(a.get('acceptance') or [])} 条",
+        "- 交付：开发 + 单元测试 + 整体编译验收；过程中需确认/澄清会直接在本会话提问",
+    ]
+    if design:
+        parts.append(f"\n**方案摘要**：{design}…")
+    prev_jobs = (_meta_get(conv).get("execJobCount") or 0)
+    if prev_jobs:
+        parts.append(f"\n> ⚠️ 本会话已有 {prev_jobs} 次实施记录，本次将创建**新分支**重新实施。")
+    return "\n".join(parts)
+
+
+async def _executor_implement(conv: dict, role: Optional[dict], confirmed: bool = False) -> str:
+    """实施触发词 → 两段式: 首次=执行预览(不建作业); 「确认执行」→ 真正建作业。
+
+    防"污染/更新过的会话"误执行: 每次执行前都展示将依据的规约版本与摘要;
+    预览后规约再变更(方案调整)则自动按最新规约刷新预览。
+    """
+    import time as _time
     from . import exec_bridge
+    conv_id = (conv or {}).get("id") or ""
     rid = (conv or {}).get("reqId") or ""
     if not rid:
         return "本会话未绑定需求，无法启动实施（请通过需求定稿生成待执行会话）。"
+    meta = _meta_get(store.ConversationsStore.get(conv_id) or conv)   # 现读 DB(传入行可能滞后)
+    pending = meta.get("execPending") or {}
+    spec_now = _spec_updated_at(rid)
+
+    if confirmed and not pending:
+        confirmed = False   # 无预览的「确认执行」→ 按实施触发处理(生成预览)
+    if confirmed:
+        if _time.time() * 1000 - (pending.get("createdAt") or 0) > _EXEC_PENDING_TTL_MS:
+            pending = {}
+        if pending and pending.get("specUpdatedAt") != spec_now:
+            pending = {}   # 预览后规约已变(方案调整) → 需重新预览
+        if not pending:
+            instruction = _build_impl_instruction(rid)
+            branch = f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
+            pending = {"instruction": instruction, "branchName": branch,
+                       "specUpdatedAt": spec_now, "createdAt": int(_time.time() * 1000)}
+            meta["execPending"] = pending
+            _meta_set(conv_id, meta)
+            return _executor_preview_card(conv, instruction, pending) + \
+                "\n\n(上一份预览已因规约变更/超时失效，已按最新规约刷新)"
+        meta.pop("execPending", None)
+        _meta_set(conv_id, meta)
+        info = exec_bridge.start_implement(conv, pending["instruction"],
+                                           executor_hint=_executor_hint(role),
+                                           branch_name=pending.get("branchName") or "")
+        try:
+            m2 = _meta_get(conv)
+            m2["execJobCount"] = (m2.get("execJobCount") or 0) + 1
+            _meta_set(conv_id, m2)
+        except Exception:  # noqa: BLE001
+            pass
+        return info
+
+    # 非确认触发(执行方案/执行本任务…) → 生成/刷新预览
     instruction = _build_impl_instruction(rid)
-    return exec_bridge.start_implement(conv, instruction,
-                                       executor_hint=_executor_hint(role))
+    stale = bool(pending) and pending.get("specUpdatedAt") != spec_now
+    branch = (pending.get("branchName") if pending and not stale else "") or \
+        f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
+    pending = {"instruction": instruction, "branchName": branch,
+               "specUpdatedAt": spec_now, "createdAt": int(_time.time() * 1000),
+               "stale": stale}
+    meta["execPending"] = pending
+    _meta_set(conv_id, meta)
+    return _executor_preview_card(conv, instruction, pending)
 
 
 def _exec_diff_text(conv: dict) -> str:
