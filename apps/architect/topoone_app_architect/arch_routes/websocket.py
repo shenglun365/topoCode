@@ -258,22 +258,12 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # KB/代码工具), 跳过 architect 工具循环/守卫——executor 会话以代码执行为中心。
     if _role and (_role.get("kind") or "") == "executor":
         question = (user_msgs[-1].get("content", "") if user_msgs else "").strip()
-        exec_id_b = ""
-        try:
-            req_id_b = (conv.get("reqId") or "") or (data.get("reqId") or "")
-            if req_id_b:
-                for _t in store.ExecutionTasksStore.all():
-                    if req_id_b in (_t.get("reqIds") or []):
-                        exec_id_b = _t.get("id") or ""
-                        break
-        except Exception:  # noqa: BLE001
-            pass
         hist_lines = [f"{m.get('role')}: {(m.get('content') or '')[:200]}"
                       for m in history[-6:] if (m.get("content") or "").strip()]
         extra_ctx = (f"会话角色: {_role.get('name') or _role.get('id')}(executor, 技能: "
                      f"{', '.join(_role.get('skills') or []) or '未限制'})\n"
                      f"最近对话:\n" + "\n".join(hist_lines))
-        reply = await _agent_chat_reply({"taskId": exec_id_b}, question, extra_ctx)
+        reply = await _agent_chat_reply(conv, question, extra_ctx)
         final_b = reply or "(coding agent 暂不可达: KB/LLM 网关无响应——稍后重试, 或在设置页检查模型连通性)"
         assistant_msg_id_b = store.next_id("m")
         store.ConversationsStore.append_message({
@@ -281,7 +271,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             "role": "assistant", "time": _ts(), "content": final_b,
         })
         try:
-            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+            # 会话状态流转: 执行会话获得 coding agent 首个回复 → 执行中(会话即流程)
+            patch = {"reviewState": "unread"}
+            if (conv.get("status") or "active") == "active":
+                patch["status"] = "running"
+            store.ConversationsStore.update(conv_id, patch)
         except Exception:  # noqa: BLE001
             pass
         await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
@@ -668,181 +662,28 @@ def _req_chat_stream(msgs, model_id):
     return llm_chat_start(msgs, model_id=model_id, session_id="arch-req-chat", max_tokens=_chat_max_tokens())
 
 
-@router.websocket("/ws/coding-agent")
-async def coding_agent_ws(websocket: WebSocket):
-    """coding-agent 会话流(代码问答聊天 + 落库；A7 起经 tAgent，不再对接 opencode)。
+# ── A7: tAgent 代码问答辅助(会话驱动: 会话→工程上下文→代码问答) ────────
 
-    注：
-    - 任务执行(task.run)已迁移到 runner 流(POST /exec/{id}/run + WS /ws/trees/{id}/events)；
-    - 对话(session.message)经 tAgent 代码问答(agentic_loop + KB/代码工具，见 tagent_chat.py)，
-      按会话关联的执行任务解析 root/project 作为上下文。
-    本 WS 仅保留会话创建/对话/停止。客户端消息:
-      session.create  { exec, planTitle, keepContext?, root?, project? } → session_created { session }
-      session.message { sessionId, content }                              → (assistant message) + message
-      session.stop   { sessionId }                                       → status stopped
-      ping                                                        → pong
-
-    KB/LLM 不可达 → 无 assistant 回复，仅落库回显用户消息(降级)。
-    """
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_json()
-            msg_type = data.get("type", "")
-
-            if msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
-
-            elif msg_type == "session.create":
-                exec_data = data.get("exec", {})
-                plan_title = data.get("planTitle", "")
-                keep_context = bool(data.get("keepContext", True))
-                root = (data.get("root") or data.get("execRoot") or "").strip()
-                project_id = (data.get("project") or "").strip() or None
-                # 请求级项目上下文(本连接后续消息/task.run 子任务继承)
-                from . import ctx as _ctx
-                from .project import _resolve_project as _rp
-                try:
-                    _proj = _rp(root, project_id)
-                    if _proj and _proj.get("id"):
-                        _ctx.set_project(_proj["id"])
-                except Exception:
-                    pass
-                session_id = store.next_id("sess")
-                now = _ts()
-                session = {
-                    "id": session_id,
-                    "taskId": exec_data.get("id", ""),
-                    "adapter": exec_data.get("adapter", "opencode"),
-                    "status": "idle",
-                    "keepContext": keep_context,
-                    "artifacts": [],
-                    "testResult": None,
-                    "stats": {"requests": 0, "tokensIn": 0, "tokensOut": 0, "bytesIn": 0, "bytesOut": 0},
-                    "createdAt": now,
-                    "updatedAt": now,
-                }
-                # PR-F: 确保执行任务有统一会话(无则建)——会话为唯一消息源
-                try:
-                    from .execution import _ensure_exec_conv
-                    task_row = store.ExecutionTasksStore.get(exec_data.get("id", "")) or {}
-                    _reqs = [store.RequirementsStore.get(i) for i in task_row.get("reqIds") or []]
-                    _ensure_exec_conv(task_row or exec_data, {"title": plan_title},
-                                      [r for r in _reqs if r])
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("[coding-agent] 统一会话确保失败(忽略): %s", e)
-                store.AgentSessionsStore.create(session)
-                init_msg = {
-                    "id": store.next_id("m"),
-                    "role": "user",
-                    "time": now,
-                    "content": f"创建会话 · 执行方案「{plan_title}」(任务 {exec_data.get('id', '')}, 第 {exec_data.get('runCount', 1)} 次)",
-                }
-                _write_task_conv_message(exec_data.get("id", ""), "user", init_msg["content"])
-                session["messages"] = [init_msg]
-                # A7：会话仅落库；对话经 tAgent 代码问答(见 session.message)，不再对接 opencode。
-                await websocket.send_json({"type": "session_created", "session": session})
-
-            elif msg_type == "session.message":
-                session_id = data.get("sessionId")
-                content = (data.get("content") or "").strip()
-                session = store.AgentSessionsStore.get(session_id)
-                if not session:
-                    await websocket.send_json({"type": "error", "message": "Session not found"})
-                    continue
-                user_msg = {
-                    "id": store.next_id("m"), "role": "user", "time": _ts(), "content": content,
-                }
-                _write_task_conv_message(session.get("taskId") or "", "user", content)
-                store.AgentSessionsStore.update(session_id, {"updatedAt": _ts()})
-                # A7：tAgent 代码问答(替换 opencode 直连)。KB/LLM 不可达 → reply=None，仅落库回显用户消息。
-                if content:
-                    # tAgent 问答是同步长调用(工具循环多轮)，先声明相变避免前端零反馈
-                    try:
-                        await websocket.send_json({"type": "status", "sessionId": session_id,
-                                                   "phase": "chat"})
-                    except Exception:
-                        pass
-                    reply = await _agent_chat_reply(session, content)
-                    try:
-                        await websocket.send_json({"type": "status", "sessionId": session_id,
-                                                   "phase": "idle"})
-                    except Exception:
-                        pass
-                    if reply:
-                        m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(), "content": reply}
-                        _write_task_conv_message(session.get("taskId") or "", "assistant", reply,
-                                                 from_assistant=True)
-                        await websocket.send_json({"type": "message", **m})
-                await websocket.send_json({"type": "message", **user_msg})
-
-            elif msg_type == "session.stop":
-                session_id = data.get("sessionId")
-                # A7：无 opencode 会话，停止仅置状态。
-                store.AgentSessionsStore.update(session_id, {"status": "stopped", "updatedAt": _ts()})
-                await websocket.send_json({"type": "stopped", "sessionId": session_id, "status": "stopped"})
-
-    except WebSocketDisconnect:
-        logger.info("Coding agent WebSocket disconnected")
-    except Exception as e:
-        logger.exception(f"Coding agent WS error: {e}")
-
-
-def _task_conv_id(task_id: str) -> str:
-    """执行任务关联的统一会话 id(无任务/未关联 → 空串)。"""
-    try:
-        task = store.ExecutionTasksStore.get(task_id) if task_id else None
-        conv_id = (task.get("conversationId") or "").strip() if task else ""
-        return conv_id if (conv_id and store.ConversationsStore.get(conv_id)) else ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _write_task_conv_message(task_id: str, role: str, content: str,
-                             from_assistant: bool = False) -> None:
-    """PR-F 统一消息源: coding agent 会话消息直接写统一会话(唯一存储)。
-
-    assistant 回复同时置 unread(会话中心角标); 失败静默(不阻断对话主流程)。
-    """
-    try:
-        conv_id = _task_conv_id(task_id)
-        if not conv_id:
-            return
-        store.ConversationsStore.append_message({
-            "id": store.next_id("m"), "conversationId": conv_id,
-            "role": role, "time": _ts(), "content": content,
-        })
-        if from_assistant:
-            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
-    except Exception:  # noqa: BLE001
-        pass
-
-
-# ── A7: tAgent 代码问答辅助 ─────────────────────────────────────
-
-async def _agent_chat_reply(session: dict, content: str,
+async def _agent_chat_reply(conv: dict, content: str,
                             extra_context: str = "") -> Optional[str]:
-    """A7: tAgent 代码问答(替换 opencode 直连)。
+    """executor 会话对话直达 coding agent(tAgent 代码问答, agentic_loop + KB/代码工具)。
 
-    解析会话关联的执行任务 → root/project → chat_reply(agentic_loop + KB/代码工具) → 回答。
-    无任务 / KB 不可达 / 异常 → None(调用方仅落库回显用户消息)。阻塞调用放线程。
+    会话绑定需求/项目 → root/project → chat_reply。KB 不可达/异常 → None
+    (调用方仅落库回显用户消息)。阻塞调用放线程。
     """
     from . import tagent_chat
-    task_id = (session.get("taskId") or "").strip()
-    task = store.ExecutionTasksStore.get(task_id) if task_id else None
-    root, project, task_context = "", "", ""
-    if task:
-        from .execution import _resolve_root_project
-        reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
-        reqs = [r for r in reqs if r]
-        root, project = _resolve_root_project(reqs, {})
-        root = root or ""
-        titles = [r.get("title", "") for r in reqs if r.get("title")]
-        task_context = (
-            f"执行任务: {task.get('id', '')}\n"
-            f"需求: {'; '.join(titles) if titles else '无'}\n"
-            "说明: 用户正在与该任务的实现会话对话，问题可能涉及该任务要实现的代码。"
-        )
+    from .execution import conv_root_project
+    root, project = conv_root_project(conv or {})
+    req_title = ""
+    rid = (conv or {}).get("reqId") or ""
+    if rid:
+        r = store.RequirementsStore.get(rid)
+        req_title = (r or {}).get("title", "")
+    task_context = ""
+    if rid:
+        task_context = (f"执行会话绑定需求: {rid}"
+                        + (f"「{req_title}」" if req_title else "")
+                        + "\n说明: 用户正在执行会话中对话, 问题通常涉及该需求要实现的代码。")
     if extra_context:
         task_context = (task_context + "\n" + extra_context) if task_context else extra_context
     try:
@@ -850,7 +691,7 @@ async def _agent_chat_reply(session: dict, content: str,
             tagent_chat.chat_reply,
             question=content, root=root, project=project, task_context=task_context)
     except Exception as e:
-        logger.warning(f"[coding-agent] tAgent 聊天失败: {e}")
+        logger.warning(f"[executor-chat] tAgent 聊天失败: {e}")
         return None
 
 
@@ -970,103 +811,6 @@ async def unit_test_ws(websocket: WebSocket):
 
 
 # ── Runner 任务树进度事件代理（A2：同源转发，前端免直连 :3458）──────
-
-def _runner_ws_url(tree_id: str) -> str:
-    """由 RunnerGateway.base_url(http://) 推导 runner WS 地址(ws://)。"""
-    from .runner_gateway import get_runner
-    base = get_runner().base_url
-    ws_base = base.replace("http://", "ws://").replace("https://", "wss://")
-    return f"{ws_base}/api/trees/{tree_id}/events"
-
-
-@router.websocket("/ws/trees/{tree_id}/events")
-async def tree_events_ws(websocket: WebSocket, tree_id: str):
-    """代理 runner 任务树进度事件到前端。
-
-    - runner → 前端：原样转发 `AgentEvent.to_dict()`(`{type, data:{stage,...}, ts}`)；
-      前端据 `data.stage` + `data.message`(节点 id / 树级原因) 更新任务树进度。
-    - 前端 → runner：控制消息 `{cmd: run/pause/resume/cancel/skip/retry, taskId?}`
-      → RunnerGateway HTTP(经 to_thread，避免阻塞事件循环)。
-    runner 不可达 → 推一条 error 事件后关闭。
-    """
-    await websocket.accept()
-    try:
-        import websockets
-    except Exception as e:  # noqa: BLE001
-        await websocket.send_json({"type": "error",
-                                   "data": {"stage": "proxy_error", "message": f"websockets 不可用: {e}"}})
-        await websocket.close()
-        return
-
-    url = _runner_ws_url(tree_id)
-    try:
-        runner_ws = await asyncio.wait_for(websockets.connect(url), timeout=5)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[tree-events] runner WS 不可达(%s): %s", url, e)
-        await websocket.send_json({"type": "error",
-                                   "data": {"stage": "proxy_error", "message": "runner 不可达"}})
-        await websocket.close()
-        return
-
-    # 初始状态同步：下发当前 tree + progress，前端据此对齐(消除"run 先于订阅"的早期事件竞态)
-    from .runner_gateway import get_runner
-    try:
-        cur = await asyncio.to_thread(get_runner().get_tree, tree_id)
-        if cur:
-            await websocket.send_json({"type": "state", "data": cur})
-    except Exception:  # noqa: BLE001
-        pass
-
-    async def _relay_runner_to_client() -> None:
-        try:
-            async for raw in runner_ws:
-                if isinstance(raw, (bytes, bytearray)):
-                    raw = raw.decode()
-                await websocket.send_text(raw)  # 原样转发 AgentEvent JSON
-        except Exception:  # noqa: BLE001
-            pass
-
-    async def _relay_client_to_runner() -> None:
-        from .runner_gateway import get_runner
-        r = get_runner()
-        try:
-            while True:
-                data = await websocket.receive_json()
-                cmd = data.get("cmd")
-                if cmd == "run":
-                    await asyncio.to_thread(r.run, tree_id)
-                elif cmd == "pause":
-                    await asyncio.to_thread(r.pause, tree_id)
-                elif cmd == "resume":
-                    await asyncio.to_thread(r.resume, tree_id)
-                elif cmd == "cancel":
-                    await asyncio.to_thread(r.cancel, tree_id)
-                elif cmd == "skip" and data.get("taskId"):
-                    await asyncio.to_thread(r.skip, tree_id, data["taskId"])
-                elif cmd == "retry" and data.get("taskId"):
-                    await asyncio.to_thread(r.retry, tree_id, data["taskId"])
-        except WebSocketDisconnect:
-            pass
-        except Exception:  # noqa: BLE001
-            pass
-
-    relay_out = asyncio.create_task(_relay_runner_to_client())
-    relay_in = asyncio.create_task(_relay_client_to_runner())
-    try:
-        # 任一侧结束(前端断开 / runner 关闭) → 取消另一侧
-        await asyncio.wait({relay_out, relay_in}, return_when=asyncio.FIRST_COMPLETED)
-    finally:
-        for t in (relay_out, relay_in):
-            t.cancel()
-        try:
-            await runner_ws.close()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            await websocket.close()
-        except Exception:  # noqa: BLE001
-            pass
-
 
 def _bus_ws_url() -> str:
     base = (os.environ.get("BROKER_BASE_URL") or "http://127.0.0.1:3486").rstrip("/")

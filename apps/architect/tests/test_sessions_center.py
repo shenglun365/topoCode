@@ -85,27 +85,3 @@ class TestSessionsCenter(unittest.TestCase):
         r = self.client.delete(f"/api/architect/session-docs/{doc['id']}")
         self.assertEqual(r.status_code, 200)
 
-    def test_exec_carries_conversation_id(self):
-        """POST /exec 透传 conversationId → execution_tasks.conversation_id。"""
-        from topoone_app_architect.arch_routes import tagent_se
-
-        async def fake_build(reqs, root=None, project=None, model_id=""):
-            return {"id": "tp-x", "title": "t", "kind": "task", "children": [],
-                    "depends_on": [], "files": [], "description": ""}, []
-
-        orig = tagent_se.build_task_tree_se
-        tagent_se.build_task_tree_se = fake_build
-        try:
-            r = self.client.post("/api/architect/exec", json={
-                "title": "t", "reqIds": [], "conversationId": "cv-9",
-                "steps": [], "taskBranch": "arch/x", "branchMode": "manual",
-            })
-            self.assertEqual(r.status_code, 200)
-            ex = r.json()["data"]["exec"]
-            self.assertEqual(ex.get("conversationId"), "cv-9")
-        finally:
-            tagent_se.build_task_tree_se = orig
-
-
-if __name__ == "__main__":
-    unittest.main()

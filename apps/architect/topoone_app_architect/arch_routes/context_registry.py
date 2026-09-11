@@ -635,7 +635,7 @@ def assemble_task_brief(conv_id: str, root: str = "", project_id: str = "") -> s
 
 
 def register_coding_task_tools() -> None:
-    """注册 coding.task.plan / coding.task.execute 会话 agent 工具(WS3)。"""
+    """注册 coding.task.plan 会话 agent 工具(WS3)。"""
     from .req_agent import register_architect_tool
 
     @register_architect_tool(
@@ -685,48 +685,3 @@ def register_coding_task_tools() -> None:
               + (f"\n⚠️ 只读约定被违反, 计划外变更: {', '.join(side[:10])}\n" if side else "")
               + ("\n(计划文件未产出/解析失败, 可重试或换执行器)" if not result.get("planFileFound") else ""))
         return {"markdown": md, "plan": plan or None}
-
-    @register_architect_tool(
-        "coding.task.execute",
-        "正式执行(主工作区+分支协议): 需会话已绑定需求(无则先 req.finalize 定稿)。"
-        "已绑定执行任务则直接交接运行; 否则原子创建(方案+SE任务树+执行任务)后运行。"
-        "「给需求拿结果」「按方案执行」时用此工具",
-    )
-    def _coding_task_execute(adapter: str = "opencode", project: Optional[str] = None,
-                             root: Optional[str] = None) -> dict:
-        import asyncio as _asyncio
-        from . import ctx as _ctx, store as _store
-        from .execution import assign_requirement, commit_execution_batch
-        req_id = _ctx.get_req()
-        if not req_id:
-            return {"error": "当前会话未绑定需求——请先在会话中收敛需求并调用 req.finalize 定稿, 再执行"}
-        req = _store.RequirementsStore.get(req_id)
-        if not req:
-            return {"error": f"需求 {req_id} 不存在"}
-        exec_id = (req.get("execId") or "")
-        if not exec_id:
-            body = {"adapter": adapter or "opencode",
-                    "conversationId": _ctx.get_conv() or "",
-                    "root": root or "", "project": project or ""}
-            try:
-                payload, error = _asyncio.run(commit_execution_batch([req_id], body))
-            except RuntimeError:
-                import asyncio as _aio_new
-                loop = _aio_new.new_event_loop()
-                try:
-                    payload, error = loop.run_until_complete(commit_execution_batch([req_id], body))
-                finally:
-                    loop.close()
-            if error:
-                return {"error": f"执行任务创建失败: {error}"}
-            exec_id = ((payload.get("exec") or {}).get("id")) or ""
-        row, e = assign_requirement(req_id, "runner", exec_id=exec_id)
-        if not row:
-            return {"error": (e[1] if e else "交接失败") or "交接失败"}
-        return {
-            "ok": True, "reqId": req_id, "execId": exec_id,
-            "status": row.get("status"), "assignedTo": row.get("assignedTo"),
-            "lifecycle": "executing",
-            "summary": f"执行任务 {exec_id} 已创建并交接运行(主工作区分支协议); "
-                       "进度在执行页查看, 完成后可回到会话做结果评估",
-        }

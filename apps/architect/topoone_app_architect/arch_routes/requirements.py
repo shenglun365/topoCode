@@ -262,29 +262,6 @@ async def finalize_requirement(req_id: str, request: Request):
     return ok({**row, "execConvId": (exec_conv or {}).get("id")})
 
 
-@router.post("/requirements/{req_id}/direct")
-async def direct_requirement(req_id: str, request: Request):
-    body = await request.json()
-    row = store.RequirementsStore.update(req_id, {
-        "location": "pool", "status": "analyzed", "routedBy": "direct",
-        "suggestion": body.get("suggestion"), "updatedAt": _ts(),
-    })
-    if not row:
-        return err(404, "Not found")
-    return ok(row)
-
-
-@router.post("/requirements/{req_id}/location")
-async def move_requirement_location(req_id: str, request: Request):
-    body = await request.json()
-    row = store.RequirementsStore.get(req_id)
-    if not row:
-        return err(404, "Not found")
-    row = store.RequirementsStore.update(
-        req_id,
-        {"location": body.get("location", row["location"]), "updatedAt": _ts()},
-    )
-    return ok(row)
 
 
 @router.post("/requirements/analyze/clarify")

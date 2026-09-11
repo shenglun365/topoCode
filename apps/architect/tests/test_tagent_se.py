@@ -229,48 +229,6 @@ def test_build_task_tree_se_failure(tmp_path):
     assert problems  # 有明确失败原因
 
 
-def test_create_execution_task_uses_se_tree(tmp_path, monkeypatch):
-    """POST /exec 用 SE 任务树替换机械拆分（直接替换，无旧路径）。"""
-    from fastapi.testclient import TestClient
-    import topoone_app_architect.arch_routes.tagent_se as T
-    from topoone_app_architect.arch_routes import store
-    from topoone_app_architect.server import build_app
-
-    data = str(tmp_path / "arch")
-    app = build_app(data_dir=data)
-    client = TestClient(app)
-
-    # 建需求（默认库，无项目上下文）
-    store.RequirementsStore.create({
-        "id": "req-1", "title": "订单退款", "desc": "支持退款", "kind": "user-story",
-        "analysis": {"assessmentSummary": "可行", "functionalScope": ["退款"],
-                     "implementationPath": "refund.go"},
-    })
-
-    fe_tree = {"id": "SEID", "title": "订单退款", "kind": "epic", "status": "pending",
-               "estMin": 180, "context": [], "files": [], "dependsOn": [],
-               "children": [{"id": "t1", "title": "梳理现状", "kind": "task",
-                             "status": "pending", "estMin": 30, "context": [],
-                             "files": ["order.go"], "dependsOn": []}]}
-
-    async def fake_se(reqs, root=None, project=None, model_id="", gateway=None):
-        return fe_tree, []
-    monkeypatch.setattr(T, "build_task_tree_se", fake_se)
-
-    res = client.post("/api/architect/exec", json={
-        "reqIds": ["req-1"], "root": str(tmp_path), "project": "p1",
-        "adapter": "opencode",
-    })
-    assert res.status_code == 200, res.text
-    body = res.json()["data"]
-    assert body["plan"]["status"] == "confirmed"
-    assert body["plan"]["taskPlanId"]  # SE 树 id 已回填
-    # 落库任务树为 SE 形状（含 dependsOn 字段）
-    tree = store.TaskTreesStore.get_by_plan(body["plan"]["id"])["root"]
-    assert tree["title"] == "订单退款"
-    assert tree["children"][0]["id"] == "t1"
-    assert "dependsOn" in tree["children"][0]
-
 
 def _run(coro):
     import asyncio

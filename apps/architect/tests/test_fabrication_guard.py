@@ -43,10 +43,6 @@ def test_claim_finalize():
     assert claim is None
 
 
-def test_claim_execute():
-    claim, need = fabricated_claim("执行任务已创建，已交由 coding agent。", set())
-    assert claim and ("coding.task.execute" in need or "execution.assign" in need)
-
 
 def test_plain_answer_ok():
     assert fabricated_claim("nginx-http-core 组件的名称如上所述。", set()) == (None, None)

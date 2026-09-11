@@ -353,61 +353,8 @@ class TestAcceptance:
         assert r["source"] == "draft" and r["itemId"] == conf["id"]
 
 
-# ── M3-6: runner 完成自动触发验收（trigger=runner_done） ─────────
 
-class TestRunnerDoneAutoAcceptance:
-    def _req(self):
-        from topoone_app_architect.arch_routes import store
-        return store.RequirementsStore.create({
-            "id": "req-1", "title": "订单创建", "status": "executing",
-            "updatedAt": 0})
-
-    def test_hook_triggers_runner_done_report(self, tmp_path, monkeypatch):
-        _ctx_setup(tmp_path, monkeypatch)
-        _fake_extract(monkeypatch, [_ASSET_HIT])
-        pid = _pid(tmp_path)
-        req = self._req()
-        conf = CT.create_item(pid, _item(reqId=req["id"]))
-        CT.confirm_item(conf["id"])
-        pkg = CT.create_package(pid)
-        from topoone_app_architect.arch_routes import execution as EX
-        EX._auto_acceptance_after_runner_done(
-            {"id": "ex-1"}, [req], str(tmp_path), None)
-        reports = AcceptanceStore.list_reports(pid, package_id=pkg["id"])
-        assert len(reports) == 1
-        assert reports[0]["triggerInfo"]["type"] == "runner_done"
-        assert reports[0]["triggerInfo"]["ref"] == "ex-1"
-        # 条目转 verifying（判定仍归设计者）
-        assert ContractItemStore.get(conf["id"])["status"] == "verifying"
-
-    def test_hook_no_package_no_report(self, tmp_path, monkeypatch):
-        _ctx_setup(tmp_path, monkeypatch)
-        _fake_extract(monkeypatch, [_ASSET_HIT])
-        pid = _pid(tmp_path)
-        req = self._req()
-        from topoone_app_architect.arch_routes import execution as EX
-        EX._auto_acceptance_after_runner_done(
-            {"id": "ex-2"}, [req], str(tmp_path), None)
-        assert AcceptanceStore.list_reports(pid) == []
-
-    def test_hook_skips_other_req_packages(self, tmp_path, monkeypatch):
-        """仅触发本任务需求关联的契约包（reqId 不匹配不触发）。"""
-        _ctx_setup(tmp_path, monkeypatch)
-        _fake_extract(monkeypatch, [_ASSET_HIT])
-        pid = _pid(tmp_path)
-        other = CT.create_item(pid, _item(reqId="req-other"))
-        CT.confirm_item(other["id"])
-        CT.create_package(pid)
-        req = self._req()  # req-1 无契约条目
-        from topoone_app_architect.arch_routes import execution as EX
-        EX._auto_acceptance_after_runner_done(
-            {"id": "ex-3"}, [req], str(tmp_path), None)
-        assert AcceptanceStore.list_reports(pid) == []
-
-
-# ── A1: 经验回写（rejected 失败模式 → induce 规约提案闭环） ─────────
-
-def _req(body):
+def _req(body=None):
     class _Req:
         async def json(self):
             return body

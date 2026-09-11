@@ -182,8 +182,6 @@ _FABRIC_RULES = [
      ("req.propose",), "已生成/落库需求提案"),
     (re.compile(r"已定稿|定稿成功|已转入待执行|已存入待执行|已固化[^。\n]{0,10}待执行"),
      ("req.finalize",), "定稿入池(转入待执行)"),
-    (re.compile(r"执行任务已创建|已创建[^。\n]{0,12}执行任务|已(开始|进入)执行|已交由 ?coding|已委派给 ?(runner|coding)"),
-     ("coding.task.execute", "execution.assign"), "创建执行任务/开始执行"),
 ]
 
 
@@ -331,7 +329,7 @@ def _now_ms() -> int:
 
 # 归档会话上禁止的动作类工具(生成/落库/定稿/指派); 检索与读取类不在此列
 _ARCHIVED_DENY_TOOLS = {
-    "req.propose", "req.finalize", "execution.assign", "contract.propose",
+    "req.propose", "req.finalize", "contract.propose",
 }
 
 
@@ -1196,17 +1194,10 @@ def tool_req_finalize(title: str = "", description: str = "",
             pass
         stale: List[str] = []
         for aid in dict.fromkeys(scoped_ids):
-            # 只拦「存在且过期」: assetScope 可含 KB 组件 id(comm-…)等非语义资产, 不误伤
+            # 提示不拦截(会话驱动): 过期资产以警告形式随定稿消息沉淀, 刷新与否交由设计者裁量
             a = store.SemanticAssetsStore.get(aid)
             if a and (a.get("status") == "stale" or a.get("needsUpdate")):
                 stale.append(f"{aid} {a.get('name', '')}")
-        if stale:
-            return {
-                "ok": False, "blocked": "stale_assets", "staleAssets": stale[:20],
-                "error": "定稿门禁: 涉及资产已过期(源码变更后未刷新), "
-                         "请先对下列资产逐个 asset.semantic.refresh, 全部新鲜后重新定稿: "
-                         + "; ".join(stale[:8]),
-            }
     analysis = {
         "functionalScope": functionalScope or [],
         "entityBoundary": entityBoundary or [],
@@ -1234,9 +1225,12 @@ def tool_req_finalize(title: str = "", description: str = "",
     except Exception:
         pass
     try:
+        stale_note = (f"\n⚠️ 涉及资产已过期(可 asset.semantic.refresh 刷新): "
+                      + "; ".join(stale[:8]) if stale else "")
         log_conv_event(ctx.get_conv(),
                        f"📄 **`{req_id}` 已定稿入池**（待执行方案就绪）"
-                       + (f" · 待执行会话 `{exec_conv_id}` 已创建" if exec_conv_id else ""))
+                       + (f" · 待执行会话 `{exec_conv_id}` 已创建" if exec_conv_id else "")
+                       + stale_note)
     except Exception:  # noqa: BLE001
         pass
     return {
@@ -1244,41 +1238,6 @@ def tool_req_finalize(title: str = "", description: str = "",
         "lifecycle": "ready", "execConvId": exec_conv_id,
         "summary": (f"已定稿，需求转入待执行；已生成独立待执行会话 {exec_conv_id}。"
                     if exec_conv_id else "已定稿，需求转入待执行(可指派 subagent 执行)。"),
-    }
-
-
-# ── 需求指派工具(定稿后 → subagent 执行，经 agent-bus broker 交接) ─────
-
-@register_architect_tool(
-    "execution.assign",
-    "指派：把本会话需求指派给 subagent 执行(定稿/待执行后可用)。"
-    "target=runner 指派内部执行任务(需 execId，缺省取需求已绑定执行任务；"
-    "broker 将触发 /exec/{execId}/run)；target=mcp 指派外部 MCP 工具(需 tool，"
-    "可选 params)。成功后需求状态→执行中，左栏会话移入「执行中」组。"
-    "参数：target(\"runner\"|\"mcp\")、execId?(runner)、tool?(mcp)、params?{…}(mcp)。",
-)
-def tool_execution_assign(target: str = "", execId: str = "",
-                          tool: str = "",
-                          params: Optional[Dict[str, Any]] = None,
-                          root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
-    from . import ctx
-    from .execution import assign_requirement
-    req_id = ctx.get_req()
-    if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求，无法指派"}
-    row, e = assign_requirement(req_id, target, exec_id=execId, tool=tool, params=params)
-    if not row:
-        return {"ok": False, "error": e[1]}
-    try:
-        log_conv_event(ctx.get_conv(),
-                       f"📮 **已指派执行**：`{req_id}` → {row.get('assignedTo')}"
-                       + (f"（任务 `{execId}`）" if execId else "") + "，需求进入执行中")
-    except Exception:  # noqa: BLE001
-        pass
-    return {
-        "ok": True, "reqId": req_id, "status": row.get("status"),
-        "assignedTo": row.get("assignedTo"), "lifecycle": "executing",
-        "summary": f"已指派给 {row.get('assignedTo')}，需求进入执行中(broker 已发布交接)。",
     }
 
 
@@ -1572,7 +1531,6 @@ _CAPABILITY_DOC = (
     "- contract.propose：把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)\n"
     "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
     "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n"
-    "- execution.assign：指派(把定稿/待执行需求指派给 subagent 执行：runner=内部执行任务，mcp=外部 MCP 工具；成功后需求进入执行中)\n"
     "- interaction.clarify：澄清提问(信息不足/存在歧义/需要用户决策时向用户提问；用户回答会在下一回合注入本会话)\n"
     "- ctx.search：跨会话检索历史上下文(单元/消息/备案文档)——回答涉及历史讨论/已有结论时先检索，避免重复讨论\n"
     "- ctx.get：读取指定会话的上下文包(摘要+关键单元+备案文档清单)\n"
@@ -1620,10 +1578,8 @@ _CAPABILITY_DOC = (
     '- req.finalize: {"title", "description", "functionalScope"[], "entityBoundary"[], '
     '"assetScope"[{assetId,assetType,role,source}], "estMin", "implementationPath", "assessmentSummary", '
     '"allowedScope"[], "forbiddenScope"[], "acceptance"[], "reqId"?}(定稿纪律见 plan 技能)\n'
-    '- execution.assign: {"target": "runner", "execId": "ex-xxx(缺省取需求已绑定任务)"} '
-    '或 {"target": "mcp", "tool": "<mcp工具名>", "params": {…}}\n'
-    '- req.finalize 门禁: assetScope 涉及资产若过期(stale/needsUpdate)会被拦截——'
-    '先 asset.semantic.refresh 刷新再定稿\n'
+    '- req.finalize 提示: assetScope 涉及资产若过期(stale/needsUpdate)会在定稿消息中'
+    '附带警告(不拦截); 建议 asset.semantic.refresh 刷新后执行\n'
     '- interaction.clarify: {"message": "<问题文本>"}\n'
     '- coding.task.plan: {"instruction": "要做什么(一句话)", "files"?: "相关文件,逗号分隔", "executorId"?: "opencode|cline|…", "timeoutS"?: 900}\n'
     '- coding.task.execute: {"adapter"?: "opencode(缺省)"}——需先 req.finalize 绑定需求\n'

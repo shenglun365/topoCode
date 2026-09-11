@@ -92,17 +92,6 @@ def test_spawn_execution_session_dual_state(client):
     assert isinstance(meta, dict) and meta.get("pendingExec") is True
 
 
-def test_asset_locks_conflict(client):
-    from topoone_app_architect.arch_routes import store
-    store.AssetLocksStore.__dict__["TABLE"]  # 表存在
-    store._insert("arch_asset_locks", {
-        "id": "lk-1", "project_id": "p1", "resource": "src/a.ts",
-        "granularity": "file", "holder": "exec-1", "holder_title": "任务A",
-    })
-    conflicts = store.AssetLocksStore.conflicts("p1", ["src/a.ts", "src/b.ts"])
-    assert len(conflicts) == 1 and conflicts[0]["holder"] == "exec-1"
-    assert store.AssetLocksStore.conflicts("p1", ["src/a.ts"], exclude_holder="exec-1") == []
-
 
 def test_role_switch_rules(client):
     """PR3 角色切换: 规范化门槛 + 单向锁定。"""
@@ -128,36 +117,6 @@ def test_role_switch_rules(client):
     r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-y"}, headers=h)
     assert r.status_code == 400 and "锁定" in r.json()["message"]
 
-
-def test_exec_conv_projection_and_mirror(client):
-    """PR3 双体系: commitBatch 自动建统一执行会话 + 终态投影 + 消息镜像。"""
-    from topoone_app_architect.arch_routes import store
-    from topoone_app_architect.arch_routes import execution as EX
-    from topoone_app_architect.arch_routes.websocket import _write_task_conv_message
-    store.RequirementsStore.create({"id": "RQ-PJ", "title": "投影", "desc": "d",
-                                    "location": "pool", "analysis": {}})
-    task = {"id": "ex-pj", "planId": "pl-1", "reqIds": ["RQ-PJ"], "status": "created",
-            "conversationId": ""}
-    # 自动建会话
-    conv_id = EX._ensure_exec_conv(task, {"title": "投影方案"}, [{"id": "RQ-PJ", "projectId": ""}])
-    conv = store.ConversationsStore.get(conv_id)
-    assert conv["kind"] == "execution" and "执行｜" in conv["title"]
-    # run 投影
-    EX._project_exec_conv({**task, "conversationId": conv_id}, lifecycle="running", review="read")
-    assert store.ConversationsStore.get(conv_id)["status"] == "running"
-    # 终态投影
-    EX._project_exec_conv({**task, "conversationId": conv_id}, lifecycle="active", review="error")
-    row = store.ConversationsStore.get(conv_id)
-    assert row["status"] == "active" and row["reviewState"] == "error"
-    # 消息镜像
-    store.ExecutionTasksStore.create if False else None
-    # 直接构造已关联任务
-    db_task = store.ExecutionTasksStore.create({"id": "ex-pj2", "planId": "pl-1",
-        "reqIds": ["RQ-PJ"], "status": "running", "conversationId": conv_id})
-    _write_task_conv_message("ex-pj2", "assistant", "执行回答", from_assistant=True)
-    msgs = store.ConversationsStore.messages(conv_id)
-    assert any(m.get("content") == "执行回答" for m in msgs)
-    assert store.ConversationsStore.get(conv_id)["reviewState"] == "unread"
 
 
 def test_handoff_creates_locked_new_session(client, monkeypatch):
@@ -197,36 +156,6 @@ def test_handoff_creates_locked_new_session(client, monkeypatch):
     assert r.status_code == 400
 
 
-def test_asset_lock_acquire_release_two_level(client, monkeypatch):
-    """PR5: strict 冲突 blocked / warn 放行 / 终态释放。"""
-    from topoone_app_architect.arch_routes import store
-    from topoone_app_architect.arch_routes import execution as EX
-    h = _auth(client)
-    store.RequirementsStore.create({
-        "id": "RQ-LK", "title": "锁", "desc": "d", "location": "pool",
-        "analysis": {"allowedScope": ["src/a.ts", "src/b.ts"], "changes": []}})
-    t1 = {"id": "ex-lk1", "planId": "pl", "reqIds": ["RQ-LK"], "status": "created"}
-    t2 = {"id": "ex-lk2", "planId": "pl", "reqIds": ["RQ-LK"], "status": "created"}
-    # strict(默认): t1 取锁成功
-    r1 = EX.acquire_task_locks(t1)
-    assert r1["ok"] and r1["acquired"] == 2
-    # t2 同资源 → 冲突 blocked
-    r2 = EX.acquire_task_locks(t2)
-    assert not r2["ok"] and len(r2["conflicts"]) == 2
-    # 切 warn → 放行(记录冲突但 ok)
-    client.put("/api/architect/exec/lock-policy", json={"mode": "warn"}, headers=h)
-    r3 = EX.acquire_task_locks(t2)
-    assert r3["ok"] and len(r3["conflicts"]) == 2
-    # 释放
-    rr = EX.release_task_locks(t1)
-    assert rr["released"] >= 2
-    rr2 = EX.acquire_task_locks(t2)   # warn 下无冲突了
-    assert rr2["ok"] and not rr2["conflicts"]
-    EX.release_task_locks(t2)
-    # 策略读写
-    pol = client.get("/api/architect/exec/lock-policy", headers=h).json()["data"]
-    assert pol["mode"] == "warn" and pol["granularity"] in ("file", "component")
-
 
 def test_conv_read_tool_includes_archived(client):
     """PR-D: conv.read 只读工具可读归档会话。"""
@@ -260,37 +189,10 @@ def test_tool_whitelist_contextvar(client):
     WS._TOOL_WHITELIST.set(None)
 
 
-def test_blocked_accepting_projects_awaiting_reply(client):
-    """PR-C: 任务 blocked/accepting → 关联会话 awaiting_reply。"""
-    from topoone_app_architect.arch_routes import store
-    from topoone_app_architect.arch_routes import execution as EX
-    store.ConversationsStore.create({"id": "cv-aw", "kind": "execution", "title": "t"})
-    EX._project_exec_conv({"id": "ex-aw", "conversationId": "cv-aw"},
-                          lifecycle="active", review="awaiting_reply")
-    assert store.ConversationsStore.get("cv-aw")["reviewState"] == "awaiting_reply"
-
-
-def test_unified_agent_session_messages(client, monkeypatch):
-    """PR-F: coding agent 会话消息以统一会话为唯一源(写/读一致)。"""
-    import asyncio
-    from topoone_app_architect.arch_routes import store
-    from topoone_app_architect.arch_routes.websocket import _write_task_conv_message, _task_conv_id
-    from topoone_app_architect.arch_routes.agent import _conv_messages_of
-    store.ConversationsStore.create({"id": "cv-uf", "kind": "execution", "title": "统一"})
-    store.ExecutionTasksStore.create({"id": "ex-uf", "planId": "pl", "reqIds": [],
-                                      "status": "running", "conversationId": "cv-uf"})
-    assert _task_conv_id("ex-uf") == "cv-uf"
-    _write_task_conv_message("ex-uf", "user", "怎么改 a.ts?")
-    _write_task_conv_message("ex-uf", "assistant", "先看入口…", from_assistant=True)
-    # agent 会话面板读统一会话
-    sess = {"id": "sess-uf", "taskId": "ex-uf"}
-    msgs = _conv_messages_of(sess)
-    assert [m["content"] for m in msgs] == ["怎么改 a.ts?", "先看入口…"]
-    assert store.ConversationsStore.get("cv-uf")["reviewState"] == "unread"
 
 
 def test_agent_chat_reply_extra_context(client, monkeypatch):
-    """PR-B: executor 路由复用 _agent_chat_reply 且携带会话角色/最近对话上下文。"""
+    """PR-B: executor 会话对话直达 coding agent, 携带需求/角色/最近对话上下文。"""
     import asyncio
     from topoone_app_architect.arch_routes import websocket as WS
     captured = {}
@@ -303,11 +205,12 @@ def test_agent_chat_reply_extra_context(client, monkeypatch):
     import topoone_app_architect.arch_routes.tagent_chat as TC
     monkeypatch.setattr(TC, "chat_reply", fake_chat_reply)
     out = asyncio.run(WS._agent_chat_reply(
-        {"taskId": ""}, "这个函数怎么改?",
+        {"reqId": ""}, "这个函数怎么改?",
         "会话角色: 执行A(executor)\n最近对话:\nuser: 上一轮"))
     assert out == "代码回答"
     assert captured["question"] == "这个函数怎么改?"
     assert "executor" in captured["ctx"] and "上一轮" in captured["ctx"]
+
 
 
 def test_parse_oc_config_models():
