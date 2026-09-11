@@ -19,9 +19,10 @@ const isWorkbench = computed(() => !!route.meta.workbench)
 async function syncProject() {
   await project.load()
   if (project.project) {
-    for (const load of [requirement.load, architecture.loadFromSnapshot]) {
-      await load().catch((err) => console.error('[arch] 数据加载失败', err))
-    }
+    await Promise.all([
+      requirement.load().catch((err) => console.error('[arch] 数据加载失败', err)),
+      architecture.loadFromSnapshot().catch((err) => console.error('[arch] 数据加载失败', err)),
+    ])
   }
 }
 

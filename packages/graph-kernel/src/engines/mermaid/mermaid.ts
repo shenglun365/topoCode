@@ -1,4 +1,11 @@
-import mermaid from 'mermaid';
+// mermaid(含 d3 全家桶, ~1MB+) 按需动态加载: 不静态进主包, 首次渲染/校验时拉起
+type MermaidApi = typeof import('mermaid').default;
+let _mermaidPromise: Promise<MermaidApi> | null = null;
+
+function loadMermaid(): Promise<MermaidApi> {
+  _mermaidPromise ??= import('mermaid').then((m) => (m.default ?? m) as MermaidApi);
+  return _mermaidPromise;
+}
 import { getCapability } from '../../core/capabilities';
 import type { DiagramSchema } from '../../core/types';
 import { toMermaid, type DegradationPolicy } from '../../core/transpile';
@@ -17,6 +24,7 @@ export class MermaidEngine implements DiagramEngine {
 
   async validate(code: string): Promise<ValidationResult> {
     try {
+      const mermaid = await loadMermaid();
       const result = (await mermaid.parse(code)) as { diagramType?: string } | undefined;
       return { valid: true, diagramType: result?.diagramType };
     } catch (err) {
@@ -26,6 +34,7 @@ export class MermaidEngine implements DiagramEngine {
 
   async render(ctx: RenderContext): Promise<RenderResult> {
     this.theme = ctx.theme ?? this.theme;
+    const mermaid = await loadMermaid();
     mermaid.initialize({
       startOnLoad: false,
       // default 'strict': agent-generated source is untrusted; inline click callbacks are stripped.
@@ -46,6 +55,7 @@ export class MermaidEngine implements DiagramEngine {
 let _ensureDone = false;
 
 export async function ensureMermaid() {
+  const mermaid = await loadMermaid();
   if (!_ensureDone) {
     mermaid.initialize({ startOnLoad: false, securityLevel: 'antiscript', theme: 'default' });
     _ensureDone = true;
