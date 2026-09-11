@@ -144,6 +144,11 @@ const roleSwitchMsg = ref('')
 const roleSwitching = ref(false)
 const executorRoles = ref<RoleRow[]>([])
 const activeRoleId = computed(() => ((conv.activeMeta as any)?.roleId as string) || 'architect')
+
+// 执行会话: 常驻触发词提示条(实施/方案调整/停止——消灭「想做实施却不知触发词」)
+const isExecutionConv = computed(() =>
+  ((conv.activeMeta as any)?.kind === 'execution')
+  && ((conv.activeMeta as any)?.status !== 'archived'))
 const roleLocked = computed(() => !!((conv.activeMeta as any)?.roleLocked))
 const roleSwitchEligible = computed(() =>
   activeRoleId.value === 'architect' && !!conv.activeId
@@ -365,7 +370,16 @@ async function answerClarify() {
       </div>
     </div>
 
-
+    <!-- 执行会话触发词常驻提示条 -->
+    <div
+      v-if="isExecutionConv"
+      class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-ctp-surface0 bg-ctp-mauve/5 px-3 py-1.5 text-[10px] text-ctp-overlay1"
+    >
+      <span class="text-ctp-mauve">⚡ 触发词</span>
+      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">执行方案</code> 启动实施</span>
+      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">方案调整</code> 修订规约</span>
+      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">停止执行</code> / <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">查看差异</code></span>
+    </div>
 
     <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
     <!-- 澄清应答横幅 -->

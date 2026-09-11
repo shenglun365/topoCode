@@ -12,9 +12,44 @@ from .common import _ts, _id
 from . import store
 from . import exec_bridge
 
-# executor 会话指令触发词(显式, 见 PR-B 分流注释)
-_IMPL_TRIG_RE = re.compile(
-    r"(执行方案|开始执行|继续执行|重新执行|执行|实施|动手实现|开始实施|继续实施)[!！。.]?")
+# executor 会话指令意图判定(分层, 见 PR-B 分流注释):
+#   显式触发词(任意位置) > 短消息动词×宾语共现兜底 > 疑问/迟疑语气排除 > 答疑
+_IMPL_EXPLICIT_RE = re.compile(
+    r"执行方案|开始执行|继续执行|重新执行|执行本任务|执行任务|执行计划|"
+    r"开始实施|继续实施|动手实现|提交执行|启动执行|跑起来|go ahead", re.I)
+_IMPL_COOCUR_RE = re.compile(
+    r"(执行|实施|启动|开跑|跑|运行|落地)[^?？!！。.]{0,8}"
+    r"(方案|任务|计划|rqa?-\d+|coding)", re.I)
+_INTENT_EXCLUDE_RE = re.compile(
+    r"如何|怎么|怎样|为什么|是否|能否|可以不|还是|要不|或者|先[^?？!！。.]{0,6}(确认|检查|评估|讨论)"
+    r"|吗[?？]|\?$", re.I)
+_IMPL_BARE_RE = re.compile(r"(执行|实施|开始|继续|动手|开始吧|跑起来|go ahead)[!！。.]?", re.I)
+_QA_TONE_RE = re.compile(r"[?？]|吗|如何|怎么|怎样|为什么|是否|能否|什么")
+
+
+def _is_impl_intent(question: str) -> bool:
+    """executor 会话消息是否为实施意图(纯函数, 供单测)。
+
+    分层: ① 显式触发词(任意位置, 仍受疑问语气否决——「执行方案吗」是提问)
+          ② 短消息(≤40字)动词×宾语共现兜底(「执行本任务」「跑一下方案」)
+    否决: 疑问语气(如何/怎么/吗?…)/迟疑前置句(执行方案前先确认…)。
+    """
+    q = (question or "").strip()
+    if not q:
+        return False
+    # 否决优先: 疑问/迟疑语气(对显式词同样生效——「执行方案吗」「执行方案前先确认…」)
+    if _QA_TONE_RE.search(q) or _INTENT_EXCLUDE_RE.search(q):
+        return False
+    if _IMPL_EXPLICIT_RE.search(q):
+        return True
+    if len(q) <= 6 and _IMPL_BARE_RE.fullmatch(q):
+        return True
+    # 短消息动词×宾语共现兜底(「执行本任务」「跑一下方案」); 长消息不兜底
+    if len(q) <= 40 and _IMPL_COOCUR_RE.search(q):
+        return True
+    return False
+
+
 _AMEND_TRIG_RE = re.compile(
     r"调整(方案|需求|规约)|(方案|需求|规约)调整|修改(方案|需求|规约)")
 _STOP_TRIG_RE = re.compile(r"(停止执行|中止执行|终止执行)[!！。.]?")
@@ -273,7 +308,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     #   ⑤ 其余 → tAgent 执行工程师答疑(tAgent 代码问答, agentic_loop + KB/代码工具)
     if _role and (_role.get("kind") or "") == "executor":
         question = (user_msgs[-1].get("content", "") if user_msgs else "").strip()
-        impl_hit = bool(_IMPL_TRIG_RE.fullmatch(question))
+        impl_hit = _is_impl_intent(question)
         amend_hit = bool(_AMEND_TRIG_RE.search(question))
         stop_hit = bool(_STOP_TRIG_RE.fullmatch(question))
         diff_hit = bool(_DIFF_TRIG_RE.fullmatch(question))
@@ -293,6 +328,17 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         else:
             exec_bridge.resume_if_job(conv_id, project_id=(conv.get("projectId") or ""))
             final_b = await _executor_chat_reply(conv, question, _role)
+            if final_b and not exec_bridge.is_running(conv_id):
+                # 答疑兜底引导(闭环): 消灭「想做实施却滑入答疑」的死循环——
+                # 无论模型怎么答, 回复尾部都有通往实施的明确路径
+                try:
+                    from . import llm_dataset as _lds
+                    _lds.record("exec_intent_miss", question=question[:200],
+                                role=(_role or {}).get("id") or "")
+                except Exception:  # noqa: BLE001
+                    pass
+                final_b += ("\n\n> ℹ️ 发送「**执行方案**」启动实施作业（开发+单元测试+整体编译验收）；"
+                            "「方案调整」可修订本会话规约；「停止执行」「查看差异」控制作业。")
         if final_b is not None:
             assistant_msg_id_b = store.next_id("m")
             store.ConversationsStore.append_message({

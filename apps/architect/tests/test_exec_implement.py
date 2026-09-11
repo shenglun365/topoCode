@@ -13,8 +13,8 @@ import topoone_app_architect.arch_routes.ctx as C
 from topoone_app_architect.arch_routes import req_agent
 from topoone_app_architect.arch_routes import requirements as reqs_mod
 from topoone_app_architect.arch_routes.websocket import (
-    _AMEND_TRIG_RE, _DIFF_TRIG_RE, _IMPL_TRIG_RE, _STOP_TRIG_RE,
-    _build_impl_instruction,
+    _AMEND_TRIG_RE, _DIFF_TRIG_RE, _STOP_TRIG_RE,
+    _build_impl_instruction, _is_impl_intent,
 )
 
 
@@ -33,11 +33,21 @@ def _setup(tmp_path, monkeypatch):
 # ── 触发词分流 ────────────────────────────────────────────────────────
 
 def test_impl_triggers():
-    for q in ("执行方案", "开始执行", "继续执行", "执行", "实施", "动手实现",
-              "执行方案。", "开始执行！"):
-        assert _IMPL_TRIG_RE.fullmatch(q), q
-    for q in ("执行方案吗", "帮我执行方案", "不执行", "执行x"):
-        assert not _IMPL_TRIG_RE.fullmatch(q), q
+    """分层意图判定: 显式词(search)/共现兜底/疑问与迟疑排除。"""
+    # 命中: 显式词(含长消息内嵌) + 共现兜底 + 英文
+    for q in ("执行方案", "执行本任务", "执行任务。", "开始执行", "实施", "执行", "动手实现",
+              "执行。", "开始", "调用 coding agent 执行本会话的方案",
+              "补充：连接池上限改为64。请执行方案",
+              "跑一下方案", "跑起来", "Go Ahead", "执行 RQ-37", "启动执行作业"):
+        assert _is_impl_intent(q), q
+    # 排除: 疑问语气 / 迟疑前置句 / 否定 / 无宾语动词
+    for q in ("这个方案怎么执行", "执行方案吗", "执行本任务？", "怎么执行任务",
+              "执行方案前先确认依赖", "检查本会话方案是否符合执行标准",
+              "不执行了", "执行风险怎么评估", "还是先讨论执行细节吧",
+              "什么是执行方案", "要不要执行方案还是先等等",
+              "验证是否生效。请执行方案", "不执行", "执行x",
+              "并行执行的分析报告"):
+        assert not _is_impl_intent(q), q
 
 
 def test_amend_triggers():
