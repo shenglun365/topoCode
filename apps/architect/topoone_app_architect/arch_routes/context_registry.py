@@ -91,62 +91,6 @@ def record_tool_call(conv_id: str, name: str, args: Dict[str, Any],
         logger.warning("[ctx-registry] 工具单元写入失败: %s", e)
 
 
-def write_exec_report(task_id: str, status: str) -> None:
-    """执行终态 → 执行回执单元(简报素材；refs 带 execIds/reqIds/modules)。"""
-    try:
-        task = store.ExecutionTasksStore.get(task_id) or {}
-        conv_id = task.get("conversationId") or ""
-        req_ids = task.get("reqIds") or []
-        req_titles = []
-        for rid in req_ids[:8]:
-            r = store.RequirementsStore.get(rid) or {}
-            if r.get("title"):
-                req_titles.append(r["title"])
-        stats = task.get("stats") or {}
-        lines = [
-            f"# 执行回执 {task_id}",
-            f"- 终态: **{status}**",
-            f"- 分支: {task.get('taskBranch') or '-'}",
-            f"- 落地提交: {task.get('branchCommit') or '-'}",
-            f"- 关联需求: {', '.join(req_titles) or '-'}",
-            f"- 会话数: {len(task.get('sessionIds') or [])} · 请求数: {stats.get('requests', 0)}",
-        ]
-        if task.get("error"):
-            lines.append(f"- 错误: {task['error'][:500]}")
-        # WS5-A: 会话有 plan 契约 → 引导结果评估(足迹×偏差, 处理/接纳由用户决策)
-        if conv_id and status in ("done", "failed", "stopped"):
-            try:
-                units = store.ContextUnitsStore.all(conversation_id=conv_id, limit=50) or []
-                if any((u.get("type") or "") == "plan" for u in units):
-                    lines.append(f"- 建议: 会话中调用 capability.evaluate(target=execution, "
-                                 f"execId={task_id}) 做结果评估(变更足迹×方案偏差)")
-            except Exception:  # noqa: BLE001
-                pass
-        refs = {"execIds": [task_id], "reqIds": list(req_ids)}
-        if conv_id:
-            conv = store.ConversationsStore.get(conv_id) or {}
-            refs["modules"] = _conv_tags(conv).get("modules") or []
-        store.ContextUnitsStore.create({
-            "conversationId": conv_id,
-            "projectId": (_project_of(conv_id) if conv_id else ""),
-            "type": "execution_report",
-            "title": f"执行回执 {task_id} [{status}]",
-            "content": "\n".join(lines),
-            "refs": refs, "importance": 1,
-        })
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[ctx-registry] 执行回执写入失败: %s", e)
-
-
-_TITLE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "title": {"type": "string", "description": "不超过 24 字的会话标题"},
-        "summary": {"type": "string", "description": "不超过 120 字的会话摘要(结论/决策/待办)"},
-    },
-    "required": ["title", "summary"],
-}
-
 
 def _conv_meta(conv: dict) -> dict:
     """会话 meta 字段(JSON) → dict。"""
@@ -157,6 +101,16 @@ def _conv_meta(conv: dict) -> dict:
         except (TypeError, ValueError):
             raw = {}
     return raw if isinstance(raw, dict) else {}
+
+
+_TITLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "description": "不超过 24 字的会话标题"},
+        "summary": {"type": "string", "description": "不超过 120 字的会话摘要(结论/决策/待办)"},
+    },
+    "required": ["title", "summary"],
+}
 
 
 def summarize_conversation(conv_id: str, force: bool = False) -> Optional[dict]:

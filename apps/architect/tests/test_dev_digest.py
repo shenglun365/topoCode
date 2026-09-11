@@ -56,18 +56,12 @@ class TestDevDigest(unittest.TestCase):
         self.assertEqual(doc["type"], "dev_digest")
         self.assertIn("开发简报", doc["title"])
         # 素材直排可见
-        self.assertIn("arch/ex-x", doc["contentMd"])
         self.assertIn("支付重构讨论", doc["contentMd"])
         self.assertIn("支付需求快照", doc["contentMd"])
         entries = (doc.get("refs") or {}).get("entries") or []
         types = {e["type"] for e in entries}
-        self.assertIn("exec", types)
         self.assertIn("session", types)
         self.assertIn("doc", types)
-        exec_entry = next(e for e in entries if e["type"] == "exec")
-        self.assertEqual(exec_entry["execId"], ex["id"])
-        self.assertEqual(exec_entry["commit"], "abc123def456")
-        self.assertEqual(exec_entry["conversationId"], conv["id"])
 
     def test_list_digests(self):
         self._seed()
@@ -82,16 +76,3 @@ class TestDevDigest(unittest.TestCase):
         r = self.client.post("/api/architect/digest", json={"sinceDays": 1})
         self.assertNotEqual(r.json().get("code"), 0)
 
-    def test_record_land_snapshot(self):
-        from topoone_app_architect.arch_routes import dev_digest
-        dev_digest.record_land_snapshot(
-            {"id": "ex-9", "title": "登录落地", "taskBranch": "arch/ex-9"}, "deadbeef")
-        db = store._target_db("arch_snapshot_records")
-        rows = db.fetchall("SELECT * FROM arch_snapshot_records WHERE task_id = 'ex-9'")
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["git_commit"], "deadbeef")
-        self.assertEqual(rows[0]["git_branch"], "arch/ex-9")
-
-
-if __name__ == "__main__":
-    unittest.main()

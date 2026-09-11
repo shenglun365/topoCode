@@ -31,9 +31,7 @@ async def bus_publish(request: Request):
 
 @router.get("/bus/needs-input")
 async def bus_needs_input():
-    """需要你输入(N)：执行任务 blocked/accepting + 未回复的 clarify。"""
-    tasks = [t for t in store.ExecutionTasksStore.all()
-             if t.get("status") in ("blocked", "accepting")]
+    """需要你输入(N)：未回复的 clarify 提问。"""
     clarifies = store.AgentBusStore.list(topic="interaction.clarify",
                                          status="delivered", limit=200)
     answers = store.AgentBusStore.list(topic="interaction.answer",
@@ -42,12 +40,6 @@ async def bus_needs_input():
                 for a in answers if (a.get("payload") or {}).get("replyTo")}
     pending = [c for c in clarifies if c.get("id") not in answered]
     items = [
-        {
-            "type": "task", "id": t["id"],
-            "reqId": (t.get("reqIds") or [""])[0],
-            "src": "runner", "label": t.get("id") or "", "status": t.get("status"),
-        } for t in tasks
-    ] + [
         {
             "type": "clarify", "id": c["id"],
             "reqId": (c.get("payload") or {}).get("reqId") or "",

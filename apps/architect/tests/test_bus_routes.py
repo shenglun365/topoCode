@@ -103,12 +103,10 @@ class TestNeedsInput:
         _setup(tmp_path, monkeypatch)
         return TestClient(build_app(data_dir=str(tmp_path / "arch")))
 
-    def test_counts_blocked_task_and_unanswered_clarify(self, tmp_path, monkeypatch):
+    def test_counts_unanswered_clarify_only(self, tmp_path, monkeypatch):
         client = self._client(tmp_path, monkeypatch)
         with client:
             _make_req()
-            _make_exec(status="blocked")
-            _make_exec("ex-2", status="running")  # 不计
             # 未回复 clarify
             store.AgentBusStore.create({
                 "id": "bus-c1", "src": "coding", "dst": "user",
@@ -124,20 +122,15 @@ class TestNeedsInput:
                 "status": "delivered", "createdAt": 2, "updatedAt": 2,
             })
             store.AgentBusStore.create({
-                "id": "bus-a1", "src": "user", "dst": "plan",
+                "id": "bus-a2", "src": "user", "dst": "plan",
                 "topic": "interaction.answer",
-                "payload": {"replyTo": "bus-c2", "reqId": "rq-1", "answer": "A"},
+                "payload": {"replyTo": "bus-c2", "message": "已答"},
                 "status": "delivered", "createdAt": 3, "updatedAt": 3,
             })
-            body = client.get("/api/architect/bus/needs-input").json()["data"]
-            assert body["count"] == 2
-            types = {i["type"] for i in body["items"]}
-            assert types == {"task", "clarify"}
-            task_item = next(i for i in body["items"] if i["type"] == "task")
-            assert task_item["id"] == "ex-1" and task_item["status"] == "blocked"
-            clarify_item = next(i for i in body["items"] if i["type"] == "clarify")
-            assert clarify_item["id"] == "bus-c1"
-            assert clarify_item["reqId"] == "rq-1"
+            r = client.get("/api/architect/bus/needs-input").json()["data"]
+            assert r["count"] == 1, r
+            assert r["items"][0]["type"] == "clarify"
+            assert r["items"][0]["label"] == "选哪个方案?"
 
     def test_empty(self, tmp_path, monkeypatch):
         client = self._client(tmp_path, monkeypatch)

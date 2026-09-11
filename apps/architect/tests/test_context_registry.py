@@ -34,25 +34,6 @@ class TestContextRegistry(unittest.TestCase):
         self.assertEqual(len(units), 3)
         self.assertEqual(sum(1 for u in units if u["type"] == "artifact"), 1)
 
-    def test_exec_report_unit(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
-        conv = self._conv()
-        store.ConversationsStore.update(conv["id"], {
-            "tags": {"modules": ["pay"], "groups": []}})
-        ex = store.ExecutionTasksStore.create({
-            "id": store.next_id("ex"), "plan_id": "plan-1", "adapter": "opencode",
-            "req_ids": [], "connectivity": "ok", "status": "created",
-            "session_ids": [], "conversationId": conv["id"],
-            "taskBranch": "arch/x", "branchMode": "manual",
-        })
-        store.ExecutionTasksStore.update(ex["id"], {"branchCommit": "abc123"})
-        cr.write_exec_report(ex["id"], "done")
-        units = store.ContextUnitsStore.all(conversation_id=conv["id"], type_="execution_report")
-        self.assertEqual(len(units), 1)
-        self.assertIn("abc123", units[0]["content"])
-        self.assertEqual(units[0]["refs"]["execIds"], [ex["id"]])
-        self.assertEqual(units[0]["refs"]["modules"], ["pay"])
-
     def test_summarize_creates_session_summary_unit(self):
         """LLM 不可达 → 标题兜底 + session_summary 单元。"""
         from topoone_app_architect.arch_routes import context_registry as cr

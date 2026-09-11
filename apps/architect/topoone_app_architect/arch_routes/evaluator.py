@@ -220,12 +220,8 @@ def _deviation_md(dev: Dict[str, Any]) -> List[str]:
     return parts
 
 
-def run_evaluate(conv_id: str, target: str = "plan", exec_id: str = "",
-                 root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
-    """评估入口: target=plan(方案评估) | execution(执行结果评估+偏差)。
-
-    返回 {markdown, assets(资产卡联动), deviation?}; 出错返回 {error}。
-    """
+def run_evaluate(conv_id: str, root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+    """评估入口: 方案评估(变更足迹×语义资产影响面)。返回 {markdown, assets}; 出错 {error}。"""
     from . import store
     from .sem.engine import project_id_for
     pid = project_id_for(root, project)
@@ -259,47 +255,6 @@ def run_evaluate(conv_id: str, target: str = "plan", exec_id: str = "",
         return {"markdown": "\n".join(md_lines),
                 "assets": [a for a in foot["assets"] if not a.get("neighbor")][:12]}
 
-    # execution: 执行 diff 足迹 + 偏差
-    task = store.ExecutionTasksStore.get(exec_id) if exec_id else None
-    if not task:
-        return {"error": f"执行任务 {exec_id or '(空)'} 不存在"}
-    root_path = root or ""
-    if not root_path:
-        from .project import _resolve_project
-        try:
-            root_path = ((_resolve_project(root, project) or {}).get("rootPath")) or ""
-        except Exception:
-            root_path = ""
-    if not root_path:
-        return {"error": "无法解析项目根(root/project)"}
-    try:
-        diff = execution_diff(root_path, task.get("baseCommit") or "",
-                              task.get("taskBranch") or "")
-    except ValueError as e:
-        return {"error": str(e)}
-    spans = parse_diff_spans(diff)
-    file_spans = [{"path": p, "lines": ls} for p, ls in spans.items()]
-    if not file_spans:
-        return {"markdown": f"# 结果评估\n\n执行任务 {exec_id} 分支无差异(未产生变更)。", "assets": []}
-    foot = change_footprint(root, project, file_spans)
-    dev = detect_deviation(plan, spans)
-    md_lines = [f"# 结果评估({exec_id})", "",
-                f"分支 `{task.get('taskBranch')}` @ `{(task.get('baseCommit') or 'HEAD')[:12]}` → {len(file_spans)} 文件变更", ""]
-    md_lines += _footprint_md("实际变更", file_spans, foot)
-    md_lines += _deviation_md(dev)
-    ir = _diagram_ir(foot)
-    if ir:
-        md_lines += ["", "受影响资产关系子图:", "", ir]
-    disp = _read_disposition(task)
-    if disp:
-        md_lines += ["", f"**偏差处置**: {disp.get('action')}——{disp.get('reason') or '（无备注）'}"]
-    return {"markdown": "\n".join(md_lines),
-            "assets": [a for a in foot["assets"] if not a.get("neighbor")][:12],
-            "deviation": {k: dev.get(k) for k in
-                          ("unplannedFiles", "outOfSpanLines", "untouchedPlannedFiles", "matchedFiles")},
-            "disposition": disp or None}
-
-
 def _read_disposition(task: Optional[dict]) -> Optional[dict]:
     raw = (task or {}).get("deviationDisposition") or ""
     if not raw:
@@ -311,59 +266,24 @@ def _read_disposition(task: Optional[dict]) -> Optional[dict]:
         return None
 
 
-def set_deviation_disposition(exec_id: str, action: str, reason: str = "") -> Dict[str, Any]:
-    """偏差处置(WS 闭环): accept(接受偏差, 放行验收) | waive(豁免计划外改动) | redo(打回重做)。"""
-    import json as _json
-    import time as _time
-    from .store import ExecutionTasksStore as ExecutionStore
-    action = (action or "").strip().lower()
-    if action not in ("accept", "waive", "redo"):
-        return {"error": "action 须为 accept|waive|redo"}
-    task = ExecutionStore.get(exec_id)
-    if not task:
-        return {"error": f"执行任务 {exec_id} 不存在"}
-    disp = {"action": action, "reason": (reason or "").strip(),
-            "at": int(_time.time() * 1000)}
-    ExecutionStore.update(exec_id, {"deviationDisposition": _json.dumps(disp, ensure_ascii=False)})
-    label = {"accept": "已接受偏差", "waive": "已豁免计划外改动", "redo": "已打回重做"}[action]
-    return {"status": "ok", "disposition": disp,
-            "markdown": f"偏差处置[{exec_id}]: **{label}**" + (f"——{disp['reason']}" if disp["reason"] else "")}
-
 
 def register_evaluator_tools() -> None:
     """注册 capability.evaluate 会话 agent 工具(WS4)。"""
     from .req_agent import register_architect_tool
 
     @register_architect_tool(
-        "capability.disposition",
-        "偏差处置: 对执行任务 capability.evaluate 发现的偏差做裁决并留痕——"
-        "accept 接受偏差(放行验收) / waive 豁免计划外改动 / redo 打回重做。"
-        "评估报告存在偏差、需要设计者定夺时用",
-    )
-    def _capability_disposition(execId: str, action: str, reason: str = "",
-                                project: Optional[str] = None,
-                                root: Optional[str] = None) -> dict:
-        result = set_deviation_disposition((execId or "").strip(), action, reason)
-        if result.get("error"):
-            return result
-        return {"markdown": result["markdown"], "disposition": result["disposition"]}
-
-    @register_architect_tool(
         "capability.evaluate",
-        "图文评估: target=plan 评估会话最新方案(变更足迹×语义资产影响面+关系子图); "
-        "target=execution(execId) 评估执行结果(实际 diff 足迹+与方案的偏差集: 计划外文件/行段/未履约)。"
-        "报告内资产卡可点击联动资产地图。方案确认前/执行完成后调用",
+        "图文评估: 评估会话最新方案(变更足迹×语义资产影响面+关系子图)。"
+        "报告内资产卡可点击联动资产地图。方案确认前调用",
     )
-    def _capability_evaluate(target: str = "plan", execId: str = "",
-                             project: Optional[str] = None,
+    def _capability_evaluate(project: Optional[str] = None,
                              root: Optional[str] = None) -> dict:
         from . import ctx as _ctx
         conv_id = _ctx.get_conv() or ""
         if not conv_id:
             return {"error": "评估需在会话中执行(读取会话 plan 契约)"}
         try:
-            return run_evaluate(conv_id, target=target, exec_id=execId,
-                                root=root, project=project)
+            return run_evaluate(conv_id, root=root, project=project)
         except Exception as e:  # noqa: BLE001
             logger.exception("[evaluator] 评估失败")
             return {"error": f"评估失败: {e}"}

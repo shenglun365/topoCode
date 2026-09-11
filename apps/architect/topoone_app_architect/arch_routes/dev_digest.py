@@ -34,10 +34,7 @@ _DIGEST_SCHEMA = {
 
 def _collect(project_id: str, since_ms: int) -> dict:
     """采集时间窗内的简报素材(项目库路由按当前项目)。"""
-    execs = store.ExecutionTasksStore.all()
-    landed = [e for e in execs
-              if e.get("branchCommit") and (e.get("branchLandedAt") or e.get("updatedAt") or 0) >= since_ms]
-    landed.sort(key=lambda e: e.get("branchLandedAt") or 0, reverse=True)
+    landed = []
 
     sessions = []
     for c in store.ConversationsStore.all(limit=200):
@@ -160,21 +157,3 @@ async def list_digests(limit: int = 10):
     } for d in docs])
 
 
-def record_land_snapshot(task: dict, commit: str) -> None:
-    """落地 → 资产版本锚点(arch_snapshot_records)：简报图文深链的版本对端。
-
-    完整资产扫描按需(基线管理页触发)；此处只落锚点记录，轻量幂等。
-    """
-    try:
-        db = store._target_db("arch_snapshot_records")
-        db.execute(
-            "INSERT INTO arch_snapshot_records (id, name, version, task_id, git_branch, git_commit, model, root_path, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (store.next_id("snap"), task.get("title") or "exec-land",
-             task.get("id") or "", task.get("id") or "",
-             task.get("taskBranch") or "", commit or "",
-             None, "", _ts()),
-        )
-        db.commit()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[digest] 落地锚点写入失败: %s", e)
