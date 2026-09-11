@@ -262,7 +262,8 @@ async def create_session(request: Request):
         "tags": _norm_tags(data) or {"modules": [], "groups": []},
         "meta": data.get("meta") or {},
     })
-    return ok(_conv_api(conv))
+    # create 返回 snake_case payload; 回显统一取 API 形状行(与 handoff 同口径)
+    return ok(_conv_api(store.ConversationsStore.get(conv["id"]) or conv))
 
 
 @router.patch("/sessions/{conv_id}")
