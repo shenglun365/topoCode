@@ -33,6 +33,19 @@ from .. import store
 from .paths import _norm_path, project_id_for, resolve_root
 from . import symbols
 
+
+def _anchor_hashes_dict(value) -> Dict[str, str]:
+    """anchor_hashes 容错解析: 期望 {file: hash} dict。
+
+    历史数据可能存了 list(无文件键, 无法锚定)或非 dict 形状 → 归一为空表,
+    避免 compare/失效校验全链 500。
+    """
+    if not isinstance(value, dict):
+        return {}
+    return {_norm_path(str(k)): str(v or "") for k, v in value.items()
+            if str(k or "").strip()}
+
+
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 60.0
@@ -347,7 +360,7 @@ def compare_changes(root: Optional[str], project: Optional[str],
     owned_ids: set = set()
     anchored: Dict[str, List[dict]] = {}   # file -> [ (asset, hash) ] 锚定索引(待提取判定用)
     for a in rows:
-        ahashes = {_norm_path(k): (v or "") for k, v in (a.get("anchorHashes") or {}).items()}
+        ahashes = _anchor_hashes_dict(a.get("anchorHashes"))
         af = set(ahashes) & {_norm_path(r.get("file") or "") for r in (a.get("astRefs") or [])}
         af = {f for f in af if f}
         if not af:

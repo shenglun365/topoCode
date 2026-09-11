@@ -3943,7 +3943,9 @@ def invalidate_assets_for_files(pid: str, files: List[str], *,
     for a in store.SemanticAssetsStore.all_status(pid, limit=2000, light=True):
         if a.get("status") == "deleted":
             continue
-        anchors = {_norm_path(f): h for f, h in (a.get("anchorHashes") or {}).items()}
+        ah = a.get("anchorHashes")
+        anchors = {_norm_path(str(k)): str(v or "") for k, v in ah.items()
+                   if isinstance(ah, dict) and str(k or "").strip()}
         if not anchors:
             continue
         hit = files & set(anchors)
