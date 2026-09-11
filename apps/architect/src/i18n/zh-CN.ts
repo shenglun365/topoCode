@@ -849,12 +849,6 @@ export default {
       cancelled: '已取消',
     },
     /** 左栏会话 4 段生命周期分组(AgentWorkbench)。 */
-    lifecycle: {
-      planning: '规划',
-      ready: '待执行',
-      executing: '执行中',
-      done: '已完成',
-    },
     kind: { 'user-story': '用户故事', fr: '功能需求', nfr: '非功能需求' },
     priority: '优先级',
     basicMd: '基本信息',

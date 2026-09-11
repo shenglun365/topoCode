@@ -24,22 +24,6 @@ async def list_requirements():
     return ok(store.RequirementsStore.all())
 
 
-@router.get("/requirements/sessions")
-async def list_sessions(include_cancelled: bool = False):
-    """左栏会话列表：会话 = 需求 + 其对话(conversation)，按 4 段 lifecycle 分组。
-
-    供 AgentWorkbench 左栏渲染(规划/待执行/执行中/已完成)。项目路由经
-    ProjectContextMiddleware 的 ?project= 上下文(与 /requirements 同口径，无泄漏)。
-    cancelled 默认排除；每组按 updatedAt 倒序。
-    """
-    from .lifecycle import build_session_groups
-
-    reqs = store.RequirementsStore.all()
-    # 会话(req→对话)按同口径项目路由(ctx ?project=)；limit 500 覆盖常规项目会话量
-    convs = store.ConversationsStore.all(kind="requirement", project_id=None, limit=500)
-    return ok(build_session_groups(reqs, convs, include_cancelled=include_cancelled))
-
-
 # ── 需求分析会话历史(阶段D 统一表，范围仅限临时提案/未绑定正式提案的会话) ──
 
 def _conv_bound(conv: dict) -> bool:

@@ -1,4 +1,4 @@
-import type { ConversationDetail, ConversationSummary, ReqSessionGroups, Requirement } from '@/types'
+import type { ConversationDetail, ConversationSummary, Requirement } from '@/types'
 import { apiDelete, apiGet, apiPatch, apiPost } from './api-client'
 import { currentProjectParams } from './project-service'
 
@@ -7,15 +7,6 @@ export const requirementService = {
     const { project } = currentProjectParams()
     const qs = project ? `?project=${encodeURIComponent(project)}` : ''
     return apiGet<Requirement[]>(`/requirements${qs}`)
-  },
-  /** 左栏会话列表：按 4 段 lifecycle(规划/待执行/执行中/已完成)分组。 */
-  async sessions(includeCancelled = false): Promise<ReqSessionGroups> {
-    const { project } = currentProjectParams()
-    const qs = new URLSearchParams()
-    if (project) qs.set('project', project)
-    if (includeCancelled) qs.set('includeCancelled', 'true')
-    const s = qs.toString()
-    return apiGet<ReqSessionGroups>(`/requirements/sessions${s ? `?${s}` : ''}`)
   },
   async create(data: Partial<Requirement>): Promise<Requirement> {
     // 必须带 project：否则后端按无项目上下文写入主库，项目页(?project=)读项目库 → 新建不可见

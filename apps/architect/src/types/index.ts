@@ -336,37 +336,6 @@ export interface Requirement {
   updatedAt: number
 }
 
-/** 需求会话生命周期(4 段)：左栏会话分组 + 监控口径，由 status 派生。 */
-export type ReqLifecycle = 'planning' | 'ready' | 'executing' | 'done'
-
-/** 左栏会话项：需求 + 其对话(conversation) 的轻量投影(AgentWorkbench 渲染用)。 */
-export interface ReqSession {
-  id: string
-  title: string
-  priority: 'P0' | 'P1' | 'P2'
-  kind: ReqKind
-  status: ReqPoolStatus
-  lifecycle: ReqLifecycle
-  location?: ReqLocation
-  /** 关联对话 id(无对话时空串，新建会话时前端发起首个 WS 回合后回填)。 */
-  conversationId: string
-  hasAnalysis: boolean
-  hasDesign: boolean
-  planId: string
-  execId: string
-  /** 指派的 subagent: runner | mcp:<tool>(P3.2)。 */
-  assignedTo: string
-  updatedAt: number
-}
-
-/** 会话按 4 段 lifecycle 分组(左栏渲染)。 */
-export interface ReqSessionGroups {
-  planning: ReqSession[]
-  ready: ReqSession[]
-  executing: ReqSession[]
-  done: ReqSession[]
-}
-
 // ============ 设计方案(方向2) ============
 
 export interface DesignColumn {

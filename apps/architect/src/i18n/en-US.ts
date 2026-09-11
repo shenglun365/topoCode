@@ -822,13 +822,6 @@ export default {
       done: 'Done',
       cancelled: 'Cancelled',
     },
-    /** Left-rail session 4-segment lifecycle groups (AgentWorkbench). */
-    lifecycle: {
-      planning: 'Planning',
-      ready: 'Ready',
-      executing: 'Executing',
-      done: 'Done',
-    },
     kind: { 'user-story': 'User Story', fr: 'Functional', nfr: 'Non-Functional' },
     priority: 'Priority',
     basicMd: 'Basic Info',
