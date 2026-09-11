@@ -620,10 +620,10 @@ async function answerClarify() {
         <template #toolbar-extra>
           <button
             v-if="isExecutionConv"
-            class="btn btn-xs btn-ghost !text-ctp-mauve"
+            class="btn btn-xs btn-ghost"
             :title="t('session.actions.guide')"
             @click="showGuide"
-          >⚡ {{ t('session.actions.guide') }}</button>
+          >{{ t('session.actions.guide') }}</button>
           <button
             class="btn btn-xs"
             :class="titleSummarizing ? 'btn-blue' : 'btn-ghost'"

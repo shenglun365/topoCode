@@ -493,7 +493,7 @@ export default {
       rename: '重命名',
       renamePrompt: '会话标题',
       summarize: '生成摘要',
-      guide: '引导（输出触发词提示，不进上下文）',
+      guide: '指令引导',
       editTags: '编辑标签/分组',
       groupsPrompt: '自定义分组(逗号分隔)',
       modulesPrompt: '关联模块(逗号分隔)',
