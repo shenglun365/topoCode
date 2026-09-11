@@ -7,20 +7,18 @@ import StatusBar from '@/components/layout/StatusBar.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
-import { useArchTaskStore } from '@/stores/task-store'
 
 const route = useRoute()
 const project = useArchProjectStore()
 const requirement = useArchRequirementStore()
 const architecture = useArchArchitectureStore()
-const task = useArchTaskStore()
 
 const isWorkbench = computed(() => !!route.meta.workbench)
 
 async function syncProject() {
   await project.load()
   if (project.project) {
-    for (const load of [requirement.load, architecture.loadFromSnapshot, task.load]) {
+    for (const load of [requirement.load, architecture.loadFromSnapshot]) {
       await load().catch((err) => console.error('[arch] 数据加载失败', err))
     }
   }

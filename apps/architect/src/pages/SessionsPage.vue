@@ -13,7 +13,6 @@ import {
   ArrowUpTrayIcon, ArrowDownTrayIcon, BoltIcon,
   FolderIcon, ClockIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import TaskDetailView from '@/components/coding/TaskDetailView.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
 import { apiGet, apiPost } from '@/services/api-client'

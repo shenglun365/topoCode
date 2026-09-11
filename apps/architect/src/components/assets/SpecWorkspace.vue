@@ -5,12 +5,10 @@ import { CheckIcon } from '@heroicons/vue/24/solid'
 import { ShieldCheckIcon, MapPinIcon, BeakerIcon, ClipboardDocumentCheckIcon, BookOpenIcon } from '@heroicons/vue/24/outline'
 import MarkdownView from '@/components/MarkdownView.vue'
 import NamingGovernancePanel from '@/components/assets/NamingGovernancePanel.vue'
-import { useArchWorkflowStore } from '@/stores/workflow-store'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { kbAssetService } from '@/services/kb-assets'
 
 const { t } = useI18n()
-const workflow = useArchWorkflowStore()
 const spec = useArchSpecStore()
 spec.load()
 
@@ -64,13 +62,13 @@ const ruleLevelColor: Record<string, string> = {
           <ShieldCheckIcon class="w-4 h-4 text-ctp-peach" />{{ t('spec.title') }}
           <span class="chip bg-ctp-mauve/15 text-ctp-mauve">{{ spec.spec?.version ?? '' }}</span>
           <span
-            v-if="workflow.specConfirmed"
+            v-if="spec.loaded"
             class="chip bg-ctp-green/15 text-ctp-green"
           >{{ t('spec.confirmed') }} ✓</span>
         </div>
         <button
           class="btn btn-green !py-1 text-xs"
-          :disabled="workflow.specConfirmed"
+          :disabled="spec.loaded"
           @click="spec.confirm()"
         >
           <CheckIcon class="w-3.5 h-3.5" />{{ t('spec.confirm') }}

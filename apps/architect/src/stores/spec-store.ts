@@ -3,7 +3,6 @@ import type { ArchitectureSpec } from '@/types'
 import { apiGet, apiPost } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
 import { currentProjectParams } from '@/services/project-service'
-import { useArchWorkflowStore } from './workflow-store'
 
 /** 项目上下文(root/project)透传，随请求携带(与其余 KB 路由同一口径)。 */
 function ctx(): string {
@@ -42,8 +41,6 @@ export const useArchSpecStore = defineStore('arch-spec', {
       }
     },
     async confirm() {
-      const workflow = useArchWorkflowStore()
-      workflow.confirmSpec()
       if (await backendUp()) {
         const { root, project } = currentProjectParams()
         apiPost<unknown>('/spec/confirm', { root, project }).catch(() => {})

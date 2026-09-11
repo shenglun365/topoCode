@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
-import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
@@ -25,14 +24,11 @@ const TABS = [
   { key: 'other', label: 'config.tabs.other' },
 ] as const
 const activeTab = ref<string>('instance')
-const agent = useArchAgentStore()
 const spec = useArchSpecStore()
 
 const project = useArchProjectStore()
 spec.load()
-agent.load()
 
-const sessions = computed(() => agent.sessions)
 
 // ── 分析任务模型映射（原 M1 角色模型映射；per-call 生效，不写全局 llm 配置） ──
 interface AgentRole { name: string; label: string; modelId: string; note?: string }
@@ -71,14 +67,6 @@ async function saveRoles() {
 
 loadRoles()
 
-const statusColor: Record<string, string> = {
-  idle: 'bg-ctp-surface0 text-ctp-subtext1',
-  planning: 'bg-ctp-peach/15 text-ctp-peach',
-  working: 'bg-ctp-blue/15 text-ctp-blue',
-  testing: 'bg-ctp-yellow/15 text-ctp-yellow',
-  done: 'bg-ctp-green/15 text-ctp-green',
-  failed: 'bg-ctp-red/15 text-ctp-red',
-}
 
 const granularityFields = [
   { key: 'estMinMin' as const },
@@ -463,32 +451,7 @@ onMounted(() => { void loadCgStatus() })
     <div v-show="activeTab === 'executors'" class="space-y-4">
       <AgentExecutorsCard />
 
-      <div class="panel overflow-hidden">
-        <div class="panel-header">
-          <span class="flex items-center gap-2">
-            <CpuChipIcon class="w-4 h-4 text-ctp-blue" />{{ t('config.activeSessions') }}
-          </span>
-        <span class="text-[11px] text-ctp-overlay1">{{ sessions.length }}</span>
-      </div>
-      <div class="divide-y divide-ctp-surface0">
-        <div
-          v-for="s in sessions"
-          :key="s.id"
-          class="flex items-center gap-2 px-4 py-2.5 text-xs"
-        >
-          <span class="font-mono text-ctp-subtext1">{{ s.adapter }}</span>
-          <span class="font-mono text-[10px] text-ctp-overlay1">{{ s.taskId }}</span>
-          <div class="flex-1" />
-            <span
-              class="chip"
-              :class="statusColor[s.status]"
-            >{{ t(`coding.status.${s.status}`) }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ tab: 角色模型映射 ═══ -->
+<!-- ═══ tab: 角色模型映射 ═══ -->
     <div v-show="activeTab === 'roleModels'">
     <div class="panel overflow-hidden">
       <div class="panel-header">

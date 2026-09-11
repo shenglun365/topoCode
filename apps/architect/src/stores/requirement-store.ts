@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import type { DesignPlan, Requirement, RequirementAnalysis } from '@/types'
+import type { Requirement, RequirementAnalysis } from '@/types'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
-import { apiGet, apiPost } from '@/services/api-client'
+import { apiPost } from '@/services/api-client'
 import { backendReady, backendUp } from '@/services/backend'
 import { requirementService } from '@/services/requirement-service'
 
@@ -48,7 +48,6 @@ interface ReqSeed {
 export const useArchRequirementStore = defineStore('arch-requirement', {
   state: () => ({
     items: [] as Requirement[],
-    plans: [] as DesignPlan[],
     loading: false,
     loaded: false,
   }),
@@ -60,9 +59,6 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
     /** 需求池(已分析待执行，唯一执行入口)。 */
     poolItems: (s) => s.items.filter((r) => locationOf(r) === 'pool' && r.status !== 'cancelled'),
     cancelled: (s) => s.items.filter((r) => r.status === 'cancelled'),
-    confirmedPlans: (s) => s.plans.filter((p) => p.status === 'confirmed'),
-    draftPlans: (s) => s.plans.filter((p) => p.status === 'draft'),
-    planConfirmed: (s) => s.plans.some((p) => p.status === 'confirmed'),
   },
   actions: {
     /** 强制重拉(会话中心确认存入后, 执行页需拿到最新池)。 */
@@ -76,12 +72,8 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       // 后端优先：需求 + 方案列表；失败直接抛出(不再静默回退 mock)。
       if (!(await backendUp())) throw new Error('后端不可达，无法加载需求/方案')
       try {
-        const [items, plans] = await Promise.all([
-          requirementService.list(),
-          apiGet<DesignPlan[]>('/plans'),
-        ])
+        const items = await requirementService.list()
         this.items = items ?? []
-        this.plans = plans ?? []
         this.items.forEach((r) => { if (r.analysis) enrichAnalysis(r.analysis) })
         this.loaded = true
         this.loading = false
@@ -213,65 +205,6 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       this.items.unshift(r)
       return r
     },
-    addPlan(plan: DesignPlan) {
-      this.plans.unshift(plan)
-    },
-    updatePlan(id: string, patch: Partial<DesignPlan>) {
-      const p = this.plans.find((x) => x.id === id)
-      if (p) Object.assign(p, patch, { updatedAt: Date.now() })
-    },
-    confirmPlan(id: string) {
-      const p = this.plans.find((x) => x.id === id)
-      if (!p) return
-      p.status = 'confirmed'
-      if (!p.taskPlanId) p.taskPlanId = `tp-${Date.now().toString().slice(-4)}`
-      this.items.forEach((r) => {
-        if (p.reqIds.includes(r.id)) { r.planId = id; r.status = 'planned' }
-      })
-      if (backendReady()) apiPost<unknown>(`/plans/${id}/confirm`).catch(() => {})
-    },
-    /** 方案被重新规划/取消时，需求回到 analyzed，可被别的方案再选。 */
-    releasePlan(id: string) {
-      const p = this.plans.find((x) => x.id === id)
-      if (!p) return
-      p.status = 'draft'
-      this.items.forEach((r) => {
-        if (p.reqIds.includes(r.id) && r.planId === id) { r.planId = undefined; r.status = 'analyzed' }
-      })
-      if (backendReady()) apiPost<unknown>(`/plans/${id}/release`).catch(() => {})
-    },
-    /**
-     * 代码级回退(回流特殊情况)：执行中需求/设计出现重大问题，该批次覆盖的
-     * 所有需求回到需求池(analyzed)，释放方案，待补充设计/调整需求后再进入执行。
-     */
-    reflowPlan(planId: string) {
-      const p = this.plans.find((x) => x.id === planId)
-      if (!p) return
-      p.status = 'draft'
-      this.items.forEach((r) => {
-        if (p.reqIds.includes(r.id)) {
-          r.planId = undefined
-          r.execId = undefined
-          if (r.status !== 'done') r.status = 'analyzed'
-        }
-      })
-    },
-    /** 方案确认后进入执行：方案覆盖的需求状态 → executing。 */
-    markPlanReqsExecuting(planId: string) {
-      const p = this.plans.find((x) => x.id === planId)
-      if (!p) return
-      this.items.forEach((r) => {
-        if (p.reqIds.includes(r.id) && (r.status === 'planned' || r.status === 'designed')) r.status = 'executing'
-      })
-    },
-    /** 方案验收通过：方案覆盖的需求状态 → done。 */
-    markPlanReqsDone(planId: string) {
-      const p = this.plans.find((x) => x.id === planId)
-      if (!p) return
-      this.items.forEach((r) => {
-        if (p.reqIds.includes(r.id) && (r.status === 'planned' || r.status === 'executing' || r.status === 'designed')) r.status = 'done'
-      })
-    },
     byId(id: string): Requirement | undefined {
       return this.items.find((r) => r.id === id)
     },
@@ -365,12 +298,6 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       r.tier = r.analysis ? 'analyzed' : 'raw'
       r.updatedAt = Date.now()
       return r
-    },
-    planById(id: string): DesignPlan | undefined {
-      return this.plans.find((p) => p.id === id)
-    },
-    async reset() {
-      this.plans.forEach((p) => { p.status = 'draft' })
     },
   },
 })

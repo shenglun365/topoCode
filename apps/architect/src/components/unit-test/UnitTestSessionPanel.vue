@@ -5,7 +5,6 @@ import { ArrowPathIcon, PaperAirplaneIcon, StopIcon } from '@heroicons/vue/24/so
 import { CheckCircleIcon, XCircleIcon, ChatBubbleLeftRightIcon, CommandLineIcon, SparklesIcon } from '@heroicons/vue/24/outline'
 import type { UnitTestSession } from '@/types'
 import { useArchUnitTestStore } from '@/stores/unit-test-store'
-import { useArchTaskStore } from '@/stores/task-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import SessionStatsPanel from '@/components/coding/SessionStatsPanel.vue'
@@ -14,16 +13,11 @@ const props = defineProps<{ session: UnitTestSession }>()
 
 const { t } = useI18n()
 const store = useArchUnitTestStore()
-const task = useArchTaskStore()
 const requirement = useArchRequirementStore()
 const input = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
 
-const linkedTitle = computed(() => {
-  const ls = task.executionTasks.filter((e) => e.testIds?.includes(props.session.testIds[0] ?? '') || props.session.testIds.every((id) => e.testIds?.includes(id)))
-  return ls[0] ? requirement.planById(ls[0].planId)?.title ?? ls[0].id : undefined
-})
 
 const toolColor: Record<string, string> = {
   'run-test': 'bg-ctp-green/10 text-ctp-green border-ctp-green/30',
@@ -165,13 +159,6 @@ function stop() {
     <div class="shrink-0 border-t border-ctp-surface0 px-3 py-2">
       <SessionStatsPanel :stats="session.stats" />
     </div>
-    <div
-      v-if="linkedTitle"
-      class="shrink-0 border-t border-ctp-surface0 px-3 py-1.5 text-[10px] text-ctp-overlay1"
-    >
-      {{ t('unitTest.linkedHint') }}  {{ linkedTitle }}
-    </div>
-
     <div class="shrink-0 flex items-end gap-2 border-t border-ctp-surface0 p-2.5">
       <textarea
         ref="inputRef"

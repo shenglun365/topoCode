@@ -5,7 +5,6 @@ import { currentProjectRoot } from '@/services/project-service'
 import { apiPost } from '@/services/api-client'
 import { useArchMcpStore } from './mcp-store'
 import { useArchProjectStore } from './project-store'
-import { useArchWorkflowStore } from './workflow-store'
 
 export type BaselineSyncStatus = 'idle' | 'syncing' | 'done'
 
@@ -108,8 +107,6 @@ export const useArchMergeBaselineStore = defineStore('arch-merge-baseline', {
         detail: '基线同步完成: KB 完成代码同步 → 基线 git 表示已更新',
       })
       project.updateBaselineGit(req.commit)
-      const workflow = useArchWorkflowStore()
-      workflow.finishAcceptance()
     },
   },
 })

@@ -59,12 +59,6 @@ const routes: RouteRecordRaw[] = [
         redirect: '/workbench/assets',
       },
       {
-        path: 'execute',
-        name: 'Execute',
-        component: () => import('@/pages/ExecutePage.vue'),
-        meta: { workbench: true, title: '任务执行' },
-      },
-      {
         path: 'unit-test',
         name: 'UnitTest',
         component: () => import('@/pages/UnitTestPage.vue'),
@@ -72,7 +66,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'coding',
-        redirect: '/workbench/execute',
+        redirect: '/workbench/sessions',
       },
       {
         path: 'archmap',

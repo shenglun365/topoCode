@@ -3,7 +3,6 @@ import type { ComplianceCheck, GateKey, IncrementalLogEntry, Rebaseline, Staging
 import { apiGet, apiPost } from '@/services/api-client'
 import { backendReady, backendUp } from '@/services/backend'
 import { currentProjectParams } from '@/services/project-service'
-import { useArchWorkflowStore } from './workflow-store'
 
 /** 项目上下文(root/project)透传(GET 走 query，POST 走 body)。 */
 function ctxQuery(): string {
@@ -109,8 +108,6 @@ export const useArchStagingStore = defineStore('arch-staging', {
         this.rebaseline.handshake.commitResult = res.commitResult
         this.rebaseline.handshake.committedId = res.committedId
         this.rebaseline.baselineId = 'baseline_id = N+1 (新基线 v1.0.0)'
-        const workflow = useArchWorkflowStore()
-        workflow.finishAcceptance()
       } catch (err) {
         throw err
       }

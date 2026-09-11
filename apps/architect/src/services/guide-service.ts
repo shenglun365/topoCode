@@ -61,7 +61,7 @@ const MISSIONS: WorkflowMission[] = [
   {
     key: 'scaffold',
     labelKey: 'guide.mission.scaffold',
-    route: '/workbench/execute',
+    route: '/workbench/sessions',
     completeness: (ctx) => {
       if (!ctx.execRootInitialized) return 0
       return 0.5
@@ -71,7 +71,7 @@ const MISSIONS: WorkflowMission[] = [
   {
     key: 'first-demo',
     labelKey: 'guide.mission.firstDemo',
-    route: '/workbench/execute',
+    route: '/workbench/sessions',
     completeness: (ctx) => {
       if (ctx.baselineCreated) return 1
       if (ctx.execRootInitialized) return 0.5

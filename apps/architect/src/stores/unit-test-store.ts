@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import type { TestChannel, TestLevel, UnitTest, UnitTestSession } from '@/types'
 import { unitTestService } from '@/services/unit-test-service'
-import { useArchTaskStore } from './task-store'
 
 const DEFAULT_ADAPTER_ID = 'opencode'
 
@@ -22,15 +21,6 @@ export const useArchUnitTestStore = defineStore('arch-unit-test', {
     },
     byId(state): (id: string) => UnitTest | undefined {
       return (id: string) => state.tests.find((t) => t.id === id)
-    },
-    /** 被某执行任务关联的单测数量(用于任务侧角标)。 */
-    linkedCount(_state): (taskId: string) => number {
-      const task = useArchTaskStore()
-      return (taskId: string) => task.findExecution(taskId)?.testIds?.length ?? 0
-    },
-    linkedTestIds(_state): (taskId: string) => string[] {
-      const task = useArchTaskStore()
-      return (taskId: string) => task.findExecution(taskId)?.testIds ?? []
     },
     passedCount(state): number {
       return state.tests.filter((t) => t.status === 'passed').length
@@ -109,17 +99,6 @@ export const useArchUnitTestStore = defineStore('arch-unit-test', {
     stop() {
       const session = this.activeSession
       if (session && session.status === 'running') session.status = 'stopped'
-    },
-    /** agent 辅助判定：建议某执行任务应关联的单测(mock)。 */
-    suggestForTask(taskId: string): string[] {
-      const task = useArchTaskStore().findExecution(taskId)
-      if (!task) return []
-      const pool = this.tests.filter((t) => t.status !== 'error')
-      const byScope = pool
-        .filter((t) => t.levels.some((l) => l === 'L0' || l === 'L1' || l === 'L2'))
-        .sort((a, b) => a.levels.length - b.levels.length)
-        .slice(0, 3)
-      return byScope.map((t) => t.id)
     },
   },
 })

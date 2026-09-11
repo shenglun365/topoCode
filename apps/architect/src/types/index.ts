@@ -659,7 +659,6 @@ export interface GranularityConfig {
   p0SubsetMax: number
 }
 
-export type DesignPlanStatus = 'draft' | 'confirmed'
 
 export interface ChangeItem {
   resource: string     // 改动资源名(组件/数据结构/流程/数据流/文件)
@@ -675,18 +674,6 @@ export interface PlanImpact {
   risks: string[]
 }
 
-export interface DesignPlan {
-  id: string
-  reqIds: string[]
-  title: string
-  approach: string
-  changes: ChangeItem[]
-  impact: PlanImpact
-  status: DesignPlanStatus
-  taskPlanId?: string
-  baseCommit: string
-  updatedAt: number
-}
 
 export type ExecutionStatus = 'created' | 'running' | 'accepting' | 'done' | 'failed' | 'blocked' | 'stopped'
 export type Connectivity = 'unknown' | 'ok' | 'fail'
@@ -854,40 +841,6 @@ export interface UnitTestSession {
   updatedAt: number
 }
 
-export interface ExecutionTask {
-  id: string
-  planId: string
-  adapter: string
-  /** coding agent 模型参数(三方 agent 仅切换模型时生效)。 */
-  model?: string
-  /** 本任务覆盖的需求池项 id 集合。 */
-  reqIds: string[]
-  connectivity: Connectivity
-  status: ExecutionStatus
-  sessionIds: string[]
-  baseCommit: string
-  runCount: number
-  createdAt: number
-  updatedAt?: number
-  endedAt?: number
-  error?: string
-  /** 任务树重建次数(任务树随执行过程变化时递增)。 */
-  treeRevision?: number
-  /** 会话统计。 */
-  stats?: TaskSessionStats
-  /** 关联的需要执行的单元测试(仅在任务侧冗余；不随任务自动执行)。 */
-  testIds?: string[]
-  amendments: AppendedReq[]
-  /** 绑定的 agent 运行实例(AgentInstance.id)。 */
-  instanceId?: string
-  /** 任务分支: auto=arch/<task_id>，manual=人工指定。 */
-  taskBranch?: string
-  branchMode?: 'auto' | 'manual'
-  /** P1 会话中心: 执行作业归属的会话 id。 */
-  conversationId?: string
-}
-
-export type AgentStatus = 'idle' | 'planning' | 'working' | 'testing' | 'done' | 'failed' | 'stopped'
 export type AgentMsgRole = 'user' | 'assistant' | 'tool'
 export type AgentToolType = 'write-file' | 'run-command' | 'run-test'
 
@@ -906,17 +859,6 @@ export interface AgentMessage {
   tool?: AgentToolCall
 }
 
-export interface AgentSession {
-  id: string
-  taskId: string
-  adapter: string
-  status: AgentStatus
-  messages: AgentMessage[]
-  keepContext: boolean
-  artifacts: string[]
-  testResult?: { passed: number; failed: number; note: string }
-  stats?: TaskSessionStats
-}
 
 export interface Snapshot {
   id: string
@@ -926,8 +868,6 @@ export interface Snapshot {
   model: ArchitectureModel
 }
 
-export type WorkflowStageKey = 'pool' | 'design' | 'execute' | 'accept'
-export type StepStatus = 'locked' | 'pending' | 'active' | 'done'
 
 export interface WorkflowStageRoute {
   path: string
@@ -935,36 +875,10 @@ export interface WorkflowStageRoute {
 }
 
 /** 数据快照，供阶段定义(数据对象)中的 isDone/matches 谓词做判定。 */
-export interface WorkflowStageCtx {
-  proposalCount: number          // 需求提案(未分析)
-  poolCount: number              // 需求池(已分析待执行)
-  analyzedCount: number
-  confirmedPlanCount: number
-  activeTaskCount: number
-  acceptingCount: number
-  doneTaskCount: number
-  unitTestSessionCount: number    // 单元测试会话数
-  passedTestCount: number         // 已通过的单测数
-}
+
 
 /** 单个流水线阶段的声明式定义，未来微调只改这里/配置数据对象。 */
-export interface WorkflowStageDef {
-  key: WorkflowStageKey
-  /** i18n key 后缀，挂到 workflow.steps.<labelKey> */
-  labelKey: string
-  route: WorkflowStageRoute
-  /** 当前路由/查询 + 数据快照是否命中本阶段(决定 stepper 高亮)。 */
-  matches: (ctx: WorkflowStageCtx, path: string, query?: Record<string, unknown>) => boolean
-  /** 该阶段工作是否已完成(决定 stepper 的 done/locked)。 */
-  isDone: (ctx: WorkflowStageCtx) => boolean
-}
 
-export interface WorkflowStep {
-  key: WorkflowStageKey
-  labelKey: string
-  status: StepStatus
-  route: WorkflowStageRoute
-}
 
 export type SpecLayerKind = 'override' | 'explicit' | 'derived'
 
