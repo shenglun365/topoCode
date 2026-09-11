@@ -41,6 +41,8 @@ export interface KbAnalysisTurn {
   reasoning?: string
   questions?: QuestionItem[]
   formDraft?: FormDraft
+  /** 消息级元数据(作业事件标记等: {jobId, kind, branch}) */
+  meta?: Record<string, any>
   /** 语义数据资产卡片(提取/检索结果，供对话确认)。 */
   assets?: SemanticAsset[]
   /** 契约条目固化卡(方案对话 🧾 固化产出，逐条确认/修改/删)。 */
@@ -76,6 +78,8 @@ export interface CollectResult {
   turns: KbAnalysisTurn[]
   questions?: QuestionItem[]
   formDraft?: FormDraft
+  /** 消息级元数据(作业事件标记等: {jobId, kind, branch}) */
+  meta?: Record<string, any>
 }
 
 export interface RequirementAnalysisAgent {

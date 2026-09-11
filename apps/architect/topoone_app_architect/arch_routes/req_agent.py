@@ -1215,47 +1215,101 @@ def _md_lines(text) -> List[str]:
     return out
 
 
+# ── 规约快照/边界解析(生命周期重构: 版本链语义) ──────────────────────
+
+def _spec_snapshot(title: str, desc_md: str, design_md: str, allowed: list,
+                   forbidden: list, acceptance: list, functional: list,
+                   assessment: str, est_min: int) -> Dict[str, Any]:
+    """规约版本快照(真相源结构)。"""
+    return {
+        "title": (title or "").strip(),
+        "desc": desc_md or "",
+        "designMd": design_md or "",
+        "allowedScope": [str(x) for x in (allowed or [])][:40],
+        "forbiddenScope": [str(x) for x in (forbidden or [])][:40],
+        "acceptance": [str(x) for x in (acceptance or [])][:40],
+        "functionalScope": [str(x) for x in (functional or [])][:40],
+        "assessmentSummary": str(assessment or "")[:500],
+        "estMin": int(est_min or 0),
+    }
+
+
+def _sync_analysis_cache(req_id: str, snapshot: Dict[str, Any]) -> None:
+    """active 版本快照 → analysis 派生缓存(design/tagent_se/engine/ws 消费面零改动)。"""
+    store.RequirementsStore.update(req_id, {
+        "analysis": {
+            "functionalScope": snapshot.get("functionalScope") or [],
+            "entityBoundary": [],
+            "assessmentSummary": snapshot.get("assessmentSummary") or "",
+            "assetScope": [],
+            "estMin": snapshot.get("estMin") or 0,
+            "implementationPath": str(snapshot.get("designMd") or "")[:500],
+            "changes": [], "steps": [],
+            "designMd": snapshot.get("designMd") or "",
+            "allowedScope": snapshot.get("allowedScope") or [],
+            "forbiddenScope": snapshot.get("forbiddenScope") or [],
+            "acceptance": snapshot.get("acceptance") or [],
+        },
+        "desc": snapshot.get("desc") or "",
+    })
+
+
+def parse_scope_files(lines: list) -> set:
+    """边界声明行 → 文件/目录集合(互斥引擎的文件级口径)。
+
+    识别: 目录(以 / 结尾) · 文件路径(含 / 且带扩展名) · 顶层路径段(如 src/)。
+    组件引用(comp:xxx)与自然语言不参与文件级互斥(组件级经 KB 口径单独解析)。
+    """
+    out: set = set()
+    for ln in lines or []:
+        t = str(ln or "").strip()
+        if not t or t.startswith("comp:"):
+            continue
+        # 剥常见前缀修饰
+        for prefix in ("./", "/"):
+            if t.startswith(prefix):
+                t = t[len(prefix):]
+        if not t or "/" not in t:
+            continue
+        out.add(t.rstrip("/"))
+    return out
+
+
 @register_architect_tool(
     "req.propose",
-    "形成需求提案：讨论收敛为明确改进/新增需求，或设计者要求 生成方案/提炼方案/转入执行 时调用，"
-    "把 需求+方案+评估 结构化落库为提案(进入规划组，等待设计者确认)。"
+    "形成/更新需求规约：讨论收敛为明确需求，或设计者要求 生成方案/提炼方案/完善需求 时调用。"
+    "会话已绑定未完结的需求时默认**更新该需求**(追加新 draft 版本，不新建)；"
+    "需要在本会话开启全新需求时传 newRequirement=true。"
     "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节)，"
     "约束四项(目标/允许范围/禁止改动/验收标准)可按对话留空，不编造。"
     "产出通道二选一：① 输出 [TOOL_CALL] 调用本工具；②(推荐，更可靠) 在回复末尾输出"
     " ```proposal 围栏，内容为本工具参数的 JSON——系统会自动解析落库并发方案卡。"
     "需求提案不用 contract.propose 替代(那是 🧾 期望固化)。"
-    "参数：title、requirementMd(需求目标)、designMd(方案：逻辑与实现细节)、"
-    "allowedScopeMd/forbiddenScopeMd(允许增删改/一定不能动的模块·文件·资产节点，每行一项，可空)、"
-    "acceptanceMd(最终验收标准，每行一条，可空)、assessmentMd(评估)、estMin(分钟)、priority(P0/P1/P2)。",
+    "参数：title、requirementMd(需求目标)、designMd(方案)、"
+    "allowedScopeMd/forbiddenScopeMd(允许增删改/一定不能动的模块·文件·目录，每行一项，可空)、"
+    "acceptanceMd(验收标准，每行一条)、assessmentMd(评估)、estMin(分钟)、priority、"
+    "newRequirement(默认 false=更新绑定需求)。",
 )
 def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "",
                      assessmentMd: str = "", priority: str = "P1",
                      estMin: int = 0,
                      allowedScopeMd: str = "", forbiddenScopeMd: str = "",
-                     acceptanceMd: str = "",
+                     acceptanceMd: str = "", newRequirement: bool = False,
                      root: Optional[str] = None,
                      project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx, store as _store
+    from .common import _ts
     title = (title or "").strip()
     if not title:
         return {"ok": False, "error": "缺少需求标题"}
-    now = __import__("topoone_app_architect.arch_routes.common", fromlist=["_ts"])._ts()
-    req = {
-        "id": _store.next_id("RQ"), "kind": "user-story", "tier": "raw",
-        "location": "proposal", "title": title,
-        "priority": priority if priority in ("P0", "P1", "P2") else "P1",
-        "status": "raw",
-        "desc": requirementMd or "", "acceptance": [], "traceTo": [],
-        "updatedAt": now,
-        # 方案/评估并入 desc（Markdown 三段）+ analysis 摘要（供池准入）
-        "sourceType": "asset-chat",
-    }
+    conv_id = ""
     try:
         conv_id = ctx.get_conv()
     except Exception:
-        conv_id = ""
-    if conv_id:
-        req["sourceConversationId"] = conv_id
+        pass
+    allowed = _md_lines(allowedScopeMd)
+    forbidden = _md_lines(forbiddenScopeMd)
+    acceptance = _md_lines(acceptanceMd)
     sections = []
     if requirementMd:
         sections.append(f"## 需求目标\n\n{requirementMd}")
@@ -1269,183 +1323,176 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
         sections.append(f"## 最终验收标准\n\n{acceptanceMd}")
     if assessmentMd:
         sections.append(f"## 评估\n\n{assessmentMd}")
-    req["desc"] = "\n\n".join(sections) if sections else (requirementMd or title)
-    req["analysis"] = {
-        "functionalScope": [], "entityBoundary": [],
-        "assessmentSummary": (assessmentMd or "")[:500],
-        "assetScope": [], "estMin": int(estMin or 0),
-        "implementationPath": (designMd or "")[:500],
-        "changes": [], "steps": [],
-        "designMd": designMd or "",
-        # 方案框架: 改动边界与验收(→ SE 任务树/coding prompt L1 简报)
-        "allowedScope": _md_lines(allowedScopeMd)[:40],
-        "forbiddenScope": _md_lines(forbiddenScopeMd)[:40],
-        "acceptance": _md_lines(acceptanceMd)[:40],
+    snapshot = _spec_snapshot(title, "\n\n".join(sections), designMd, allowed,
+                              forbidden, acceptance, [], assessmentMd, estMin)
+
+    bound_rid = ""
+    try:
+        bound_rid = ctx.get_req()
+    except Exception:
+        pass
+    if bound_rid and not newRequirement:
+        row = _store.RequirementsStore.get(bound_rid)
+        if row and (row.get("doneMark") or 0) != 1:
+            entry = _store.RequirementsStore.spec_append(
+                bound_rid, snapshot, actor="architect", conv_id=conv_id,
+                reason="对话完善规约")
+            _sync_analysis_cache(bound_rid, snapshot)
+            try:
+                log_conv_event(conv_id,
+                               f"📝 **规约已更新**：`{bound_rid}` → v{entry['ver']}"
+                               f"（draft；确认执行需用户发送「执行方案」）")
+            except Exception:  # noqa: BLE001
+                pass
+            return {"ok": True, "requirementId": bound_rid, "ver": entry["ver"],
+                    "updated": True, "title": title,
+                    "hint": "已更新既有需求规约(新 draft 版本)；用户「执行方案」→ 预览确认后进入执行"}
+
+    req = {
+        "id": _store.next_id("RQ"), "kind": "user-story",
+        "status": "draft", "title": title,
+        "priority": priority if priority in ("P0", "P1", "P2") else "P1",
+        "activeVer": 1,
+        "specVersions": [{"ver": 1, "state": "draft", "snapshot": snapshot,
+                          "source": {"convId": conv_id, "actor": "architect"},
+                          "reason": "初始提案", "createdAt": _ts()}],
+        "ownerConv": conv_id, "sourceType": "asset-chat",
+        "sourceConversationId": conv_id, "updatedAt": _ts(), "createdAt": _ts(),
     }
     _store.RequirementsStore.create(req)
+    _sync_analysis_cache(req["id"], snapshot)
     try:
         log_conv_event(conv_id,
-                       f"📝 **需求提案已创建**：`{req['id']}` {title}（提案侧，尚未定稿；"
-                       "用户确认后调用 req.finalize 入池）")
+                       f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
+                       "用户「执行方案」→ 预览确认后进入执行）")
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "requirementId": req["id"], "title": title,
-            "hint": "提案已创建（规划组）；用户确认后在需求方案会话中继续"}
+    return {"ok": True, "requirementId": req["id"], "ver": 1, "updated": False,
+            "title": title, "hint": "新需求规约已创建(draft v1)"}
 
 
 @register_architect_tool(
     "req.finalize",
-    "定稿：把 plan 结论固化为结构化需求分析并转入待执行。当需求讨论收敛、可明确范围/影响/实现路径时调用"
-    "(调用后本会话需求状态→待执行，左栏会话移入「待执行」组)。"
-    "确认语义：会话中已生成提案后，用户表示 确认存入/同意/存入待执行/确认方案/可以执行 等确认意图时调用本工具。"
-    "参数 reqId 可选——多提案会话中用户指明确认某一条时传入对应 RQ 编号(缺省取会话绑定需求)。"
-    "参数：title、description、functionalScope[str]、entityBoundary[str]、"
-    "assetScope[{assetId,assetType,role,source}]、estMin(int 分钟)、implementationPath(str)、assessmentSummary(str)、"
-    "allowedScope[str](允许增删改的模块/文件/数据资产节点)、forbiddenScope[str](一定不能动的)、"
-    "acceptance[str](最终验收标准)。",
+    "规约确认(交托门禁)：把当前 draft 版本确认为可执行(confirmed/ready)。"
+    "确认语义：用户表示 确认存入/同意/确认方案/可以执行/确认执行 等确认意图时调用。"
+    "门禁：designMd(方案)与 acceptance(验收标准)非空；allowedScope 必须可解析出"
+    "文件/目录(或用户显式接受无边界风险)。确认后旧 confirmed 版本自动废弃(superseded)。"
+    "参数 reqId 可选(缺省取会话绑定需求)。",
 )
-def tool_req_finalize(title: str = "", description: str = "",
-                      functionalScope: Optional[List[str]] = None,
-                      entityBoundary: Optional[List[str]] = None,
-                      assetScope: Optional[List[Dict[str, Any]]] = None,
-                      estMin: Optional[int] = None,
-                      implementationPath: str = "",
-                      assessmentSummary: str = "",
-                      allowedScope: Optional[List[str]] = None,
-                      forbiddenScope: Optional[List[str]] = None,
-                      acceptance: Optional[List[str]] = None,
-                      reqId: str = "",
-                      root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
+                      project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法定稿"}
+        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法确认"}
     row = store.RequirementsStore.get(req_id)
     if not row:
         return {"ok": False, "error": f"需求 {req_id} 不存在"}
+    if (row.get("doneMark") or 0) == 1:
+        return {"ok": False, "error": f"{req_id} 已完结(用户判定已完成)；继续执行请新建需求"}
+    active = store.RequirementsStore.spec_active(req_id)
+    if not active:
+        return {"ok": False, "error": "无生效规约版本"}
+    if active.get("state") == "confirmed":
+        return {"ok": True, "reqId": req_id, "ver": active.get("ver"),
+                "hint": "当前版本已确认(ready)，可直接「执行方案」"}
+    snap = active.get("snapshot") or {}
+    missing = []
+    if not (snap.get("designMd") or "").strip():
+        missing.append("方案(designMd)")
+    if not (snap.get("acceptance") or []):
+        missing.append("验收标准(acceptance)")
+    if missing:
+        return {"ok": False, "error": f"规约确认门禁未过——缺少：{'、'.join(missing)}。"
+                "请先完善(继续对话或 req.propose 更新)再确认。"}
+    scope_files = parse_scope_files(snap.get("allowedScope") or [])
+    boundary_note = ""
+    if not scope_files:
+        boundary_note = ("\n⚠️ 允许改动范围未解析出文件/目录——并行执行互斥将无法保护本需求，"
+                         "建议补充明确的文件/目录边界。")
+    res = store.RequirementsStore.spec_confirm(req_id)
+    if not res.get("ok"):
+        return res
     try:
-        est = int(estMin or 0)
-    except (TypeError, ValueError):
-        est = 0
-    # ── WS5-B 定稿门禁: 涉及资产保鲜检查(过期→拦截, 先刷新再定稿) ──
-    scoped_ids = [str(x.get("assetId") or "").strip()
-                  for x in (assetScope or [])
-                  if isinstance(x, dict) and str(x.get("assetId") or "").strip()]
-    if scoped_ids:
-        try:
-            from .sem.engine import _lazy_reconcile
-            _lazy_reconcile(root, project)
-        except Exception:
-            pass
-        stale: List[str] = []
-        for aid in dict.fromkeys(scoped_ids):
-            # 提示不拦截(会话驱动): 过期资产以警告形式随定稿消息沉淀, 刷新与否交由设计者裁量
-            a = store.SemanticAssetsStore.get(aid)
-            if a and (a.get("status") == "stale" or a.get("needsUpdate")):
-                stale.append(f"{aid} {a.get('name', '')}")
-    analysis = {
-        "functionalScope": functionalScope or [],
-        "entityBoundary": entityBoundary or [],
-        "assessmentSummary": assessmentSummary or "",
-        "assetScope": assetScope or [],
-        "estMin": est,
-        "implementationPath": implementationPath or "",
-        "changes": [],
-        "steps": [],
-        "allowedScope": allowedScope or [],
-        "forbiddenScope": forbiddenScope or [],
-        "acceptance": acceptance or [],
-    }
-    store.RequirementsStore.update(req_id, {
-        "title": (title or "").strip() or row.get("title") or req_id,
-        "analysis": analysis,
-        "status": "analyzed",
-        "location": "pool",
-    })
-    exec_conv_id = ""
-    try:
-        from .requirements import spawn_execution_session
-        conv = spawn_execution_session(store.RequirementsStore.get(req_id))
-        exec_conv_id = (conv or {}).get("id") or ""
-    except Exception:
-        pass
-    try:
-        stale_note = (f"\n⚠️ 涉及资产已过期(可 asset.semantic.refresh 刷新): "
-                      + "; ".join(stale[:8]) if stale else "")
         log_conv_event(ctx.get_conv(),
-                       f"📄 **`{req_id}` 已定稿入池**（待执行方案就绪）"
-                       + (f" · 待执行会话 `{exec_conv_id}` 已创建" if exec_conv_id else "")
-                       + stale_note)
+                       f"✅ **规约已确认**：`{req_id}` v{active.get('ver')}（ready，可执行）"
+                       + boundary_note)
     except Exception:  # noqa: BLE001
         pass
-    return {
-        "ok": True, "reqId": req_id, "status": "analyzed", "location": "pool",
-        "lifecycle": "ready", "execConvId": exec_conv_id,
-        "summary": (f"已定稿，需求转入待执行；已生成独立待执行会话 {exec_conv_id}。"
-                    if exec_conv_id else "已定稿，需求转入待执行(可指派 subagent 执行)。"),
-    }
+    return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "status": "ready",
+            "boundaryFiles": sorted(scope_files),
+            "hint": "规约已确认(ready)；在会话中发送「执行方案」预览并确认执行"}
 
 
 @register_architect_tool(
     "req.amend",
-    "方案调整(执行会话专用)：把用户在执行会话中要求的方案/规约调整落回【既有】需求的"
-    "分析字段(只更新，不新建规约；严禁与 req.propose/req.finalize 混用)。"
-    "参数均可选——只传需要调整的字段；designMd 为调整后的完整方案(全文替换语义)。"
-    "参数：designMd(方案)、allowedScope[str]、forbiddenScope[str]、acceptance[str]、"
-    "functionalScope[str]、assessmentSummary(str)、reasoning(调整理由, 会话留痕)。",
+    "需求修订(通用)：用户要求 补充需求/完善方案/调整规约 时调用——对会话绑定(或指定)"
+    "需求追加新 draft 版本(append-only，历史版本保留可追溯)。"
+    "参数均可选——只传需要调整的字段，未传字段沿用当前版本值。"
+    "参数：reqId(可选)、designMd(调整后完整方案)、allowedScope[str]、forbiddenScope[str]、"
+    "acceptance[str]、functionalScope[str]、requirementMd(需求目标)、"
+    "assessmentSummary(str)、reasoning(修订理由, 版本留痕)。",
 )
-def tool_req_amend(reqId: str = "",
-                   designMd: str = "",
+def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                    allowedScope: Optional[List[str]] = None,
                    forbiddenScope: Optional[List[str]] = None,
                    acceptance: Optional[List[str]] = None,
                    functionalScope: Optional[List[str]] = None,
-                   assessmentSummary: str = "",
-                   reasoning: str = "",
+                   assessmentSummary: str = "", reasoning: str = "",
                    root: Optional[str] = None,
                    project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法调整"}
+        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法修订"}
     row = store.RequirementsStore.get(req_id)
     if not row:
         return {"ok": False, "error": f"需求 {req_id} 不存在"}
-    analysis = dict(row.get("analysis") or {})
+    if (row.get("doneMark") or 0) == 1:
+        return {"ok": False, "error": f"{req_id} 已完结；补充需求请新建需求(req.propose newRequirement=true)"}
+    active = store.RequirementsStore.spec_active(req_id) or {}
+    snap = dict(active.get("snapshot") or {})
     changed = []
+    if requirementMd:
+        snap["desc"] = f"## 需求目标\n\n{requirementMd}"
+        changed.append("需求目标")
     if designMd:
-        analysis["designMd"] = designMd
-        analysis["implementationPath"] = str(designMd)[:500]
-        changed.append("方案(designMd)")
+        snap["designMd"] = designMd
+        changed.append("方案")
     if allowedScope is not None:
-        analysis["allowedScope"] = _md_lines(allowedScope)[:40]
+        snap["allowedScope"] = _md_lines(allowedScope)[:40]
         changed.append("允许改动范围")
     if forbiddenScope is not None:
-        analysis["forbiddenScope"] = _md_lines(forbiddenScope)[:40]
+        snap["forbiddenScope"] = _md_lines(forbiddenScope)[:40]
         changed.append("禁止改动范围")
     if acceptance is not None:
-        analysis["acceptance"] = _md_lines(acceptance)[:40]
+        snap["acceptance"] = _md_lines(acceptance)[:40]
         changed.append("验收标准")
     if functionalScope is not None:
-        analysis["functionalScope"] = _md_lines(functionalScope)[:40]
-        changed.append("需求目标")
+        snap["functionalScope"] = _md_lines(functionalScope)[:40]
+        changed.append("需求目标清单")
     if assessmentSummary:
-        analysis["assessmentSummary"] = str(assessmentSummary)[:500]
+        snap["assessmentSummary"] = str(assessmentSummary)[:500]
         changed.append("评估摘要")
     if not changed:
-        return {"ok": False, "error": "未提供任何调整字段(参数均可选, 至少传一项)"}
-    store.RequirementsStore.update(req_id, {
-        "analysis": analysis,
-        "updatedAt": __import__("topoone_app_architect.arch_routes.common", fromlist=["_ts"])._ts(),
-    })
+        return {"ok": False, "error": "未提供任何修订字段(参数均可选, 至少传一项)"}
+    conv_id = ""
     try:
-        log_conv_event(ctx.get_conv(),
-                       f"✏️ **方案已调整**（{req_id}）：{'、'.join(changed)}"
+        conv_id = ctx.get_conv()
+    except Exception:
+        pass
+    entry = store.RequirementsStore.spec_append(
+        req_id, snap, actor="architect", conv_id=conv_id,
+        reason=str(reasoning or "")[:200])
+    _sync_analysis_cache(req_id, snap)
+    try:
+        log_conv_event(conv_id,
+                       f"✏️ **规约已修订**（{req_id} → v{entry['ver']} draft）：{'、'.join(changed)}"
                        + (f" —— {str(reasoning)[:120]}" if reasoning else ""))
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "reqId": req_id, "amended": changed,
-            "hint": "调整已落回既有规约；若实施作业已在运行，建议用户「停止执行」后重新「执行方案」"}
+    return {"ok": True, "reqId": req_id, "ver": entry["ver"], "amended": changed,
+            "hint": "修订已追加新 draft 版本；「执行方案」预览确认后按新版本执行"}
 
 
 # ── 会话只读工具(PR-D: 归档会话可被 agent 读取/引用; 不在任何动作黑名单) ──

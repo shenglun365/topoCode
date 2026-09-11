@@ -11,7 +11,7 @@ import {
   ChatBubbleOvalLeftEllipsisIcon, MagnifyingGlassIcon, PlusIcon, ArrowPathIcon,
   DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
   ArrowUpTrayIcon, ArrowDownTrayIcon, BoltIcon,
-  FolderIcon, ClockIcon, XMarkIcon, ClipboardDocumentIcon,
+  FolderIcon, ClockIcon, XMarkIcon, ClipboardDocumentIcon, StopIcon,
 } from '@heroicons/vue/24/outline'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useAppDialog } from '@/composables/useAppDialog'
@@ -41,6 +41,18 @@ function projectNameOf(c: ConversationMeta): string {
   return (c.projectId && projNameMap.value[c.projectId]) || c.projectId || ''
 }
 
+const stopExecBusy = ref('')
+async function stopExec(c: ConversationMeta) {
+  if (stopExecBusy.value) return
+  stopExecBusy.value = c.id
+  try {
+    await apiPost(`/sessions/${c.id}/stop-exec`, {})
+    await load()
+  } catch { /* 刷新兜底 */ } finally {
+    stopExecBusy.value = ''
+  }
+}
+
 async function copyRef(c: ConversationMeta) {
   const payload = {
     projectId: c.projectId || '',
@@ -62,7 +74,7 @@ const busyTip = ref('')
 const q = ref('')
 const timeFilter = ref<'all' | 'today' | 'week' | 'earlier'>('all')
 const groupFilter = ref('')          // '' = 全部; group:<name> / module:<name>
-const statusFilter = ref('all')      // PR1 生命周期过滤: all | active | running | archived
+const statusFilter = ref('all')      // 生命周期重构: all | active | running(workState) | archived
 
 // PR3 角色徽标: 会话列表显示 executor 角色名
 const roleMap = ref<Record<string, string>>({})
@@ -114,7 +126,8 @@ function timeBucket(c: ConversationMeta): 'today' | 'week' | 'earlier' {
 const filtered = computed(() => {
   let out = list.value
   if (timeFilter.value !== 'all') out = out.filter((c) => timeBucket(c) === timeFilter.value)
-  if (statusFilter.value !== 'all') out = out.filter((c) => (c.status || 'active') === statusFilter.value)
+  if (statusFilter.value === 'running') out = out.filter((c) => (c as any).workState === 'running')
+  else if (statusFilter.value !== 'all') out = out.filter((c) => (c.status || 'active') === statusFilter.value)
   if (groupFilter.value.startsWith('group:')) {
     const g = groupFilter.value.slice(6)
     out = out.filter((c) => c.tags.groups.includes(g))
@@ -286,12 +299,17 @@ function reviewClass(rs?: string) {
             @click="openInDock(c)"
           >
             <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
-            <span v-if="c.pendingExec" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">{{ t('session.pendingExec') }}</span>
             <span
-              v-if="c.roleId && c.roleId !== 'architect'"
-              class="chip shrink-0 bg-ctp-peach/15 text-ctp-peach"
+              v-if="(c as any).workState === 'running'"
+              class="chip shrink-0 animate-pulse bg-ctp-peach/15 text-ctp-peach"
+              :title="t('session.workState.runningHint')"
+            >▶ {{ t('session.workState.running') }}</span>
+            <span
+              v-for="r in ((c as any).roles || []).filter((x: string) => x !== 'architect')"
+              :key="r"
+              class="chip shrink-0 bg-ctp-surface0/60 text-ctp-subtext1"
               :title="t('session.role.roleTitle')"
-            >{{ roleMap[c.roleId] || c.roleId }}</span>
+            >{{ roleMap[r] || r }}</span>
             <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -333,6 +351,15 @@ function reviewClass(rs?: string) {
               <span>{{ fmt(c.updatedAt) }}</span>
             </div>
             <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <!-- running 会话: 停止作业(UI 确定操作) -->
+              <button
+                v-if="(c as any).workState === 'running'"
+                class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-red"
+                :title="t('session.job.stop')"
+                @click.stop="stopExec(c)"
+              >
+                <StopIcon class="h-3.5 w-3.5" />
+              </button>
               <!-- 一键复制引用 JSON(项目ID/项目名称/会话名称/会话ID) -->
               <button
                 class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-green"

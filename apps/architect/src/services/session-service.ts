@@ -19,11 +19,10 @@ export interface ConversationMeta {
   /** 查看状态: read | unread | awaiting_reply | error */
   reviewState?: string
   /** 执行角色(默认 architect) */
-  roleId?: string
-  /** 角色锁定(首次切换 executor 后=true, 再换走交接) */
-  roleLocked?: boolean
-  /** 待执行标记(确认定稿生成的会话) */
-  pendingExec?: boolean
+  /** 工作相位: architect(常态) | running(外调作业执行中) */
+  workState?: 'architect' | 'running'
+  /** 角色集(能力声明; architect 恒在) */
+  roles?: string[]
   tags: SessionTags
   summary: string
   msgCount: number
@@ -88,7 +87,7 @@ export const sessionService = {
   async create(body: { kind: string; title?: string; tags?: SessionTags }): Promise<ConversationMeta> {
     return apiPost<ConversationMeta>('/sessions', body)
   },
-  async update(id: string, patch: Partial<Pick<ConversationMeta, 'title' | 'status' | 'summary' | 'reviewState' | 'roleId'> & { tags: SessionTags }>): Promise<ConversationMeta> {
+  async update(id: string, patch: Partial<Pick<ConversationMeta, 'title' | 'status' | 'summary' | 'reviewState' | 'roles'> & { tags: SessionTags }>): Promise<ConversationMeta> {
     return apiPatch<ConversationMeta>(`/sessions/${id}`, patch)
   },
   async remove(id: string): Promise<void> {

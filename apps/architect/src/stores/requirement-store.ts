@@ -6,9 +6,7 @@ import { backendReady, backendUp } from '@/services/backend'
 import { requirementService } from '@/services/requirement-service'
 
 /** 归属推导：未显式记录时按旧 tier 兼容。 */
-function locationOf(r: Requirement): 'proposal' | 'pool' {
-  return r.location ?? (r.tier === 'raw' ? 'proposal' : 'pool')
-}
+
 
 /** 代码映射对齐：补 file；核心资产补代码定位示意(真实 /kb/model codeMappings)。 */
 function enrichAnalysis(rep?: RequirementAnalysis): RequirementAnalysis | undefined {
@@ -52,12 +50,14 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
     loaded: false,
   }),
   getters: {
-    rawItems: (s) => s.items.filter((r) => locationOf(r) === 'proposal' && !r.analysis && r.status !== 'cancelled'),
-    analyzedItems: (s) => s.items.filter((r) => locationOf(r) === 'pool' && r.status !== 'cancelled'),
-    /** 需求提案：未入池(可已分析、继续讨论)。 */
-    proposals: (s) => s.items.filter((r) => locationOf(r) === 'proposal' && r.status !== 'cancelled'),
-    /** 需求池(已分析待执行，唯一执行入口)。 */
-    poolItems: (s) => s.items.filter((r) => locationOf(r) === 'pool' && r.status !== 'cancelled'),
+    /** 规约演进中(draft): 可继续讨论/修订。 */
+    rawItems: (s) => s.items.filter((r) => r.status === 'draft' && !r.analysis),
+    /** 就绪(ready=已确认可执行): 唯一执行入口。 */
+    analyzedItems: (s) => s.items.filter((r) => r.status === 'ready'),
+    proposals: (s) => s.items.filter((r) => r.status === 'draft'),
+    poolItems: (s) => s.items.filter((r) => r.status === 'ready'),
+    /** 已完成(用户判定阶段性完结)。 */
+    doneItems: (s) => s.items.filter((r) => r.status === 'done'),
     cancelled: (s) => s.items.filter((r) => r.status === 'cancelled'),
   },
   actions: {
@@ -86,11 +86,9 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       const r: Requirement = {
         id: `RQ-${Date.now().toString().slice(-4)}`,
         kind: 'user-story',
-        tier: 'raw',
-        location: 'proposal',
         title: input.title ?? '未命名需求',
         priority: input.priority ?? 'P1',
-        status: 'raw',
+        status: 'draft',
         desc: input.desc ?? '',
         acceptance: input.acceptance ?? [],
         traceTo: input.traceTo ?? [],
@@ -106,11 +104,11 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
     },
     cancel(id: string) {
       const r = this.items.find((x) => x.id === id)
-      if (r && r.status === 'raw') r.status = 'cancelled'
+      if (r && r.status === 'draft') r.status = 'cancelled'
     },
     uncancel(id: string) {
       const r = this.items.find((x) => x.id === id)
-      if (r && r.status === 'cancelled') r.status = 'raw'
+      if (r && r.status === 'cancelled') r.status = 'draft'
     },
     /** 完成分析并入池(门槛由调用方校验)：单条提案 → 需求池(已分析)。 */
     finalizeAnalysis(
@@ -121,9 +119,7 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       enrichAnalysis(report)
       const assetIds = report.assetScope.map((a) => a.assetId)
       if (existing) {
-        existing.tier = 'analyzed'
-        existing.location = 'pool'
-        existing.status = 'analyzed'
+        existing.status = 'ready'
         existing.title = seed.title
         existing.desc = ''
         existing.priority = seed.priority
@@ -138,11 +134,9 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       const r: Requirement = {
         id: seed.id ?? `RQ-${Date.now().toString().slice(-4)}`,
         kind: 'user-story',
-        tier: 'analyzed',
-        location: 'pool',
         title: seed.title,
         priority: seed.priority,
-        status: 'analyzed',
+        status: 'ready',
         desc: '',
         acceptance: [],
         remarks: seed.basicMd,
@@ -162,9 +156,7 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
     addDirect(seed: ReqSeed, suggestion?: Requirement['suggestion']): Requirement {
       const existing = seed.id ? this.items.find((x) => x.id === seed.id) : undefined
       if (existing) {
-        existing.tier = 'analyzed'
-        existing.location = 'pool'
-        existing.status = 'analyzed'
+        existing.status = 'ready'
         existing.title = seed.title
         existing.desc = ''
         existing.priority = seed.priority
@@ -179,11 +171,9 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       const r: Requirement = {
         id: `RQ-${Date.now().toString().slice(-4)}`,
         kind: 'user-story',
-        tier: 'analyzed',
-        location: 'pool',
         title: seed.title,
         priority: seed.priority,
-        status: 'analyzed',
+        status: 'ready',
         desc: '',
         acceptance: [],
         remarks: seed.basicMd,
@@ -252,11 +242,9 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       const r: Requirement = {
         id: seed.id ?? `RQ-${Date.now().toString().slice(-4)}`,
         kind: 'user-story',
-        tier: analysis ? 'analyzed' : 'raw',
-        location: 'proposal',
         title: seed.title,
         priority: seed.priority,
-        status: analysis ? 'analyzed' : 'raw',
+        status: 'draft',
         desc: '',
         acceptance: [],
         remarks: seed.basicMd,

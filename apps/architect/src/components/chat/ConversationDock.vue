@@ -4,7 +4,7 @@
  * 会话引擎在 conversation-store；本组件只做外观与会话切换。
  */
 import { useAppDialog } from '@/composables/useAppDialog'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
@@ -139,21 +139,8 @@ function emitRefreshAsset(id: string) {
 // ── PR3 角色条: 会话执行角色徽标 + 首次绑定执行角色(切换即锁定) ──
 interface RoleRow { id: string; name: string; kind: string; executorId: string }
 const roleNames = ref<Record<string, string>>({})
-const roleSwitchOpen = ref(false)
-const roleSwitchMsg = ref('')
-const roleSwitching = ref(false)
 const executorRoles = ref<RoleRow[]>([])
-const activeRoleId = computed(() => ((conv.activeMeta as any)?.roleId as string) || 'architect')
-
-// 执行会话: 常驻触发词提示条(实施/方案调整/停止——消灭「想做实施却不知触发词」)
-const isExecutionConv = computed(() =>
-  ((conv.activeMeta as any)?.kind === 'execution')
-  && ((conv.activeMeta as any)?.status !== 'archived'))
-const roleLocked = computed(() => !!((conv.activeMeta as any)?.roleLocked))
-const roleSwitchEligible = computed(() =>
-  activeRoleId.value === 'architect' && !!conv.activeId
-  && (conv.activeMeta as any)?.status !== 'archived')
-
+// ── 生命周期重构: 工作相位 + 角色集声明 + 作业控制 ──
 async function loadRoleNames() {
   try {
     const roles = await apiGet<RoleRow[]>('/session-roles')
@@ -162,73 +149,150 @@ async function loadRoleNames() {
 }
 onMounted(() => { void loadRoleNames() })
 
-async function openRoleSwitch() {
-  roleSwitchMsg.value = ''
+const workState = computed(() => ((conv.activeMeta as any)?.workState as string) || 'architect')
+const isRunning = computed(() => workState.value === 'running'
+  && (conv.activeMeta as any)?.status !== 'archived')
+const activeRoles = computed<string[]>(
+  () => ((conv.activeMeta as any)?.roles as string[]) || ['architect'])
+
+// 绑定需求的 architect 态会话: 常驻触发词提示条
+const isExecutionConv = computed(() =>
+  !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
+  && !isRunning.value)
+// running 输入锁提示(裁决#6.1)
+const inputLockedHint = computed(() =>
+  isRunning.value ? t('session.workState.lockedHint') : null)
+
+// RQ 状态徽标 + 登记簿完成标记(第二入口, 裁决#3/#8)
+const reqStatus = ref<{ id: string; status?: string; activeVer?: number } | null>(null)
+const markDoneBusy = ref(false)
+async function refreshReqStatus() {
+  if (!conv.activeReqId) { reqStatus.value = null; return }
+  try {
+    reqStatus.value = await apiGet(`/requirements/${conv.activeReqId}`)
+  } catch { reqStatus.value = null }
+}
+watch(() => conv.activeReqId, () => { void refreshReqStatus() }, { immediate: true })
+async function markReqDone(done: boolean) {
+  if (!conv.activeReqId || markDoneBusy.value) return
+  markDoneBusy.value = true
+  try {
+    await apiPost(`/requirements/${conv.activeReqId}/done`, { done })
+    await refreshReqStatus()
+  } catch { /* 无碍 */ } finally {
+    markDoneBusy.value = false
+  }
+}
+
+// roles 声明器(能力声明即用, 不锁定)
+const rolesOpen = ref(false)
+const rolesDraft = ref<string[]>([])
+const rolesBusy = ref(false)
+const rolesMsg = ref('')
+async function openRoles() {
+  rolesMsg.value = ''
+  rolesDraft.value = [...activeRoles.value]
   try {
     const roles = await apiGet<RoleRow[]>('/session-roles')
     executorRoles.value = roles.filter((r) => r.kind === 'executor')
   } catch (e: any) {
-    roleSwitchMsg.value = e?.message || String(e)
+    rolesMsg.value = e?.message || String(e)
   }
-  roleSwitchOpen.value = true
+  rolesOpen.value = true
 }
-
-/** PR4 交接: 锁定会话换绑 → 标准化摘要生成新会话(绑目标 executor 角色)。 */
-const handoffOpen = ref(false)
-const handoffMsg = ref('')
-const handoffBusy = ref(false)
-const handoffTarget = ref('')
-const handoffArchive = ref(true)
-const handoffEligible = computed(() =>
-  !!conv.activeId && roleLocked.value && (conv.activeMeta as any)?.status !== 'archived')
-
-async function openHandoff() {
-  handoffMsg.value = ''
-  handoffTarget.value = ''
-  try {
-    const roles = await apiGet<RoleRow[]>('/session-roles')
-    executorRoles.value = roles.filter((r) => r.kind === 'executor')
-    handoffTarget.value = executorRoles.value[0]?.id || ''
-  } catch (e: any) {
-    handoffMsg.value = e?.message || String(e)
-  }
-  handoffOpen.value = true
+function toggleRole(id: string) {
+  rolesDraft.value = rolesDraft.value.includes(id)
+    ? rolesDraft.value.filter((x) => x !== id)
+    : [...rolesDraft.value, id]
 }
-
-async function runHandoff() {
-  if (!conv.activeId || !handoffTarget.value || handoffBusy.value) return
-  handoffBusy.value = true
-  handoffMsg.value = ''
+async function saveRoles() {
+  if (!conv.activeId || rolesBusy.value) return
+  rolesBusy.value = true
+  rolesMsg.value = ''
   try {
-    const { apiPost } = await import('@/services/api-client')
-    const d = await apiPost<{ newConvId: string }>(`/sessions/${conv.activeId}/handoff`,
-      { targetRoleId: handoffTarget.value, archiveOrigin: handoffArchive.value })
-    handoffOpen.value = false
-    const list = await sessionService.list({ limit: 30, scope: 'all' })
-    const meta = list.find((c) => c.id === d.newConvId)
-    if (meta) await conv.openConversation(meta)
-    void loadRecent()
+    const updated = await sessionService.update(conv.activeId, { roles: rolesDraft.value } as any)
+    conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
+                        roles: (updated as any)?.roles ?? rolesDraft.value } as ConversationMeta
+    rolesOpen.value = false
   } catch (e: any) {
-    handoffMsg.value = e?.message || String(e)
+    rolesMsg.value = e?.message || String(e)
   } finally {
-    handoffBusy.value = false
+    rolesBusy.value = false
   }
 }
 
-async function switchRole(role: RoleRow) {
-  if (!conv.activeId || roleSwitching.value) return
-  roleSwitching.value = true
-  roleSwitchMsg.value = ''
+// 作业控制: 停止(仅 UI, 裁决#5) / 继续执行(增量回合)
+const stopBusy = ref(false)
+async function stopExec() {
+  if (!conv.activeId || stopBusy.value) return
+  stopBusy.value = true
   try {
-    const updated = await sessionService.update(conv.activeId, { roleId: role.id } as any)
-    conv.activeMeta = { ...(conv.activeMeta as ConversationMeta), roleId: role.id, roleLocked: true } as ConversationMeta
-    roleSwitchMsg.value = t('session.role.switched', { name: updated.title || role.name })
-    roleSwitchOpen.value = false
-  } catch (e: any) {
-    roleSwitchMsg.value = e?.message || String(e)
-  } finally {
-    roleSwitching.value = false
+    await apiPost(`/sessions/${conv.activeId}/stop-exec`, {})
+    await syncRunningState(true)
+  } catch { /* 提示随对账刷新 */ } finally {
+    stopBusy.value = false
   }
+}
+function resumeJob() {
+  if (inputLockedHint.value) return
+  void conv.send('继续执行', { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}) })
+  onSent()
+}
+
+// running 态准实时同步: 复用 5s 轮询——刷新 workState + 增量消息(泵产物)
+async function syncRunningState(force = false) {
+  if (!conv.activeId) return
+  if (!force && !isRunning.value) return
+  try {
+    const list = await sessionService.list({ limit: 400, scope: 'all' })
+    const meta = list.find((c) => c.id === conv.activeId)
+    if (meta) {
+      const prev = workState.value
+      conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
+                          workState: (meta as any).workState } as ConversationMeta
+      if (prev === 'running' && (meta as any).workState !== 'running') {
+        // 相位回落(回合结束/终态) → 全量拉一次消息(泵期间的增量可见)
+        const detail = await sessionService.messages(conv.activeId)
+        conv.applyConversation({ ...detail, reqId: conv.activeReqId })
+      }
+    }
+  } catch { /* 列表失败无碍 */ }
+}
+
+// 验收视图(done 消息卡「验收」): 差异+简报+通过/返工
+const acceptOpen = ref(false)
+const acceptMsg = ref('')
+const acceptDiff = ref('')
+const acceptMeta = ref<Record<string, any> | null>(null)
+const acceptBusy = ref(false)
+async function openAccept(meta: Record<string, any>) {
+  acceptMeta.value = meta
+  acceptMsg.value = ''
+  acceptDiff.value = ''
+  acceptOpen.value = true
+  try {
+    const d = await apiGet<{ message: string }>(`/sessions/${conv.activeId}/diff`)
+    acceptDiff.value = d?.message || ''
+  } catch (e: any) {
+    acceptDiff.value = e?.message || String(e)
+  }
+}
+async function acceptPass() {
+  if (!conv.activeReqId || acceptBusy.value) return
+  acceptBusy.value = true
+  try {
+    await apiPost(`/requirements/${conv.activeReqId}/done`, { done: true })
+    acceptMsg.value = t('session.job.acceptDone')
+    acceptOpen.value = false
+  } catch (e: any) {
+    acceptMsg.value = e?.message || String(e)
+  } finally {
+    acceptBusy.value = false
+  }
+}
+function acceptRework() {
+  acceptOpen.value = false
+  conv.pushDraft(t('session.job.reworkDraft'))
 }
 
 // 命名规约提议卡(资产对话): 确认固化 / 忽略(原资产页逻辑迁至 dock)
@@ -249,6 +313,7 @@ async function pollNeedsInput() {
   try {
     needsInput.value = await busService.needsInput()
   } catch { /* broker 暂不可达 → 保持上次值 */ }
+  void syncRunningState()          // running 相位准实时同步(workState/泵消息)
 }
 const pendingClarify = computed<NeedsInputItem | null>(() => {
   const items = needsInput.value?.items ?? []
@@ -370,7 +435,7 @@ async function answerClarify() {
       </div>
     </div>
 
-    <!-- 执行会话触发词常驻提示条 -->
+    <!-- 触发词常驻提示条(绑定需求的 architect 态会话) -->
     <div
       v-if="isExecutionConv"
       class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-ctp-surface0 bg-ctp-mauve/5 px-3 py-1.5 text-[10px] text-ctp-overlay1"
@@ -378,7 +443,28 @@ async function answerClarify() {
       <span class="text-ctp-mauve">⚡ 触发词</span>
       <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">执行方案</code> 预览 → <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">确认执行</code> 启动</span>
       <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">方案调整</code> 修订规约</span>
-      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">停止执行</code> / <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">查看差异</code></span>
+      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">继续执行</code> 转达补充 · <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">查看差异</code></span>
+      <span v-if="reqStatus" class="ml-auto flex items-center gap-1.5">
+        <span
+          class="chip !text-[10px]"
+          :class="reqStatus.status === 'ready' ? 'bg-ctp-green/15 text-ctp-green'
+            : reqStatus.status === 'done' ? 'bg-ctp-overlay0/20 text-ctp-overlay1' : 'bg-ctp-surface0/60 text-ctp-subtext1'"
+          :title="t('session.reqState.title')"
+        >{{ conv.activeReqId }} · {{ t(`req.status.${reqStatus.status || 'raw'}`) }}<template v-if="reqStatus.activeVer"> v{{ reqStatus.activeVer }}</template></span>
+        <button
+          v-if="reqStatus.status === 'ready'"
+          class="btn !py-0 !px-1.5 !text-[10px]"
+          :disabled="markDoneBusy"
+          :title="t('session.job.acceptHint')"
+          @click="markReqDone(true)"
+        >{{ t('session.reqState.markDone') }}</button>
+        <button
+          v-else-if="reqStatus.status === 'done'"
+          class="btn !py-0 !px-1.5 !text-[10px] btn-ghost"
+          :disabled="markDoneBusy"
+          @click="markReqDone(false)"
+        >{{ t('session.reqState.undoDone') }}</button>
+      </span>
     </div>
 
     <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
@@ -412,67 +498,70 @@ async function answerClarify() {
 
     <!-- 对话主体 -->
     <div class="min-h-0 flex-1">
-      <!-- PR3 角色切换对话框 -->
+      <!-- roles 声明器(能力声明即用, 不锁定) -->
       <div
-        v-if="roleSwitchOpen"
+        v-if="rolesOpen"
         class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
-        @click.self="roleSwitchOpen = false"
+        @click.self="rolesOpen = false"
       >
         <div class="panel w-full max-w-sm">
           <div class="panel-header">
-            <span>{{ t('session.role.bindTitle') }}</span>
-            <button class="btn btn-xs btn-ghost" @click="roleSwitchOpen = false">
+            <span>{{ t('session.role.manageTitle') }}</span>
+            <button class="btn btn-xs btn-ghost" @click="rolesOpen = false">
               <XMarkIcon class="w-3.5 h-3.5" />
             </button>
           </div>
           <div class="p-3 space-y-2">
-            <p class="text-[11px] text-ctp-subtext0">{{ t('session.role.bindHint') }}</p>
-            <p v-if="roleSwitchMsg" class="text-[11px] text-ctp-yellow break-all">{{ roleSwitchMsg }}</p>
+            <p class="text-[11px] text-ctp-subtext0">{{ t('session.role.manageHint') }}</p>
+            <p v-if="rolesMsg" class="text-[11px] text-ctp-yellow break-all">{{ rolesMsg }}</p>
             <button
               v-for="r in executorRoles"
               :key="r.id"
-              class="w-full rounded-lg border border-ctp-surface1 px-3 py-2 text-left hover:border-ctp-blue/40 transition-colors"
-              :disabled="roleSwitching"
-              @click="switchRole(r)"
+              class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors"
+              :class="rolesDraft.includes(r.id) ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40'"
+              @click="toggleRole(r.id)"
             >
-              <div class="text-xs text-ctp-text">{{ r.name }}</div>
-              <div class="text-[10px] text-ctp-subtext0">{{ t('session.role.executorOf') }}: {{ r.executorId || '—' }}</div>
+              <span
+                class="h-3 w-3 shrink-0 rounded border"
+                :class="rolesDraft.includes(r.id) ? 'bg-ctp-blue border-ctp-blue' : 'border-ctp-overlay1'"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block text-xs text-ctp-text">{{ r.name }}</span>
+                <span class="block text-[10px] text-ctp-subtext0">{{ t('session.role.executorOf') }}: {{ r.executorId || '—' }}</span>
+              </span>
             </button>
             <p v-if="!executorRoles.length" class="text-[11px] text-ctp-overlay1">
               {{ t('session.role.noExecutors') }}
             </p>
+            <button
+              class="btn btn-primary w-full !py-1.5 text-xs"
+              :disabled="rolesBusy"
+              @click="saveRoles"
+            >{{ rolesBusy ? t('common.saving') : t('common.save') }}</button>
           </div>
         </div>
       </div>
 
-      <!-- PR4 交接对话框: 生成新会话绑目标角色 -->
+      <!-- 验收视图(作业 done 消息卡入口): 差异 + 简报 + 通过/返工 -->
       <div
-        v-if="handoffOpen"
+        v-if="acceptOpen"
         class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
-        @click.self="handoffOpen = false"
+        @click.self="acceptOpen = false"
       >
-        <div class="panel w-full max-w-sm">
+        <div class="panel flex max-h-[80%] w-full max-w-lg flex-col">
           <div class="panel-header">
-            <span>{{ t('session.role.handoffTitle') }}</span>
-            <button class="btn btn-xs btn-ghost" @click="handoffOpen = false">
+            <span>{{ t('session.job.acceptTitle') }}（{{ acceptMeta?.branch || '' }}）</span>
+            <button class="btn btn-xs btn-ghost" @click="acceptOpen = false">
               <XMarkIcon class="w-3.5 h-3.5" />
             </button>
           </div>
-          <div class="p-3 space-y-2">
-            <p class="text-[11px] text-ctp-subtext0">{{ t('session.role.handoffHint') }}</p>
-            <p v-if="handoffMsg" class="text-[11px] text-ctp-yellow break-all">{{ handoffMsg }}</p>
-            <select v-model="handoffTarget" class="input !py-1 text-xs w-full">
-              <option v-for="r in executorRoles" :key="r.id" :value="r.id">{{ r.name }}（{{ r.executorId || '—' }}）</option>
-            </select>
-            <label class="flex items-center gap-1.5 text-[11px] text-ctp-subtext1">
-              <input v-model="handoffArchive" type="checkbox" class="accent-ctp-blue">
-              {{ t('session.role.handoffArchive') }}
-            </label>
-            <button
-              class="btn btn-primary w-full !py-1.5 text-xs"
-              :disabled="!handoffTarget || handoffBusy"
-              @click="runHandoff"
-            >{{ handoffBusy ? t('common.saving') : t('session.role.handoffGo') }}</button>
+          <div class="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+            <div class="whitespace-pre-wrap rounded-lg border border-ctp-surface1 bg-ctp-mantle/60 p-2.5 text-[11px] leading-relaxed text-ctp-subtext0">{{ acceptDiff || '…' }}</div>
+            <p v-if="acceptMsg" class="text-[11px] text-ctp-yellow break-all">{{ acceptMsg }}</p>
+          </div>
+          <div class="flex items-center justify-end gap-2 border-t border-ctp-surface0 p-2.5">
+            <button class="btn btn-xs" :disabled="acceptBusy" @click="acceptRework">{{ t('session.job.rework') }}</button>
+            <button class="btn btn-xs btn-primary" :disabled="acceptBusy || !conv.activeReqId" @click="acceptPass">{{ t('session.job.pass') }}</button>
           </div>
         </div>
       </div>
@@ -491,7 +580,10 @@ async function answerClarify() {
         @summarize-title="summarizeTitle"
         :diagram-skill="conv.diagramSkill"
         :read-only="(conv.activeMeta as any)?.status === 'archived'"
+        :input-locked="inputLockedHint"
         @send="(text) => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}) }); onSent() }"
+        @job-accept="openAccept"
+        @job-resume="resumeJob"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
         @toggle-diagram-skill="conv.toggleDiagramSkill"
@@ -504,20 +596,28 @@ async function answerClarify() {
         <template #header-extra>
           <div v-if="conv.activeId" class="ml-auto flex shrink-0 items-center gap-1.5">
             <span
-              class="chip !text-[10px]"
-              :class="activeRoleId === 'architect' ? 'bg-ctp-surface0/60 text-ctp-subtext1' : 'bg-ctp-peach/15 text-ctp-peach'"
-            >{{ roleNames[activeRoleId] || activeRoleId }}</span>
-            <span v-if="roleLocked" class="text-[10px] text-ctp-overlay0" :title="t('session.role.lockedHint')">🔒</span>
+              v-if="isRunning"
+              class="chip !text-[10px] animate-pulse bg-ctp-peach/15 text-ctp-peach"
+              :title="t('session.workState.runningHint')"
+            >▶ {{ t('session.workState.running') }}</span>
+            <span
+              v-for="r in activeRoles.filter((x) => x !== 'architect')"
+              :key="r"
+              class="chip !text-[10px] bg-ctp-surface0/60 text-ctp-subtext1"
+              :title="t('session.role.manageTitle')"
+            >{{ roleNames[r] || r }}</span>
             <button
-              v-if="roleSwitchEligible"
               class="btn !py-0 !px-2 !text-[10px]"
-              @click="openRoleSwitch"
-            >{{ t('session.role.bind') }}</button>
+              :title="t('session.role.manageTitle')"
+              @click="openRoles"
+            >{{ t('session.role.manage') }}</button>
             <button
-              v-if="handoffEligible"
-              class="btn !py-0 !px-2 !text-[10px]"
-              @click="openHandoff"
-            >{{ t('session.role.handoff') }}</button>
+              v-if="isRunning"
+              class="btn !py-0 !px-2 !text-[10px] btn-ghost !text-ctp-red"
+              :disabled="stopBusy"
+              :title="t('session.job.stop')"
+              @click="stopExec"
+            >⏹ {{ t('session.job.stop') }}</button>
           </div>
         </template>
         <template #toolbar-extra>

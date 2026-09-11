@@ -1,18 +1,11 @@
 export type Locale = 'zh-CN' | 'en-US'
 
 export type ReqKind = 'user-story' | 'fr' | 'nfr'
-export type ReqTier = 'raw' | 'analyzed'
-/** 需求归属：提案(可继续讨论/再分析) 或 需求池(唯一执行入口)。 */
-export type ReqLocation = 'proposal' | 'pool'
-export type ReqPoolStatus =
-  | 'raw'          // 原始需求：仅描述
-  | 'analyzing'    // 分析中
-  | 'analyzed'     // 分析后：功能范围/实体边界/优先级已确认
-  | 'designed'     // 已被某方案覆盖
-  | 'planned'      // 方案已确认，已生成任务方案
-  | 'executing'    // 有执行任务在跑
-  | 'done'
-  | 'cancelled'
+/**
+ * 登记簿状态(生命周期重构 v2):
+ * draft(规约演进中) | ready(已确认可执行) | done(用户判定阶段性完结) | cancelled
+ */
+export type ReqPoolStatus = 'draft' | 'ready' | 'done' | 'cancelled'
 
 export type AssetType = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
   | 'asset' | 'process' | 'decision' | 'contract' | 'state' | 'rule'
@@ -309,12 +302,16 @@ export interface PathSuggestion {
 export interface Requirement {
   id: string
   kind: ReqKind
-  tier: ReqTier
-  /** 归属：提案 / 需求池（提案可携带 analysis，池可移回提案）。 */
-  location?: ReqLocation
   title: string
   priority: 'P0' | 'P1' | 'P2'
   status: ReqPoolStatus
+  /** 当前生效规约版本号(activeVer 指针)。 */
+  activeVer?: number
+  /** 用户完成判定(RQ 已完成=阶段性完结)。 */
+  doneMark?: number
+  doneAt?: number
+  /** 演进所有权会话(其他会话只读引导)。 */
+  ownerConv?: string
   desc: string
   acceptance: string[]
   /** 备注信息(含可验收标准，合并原验收标准字段)。 */

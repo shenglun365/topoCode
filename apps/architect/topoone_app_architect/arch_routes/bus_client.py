@@ -8,7 +8,7 @@ architect 侧的 agent(plan agent / 指派入口)经本网关向 broker 发布�
 - `health()` → bool(GET /health)。
 
 契约(见 agent_bus.py)：
-- topic: execution.handoff / interaction.clarify / interaction.answer /
+- topic: interaction.clarify / interaction.answer /
   plan.revise / execution.progress / execution.result / execution.amend
 - src/dst: plan | coding | runner | mcp | monitor | user | *
 

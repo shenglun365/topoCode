@@ -19,22 +19,13 @@ from . import store
 router = APIRouter()
 
 # 会话中心全量口径(含资产/设计对话; execution/unit-test 会话由对应域自持, 此处也收录)
-SESSION_KINDS = ["requirement", "design", "asset", "execution", "unit-test", "generic"]
+SESSION_KINDS = ["requirement", "asset", "unit-test", "generic"]
 
 # PR1 双维度状态机: 生命周期(status) + 查看状态(review_state)
 LIFECYCLES = ("active", "running", "archived")          # archived 不可逆终态
 REVIEW_STATES = ("read", "unread", "awaiting_reply", "error")
 
 _GROUPS_KEY = "session.groups"      # 用户自定义分组(collab config, JSON 数组)
-
-
-def _pending_exec(c) -> bool:
-    """待执行标记(meta.pendingExec): 确认定稿生成的待执行会话(active 生命周期)。"""
-    try:
-        meta = json.loads(c.get("meta") or "{}") if isinstance(c.get("meta"), str) else (c.get("meta") or {})
-        return bool(isinstance(meta, dict) and meta.get("pendingExec"))
-    except (TypeError, ValueError):
-        return False
 
 
 def _tags_of(conv: dict) -> dict:
@@ -96,9 +87,9 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "reqId": c.get("reqId") or "",
             "title": title,
             "status": c.get("status") or "active",
+            "workState": c.get("workState") or "architect",
             "reviewState": c.get("reviewState") or "read",
-            "roleId": c.get("roleId") or "architect",
-            "pendingExec": _pending_exec(c),
+            "roles": _roles_of(c),
             "tags": _tags_of(c),
             "summary": c.get("summary") or "",
             "msgCount": c.get("msgCount") or 0,
@@ -235,7 +226,7 @@ async def delete_session_role(role_id: str):
         return err(400, "architect 为系统内置角色, 不可删除")
     # 会话引用校验: 有活跃(未归档)会话使用该角色 → 拒绝删除
     used = [c for c in store.ConversationsStore.all(limit=400)
-            if (c.get("roleId") or "architect") == role_id
+            if role_id in _roles_of(c)
             and (c.get("status") or "active") != "archived"]
     if used:
         return err(400, f"仍有 {len(used)} 个未归档会话使用该角色, 不可删除")
@@ -250,19 +241,24 @@ async def create_session(request: Request):
     if kind not in SESSION_KINDS:
         kind = "requirement"
     title = (data.get("title") or "").strip()
-    role_id = data.get("roleId") or "architect"
-    if role_id != "architect" and not store.SessionRolesStore.get(role_id):
-        return err(400, f"角色不存在: {role_id}")
+    roles = ["architect"]
+    for rid in (data.get("roles") or []):
+        rid = str(rid or "").strip()
+        if rid and rid != "architect":
+            if not store.SessionRolesStore.get(rid):
+                return err(400, f"角色不存在: {rid}")
+            if rid not in roles:
+                roles.append(rid)
     conv = store.ConversationsStore.create({
         "kind": kind,
         "projectId": data.get("projectId") or "",
         "title": title or f"{kind} 会话",
         "status": "active",
-        "roleId": role_id,
+        "roles": roles,
         "tags": _norm_tags(data) or {"modules": [], "groups": []},
         "meta": data.get("meta") or {},
     })
-    # create 返回 snake_case payload; 回显统一取 API 形状行(与 handoff 同口径)
+    # create 返回 snake_case payload; 回显统一取 API 形状行
     return ok(_conv_api(store.ConversationsStore.get(conv["id"]) or conv))
 
 
@@ -291,8 +287,8 @@ async def update_session(conv_id: str, request: Request):
         patch["summary"] = str(data.get("summary") or "")
     if "status" in data:
         status = str(data.get("status") or "").strip()
-        if status not in LIFECYCLES:
-            return err(400, f"非法生命周期状态: {status}(active|running|archived)")
+        if status not in ("active", "archived"):
+            return err(400, f"非法生命周期状态: {status}(active|archived)")
         if (conv.get("status") or "active") == "archived" and status != "archived":
             return err(400, "归档不可逆：归档会话只读，请复制到新会话继续")
         patch["status"] = status
@@ -301,25 +297,20 @@ async def update_session(conv_id: str, request: Request):
         if rs not in REVIEW_STATES:
             return err(400, f"非法查看状态: {rs}(read|unread|awaiting_reply|error)")
         patch["reviewState"] = rs
-    # PR3 角色切换: architect→executor 单向一次(切换即锁定); 再换走交接(P4)
-    if "roleId" in data and (data.get("roleId") or "architect") != (conv.get("roleId") or "architect"):
-        target = str(data.get("roleId") or "").strip()
-        role = store.SessionRolesStore.get(target)
-        if not role:
-            return err(400, f"角色不存在: {target}")
-        if (role.get("kind") or "executor") != "executor":
-            return err(400, "只能切换到 executor 角色系统角色 architect 不可指定")
-        if conv.get("roleLocked"):
-            return err(400, "会话角色已锁定(首次切换后不可再改)：请用交接指令生成新会话再绑定新角色")
+    # 角色集更新(生命周期重构: 声明即用, 不锁定; architect 恒在)
+    if "roles" in data:
         if (conv.get("status") or "active") == "archived":
-            return err(400, "归档会话只读，不可切换角色")
-        # 规范化门槛: 会话绑定需求且已定稿入池(location=pool)
-        req_id = conv.get("reqId") or ""
-        req = store.RequirementsStore.get(req_id) if req_id else None
-        if not req or (req.get("location") or "") != "pool":
-            return err(400, "需求未规范化：请先在会话中「方案生成→确认存入」定稿入池，再切换执行角色")
-        patch["roleId"] = target
-        patch["roleLocked"] = True
+            return err(400, "归档会话只读，不可更新角色")
+        roles = ["architect"]
+        for rid in (data.get("roles") or []):
+            rid = str(rid or "").strip()
+            if rid and rid != "architect":
+                if not store.SessionRolesStore.get(rid):
+                    return err(400, f"角色不存在: {rid}")
+                if rid not in roles:
+                    roles.append(rid)
+        if roles != _roles_of(conv):
+            patch["roles"] = roles
     tags = _norm_tags(data)
     if tags is not None:
         patch["tags"] = tags
@@ -380,115 +371,27 @@ async def session_context(conv_id: str):
     } for u in units])
 
 
+def _roles_of(conv: dict) -> list:
+    r = conv.get("roles")
+    return r if isinstance(r, list) and r else ["architect"]
+
+
 def _conv_api(conv: dict) -> dict:
     return {
         "id": conv["id"],
-        "kind": conv.get("kind") or "requirement",
+        "kind": conv.get("kind") or "generic",
         "reqId": conv.get("reqId") or "",
         "title": conv.get("title") or "",
         "status": conv.get("status") or "active",
+        "workState": conv.get("workState") or "architect",
         "reviewState": conv.get("reviewState") or "read",
-        "roleId": conv.get("roleId") or "architect",
-        "roleLocked": bool(conv.get("roleLocked")),
-        "pendingExec": _pending_exec(conv),
+        "roles": _roles_of(conv),
         "tags": _tags_of(conv),
         "summary": conv.get("summary") or "",
         "createdAt": conv.get("createdAt"),
         "updatedAt": conv.get("updatedAt"),
     }
 
-
-# ── PR4 交接机制: 角色锁定后的换绑路径(标准化摘要 → 干净新会话绑新角色) ──
-
-@router.post("/sessions/{conv_id}/handoff")
-async def handoff_session(conv_id: str, request: Request):
-    """交接: 装配对齐当前代码状态的交接摘要 → 创建新会话绑定目标 executor 角色。
-
-    - 原会话保留(可选归档, body.archiveOrigin=true); meta.handoffTo 指向新会话。
-    - 新会话: 同 kind/同需求绑定, roleId=目标, role_locked=1(生而锁定——再换仍走交接),
-      种子消息=交接摘要(dossier: 需求三段+关键结论+资产锚点+git 基线)。
-    """
-    conv = store.ConversationsStore.get(conv_id)
-    if not conv:
-        return err(404, "会话不存在")
-    if (conv.get("status") or "active") == "archived":
-        return err(400, "归档会话只读——归档会话的提炼/复制即可引用, 无需交接")
-    body = await request.json()
-    target_id = str(body.get("targetRoleId") or "").strip()
-    role = store.SessionRolesStore.get(target_id) if target_id else None
-    if not role:
-        return err(404, f"目标角色不存在: {target_id}")
-    if (role.get("kind") or "") != "executor":
-        return err(400, "交接目标必须是 executor 角色")
-    if target_id == (conv.get("roleId") or "architect"):
-        return err(400, "目标角色与当前角色相同, 无需交接")
-
-    req_id = conv.get("reqId") or ""
-    reqs = [store.RequirementsStore.get(req_id)] if req_id else []
-    reqs = [r for r in reqs if r]
-    if not reqs:
-        return err(400, "交接需要会话已绑定规范化需求(先「方案生成→确认存入」)")
-
-    # 交接摘要: dossier(会话摘要/备案文档/高优上下文单元/需求三段/项目规约) + git 基线
-    from .context_registry import assemble_dossier
-    from .execution import _resolve_root_project, _real_base_commit
-    root, project = _resolve_root_project(reqs, {})
-    dossier = assemble_dossier(conv_id, reqs=reqs, root=root or "",
-                               project_id=project or "", persist=False) or ""
-    base_commit = _real_base_commit(root)
-    role_name = role.get("name") or target_id
-    brief_lines = [
-        f"**交接摘要**（原会话 {conv_id} → 角色 {role_name}）",
-        "",
-        "以下上下文由原会话标准化整理生成, 已对齐当前代码状态, 可直接开始执行:",
-    ]
-    if base_commit:
-        brief_lines.append(f"- 代码基线: git `{base_commit[:12]}`")
-    if dossier:
-        brief_lines.append("")
-        brief_lines.append(dossier)
-    brief = "\n".join(brief_lines)
-
-    meta = {"handoffFrom": conv_id, "sourceConversationId": conv_id}
-    exec_id = ""
-    try:
-        origin_meta = json.loads(conv.get("meta") or "{}") if isinstance(conv.get("meta"), str) else (conv.get("meta") or {})
-        if isinstance(origin_meta, dict) and origin_meta.get("execId"):
-            exec_id = origin_meta["execId"]
-            meta["execId"] = exec_id
-    except (TypeError, ValueError):
-        pass
-    new_conv = store.ConversationsStore.create({
-        "kind": conv.get("kind") or "execution",
-        "projectId": conv.get("projectId") or "",
-        "reqId": req_id,
-        "title": f"{role_name}｜{(conv.get('title') or req_id)[:28]}",
-        "status": "active", "reviewState": "unread",
-        "roleId": target_id, "roleLocked": True,
-        "meta": meta,
-    })
-    store.ConversationsStore.append_message({
-        "id": store.next_id("m"), "conversationId": new_conv["id"],
-        "role": "assistant", "time": _ts(),
-        "content": brief,
-    })
-    # 原会话: 指向新会话 + 可选归档
-    origin_patch = {"reviewState": "read"}
-    origin_meta = dict(meta)
-    origin_meta.pop("execId", None)
-    origin_meta["handoffTo"] = new_conv["id"]
-    origin_patch["meta"] = json.dumps(origin_meta, ensure_ascii=False)
-    if body.get("archiveOrigin"):
-        origin_patch["status"] = "archived"
-    store.ConversationsStore.update(conv_id, origin_patch)
-    return ok({
-        "newConvId": new_conv["id"], "conversation": _conv_api(
-            store.ConversationsStore.get(new_conv["id"]) or new_conv),
-        "archivedOrigin": bool(body.get("archiveOrigin")),
-    })
-
-
-# ── P3: probe(方案草图) + 前置上下文构造 ────────────────────
 
 @router.post("/sessions/{conv_id}/probe")
 async def probe_session(conv_id: str, request: Request):

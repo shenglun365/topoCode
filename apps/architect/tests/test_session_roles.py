@@ -34,13 +34,13 @@ def test_roles_crud_and_protection(client):
     # architect 不可删
     r = client.delete("/api/architect/session-roles/architect", headers=h)
     assert r.status_code == 400
-    # 建会话绑不存在角色拒绝
+    # 建会话声明不存在角色拒绝
     r = client.post("/api/architect/sessions",
-                    json={"kind": "generic", "roleId": "ghost"}, headers=h)
+                    json={"kind": "generic", "roles": ["ghost"]}, headers=h)
     assert r.status_code == 400
-    # 绑 executor 角色的会话存在 → 删角色拒绝
+    # 声明 executor 角色的会话存在 → 删角色拒绝
     c = client.post("/api/architect/sessions",
-                    json={"kind": "generic", "roleId": "exec-1"}, headers=h).json()["data"]
+                    json={"kind": "generic", "roles": ["exec-1"]}, headers=h).json()["data"]
     r = client.delete("/api/architect/session-roles/exec-1", headers=h)
     assert r.status_code == 400
     # 会话归档后可删

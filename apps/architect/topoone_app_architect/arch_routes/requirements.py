@@ -143,13 +143,24 @@ async def create_requirement(request: Request):
     # S5：资产地图对话来源（对话中形成的提案卡提交时携带）
     src_type = (body.get("sourceType") or "").strip()
     src_conv = (body.get("sourceConversationId") or "").strip()
+    from .common import _ts as _ts2
+    import json as _json
+    _ts_v = _ts2()
+    snapshot = {"title": body.get("title", ""), "desc": body.get("desc", ""),
+                "designMd": "", "allowedScope": body.get("allowedScope") or [],
+                "forbiddenScope": body.get("forbiddenScope") or [],
+                "acceptance": body.get("acceptance") or [], "functionalScope": [],
+                "assessmentSummary": "", "estMin": 0}
     req = {
-        "id": body.get("id") or store.next_id("RQ"), "kind": body.get("kind", "user-story"), "tier": "raw",
-        "location": "proposal", "title": body.get("title", ""),
-        "priority": body.get("priority", "P2"), "status": "raw",
-        "desc": body.get("desc", ""), "acceptance": body.get("acceptance", []),
-        "traceTo": body.get("traceTo", []), "updatedAt": _ts(),
-        "sourceType": src_type, "sourceConversationId": src_conv,
+        "id": body.get("id") or store.next_id("RQ"), "kind": body.get("kind", "user-story"),
+        "status": "draft", "title": body.get("title", ""),
+        "priority": body.get("priority", "P2"),
+        "specVersions": [{"ver": 1, "state": "draft", "snapshot": snapshot,
+                          "source": {"convId": src_conv, "actor": "manual"},
+                          "reason": "手工登记", "createdAt": _ts_v}],
+        "activeVer": 1,
+        "desc": body.get("desc", ""), "updatedAt": _ts_v, "createdAt": _ts_v,
+        "sourceType": src_type or "manual", "sourceConversationId": src_conv,
     }
     store.RequirementsStore.create(req)
     return ok(store.RequirementsStore.get(req["id"]))
@@ -191,81 +202,37 @@ async def cancel_requirement(req_id: str):
     return ok(row)
 
 
-def spawn_execution_session(req: dict) -> Optional[dict]:
-    """确认定稿 → 生成独立「待执行」会话(kind=execution, status=pending, 绑定需求)。
-
-    幂等：同需求已存在待执行会话则直接返回既有。设计者确认(按钮 REST 或会话内
-    req.finalize)后，会话中心出现独立条目，等待任务执行页对接 coding agent。
-    """
-    if not req or not req.get("id"):
-        return None
-    rid = req["id"]
-    for c in store.ConversationsStore.by_req(rid, limit=50):
-        if (c.get("kind") or "") == "execution":
-            return c
-    origin_id = req.get("sourceConversationId") or ""
-    origin = store.ConversationsStore.get(origin_id) if origin_id else None
-    a = req.get("analysis") or {}
-    lines = [f"方案 **{(req.get('title') or rid)}**（{rid}）已确认定稿，进入待执行队列。"]
-    if a.get("implementationPath"):
-        lines.append(f"\n**实现路径**：{str(a['implementationPath'])[:300]}")
-    forbid = a.get("forbiddenScope") or []
-    if forbid:
-        lines.append("\n**禁止改动（一定不能动）**：\n" + "\n".join(f"- {x}" for x in forbid[:8]))
-    acc = a.get("acceptance") or []
-    if acc:
-        lines.append("\n**验收标准**：\n" + "\n".join(f"- {x}" for x in acc[:8]))
-    lines.append(
-        "\n**触发词**：\n"
-        "- 「执行方案」/「开始执行」——启动 coding agent 实施（开发 + 单元测试 + 整体编译验收）；"
-        "过程中需要你操作/确认/澄清时会直接在本会话提问，回复即可转达；「停止执行」中止，「查看差异」看改动\n"
-        "- 「方案调整」+ 调整说明——回到 architect 调整本需求的方案与规约"
-        "（只更新本会话绑定的规约，不新建）\n"
-        "- 其他任意问题——执行工程师技术答疑")
-    meta = {"pendingExec": True}
-    if origin_id:
-        meta["sourceConversationId"] = origin_id
-    conv = store.ConversationsStore.create({
-        "kind": "execution", "projectId": (origin or {}).get("projectId") or "",
-        "reqId": rid, "title": f"待执行｜{(req.get('title') or rid)[:36]}",
-        "status": "active", "reviewState": "unread",
-        "meta": meta,
-    })
-    store.ConversationsStore.append_message({
-        "id": store.next_id("m"), "conversationId": conv["id"], "role": "assistant",
-        "time": _ts(), "content": "\n".join(lines),
-        "projectId": (origin or {}).get("projectId") or conv.get("projectId") or "",
-    })
-    return conv
+@router.post("/requirements/{req_id}/done")
+async def mark_requirement_done(req_id: str, request: Request):
+    """RQ 完成判定(用户判定, 裁决#3): done=true → 登记簿「已完成」(阶段性完结);
+    完成后继续迭代 = 新建需求。done=false 可撤销。"""
+    body = await request.json() if request.headers.get("content-length") else {}
+    row = store.RequirementsStore.mark_done(req_id, bool(body.get("done", True)))
+    if not row:
+        return err(404, "Not found")
+    return ok(row)
 
 
 @router.post("/requirements/{req_id}/finalize")
-async def finalize_requirement(req_id: str, request: Request):
-    body = await request.json()
-    row = store.RequirementsStore.update(req_id, {
-        "tier": "analyzed", "location": "pool", "status": "analyzed",
-        "analysis": body.get("analysis", {}), "updatedAt": _ts(),
-    })
-    if not row:
-        return err(404, "Not found")
-    exec_conv = None
-    try:
-        exec_conv = spawn_execution_session(row)
-    except Exception:
-        pass
-    # 统一时间线: 按钮定稿也回写来源会话
+async def finalize_requirement(req_id: str):
+    """规约确认(REST 入口): active draft → confirmed/ready。门禁与 superseded 收口同工具路径。"""
+    res = store.RequirementsStore.spec_confirm(req_id)
+    if not res.get("ok"):
+        return err(400, res.get("error") or "确认失败")
+    row = store.RequirementsStore.get(req_id)
+    # 统一时间线: 按钮确认也回写来源会话
     try:
         origin_id = row.get("sourceConversationId") or ""
         if origin_id and store.ConversationsStore.get(origin_id):
             store.ConversationsStore.append_message({
                 "id": store.next_id("m"), "conversationId": origin_id,
                 "role": "assistant", "time": _ts(),
-                "content": f"📄 **`{req_id}` 已定稿入池**（待执行方案就绪）"
-                           + (f" · 待执行会话 `{(exec_conv or {}).get('id')}` 已创建" if exec_conv else ""),
+                "content": f"✅ **`{req_id}` v{row.get('activeVer')} 规约已确认**（ready，会话内「执行方案」进入执行）",
+                "projectId": row.get("ownerConv") and "" or "",
             })
     except Exception:  # noqa: BLE001
         pass
-    return ok({**row, "execConvId": (exec_conv or {}).get("id")})
+    return ok(row)
 
 
 

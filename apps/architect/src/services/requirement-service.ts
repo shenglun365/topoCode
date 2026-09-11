@@ -14,12 +14,6 @@ export const requirementService = {
     const qs = project ? `?project=${encodeURIComponent(project)}` : ''
     return apiPost<Requirement>(`/requirements${qs}`, data)
   },
-  /** P3.2: 指派需求给 subagent(runner 内部执行任务 / mcp 外部工具) → 经 broker handoff → 执行中。 */
-  async assign(reqId: string, data: {
-    target: 'runner' | 'mcp'; execId?: string; tool?: string; params?: Record<string, unknown>
-  }): Promise<Requirement> {
-    return apiPost<Requirement>(`/requirements/${reqId}/assign`, data)
-  },
   async update(id: string, data: Partial<Requirement>): Promise<Requirement> {
     return apiPatch<Requirement>(`/requirements/${id}`, data)
   },

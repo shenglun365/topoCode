@@ -48,25 +48,6 @@ def test_plain_answer_ok():
     assert fabricated_claim("nginx-http-core 组件的名称如上所述。", set()) == (None, None)
 
 
-def test_spawn_execution_session_idempotent():
-    req = {
-        "id": "RQ-GUARD-1", "title": "守卫测试需求",
-        "analysis": {"implementationPath": "p", "forbiddenScope": ["core/"],
-                     "acceptance": ["构建通过"]},
-        "sourceConversationId": "",
-    }
-    c1 = store.ConversationsStore.create  # noqa: F841  (确保 store 可用)
-    from topoone_app_architect.arch_routes.requirements import spawn_execution_session
-    a = spawn_execution_session(req)
-    b = spawn_execution_session(req)
-    assert a and b and a["id"] == b["id"]
-    # PR1 双维度: 待执行会话 = active + unread + meta.pendingExec 标记
-    assert a["kind"] == "execution" and a["status"] == "active"
-    assert "pendingExec" in (a.get("meta") or "")
-    msgs = store.ConversationsStore.messages(a["id"])
-    assert msgs and "守卫测试需求" in msgs[0]["content"]
-
-
 def test_extract_proposal_fence():
     from topoone_app_architect.arch_routes.req_agent import extract_proposal_fence
     text = '前言\n```proposal\n{"title": "T", "designMd": "细节", "estMin": 30}\n```\n后记'

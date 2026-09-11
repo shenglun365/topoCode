@@ -1,231 +1,172 @@
-"""PR1 双维度状态机: 生命周期(active/running/archived 不可逆) + 查看状态。"""
-import pytest
+"""生命周期重构 v2 回归：workState 相位 / roles 声明 / 规约版本链 / 登记簿状态。
+
+Run: cd <repo> && python -m pytest apps/architect/tests/test_session_lifecycle.py -q
+"""
+import json
+import os
+import sys
+
+_repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+sys.path.insert(0, _repo)
+
+import topoone_app_architect.arch_routes.ctx as C
+from topoone_app_architect.arch_routes import store
+
 from fastapi.testclient import TestClient
+from topoone_app_architect.server import build_app
 
 
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ARCH_DATA_DIR", str(tmp_path))
-    from topoone_app_architect.arch_routes import ctx as C
-    C._db = None; C._kb = None; C._data_dir = None
+def _setup(tmp_path, monkeypatch):
+    data = str(tmp_path / "arch")
+    monkeypatch.setenv("ARCH_DATA_DIR", data)
+    C._db = None
+    C._kb = None
+    C._data_dir = None
     C._project_dbs.clear()
-    from topoone_app_architect import server as _srv
-    app = _srv.build_app(data_dir=str(tmp_path / "arch"))
+    C.reset_project(C._project_var.set(None))
+    C.reset_req(C._req_var.set(None))
+    C.setup(data_dir=data)
+    return data
+
+
+def _client(monkeypatch, data):
+    app = build_app(data_dir=data)
     return TestClient(app)
 
 
-def _auth(client):
-    tok = client.get("/api/architect/health").json().get("data", {}).get("token")
-    h = {"Authorization": f"Bearer {tok}"} if tok else {}
-    return h
+def _h(client):
+    return {"Authorization": "Bearer test"}
 
 
-def test_lifecycle_validation_and_archive_irreversible(client):
-    h = _auth(client)
-    c = client.post("/api/architect/sessions", json={"kind": "generic", "title": "T"},
-                    headers=h).json()["data"]
-    assert c["status"] == "active" and c["reviewState"] == "read"
-    assert c["roleId"] == "architect"
-    # 非法旧值拒绝
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"status": "waiting"}, headers=h)
+def _mk_confirmed_req(rid, **snap):
+    s = {"title": "T", "desc": "", "designMd": "方案", "allowedScope": ["modules/x/"],
+         "forbiddenScope": [], "acceptance": ["编译通过"], "functionalScope": [],
+         "assessmentSummary": "", "estMin": 0}
+    s.update(snap)
+    store.RequirementsStore.create({
+        "id": rid, "title": s["title"], "status": "ready",
+        "specVersions": [{"ver": 1, "state": "confirmed", "snapshot": s,
+                          "source": {"convId": "", "actor": "t"},
+                          "reason": "", "createdAt": 1}],
+        "activeVer": 1, "updatedAt": 1, "createdAt": 1})
+
+
+# ── 会话: roles 声明 + workState ──
+
+def test_session_roles_array_and_workstate(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    store.SessionRolesStore.upsert({"id": "exec-1", "name": "E", "kind": "executor"})
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+    assert store.ConversationsStore.roles_of(conv["id"]) == ["architect"]
+    store.ConversationsStore.set_roles(conv["id"], ["architect", "exec-1"])
+    assert store.ConversationsStore.roles_of(conv["id"]) == ["architect", "exec-1"]
+    store.ConversationsStore.set_work_state(conv["id"], "running")
+    assert store.ConversationsStore.work_state(conv["id"]) == "running"
+    store.ConversationsStore.set_work_state(conv["id"], "architect")
+    assert store.ConversationsStore.work_state(conv["id"]) == "architect"
+
+
+def test_rest_create_patch_roles_and_lifecycle(tmp_path, monkeypatch):
+    data = _setup(tmp_path, monkeypatch)
+    client = _client(monkeypatch, data)
+    store.SessionRolesStore.upsert({"id": "exec-1", "name": "E", "kind": "executor"})
+    # roles 声明即用(不锁定)
+    c = client.post("/api/architect/sessions",
+                    json={"kind": "generic", "roles": ["exec-1"]}, headers=_h(client)).json()["data"]
+    assert c["roles"] == ["architect", "exec-1"]
+    assert c["workState"] == "architect"
+    # 声明不存在角色 → 400
+    r = client.post("/api/architect/sessions",
+                    json={"kind": "generic", "roles": ["ghost"]}, headers=_h(client))
     assert r.status_code == 400
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"status": "done"}, headers=h)
+    # status 仅 active|archived(running 语义已移至 workState)
+    r = client.patch(f"/api/architect/sessions/{c['id']}",
+                     json={"status": "running"}, headers=_h(client))
     assert r.status_code == 400
-    # reviewState 校验
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"reviewState": "bad"}, headers=h)
+    r = client.patch(f"/api/architect/sessions/{c['id']}",
+                     json={"status": "archived"}, headers=_h(client))
+    assert r.status_code == 200 and r.json()["data"]["status"] == "archived"
+    # 归档不可逆 + roles 不可改
+    r = client.patch(f"/api/architect/sessions/{c['id']}",
+                     json={"status": "active"}, headers=_h(client))
     assert r.status_code == 400
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"reviewState": "unread"}, headers=h)
-    assert r.json()["data"]["reviewState"] == "unread"
-    # 归档 → 不可逆
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"status": "archived"}, headers=h)
-    assert r.json()["data"]["status"] == "archived"
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"status": "active"}, headers=h)
-    assert r.status_code == 400
-    # 归档后 reviewState 仍可更新(读标记)
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"reviewState": "read"}, headers=h)
-    assert r.json()["data"]["reviewState"] == "read"
-
-
-def test_legacy_status_migration(client):
-    """存量单值状态迁移: waiting→awaiting_reply+active; pending→active+pendingExec。"""
-    from topoone_app_architect.arch_routes import store
-    store.ConversationsStore.create({"id": "cv-old1", "kind": "asset", "status": "waiting"})
-    store.ConversationsStore.create({"id": "cv-old2", "kind": "execution", "status": "pending"})
-    from topoone_app_architect.arch_routes.db_schema import _migrate_conversation_lifecycle
-    db = store._db()
-    _migrate_conversation_lifecycle(db)
-    c1 = store.ConversationsStore.get("cv-old1")
-    assert c1["status"] == "active" and c1["reviewState"] == "awaiting_reply"
-    c2 = store.ConversationsStore.get("cv-old2")
-    assert c2["status"] == "active" and c2["reviewState"] == "read"
-    meta = c2.get("meta") or {}
-    assert (meta.get("pendingExec") if isinstance(meta, dict) else True) is True
-
-
-def test_roles_seed_and_builtin_protection(client):
-    from topoone_app_architect.arch_routes import store
-    roles = store.SessionRolesStore.all()
-    arch = [r for r in roles if r["id"] == "architect"]
-    assert arch and arch[0]["kind"] == "architect" and arch[0]["builtin"]
-    # 内置角色不可删
-    assert store.SessionRolesStore.delete("architect") is False
-    # executor 角色可建可删
-    r = store.SessionRolesStore.upsert({"id": "exec-cline", "name": "执行器·cline",
-                                        "executorId": "cline"})
-    assert r["id"] == "exec-cline" and r["kind"] == "executor"
-    # 内置角色改绑定被忽略
-    store.SessionRolesStore.upsert({"id": "architect", "name": "Architect",
-                                    "executorId": "hijack", "kind": "executor"})
-    assert store.SessionRolesStore.get("architect")["executorId"] == ""
-    assert store.SessionRolesStore.delete("exec-cline") is True
-
-
-def test_spawn_execution_session_dual_state(client):
-    from topoone_app_architect.arch_routes import store
-    from topoone_app_architect.arch_routes.requirements import spawn_execution_session
-    store.RequirementsStore.create({"id": "RQ-D1", "title": "双态测试", "desc": "d"})
-    conv = spawn_execution_session({"id": "RQ-D1", "title": "双态测试",
-                                    "analysis": {"acceptance": ["构建通过"]}})
-    row = store.ConversationsStore.get(conv["id"])
-    assert row["status"] == "active" and row["reviewState"] == "unread"
-    meta = row.get("meta") or {}
-    assert isinstance(meta, dict) and meta.get("pendingExec") is True
-
-
-
-def test_role_switch_rules(client):
-    """PR3 角色切换: 规范化门槛 + 单向锁定。"""
-    from topoone_app_architect.arch_routes import store
-    h = _auth(client)
-    store.SessionRolesStore.upsert({"id": "exec-x", "name": "执行X", "executorId": "opencode"})
-    c = client.post("/api/architect/sessions", json={"kind": "generic", "title": "切换"}, headers=h).json()["data"]
-    # 未绑定需求 → 拒绝(未规范化)
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-x"}, headers=h)
-    assert r.status_code == 400 and "规范化" in r.json()["message"]
-    # 绑定需求但未入池 → 拒绝
-    store.RequirementsStore.create({"id": "RQ-SW", "title": "t", "location": "proposal"})
-    client.patch(f"/api/architect/sessions/{c['id']}", json=None, headers=h) if False else None
-    store.ConversationsStore.update(c["id"], {"reqId": "RQ-SW"})
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-x"}, headers=h)
-    assert r.status_code == 400
-    # 入池 → 切换成功且锁定
-    store.RequirementsStore.update("RQ-SW", {"location": "pool"})
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-x"}, headers=h)
-    assert r.json()["data"]["roleId"] == "exec-x" and r.json()["data"]["roleLocked"]
-    # 再换(即使另一角色) → 锁定拒绝
-    store.SessionRolesStore.upsert({"id": "exec-y", "name": "执行Y", "executorId": "cline"})
-    r = client.patch(f"/api/architect/sessions/{c['id']}", json={"roleId": "exec-y"}, headers=h)
-    assert r.status_code == 400 and "锁定" in r.json()["message"]
-
-
-
-def test_handoff_creates_locked_new_session(client, monkeypatch):
-    """PR4 交接: 规范化会话 → 新会话绑目标角色(生而锁定) + 原会话指向。"""
-    from topoone_app_architect.arch_routes import store
-    from topoone_app_architect.arch_routes import context_registry as CR
-    # dossier 需 LLM 的段落裁剪纯本地拼装, 但 root 解析可能走 KB → 打桩兜底
-    monkeypatch.setattr(CR, "assemble_dossier", lambda *a, **k: "【测试交接档案】需求: X; 方案: Y")
-    h = _auth(client)
-    store.SessionRolesStore.upsert({"id": "exec-h", "name": "交接目标", "executorId": "opencode"})
-    c = client.post("/api/architect/sessions", json={"kind": "generic", "title": "原会话"}, headers=h).json()["data"]
-    # 未绑定需求 → 拒绝
-    r = client.post(f"/api/architect/sessions/{c['id']}/handoff",
-                    json={"targetRoleId": "exec-h"}, headers=h)
-    assert r.status_code == 400
-    store.RequirementsStore.create({"id": "RQ-HO", "title": "交接需求", "desc": "d", "location": "pool"})
-    store.ConversationsStore.update(c["id"], {"reqId": "RQ-HO"})
-    r = client.post(f"/api/architect/sessions/{c['id']}/handoff",
-                    json={"targetRoleId": "exec-h", "archiveOrigin": True}, headers=h)
-    assert r.status_code == 200, r.text
-    d = r.json()["data"]
-    new_id = d["newConvId"]
-    new_conv = store.ConversationsStore.get(new_id)
-    assert new_conv["roleId"] == "exec-h" and new_conv["roleLocked"]
-    assert new_conv["reqId"] == "RQ-HO" and new_conv["reviewState"] == "unread"
-    msgs = store.ConversationsStore.messages(new_id)
-    assert any("交接摘要" in (m.get("content") or "") for m in msgs)
-    # 原会话归档 + handoffTo
-    origin = store.ConversationsStore.get(c["id"])
-    assert origin["status"] == "archived" and "handoffTo" in (origin.get("meta") or "")
-    # 归档会话不能再交接
-    r = client.post(f"/api/architect/sessions/{c['id']}/handoff",
-                    json={"targetRoleId": "exec-h"}, headers=h)
-    assert r.status_code == 400
-    # 新会话(锁定)不能再直接 PATCH roleId
-    r = client.patch(f"/api/architect/sessions/{new_id}", json={"roleId": "architect"}, headers=h)
+    r = client.patch(f"/api/architect/sessions/{c['id']}",
+                     json={"roles": []}, headers=_h(client))
     assert r.status_code == 400
 
 
-
-def test_conv_read_tool_includes_archived(client):
-    """PR-D: conv.read 只读工具可读归档会话。"""
-    from topoone_app_architect.arch_routes import req_agent as R
-    from topoone_app_architect.arch_routes import store
-    store.ConversationsStore.create({"id": "cv-arch1", "kind": "generic",
-                                     "title": "归档读", "status": "archived"})
-    store.ConversationsStore.append_message({"id": "m1", "conversationId": "cv-arch1",
-                                             "role": "user", "time": 1, "content": "历史提问"})
-    r = R.run_arch_tool("conv.read", {"convId": "cv-arch1"}, None, None)
-    assert r.get("ok") and r["lifecycle"] == "archived"
-    assert any(m["content"] == "历史提问" for m in r["messages"])
+def test_execution_kind_removed(tmp_path, monkeypatch):
+    data = _setup(tmp_path, monkeypatch)
+    client = _client(monkeypatch, data)
+    r = client.post("/api/architect/sessions",
+                    json={"kind": "execution"}, headers=_h(client))
+    c = r.json()["data"]
+    assert c["kind"] == "requirement"      # 非法 kind 落默认
 
 
-def test_tool_whitelist_contextvar(client):
-    """PR-A: 角色工具白名单 contextvar 拒绝未授权工具。"""
-    import asyncio
-    from topoone_app_architect.arch_routes import websocket as WS
-    sent = []
-    class _FakeWS:
-        async def send_json(self, obj):
-            sent.append(obj)
-    WS._TOOL_WHITELIST.set(["kb.asset.search"])
+# ── 规约版本链 + 登记簿 ──
 
-    async def _run():
-        return await WS._run_tool_with_progress(
-            _FakeWS(), "req-propose-x", "req.propose",
-            {"title": "x", "designMd": "d"}, None, None)
-    res = asyncio.run(_run())
-    assert res["ok"] is False and "白名单拒绝" in res["text"]
-    WS._TOOL_WHITELIST.set(None)
-
-
-
-
-def test_agent_chat_reply_extra_context(client, monkeypatch):
-    """PR-B: executor 会话对话直达 coding agent, 携带需求/角色/最近对话上下文。"""
-    import asyncio
-    from topoone_app_architect.arch_routes import websocket as WS
-    captured = {}
-
-    def fake_chat_reply(*, question, root, project, task_context="", model_id="", max_rounds=4):
-        captured["question"] = question
-        captured["ctx"] = task_context
-        return "代码回答"
-
-    import topoone_app_architect.arch_routes.tagent_chat as TC
-    monkeypatch.setattr(TC, "chat_reply", fake_chat_reply)
-    out = asyncio.run(WS._agent_chat_reply(
-        {"reqId": ""}, "这个函数怎么改?",
-        "会话角色: 执行A(executor)\n最近对话:\nuser: 上一轮"))
-    assert out == "代码回答"
-    assert captured["question"] == "这个函数怎么改?"
-    assert "executor" in captured["ctx"] and "上一轮" in captured["ctx"]
+def test_spec_lifecycle_versions(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    store.RequirementsStore.create({
+        "id": "RQ-A", "title": "A", "status": "draft",
+        "specVersions": [{"ver": 1, "state": "draft",
+                          "snapshot": {"title": "A", "designMd": "v1", "acceptance": ["a"],
+                                       "allowedScope": ["modules/a/"]},
+                          "source": {"convId": "", "actor": "t"}, "reason": "", "createdAt": 1}],
+        "activeVer": 1, "updatedAt": 1, "createdAt": 1})
+    # append v2 → active 切换, 仍 draft
+    e = store.RequirementsStore.spec_append("RQ-A", {"title": "A", "designMd": "v2",
+        "acceptance": ["a"], "allowedScope": ["modules/b/"]}, reason="修订")
+    assert e["ver"] == 2
+    assert store.RequirementsStore.get("RQ-A")["status"] == "draft"
+    # confirm → ready + v1 隐式 superseded? v1 是 draft 不是 confirmed → 保持 draft
+    res = store.RequirementsStore.spec_confirm("RQ-A")
+    assert res["ok"]
+    vs = store.RequirementsStore.spec_versions("RQ-A")
+    assert vs[0]["state"] == "draft" and vs[1]["state"] == "confirmed"
+    # 再修订 + confirm → v2 superseded(隐式废弃)
+    store.RequirementsStore.spec_append("RQ-A", {"title": "A", "designMd": "v3",
+        "acceptance": ["a"], "allowedScope": ["modules/c/"]})
+    store.RequirementsStore.spec_confirm("RQ-A")
+    vs = store.RequirementsStore.spec_versions("RQ-A")
+    assert vs[1]["state"] == "superseded" and vs[2]["state"] == "confirmed"
+    assert store.RequirementsStore.get("RQ-A")["status"] == "ready"
+    # 用户完成判定 → done; 之后 spec_append 不应发生(工具层拦), store 层保护状态
+    store.RequirementsStore.mark_done("RQ-A")
+    row = store.RequirementsStore.get("RQ-A")
+    assert row["status"] == "done" and row["doneMark"] == 1
 
 
+def test_migration_v2_from_legacy(tmp_path, monkeypatch):
+    """存量 RQ(analysis/status=analyzed) → v1 confirmed + ready。"""
+    _setup(tmp_path, monkeypatch)
+    store.RequirementsStore.create({
+        "id": "RQ-M", "title": "迁移", "status": "analyzed",
+        "analysis": json.dumps({"designMd": "旧方案", "acceptance": ["x"],
+                                "allowedScope": ["src/a/"]}),
+        "updatedAt": 111})
+    from topoone_app_architect.arch_routes.db_schema import _migrate_lifecycle_v2
+    from topoone_app_architect.arch_routes.store.base import _db
+    _migrate_lifecycle_v2(_db())
+    _migrate_lifecycle_v2(_db())  # 幂等
+    r = store.RequirementsStore.get("RQ-M")
+    assert r["status"] == "ready" and r["activeVer"] == 1
+    v = store.RequirementsStore.spec_active("RQ-M")
+    assert v["state"] == "confirmed" and v["snapshot"]["designMd"] == "旧方案"
+    # analysis 派生缓存同步
+    assert r["analysis"]["designMd"] == "旧方案"
 
-def test_parse_oc_config_models():
-    """opencode /config → 模型条目(local/cloud 分类)。"""
-    from topoone_app_architect.arch_routes.agent_executors import _parse_oc_config
-    cfg = {"provider": {
-        "AMD-GPU-8200": {"options": {"baseURL": "http://192.168.1.76:8200/v1"},
-                         "models": {"Qwen3.8-27B": {}, "Qwen3.6-27B": {}}},
-        "siliconflow": {"options": {"baseURL": "https://api.siliconflow.cn/v1"},
-                        "models": {"DeepSeek-V4": {}}},
-        "no-url": {"models": {"x": {}}},
-    }}
-    out = _parse_oc_config(cfg)
-    got = {(m["model"], m["kind"]) for m in out}
-    assert ("AMD-GPU-8200/Qwen3.8-27B", "local") in got
-    assert ("siliconflow/DeepSeek-V4", "cloud") in got
-    assert not any(m["model"].startswith("no-url") for m in out)
-    assert all(m["url"] for m in out)
+
+def test_migration_v2_deletes_execution_convs(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    ce = store.ConversationsStore.create({"kind": "execution", "title": "旧执行会话"})
+    store.ConversationsStore.append_message({"id": "m-x", "conversationId": ce["id"],
+                                              "role": "assistant", "time": 1, "content": "x"})
+    cn = store.ConversationsStore.create({"kind": "generic", "title": "留"})
+    from topoone_app_architect.arch_routes.db_schema import _migrate_lifecycle_v2
+    from topoone_app_architect.arch_routes.store.base import _db
+    _migrate_lifecycle_v2(_db())
+    assert store.ConversationsStore.get(ce["id"]) is None
+    assert store.ConversationsStore.get(cn["id"]) is not None
+    assert store.ConversationsStore.messages(ce["id"]) == []

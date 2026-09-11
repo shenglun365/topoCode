@@ -2,7 +2,6 @@
 import asyncio
 import json
 import logging
-import contextvars
 import os
 import re
 import urllib.request
@@ -53,7 +52,7 @@ def _is_impl_intent(question: str) -> bool:
 _AMEND_TRIG_RE = re.compile(
     r"调整(方案|需求|规约)|(方案|需求|规约)调整|修改(方案|需求|规约)")
 _CONFIRM_TRIG_RE = re.compile(r"(确认执行|确认启动|确认，执行|确认。执行)[!！。.]?")
-_STOP_TRIG_RE = re.compile(r"(停止执行|中止执行|终止执行)[!！。.]?")
+_RESUME_TRIG_RE = re.compile(r"(继续执行|继续任务|接着执行|继续跑)[!！。.]?")
 _DIFF_TRIG_RE = re.compile(r"(查看差异|看下差异|查看 diff|看 diff)[?？!！。.]?", re.I)
 
 logger = logging.getLogger(__name__)
@@ -272,6 +271,16 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             _ctx.set_req(conv["reqId"])
     except Exception:
         pass
+    # 生命周期重构: running 相位输入锁定(裁决#6.1)——控制走 UI 停止按钮(REST),
+    # 并行讨论请复制上下文开新会话; 回合结束自动回 architect 态
+    if conv and (conv.get("workState") or "architect") == "running":
+        await websocket.send_json({"type": "error", "requestId": "",
+                                   "message": "作业执行中：会话输入已锁定。"
+                                              "可等待回合结束（自动恢复对话）、"
+                                              "在会话信息面板点击「停止作业」，或"
+                                              "复制本会话上下文到新会话继续讨论。"})
+        return
+
     user_msgs = [m for m in history if m.get("role") == "user" and (m.get("content") or "").strip()]
     last_user_msg_id = ""
     for m in user_msgs[-1:]:
@@ -287,94 +296,59 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         skill_scenarios = []
     # PR-A 角色能力 enforcement: executor 角色会话 → 技能场景以角色配置为准、
     # 工具白名单收紧(空=全量); architect 角色不受限。
-    _role = None
-    try:
-        _role = store.SessionRolesStore.get(
-            (conv.get("roleId") or "architect")) if conv else None
-        if _role and (_role.get("kind") or "") == "executor":
-            role_skills = [str(x) for x in (_role.get("skills") or []) if x]
-            if role_skills:
-                skill_scenarios = role_skills
-            _TOOL_WHITELIST.set([str(x) for x in (_role.get("tools") or []) if x] or None)
-        else:
-            _TOOL_WHITELIST.set(None)
-    except Exception:  # noqa: BLE001
-        _TOOL_WHITELIST.set(None)
-    # PR-B executor 会话路由: 指令分级分流——
-    #   ① 实施触发词(执行方案/开始执行/继续执行/执行/实施…) → runner 实施作业(桥接泵)
-    #   ② 停止执行/查看差异 → 作业控制
-    #   ③ 作业运行中的其他消息 → 提示经泵上行转达(等待输入场景)
-    #   ④ 方案调整(调整方案/方案调整/调整需求…) → 回 architect 流程修订本会话绑定
-    #      规约(req.amend, 不新建规约)——不走 executor 早退, 落到下方主流程
-    #   ⑤ 其余 → tAgent 执行工程师答疑(tAgent 代码问答, agentic_loop + KB/代码工具)
-    if _role and (_role.get("kind") or "") == "executor":
-        question = (user_msgs[-1].get("content", "") if user_msgs else "").strip()
-        impl_hit = _is_impl_intent(question)
-        amend_hit = bool(_AMEND_TRIG_RE.search(question))
-        stop_hit = bool(_STOP_TRIG_RE.fullmatch(question))
-        diff_hit = bool(_DIFF_TRIG_RE.fullmatch(question))
-        job_live = exec_bridge.is_running(conv_id)
-        confirm_hit = bool(_CONFIRM_TRIG_RE.fullmatch(question))
-        if stop_hit:
-            final_b = exec_bridge.stop(conv_id)
-        elif diff_hit:
-            final_b = _exec_diff_text(conv)
-        elif job_live:
-            final_b = ("实施作业运行中——执行工程师的提问会直接出现在本会话，"
-                       "直接发送消息即可转达（作业等待输入时自动送达）。"
-                       "发送「停止执行」可中止，「查看差异」看当前改动。")
-        elif confirm_hit or (impl_hit and not job_live):
-            final_b = await _executor_implement(conv, _role, confirmed=confirm_hit)
-        elif amend_hit:
-            final_b = None  # 落到下方 architect 主流程(带 req.amend 收敛)
-        else:
-            exec_bridge.resume_if_job(conv_id, project_id=(conv.get("projectId") or ""))
-            final_b = await _executor_chat_reply(conv, question, _role)
-            if final_b and not exec_bridge.is_running(conv_id):
-                # 答疑兜底引导(闭环): 消灭「想做实施却滑入答疑」的死循环——
-                # 无论模型怎么答, 回复尾部都有通往实施的明确路径
-                try:
-                    from . import llm_dataset as _lds
-                    _lds.record("exec_intent_miss", question=question[:200],
-                                role=(_role or {}).get("id") or "")
-                except Exception:  # noqa: BLE001
-                    pass
-                final_b += ("\n\n> ℹ️ 发送「**执行方案**」启动实施作业（开发+单元测试+整体编译验收）；"
-                            "「方案调整」可修订本会话规约；「停止执行」「查看差异」控制作业。")
-        if final_b is not None:
-            assistant_msg_id_b = store.next_id("m")
-            store.ConversationsStore.append_message({
-                "id": assistant_msg_id_b, "conversationId": conv_id,
-                "role": "assistant", "time": _ts(), "content": final_b,
-            })
-            try:
-                # 会话状态流转: 执行会话获得 coding agent 首个回复 → 执行中(会话即流程)
-                patch = {"reviewState": "unread"}
-                if (conv.get("status") or "active") == "active":
-                    patch["status"] = "running"
-                store.ConversationsStore.update(conv_id, patch)
-            except Exception:  # noqa: BLE001
-                pass
-            await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
-                                       "requestId": "", "userMessageId": last_user_msg_id})
-            for i in range(0, len(final_b), 96):
-                await websocket.send_json({"type": "chunk", "requestId": "",
-                                           "delta": final_b[i:i + 96]})
-                await asyncio.sleep(0.01)
-            await websocket.send_json({"type": "done", "conversationId": conv_id,
-                                       "content": final_b, "messageId": assistant_msg_id_b})
-            return
-        # 方案调整: 注入修订契约后走 architect 主流程(工具含 req.amend, 守卫照常)
+    # 生命周期重构: 角色是能力声明(roles 数组)——无白名单/锁定; architect 恒为对话主体
+    # ---- architect 态意图分流(生命周期重构) ----
+    #   ① 执行意图(执行方案/执行本任务…) → 执行预览; 「确认执行」→ 建作业
+    #   ② 「继续执行」→ 增量回合(把回合结束后的用户补充打包交回等待中的作业)
+    #   ③ 「查看差异」→ 最近作业 diff(只读, 亦走 UI 按钮)
+    #   ④ 方案调整(调整方案/需求/规约) → architect 主流程 + req.amend 契约
+    #   ⑤ 其余 → architect 主流程(全量工具)
+    #   停止作业: 仅 UI 按钮(REST 确定操作, 裁决#5), 无自然语言通道
+    question = (user_msgs[-1].get("content", "") if user_msgs else "").strip()
+    impl_hit = _is_impl_intent(question)
+    confirm_hit = bool(_CONFIRM_TRIG_RE.fullmatch(question))
+    resume_hit = bool(_RESUME_TRIG_RE.fullmatch(question))
+    diff_hit = bool(_DIFF_TRIG_RE.fullmatch(question))
+    amend_hit = bool(_AMEND_TRIG_RE.search(question))
+    final_b = None
+    if confirm_hit or (impl_hit and not exec_bridge.is_running(conv_id)):
+        final_b = await _executor_implement(conv, None, confirmed=confirm_hit)
+    elif resume_hit:
+        final_b = await _exec_resume_turn(conv)
+    elif diff_hit:
+        final_b = exec_bridge.diff_text(conv_id)
+    if final_b is not None:
+        assistant_msg_id_b = store.next_id("m")
+        store.ConversationsStore.append_message({
+            "id": assistant_msg_id_b, "conversationId": conv_id,
+            "role": "assistant", "time": _ts(), "content": final_b,
+        })
+        try:
+            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+        except Exception:  # noqa: BLE001
+            pass
+        await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
+                                   "requestId": "", "userMessageId": last_user_msg_id})
+        for i in range(0, len(final_b), 96):
+            await websocket.send_json({"type": "chunk", "requestId": "",
+                                       "delta": final_b[i:i + 96]})
+            await asyncio.sleep(0.01)
+        await websocket.send_json({"type": "done", "conversationId": conv_id,
+                                   "content": final_b, "messageId": assistant_msg_id_b})
+        return
+    amend_contract = None
+    if amend_hit:
+        # 方案调整: 注入修订契约后走 architect 主流程(req.amend 追加新 draft 版本)
         amend_contract = (
-            "【方案调整模式】本会话为执行会话，绑定需求 "
-            f"{(conv.get('reqId') or '')}。用户要求调整方案/规约——你现在是架构师："
-            "与用户对话收敛调整内容，并用 req.amend 工具把调整落回该需求的方案字段"
-            "(只更新既有规约，严禁调用 req.propose / req.finalize 新建规约)。"
-            "调整完成后向用户复述变更点。")
+            "【需求修订模式】本会话绑定需求 "
+            f"{(conv.get('reqId') or '')}。用户要求补充/完善/调整需求或方案——"
+            "与用户对话收敛修订内容，并用 req.amend 工具落为该需求的新 draft 版本"
+            "(append-only 修订；不要调用 req.finalize，确认由用户显式发起)。"
+            "修订完成后向用户复述变更点，并说明「执行方案」将按新版本执行。")
 
     msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
                                 skill_scenarios=[str(s) for s in skill_scenarios])
-    if _role and (_role.get("kind") or "") == "executor" and amend_hit:
+    if amend_contract:
         msgs.insert(1, {"role": "system", "content": amend_contract})
 
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，
@@ -701,17 +675,6 @@ async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds:
     return res.get("content", "") if isinstance(res, dict) else ""
 
 
-# PR-A 角色工具白名单(请求级 contextvar: executor 角色会话限制可调工具集)
-_TOOL_WHITELIST = contextvars.ContextVar("arch_tool_whitelist", default=None)
-
-
-def _check_tool_whitelist(name: str) -> Optional[str]:
-    wl = _TOOL_WHITELIST.get()
-    if not wl or name in wl:
-        return None
-    return f"角色工具白名单拒绝: {name} 不在本会话角色允许的工具集内"
-
-
 async def _ws_send(websocket, payload: dict) -> None:
     """尽力发送: 连接断开时吞异常(工具进度不因断连炸出回合)。"""
     try:
@@ -732,11 +695,6 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     """
     from . import context_registry, req_agent
     await _ws_send(websocket, {"type": "tool_call", "requestId": request_id, "tool": name})
-    denied = _check_tool_whitelist(name)
-    if denied:
-        await _ws_send(websocket, {"type": "tool_result", "requestId": request_id,
-                                   "tool": name, "ok": False, "summary": denied[:160]})
-        return {"name": name, "text": denied, "ok": False}
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
     summary = req_agent.tool_result_text(name, result)
     ok = not (isinstance(result, dict) and result.get("error"))
@@ -800,44 +758,20 @@ def _req_chat_stream(msgs, model_id):
 
 # ── A7: tAgent 代码问答辅助(会话驱动: 会话→工程上下文→代码问答) ────────
 
-async def _agent_chat_reply(conv: dict, content: str,
-                            extra_context: str = "",
-                            role: Optional[dict] = None) -> Optional[str]:
-    """executor 会话对话直达 coding agent(tAgent 代码问答, agentic_loop + KB/代码工具)。
 
-    会话绑定需求/项目 → root/project → chat_reply。KB 不可达/异常 → None
-    (调用方仅落库回显用户消息)。阻塞调用放线程。
+def _build_impl_instruction(rid: str, prior_brief: str = "") -> str:
+    """绑定需求 active 规约版本 → coding agent 实施指令(方案/边界/验收/DoD)。
+
+    prior_brief: 前情简报(重试时注入——上次非完成作业的失败原因/改动/结论)。
     """
-    from . import tagent_chat
-    from .execution import conv_root_project
-    root, project = conv_root_project(conv or {})
-    req_title = ""
-    rid = (conv or {}).get("reqId") or ""
-    if rid:
-        r = store.RequirementsStore.get(rid)
-        req_title = (r or {}).get("title", "")
-    task_context = ""
-    if rid:
-        task_context = (f"执行会话绑定需求: {rid}"
-                        + (f"「{req_title}」" if req_title else "")
-                        + "\n说明: 用户正在执行会话中对话, 问题通常涉及该需求要实现的代码。")
-    if extra_context:
-        task_context = (task_context + "\n" + extra_context) if task_context else extra_context
-    try:
-        return await asyncio.to_thread(
-            tagent_chat.chat_reply,
-            question=content, root=root, project=project, task_context=task_context,
-            model_id=(role or {}).get("modelId") or "")
-    except Exception as e:
-        logger.warning(f"[executor-chat] tAgent 聊天失败: {e}")
-        return None
-
-
-def _build_impl_instruction(rid: str) -> str:
-    """绑定需求 → coding agent 实施指令(目标/方案/边界/验收/交付定义)。"""
     r = store.RequirementsStore.get(rid) or {}
-    a = r.get("analysis") or {}
-    parts = [f"# 实施任务：{r.get('title') or rid}（{rid}）"]
+    active = store.RequirementsStore.spec_active(rid) or {}
+    a = (active.get("snapshot") or {})
+    if not a:
+        a = r.get("analysis") or {}
+    parts = [f"# 实施任务：{r.get('title') or rid}（{rid} · 规约 v{active.get('ver') or '?'}）"]
+    if prior_brief:
+        parts.append("## 前情简报(上次作业)\n" + prior_brief)
     if a.get("functionalScope"):
         parts.append("## 需求目标\n" + "\n".join(f"- {x}" for x in a["functionalScope"]))
     if a.get("designMd") or a.get("implementationPath"):
@@ -859,9 +793,21 @@ def _build_impl_instruction(rid: str) -> str:
     return "\n\n".join(parts)
 
 
-def _executor_hint(role: Optional[dict]) -> Optional[dict]:
-    """角色绑定的执行器配置 → runner 作业提示(model/端口等)。"""
-    eid = (role or {}).get("executorId") or ""
+def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
+    """会话 roles 中的 executor 角色 → 其执行器配置提示(model/端口等)。"""
+    roles = []
+    try:
+        rr = (conv or {}).get("roles")
+        roles = rr if isinstance(rr, list) else []
+    except Exception:  # noqa: BLE001
+        pass
+    eid = ""
+    for rid_role in roles:
+        if rid_role and rid_role != "architect":
+            r = store.SessionRolesStore.get(rid_role)
+            if r and (r.get("kind") or "") == "executor" and r.get("executorId"):
+                eid = r["executorId"]
+                break
     if not eid:
         return None
     try:
@@ -902,107 +848,151 @@ def _spec_updated_at(rid: str) -> int:
 
 
 def _executor_preview_card(conv: dict, instruction: str, pending: dict) -> str:
-    """执行预览卡: 即将按哪版规约实施(方案摘要/边界/验收/分支), 待确认。"""
+    """执行预览卡: 即将按哪个规约版本执行(方案摘要/边界/验收/分支), 待确认。"""
     rid = (conv or {}).get("reqId") or ""
     r = store.RequirementsStore.get(rid) or {}
-    a = r.get("analysis") or {}
+    active = store.RequirementsStore.spec_active(rid) or {}
+    snap = active.get("snapshot") or {}
     import datetime as _dt
-    upd = _dt.datetime.fromtimestamp((pending.get("specUpdatedAt") or 0) / 1000).strftime("%m-%d %H:%M") \
-        if pending.get("specUpdatedAt") else "未知"
-    design = str(a.get("designMd") or a.get("implementationPath") or "")[:400]
     parts = [
         "📋 **执行预览**（回复「**确认执行**」启动作业；「方案调整」可先修订规约）",
         f"- 需求：{r.get('title') or rid}（{rid}）",
-        f"- 规约版本：{upd}" + ("（最新）" if not pending.get("stale") else "（⚠️ 预览后规约已变更，本卡已按最新规约刷新）"),
+        f"- 规约版本：v{active.get('ver') or pending.get('specVer') or '?'}"
+        + ("（预览后规约已修订，本卡已按最新版本刷新）" if pending.get("stale") else "（最新）"),
         f"- 分支：`{pending.get('branchName') or ''}`",
-        f"- 允许改动 {len(a.get('allowedScope') or [])} 项 / 禁止改动 {len(a.get('forbiddenScope') or [])} 项 / 验收标准 {len(a.get('acceptance') or [])} 条",
-        "- 交付：开发 + 单元测试 + 整体编译验收；过程中需确认/澄清会直接在本会话提问",
+        f"- 允许改动 {len(snap.get('allowedScope') or [])} 项 / "
+        f"禁止改动 {len(snap.get('forbiddenScope') or [])} 项 / "
+        f"验收标准 {len(snap.get('acceptance') or [])} 条",
+        "- 交付：开发 + 单元测试 + 整体编译验收；作业执行中会话输入锁定，"
+        "agent 提问/完成/报错时自动恢复对话",
     ]
+    design = str(snap.get("designMd") or "")[:400]
     if design:
         parts.append(f"\n**方案摘要**：{design}…")
-    prev_jobs = (_meta_get(conv).get("execJobCount") or 0)
-    if prev_jobs:
-        parts.append(f"\n> ⚠️ 本会话已有 {prev_jobs} 次实施记录，本次将创建**新分支**重新实施。")
+    jobs = _meta_get(conv).get("jobs") or []
+    if jobs:
+        parts.append(f"\n> ℹ️ 本会话已有 {len(jobs)} 次作业记录(账本可追溯)；本次为独立新作业。")
     return "\n".join(parts)
 
 
-async def _executor_implement(conv: dict, role: Optional[dict], confirmed: bool = False) -> str:
-    """实施触发词 → 两段式: 首次=执行预览(不建作业); 「确认执行」→ 真正建作业。
+def _prior_job_brief(conv: dict) -> str:
+    """前情简报: 最近一条非完成作业的失败原因/实际改动/结论(重试上下文延续)。"""
+    jobs = _meta_get(conv).get("jobs") or []
+    for j in reversed(jobs):
+        if (j.get("status") or "") not in ("done",):
+            lines = []
+            if j.get("failReason"):
+                lines.append(f"- 上次结果: {str(j['failReason'])[:200]}")
+            if j.get("changedFiles"):
+                lines.append("- 已改动文件: " + ", ".join(j["changedFiles"][:12]))
+            if j.get("lastAgentNote"):
+                lines.append(f"- agent 结论: {str(j['lastAgentNote'])[:300]}")
+            if lines:
+                lines.append("- 请基于以上前情继续/修正，避免重复已完成的工作")
+                return "\n".join(lines)
+        break
+    return ""
 
-    防"污染/更新过的会话"误执行: 每次执行前都展示将依据的规约版本与摘要;
-    预览后规约再变更(方案调整)则自动按最新规约刷新预览。
+
+async def _executor_implement(conv: dict, role: Optional[dict], confirmed: bool = False) -> str:
+    """实施意图 → 两段式: 首次=执行预览(不建作业); 「确认执行」→ 真正建作业。
+
+    版本绑定: 预览/确认均锚定 active 规约版本(specVer); 预览后规约修订
+    (版本号变化) → 旧预览自动失效, 确认时按最新版本刷新预览。
     """
     import time as _time
     from . import exec_bridge
     conv_id = (conv or {}).get("id") or ""
     rid = (conv or {}).get("reqId") or ""
     if not rid:
-        return "本会话未绑定需求，无法启动实施（请通过需求定稿生成待执行会话）。"
+        return ("本会话未绑定需求规约，无法执行。请先在对话中形成需求"
+                "（模型会调用 req.propose），或从需求登记选择既有需求。")
+    row = store.RequirementsStore.get(rid)
+    if not row:
+        return f"需求 {rid} 不存在。"
+    if (row.get("doneMark") or 0) == 1:
+        return (f"{rid} 已完结(用户判定)。继续迭代请新建需求"
+                "（对话提出新需求即可，可引用本需求上下文）。")
+    active = store.RequirementsStore.spec_active(rid)
+    if not active:
+        return "该需求无生效规约版本。"
+    if active.get("state") != "confirmed":
+        return ("当前规约版本 v%s 尚未确认(draft)。请先说「确认方案」或经需求登记确认"
+                "（req.finalize 门禁校验后进入 ready），再「执行方案」。"
+                % active.get("ver"))
     meta = _meta_get(store.ConversationsStore.get(conv_id) or conv)   # 现读 DB(传入行可能滞后)
     pending = meta.get("execPending") or {}
-    spec_now = _spec_updated_at(rid)
+    spec_ver_now = int(active.get("ver") or 0)
 
     if confirmed and not pending:
-        confirmed = False   # 无预览的「确认执行」→ 按实施触发处理(生成预览)
+        confirmed = False   # 无预览的「确认执行」→ 按实施意图处理(生成预览)
     if confirmed:
         if _time.time() * 1000 - (pending.get("createdAt") or 0) > _EXEC_PENDING_TTL_MS:
             pending = {}
-        if pending and pending.get("specUpdatedAt") != spec_now:
-            pending = {}   # 预览后规约已变(方案调整) → 需重新预览
+        if pending and pending.get("specVer") != spec_ver_now:
+            pending = {}   # 预览后规约修订 → 需重新预览
         if not pending:
-            instruction = _build_impl_instruction(rid)
+            instruction = _build_impl_instruction(rid, prior_brief=_prior_job_brief(conv))
             branch = f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
             pending = {"instruction": instruction, "branchName": branch,
-                       "specUpdatedAt": spec_now, "createdAt": int(_time.time() * 1000)}
+                       "specVer": spec_ver_now, "createdAt": int(_time.time() * 1000)}
             meta["execPending"] = pending
             _meta_set(conv_id, meta)
             return _executor_preview_card(conv, instruction, pending) + \
-                "\n\n(上一份预览已因规约变更/超时失效，已按最新规约刷新)"
+                "\n\n(上一份预览已因规约修订/超时失效，已按最新版本刷新)"
         meta.pop("execPending", None)
         _meta_set(conv_id, meta)
-        info = exec_bridge.start_implement(conv, pending["instruction"],
-                                           executor_hint=_executor_hint(role),
-                                           branch_name=pending.get("branchName") or "")
-        try:
-            m2 = _meta_get(conv)
-            m2["execJobCount"] = (m2.get("execJobCount") or 0) + 1
-            _meta_set(conv_id, m2)
-        except Exception:  # noqa: BLE001
-            pass
-        return info
+        return exec_bridge.start_implement(
+            conv, pending["instruction"], executor_hint=_executor_hint(conv),
+            branch_name=pending.get("branchName") or "",
+            spec_ver=spec_ver_now)
 
     # 非确认触发(执行方案/执行本任务…) → 生成/刷新预览
-    instruction = _build_impl_instruction(rid)
-    stale = bool(pending) and pending.get("specUpdatedAt") != spec_now
+    instruction = _build_impl_instruction(rid, prior_brief=_prior_job_brief(conv))
+    stale = bool(pending) and pending.get("specVer") != spec_ver_now
     branch = (pending.get("branchName") if pending and not stale else "") or \
         f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
     pending = {"instruction": instruction, "branchName": branch,
-               "specUpdatedAt": spec_now, "createdAt": int(_time.time() * 1000),
+               "specVer": spec_ver_now, "createdAt": int(_time.time() * 1000),
                "stale": stale}
     meta["execPending"] = pending
     _meta_set(conv_id, meta)
     return _executor_preview_card(conv, instruction, pending)
 
 
-def _exec_diff_text(conv: dict) -> str:
-    """「查看差异」→ 当前作业相对基线的 diff 摘要。"""
+async def _exec_resume_turn(conv: dict) -> str:
+    """「继续执行」: 把上次回合结束后的用户补充打包交回等待中的作业(增量回合)。
+
+    依赖 coding agent 会话保持能力(opencode session 多轮, 已确认); 作业终态
+    (done/failed/lost)时不可续——引导走「执行方案」新作业(自动带前情简报)。
+    """
     from . import exec_bridge
-    info = exec_bridge.job_info(conv) or {}
-    if not info.get("jobId"):
-        return "暂无实施作业。发送「执行方案」开始实施。"
-    d = exec_bridge._runner(f"/api/implement/{info['jobId']}/diff", timeout=30.0) or {}
-    if not d.get("ok"):
-        return "无法获取差异(作业不存在或 runner 不可达)。"
-    files = "\n".join(f"- `{f}`" for f in (d.get("changedFiles") or [])[:30]) or "- (无)"
-    return (f"**分支 `{info.get('branch', '')}` 相对基线的差异**"
-            f"(+{d.get('addLines', 0)}/-{d.get('delLines', 0)} 行)\n{files}")
+    conv_id = (conv or {}).get("id") or ""
+    job = exec_bridge.waiting_job(conv_id)
+    if not job:
+        if exec_bridge.is_running(conv_id):
+            return ("作业正在执行回合中(会话输入本应锁定)——请等待回合结束或"
+                    "在会话信息面板停止作业。")
+        return ("没有等待输入的作业。发送「执行方案」按当前规约版本启动新作业"
+                "（会自动附带上次作业的前情简报）。")
+    # 增量上下文: 上次 agent 事件消息之后的所有用户消息
+    msgs = store.ConversationsStore.messages(conv_id, limit=30)
+    cut_ts = job.get("lastAgentTs") or 0
+    inc = [m.get("content", "").strip() for m in msgs
+           if m.get("role") == "user" and (m.get("time") or 0) > cut_ts
+           and (m.get("content") or "").strip()]
+    if not inc:
+        return ("没有新补充的信息。请先回复执行工程师的问题，再发送「继续执行」。")
+    payload = ("用户补充/回复(继续执行)：\n\n" + "\n\n---\n\n".join(inc[:10]))
+    res = await asyncio.to_thread(
+        exec_bridge.job_input, conv_id, job.get("jobId", ""), payload)
+    if res.get("ok"):
+        return (f"➡️ 已转达执行工程师（{len(inc)} 条补充），作业继续。"
+                "回合期间会话输入锁定，agent 提问/完成/报错时自动恢复。")
+    return f"转达失败：{res.get('error') or 'runner 不可达'}。可稍后重试或「执行方案」新作业。"
 
 
-async def _executor_chat_reply(conv: dict, question: str, role: Optional[dict]) -> str:
-    """执行工程师答疑(tAgent 代码问答) + 不可达兜底文案。"""
-    reply = await _agent_chat_reply(conv, question, role=role)
-    return reply or ("(执行工程师暂不可达: runner/LLM 网关无响应——稍后重试，"
-                     "或在系统管理页检查执行器与模型连通性)")
+
 
 
 def _push_session_message(session_id: str, role: str, content: str, tool=None):

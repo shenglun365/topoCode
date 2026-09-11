@@ -35,6 +35,8 @@ const props = defineProps<{
   contractSkill?: boolean
   /** 是否显示 🧾 开关(仅需求方案对话显示；资产管理/工作台不显示)。 */
   showContractSkill?: boolean
+  /** 作业执行锁(生命周期重构): 非空=running 输入锁定, 值为提示文案。 */
+  inputLocked?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -50,6 +52,8 @@ const emit = defineEmits<{
   'contract-confirm': [id: string]
   'contract-delete': [id: string]
   'contract-edit-save': [id: string, patch: Record<string, unknown>]
+  'job-accept': [meta: Record<string, any>]
+  'job-resume': []
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
   'goto-acceptance': []
@@ -127,6 +131,7 @@ watch(
 )
 
 function send() {
+  if (props.inputLocked) return
   if (!input.value.trim() || props.busy) return
   emit('send', input.value.trim())
   input.value = ''
@@ -628,6 +633,28 @@ onUnmounted(() => {
             {{ m.reasoning }}
           </div>
           <ChatMessageBlocks :content="m.content" />
+
+          <!-- 作业事件卡操作(生命周期重构): done→验收 / waiting_input→继续执行快捷 -->
+          <div
+            v-if="m.meta?.kind === 'job_done'"
+            class="mt-2 flex items-center gap-2"
+          >
+            <button
+              class="btn btn-xs btn-primary"
+              @click="emit('job-accept', m.meta)"
+            >{{ t('session.job.accept') }}</button>
+            <span class="text-[10px] text-ctp-overlay0">{{ t('session.job.acceptHint') }}</span>
+          </div>
+          <div
+            v-else-if="m.meta?.kind === 'job_input'"
+            class="mt-2 flex items-center gap-2"
+          >
+            <button
+              class="btn btn-xs"
+              @click="emit('job-resume')"
+            >{{ t('session.job.resume') }}</button>
+            <span class="text-[10px] text-ctp-overlay0">{{ t('session.job.resumeHint') }}</span>
+          </div>
 
           <div
             v-if="m.assets?.length"
@@ -1144,8 +1171,9 @@ onUnmounted(() => {
         v-model="input"
         rows="2"
         class="input !py-2.5 text-xs resize-y min-h-0"
-        :disabled="props.readOnly"
-        :placeholder="props.readOnly ? t('session.readOnlyHint') : t('requirement.chat.placeholder')"
+        :disabled="props.readOnly || !!props.inputLocked"
+        :placeholder="props.inputLocked ? props.inputLocked
+          : (props.readOnly ? t('session.readOnlyHint') : t('requirement.chat.placeholder'))"
         @input="autoResize"
         @keydown="onInputKeydown"
       />
@@ -1160,7 +1188,7 @@ onUnmounted(() => {
       <button
         v-else
         class="btn btn-primary !py-2.5 shrink-0 whitespace-nowrap"
-        :disabled="!input.trim() || props.readOnly"
+        :disabled="!input.trim() || props.readOnly || !!props.inputLocked"
         @click="send"
       >
         <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}

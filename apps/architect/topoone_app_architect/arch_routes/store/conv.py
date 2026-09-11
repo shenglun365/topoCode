@@ -169,18 +169,22 @@ class ConversationsStore:
 
     @classmethod
     def create(cls, data: dict) -> dict:
-        """创建会话；缺省补 id/时间字段。tags(JSON {modules,groups})/summary 会话中心用。"""
+        """创建会话；缺省补 id/时间字段。roles(JSON 角色集)/work_state(相位)生命周期用。"""
+        import json as _json
         now = int(__import__("time").time() * 1000)
+        roles = data.get("roles")
+        if not isinstance(roles, list) or not roles:
+            roles = ["architect"]
         payload = {
             "id": data.get("id") or next_id("cv"),
-            "kind": data.get("kind", "requirement"),
+            "kind": data.get("kind", "generic"),
             "project_id": data.get("projectId") or "",
             "req_id": data.get("reqId") or "",
             "title": data.get("title") or "",
             "status": data.get("status") or "active",
+            "work_state": data.get("workState") or "architect",
             "review_state": data.get("reviewState") or "read",
-            "role_id": data.get("roleId") or "architect",
-            "role_locked": 1 if data.get("roleLocked") else 0,
+            "roles": _json.dumps(roles, ensure_ascii=False),
             "tags": data.get("tags"),
             "summary": data.get("summary") or "",
             "meta": data.get("meta"),
@@ -286,6 +290,33 @@ class ConversationsStore:
     def append_message(cls, msg: dict) -> dict:
         _insert(cls.MSG_TABLE, msg)
         return msg
+
+    # ── 生命周期重构: 角色集 + 工作相位 ──
+
+    @classmethod
+    def roles_of(cls, conv_id: str) -> list:
+        row = cls.get(conv_id) or {}
+        r = row.get("roles")
+        if isinstance(r, list) and r:
+            return r
+        return ["architect"]
+
+    @classmethod
+    def set_roles(cls, conv_id: str, roles: list) -> None:
+        import json as _json
+        cls.update(conv_id, {"roles": _json.dumps(list(roles), ensure_ascii=False)})
+
+    @classmethod
+    def work_state(cls, conv_id: str) -> str:
+        row = cls.get(conv_id) or {}
+        return (row.get("workState") or "architect") if row.get("workState") else "architect"
+
+    @classmethod
+    def set_work_state(cls, conv_id: str, state: str) -> None:
+        """工作相位: architect(常态) | running(外调作业执行中)。
+        running ⇔ 账本存在非终态作业——由 exec_bridge 聚合维护, 此处仅落库。"""
+        if state in ("architect", "running"):
+            cls.update(conv_id, {"workState": state})
 
     @classmethod
     def delete_message(cls, conv_id: str, message_id: str) -> bool:

@@ -175,17 +175,17 @@ ARCH_PROJECT_TABLES_SQL = """
 
     CREATE TABLE IF NOT EXISTS arch_conversations (
         id TEXT PRIMARY KEY,
-        kind TEXT DEFAULT 'requirement',    -- requirement | design | asset | execution | unit-test | generic
+        kind TEXT DEFAULT 'generic',        -- requirement | asset | unit-test | generic
         project_id TEXT DEFAULT '',
         req_id TEXT DEFAULT '',
         title TEXT DEFAULT '',
-        status TEXT DEFAULT 'active',       -- 生命周期维度: active | running | archived(不可逆)
-        review_state TEXT DEFAULT 'read',   -- 查看状态维度: read | unread | awaiting_reply | error
-        role_id TEXT DEFAULT 'architect',   -- 执行角色(arch_session_roles.id; 新会话默认 architect)
-        role_locked INTEGER DEFAULT 0,      -- 角色锁定(首次切换 executor 后=1, 再换只能交接)
+        status TEXT DEFAULT 'active',       -- 生命周期: active | archived(不可逆)
+        work_state TEXT DEFAULT 'architect', -- 工作相位: architect(常态) | running(外调作业执行中)
+        review_state TEXT DEFAULT 'read',   -- 查看状态: read | unread | awaiting_reply | error
+        roles TEXT,                         -- JSON: 角色集 [architect(恒), ...外调角色id]
         tags TEXT,                          -- JSON: {modules:[], groups:[]} 会话分类(会话中心)
-        summary TEXT DEFAULT '',            -- 会话摘要(自动生成/手改；历史总结素材)
-        meta TEXT,                          -- JSON: 自由对话上下文(范围/意图等)
+        summary TEXT DEFAULT '',            -- 会话摘要
+        meta TEXT,                          -- JSON: 作业账本 jobs[] 等
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0
     );
@@ -591,34 +591,78 @@ def architect_db_migrations(db) -> None:
 
 # ── 项目库迁移(旧项目库升级兜底，幂等) ─────────────────────────
 
-def _migrate_conversation_lifecycle(db) -> None:
-    """存量会话状态迁移(一次性, 幂等): 单值 status → 双维度。
+def _migrate_lifecycle_v2(db) -> None:
+    """生命周期重构迁移(一次性, 幂等; 新鲜库各列默认即新模型, 无行可迁)。
 
-    waiting→(active, awaiting_reply); done/pending→(active, read) —
-    pending 额外打 meta.pendingExec 标记(待执行徽标); running/archived 保持。
+    - RQ: 首次(无 spec_versions) → 由存量 analysis/status 初始化 v1 版本
+      (analyzed/pool → confirmed+ready; raw → draft; cancelled/done 保持); 登记所有权。
+    - 会话: kind=execution 旧执行会话删除(含消息); roles 空 → 由 role_id 推导;
+      work_state 空 → architect; 旧 status=running → active(相位由作业账本推导)。
     """
+    import json as _json
+    now = int(__import__("time").time() * 1000)
+    # ── RQ → spec v1 ──
     try:
         rows = db.fetchall(
-            "SELECT id, status, meta FROM arch_conversations WHERE status IN ('waiting','done','pending')")
+            "SELECT id, title, desc, analysis, status, source_conversation_id, updated_at "
+            "FROM arch_requirements WHERE spec_versions IS NULL")
     except Exception:
-        return
+        rows = []
     for r in rows:
-        cid, st = r["id"], r["status"]
-        review = "awaiting_reply" if st == "waiting" else "read"
-        meta = r["meta"] or ""
-        if st == "pending":
-            try:
-                import json as _json
-                m = _json.loads(meta) if isinstance(meta, str) and meta else {}
-                if isinstance(m, dict):
-                    m["pendingExec"] = True
-                    meta = _json.dumps(m, ensure_ascii=False)
-            except Exception:
-                meta = '{"pendingExec": true}'
+        try:
+            a = _json.loads(r["analysis"]) if r["analysis"] else {}
+        except Exception:
+            a = {}
+        if not isinstance(a, dict):
+            a = {}
+        old_status = (r["status"] or "").lower()
+        confirmed = old_status in ("analyzed",) or old_status == "ready"
+        snap = {
+            "title": r["title"] or "", "desc": r["desc"] or "",
+            "functionalScope": a.get("functionalScope") or [],
+            "designMd": a.get("designMd") or str(a.get("implementationPath") or ""),
+            "allowedScope": a.get("allowedScope") or [],
+            "forbiddenScope": a.get("forbiddenScope") or [],
+            "acceptance": a.get("acceptance") or [],
+            "assessmentSummary": str(a.get("assessmentSummary") or ""),
+            "estMin": a.get("estMin") or 0,
+        }
+        v1 = {"ver": 1,
+              "state": "confirmed" if confirmed else "draft",
+              "snapshot": snap,
+              "source": {"convId": r["source_conversation_id"] or "", "actor": "migration"},
+              "reason": "存量规约迁移初始化", "createdAt": r["updated_at"] or now}
+        new_status = "ready" if confirmed else ("cancelled" if old_status == "cancelled" else "draft")
         db.execute(
-            "UPDATE arch_conversations SET status='active', review_state=?, role_id='architect', "
-            "role_locked=0, meta=? WHERE id=?", (review, meta, cid))
+            "UPDATE arch_requirements SET spec_versions=?, active_ver=1, status=?, "
+            "owner_conv=COALESCE(NULLIF(?,''), '') WHERE id=?",
+            (_json.dumps([v1], ensure_ascii=False), new_status,
+             r["source_conversation_id"] or "", r["id"]))
     if rows:
+        db.commit()
+    # ── 会话: 删旧执行会话 + roles/work_state 初始化 ──
+    try:
+        db.execute(
+            "DELETE FROM arch_conversation_messages WHERE conversation_id IN "
+            "(SELECT id FROM arch_conversations WHERE kind='execution')")
+        db.execute("DELETE FROM arch_conversations WHERE kind='execution'")
+    except Exception:
+        pass
+    try:
+        legacy_roles = db.fetchall(
+            "SELECT id, role_id FROM arch_conversations WHERE roles IS NULL")
+    except Exception:
+        legacy_roles = []
+    for r in legacy_roles:
+        rid = r.get("role_id") or ""
+        roles = [rid] if rid and rid != "architect" else ["architect"]
+        db.execute("UPDATE arch_conversations SET roles=?, work_state='architect' WHERE id=?",
+                   (_json.dumps(roles, ensure_ascii=False), r["id"]))
+    try:
+        db.execute("UPDATE arch_conversations SET status='active' WHERE status='running'")
+    except Exception:
+        pass
+    if legacy_roles:
         db.commit()
 
 
@@ -640,27 +684,25 @@ def _project_migrations(db) -> None:
         ("origin_project_id", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_requirements", [
-        ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),
-        ("parent_id", "TEXT"), ("related_to", "TEXT"), ("merged_into", "TEXT"),
-        ("preferred_asset_ids", "TEXT"),
-        ("design", "TEXT"),
         ("asset_invalidated", "INTEGER DEFAULT 0"),
         ("asset_invalidated_at", "INTEGER DEFAULT 0"),
-        ("assigned_to", "TEXT DEFAULT ''"),
-        # S5 会话中心：需求来源（资产地图对话中形成 → 提交）
+        ("spec_versions", "TEXT"),
+        ("active_ver", "INTEGER DEFAULT 0"),
+        ("done_mark", "INTEGER DEFAULT 0"),
+        ("done_at", "INTEGER DEFAULT 0"),
+        ("owner_conv", "TEXT DEFAULT ''"),
         ("source_type", "TEXT DEFAULT ''"),
         ("source_conversation_id", "TEXT DEFAULT ''"),
+        ("created_at", "INTEGER DEFAULT 0"),
     ])
     _add_cols(db, "arch_conversations", [
-        # P1 会话中心：分类标签 + 摘要(全量持久化、历史总结素材)
         ("tags", "TEXT"),
         ("summary", "TEXT DEFAULT ''"),
-        # PR1 双维度状态机: 查看状态 + 执行角色(生命周期沿用 status 列)
         ("review_state", "TEXT DEFAULT 'read'"),
-        ("role_id", "TEXT DEFAULT 'architect'"),
-        ("role_locked", "INTEGER DEFAULT 0"),
+        ("roles", "TEXT"),
+        ("work_state", "TEXT DEFAULT 'architect'"),
     ])
-    _migrate_conversation_lifecycle(db)
+    _migrate_lifecycle_v2(db)
     _add_cols(db, "arch_unit_tests", [
         ("asset_refs", "TEXT"),
     ])

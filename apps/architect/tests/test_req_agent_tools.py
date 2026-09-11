@@ -45,71 +45,77 @@ class _FakeGW:
 
 
 class TestReqFinalize:
-    def test_finalize_moves_to_ready(self, tmp_path, monkeypatch):
+    """规约确认(交托门禁)——生命周期重构 v2 语义。"""
+
+    def _mk_req(self, rid, **snap_extra):
+        import json as _json
+        snap = {"title": "旧标题", "desc": "", "designMd": "", "allowedScope": [],
+                "forbiddenScope": [], "acceptance": [], "functionalScope": [],
+                "assessmentSummary": "", "estMin": 0}
+        snap.update(snap_extra)
+        store.RequirementsStore.create({
+            "id": rid, "title": snap["title"], "status": "draft", "priority": "P1",
+            "kind": "user-story", "activeVer": 1,
+            "specVersions": [{"ver": 1, "state": "draft", "snapshot": snap,
+                              "source": {"convId": "", "actor": "t"},
+                              "reason": "", "createdAt": 1}],
+            "updatedAt": 1, "createdAt": 1,
+        })
+
+    def test_finalize_gate_and_ready(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
         tok_p = C.set_project("proj-f1")
         try:
-            store.RequirementsStore.create({
-                "id": "RQ-1", "title": "旧标题", "status": "raw", "location": "proposal",
-                "priority": "P1", "kind": "user-story", "updatedAt": 1,
-            })
+            # 门禁: 缺方案+验收 → 拒绝
+            self._mk_req("RQ-1")
             tok_r = C.set_req("RQ-1")
             try:
-                res = req_agent.tool_req_finalize(
-                    title="新标题", functionalScope=["s1"], entityBoundary=["e1"],
-                    assetScope=[{"assetId": "a1", "assetType": "component", "role": "core", "source": "auto"}],
-                    estMin=90, implementationPath="p", assessmentSummary="ok",
-                )
+                res = req_agent.tool_req_finalize()
+                assert res["ok"] is False and "门禁" in res["error"]
+                # 补齐后确认 → ready
+                req_agent.tool_req_amend(designMd="方案A", acceptance=["编译通过"],
+                                         allowedScope=["modules/x/"])
+                res2 = req_agent.tool_req_finalize()
             finally:
                 C.reset_req(tok_r)
+            assert res2["ok"] is True, res2
+            row = store.RequirementsStore.get("RQ-1")
+            assert row["status"] == "ready"
+            assert row["activeVer"] == 2                       # amend 追加了 v2
+            active = store.RequirementsStore.spec_active("RQ-1")
+            assert active["state"] == "confirmed" and active["snapshot"]["designMd"] == "方案A"
+            assert res2["boundaryFiles"] == ["modules/x"]      # 边界可解析
         finally:
             C.reset_project(tok_p)
-        assert res["ok"] is True
-        assert res["lifecycle"] == "ready"
-        row = store.RequirementsStore.get("RQ-1")
-        assert row["status"] == "analyzed"
-        assert row["location"] == "pool"
-        assert row["title"] == "新标题"
-        assert row["analysis"]["estMin"] == 90
-        assert row["analysis"]["functionalScope"] == ["s1"]
-        assert row["analysis"]["assetScope"][0]["assetId"] == "a1"
 
-    def test_finalize_keeps_old_title_when_blank(self, tmp_path, monkeypatch):
+    def test_finalize_supersedes_old_confirmed(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
-        tok_p = C.set_project("proj-f2")
-        try:
-            store.RequirementsStore.create({
-                "id": "RQ-2", "title": "保留标题", "status": "raw", "location": "proposal",
-                "priority": "P1", "kind": "user-story", "updatedAt": 1,
-            })
-            tok_r = C.set_req("RQ-2")
-            try:
-                res = req_agent.tool_req_finalize(assessmentSummary="ok")
-            finally:
-                C.reset_req(tok_r)
-        finally:
-            C.reset_project(tok_p)
+        self._mk_req("RQ-2", designMd="v1方案", acceptance=["a"])
+        store.RequirementsStore.spec_confirm("RQ-2")
+        # 修订新版本 → 确认 → 旧 confirmed 隐式废弃
+        req_agent.tool_req_amend(reqId="RQ-2", designMd="v2方案")
+        res = req_agent.tool_req_finalize(reqId="RQ-2")
         assert res["ok"] is True
-        assert store.RequirementsStore.get("RQ-2")["title"] == "保留标题"
+        vs = store.RequirementsStore.spec_versions("RQ-2")
+        assert vs[0]["state"] == "superseded" and vs[1]["state"] == "confirmed"
+
+    def test_finalize_done_req_rejected(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        self._mk_req("RQ-3", designMd="d", acceptance=["a"])
+        store.RequirementsStore.mark_done("RQ-3")
+        res = req_agent.tool_req_finalize(reqId="RQ-3")
+        assert res["ok"] is False and "已完结" in res["error"]
 
     def test_finalize_no_req_ctx(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
-        # 无需求上下文(如资产管理会话) → 无法定稿
-        res = req_agent.tool_req_finalize(title="x")
+        res = req_agent.tool_req_finalize()
         assert res["ok"] is False
         assert "未绑定需求" in res["error"]
 
     def test_finalize_unknown_req(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
-        tok_p = C.set_project("proj-f3")
-        tok_r = C.set_req("RQ-nope")
-        try:
-            res = req_agent.tool_req_finalize(title="x")
-        finally:
-            C.reset_req(tok_r)
-            C.reset_project(tok_p)
-        assert res["ok"] is False
-        assert "不存在" in res["error"]
+        res = req_agent.tool_req_finalize(reqId="RQ-nope")
+        assert res["ok"] is False and "不存在" in res["error"]
 
 
 class TestMcpCall:

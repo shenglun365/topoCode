@@ -82,36 +82,9 @@ def _route_and_mark(msg: dict) -> dict:
     dst = (msg.get("dst") or "").strip()
     payload = msg.get("payload") or {}
     ok_flag, detail = True, ""
-    if topic == "execution.handoff":
-        if dst == "runner":
-            exec_id = (payload.get("execId") or "").strip()
-            if not exec_id:
-                ok_flag, detail = False, "handoff 缺少 execId"
-            else:
-                url = f"{_DEFAULT_ARCH_URL}/api/architect/exec/{exec_id}/run"
-                ok_flag, detail = _http_post_json(url, {})
-        elif dst == "mcp":
-            tool = (payload.get("tool") or "").strip()
-            if not tool:
-                ok_flag, detail = False, "handoff 缺少 MCP tool 名"
-            else:
-                url = f"{_DEFAULT_MCP_URL}/v1/tools/{tool}/call"
-                ok_flag, detail = _http_post_json(url, payload.get("params") or {})
-        else:
-            detail = f"dst={dst or '*'} 仅持久化(监控/用户事件)"
-    elif dst == "coding":
-        # 主 Agent → 指定 coding agent 会话：追问/修正/amend（会话键 executor:taskId）
-        session_key = (payload.get("sessionKey") or "").strip()
-        if not session_key and payload.get("execId") and payload.get("taskId"):
-            session_key = f"{payload.get('adapter', 'opencode')}:{payload['taskId']}"
-        message = (payload.get("message") or payload.get("text") or "").strip()
-        if not session_key or not message:
-            ok_flag, detail = False, "dst=coding 缺少 sessionKey/message"
-        else:
-            url = f"{_DEFAULT_RUNNER_URL}/api/agent-sessions/inject"
-            ok_flag, detail = _http_post_json(url, {"sessionKey": session_key,
-                                                    "message": message})
-    elif dst == "plan":
+    # 生命周期重构: execution.handoff/dst=coding 路由随 exec-tasks/agent-sessions
+    # 机制一并退役; 保留 dst=plan(clarify 注入)与监控类消息持久化
+    if dst == "plan":
         # 双向协商：clarify/amend/answer → 注入 plan agent 需求会话(下一回合可见)
         req_id = (payload.get("reqId") or "").strip()
         message = (payload.get("message") or payload.get("text")

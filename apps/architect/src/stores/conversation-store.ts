@@ -115,7 +115,7 @@ export const useConversationStore = defineStore('archConversation', () => {
     const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
     // 旧会话可能累积了重复的页面引导消息——相邻同文 assistant 消息折叠为一条
     turns.value = msgs
-      .map((m) => ({ role: m.role, content: m.content, id: m.id }))
+      .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: (m as any).meta }))
       .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content))
     activeId.value = conv.id
     if (typeof conv.reqId === 'string') activeReqId.value = conv.reqId

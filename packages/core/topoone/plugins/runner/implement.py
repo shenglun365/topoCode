@@ -61,13 +61,17 @@ class ImplementJob:
 
     def __init__(self, job_id: str, root: str, wt: str, base: str, branch: str,
                  instruction: str, model: str = "", base_port: int = 3478,
-                 auto_start: bool = True, base_url: str = ""):
+                 auto_start: bool = True, base_url: str = "",
+                 boundaries: Optional[Dict[str, Any]] = None):
         self.id = job_id
         self.root = os.path.abspath(root)
         self.wt = wt
         self.base = base
         self.branch = branch
         self.instruction = instruction
+        # 操作边界(互斥引擎口径): {files: [路径/目录前缀], components: [KB 组件 id],
+        # readOnly: bool(只读作业豁免写互斥)}
+        self.boundaries = boundaries or {}
         self.model = model
         self.base_port = base_port
         self.auto_start = auto_start
@@ -100,7 +104,8 @@ class ImplementJob:
 
     def snapshot(self, since: int = 0) -> Dict[str, Any]:
         return {"jobId": self.id, "status": self.status, "error": self.error,
-                "branch": self.branch, "worktree": self.wt,
+                "branch": self.branch, "worktree": self.wt, "root": self.root,
+                "boundaries": self.boundaries,
                 "sessionId": self.session_id,
                 "events": [e for e in self.events if e["seq"] > since]}
 
@@ -267,12 +272,21 @@ def register(app: FastAPI) -> None:
             model=str(body.get("model") or ""),
             base_port=int(body.get("basePort") or 3478),
             auto_start=bool(body.get("autoStart", True)),
-            base_url=str(body.get("baseUrl") or ""))
+            base_url=str(body.get("baseUrl") or ""),
+            boundaries=body.get("boundaries") or {})
         _JOBS[job_id] = job
         job.turn_task = asyncio.create_task(job.start())
         logger.info("[implement] job %s created root=%s branch=%s", job_id, root, branch)
         return {"ok": True, "jobId": job_id, "branch": branch, "worktree": wt,
                 "status": job.status}
+
+    @app.get("/api/implement/running")
+    async def implement_running():
+        """全局运行中(非终态)作业清单——architect 互斥引擎的校验数据源。"""
+        return {"ok": True, "jobs": [
+            {"jobId": j.id, "root": j.root, "branch": j.branch,
+             "status": j.status, "boundaries": j.boundaries}
+            for j in _JOBS.values() if j.status not in ("done", "failed", "stopped")]}
 
     @app.get("/api/implement/{job_id}")
     async def implement_snapshot(job_id: str, since: int = 0):
