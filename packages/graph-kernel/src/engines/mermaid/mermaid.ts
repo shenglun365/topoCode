@@ -27,6 +27,10 @@ function installCytoAnimErrFilter(): void {
     }
   });
 }
+
+// 模块随主包静态加载, 启动即安装(不等首次 mermaid 动态加载)——
+// 任何页面(含未渲染过图的)都能拦截该已知竞态残留
+installCytoAnimErrFilter();
 import { getCapability } from '../../core/capabilities';
 import type { DiagramSchema } from '../../core/types';
 import { toMermaid, type DegradationPolicy } from '../../core/transpile';
