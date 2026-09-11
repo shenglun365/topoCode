@@ -10,6 +10,7 @@ import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import { apiPost } from '@/services/api-client'
 import type { SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
+import { copyText } from '@/utils/clipboard'
 
 const props = defineProps<{
   turns: KbAnalysisTurn[]
@@ -253,7 +254,7 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null
 async function copyTurn(i: number) {
   const m = props.turns[i]
   if (!m) return
-  const ok = await copyToClipboard(m.content)
+  const ok = await copyText(m.content)
   if (ok) {
     copiedTurn.value = i
     if (copiedTimer.value) clearTimeout(copiedTimer.value)
@@ -271,30 +272,6 @@ function onMsgCopy() {
   if (text) showToast(t('requirement.chat.copySuccess'))
 }
 
-/** 复制到剪贴板；不可用时降级 execCommand。 */
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // fallthrough
-  }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
-  } catch {
-    return false
-  }
-}
 
 function showToast(text: string) {
   toastText.value = text
@@ -386,7 +363,7 @@ function copyAsset(a: SemanticAsset) {
     lines.push('')
     lines.push(...a.astRefs.slice(0, 10).map((r) => `${r.file}:L${r.startLine}-L${r.endLine} ${r.symbol}`))
   }
-  void copyToClipboard(lines.join('\n')).then((ok) => showToast(ok ? t('requirement.chat.copySuccess') : t('requirement.chat.copyFailed')))
+  void copyText(lines.join('\n')).then((ok) => showToast(ok ? t('requirement.chat.copySuccess') : t('requirement.chat.copyFailed')))
 }
 
 /** 资产是否可引用(active 且未标记需更新)。 */

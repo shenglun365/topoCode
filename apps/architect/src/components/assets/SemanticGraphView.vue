@@ -16,6 +16,7 @@ import type { SemanticGraphViewId } from '@/utils/diagram-gen'
 import type { SemanticAsset, SemanticAssetLevel, SemanticAssetKind, GraphFileEntry } from '@/types'
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
 import { semanticAssetService, type AssetCompareResult } from '@/services/semantic-asset-service'
+import { copyText } from '@/utils/clipboard'
 
 const { t } = useI18n()
 
@@ -1117,11 +1118,10 @@ async function copySegLoc(seg: CodeSegment, si: number) {
   const start = s.lines[0].line
   const end = s.lines[s.lines.length - 1].line
   const loc = `${seg.file}:L${start}${end !== start ? `-L${end}` : ''}${seg.symbol ? ' ' + seg.symbol : ''}`
-  try {
-    await navigator.clipboard.writeText(loc)
+  if (await copyText(loc)) {
     copiedSeg.value = si
     setTimeout(() => { if (copiedSeg.value === si) copiedSeg.value = -1 }, 1500)
-  } catch { /* 剪贴板不可用则忽略 */ }
+  }
 }
 
 // ---- C1 按类别结构化 detail(有数据时)：entity/contract→字段 · process/decision→步骤 · state→状态 ----

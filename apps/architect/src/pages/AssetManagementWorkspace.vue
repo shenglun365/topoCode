@@ -26,6 +26,7 @@ import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { useConversationStore } from '@/stores/conversation-store'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
 import type { AssetDetail, AssetDiagramItem, ConversationDetail, GraphFileEntry, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
+import { copyText } from '@/utils/clipboard'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -1400,30 +1401,6 @@ function kindIcon(k: SemanticAsset['kind']) {
   return CubeTransparentIcon
 }
 
-/** 复制到剪贴板；不可用时降级 execCommand。 */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // fallthrough
-  }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
-  } catch {
-    return false
-  }
-}
 
 async function copyAsset(a: SemanticAsset) {
   const lines = [`${a.name} (${a.kind})`, `ID: ${a.id}`, a.desc]
@@ -1624,27 +1601,7 @@ function compRefText(name: string, id: string): string {
 const copiedKey = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 async function copyCompRef(key: string, name: string, id: string) {
-  const text = compRefText(name, id)
-  let ok = false
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      ok = true
-    }
-  } catch { /* fallthrough */ }
-  if (!ok) {
-    // 非安全上下文(LAN http) clipboard API 不可用 → execCommand 降级
-    try {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      ok = document.execCommand('copy')
-      document.body.removeChild(ta)
-    } catch { ok = false }
-  }
+  const ok = await copyText(compRefText(name, id))
   if (ok) {
     copiedKey.value = key
     if (copiedTimer) clearTimeout(copiedTimer)

@@ -184,6 +184,7 @@ import { semanticAssetService, type AssetCompareResult, type SourceSnippet } fro
 import type { SemanticAsset } from '@/types'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import { useArchSettingsStore } from '@/stores/settings-store'
+import { copyText } from '@/utils/clipboard'
 
 const props = defineProps<{ file: string; assets: SemanticAsset[]; compareData?: AssetCompareResult | null }>()
 const emit = defineEmits<{ close: []; goto: [id: string] }>()
@@ -271,11 +272,10 @@ async function copyLoc(i: number) {
   const start = s2.lines[0]!.line
   const end = s2.lines[s2.lines.length - 1]!.line
   const loc = `${seg!.file}:L${start}${end !== start ? `-L${end}` : ''}${seg!.symbol ? ' ' + seg!.symbol : ''}`
-  try {
-    await navigator.clipboard.writeText(loc)
+  if (await copyText(loc)) {
     copiedSeg.value = i
     setTimeout(() => { if (copiedSeg.value === i) copiedSeg.value = -1 }, 1500)
-  } catch { /* 剪贴板不可用忽略 */ }
+  }
 }
 /** 源码路径展示：去开头 ./ 后从头省略目录段(保尾部)，完整路径悬停展示。 */
 function shortPath(p: string): string {

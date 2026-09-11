@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { MagnifyingGlassIcon, ArrowsRightLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { kbAssetService } from '@/services/kb-assets'
+import { copyText } from '@/utils/clipboard'
 import type { CodeMapping } from '@/types'
 
 const { t } = useI18n()
@@ -54,26 +55,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 
 const pageItems = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
 function copy(value: string) {
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(value).catch(() => fallbackCopy(value))
-  } else {
-    fallbackCopy(value)
-  }
-}
-
-function fallbackCopy(value: string) {
-  const ta = document.createElement('textarea')
-  ta.value = value
-  ta.style.position = 'fixed'
-  ta.style.opacity = '0'
-  document.body.appendChild(ta)
-  ta.select()
-  try {
-    document.execCommand('copy')
-  } catch {
-    /* ignore */
-  }
-  document.body.removeChild(ta)
+  void copyText(value)
 }
 
 function goto(p: number) {

@@ -17,6 +17,7 @@ import { useArchUnitTestStore } from '@/stores/unit-test-store'
 import { XMarkIcon, BeakerIcon } from '@heroicons/vue/24/outline'
 import { toMermaid } from '@topo/graph-kernel'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
+import { copyText } from '@/utils/clipboard'
 
 const { t } = useI18n()
 const unitTest = useArchUnitTestStore()
@@ -242,13 +243,8 @@ async function draftFix(reportId: string, itemId: string) {
   }
 }
 
-function copyFix(k: string) {
-  const text = fixDrafts[k] || ''
-  try {
-    void navigator.clipboard?.writeText(text)
-  } catch {
-    /* ignore */
-  }
+async function copyFix(k: string) {
+  await copyText(fixDrafts[k] || '')
 }
 
 function factsOf(rid: string, itemId: string, layer: 'L1' | 'L2'): AcceptanceFact | undefined {

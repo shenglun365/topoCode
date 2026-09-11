@@ -12,6 +12,7 @@ import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { UserGroupIcon, PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { apiGet, apiPut, apiDelete } from '@/services/api-client'
+import { copyText } from '@/utils/clipboard'
 
 interface ExecModel { id: string; name: string; model: string }
 interface ExecEntry { id: string; type: string; host: string; config: Record<string, any> & { models?: ExecModel[] } }
@@ -121,12 +122,8 @@ async function copyInjection(role: SessionRole) {
     `- ${JSON.stringify(role.permissions ?? {})}`,
     '请以以上配置作为你的能力边界执行后续任务。',
   ].filter(Boolean)
-  try {
-    await navigator.clipboard.writeText(lines.join('\n'))
-    copyHint.value = t('config.sessionRoles.copied')
-  } catch {
-    copyHint.value = lines.join('\n')
-  }
+  const ok = await copyText(lines.join('\n'))
+  copyHint.value = ok ? t('config.sessionRoles.copied') : lines.join('\n')
   setTimeout(() => { copyHint.value = '' }, 6000)
 }
 
