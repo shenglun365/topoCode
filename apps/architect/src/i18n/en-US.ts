@@ -2019,7 +2019,7 @@ renderingMore: 'Rendered {done}/{total} · scroll for more',
     nextPage: 'Next',
     history: {
       title: 'Conversations',
-      newConversation: 'Import as new conversation',
+      newConversation: 'New Conversation',
       newConversationHint: 'Start a fresh conversation with the selected asset',
       hint: 'Saved asset-management conversations. "Import" restores a conversation to keep confirming asset specs; "Delete" removes it.',
       loading: 'Loading…',
