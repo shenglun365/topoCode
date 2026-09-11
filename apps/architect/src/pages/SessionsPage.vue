@@ -32,8 +32,7 @@ const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = 
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
 
-// ── 引用复制: 条目级 项目ID/项目名称/会话名称/会话ID ──
-const copyMenuFor = ref('')
+// ── 引用复制: 一键拷贝 JSON(项目ID/项目名称/会话名称/会话ID) ──
 const copied = ref('')
 const projNameMap = ref<Record<string, string>>({})
 
@@ -41,15 +40,16 @@ function projectNameOf(c: ConversationMeta): string {
   return (c.projectId && projNameMap.value[c.projectId]) || c.projectId || ''
 }
 
-async function copyRef(c: ConversationMeta, field: 'projectId' | 'projectName' | 'convTitle' | 'convId') {
-  const text = field === 'projectId' ? (c.projectId || '')
-    : field === 'projectName' ? projectNameOf(c)
-    : field === 'convTitle' ? (c.title || '')
-    : c.id
-  if (!text) return
+async function copyRef(c: ConversationMeta) {
+  const payload = {
+    projectId: c.projectId || '',
+    projectName: projectNameOf(c),
+    sessionName: c.title || '',
+    sessionId: c.id,
+  }
   try {
-    await navigator.clipboard.writeText(text)
-    copied.value = field
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+    copied.value = c.id
     setTimeout(() => { copied.value = '' }, 1500)
   } catch { /* noop */ }
 }
@@ -289,7 +289,7 @@ function reviewClass(rs?: string) {
             <span
               v-if="c.roleId && c.roleId !== 'architect'"
               class="chip shrink-0 bg-ctp-peach/15 text-ctp-peach"
-              :title="t('session.roleTitle')"
+              :title="t('session.role.roleTitle')"
             >{{ roleMap[c.roleId] || c.roleId }}</span>
             <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
             <div class="min-w-0 flex-1">
@@ -332,32 +332,15 @@ function reviewClass(rs?: string) {
               <span>{{ fmt(c.updatedAt) }}</span>
             </div>
             <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-              <!-- 引用复制: 项目ID/项目名称/会话名称/会话ID -->
-              <div class="relative">
-                <button
-                  class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-green"
-                  :title="t('session.copy.menu')"
-                  @click.stop="copyMenuFor = copyMenuFor === c.id ? '' : c.id"
-                >
-                  <ClipboardDocumentIcon class="h-3.5 w-3.5" />
-                </button>
-                <div
-                  v-if="copyMenuFor === c.id"
-                  class="absolute right-0 top-7 z-30 min-w-[8.5rem] overflow-hidden rounded-md border border-ctp-surface1 bg-ctp-base py-1 shadow-lg"
-                  @click.stop
-                  @mouseleave="copyMenuFor = ''"
-                >
-                  <button
-                    v-for="f in (['projectId', 'projectName', 'convTitle', 'convId'] as const)"
-                    :key="f"
-                    class="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-[11px] text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
-                    @click="copyRef(c, f); copyMenuFor = ''"
-                  >
-                    <span>{{ t(`session.copy.${f}`) }}</span>
-                    <CheckIcon v-if="copied === f" class="h-3 w-3 text-ctp-green" />
-                  </button>
-                </div>
-              </div>
+              <!-- 一键复制引用 JSON(项目ID/项目名称/会话名称/会话ID) -->
+              <button
+                class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-green"
+                :title="t('session.copy.menu')"
+                @click.stop="copyRef(c)"
+              >
+                <CheckIcon v-if="copied === c.id" class="h-3.5 w-3.5 text-ctp-green" />
+                <ClipboardDocumentIcon v-else class="h-3.5 w-3.5" />
+              </button>
               <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.openInDock')" @click.stop="openInDock(c)">
                 <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />
               </button>

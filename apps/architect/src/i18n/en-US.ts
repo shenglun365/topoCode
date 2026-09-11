@@ -462,11 +462,8 @@ export default {
       deleteConfirm: 'Delete session "{title}"? Messages will be removed too.',
     },
     copy: {
-      menu: 'Copy reference',
-      projectId: 'Project ID',
-      projectName: 'Project name',
-      convTitle: 'Session name',
-      convId: 'Session ID',
+      menu: 'Copy reference (JSON)',
+      copied: 'Copied',
     },
     context: {
       title: 'Context',

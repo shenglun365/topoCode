@@ -486,11 +486,8 @@ export default {
       deleteConfirm: '删除会话「{title}」？对话记录将一并删除。',
     },
     copy: {
-      menu: '复制引用',
-      projectId: '项目 ID',
-      projectName: '项目名称',
-      convTitle: '会话名称',
-      convId: '会话 ID',
+      menu: '复制引用(JSON)',
+      copied: '已复制',
     },
     context: {
       title: '上下文',
