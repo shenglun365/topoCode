@@ -3,6 +3,7 @@
  * 全局会话栏(右侧 dock) —— architect 唯一对话入口(P1 决策2)。
  * 会话引擎在 conversation-store；本组件只做外观与会话切换。
  */
+import { useAppDialog } from '@/composables/useAppDialog'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -30,6 +31,7 @@ const props = withDefaults(defineProps<{
 }>(), { inline: false })
 
 const { t } = useI18n()
+const dialog = useAppDialog()
 const router = useRouter()
 const conv = useConversationStore()
 
@@ -49,7 +51,7 @@ async function mineActive() {
     // 提炼报告由服务端沉淀为会话消息(统一时间线)
     await apiPost('/capabilities/mine', { conversationId: conv.activeId, project: pid })
   } catch (e) {
-    window.alert(e instanceof Error ? e.message : String(e))
+    await dialog.alert(e instanceof Error ? e.message : String(e))
   } finally { mining.value = false }
 }
 async function archiveActive() {
@@ -58,7 +60,7 @@ async function archiveActive() {
     const r = await sessionService.update(conv.activeId, { status: 'archived' } as any)
     ;(conv.activeMeta as any).status = 'archived'
     if ((r as any)?.mineableHint && activeProject()) {
-      if (window.confirm(t('session.mineOnEnd'))) await mineActive()
+      if (await dialog.confirm(t('session.mineOnEnd'))) await mineActive()
     }
   } catch { /* 保持 */ }
 }

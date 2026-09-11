@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
+import AppDialogHost from '@/components/common/AppDialogHost.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
@@ -45,5 +46,6 @@ watch(
       </main>
     </div>
     <StatusBar v-if="isWorkbench" />
+    <AppDialogHost />
   </div>
 </template>

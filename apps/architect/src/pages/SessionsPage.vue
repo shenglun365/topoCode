@@ -14,6 +14,7 @@ import {
   FolderIcon, ClockIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useConversationStore } from '@/stores/conversation-store'
+import { useAppDialog } from '@/composables/useAppDialog'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
 import { apiGet, apiPost } from '@/services/api-client'
 import { useSplitPane } from '@/composables/useSplitPane'
@@ -29,6 +30,7 @@ const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = 
 
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
+const dialog = useAppDialog()
 const loading = ref(false)
 const busyTip = ref('')
 
@@ -145,9 +147,9 @@ async function summarize(c: ConversationMeta, force = false) {
   }
 }
 async function editTags(c: ConversationMeta) {
-  const groups = window.prompt(t('session.actions.groupsPrompt'), c.tags.groups.join(', '))
+  const groups = await dialog.prompt(t('session.actions.groupsPrompt'), c.tags.groups.join(', '))
   if (groups === null) return
-  const modules = window.prompt(t('session.actions.modulesPrompt'), c.tags.modules.join(', '))
+  const modules = await dialog.prompt(t('session.actions.modulesPrompt'), c.tags.modules.join(', '))
   if (modules === null) return
   const tags = {
     groups: groups.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
@@ -158,12 +160,12 @@ async function editTags(c: ConversationMeta) {
   void sessionService.groups().then((g) => { groupsInfo.value = g })
 }
 async function removeSession(c: ConversationMeta) {
-  if (!window.confirm(t('session.actions.deleteConfirm', { title: c.title }))) return
+  if (!(await dialog.confirm(t('session.actions.deleteConfirm', { title: c.title }), { danger: true }))) return
   await sessionService.remove(c.id)
   list.value = list.value.filter((x) => x.id !== c.id)
 }
 async function newGroup() {
-  const name = window.prompt(t('session.actions.newGroupPrompt'))
+  const name = await dialog.prompt(t('session.actions.newGroupPrompt'))
   if (!name || !name.trim()) return
   const names = [...new Set([...groupsInfo.value.groups, name.trim()])]
   await sessionService.saveGroups(names)

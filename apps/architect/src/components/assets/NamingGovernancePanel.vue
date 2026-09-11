@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAppDialog } from '@/composables/useAppDialog'
 import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -12,6 +13,7 @@ import {
 } from '@/services/naming-service'
 
 const { t } = useI18n()
+const dialog = useAppDialog()
 
 const sub = ref<'conventions' | 'glossary' | 'tombstones'>('conventions')
 
@@ -152,10 +154,10 @@ async function doImport() {
   try {
     const res = await namingService.importTerms(importPath.value.trim())
     importPath.value = ''
-    alert(t('naming.imported', { n: res.imported, path: res.sourceRef }))
+    await dialog.alert(t('naming.imported', { n: res.imported, path: res.sourceRef }))
     await loadTerms()
   } catch (err: any) {
-    alert(err?.message || String(err))
+    await dialog.alert(err?.message || String(err))
   } finally {
     glossaryBusy.value = ''
   }

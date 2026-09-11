@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAppDialog } from '@/composables/useAppDialog'
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -201,6 +202,7 @@ const statusText = computed(() => {
 
 // ---- 组件归属映射 + 组件范围筛选 + 按组件分组 ----
 const arch = useArchArchitectureStore()
+const dialog = useAppDialog()
 const OTHER_KEY = '__other__'
 
 /** 统一组件节点(树/归属映射用)。 */
@@ -716,7 +718,7 @@ const pendingExtractable = computed(() => {
 async function extractPendingAndRecompare() {
   const files = pendingExtractable.value
   if (!files.length) return
-  if (!window.confirm(t('assetMgmt.diff.extractConfirm', { n: files.length }))) return
+  if (!(await dialog.confirm(t('assetMgmt.diff.extractConfirm', { n: files.length })))) return
   extractingPending.value = true
   let extracted = 0
   try {
@@ -1544,12 +1546,12 @@ async function switchTier(tier: 'low' | 'mid' | 'high') {
       .map(([k, n]) => `${t(`assetMgmt.kind.${k}`)}×${n}`)
       .join(', ') || '0'
     const msg = t('assetMgmt.framework.confirmMsg', { n: pv.voidedAssets, dist })
-    if (!window.confirm(msg)) return
+    if (!(await dialog.confirm(msg))) return
     fwSwitching.value = true
     await semanticAssetService.switchFramework(tier)
     await Promise.all([loadFramework(), loadSemantic(), loadOverview(), loadCoverage(), refreshStatus()])
   } catch (e: any) {
-    window.alert(e?.message || t('assetMgmt.framework.switchFailed'))
+    await dialog.alert(e?.message || t('assetMgmt.framework.switchFailed'))
   } finally {
     fwSwitching.value = false
   }

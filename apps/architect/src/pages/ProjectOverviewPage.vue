@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAppDialog } from '@/composables/useAppDialog'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -19,6 +20,7 @@ import {
 const { t } = useI18n()
 const router = useRouter()
 const project = useArchProjectStore()
+const dialog = useAppDialog()
 
 // ── P4 开发简报(驾驶舱) ──
 const digests = ref<DigestInfo[]>([])
@@ -107,7 +109,7 @@ function closeLinkDialog() {
 }
 
 async function askUnlink() {
-  if (!window.confirm(t('overviewHome.unlinkConfirm'))) return
+  if (!(await dialog.confirm(t('overviewHome.unlinkConfirm'), { danger: true }))) return
   unlinking.value = true
   try {
     await useArchProjectStore().unlinkKb()
