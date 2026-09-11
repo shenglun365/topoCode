@@ -485,6 +485,13 @@ export default {
       newGroupPrompt: '新分组名称',
       deleteConfirm: '删除会话「{title}」？对话记录将一并删除。',
     },
+    copy: {
+      menu: '复制引用',
+      projectId: '项目 ID',
+      projectName: '项目名称',
+      convTitle: '会话名称',
+      convId: '会话 ID',
+    },
     context: {
       title: '上下文',
       empty: '暂无上下文单元(工具轨迹/摘要/回执随使用积累)',

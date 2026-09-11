@@ -461,6 +461,13 @@ export default {
       newGroupPrompt: 'New group name',
       deleteConfirm: 'Delete session "{title}"? Messages will be removed too.',
     },
+    copy: {
+      menu: 'Copy reference',
+      projectId: 'Project ID',
+      projectName: 'Project name',
+      convTitle: 'Session name',
+      convId: 'Session ID',
+    },
     context: {
       title: 'Context',
       empty: 'No context units yet (tool traces/summaries/reports accumulate in use)',

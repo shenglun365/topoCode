@@ -11,12 +11,13 @@ import {
   ChatBubbleOvalLeftEllipsisIcon, MagnifyingGlassIcon, PlusIcon, ArrowPathIcon,
   DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
   ArrowUpTrayIcon, ArrowDownTrayIcon, BoltIcon,
-  FolderIcon, ClockIcon, XMarkIcon,
+  FolderIcon, ClockIcon, XMarkIcon, ClipboardDocumentIcon,
 } from '@heroicons/vue/24/outline'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useAppDialog } from '@/composables/useAppDialog'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
 import { apiGet, apiPost } from '@/services/api-client'
+import { projectService } from '@/services/project-service'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
 
@@ -30,6 +31,28 @@ const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = 
 
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
+
+// ── 引用复制: 条目级 项目ID/项目名称/会话名称/会话ID ──
+const copyMenuFor = ref('')
+const copied = ref('')
+const projNameMap = ref<Record<string, string>>({})
+
+function projectNameOf(c: ConversationMeta): string {
+  return (c.projectId && projNameMap.value[c.projectId]) || c.projectId || ''
+}
+
+async function copyRef(c: ConversationMeta, field: 'projectId' | 'projectName' | 'convTitle' | 'convId') {
+  const text = field === 'projectId' ? (c.projectId || '')
+    : field === 'projectName' ? projectNameOf(c)
+    : field === 'convTitle' ? (c.title || '')
+    : c.id
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = field
+    setTimeout(() => { copied.value = '' }, 1500)
+  } catch { /* noop */ }
+}
 const dialog = useAppDialog()
 const loading = ref(false)
 const busyTip = ref('')
@@ -64,6 +87,11 @@ async function load() {
 }
 onMounted(async () => {
   await load()
+  // 项目名称映射(引用复制用): arch_projects 全量, 失败静默(降级显示 projectId)
+  try {
+    const ps = await projectService.listProjects()
+    projNameMap.value = Object.fromEntries(ps.map((p) => [p.id, p.name || '']))
+  } catch { /* noop */ }
   // 深链 ?select=<convId|reqId>（兼容旧需求深链）→ 直接在对话栏打开
   const sel = typeof route.query.select === 'string' ? route.query.select : ''
   if (sel) {
@@ -304,6 +332,32 @@ function reviewClass(rs?: string) {
               <span>{{ fmt(c.updatedAt) }}</span>
             </div>
             <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <!-- 引用复制: 项目ID/项目名称/会话名称/会话ID -->
+              <div class="relative">
+                <button
+                  class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-green"
+                  :title="t('session.copy.menu')"
+                  @click.stop="copyMenuFor = copyMenuFor === c.id ? '' : c.id"
+                >
+                  <ClipboardDocumentIcon class="h-3.5 w-3.5" />
+                </button>
+                <div
+                  v-if="copyMenuFor === c.id"
+                  class="absolute right-0 top-7 z-30 min-w-[8.5rem] overflow-hidden rounded-md border border-ctp-surface1 bg-ctp-base py-1 shadow-lg"
+                  @click.stop
+                  @mouseleave="copyMenuFor = ''"
+                >
+                  <button
+                    v-for="f in (['projectId', 'projectName', 'convTitle', 'convId'] as const)"
+                    :key="f"
+                    class="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-[11px] text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
+                    @click="copyRef(c, f); copyMenuFor = ''"
+                  >
+                    <span>{{ t(`session.copy.${f}`) }}</span>
+                    <CheckIcon v-if="copied === f" class="h-3 w-3 text-ctp-green" />
+                  </button>
+                </div>
+              </div>
               <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.openInDock')" @click.stop="openInDock(c)">
                 <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />
               </button>
