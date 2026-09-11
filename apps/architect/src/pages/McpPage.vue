@@ -14,6 +14,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import { useArchMcpStore } from '@/stores/mcp-store'
 import { apiGet } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
+import { copyText } from '@/utils/clipboard'
 
 const { t } = useI18n()
 const mcp = useArchMcpStore()
@@ -42,11 +43,10 @@ onMounted(async () => {
 })
 
 async function copy(text: string, key: string) {
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyText(text)) {
     copied.value = key
     setTimeout(() => { copied.value = '' }, 1500)
-  } catch { /* noop */ }
+  }
 }
 </script>
 

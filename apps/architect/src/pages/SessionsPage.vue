@@ -18,6 +18,7 @@ import { useAppDialog } from '@/composables/useAppDialog'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
 import { apiGet, apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
+import { copyText } from '@/utils/clipboard'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
 
@@ -47,11 +48,11 @@ async function copyRef(c: ConversationMeta) {
     sessionName: c.title || '',
     sessionId: c.id,
   }
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+  const ok = await copyText(JSON.stringify(payload, null, 2))
+  if (ok) {
     copied.value = c.id
     setTimeout(() => { copied.value = '' }, 1500)
-  } catch { /* noop */ }
+  }
 }
 const dialog = useAppDialog()
 const loading = ref(false)
