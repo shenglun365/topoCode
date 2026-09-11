@@ -3,34 +3,10 @@ type MermaidApi = typeof import('mermaid').default;
 let _mermaidPromise: Promise<MermaidApi> | null = null;
 
 function loadMermaid(): Promise<MermaidApi> {
-  _mermaidPromise ??= import('mermaid').then((m) => {
-    installCytoAnimErrFilter();
-    return (m.default ?? m) as MermaidApi;
-  });
+  _mermaidPromise ??= import('mermaid').then((m) => (m.default ?? m) as MermaidApi);
   return _mermaidPromise;
 }
 
-// mermaid 11.17.x 内部捆绑的 cytoscape(architecture 等图布局)存在动画竞态:
-// 临时渲染容器移除后, 样式动画 timer 仍触发 → Uncaught TypeError
-// 「Cannot read properties of undefined (reading 'startTime')」(reportAllChanges)。
-// 对渲染结果无实际影响(布局已完成的残留触发), 全局定向过滤防控制台污染;
-// mermaid 升级至修复版(≥12)后移除本过滤器。
-let _cytoAnimErrFilterInstalled = false;
-
-function installCytoAnimErrFilter(): void {
-  if (_cytoAnimErrFilterInstalled || typeof window === 'undefined') return;
-  _cytoAnimErrFilterInstalled = true;
-  window.addEventListener('error', (ev: ErrorEvent) => {
-    const msg = ev.message || '';
-    if (msg.includes("reading 'startTime'") || msg.includes("reading 'endTime'")) {
-      ev.preventDefault();
-    }
-  });
-}
-
-// 模块随主包静态加载, 启动即安装(不等首次 mermaid 动态加载)——
-// 任何页面(含未渲染过图的)都能拦截该已知竞态残留
-installCytoAnimErrFilter();
 import { getCapability } from '../../core/capabilities';
 import type { DiagramSchema } from '../../core/types';
 import { toMermaid, type DegradationPolicy } from '../../core/transpile';
