@@ -215,8 +215,13 @@ def spawn_execution_session(req: dict) -> Optional[dict]:
     acc = a.get("acceptance") or []
     if acc:
         lines.append("\n**验收标准**：\n" + "\n".join(f"- {x}" for x in acc[:8]))
-    lines.append("\n**下一步**：任务执行页「新建任务」勾选该需求 → 选择执行器(cline/codex/opencode) "
-                 "→ 创建执行任务对接 coding agent。")
+    lines.append(
+        "\n**触发词**：\n"
+        "- 「执行方案」/「开始执行」——启动 coding agent 实施（开发 + 单元测试 + 整体编译验收）；"
+        "过程中需要你操作/确认/澄清时会直接在本会话提问，回复即可转达；「停止执行」中止，「查看差异」看改动\n"
+        "- 「方案调整」+ 调整说明——回到 architect 调整本需求的方案与规约"
+        "（只更新本会话绑定的规约，不新建）\n"
+        "- 其他任意问题——执行工程师技术答疑")
     meta = {"pendingExec": True}
     if origin_id:
         meta["sourceConversationId"] = origin_id
@@ -229,6 +234,7 @@ def spawn_execution_session(req: dict) -> Optional[dict]:
     store.ConversationsStore.append_message({
         "id": store.next_id("m"), "conversationId": conv["id"], "role": "assistant",
         "time": _ts(), "content": "\n".join(lines),
+        "projectId": (origin or {}).get("projectId") or conv.get("projectId") or "",
     })
     return conv
 

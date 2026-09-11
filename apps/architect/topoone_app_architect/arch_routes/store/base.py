@@ -10,6 +10,7 @@ ID 生成: 按前缀单调递增序列(见 conventions.md §4)。
 """
 
 import json
+import sqlite3
 import time
 import re
 from typing import Optional
@@ -296,14 +297,38 @@ def _fetchall_routed(table: str, sql: str, params: tuple,
 
 # ── 通用 CRUD(项目表自动路由) ──────────────────────────────────
 
+_TBL_COLS_CACHE: dict = {}
+
+
+def _table_cols(db, table: str) -> set:
+    """表列集合(带缓存)——插入前过滤载荷里的纯路由键(如 projectId)。"""
+    key = (getattr(db, "db_path", "") or id(db), table)
+    cols = _TBL_COLS_CACHE.get(key)
+    if cols is None:
+        try:
+            rows = db.execute(f"PRAGMA table_info({table})").fetchall()
+            cols = {r[1] if not isinstance(r, sqlite3.Row) else r["name"]
+                    for r in rows}
+        except Exception:  # noqa: BLE001
+            cols = set()
+        _TBL_COLS_CACHE[key] = cols
+    return cols
+
+
 def _insert_into(db, table: str, data: dict) -> None:
     cols = []
     params = []
     vals = []
+    known = _table_cols(db, table)
     for k, v in data.items():
-        cols.append(_to_snake(k))
+        snake = _to_snake(k)
+        if known and snake not in known:
+            continue  # 路由提示键(projectId 等)不落库, 防列缺失崩溃
+        cols.append(snake)
         params.append("?")
         vals.append(_dumps(v))
+    if not cols:
+        raise RuntimeError(f"插入载荷为空(全部键不匹配表列): {table}")
     db.execute(
         f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(params)})",
         tuple(vals),

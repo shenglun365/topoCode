@@ -4,11 +4,21 @@ import json
 import logging
 import contextvars
 import os
+import re
 import urllib.request
 from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .common import _ts, _id
 from . import store
+from . import exec_bridge
+
+# executor 会话指令触发词(显式, 见 PR-B 分流注释)
+_IMPL_TRIG_RE = re.compile(
+    r"(执行方案|开始执行|继续执行|重新执行|执行|实施|动手实现|开始实施|继续实施)[!！。.]?")
+_AMEND_TRIG_RE = re.compile(
+    r"调整(方案|需求|规约)|(方案|需求|规约)调整|修改(方案|需求|规约)")
+_STOP_TRIG_RE = re.compile(r"(停止执行|中止执行|终止执行)[!！。.]?")
+_DIFF_TRIG_RE = re.compile(r"(查看差异|看下差异|查看 diff|看 diff)[?？!！。.]?", re.I)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -254,42 +264,70 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             _TOOL_WHITELIST.set(None)
     except Exception:  # noqa: BLE001
         _TOOL_WHITELIST.set(None)
-    # PR-B executor 会话路由: 对话直达 coding agent(tAgent 代码问答, agentic_loop +
-    # KB/代码工具), 跳过 architect 工具循环/守卫——executor 会话以代码执行为中心。
+    # PR-B executor 会话路由: 指令分级分流——
+    #   ① 实施触发词(执行方案/开始执行/继续执行/执行/实施…) → runner 实施作业(桥接泵)
+    #   ② 停止执行/查看差异 → 作业控制
+    #   ③ 作业运行中的其他消息 → 提示经泵上行转达(等待输入场景)
+    #   ④ 方案调整(调整方案/方案调整/调整需求…) → 回 architect 流程修订本会话绑定
+    #      规约(req.amend, 不新建规约)——不走 executor 早退, 落到下方主流程
+    #   ⑤ 其余 → tAgent 执行工程师答疑(tAgent 代码问答, agentic_loop + KB/代码工具)
     if _role and (_role.get("kind") or "") == "executor":
         question = (user_msgs[-1].get("content", "") if user_msgs else "").strip()
-        hist_lines = [f"{m.get('role')}: {(m.get('content') or '')[:200]}"
-                      for m in history[-6:] if (m.get("content") or "").strip()]
-        extra_ctx = (f"会话角色: {_role.get('name') or _role.get('id')}(executor, 技能: "
-                     f"{', '.join(_role.get('skills') or []) or '未限制'})\n"
-                     f"最近对话:\n" + "\n".join(hist_lines))
-        reply = await _agent_chat_reply(conv, question, extra_ctx)
-        final_b = reply or "(coding agent 暂不可达: KB/LLM 网关无响应——稍后重试, 或在设置页检查模型连通性)"
-        assistant_msg_id_b = store.next_id("m")
-        store.ConversationsStore.append_message({
-            "id": assistant_msg_id_b, "conversationId": conv_id,
-            "role": "assistant", "time": _ts(), "content": final_b,
-        })
-        try:
-            # 会话状态流转: 执行会话获得 coding agent 首个回复 → 执行中(会话即流程)
-            patch = {"reviewState": "unread"}
-            if (conv.get("status") or "active") == "active":
-                patch["status"] = "running"
-            store.ConversationsStore.update(conv_id, patch)
-        except Exception:  # noqa: BLE001
-            pass
-        await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
-                                   "requestId": "", "userMessageId": last_user_msg_id})
-        for i in range(0, len(final_b), 96):
-            await websocket.send_json({"type": "chunk", "requestId": "",
-                                       "delta": final_b[i:i + 96]})
-            await asyncio.sleep(0.01)
-        await websocket.send_json({"type": "done", "conversationId": conv_id,
-                                   "content": final_b, "messageId": assistant_msg_id_b})
-        return
+        impl_hit = bool(_IMPL_TRIG_RE.fullmatch(question))
+        amend_hit = bool(_AMEND_TRIG_RE.search(question))
+        stop_hit = bool(_STOP_TRIG_RE.fullmatch(question))
+        diff_hit = bool(_DIFF_TRIG_RE.fullmatch(question))
+        job_live = exec_bridge.is_running(conv_id)
+        if impl_hit and not job_live:
+            final_b = await _executor_implement(conv, _role)
+        elif stop_hit:
+            final_b = exec_bridge.stop(conv_id)
+        elif diff_hit:
+            final_b = _exec_diff_text(conv)
+        elif job_live:
+            final_b = ("实施作业运行中——执行工程师的提问会直接出现在本会话，"
+                       "直接发送消息即可转达（作业等待输入时自动送达）。"
+                       "发送「停止执行」可中止，「查看差异」看当前改动。")
+        elif amend_hit:
+            final_b = None  # 落到下方 architect 主流程(带 req.amend 收敛)
+        else:
+            exec_bridge.resume_if_job(conv_id, project_id=(conv.get("projectId") or ""))
+            final_b = await _executor_chat_reply(conv, question, _role)
+        if final_b is not None:
+            assistant_msg_id_b = store.next_id("m")
+            store.ConversationsStore.append_message({
+                "id": assistant_msg_id_b, "conversationId": conv_id,
+                "role": "assistant", "time": _ts(), "content": final_b,
+            })
+            try:
+                # 会话状态流转: 执行会话获得 coding agent 首个回复 → 执行中(会话即流程)
+                patch = {"reviewState": "unread"}
+                if (conv.get("status") or "active") == "active":
+                    patch["status"] = "running"
+                store.ConversationsStore.update(conv_id, patch)
+            except Exception:  # noqa: BLE001
+                pass
+            await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
+                                       "requestId": "", "userMessageId": last_user_msg_id})
+            for i in range(0, len(final_b), 96):
+                await websocket.send_json({"type": "chunk", "requestId": "",
+                                           "delta": final_b[i:i + 96]})
+                await asyncio.sleep(0.01)
+            await websocket.send_json({"type": "done", "conversationId": conv_id,
+                                       "content": final_b, "messageId": assistant_msg_id_b})
+            return
+        # 方案调整: 注入修订契约后走 architect 主流程(工具含 req.amend, 守卫照常)
+        amend_contract = (
+            "【方案调整模式】本会话为执行会话，绑定需求 "
+            f"{(conv.get('reqId') or '')}。用户要求调整方案/规约——你现在是架构师："
+            "与用户对话收敛调整内容，并用 req.amend 工具把调整落回该需求的方案字段"
+            "(只更新既有规约，严禁调用 req.propose / req.finalize 新建规约)。"
+            "调整完成后向用户复述变更点。")
 
     msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
                                 skill_scenarios=[str(s) for s in skill_scenarios])
+    if _role and (_role.get("kind") or "") == "executor" and amend_hit:
+        msgs.insert(1, {"role": "system", "content": amend_contract})
 
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，
     # 无角色命中时 eff_model=None → 回退全局偏好(既有链不变)。护栏 R3：per-call 参数。
@@ -715,7 +753,8 @@ def _req_chat_stream(msgs, model_id):
 # ── A7: tAgent 代码问答辅助(会话驱动: 会话→工程上下文→代码问答) ────────
 
 async def _agent_chat_reply(conv: dict, content: str,
-                            extra_context: str = "") -> Optional[str]:
+                            extra_context: str = "",
+                            role: Optional[dict] = None) -> Optional[str]:
     """executor 会话对话直达 coding agent(tAgent 代码问答, agentic_loop + KB/代码工具)。
 
     会话绑定需求/项目 → root/project → chat_reply。KB 不可达/异常 → None
@@ -739,10 +778,88 @@ async def _agent_chat_reply(conv: dict, content: str,
     try:
         return await asyncio.to_thread(
             tagent_chat.chat_reply,
-            question=content, root=root, project=project, task_context=task_context)
+            question=content, root=root, project=project, task_context=task_context,
+            model_id=(role or {}).get("modelId") or "")
     except Exception as e:
         logger.warning(f"[executor-chat] tAgent 聊天失败: {e}")
         return None
+
+
+def _build_impl_instruction(rid: str) -> str:
+    """绑定需求 → coding agent 实施指令(目标/方案/边界/验收/交付定义)。"""
+    r = store.RequirementsStore.get(rid) or {}
+    a = r.get("analysis") or {}
+    parts = [f"# 实施任务：{r.get('title') or rid}（{rid}）"]
+    if a.get("functionalScope"):
+        parts.append("## 需求目标\n" + "\n".join(f"- {x}" for x in a["functionalScope"]))
+    if a.get("designMd") or a.get("implementationPath"):
+        parts.append("## 实现方案(遵循执行)\n"
+                     + str(a.get("designMd") or a.get("implementationPath")))
+    if a.get("allowedScope"):
+        parts.append("## 允许增删改\n" + "\n".join(f"- {x}" for x in a["allowedScope"]))
+    if a.get("forbiddenScope"):
+        parts.append("## 一定不能动\n" + "\n".join(f"- {x}" for x in a["forbiddenScope"]))
+    if a.get("acceptance"):
+        parts.append("## 验收标准\n" + "\n".join(f"- {x}" for x in a["acceptance"]))
+    parts.append(
+        "## 交付定义(DoD)\n"
+        "1. 按方案完成代码实现；\n"
+        "2. 为新增/变更逻辑编写并运行单元测试(全部通过)；\n"
+        "3. 完成整体编译/构建验证(项目可编译、无链接错误)；\n"
+        "4. 全部完成后输出 [[IMPLEMENT_DONE]] 与摘要(变更文件/单测结果/编译结果/遗留项)；"
+        "任一环节需要用户操作、确认、澄清或补充信息时，输出 [[NEED_INPUT]] 与具体问题后结束回合等待。")
+    return "\n\n".join(parts)
+
+
+def _executor_hint(role: Optional[dict]) -> Optional[dict]:
+    """角色绑定的执行器配置 → runner 作业提示(model/端口等)。"""
+    eid = (role or {}).get("executorId") or ""
+    if not eid:
+        return None
+    try:
+        from .agent_executors import load_executors
+        for e in load_executors():
+            if (e.get("id") or "") == eid:
+                cfg = e.get("config") or {}
+                models = e.get("models") or []
+                return {"model": (models[0] if models else "") or cfg.get("model") or "",
+                        "basePort": cfg.get("base_port"), "autoStart": cfg.get("auto_start"),
+                        "baseUrl": cfg.get("base_url") or cfg.get("serve_url") or ""}
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+async def _executor_implement(conv: dict, role: Optional[dict]) -> str:
+    """实施触发词 → 组装指令 → runner 建作业 + 桥接泵启动。返回 ack 文案。"""
+    from . import exec_bridge
+    rid = (conv or {}).get("reqId") or ""
+    if not rid:
+        return "本会话未绑定需求，无法启动实施（请通过需求定稿生成待执行会话）。"
+    instruction = _build_impl_instruction(rid)
+    return exec_bridge.start_implement(conv, instruction,
+                                       executor_hint=_executor_hint(role))
+
+
+def _exec_diff_text(conv: dict) -> str:
+    """「查看差异」→ 当前作业相对基线的 diff 摘要。"""
+    from . import exec_bridge
+    info = exec_bridge.job_info(conv) or {}
+    if not info.get("jobId"):
+        return "暂无实施作业。发送「执行方案」开始实施。"
+    d = exec_bridge._runner(f"/api/implement/{info['jobId']}/diff", timeout=30.0) or {}
+    if not d.get("ok"):
+        return "无法获取差异(作业不存在或 runner 不可达)。"
+    files = "\n".join(f"- `{f}`" for f in (d.get("changedFiles") or [])[:30]) or "- (无)"
+    return (f"**分支 `{info.get('branch', '')}` 相对基线的差异**"
+            f"(+{d.get('addLines', 0)}/-{d.get('delLines', 0)} 行)\n{files}")
+
+
+async def _executor_chat_reply(conv: dict, question: str, role: Optional[dict]) -> str:
+    """执行工程师答疑(tAgent 代码问答) + 不可达兜底文案。"""
+    reply = await _agent_chat_reply(conv, question, role=role)
+    return reply or ("(执行工程师暂不可达: runner/LLM 网关无响应——稍后重试，"
+                     "或在系统管理页检查执行器与模型连通性)")
 
 
 def _push_session_message(session_id: str, role: str, content: str, tool=None):

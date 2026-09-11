@@ -1386,6 +1386,65 @@ def tool_req_finalize(title: str = "", description: str = "",
     }
 
 
+@register_architect_tool(
+    "req.amend",
+    "方案调整(执行会话专用)：把用户在执行会话中要求的方案/规约调整落回【既有】需求的"
+    "分析字段(只更新，不新建规约；严禁与 req.propose/req.finalize 混用)。"
+    "参数均可选——只传需要调整的字段；designMd 为调整后的完整方案(全文替换语义)。"
+    "参数：designMd(方案)、allowedScope[str]、forbiddenScope[str]、acceptance[str]、"
+    "functionalScope[str]、assessmentSummary(str)、reasoning(调整理由, 会话留痕)。",
+)
+def tool_req_amend(reqId: str = "",
+                   designMd: str = "",
+                   allowedScope: Optional[List[str]] = None,
+                   forbiddenScope: Optional[List[str]] = None,
+                   acceptance: Optional[List[str]] = None,
+                   functionalScope: Optional[List[str]] = None,
+                   assessmentSummary: str = "",
+                   reasoning: str = "",
+                   root: Optional[str] = None,
+                   project: Optional[str] = None) -> Dict[str, Any]:
+    from . import ctx
+    req_id = (reqId or "").strip() or ctx.get_req()
+    if not req_id:
+        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法调整"}
+    row = store.RequirementsStore.get(req_id)
+    if not row:
+        return {"ok": False, "error": f"需求 {req_id} 不存在"}
+    analysis = dict(row.get("analysis") or {})
+    changed = []
+    if designMd:
+        analysis["designMd"] = designMd
+        analysis["implementationPath"] = str(designMd)[:500]
+        changed.append("方案(designMd)")
+    if allowedScope is not None:
+        analysis["allowedScope"] = _md_lines(allowedScope)[:40]
+        changed.append("允许改动范围")
+    if forbiddenScope is not None:
+        analysis["forbiddenScope"] = _md_lines(forbiddenScope)[:40]
+        changed.append("禁止改动范围")
+    if acceptance is not None:
+        analysis["acceptance"] = _md_lines(acceptance)[:40]
+        changed.append("验收标准")
+    if functionalScope is not None:
+        analysis["functionalScope"] = _md_lines(functionalScope)[:40]
+        changed.append("需求目标")
+    if assessmentSummary:
+        analysis["assessmentSummary"] = str(assessmentSummary)[:500]
+        changed.append("评估摘要")
+    if not changed:
+        return {"ok": False, "error": "未提供任何调整字段(参数均可选, 至少传一项)"}
+    store.RequirementsStore.update(req_id, {"analysis": analysis})
+    try:
+        log_conv_event(ctx.get_conv(),
+                       f"✏️ **方案已调整**（{req_id}）：{'、'.join(changed)}"
+                       + (f" —— {str(reasoning)[:120]}" if reasoning else ""))
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "reqId": req_id, "amended": changed,
+            "hint": "调整已落回既有规约；若实施作业已在运行，建议用户「停止执行」后重新「执行方案」"}
+
+
 # ── 会话只读工具(PR-D: 归档会话可被 agent 读取/引用; 不在任何动作黑名单) ──
 
 @register_architect_tool(

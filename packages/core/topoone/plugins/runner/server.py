@@ -553,6 +553,9 @@ def main():
     from topoone.http_logging import install_heartbeat_filter
     install_heartbeat_filter()
     init_runner()
+    # 实施作业宿主(会话驱动真实实施: worktree 保留 + opencode 会话 + 双向缓冲)
+    from . import implement
+    implement.register(app)
     logger.info("[runner] starting on port %s (executors=%s)", PORT, state.pool.available())
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")
 
