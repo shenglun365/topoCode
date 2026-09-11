@@ -1833,7 +1833,7 @@ export default {
     selectAll: 'Select All',
     invert: 'Invert',
     reconciling: 'Checking…',
-    historyButton: 'History',
+    historyButton: 'Conversations',
     sync: {
       button: 'Update Assets',
       hint: 'Check the delta against the latest worktree code (uncommitted changes included; added/modified/never-extracted/stale), then extract incrementally after confirmation (LLM summarization included when a model is available); the baseline is only used for delta calculation — unchanged files are skipped',
@@ -2018,7 +2018,7 @@ renderingMore: 'Rendered {done}/{total} · scroll for more',
     prevPage: 'Prev',
     nextPage: 'Next',
     history: {
-      title: 'Chat History',
+      title: 'Conversations',
       newConversation: 'Import as new conversation',
       newConversationHint: 'Start a fresh conversation with the selected asset',
       hint: 'Saved asset-management conversations. "Import" restores a conversation to keep confirming asset specs; "Delete" removes it.',
