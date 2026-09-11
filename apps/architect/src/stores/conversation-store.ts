@@ -205,7 +205,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     beginProgress()
     const ac = new AbortController(); abortCtl.value = ac
     try {
-      const msgs = arr.slice(0, -1).map((m) => ({ role: m.role, content: m.content }))
+      // 本地引导消息(meta.kind='hint')纯前端提示, 不进入模型上下文
+      const msgs = arr.slice(0, -1).filter((m) => m.meta?.kind !== 'hint').map((m) => ({ role: m.role, content: m.content }))
       await chatStream(msgs, {
         conversationId: activeId.value || undefined,
         kind: opts?.kind ?? (activeMeta.value as any)?.kind ?? undefined,
@@ -256,6 +257,14 @@ export const useConversationStore = defineStore('archConversation', () => {
     return send(text)
   }
 
+  /**
+   * 本地引导消息(「引导」按钮输出)：仅在当前对话流渲染,
+   * 不发后端/不落库/不进上下文——会话切换或重开自然消失。
+   */
+  function pushLocalHint(text: string) {
+    turns.value.push({ role: 'assistant', content: text, meta: { kind: 'hint' } })
+  }
+
   async function deleteTurn(index: number) {
     const turn = turns.value[index]
     if (!turn) return
@@ -286,6 +295,6 @@ export const useConversationStore = defineStore('archConversation', () => {
     busyLabel, toolTrail,
     registerChatHook,
     openConversation, newConversation, applyConversation,
-    send, sendAnswers, deleteTurn, stop, refreshActiveMeta,
+    send, sendAnswers, deleteTurn, stop, refreshActiveMeta, pushLocalHint,
   }
 })

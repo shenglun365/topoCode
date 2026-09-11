@@ -155,10 +155,24 @@ const isRunning = computed(() => workState.value === 'running'
 const activeRoles = computed<string[]>(
   () => ((conv.activeMeta as any)?.roles as string[]) || ['architect'])
 
-// 绑定需求的 architect 态会话: 常驻触发词提示条
+// 绑定需求的 architect 态会话: 「引导」按钮可见(触发词提示按需输出)
 const isExecutionConv = computed(() =>
   !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
   && !isRunning.value)
+
+/** 引导消息: 仅渲染进对话流(本地), 不发后端/不进上下文, 切换会话自然消失。 */
+const GUIDE_MD = [
+  '⚡ **会话引导**（仅本地提示，不进入对话上下文）',
+  '',
+  '- `执行方案` 生成执行预览 → `确认执行` 启动作业',
+  '- `方案调整` + 调整点 修订规约（生成新 draft 版本）',
+  '- 作业提问时直接回复补充 → `继续执行` 转达给 agent',
+  '- `查看差异` 查看作业产物；完成后可标记需求完成',
+].join('\n')
+function showGuide() {
+  if (!isExecutionConv.value) return
+  conv.pushLocalHint(GUIDE_MD)
+}
 // running 输入锁提示(裁决#6.1)
 const inputLockedHint = computed(() =>
   isRunning.value ? t('session.workState.lockedHint') : null)
@@ -435,38 +449,6 @@ async function answerClarify() {
       </div>
     </div>
 
-    <!-- 触发词常驻提示条(绑定需求的 architect 态会话) -->
-    <div
-      v-if="isExecutionConv"
-      class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-ctp-surface0 bg-ctp-mauve/5 px-3 py-1.5 text-[10px] text-ctp-overlay1"
-    >
-      <span class="text-ctp-mauve">⚡ 触发词</span>
-      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">执行方案</code> 预览 → <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">确认执行</code> 启动</span>
-      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">方案调整</code> 修订规约</span>
-      <span><code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">继续执行</code> 转达补充 · <code class="rounded bg-ctp-surface0 px-1 py-px text-ctp-text">查看差异</code></span>
-      <span v-if="reqStatus" class="ml-auto flex items-center gap-1.5">
-        <span
-          class="chip !text-[10px]"
-          :class="reqStatus.status === 'ready' ? 'bg-ctp-green/15 text-ctp-green'
-            : reqStatus.status === 'done' ? 'bg-ctp-overlay0/20 text-ctp-overlay1' : 'bg-ctp-surface0/60 text-ctp-subtext1'"
-          :title="t('session.reqState.title')"
-        >{{ conv.activeReqId }} · {{ t(`req.status.${reqStatus.status || 'raw'}`) }}<template v-if="reqStatus.activeVer"> v{{ reqStatus.activeVer }}</template></span>
-        <button
-          v-if="reqStatus.status === 'ready'"
-          class="btn !py-0 !px-1.5 !text-[10px]"
-          :disabled="markDoneBusy"
-          :title="t('session.job.acceptHint')"
-          @click="markReqDone(true)"
-        >{{ t('session.reqState.markDone') }}</button>
-        <button
-          v-else-if="reqStatus.status === 'done'"
-          class="btn !py-0 !px-1.5 !text-[10px] btn-ghost"
-          :disabled="markDoneBusy"
-          @click="markReqDone(false)"
-        >{{ t('session.reqState.undoDone') }}</button>
-      </span>
-    </div>
-
     <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
     <!-- 澄清应答横幅 -->
     <div
@@ -596,6 +578,21 @@ async function answerClarify() {
         <template #header-extra>
           <div v-if="conv.activeId" class="ml-auto flex shrink-0 items-center gap-1.5">
             <span
+              v-if="reqStatus && (conv.activeMeta as any)?.status !== 'archived'"
+              class="chip !text-[10px]"
+              :class="reqStatus.status === 'ready' ? 'bg-ctp-green/15 text-ctp-green'
+                : reqStatus.status === 'done' ? 'bg-ctp-overlay0/20 text-ctp-overlay1' : 'bg-ctp-surface0/60 text-ctp-subtext1'"
+              :title="t('session.reqState.title')"
+            >{{ conv.activeReqId }} · {{ t(`req.status.${reqStatus.status || 'raw'}`) }}<template v-if="reqStatus.activeVer"> v{{ reqStatus.activeVer }}</template></span>
+            <button
+              v-if="reqStatus?.status === 'ready' || reqStatus?.status === 'done'"
+              class="btn !py-0 !px-1.5 !text-[10px]"
+              :class="reqStatus.status === 'done' ? 'btn-ghost' : ''"
+              :disabled="markDoneBusy"
+              :title="reqStatus.status === 'done' ? t('session.reqState.title') : t('session.job.acceptHint')"
+              @click="markReqDone(reqStatus.status !== 'done')"
+            >{{ reqStatus.status === 'done' ? t('session.reqState.undoDone') : t('session.reqState.markDone') }}</button>
+            <span
               v-if="isRunning"
               class="chip !text-[10px] animate-pulse bg-ctp-peach/15 text-ctp-peach"
               :title="t('session.workState.runningHint')"
@@ -621,6 +618,12 @@ async function answerClarify() {
           </div>
         </template>
         <template #toolbar-extra>
+          <button
+            v-if="isExecutionConv"
+            class="btn btn-xs btn-ghost !text-ctp-mauve"
+            :title="t('session.actions.guide')"
+            @click="showGuide"
+          >⚡ {{ t('session.actions.guide') }}</button>
           <button
             class="btn btn-xs"
             :class="titleSummarizing ? 'btn-blue' : 'btn-ghost'"

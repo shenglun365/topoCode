@@ -469,6 +469,7 @@ export default {
       rename: 'Rename',
       renamePrompt: 'Session title',
       summarize: 'Summarize',
+      guide: 'Guide (prints trigger hints, not sent to context)',
       editTags: 'Edit tags/groups',
       groupsPrompt: 'Custom groups (comma separated)',
       modulesPrompt: 'Modules (comma separated)',
