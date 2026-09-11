@@ -12,7 +12,6 @@ import {
 } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchMcpStore } from '@/stores/mcp-store'
-import { apiGet } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
 import { copyText } from '@/utils/clipboard'
 
@@ -37,8 +36,7 @@ const TOOLS = [
 
 onMounted(async () => {
   try {
-    await apiGet('/git') // 探活（同进程架构：architect 可达即 MCP HTTP 可达）
-    httpUp.value = await backendUp()
+    httpUp.value = await backendUp() // 探活（同进程架构：architect 可达即 MCP HTTP 可达）
   } catch { httpUp.value = false }
 })
 
