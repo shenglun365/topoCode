@@ -95,14 +95,14 @@ class TestStoreRouting:
         _setup(tmp_path, monkeypatch)
         token = C.set_project("proj-p2")
         try:
-            store.PlansStore.create({"id": "plan-1", "title": "上下文方案", "updatedAt": 1})
+            store.DocsStore.create({"id": "doc-1", "title": "上下文方案", "updatedAt": 1})
             pdb = C.project_db("proj-p2", create=False)
             assert pdb is not None
-            assert pdb.fetchone("SELECT id FROM arch_plans WHERE id=?", ("plan-1",))
+            assert pdb.fetchone("SELECT id FROM arch_docs WHERE id=?", ("doc-1",))
             # 有上下文读 → 只查项目库
-            assert store.PlansStore.get("plan-1")["title"] == "上下文方案"
-            assert store.PlansStore.all() == [store._row_to_api(
-                pdb.fetchone("SELECT * FROM arch_plans WHERE id=?", ("plan-1",)))]
+            assert store.DocsStore.get("doc-1")["title"] == "上下文方案"
+            assert store.DocsStore.all() == [store._row_to_api(
+                pdb.fetchone("SELECT * FROM arch_docs WHERE id=?", ("doc-1",)))]
         finally:
             C.reset_project(token)
 
@@ -126,19 +126,21 @@ class TestStoreRouting:
     def test_locate_db_update_without_context(self, tmp_path, monkeypatch):
         """id 定位写: 行在项目库、无上下文 update/delete 仍能命中(WS 后续消息场景)。"""
         _setup(tmp_path, monkeypatch)
-        store.AgentSessionsStore.create({"id": "sess-1", "status": "idle", "createdAt": 1, "updatedAt": 1})
-        # 会话落入主库默认桶; 改放项目库场景:
+        store.SemanticAssetsStore.create({"id": "sa-r1", "kind": "entity", "name": "r1",
+            "scopeType": "files", "scopeKey": "a.py", "status": "active", "createdAt": 1, "updatedAt": 1})
+        # 语义资产落入主库默认桶; 改放项目库场景:
         token = C.set_project("proj-l1")
-        store.AgentSessionsStore.create({"id": "sess-2", "status": "idle", "createdAt": 1, "updatedAt": 1})
+        store.SemanticAssetsStore.create({"id": "sa-r2", "kind": "entity", "name": "r2",
+            "scopeType": "files", "scopeKey": "b.py", "status": "active", "createdAt": 1, "updatedAt": 1})
         C.reset_project(token)
-        # 无上下文更新项目库里的会话
-        out = store.AgentSessionsStore.update("sess-2", {"status": "busy"})
-        assert out and out["status"] == "busy"
+        # 无上下文更新项目库里的单元
+        out = store.SemanticAssetsStore.update("sa-r2", {"status": "stale"})
+        assert out and out["status"] == "stale"
         pdb = C.project_db("proj-l1", create=False)
-        assert pdb.fetchone("SELECT status FROM arch_agent_sessions WHERE id=?", ("sess-2",))["status"] == "busy"
+        assert pdb.fetchone("SELECT status FROM arch_semantic_assets WHERE id=?", ("sa-r2",))["status"] == "stale"
         # 无上下文删除
-        assert store.AgentSessionsStore.delete("sess-2") is True
-        assert pdb.fetchone("SELECT id FROM arch_agent_sessions WHERE id=?", ("sess-2",)) is None
+        assert store.SemanticAssetsStore.delete("sa-r2") is True
+        assert pdb.fetchone("SELECT id FROM arch_semantic_assets WHERE id=?", ("sa-r2",)) is None
 
     def test_project_scoped_read_no_cross_leak(self, tmp_path, monkeypatch):
         """显式项目定位但该库不存在 → 空结果(不跨项目泄漏)。"""
@@ -156,18 +158,18 @@ class TestStoreRouting:
 
     def test_run_atomic_routes_by_context(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
-        store.PlansStore.create({"id": "plan-9", "title": "p", "updatedAt": 1})
+        store.DocsStore.create({"id": "doc-9", "title": "p", "updatedAt": 1})
         token = C.set_project("proj-atom")
-        store.PlansStore.create({"id": "plan-10", "title": "p10", "updatedAt": 1})
+        store.DocsStore.create({"id": "doc-10", "title": "p10", "updatedAt": 1})
         try:
             store.run_atomic([
-                ("UPDATE arch_plans SET status = ? WHERE id = ?", ("done", "plan-10")),
-            ], table="arch_plans")
+                ("UPDATE arch_docs SET type = ? WHERE id = ?", ("dev_digest", "doc-10")),
+            ], table="arch_docs")
         finally:
             C.reset_project(token)
         pdb = C.project_db("proj-atom", create=False)
         assert pdb is not None
-        assert pdb.fetchone("SELECT status FROM arch_plans WHERE id=?", ("plan-10",))["status"] == "done"
+        assert pdb.fetchone("SELECT type FROM arch_docs WHERE id=?", ("doc-10",))["type"] == "dev_digest"
 
     def test_migration_idempotent_on_project_db(self, tmp_path, monkeypatch):
         """项目库迁移幂等: 重跑 init 不改写已有行(rule 保持一级类别)。"""

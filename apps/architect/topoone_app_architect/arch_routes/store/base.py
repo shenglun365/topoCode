@@ -160,23 +160,19 @@ def bump_seq(prefix: str, min_seq: int) -> int:
 
 # 项目级表(落项目库; 其余为全局表, 恒在主库)
 PROJECT_TABLES = frozenset({
-    "arch_requirements", "arch_plans", "arch_task_trees",
-    "arch_execution_tasks", "arch_agent_sessions", "arch_agent_messages",
+    "arch_requirements",
     "arch_unit_tests", "arch_unit_test_sessions", "arch_unit_test_messages",
     "arch_conversations", "arch_conversation_messages", "arch_docs",
     "arch_context_units",
     "arch_blueprints", "arch_tags", "arch_staging_scans",
     "arch_snapshot_records", "arch_kb_snapshots",
     "arch_semantic_assets", "arch_ast_cache", "arch_semantic_refs",
-    "arch_extract_tasks",
     # M0 冻结 schema（plan-C-M0.md §6）
     "arch_framework_configs", "arch_name_tombstones", "arch_user_overlays",
     "arch_naming_conventions", "arch_glossary",
     "arch_capability_proposals",
     "arch_contract_items", "arch_contract_packages",
     "arch_acceptance_reports", "arch_acceptance_facts", "arch_acceptance_opinions",
-    # PR1 双维度状态机/角色体系: 并行执行资产锁(项目库)
-    "arch_asset_locks",
 })
 
 # WS8 认知层→主库提升: 主库全局桶哨兵 project_id(设计稿 global-promotion-design.md)

@@ -137,80 +137,6 @@ ARCH_PROJECT_TABLES_SQL = """
         asset_invalidated_at INTEGER DEFAULT 0
     );
 
-    CREATE TABLE IF NOT EXISTS arch_plans (
-        id TEXT PRIMARY KEY,
-        req_ids TEXT,                       -- JSON: string[]
-        title TEXT DEFAULT '',
-        approach TEXT DEFAULT '',
-        changes TEXT,                       -- JSON: ChangeItem[]
-        impact TEXT,                        -- JSON
-        status TEXT DEFAULT 'draft',
-        task_plan_id TEXT,
-        base_commit TEXT,
-        updated_at INTEGER DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS arch_task_trees (
-        id TEXT PRIMARY KEY,
-        plan_id TEXT,
-        root TEXT,                          -- JSON: TaskNode
-        revision INTEGER DEFAULT 0,
-        history TEXT,                       -- JSON: TaskNode[] (缩略快照, 上限20)
-        updated_at INTEGER DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS arch_execution_tasks (
-        id TEXT PRIMARY KEY,
-        plan_id TEXT,
-        adapter TEXT DEFAULT 'opencode',
-        model TEXT,
-        req_ids TEXT,                       -- JSON: string[]
-        connectivity TEXT DEFAULT 'unknown',
-        status TEXT DEFAULT 'created',
-        session_ids TEXT,                   -- JSON: string[]
-        base_commit TEXT,
-        run_count INTEGER DEFAULT 0,
-        tree_revision INTEGER DEFAULT 0,
-        test_ids TEXT,                      -- JSON: string[] (任务侧冗余关联)
-        amendments TEXT,                    -- JSON: AppendedReq[]
-        stats TEXT,                         -- JSON: TaskSessionStats
-        error TEXT,
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0,
-        ended_at INTEGER,
-        instance_id TEXT DEFAULT '',
-        task_branch TEXT DEFAULT '',
-        branch_mode TEXT DEFAULT 'auto',
-        asset_invalidated INTEGER DEFAULT 0,
-        runner_tree_id TEXT DEFAULT '',
-        pending_rejudge TEXT DEFAULT ''
-    );
-
-    CREATE TABLE IF NOT EXISTS arch_agent_sessions (
-        id TEXT PRIMARY KEY,
-        task_id TEXT,
-        adapter TEXT DEFAULT 'opencode',
-        status TEXT DEFAULT 'idle',
-        keep_context INTEGER DEFAULT 1,
-        artifacts TEXT,                     -- JSON: string[]
-        test_result TEXT,                   -- JSON
-        stats TEXT,                         -- JSON: TaskSessionStats
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0,
-        instance_id TEXT DEFAULT '',
-        opencode_session_id TEXT DEFAULT ''
-    );
-
-    CREATE TABLE IF NOT EXISTS arch_agent_messages (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        time INTEGER DEFAULT 0,
-        content TEXT DEFAULT '',
-        tool TEXT                            -- JSON: AgentToolCall
-    );
-    CREATE INDEX IF NOT EXISTS idx_arch_agent_msgs_session ON arch_agent_messages(session_id);
-
     CREATE TABLE IF NOT EXISTS arch_unit_tests (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL DEFAULT '',
@@ -404,22 +330,6 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_refs_asset ON arch_semantic_refs(asset_id);
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_refs_ref ON arch_semantic_refs(ref_type, ref_id);
-
-    CREATE TABLE IF NOT EXISTS arch_extract_tasks (
-        id TEXT PRIMARY KEY,
-        project_id TEXT DEFAULT '',
-        root TEXT DEFAULT '',
-        status TEXT DEFAULT 'running',     -- running | done | partial | failed
-        kind TEXT DEFAULT 'semantic',      -- semantic 提取任务归类
-        comp_ids TEXT,                     -- JSON: string[] 待提取组件 id
-        total INTEGER DEFAULT 0,
-        done INTEGER DEFAULT 0,
-        progress TEXT,                     -- JSON: [{compId, status, count, error}]
-        messages TEXT,                     -- JSON: [{id, role, content, time}] 同步到对话
-        meta TEXT,                         -- JSON: 附加(模型/会话上下文)
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
-    );
 
     -- ── M0 冻结 schema（docs/architect-reconstruction/plan-C-M0.md §6） ──
 
@@ -681,21 +591,6 @@ def architect_db_migrations(db) -> None:
 
 # ── 项目库迁移(旧项目库升级兜底，幂等) ─────────────────────────
 
-ASSET_LOCK_TABLE_SQL = """
-    -- 并行执行资产锁(PR5): 同项目并行任务不能同时改相同数据资产
-    CREATE TABLE IF NOT EXISTS arch_asset_locks (
-        id TEXT PRIMARY KEY,
-        project_id TEXT DEFAULT '',
-        resource TEXT NOT NULL,             -- 文件路径 或 组件资产 id(sa-*)
-        granularity TEXT DEFAULT 'file',    -- file | component
-        holder TEXT NOT NULL,               -- 持有者(execId/convId)
-        holder_title TEXT DEFAULT '',
-        acquired_at INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_asset_locks_res ON arch_asset_locks(project_id, resource);
-"""
-
-
 def _migrate_conversation_lifecycle(db) -> None:
     """存量会话状态迁移(一次性, 幂等): 单值 status → 双维度。
 
@@ -744,10 +639,6 @@ def _project_migrations(db) -> None:
     _add_cols(db, "arch_capability_proposals", [
         ("origin_project_id", "TEXT DEFAULT ''"),
     ])
-    # 偏差处置流: 执行任务上的处置记录(JSON: {action, reason, at, deviationDigest})
-    _add_cols(db, "arch_execution_tasks", [
-        ("deviation_disposition", "TEXT DEFAULT ''"),
-    ])
     _add_cols(db, "arch_requirements", [
         ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),
         ("parent_id", "TEXT"), ("related_to", "TEXT"), ("merged_into", "TEXT"),
@@ -760,19 +651,6 @@ def _project_migrations(db) -> None:
         ("source_type", "TEXT DEFAULT ''"),
         ("source_conversation_id", "TEXT DEFAULT ''"),
     ])
-    _add_cols(db, "arch_execution_tasks", [
-        ("instance_id", "TEXT DEFAULT ''"),
-        ("task_branch", "TEXT DEFAULT ''"),
-        ("branch_mode", "TEXT DEFAULT 'auto'"),
-        ("asset_invalidated", "INTEGER DEFAULT 0"),
-        ("runner_tree_id", "TEXT DEFAULT ''"),
-        ("pending_rejudge", "TEXT DEFAULT ''"),
-        # S2 任务分支协议：落地提交与时间（幂等闸 + 验收 diff 锚点）
-        ("branch_commit", "TEXT DEFAULT ''"),
-        ("branch_landed_at", "INTEGER DEFAULT 0"),
-        # P1 会话中心：执行作业归属的会话(上下文构造/简报的关联键)
-        ("conversation_id", "TEXT DEFAULT ''"),
-    ])
     _add_cols(db, "arch_conversations", [
         # P1 会话中心：分类标签 + 摘要(全量持久化、历史总结素材)
         ("tags", "TEXT"),
@@ -783,10 +661,6 @@ def _project_migrations(db) -> None:
         ("role_locked", "INTEGER DEFAULT 0"),
     ])
     _migrate_conversation_lifecycle(db)
-    _add_cols(db, "arch_agent_sessions", [
-        ("instance_id", "TEXT DEFAULT ''"),
-        ("opencode_session_id", "TEXT DEFAULT ''"),
-    ])
     _add_cols(db, "arch_unit_tests", [
         ("asset_refs", "TEXT"),
     ])
@@ -846,7 +720,6 @@ def init_architect_db(db) -> None:
     """
     db.executescript(ARCH_MAIN_TABLES_SQL + "\n" + ARCH_PROJECT_TABLES_SQL)
     db.executescript(SESSION_ROLE_TABLE_SQL)
-    db.executescript(ASSET_LOCK_TABLE_SQL)
     _seed_roles(db)
     _main_migrations(db)
     _project_migrations(db)
@@ -855,5 +728,4 @@ def init_architect_db(db) -> None:
 def init_architect_project_db(db) -> None:
     """初始化 architect 项目库(architect/<pid>/arch.db)。幂等。"""
     db.executescript(ARCH_PROJECT_TABLES_SQL)
-    db.executescript(ASSET_LOCK_TABLE_SQL)
     _project_migrations(db)

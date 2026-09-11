@@ -250,67 +250,6 @@ class SemanticAssetsStore:
 
 
 
-class ExtractTaskStore:
-    """语义资产提取任务(状态保持：浏览器刷新不中断，前端可恢复读取)。
-
-    表: arch_extract_tasks。任务在服务端后台线程执行，进度/消息持久化，
-    前端轮询同步到资产管理对话消息栏。
-    """
-
-    TABLE = "arch_extract_tasks"
-    KINDS = ("semantic",)
-
-    @classmethod
-    def create(cls, data: dict) -> dict:
-        _insert(cls.TABLE, data)
-        return data
-
-    @classmethod
-    def get(cls, task_id: str) -> Optional[dict]:
-        return _get(cls.TABLE, task_id)
-
-    @classmethod
-    def update(cls, task_id: str, data: dict) -> Optional[dict]:
-        return _update(cls.TABLE, task_id, data)
-
-    @classmethod
-    def delete(cls, task_id: str) -> bool:
-        return _delete(cls.TABLE, task_id)
-
-    @classmethod
-    def list_recent(cls, project_id: str = "", limit: int = 20) -> list[dict]:
-        conds, params = [], []
-        if project_id:
-            conds.append("project_id = ?")
-            params.append(project_id)
-        where = ("WHERE " + " AND ".join(conds)) if conds else ""
-        rows, mode = _fetchall_routed(
-            cls.TABLE,
-            f"SELECT * FROM {cls.TABLE} {where} ORDER BY created_at DESC LIMIT ?",
-            tuple(params + [int(limit)]),
-            project_id or None,
-        )
-        out = [_row_to_api(r) for r in rows]
-        if mode == "scan":
-            out.sort(key=lambda r: (r.get("createdAt") is None, r.get("createdAt") or 0), reverse=True)
-            out = out[: int(limit)]
-        return out
-
-    @classmethod
-    def latest(cls, project_id: str = "", kind: str = "semantic") -> Optional[dict]:
-        conds, params = ["kind = ?"], [kind or "semantic"]
-        if project_id:
-            conds.append("project_id = ?")
-            params.append(project_id)
-        sql = (f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
-               "ORDER BY created_at DESC LIMIT 1")
-        rows, mode = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id or None)
-        if mode == "scan" and len(rows) > 1:
-            rows.sort(key=lambda r: (r.get("created_at") or 0), reverse=True)
-        return _row_to_api(rows[0]) if rows else None
-
-
-
 
 class AstCacheStore:
     """architect AST 缓存层(要求③)：按文件存符号/边，content_hash 判新鲜。

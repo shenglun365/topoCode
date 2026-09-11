@@ -3,64 +3,6 @@ from __future__ import annotations
 
 from .base import PROJECT_TABLES, _all, _db, _dumps, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _target_db, _to_snake, _update, next_id
 
-class AgentSessionsStore:
-    TABLE = "arch_agent_sessions"
-
-    @classmethod
-    def all(cls):
-        return _all(cls.TABLE, order_by="created_at DESC")
-
-    @classmethod
-    def get(cls, session_id: str):
-        return _get(cls.TABLE, session_id)
-
-    @classmethod
-    def create(cls, data: dict) -> dict:
-        _insert(cls.TABLE, data)
-        return data
-
-    @classmethod
-    def update(cls, session_id: str, data: dict) -> Optional[dict]:
-        return _update(cls.TABLE, session_id, data)
-
-    @classmethod
-    def messages(cls, session_id: str) -> list[dict]:
-        db, found = _locate_db(cls.TABLE, session_id)
-        if not found:
-            return []
-        rows = db.fetchall(
-            "SELECT * FROM arch_agent_messages WHERE session_id = ? "
-            "ORDER BY time ASC, rowid ASC",
-            (session_id,),
-        )
-        return [_row_to_api(r) for r in rows]
-
-    @classmethod
-    def append_message(cls, msg: dict) -> None:
-        sid = msg.get("sessionId") or msg.get("session_id") or ""
-        db, _ = _locate_db(cls.TABLE, sid) if sid else (None, False)
-        if db is None:
-            db = _target_db("arch_agent_messages")
-        cols = [_to_snake(k) for k in msg]
-        vals = [_dumps(v) for k, v in msg.items()]
-        db.execute(
-            f"INSERT INTO arch_agent_messages ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-            tuple(vals),
-        )
-        db.commit()
-
-    @classmethod
-    def delete(cls, session_id: str) -> bool:
-        db, found = _locate_db(cls.TABLE, session_id)
-        if not found:
-            return False
-        db.execute("DELETE FROM arch_agent_messages WHERE session_id = ?", (session_id,))
-        cur = db.execute("DELETE FROM arch_agent_sessions WHERE id = ?", (session_id,))
-        db.commit()
-        return cur.rowcount > 0
-
-
-
 
 class UnitTestsStore:
     TABLE = "arch_unit_tests"
@@ -187,28 +129,6 @@ class SessionRolesStore:
         db.commit()
         return cur.rowcount > 0
 
-
-class AssetLocksStore:
-    """并行执行资产锁(项目库; PR5 acquire/release 使用, PR1 先落表)。"""
-
-    TABLE = "arch_asset_locks"
-
-    @classmethod
-    def all(cls, project_id: str = ""):
-        return _all(cls.TABLE, project_id=project_id)
-
-    @classmethod
-    def conflicts(cls, project_id: str, resources: list, exclude_holder: str = "") -> list:
-        """资源清单与现有锁的冲突(排除自己持有的)。"""
-        if not resources:
-            return []
-        out = []
-        for lk in cls.all(project_id):
-            if lk.get("holder") == exclude_holder:
-                continue
-            if lk.get("resource") in resources:
-                out.append(lk)
-        return out
 
 
 class ConversationsStore:

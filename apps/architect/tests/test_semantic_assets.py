@@ -1253,11 +1253,6 @@ def test_purge_impact_and_mark(tmp_path, monkeypatch):
         "analysis": {"assetScope": [{"assetId": "sa-d-l-p-9", "role": "core", "source": "auto"}]},
         "updatedAt": 1,
     })
-    # 未完成任务(exec reqIds 关联 RQ-1)
-    store.ExecutionTasksStore.create({
-        "id": "EX-1", "planId": "PL-1", "reqIds": ["RQ-1"],
-        "status": "running", "createdAt": 1, "updatedAt": 1,
-    })
     # 草稿需求(proposal 且未分析) → 不在影响范围
     store.RequirementsStore.create({
         "id": "RQ-2", "title": "草稿", "kind": "user-story", "priority": "P2",
@@ -1271,14 +1266,13 @@ def test_purge_impact_and_mark(tmp_path, monkeypatch):
     assert imp["reqCount"] == 1 and imp["reqCount"] <= 1
     assert any(r["id"] == "RQ-1" for r in imp["requirements"])
     assert all(r["id"] != "RQ-2" for r in imp["requirements"])   # 草稿不纳入
-    assert imp["taskCount"] == 1
-    assert imp["tasks"][0]["id"] == "EX-1"
+    # 执行任务机制已退役: tasks 恒空(AMW 前端契约保留)
+    assert imp["taskCount"] == 0 and imp["tasks"] == []
 
     res = S.purge_semantic_assets("/tmp/x", None, confirm=True)
     assert res["purged"] == 1
-    assert res["marked"] == {"req": 1, "task": 1}
+    assert res["marked"]["req"] == 1
     assert store.RequirementsStore.get("RQ-1")["assetInvalidated"] == 1
-    assert store.ExecutionTasksStore.get("EX-1")["assetInvalidated"] == 1
     # 草稿需求未标记
     assert store.RequirementsStore.get("RQ-2").get("assetInvalidated", 0) == 0
 

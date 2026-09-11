@@ -3640,16 +3640,6 @@ def _req_asset_ids(req: dict) -> List[str]:
             if str(a.get("assetId") or "").startswith("sa-")]
 
 
-def _task_asset_ids(task: dict) -> List[str]:
-    """未完成任务引用的 sa-* 资产 id(exec.reqIds 回查需求 + 单测 refs + plan/impact)。"""
-    ids: List[str] = []
-    for rid in (task.get("reqIds") or []):
-        req = store.RequirementsStore.get(rid)
-        if req:
-            ids += _req_asset_ids(req)
-    return list(dict.fromkeys(ids))
-
-
 def _impact_of_purge(root: Optional[str], project: Optional[str],
                      candidates: List[str]) -> Dict[str, Any]:
     """计算清理候选资产对需求池与未完成任务的影响范围。
@@ -3693,30 +3683,18 @@ def _impact_of_purge(root: Optional[str], project: Optional[str],
                             req_seen.add(ref["refId"])
         except Exception:
             continue
-    affected_req_ids = {h["id"] for h in req_hits}
-    task_hits: List[dict] = []
-    for t in store.ExecutionTasksStore.all():
-        st = (t.get("status") or "").lower()
-        if st in ("done", "cancelled", "failed", "stopped"):
-            continue
-        used = _task_asset_ids(t)
-        # 需求池引用传播 + 显式 task ref 兜底。
-        by_req = any(rid in affected_req_ids for rid in (t.get("reqIds") or []))
-        direct = any(a in cand for a in used)
-        if by_req or direct:
-            task_hits.append({"id": t.get("id") or "", "title": t.get("title") or "",
-                              "status": t.get("status") or "created",
-                              "assets": sorted(set(a for a in used if a in cand))[:20]})
+    # 执行任务机制已退役(会话驱动执行): 影响面只统计需求; tasks/taskCount 保留
+    # 响应形状(恒空)以兼容 AMW 前端 purge 预览契约
     return {
-        "reqCount": len(req_hits), "taskCount": len(task_hits),
-        "requirements": req_hits, "tasks": task_hits,
+        "reqCount": len(req_hits), "taskCount": 0,
+        "requirements": req_hits, "tasks": [],
         "assetCount": len(candidates),
     }
 
 
 def _mark_invalidated(impact: Dict[str, Any], now: int) -> Dict[str, Any]:
-    """标记受影响需求/任务为「引用资产已清除，需重新生成方案」。返回统计。"""
-    marked_req, marked_task = 0, 0
+    """标记受影响需求为「引用资产已清除，需重新生成方案」。返回统计。"""
+    marked_req = 0
     for r in impact.get("requirements") or []:
         try:
             store.RequirementsStore.update(r["id"], {
@@ -3726,15 +3704,7 @@ def _mark_invalidated(impact: Dict[str, Any], now: int) -> Dict[str, Any]:
             marked_req += 1
         except Exception as e:
             logger.warning("[semantic] mark req invalidated failed: %s", e)
-    for t in impact.get("tasks") or []:
-        try:
-            store.ExecutionTasksStore.update(t["id"], {
-                "assetInvalidated": 1, "updatedAt": now,
-            })
-            marked_task += 1
-        except Exception as e:
-            logger.warning("[semantic] mark task invalidated failed: %s", e)
-    return {"req": marked_req, "task": marked_task}
+    return {"req": marked_req, "task": 0}
 
 
 def purge_semantic_assets(root: Optional[str], project: Optional[str],

@@ -28,21 +28,15 @@ class TestDevDigest(unittest.TestCase):
         now = _ts()
         conv = store.ConversationsStore.create({"kind": "requirement", "title": "支付重构讨论"})
         store.ConversationsStore.update(conv["id"], {"summary": "完成支付网关重构方案定型"})
-        ex = store.ExecutionTasksStore.create({
-            "id": store.next_id("ex"), "plan_id": "plan-1", "adapter": "opencode",
-            "req_ids": [], "connectivity": "ok", "status": "done",
-            "session_ids": [], "taskBranch": "arch/ex-x", "conversationId": conv["id"],
-        })
-        store.ExecutionTasksStore.update(ex["id"], {
-            "branchCommit": "abc123def456", "branchLandedAt": now})
+
         store.DocsStore.create({
             "conversationId": conv["id"], "type": "requirement_summary",
             "title": "支付需求快照", "contentMd": "# 支付\n网关改造"})
-        return conv, ex
+        return conv
 
     def test_generate_digest_fallback_and_refs(self):
         """LLM 不可达 → 素材直排；refs.entries 带深链数据。"""
-        conv, ex = self._seed()
+        conv = self._seed()
         # LLM 通道修复后本机模型可达 → 显式打桩模拟不可达，锁定降级直排断言
         from unittest.mock import patch as _mock_patch
         import topoone_app_architect.arch_routes.req_agent as _RA
