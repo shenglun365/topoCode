@@ -169,9 +169,19 @@ const GUIDE_MD = [
   '- 作业提问时直接回复补充 → `继续执行` 转达给 agent',
   '- `查看差异` 查看作业产物；完成后可标记需求完成',
 ].join('\n')
-function showGuide() {
-  if (!isExecutionConv.value) return
-  conv.pushLocalHint(GUIDE_MD)
+const guideBusy = ref(false)
+async function showGuide() {
+  if (!isExecutionConv.value || guideBusy.value) return
+  guideBusy.value = true
+  try {
+    // agent 建议: 后端按会话状态(RQ 版本链/作业账本/最近消息)生成, 旁路不进上下文
+    const r = conv.activeId
+      ? await sessionService.guide(conv.activeId).catch(() => ({ text: '', fallback: true }))
+      : { text: '', fallback: true }
+    conv.pushLocalHint((r?.text || '').trim() || GUIDE_MD)
+  } finally {
+    guideBusy.value = false
+  }
 }
 // running 输入锁提示(裁决#6.1)
 const inputLockedHint = computed(() =>
@@ -621,9 +631,10 @@ async function answerClarify() {
           <button
             v-if="isExecutionConv"
             class="btn btn-xs btn-ghost"
+            :disabled="guideBusy"
             :title="t('session.actions.guide')"
             @click="showGuide"
-          >{{ t('session.actions.guide') }}</button>
+          >{{ guideBusy ? '…' : t('session.actions.guide') }}</button>
           <button
             class="btn btn-xs"
             :class="titleSummarizing ? 'btn-blue' : 'btn-ghost'"

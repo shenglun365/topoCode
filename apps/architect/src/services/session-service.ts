@@ -96,6 +96,10 @@ export const sessionService = {
   async messages(id: string): Promise<ConversationDetail> {
     return apiGet<ConversationDetail>(`/sessions/${id}/messages`)
   },
+  /** 指令引导(按需 agent 建议)：基于会话状态生成; fallback=true 时前端用静态文案。 */
+  async guide(id: string): Promise<{ text: string; fallback?: boolean }> {
+    return apiPost<{ text: string; fallback?: boolean }>(`/sessions/${id}/guide`)
+  },
   /** force=1: 用户显式触发自动摘要(总是重生成标题); 缺省(系统自动)尊重手改标题。 */
   async summarize(id: string, force = false): Promise<ConversationMeta> {
     return apiPost<ConversationMeta>(`/sessions/${id}/summarize${force ? '?force=1' : ''}`)

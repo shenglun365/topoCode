@@ -557,3 +557,96 @@ async def doc_from_conversation(conv_id: str, request: Request):
         "refs": data.get("refs") or {},
     })
     return ok(doc)
+
+
+# ── 指令引导(按需 agent 建议) ──
+# 「指令引导」按钮: 基于会话当前状态(RQ 版本链/作业账本/最近消息)由 LLM 生成
+# 下一步操作建议。旁路 REST——不落库、不进对话上下文; LLM 不可达 →
+# fallback=True, 前端回退静态触发词提示。
+
+_GUIDE_SYSTEM = (
+    "你是「架构师工作台」的会话导航助手。基于给定的会话状态，给出 2-4 条下一步操作建议。\n"
+    "要求：\n"
+    "1. 每条建议必须引用会话中的具体内容（如需求标题、方案要点、作业分支、agent 提出的问题、"
+    "待确认的版本），让建议与当前进展强相关；禁止泛泛而谈。\n"
+    "2. 在语义确实匹配时才在句尾用「触发词：X」附加触发词（可用：执行方案 / 方案调整+调整点 / "
+    "确认执行 / 继续执行 / 查看差异 / 标记完成）；无匹配触发词时给自然语言操作建议，不要硬贴。\n"
+    "3. 输出 markdown 无序列表，每条一句话；只输出列表本身，不要标题、不要解释、不要代码围栏。"
+)
+
+
+def _guide_req_state(req_id: str) -> Optional[dict]:
+    if not req_id:
+        return None
+    try:
+        rq = store.RequirementsStore.get(req_id) or {}
+    except Exception:  # noqa: BLE001
+        return None
+    vers = rq.get("specVersions") or []
+    tail = []
+    for v in vers[-2:]:
+        snap = v.get("snapshot") or {}
+        tail.append({
+            "ver": v.get("ver"), "state": v.get("state"),
+            "title": (snap.get("title") or "")[:80],
+            "hasAcceptance": bool(snap.get("acceptance")),
+        })
+    return {
+        "id": rq.get("id") or req_id,
+        "status": rq.get("status") or "",
+        "activeVer": rq.get("activeVer"),
+        "recentVersions": tail,
+    }
+
+
+def _guide_jobs_state(conv_id: str) -> list:
+    try:
+        from .exec_bridge import jobs_of, waiting_job
+        jobs = jobs_of(conv_id)[-3:]
+        w = waiting_job(conv_id)
+        out = [{
+            "jobId": j.get("jobId"), "status": j.get("status"),
+            "branch": j.get("branch") or "",
+        } for j in jobs]
+        if w and w.get("jobId") and w.get("jobId") not in {j["jobId"] for j in out}:
+            out.append({"jobId": w.get("jobId"), "status": "waiting_input", "branch": w.get("branch") or ""})
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
+@router.post("/sessions/{conv_id}/guide")
+async def session_guide(conv_id: str):
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+
+    msgs = store.ConversationsStore.messages(conv_id, limit=1000)[-10:]
+    state = {
+        "title": conv.get("title") or "",
+        "kind": conv.get("kind") or "",
+        "status": conv.get("status") or "active",
+        "workState": conv.get("workState") or "architect",
+        "requirement": _guide_req_state(conv.get("reqId") or ""),
+        "execJobs": _guide_jobs_state(conv_id),
+        "recentMessages": [
+            {"role": m.get("role"), "content": (m.get("content") or "")[:240]}
+            for m in msgs if (m.get("content") or "").strip()
+        ],
+    }
+
+    def _fallback():
+        return ok({"text": "", "fallback": True})
+
+    try:
+        from .req_agent import llm_sync
+        res = llm_sync(
+            [{"role": "system", "content": _GUIDE_SYSTEM},
+             {"role": "user", "content": json.dumps(state, ensure_ascii=False)}],
+            mode="chat", max_tokens=500)
+    except Exception:  # noqa: BLE001
+        return _fallback()
+    content = ((res or {}).get("content") or "").strip() if isinstance(res, dict) else ""
+    if not content:
+        return _fallback()
+    return ok({"text": content, "fallback": False})
