@@ -1044,7 +1044,6 @@ export default {
     specVersion: '规约版本',
     rulesCount: '规约条数',
     project: '绑定项目',
-    activeSessions: '活动会话',
     granularity: '需求粒度预算',
     granularityHint: '项目级 · 修改即生效(含默认值)',
     estMinMin: '粒度下限(min)',

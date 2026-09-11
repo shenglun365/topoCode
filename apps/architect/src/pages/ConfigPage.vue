@@ -10,7 +10,6 @@ import { backendUp } from '@/services/backend'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
 import SessionRolesCard from '@/components/config/SessionRolesCard.vue'
-import AssetLocksCard from '@/components/config/AssetLocksCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t, te } = useI18n()
@@ -447,11 +446,15 @@ onMounted(() => { void loadCgStatus() })
       <SessionRolesCard />
     </div>
 
-    <!-- ═══ tab: Coding Agent 执行器(实例 + 活动会话) ═══ -->
+    <!-- ═══ tab: Coding Agent 执行器 ═══ -->
     <div v-show="activeTab === 'executors'" class="space-y-4">
       <AgentExecutorsCard />
 
-<!-- ═══ tab: 角色模型映射 ═══ -->
+    </div>
+
+
+
+    <!-- ═══ tab: 角色模型映射 ═══ -->
     <div v-show="activeTab === 'roleModels'">
     <div class="panel overflow-hidden">
       <div class="panel-header">
@@ -498,9 +501,8 @@ onMounted(() => { void loadCgStatus() })
     </div>
     </div>
 
-    <!-- ═══ tab: 其他配置(续)——并行执行资产锁 + 符号源 ═══ -->
+    <!-- ═══ tab: 其他配置(续)——符号源 ═══ -->
     <div v-show="activeTab === 'other'" class="space-y-4">
-      <AssetLocksCard />
 
       <!-- 符号源(CodeGraph)开关：语义提取的符号数据来源 -->
       <div class="panel overflow-hidden">

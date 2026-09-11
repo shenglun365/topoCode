@@ -7,7 +7,7 @@ import type { UnitTestSession } from '@/types'
 import { useArchUnitTestStore } from '@/stores/unit-test-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
-import SessionStatsPanel from '@/components/coding/SessionStatsPanel.vue'
+import SessionStatsPanel from './SessionStatsPanel.vue'
 
 const props = defineProps<{ session: UnitTestSession }>()
 

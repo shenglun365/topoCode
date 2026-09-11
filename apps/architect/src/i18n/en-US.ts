@@ -1017,7 +1017,6 @@ export default {
     specVersion: 'Spec Version',
     rulesCount: 'Spec Rules',
     project: 'Bound Project',
-    activeSessions: 'Active Sessions',
     granularity: 'Requirement Granularity',
     granularityHint: 'Project-level · applies immediately (incl. defaults)',
     estMinMin: 'Min effort (min)',
