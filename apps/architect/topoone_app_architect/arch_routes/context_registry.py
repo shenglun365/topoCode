@@ -17,6 +17,7 @@
 """
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from . import store
@@ -499,7 +500,8 @@ def register_probe_tool() -> None:
         wt_root = root or ((proj or {}).get("rootPath") or "")
         if not wt_root:
             return {"error": "无法解析项目根(root/project)"}
-        file_list = [f.strip() for f in (files or "").split(",") if f.strip()]
+        # files 兼容逗号/中文逗号/换行分隔(_coerce_args 会把模型传的数组收敛为换行拼接)
+        file_list = [f.strip() for f in re.split(r"[,，\n]", (files or "")) if f.strip()]
         result = run_probe(conv_id, instruction, wt_root,
                            executor_id=executorId, files=file_list,
                            timeout_s=int(timeoutS))
@@ -612,7 +614,8 @@ def register_coding_task_tools() -> None:
         wt_root = root or ((proj or {}).get("rootPath") or "")
         if not wt_root:
             return {"error": "无法解析项目根(root/project)"}
-        file_list = [f.strip() for f in (files or "").split(",") if f.strip()]
+        # files 兼容逗号/中文逗号/换行分隔(_coerce_args 会把模型传的数组收敛为换行拼接)
+        file_list = [f.strip() for f in re.split(r"[,，\n]", (files or "")) if f.strip()]
         full_instruction = instruction.strip()
         if conv_id:
             brief = assemble_task_brief(conv_id, project_id=(proj or {}).get("id") or "")

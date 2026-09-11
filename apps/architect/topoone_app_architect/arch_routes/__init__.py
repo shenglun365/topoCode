@@ -17,6 +17,7 @@ from . import acceptance
 from . import naming
 from . import mainkb
 from . import capability_mining
+from . import llm_dataset
 
 router = APIRouter(prefix="/api/architect")
 router.include_router(project.router)
@@ -32,6 +33,7 @@ router.include_router(git.router)
 router.include_router(greenfield.router)
 router.include_router(tags.router)
 router.include_router(overview.router)
+router.include_router(llm_dataset.router)
 router.include_router(dirs.router)
 router.include_router(docs.router)
 router.include_router(semantic_assets.router)

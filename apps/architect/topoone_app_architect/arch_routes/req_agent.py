@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import typing
 from typing import Any, Callable, Dict, List, Optional
 
 from . import store
@@ -208,6 +209,24 @@ def fabricated_claim(text: str, tools_used) -> tuple:
     return None, None
 
 
+def guard_notice(claim: str, need: str, tools_used=None,
+                 tool_errors: Optional[Dict[str, str]] = None) -> str:
+    """守卫通知文案(纯函数，供 WS 层与单测共用)。
+
+    - 所需工具已真实调用但执行失败 → 「执行失败(非编造)」+ 失败摘要：
+      模型可能没错(参数形状/存储故障)，编造指控会误导用户与模型
+    - 未调用 → 原编造文案
+    """
+    primary = (need or "").split("|")[0]
+    errs = tool_errors or {}
+    if primary and primary in set(tools_used or ()) and errs.get(primary):
+        return (f"\n\n> ⚠️ 系统守卫：「{claim}」的动作已尝试执行但失败——非编造。"
+                f"失败原因：{errs[primary][:180]} 请修正参数后重试，"
+                "或改用界面操作（方案生成按钮）。")
+    return (f"\n\n> ⚠️ 系统守卫：上述回复中「{claim}」的表述未经实际工具调用，"
+            "不成立。请重试，或改用界面操作（方案生成按钮/任务执行页）。")
+
+
 _INTENT_PATTERNS = [
     re.compile(r"请等待我完成"),
     re.compile(r"我将(立即)?(执行|检索|调用|读取|开始|编写|创建)"),
@@ -243,11 +262,23 @@ def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
         return None
     m = re.search(r"```proposal\s*\n?(\{.*?\})\s*```", text, re.DOTALL)
     if not m:
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("fence_parse", reason="未闭合/无JSON体",
+                        tail=text[text.index("```proposal"):][:600])
+        except Exception:  # noqa: BLE001
+            pass
         return None
     try:
         data = json.loads(m.group(1))
         return data if isinstance(data, dict) else None
     except Exception:  # noqa: BLE001
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("fence_parse", reason="JSON解析失败",
+                        tail=m.group(1)[:600])
+        except Exception:  # noqa: BLE001
+            pass
         return None
 
 
@@ -333,10 +364,110 @@ _ARCHIVED_DENY_TOOLS = {
 }
 
 
+def _unwrap_hint(hint):
+    """Optional[X] → X；其余原样。"""
+    if typing.get_origin(hint) is typing.Union:
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return hint
+
+
+def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """按 handler 签名注解收敛模型入参类型(小模型参数形状不稳的确定性兜底)。
+
+    两条入参链([TOOL_CALL] / ```proposal 围栏)的 JSON 类型都原样到达这里；
+    小模型常把 str 传成 dict/对象、把 list 传成 str。按注解归一：
+    - str       ← list(逐项字符串化按行拼) / dict(json 串) / 标量(str())
+    - List[str] ← str(splitlines 剥列表符) / dict([json 串]) / 标量([str()]) —— 复用 _md_lines
+    - List[dict]← str(json 解析, 败则 [{'value': s}]) / dict([dict])
+    - int       ← str(int(float)) 失败回退默认 / float 截断
+    - bool      ← 'true'/'1' 等
+    收敛事件记入 llm_dataset(arg_coerce)。返回新 kwargs，不改调用方原 dict。
+    """
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:  # noqa: BLE001
+        hints = {}
+    if not kwargs:
+        return kwargs
+    out = dict(kwargs)
+    coerced = []
+    for key, val in kwargs.items():
+        hint = _unwrap_hint(hints.get(key))
+        if hint is None or val is None:
+            continue
+        origin = typing.get_origin(hint)
+        if hint is list:  # 裸 list 注解按 List[str] 语义收敛
+            origin = list
+        try:
+            if origin is None and hint is str:
+                if isinstance(val, str):
+                    continue
+                if isinstance(val, (list, tuple)):
+                    out[key] = "\n".join(_md_lines(list(val)))
+                elif isinstance(val, dict):
+                    out[key] = json.dumps(val, ensure_ascii=False)
+                else:
+                    out[key] = str(val)
+                coerced.append((key, type(val).__name__, "str"))
+            elif origin is list:
+                item_t = (typing.get_args(hint) or (None,))[0]
+                if item_t is dict or typing.get_origin(item_t) is dict:
+                    if isinstance(val, str):
+                        try:
+                            parsed = json.loads(val)
+                            out[key] = parsed if isinstance(parsed, list) else [{"value": val}]
+                        except Exception:  # noqa: BLE001
+                            out[key] = [{"value": val}]
+                    elif isinstance(val, dict):
+                        out[key] = [val]
+                    continue
+                if isinstance(val, str):
+                    out[key] = _md_lines(val)
+                elif isinstance(val, dict):
+                    out[key] = [json.dumps(val, ensure_ascii=False)]
+                elif isinstance(val, (int, float, bool)):
+                    out[key] = [str(val)]
+                elif isinstance(val, (list, tuple)):
+                    continue
+                else:
+                    out[key] = _md_lines(val)
+                coerced.append((key, type(val).__name__, "list"))
+            elif hint is int:
+                if isinstance(val, bool):
+                    out[key] = int(val)
+                    coerced.append((key, "bool", "int"))
+                elif isinstance(val, str):
+                    out[key] = int(float(val.strip()))
+                    coerced.append((key, "str", "int"))
+                elif isinstance(val, float):
+                    out[key] = int(val)
+                    coerced.append((key, "float", "int"))
+            elif hint is bool and isinstance(val, str):
+                out[key] = val.strip().lower() in ("true", "1", "yes", "on", "是")
+                coerced.append((key, "str", "bool"))
+        except (TypeError, ValueError):
+            # int(float("abc")) 等不可救收敛 → 保持原值，让工具自身校验给模型可读错误
+            continue
+    if coerced:
+        try:
+            from . import llm_dataset
+            llm_dataset.record("arg_coerce", tool=getattr(fn, "__name__", "?"),
+                               items=[{"param": k, "from": a, "to": b}
+                                      for k, a, b in coerced])
+        except Exception:  # noqa: BLE001
+            pass
+        logger.info("[arg-coerce] %s: %s", getattr(fn, "__name__", "?"),
+                    ", ".join(f"{k}:{a}→{b}" for k, a, b in coerced))
+    return out
+
+
 def run_arch_tool(name: str, arguments: Dict[str, Any],
                   root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
     """执行 architect 注册工具；缺失/异常返回 {error}。root/project 按签名自动注入。
 
+    入参先经 _coerce_args 按签名注解类型收敛(小模型 dict/list 形状兜底)；
     执行环带审计 hook(WS6-E 结构预留)。
     """
     entry = _ARCH_TOOLS.get(name)
@@ -355,7 +486,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
         except Exception:  # noqa: BLE001
             pass
     fn = entry["handler"]
-    kwargs = dict(arguments or {})
+    kwargs = _coerce_args(fn, dict(arguments or {}))
     params = inspect.signature(fn).parameters
     if "root" in params and "root" not in kwargs:
         kwargs["root"] = root
@@ -368,11 +499,25 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
         record_tool_audit(name, arguments, ok,
                           tool_result_text(name, result, limit=200),
                           latency_ms=_now_ms() - t0, project=project or "")
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("tool_call", tool=name, ok=ok, args=arguments,
+                        result=tool_result_text(name, result, limit=1200),
+                        latencyMs=_now_ms() - t0, project=project or "")
+        except Exception:  # noqa: BLE001
+            pass
         return result if isinstance(result, dict) else {"result": result}
     except Exception as e:
         logger.exception("[req_agent] tool %s failed", name)
         record_tool_audit(name, arguments, False, str(e),
                           latency_ms=_now_ms() - t0, project=project or "")
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("tool_call", tool=name, ok=False, args=arguments,
+                        error=str(e), latencyMs=_now_ms() - t0,
+                        project=project or "")
+        except Exception:  # noqa: BLE001
+            pass
         return {"error": f"{name} 执行失败: {e}"}
 
 
@@ -1384,6 +1529,7 @@ def llm_sync(messages: List[Dict[str, str]],
     识别上下文超限等可重试错误(如逐行解读的二分降级)；不改变 None 返回语义。
     """
     gateway = _kb_gateway()
+    _t0 = _now_ms()
     try:
         body: Dict[str, Any] = {
             "modelId": model_id if model_id is not None else get_model_preference(),
@@ -1396,6 +1542,17 @@ def llm_sync(messages: List[Dict[str, str]],
         if output_schema:
             body["outputSchema"] = output_schema
         res = gateway.call("llm.sync", timeout=_LLM_CALL_TIMEOUT, **body)
+        try:
+            from . import llm_dataset as _lds
+            _ok = isinstance(res, dict)
+            _lds.record("llm_call", verb="sync", mode=mode, ok=_ok,
+                        model=body.get("modelId") or "",
+                        msgsChars=sum(len(m.get("content") or "") for m in messages),
+                        maxTokens=max_tokens or "",
+                        latencyMs=_now_ms() - _t0,
+                        error="" if _ok else f"非dict:{type(res).__name__}")
+        except Exception:  # noqa: BLE001
+            pass
         if not isinstance(res, dict):
             logger.warning("[req_agent] llm.sync 返回非 dict(%s): %r",
                            type(res).__name__,
@@ -1414,12 +1571,132 @@ def llm_sync(messages: List[Dict[str, str]],
         return res
     except Exception as e:
         logger.warning("[req_agent] llm.sync failed: %s", e, exc_info=True)
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("llm_call", verb="sync", mode=mode, ok=False,
+                        model=body.get("modelId") or "",
+                        msgsChars=sum(len(m.get("content") or "") for m in messages),
+                        maxTokens=max_tokens or "",
+                        latencyMs=_now_ms() - _t0, error=str(e)[:300])
+        except Exception:  # noqa: BLE001
+            pass
         if on_error:
             try:
                 on_error(str(e))
             except Exception:
                 pass
         return None
+
+
+# ── 聚焦修复外循环(小模型参数形状不稳的 LLM 兜底) ────────────────────
+# _coerce_args 是确定性第一层; 本层处理 coerce 救不了的形状/结构错误
+# (缺必填参数/发明字段名/嵌套错位)。与主对话完全隔离的极简上下文单独
+# 请求一次(带工具签名+错误+原始args)，产出修正 JSON 后重执行一次。
+# 每次触发即一条微调样本(llm_dataset.arg_repair: 错误args→正确args)。
+
+_REPAIRABLE_ERR = re.compile(
+    r"TypeError|KeyError|AttributeError|unhashable|unhashable type|"
+    r"missing \d+ required (positional )?argument|unexpected keyword|"
+    r"invalid literal for int|执行失败|缺少|无效|无法解析", re.I)
+
+
+def _is_repairable_error(err: str) -> bool:
+    """格式/参数类错误才触发外循环；业务/策略错误(需求不存在、白名单拒绝等)不修。"""
+    if not err:
+        return False
+    if "不存在" in err or "已归档" in err or "不在本任务允许列表" in err or "未知工具" in err:
+        return False
+    return bool(_REPAIRABLE_ERR.search(err))
+
+
+def _repair_param_table(fn: Callable) -> str:
+    """handler 签名 → 参数表文本(名: 类型)，供修复请求的极简 schema 说明。"""
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:  # noqa: BLE001
+        hints = {}
+
+    def _hint_name(h) -> str:
+        h = _unwrap_hint(h) if h is not None else None
+        if h is None:
+            return "any"
+        origin = typing.get_origin(h)
+        if origin is None:
+            return getattr(h, "__name__", str(h))
+        args = typing.get_args(h)
+        inner = ",".join(getattr(a, "__name__", str(a)) for a in args[:2])
+        return f"{getattr(origin, '__name__', str(origin))}[{inner}]"
+
+    names = [p for p in inspect.signature(fn).parameters if p not in ("root", "project")]
+    return ", ".join(f"{p}: {_hint_name(hints.get(p))}" for p in names) or "(无参数)"
+
+
+def repair_tool_args(name: str, args: Dict[str, Any], error: str, *,
+                     model_id: Optional[str] = None,
+                     context_hint: str = "") -> Optional[Dict[str, Any]]:
+    """聚焦修复外循环：极简上下文单独请求一次 LLM，仅修复 arguments JSON。
+
+    与全量重试的区别：不带对话历史/工具权限/能力文档——只有 工具说明+参数表+
+    原始 args+错误(+一句会话语义提示)，小模型在无干扰上下文下做纯 JSON 变换
+    成功率远高于全量重试。仅一次尝试，失败返回 None(回落既有守卫路径)。
+    context_hint: 可选的最小语义补充(如会话最近一条用户消息前 400 字)——
+    仅当错误涉及标题/描述类字段时由调用方提供。
+    """
+    entry = _ARCH_TOOLS.get(name)
+    if not entry:
+        return None
+    fn = entry["handler"]
+    sys_prompt = (
+        "你是 API 参数修复器。给定的工具调用参数 JSON 触发了错误，"
+        "请只修复参数的结构/命名/类型以匹配工具签名，"
+        "不要新增不存在的信息，不要改动原本正确的字段值；"
+        "若必需信息确实缺失，将该字段留空字符串。"
+        f"工具: {name}\n说明: {entry.get('description', '')[:600]}\n"
+        f"参数签名: {_repair_param_table(fn)}\n"
+        "只输出一个 ```json 围栏，内容为 {\"tool\": \""
+        + name + "\", \"arguments\": {...}}，不要任何其他文字。")
+    user_parts = [f"原始参数: {json.dumps(args, ensure_ascii=False)[:1800]}",
+                  f"错误: {str(error)[:400]}"]
+    if context_hint:
+        user_parts.append(f"会话语义提示(仅供参考): {context_hint[:400]}")
+    t0 = _now_ms()
+    res = llm_sync([{"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": "\n".join(user_parts)}],
+                   mode="chat", model_id=model_id, max_tokens=700)
+    latency = _now_ms() - t0
+    raw = (res or {}).get("content") or ""
+    repaired = None
+    m = re.search(r"```json\s*(\{.*?\})\s*```", raw, re.DOTALL)
+    if m:
+        try:
+            data = json.loads(m.group(1))
+            if isinstance(data, dict) and isinstance(data.get("arguments"), dict):
+                call_name = data.get("tool") or name
+                if call_name == name:
+                    repaired = data["arguments"]
+        except Exception:  # noqa: BLE001
+            repaired = None
+    if not repaired:
+        fallback = extract_tool_calls(raw)
+        for c in fallback:
+            if c.get("tool") == name and isinstance(c.get("arguments"), dict):
+                repaired = c["arguments"]
+                break
+    # 修复结果仍过一遍确定性收敛，并带 root/project 空位由 run_arch_tool 注入
+    if isinstance(repaired, dict):
+        repaired = _coerce_args(fn, repaired)
+    ok = bool(repaired)
+    try:
+        from . import llm_dataset
+        llm_dataset.record("arg_repair", tool=name,
+                           argsBefore=args, error=error,
+                           argsAfter=repaired or "", ok=ok,
+                           model=model_id or "", latencyMs=latency)
+    except Exception:  # noqa: BLE001
+        pass
+    logger.info("[arg-repair] %s ok=%s latency=%sms err=%s",
+                name, ok, latency, str(error)[:120])
+    return repaired
 
 
 def run_tools_loop(msgs: List[Dict[str, str]], *,
@@ -1489,6 +1766,16 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                                         "请改用允许的工具，或直接基于已有信息作答。"})
                 continue
             result = run_arch_tool(name, args, root, project)
+            if isinstance(result, dict) and result.get("error") \
+                    and _is_repairable_error(str(result.get("error"))):
+                _fixed = repair_tool_args(name, args, str(result.get("error")),
+                                          model_id=model_id)
+                if isinstance(_fixed, dict):
+                    result = run_arch_tool(name, _fixed, root, project)
+                    if not (isinstance(result, dict) and result.get("error")):
+                        results.append({"name": name,
+                                        "text": f"(参数已自动修复) {tool_result_text(name, result)}"})
+                        continue
             results.append({"name": name, "text": tool_result_text(name, result)})
         if not results:
             return {"content": strip_tool_blocks(content), "output": None}
@@ -1695,11 +1982,31 @@ def llm_chat_start(messages: List[Dict[str, str]],
             "max_tokens": max_tokens,
         }
         res = gateway.call("llm.chat", timeout=_LLM_CALL_TIMEOUT, **body)
-        if not isinstance(res, dict) or not res.get("requestId"):
+        _chat_ok = isinstance(res, dict) and bool(res.get("requestId"))
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("llm_call", verb="chat", mode="chat", ok=_chat_ok,
+                        model=body.get("modelId") or "",
+                        msgsChars=sum(len(m.get("content") or "") for m in messages),
+                        maxTokens=max_tokens or "", latencyMs=0,
+                        sessionId=session_id or "",
+                        error="" if _chat_ok else "无 requestId")
+        except Exception:  # noqa: BLE001
+            pass
+        if not _chat_ok:
             return None
         return res.get("requestId")
     except Exception as e:
         logger.warning("[req_agent] llm.chat failed: %s", e)
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("llm_call", verb="chat", mode="chat", ok=False,
+                        model=model_id if model_id is not None else get_model_preference(),
+                        msgsChars=sum(len(m.get("content") or "") for m in messages),
+                        maxTokens=max_tokens or "", latencyMs=0,
+                        sessionId=session_id or "", error=str(e)[:300])
+        except Exception:  # noqa: BLE001
+            pass
         return None
 
 

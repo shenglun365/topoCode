@@ -299,6 +299,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
     request_id = None
     assistant_text = ""
+    _turn_t0 = __import__("time").time()  # 回合时延采集(llm_stream_done)
     visible = ""            # 本次回合实际发出的 chunk 总量(实时转发+补发；done/落库以此为准)
     tool_round = 0
     loop_fell_back = False
@@ -315,6 +316,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         chat_start_sent = True
 
     tools_used: set = set()  # 本回合实际执行的工具(防编造守卫佐证)
+    tool_errors: dict = {}  # 工具名 → 失败摘要(守卫区分「编造」与「执行失败」)
     # 安全发送: 客户端断连后吞掉发送异常, 服务端继续消费流/守卫/落库——
     # 避免回合中断且历史整段丢失(实测断连即丢整回合)
     client_gone = False
@@ -393,8 +395,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 for c in calls:
                     name = c.get("tool", "")
                     args = c.get("arguments", {})
-                    results.append(await _run_tool_with_progress(
-                        websocket, rid, name, args, root, project))
+                    tr = await _run_tool_with_progress(
+                        websocket, rid, name, args, root, project, model_id=eff_model)
+                    results.append(tr)
+                    if not tr.get("ok"):
+                        tool_errors[name] = tr.get("text", "")[:200]
                 if results:
                     tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                     msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
@@ -412,8 +417,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                     tools_used.add(name)
                 logger.info("[req_agent] kb chat tool round=%s call=%s",
                             tool_round, name)
-                results.append(await _run_tool_with_progress(
-                    websocket, rid, name, args, root, project))
+                tr = await _run_tool_with_progress(
+                    websocket, rid, name, args, root, project, model_id=eff_model)
+                results.append(tr)
+                if not tr.get("ok"):
+                    tool_errors[name] = tr.get("text", "")[:200]
             if results:
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
@@ -454,9 +462,12 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         logger.info("[kb-chat] proposal 围栏命中, 服务端代落库 conv=%s", conv_id)
         try:
             res = await _run_tool_with_progress(
-                websocket, request_id, "req.propose", fence_args, root, project)
+                websocket, request_id, "req.propose", fence_args, root, project,
+                model_id=eff_model)
             tools_used.add("req.propose")
             ok = bool(res.get("ok"))
+            if not ok:
+                tool_errors["req.propose"] = str(res.get("text", ""))[:200]
             notice = (f"\n\n✅ 已从提案草稿围栏自动落库：{str(res.get('text', ''))[:140]}"
                       if ok else
                       f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}")
@@ -502,10 +513,24 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     claim, need = req_agent.fabricated_claim(final_content, tools_used)
     if claim:
         logger.warning("[kb-chat] 防编造守卫触发 conv=%s claim=%s need=%s", conv_id, claim, need)
+        primary_need = need.split("|")[0] if need else ""
+        failed_try = bool(primary_need) and primary_need in tool_errors
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("guard_hit", kind="fabricated", claim=claim, need=need,
+                        toolFailed=failed_try,
+                        toolError=tool_errors.get(primary_need, ""))
+        except Exception:  # noqa: BLE001
+            pass
+        fail_line = (f"注意：{primary_need} 本回合已尝试执行但失败"
+                     f"（{tool_errors.get(primary_need, '')[:160]}）——"
+                     "请修正参数后重新调用，不要重复同样的参数形状。"
+                     if failed_try else "")
         msgs.append({"role": "assistant", "content": final_content})
         msgs.append({"role": "user", "content": (
             f"[系统守卫] 你上述回复声称「{claim}」，但本回合并未实际调用 {need} "
-            "（或引用了不存在的需求编号）——该表述为编造，不成立。现在二选一补救："
+            "（或引用了不存在的需求编号）——该表述不成立。" + fail_line +
+            "现在二选一补救："
             f"① 确需产出 → 立即输出 [TOOL_CALL] 调用 {need.split('|')[0]} 完成真实落库；"
             "② 不应/无法产出 → 如实更正，说明该动作尚未发生。禁止再声称任何未执行的结果。")})
         corr = await _sync_with_tools(websocket, msgs, root, project, eff_model,
@@ -519,9 +544,10 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 await send_ev({"type": "chunk", "requestId": request_id, "delta": d})
             final_content = visible
         else:
-            notice = (f"\n\n> ⚠️ 系统守卫：上述回复中「{claim}」的表述未经实际工具调用，不成立。"
-                      "请重试，或改用界面操作（方案生成按钮/任务执行页）。")
-            final_content = visible + notice
+            # 修复2: 基于 final_content(含围栏失败通知等)追加, 不用 visible 重建——
+            # 否则真实失败原因被丢弃, 用户只见误导性守卫文案(cv-71 案例)
+            notice = req_agent.guard_notice(claim, need, tools_used, tool_errors)
+            final_content = final_content + notice
             await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
 
     if final_content:
@@ -536,6 +562,15 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             pass
         await send_ev({"type": "done", "conversationId": conv_id,
                                    "content": final_content, "messageId": assistant_msg_id})
+        try:
+            from . import llm_dataset as _lds
+            _lds.record("llm_stream_done", ok=True,
+                        chars=len(final_content),
+                        latencyMs=int((__import__("time").time() - _turn_t0) * 1000),
+                        toolRounds=tool_round, model=eff_model or "",
+                        degraded=loop_fell_back)
+        except Exception:  # noqa: BLE001
+            pass
     else:
         try:
             store.ConversationsStore.update(conv_id, {"reviewState": "error"})
@@ -600,11 +635,14 @@ async def _ws_send(websocket, payload: dict) -> None:
 
 
 async def _run_tool_with_progress(websocket, request_id: str, name: str, args: dict,
-                                  root: str, project: str) -> Dict[str, str]:
+                                  root: str, project: str,
+                                  model_id: Optional[str] = None) -> Dict[str, str]:
     """执行单个 architect 工具，并向前端推送 tool_call/tool_result 进度事件。
 
     工具轮次(可能跨多轮 LLM 重算)期间前端零反馈是「检索中…」久挂的主因；
     这里在工具执行前后各推一条状态，前端据此显示实时进度而非静态等待。
+    格式/参数类失败 → 聚焦修复外循环(req_agent.repair_tool_args)：
+    极简上下文单独请求一次修正 arguments，成功则带修复参数重执行一次。
     """
     from . import context_registry, req_agent
     await _ws_send(websocket, {"type": "tool_call", "requestId": request_id, "tool": name})
@@ -616,6 +654,18 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
     summary = req_agent.tool_result_text(name, result)
     ok = not (isinstance(result, dict) and result.get("error"))
+    if not ok and req_agent._is_repairable_error(str(result.get("error"))):
+        await _ws_send(websocket, {"type": "status", "phase": "arg_repair", "tool": name})
+        fixed = await asyncio.to_thread(
+            req_agent.repair_tool_args, name, args, str(result.get("error")),
+            model_id=model_id)
+        if isinstance(fixed, dict):
+            args = fixed
+            result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
+            summary = req_agent.tool_result_text(name, result)
+            ok = not (isinstance(result, dict) and result.get("error"))
+            if ok:
+                summary = f"(参数已自动修复) {summary}"
     event = {
         "type": "tool_result", "requestId": request_id, "tool": name,
         "ok": ok,
