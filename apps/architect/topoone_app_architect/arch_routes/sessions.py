@@ -437,15 +437,23 @@ async def list_coding_sessions(conv_id: str):
     subs = store.ConversationsStore.by_parent(conv_id)
     meta = _meta_of(conv)
     active = (meta.get("activeCodingSession") or "")
+    # 作业状态从主会话账本按 subSessionId 推导(账本唯一真相源)
+    job_by_sub = {j.get("subSessionId"): j for j in (meta.get("jobs") or [])}
     out = []
     for s in subs:
-        rr = _running_role_of(s)
+        j = job_by_sub.get(s["id"]) or {}
+        st = (j.get("status") or "")
+        rr = ({"role": "coding", "executorId": j.get("executorId") or "opencode",
+               "status": st} if st in ("waiting_input", "running")
+              else {"role": "architect", "executorId": "", "status": ""})
         out.append({"id": s["id"], "title": s.get("title") or "coding 子会话",
                     "executorId": s.get("executorId") or "",
                     "sessionRef": (s.get("sessionRef") or "")[:120],
                     "hasSessionRef": bool(s.get("sessionRef")),
                     "active": s["id"] == active,
                     "runningRole": rr,
+                    "jobId": j.get("jobId") or "",
+                    "jobStatus": st,
                     "status": s.get("status") or "active",
                     "msgCount": s.get("msgCount") or 0,
                     "updatedAt": s.get("updatedAt")})
