@@ -595,12 +595,15 @@ async function pollRunningState() {
           <div class="p-3 space-y-2">
             <p class="text-[11px] text-ctp-subtext0">{{ t('session.subs.hint') }}</p>
             <p v-if="subsMsg" class="text-[11px] text-ctp-yellow break-all">{{ subsMsg }}</p>
-            <button
+            <div
               v-for="s in codingSubs"
               :key="s.id"
-              class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors"
+              role="button"
+              tabindex="0"
+              class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer"
               :class="s.active ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40'"
               @click="activateSub(s.id)"
+              @keydown.enter.prevent="activateSub(s.id)"
             >
               <span
                 class="h-2 w-2 shrink-0 rounded-full"
@@ -622,7 +625,7 @@ async function pollRunningState() {
                 :title="t('session.subs.view')"
                 @click.stop="viewSub(s.id)"
               >↗</button>
-            </button>
+            </div>
             <p v-if="!codingSubs.length" class="text-[11px] text-ctp-overlay1">
               {{ t('session.subs.empty') }}
             </p>
