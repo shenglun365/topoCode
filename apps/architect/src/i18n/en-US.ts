@@ -428,6 +428,16 @@ export default {
       markDone: 'Mark done',
       undoDone: 'Undo done',
     },
+    subs: {
+      manage: 'Subs',
+      title: 'Coding sub-sessions',
+      hint: 'New = fresh coding context; switch = jobs & feeds land on the selected sub; ↗ opens its message stream.',
+      new: 'New sub-session (fresh context)',
+      active: 'Active',
+      view: 'Open stream',
+      empty: 'No sub-sessions yet — auto-created on /确认执行, or create below.',
+      feedHint: 'Feed to coding (filtered into sub-session & job)',
+    },
     target: {
       architect: 'Architect',
       architectHint: 'Send to architect: free discussion',

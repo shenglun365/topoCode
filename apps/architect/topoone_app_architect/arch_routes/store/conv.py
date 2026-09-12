@@ -158,6 +158,18 @@ class ConversationsStore:
         return [_row_to_api(r) for r in rows]
 
     @classmethod
+    def by_parent(cls, parent_conv_id: str, limit: int = 50) -> list[dict]:
+        """主会话的 coding 子会话池(parent_conv_id 匹配, 更新时间倒序)。"""
+        rows, _ = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT *, (SELECT COUNT(*) FROM {cls.MSG_TABLE} m "
+            f" WHERE m.conversation_id = {cls.TABLE}.id) AS msg_count "
+            f"FROM {cls.TABLE} WHERE parent_conv_id = ? "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (parent_conv_id, int(limit)), None)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
     def by_req(cls, req_id: str, project_id: str = "", limit: int = 20) -> list[dict]:
         """按关联需求/提案 id 找会话(req_id 匹配; 同需求多会话按更新时间倒序)。"""
         conds, params = ["req_id = ?"], [req_id]

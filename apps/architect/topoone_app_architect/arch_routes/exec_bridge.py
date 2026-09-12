@@ -110,6 +110,51 @@ def waiting_job(conv_id: str) -> Optional[dict]:
     return None
 
 
+def _meta_dict_of(conv: dict) -> dict:
+    meta = (conv or {}).get("meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (TypeError, ValueError):
+            meta = {}
+    return meta or {}
+
+
+def _ensure_active_coding_session(conv: dict) -> str:
+    """确保主会话有活跃 coding 子会话(无→新建; 指向失效→重建)。
+
+    子会话 = 作业宿主(coding 自持上下文容器): 新建即清空上下文,
+    切换/复活靠 session_ref。库路由与主会话同项目库。
+    """
+    conv_id = (conv or {}).get("id") or ""
+    meta = _meta_dict_of(conv)
+    active = meta.get("activeCodingSession") or ""
+    if active:
+        sub = store.ConversationsStore.get(active)
+        if sub and (sub.get("parentConvId") or "") == conv_id \
+                and (sub.get("status") or "active") == "active":
+            return active
+    pid = (conv or {}).get("projectId") or ""
+    from . import ctx as _ctx
+    tok = _ctx.set_project(pid) if pid else None
+    try:
+        sub = store.ConversationsStore.create({
+            "kind": "coding", "projectId": pid,
+            "reqId": (conv or {}).get("reqId") or "",
+            "title": "coding 子会话",
+            "executorId": (conv or {}).get("executorId") or "",
+            "parentConvId": conv_id,
+            "roles": ["architect"],
+            "meta": {"createdFrom": conv_id, "createdAtTs": _ts()},
+        })
+    finally:
+        if tok is not None:
+            _ctx.reset_project(tok)
+    meta["activeCodingSession"] = sub["id"]
+    store.ConversationsStore.update(conv_id, {"meta": meta})
+    return sub["id"]
+
+
 def active_job(conv_id: str) -> Optional[dict]:
     """最近活跃作业(waiting_input|running)——coding 收件人定向投递目标。"""
     for j in reversed(jobs_of(conv_id)):
@@ -274,19 +319,30 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
         payload["executorId"] = executor_hint["executorId"]
         payload["executorType"] = executor_hint.get("executorType") or ""
         payload["executorConfig"] = executor_hint.get("executorConfig") or {}
+    # S3 子会话宿主: 作业挂活跃 coding 子会话(sessionRef 复活执行器原生会话)
+    sub_id = _ensure_active_coding_session(store.ConversationsStore.get(conv_id) or conv)
+    sub_row = store.ConversationsStore.get(sub_id) or {}
+    if sub_row.get("sessionRef"):
+        payload["sessionRef"] = sub_row["sessionRef"]
+
     res = _runner("/api/implement", payload, timeout=20.0)
     if not res or not res.get("ok"):
         err = (res or {}).get("error") or "runner 服务不可达(:3458)"
         return (f"❌ 实施作业启动失败：{err}\n"
-                "请检查 runner 服务与执行器(系统管理→执行器探活)后重试「执行方案」。")
+                "请检查 runner 服务与执行器(系统管理→执行器探活)后重试 `/执行`。")
     job_id = res["jobId"]
     _job_upsert(conv_id, {
         "jobId": job_id, "branch": res.get("branch") or branch,
         "worktree": res.get("worktree") or "", "specVer": spec_ver,
         "reqId": rid, "status": "running", "startedAt": _ts(),
         "executorId": (executor_hint or {}).get("executorId") or "",
+        "subSessionId": sub_id,
         "changedFiles": [], "failReason": "", "lastAgentNote": "", "lastAgentTs": 0,
     })
+    _append(sub_id, "user",
+            f"🚀 作业启动（`{job_id}` 规约 v{spec_ver or '?'} 分支 `{branch}`）\n\n"
+            + instruction[:4000],
+            msg_meta={"jobId": job_id, "kind": "job_start"})
     _start_pump(conv_id, job_id, rid)
     return (f"🚀 实施作业已启动\n"
             f"- 作业 `{job_id}`　规约 v{spec_ver or '?'}　分支 `{branch}`\n"
@@ -405,6 +461,20 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                         "「执行方案」重试将自动附前情简报。")
                 return
             pid = (store.ConversationsStore.get(conv_id) or {}).get("projectId") or ""
+            # S3: 事件消息流落子会话(done/failed 主会话保留完整卡); session_ref 回填
+            sub_id = ""
+            jb = next((j for j in jobs_of(conv_id) if j.get("jobId") == job_id), None)
+            if jb and jb.get("subSessionId"):
+                sub_id = jb["subSessionId"]
+            sid = (snap.get("sessionId") or "").strip()
+            if sid and sub_id:
+                try:
+                    sub_row = store.ConversationsStore.get(sub_id) or {}
+                    if (sub_row.get("sessionRef") or "") != sid:
+                        store.ConversationsStore.update(sub_id, {"sessionRef": sid})
+                except Exception:  # noqa: BLE001
+                    pass
+            target = sub_id or conv_id
             for ev in snap.get("events") or []:
                 last_seq = max(last_seq, ev.get("seq", 0))
                 kind = ev.get("kind") or ""
@@ -413,9 +483,9 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                 text = (ev.get("text") or "").strip()
                 if kind == "input_required":
                     clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
-                    _append(conv_id, "assistant",
+                    _append(target, "assistant",
                             f"⏸ **执行工程师需要你的输入**（作业 `{job_id[:12]}…`）\n\n{clean}\n\n"
-                            "回复补充内容后发送「**继续执行**」转达；停止请用会话信息面板按钮。",
+                            "回复补充内容后以 coding 收件人发送(或 `/继续`)转达；停止请用会话信息面板按钮。",
                             msg_meta={"jobId": job_id, "kind": "job_input"})
                     _job_upsert(conv_id, {"jobId": job_id, "status": "waiting_input",
                                           "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
@@ -435,18 +505,26 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                             "通过=需求标记已完成；需返工=回复意见后「继续执行」或调整规约。",
                             msg_meta={"jobId": job_id, "kind": "job_done",
                                       "branch": (jobs_of(conv_id)[-1] or {}).get("branch", "")})
+                    if sub_id:
+                        _append(sub_id, "assistant",
+                                f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n{clean}",
+                                msg_meta={"jobId": job_id, "kind": "job_done_sub"})
                 elif kind == "failed":
                     _job_upsert(conv_id, {"jobId": job_id, "status": "failed",
                                           "endedAt": _ts(), "failReason": text[:400],
                                           "lastAgentTs": _ts()})
                     _append(conv_id, "assistant",
                             f"❌ 执行作业失败：{text}\n分支已保留。"
-                            "排查后「执行方案」重试(自动附前情简报)。",
+                            "排查后 `/执行` 重试(自动附前情简报)。",
                             msg_meta={"jobId": job_id, "kind": "job_failed"})
+                    if sub_id:
+                        _append(sub_id, "assistant",
+                                f"❌ 执行作业失败：{text}",
+                                msg_meta={"jobId": job_id, "kind": "job_failed_sub"})
                 elif kind in ("aborted", "finished"):
                     _append(conv_id, "assistant", f"ℹ️ {text}")
                 elif text:
-                    _append(conv_id, "assistant", text,
+                    _append(target, "assistant", text,
                             msg_meta={"jobId": job_id, "kind": "job_progress"})
                     _job_upsert(conv_id, {"jobId": job_id, "lastAgentTs": _ts()})
             status = snap.get("status") or ""

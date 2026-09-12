@@ -483,6 +483,10 @@ class OpenCodeTurnAdapter(TurnAdapter):
 
     async def start_session(self, job) -> None:
         job.serve_url = await self._serve_url(job)
+        if job.session_id:
+            # 子会话复活: 复用执行器原生 session(消息历史在执行器侧保持)
+            self._start_sse(job)
+            return
         headers = {"Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=30.0, headers=headers) as c:
             r = await c.post(f"{job.serve_url}/session", json={"title": job.id})
@@ -644,7 +648,8 @@ class ClineTurnAdapter(TurnAdapter):
 
         sc.set_event_handler(_on_event)
         await sc.call("ping", timeout=40.0)   # sidecar 就绪
-        job.session_id = job.id               # cline 语义: taskId 即会话
+        # cline 语义: taskId 即会话; 预置 session_id(复活)=续用既有任务上下文
+        job.session_id = job.session_id or job.id
         job.serve_url = f"sidecar://{self.executor_id}"
 
     async def run_turn(self, job, text: str) -> TurnOutcome:
@@ -653,7 +658,7 @@ class ClineTurnAdapter(TurnAdapter):
         try:
             sc = self._sidecar()
             params: Dict[str, Any] = {
-                "taskId": job.id, "prompt": text, "cwd": job.wt,
+                "taskId": job.session_id or job.id, "prompt": text, "cwd": job.wt,
                 "maxIterations": self._max_iterations,
                 "archUrl": self._arch_url, "archToken": self._arch_token,
                 "projectId": getattr(job, "project_id", "") or "",
@@ -744,12 +749,16 @@ class CodexTurnAdapter(TurnAdapter):
 
     async def start_session(self, job) -> None:
         proxy = _codex_server(self._codex_bin, self._codex_home)
-        th = await proxy.proc.call("thread/start", {}, timeout=60.0)
-        thread_id = ((th or {}).get("thread") or {}).get("id") or ""
-        if not thread_id:
-            raise RuntimeError("codex thread 创建失败")
-        self._thread_of[job.id] = thread_id
-        job.session_id = thread_id
+        if job.session_id:
+            # 子会话复活: 复用既有 threadId 续线程(turn 会续在该线程上)
+            self._thread_of[job.id] = job.session_id
+        else:
+            th = await proxy.proc.call("thread/start", {}, timeout=60.0)
+            thread_id = ((th or {}).get("thread") or {}).get("id") or ""
+            if not thread_id:
+                raise RuntimeError("codex thread 创建失败")
+            self._thread_of[job.id] = thread_id
+            job.session_id = thread_id
         job.serve_url = f"codex-appserver://{self._codex_bin}"
         job.last_activity_ts = time.time()
 

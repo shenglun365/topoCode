@@ -452,6 +452,16 @@ export default {
       markDone: '标记完成',
       undoDone: '撤销完成',
     },
+    subs: {
+      manage: '子会话',
+      title: 'coding 子会话池',
+      hint: '新建=清空 coding 自持上下文；切换=后续作业与投喂落所选子会话；↗ 查看=打开该子会话消息流。',
+      new: '新建子会话(清空上下文)',
+      active: '活跃',
+      view: '查看消息流',
+      empty: '暂无子会话——/确认执行 时自动创建，或点下方新建。',
+      feedHint: '转达给 coding(过滤后进入子会话与作业)',
+    },
     target: {
       architect: '架构师',
       architectHint: '发给 architect：自由对话/需求分析',

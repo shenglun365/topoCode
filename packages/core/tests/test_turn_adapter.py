@@ -255,3 +255,46 @@ def test_codex_abort_sends_interrupt(monkeypatch):
         return await a.abort(j)
     assert asyncio.run(_flow()) is True
     assert "turn/interrupt" in fake.calls
+
+
+# ── S3 子会话复活: sessionRef 预置 → adapter 复用执行器原生会话 ────────
+
+def test_implement_sessionref_preset():
+    """sessionRef 预置即复活键(job.session_id 注入 adapter)。"""
+    import topoone.plugins.runner.implement as impl
+    job = impl.ImplementJob(
+        "impl-x", "/r", "/w", "HEAD", "b", "i",
+        adapter=_WatchFakeAdapter(lambda: None))
+    job.session_id = "ses-old"
+    assert job.session_id == "ses-old"
+
+
+def test_opencode_adapter_reuses_preset_session(monkeypatch):
+    """OpenCodeTurnAdapter.start_session: 预置 session_id → 跳过 POST /session 直接订阅。"""
+    import asyncio
+    from topoone.plugins.runner.turn_adapter import OpenCodeTurnAdapter
+
+    created = {"n": 0}
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): created["n"] += 1; return {"id": "ses-new"}
+
+    class _NoPostClient:
+        def __init__(self, *a, **k): pass 
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **k): return _Resp()
+
+    import topoone.plugins.runner.turn_adapter as ta
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _NoPostClient)
+
+    a = OpenCodeTurnAdapter(base_url="http://127.0.0.1:19999")
+    a._start_sse = lambda job: None   # 订阅打桩
+
+    class _J:
+        id = "j1"; wt = "/w"; session_id = "ses-old"; serve_url = ""; sse_stop = None
+    j = _J()
+    asyncio.run(a.start_session(j))
+    assert j.session_id == "ses-old"   # 未被覆盖
+    assert created["n"] == 0           # 未新建会话

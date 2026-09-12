@@ -428,6 +428,138 @@ def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str)
     return _conv_api(store.ConversationsStore.get(new_conv["id"]) or new_conv)
 
 
+@router.get("/sessions/{conv_id}/coding-sessions")
+async def list_coding_sessions(conv_id: str):
+    """主会话的 coding 子会话池(按更新时间倒序; 含活跃标记与作业状态)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    subs = store.ConversationsStore.by_parent(conv_id)
+    meta = _meta_of(conv)
+    active = (meta.get("activeCodingSession") or "")
+    out = []
+    for s in subs:
+        rr = _running_role_of(s)
+        out.append({"id": s["id"], "title": s.get("title") or "coding 子会话",
+                    "executorId": s.get("executorId") or "",
+                    "sessionRef": (s.get("sessionRef") or "")[:120],
+                    "hasSessionRef": bool(s.get("sessionRef")),
+                    "active": s["id"] == active,
+                    "runningRole": rr,
+                    "status": s.get("status") or "active",
+                    "msgCount": s.get("msgCount") or 0,
+                    "updatedAt": s.get("updatedAt")})
+    return ok(out)
+
+
+@router.post("/sessions/{conv_id}/coding-sessions")
+async def create_coding_session(conv_id: str, request: Request):
+    """新建 coding 子会话(清空 coding 自持上下文的新执行环境)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    data = await request.json() if request else {}
+    # 归档会话只读
+    if (conv.get("status") or "active") == "archived":
+        return err(400, "归档会话只读，不可新建子会话")
+    sub = store.ConversationsStore.create({
+        "kind": "coding", "projectId": conv.get("projectId") or "",
+        "reqId": conv.get("reqId") or "",
+        "title": str(data.get("title") or "").strip() or "coding 子会话",
+        "executorId": conv.get("executorId") or "",
+        "parentConvId": conv_id,
+        "roles": ["architect"],
+        "meta": {"createdFrom": conv_id, "createdAtTs": _ts()},
+    })
+    _set_active_coding_session(conv_id, sub["id"])
+    return ok(_conv_api(store.ConversationsStore.get(sub["id"]) or sub))
+
+
+@router.post("/sessions/{conv_id}/coding-sessions/{sub_id}/activate")
+async def activate_coding_session(conv_id: str, sub_id: str):
+    """切换活跃 coding 子会话(后续 /执行 作业与投喂落此子会话)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    sub = store.ConversationsStore.get(sub_id)
+    if not conv or not sub:
+        return err(404, "会话或子会话不存在")
+    if (sub.get("parentConvId") or "") != conv_id:
+        return err(400, "该会话不属于此主会话的子会话池")
+    _set_active_coding_session(conv_id, sub_id)
+    return ok({"active": sub_id})
+
+
+def _meta_of(conv: dict) -> dict:
+    meta = conv.get("meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (TypeError, ValueError):
+            meta = {}
+    return meta or {}
+
+
+def _set_active_coding_session(conv_id: str, sub_id: str) -> None:
+    meta = _meta_of(store.ConversationsStore.get(conv_id) or {})
+    meta["activeCodingSession"] = sub_id
+    store.ConversationsStore.update(conv_id, {"meta": meta})
+
+
+@router.post("/sessions/{conv_id}/feed")
+async def feed_to_coding(conv_id: str, request: Request):
+    """投喂门: 主会话消息 → 规则过滤 → 落活跃 coding 子会话(审计 feedFrom) → 投递活跃作业。
+
+    body: {messageId} 定向转发历史消息 | {text} 直发文本。
+    过滤规则(确定性): 剥离 hint 本地提示/工具轨迹标记, 只留正文。
+    """
+    from . import exec_bridge
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    body = await request.json()
+    text, src_msg_id = "", ""
+    if body.get("messageId"):
+        m = next((x for x in store.ConversationsStore.messages(conv_id, limit=200)
+                  if x.get("id") == body["messageId"]), None)
+        if not m:
+            return err(404, "消息不存在")
+        if (m.get("meta") or {}).get("kind") == "hint":
+            return err(400, "本地提示消息不可转发")
+        text = (m.get("content") or "").strip()
+        src_msg_id = m.get("id") or ""
+    else:
+        text = str(body.get("text") or "").strip()
+    if not text:
+        return err(400, "转发内容为空")
+
+    meta = _meta_of(conv)
+    active_sub = meta.get("activeCodingSession") or ""
+    delivered, queued, feed_note = False, False, ""
+    res = exec_bridge.deliver_to_coding(conv_id, text)
+    if res.get("ok"):
+        delivered, queued = True, bool(res.get("queued"))
+    elif res.get("error") != "no-active-job":
+        return err(400, f"投递失败: {res.get('error')}")
+
+    # 落子会话消息流(审计: 哪些主会话信息进入了 coding 上下文)
+    if active_sub:
+        store.ConversationsStore.append_message({
+            "id": store.next_id("m"), "conversationId": active_sub,
+            "role": "user", "time": _ts(), "content": text[:12000],
+            "meta": {"kind": "feed", "feedFrom": {"convId": conv_id,
+                                                  "messageId": src_msg_id,
+                                                  "at": _ts(),
+                                                  "delivered": delivered, "queued": queued}},
+        })
+        feed_note = f"；已记录到子会话 {active_sub}"
+    else:
+        feed_note = "；(无活跃子会话——仅投递作业)"
+    summary = ("📥 已排队转达(回合结束自动续跑)" if queued
+               else "➡️ 已转达作业" if delivered
+               else "已记录(当前无活跃作业——下次 /执行 后生效于新上下文)")
+    return ok({"delivered": delivered, "queued": queued,
+               "activeSub": active_sub, "summary": summary + feed_note})
+
+
 @router.post("/sessions/{conv_id}/probe")
 async def probe_session(conv_id: str, request: Request):
     """会话内发起方案草图(probe): worktree 快照 + coding agent + 伪 diff，产物落单元。"""

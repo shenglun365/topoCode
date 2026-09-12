@@ -354,6 +354,8 @@ def register(app: FastAPI) -> None:
             stall_sec=float(body.get("stallSec") or _DEFAULT_STALL_SEC),
             project_id=str(body.get("projectId") or ""))
         _JOBS[job_id] = job
+        # 子会话复活: 预置执行器原生会话 id(空=新建会话)
+        job.session_id = str(body.get("sessionRef") or "")
         job.turn_task = asyncio.create_task(job.start())
         logger.info("[implement] job %s created root=%s branch=%s", job_id, root, branch)
         return {"ok": True, "jobId": job_id, "branch": branch, "worktree": wt,

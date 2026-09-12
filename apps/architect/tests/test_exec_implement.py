@@ -392,3 +392,68 @@ def test_running_role_in_session_api(tmp_path, monkeypatch):
     # 无作业 → architect
     conv2 = store.ConversationsStore.create({"kind": "generic"})
     assert S._conv_api(conv2)["runningRole"]["role"] == "architect"
+
+
+# ── S3 子会话池: ensure/账本宿主/投喂门 ────────────────────────────────
+
+def test_ensure_active_coding_session(tmp_path, monkeypatch):
+    """无→新建(挂主会话); 失效(归档)→重建; 有效→复用。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge
+    conv = store.ConversationsStore.create({"kind": "requirement", "reqId": "RQ-1"})
+    sub1 = exec_bridge._ensure_active_coding_session(conv)
+    assert sub1
+    s = store.ConversationsStore.get(sub1)
+    assert s["parentConvId"] == conv["id"] and s["kind"] == "coding"
+    meta = store.ConversationsStore.get(conv["id"])["meta"]
+    assert meta["activeCodingSession"] == sub1
+    # 复用
+    assert exec_bridge._ensure_active_coding_session(
+        store.ConversationsStore.get(conv["id"])) == sub1
+    # 失效(归档)→重建
+    store.ConversationsStore.update(sub1, {"status": "archived"})
+    sub2 = exec_bridge._ensure_active_coding_session(
+        store.ConversationsStore.get(conv["id"]))
+    assert sub2 != sub1
+
+
+def test_coding_sessions_rest_and_feed(tmp_path, monkeypatch):
+    """子会话 REST(列表/新建/激活) + 投喂门(审计/过滤/无作业记录)。"""
+    _setup(tmp_path, monkeypatch)
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    client = TestClient(build_app(data_dir=str(tmp_path / "arch")))
+    _h = lambda: {"Authorization": "Bearer test"}
+    from topoone_app_architect.arch_routes import exec_bridge
+    conv = store.ConversationsStore.create({"kind": "requirement", "reqId": "RQ-1"})
+    # 手动投递失败场景: 无作业 → feed 仍记录
+    mid = store.ConversationsStore.append_message({
+        "id": store.next_id("m"), "conversationId": conv["id"],
+        "role": "assistant", "time": 1, "content": "**结论**: 桶大小要可配置"})["id"]
+    r = client.post(f"/api/architect/sessions/{conv['id']}/feed",
+                    json={"messageId": mid}, headers=_h()).json()["data"]
+    assert r["delivered"] is False and "已记录" in r["summary"]
+    # 新建子会话
+    r2 = client.post(f"/api/architect/sessions/{conv['id']}/coding-sessions",
+                     json={}, headers=_h()).json()["data"]
+    assert r2["parentConvId"] == conv["id"] and r2["kind"] == "coding"
+    sub_id = r2["id"]
+    # 列表(含活跃标记)
+    lst = client.get(f"/api/architect/sessions/{conv['id']}/coding-sessions",
+                     headers=_h()).json()["data"]
+    assert any(s["id"] == sub_id and s["active"] for s in lst)
+    # 再投喂(有活跃子会话, 仍无作业) → 落子会话+feedFrom 审计
+    r3 = client.post(f"/api/architect/sessions/{conv['id']}/feed",
+                     json={"messageId": mid}, headers=_h()).json()["data"]
+    assert r3["activeSub"] == sub_id
+    sub_msgs = store.ConversationsStore.messages(sub_id)
+    fed = [m for m in sub_msgs if (m.get("meta") or {}).get("kind") == "feed"]
+    assert len(fed) == 1 and "桶大小" in fed[0]["content"]
+    assert fed[0]["meta"]["feedFrom"]["messageId"] == mid
+    # hint 消息不可转发
+    store.ConversationsStore.append_message({
+        "id": "m-hint", "conversationId": conv["id"], "role": "assistant",
+        "time": 2, "content": "本地提示", "meta": {"kind": "hint"}})
+    r4 = client.post(f"/api/architect/sessions/{conv['id']}/feed",
+                     json={"messageId": "m-hint"}, headers=_h())
+    assert r4.json()["code"] == 400

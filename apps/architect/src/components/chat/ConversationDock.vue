@@ -135,12 +135,79 @@ function emitRefreshAsset(id: string) {
   window.dispatchEvent(new CustomEvent('arch:refresh-asset', { detail: id }))
 }
 
+// ── S3 coding 子会话池: 新建(清空自持上下文)/切换活跃/查看 ──
+interface SubSession { id: string; title: string; executorId?: string; sessionRef?: string
+  hasSessionRef?: boolean; active?: boolean; status?: string
+  runningRole?: { role: string; status?: string }; msgCount?: number }
+const subsOpen = ref(false)
+const subsBusy = ref(false)
+const subsMsg = ref('')
+const codingSubs = ref<SubSession[]>([])
+const isMainSession = computed(() => (conv.activeMeta as any)?.kind !== 'coding')
+async function loadSubs() {
+  if (!conv.activeId || !isMainSession.value) return
+  try {
+    codingSubs.value = await apiGet<SubSession[]>(`/sessions/${conv.activeId}/coding-sessions`)
+  } catch { codingSubs.value = [] }
+}
+async function openSubs() {
+  subsMsg.value = ''
+  await loadSubs()
+  subsOpen.value = true
+}
+async function newSub() {
+  if (!conv.activeId || subsBusy.value) return
+  subsBusy.value = true
+  try {
+    await apiPost(`/sessions/${conv.activeId}/coding-sessions`, {})
+    await loadSubs()
+    await syncRunningState(true)
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally { subsBusy.value = false }
+}
+async function activateSub(id: string) {
+  if (!conv.activeId || subsBusy.value) return
+  subsBusy.value = true
+  try {
+    await apiPost(`/sessions/${conv.activeId}/coding-sessions/${id}/activate`, {})
+    await loadSubs()
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally { subsBusy.value = false }
+}
+function viewSub(id: string) {
+  subsOpen.value = false
+  listOpen.value = false
+  void conv.openConversation({ id } as ConversationMeta)
+}
+
+// ── S3 投喂门: 主会话消息 → 过滤 → 活跃子会话+作业 ──
+const feedBusyIdx = ref(-1)
+async function onFeedTurn(p: { index: number; id?: string }) {
+  if (feedBusyIdx.value >= 0 || !conv.activeId) return
+  const m = conv.turns[p.index]
+  if (!m) return
+  feedBusyIdx.value = p.index
+  try {
+    const r = await apiPost<{ summary?: string; delivered?: boolean }>(
+      `/sessions/${conv.activeId}/feed`, { messageId: m.id || '', text: m.id ? undefined : m.content })
+    conv.pushLocalHint(String(r?.summary || '已投喂'))
+  } catch (e: any) {
+    conv.pushLocalHint(`⚠️ 转达失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    setTimeout(() => { feedBusyIdx.value = -1 }, 600)
+  }
+}
+
 // ── 执行器绑定(会话模型 v3): 一次绑定不可换; 换=克隆 ──
 interface ExecutorRow { id: string; type: string; enabled?: boolean }
 const executorList = ref<ExecutorRow[]>([])
 const boundExecutorId = computed(
   () => ((conv.activeMeta as any)?.executorId as string) || '')
 // ── 生命周期重构: 工作相位 + 角色集声明 + 作业控制 ──
+watch(() => conv.activeId, () => { void loadSubs() })
+
 async function loadExecutors() {
   try {
     const r = await apiGet<{ executors: ExecutorRow[] }>('/agent/executors')
@@ -488,6 +555,62 @@ async function pollRunningState() {
     <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
     <!-- 对话主体 -->
     <div class="min-h-0 flex-1">
+      <!-- coding 子会话池(S3): 新建/切换/查看 -->
+      <div
+        v-if="subsOpen"
+        class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
+        @click.self="subsOpen = false"
+      >
+        <div class="panel w-full max-w-sm">
+          <div class="panel-header">
+            <span>{{ t('session.subs.title') }}</span>
+            <button class="btn btn-xs btn-ghost" @click="subsOpen = false">
+              <XMarkIcon class="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div class="p-3 space-y-2">
+            <p class="text-[11px] text-ctp-subtext0">{{ t('session.subs.hint') }}</p>
+            <p v-if="subsMsg" class="text-[11px] text-ctp-yellow break-all">{{ subsMsg }}</p>
+            <button
+              v-for="s in codingSubs"
+              :key="s.id"
+              class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors"
+              :class="s.active ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40'"
+              @click="activateSub(s.id)"
+            >
+              <span
+                class="h-2 w-2 shrink-0 rounded-full"
+                :class="s.runningRole?.role === 'coding'
+                  ? (s.runningRole.status === 'waiting_input' ? 'bg-ctp-yellow' : 'bg-ctp-peach animate-pulse')
+                  : (s.active ? 'bg-ctp-blue' : 'bg-ctp-overlay1')"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block text-xs text-ctp-text truncate">{{ s.title }}</span>
+                <span class="block text-[10px] text-ctp-subtext0">
+                  {{ s.hasSessionRef ? '● 有执行器会话(可复活)' : '○ 新上下文' }}
+                  · {{ s.msgCount || 0 }} 条
+                  <template v-if="s.runningRole?.role === 'coding'">· {{ s.runningRole.status }}</template>
+                </span>
+              </span>
+              <span v-if="s.active" class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue">{{ t('session.subs.active') }}</span>
+              <button
+                class="btn btn-xs btn-ghost shrink-0"
+                :title="t('session.subs.view')"
+                @click.stop="viewSub(s.id)"
+              >↗</button>
+            </button>
+            <p v-if="!codingSubs.length" class="text-[11px] text-ctp-overlay1">
+              {{ t('session.subs.empty') }}
+            </p>
+            <button
+              class="btn btn-primary w-full !py-1.5 text-xs"
+              :disabled="subsBusy"
+              @click="newSub"
+            >{{ subsBusy ? '…' : t('session.subs.new') }}</button>
+          </div>
+        </div>
+      </div>
+
       <!-- roles 声明器(能力声明即用, 不锁定) -->
       <div
         v-if="rolesOpen"
@@ -580,6 +703,7 @@ async function pollRunningState() {
         @job-resume="resumeJob"
         @guard-repair="onGuardRepair"
         @fill-cmd="fillCmd"
+        @feed-turn="onFeedTurn"
         @spec-apply="onSpecApply"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
@@ -625,6 +749,12 @@ async function pollRunningState() {
               :title="t('session.role.manageTitle')"
               @click="openRoles"
             >{{ t('session.role.manage') }}</button>
+            <button
+              v-if="isMainSession"
+              class="btn !py-0 !px-2 !text-[10px]"
+              :title="t('session.subs.title')"
+              @click="openSubs"
+            >{{ t('session.subs.manage') }}<template v-if="codingSubs.length">({{ codingSubs.length }})</template></button>
             <button
               v-if="isRunning"
               class="btn !py-0 !px-2 !text-[10px] btn-ghost !text-ctp-red"

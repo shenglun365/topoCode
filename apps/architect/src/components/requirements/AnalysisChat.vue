@@ -48,6 +48,7 @@ const emit = defineEmits<{
   answers: [answers: Record<string, string>]
   'confirm-draft': []
   'delete-turn': [index: number]
+  'feed-turn': [p: { index: number; id?: string }]
   'refresh-asset': [assetId: string]
   'toggle-diagram-skill': [enabled: boolean]
   'toggle-contract-skill': [enabled: boolean]
@@ -90,6 +91,9 @@ function onGuardAction(index: number, s: { action: string; label: string }) {
     setTimeout(() => { guardBusyIdx.value = -1 }, 800)
   }
 }
+
+// ── S3 投喂门: 消息级「转达 coding」(dock 执行 POST /feed, 结果本地消息) ──
+const feedBusyIdx = ref(-1)
 
 // ── 指令符号 chips: 本地提示/守卫/系统消息中出现的 /指令 渲染为标签, 点击填入对话框 ──
 const CMD_TOKENS = ['/执行', '/确认执行', '/定稿', '/继续', '/diff', '/调整']
@@ -683,6 +687,15 @@ onUnmounted(() => {
                 v-else
                 class="w-3 h-3 text-ctp-green"
               />
+            </button>
+            <button
+              v-if="m.role === 'assistant' && !(m.meta?.kind)"
+              class="text-ctp-overlay0 hover:text-ctp-mauve transition-colors p-0.5"
+              :title="t('session.subs.feedHint')"
+              :disabled="feedBusyIdx === i"
+              @click="emit('feed-turn', { index: i, id: (m as any).id })"
+            >
+              <PaperAirplaneIcon class="w-3 h-3 rotate-90" />
             </button>
             <button
               class="text-ctp-overlay0 hover:text-ctp-red transition-colors p-0.5"
