@@ -1,4 +1,4 @@
-"""执行链路回归(生命周期 v2)：触发词分层 / 两段式确认(specVer) / 继续执行增量回合。
+"""执行链路回归(生命周期 v3)：指令符号分发 / 两段式确认(specVer) / /继续 增量回合。
 
 Run: cd <repo> && python -m pytest apps/architect/tests/test_exec_implement.py -q
 """
@@ -27,31 +27,19 @@ def _setup(tmp_path, monkeypatch):
     return C.setup(data_dir=data)
 
 
-# ── 触发词分层判定 ────────────────────────────────────────────────────
+# ── 会话指令符号解析(确定性分发, 无语义判断) ──────────────────────────
 
-def test_impl_triggers():
-    from topoone_app_architect.arch_routes.websocket import _is_impl_intent
-    for q in ("执行方案", "执行本任务", "执行任务。", "开始执行", "实施", "执行", "动手实现",
-              "执行。", "开始", "调用 coding agent 执行本会话的方案",
-              "补充：连接池上限改为64。请执行方案",
-              "跑一下方案", "跑起来", "Go Ahead", "执行 RQ-37", "启动执行作业"):
-        assert _is_impl_intent(q), q
-    for q in ("这个方案怎么执行", "执行方案吗", "执行本任务？", "怎么执行任务",
-              "执行方案前先确认依赖", "检查本会话方案是否符合执行标准",
-              "不执行了", "执行风险怎么评估", "还是先讨论执行细节吧",
-              "什么是执行方案", "要不要执行方案还是先等等",
-              "验证是否生效。请执行方案", "不执行", "执行x",
-              "并行执行的分析报告"):
-        assert not _is_impl_intent(q), q
-
-
-def test_confirm_and_resume_triggers():
-    from topoone_app_architect.arch_routes.websocket import (
-        _CONFIRM_TRIG_RE, _RESUME_TRIG_RE, _DIFF_TRIG_RE)
-    assert _CONFIRM_TRIG_RE.fullmatch("确认执行")
-    assert not _CONFIRM_TRIG_RE.fullmatch("不确认执行")
-    assert _RESUME_TRIG_RE.fullmatch("继续执行")
-    assert _DIFF_TRIG_RE.fullmatch("查看差异")
+def test_session_cmd_parse():
+    from topoone_app_architect.arch_routes.websocket import parse_session_cmd, SESSION_CMDS
+    for name in SESSION_CMDS:
+        assert parse_session_cmd(f"/{name}") == name, name
+        assert parse_session_cmd(f" /{name} ") == name, name          # 容忍空白
+        assert parse_session_cmd(f"/{name}!") == name, name           # 容忍尾随标点
+    assert parse_session_cmd("执行方案") == ""                          # 自然语言不再触发
+    assert parse_session_cmd("确认执行") == ""
+    assert parse_session_cmd("/不存在的指令") == ""
+    assert parse_session_cmd("执行方案吗 /执行") == ""                  # 非确切指令整条忽略
+    assert parse_session_cmd("看看这个/调整的写法") == ""               # 指令必须在消息首且独立
 
 
 # ── 会话/需求夹具(camelCase 会话行 + active 规约) ─────────────────────
@@ -130,7 +118,7 @@ def test_two_stage_confirm_binds_spec_ver(tmp_path, monkeypatch):
 
 
 def test_draft_spec_blocks_execution(tmp_path, monkeypatch):
-    """draft 规约不可执行——先确认(finalize)再执行。"""
+    """draft 规约不可执行——先 /定稿 再执行。"""
     _setup(tmp_path, monkeypatch)
     res = req_agent.run_arch_tool(
         "req.propose", {"title": "T-draft", "designMd": "d", "acceptanceMd": "a"},
@@ -141,7 +129,7 @@ def test_draft_spec_blocks_execution(tmp_path, monkeypatch):
     from topoone_app_architect.arch_routes import websocket as ws
     _patch_bridge(monkeypatch, tmp_path)
     out = asyncio.run(ws._executor_implement(conv, None))
-    assert "尚未确认" in out and "确认方案" in out
+    assert "尚未确认" in out and "/定稿" in out
 
 
 def test_done_req_blocks_execution(tmp_path, monkeypatch):
@@ -152,7 +140,7 @@ def test_done_req_blocks_execution(tmp_path, monkeypatch):
     assert "已完结" in out and "新建需求" in out
 
 
-# ── 继续执行(增量回合) ────────────────────────────────────────────────
+# ── /继续(增量回合) ────────────────────────────────────────────────
 
 def test_resume_turn_packages_incremental_messages(tmp_path, monkeypatch):
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
@@ -272,3 +260,66 @@ def test_start_implement_mutex_rejects(tmp_path, monkeypatch):
                                       "instruction", branch_name="exec/t", spec_ver=1)
     assert out.startswith("⛔") and "冲突" in out
     assert calls["path"] == "/api/implement/running"       # 未建作业
+
+
+# ── /定稿 系统直通 + 结构门禁(放宽裁决) ────────────────────────────────
+
+def test_cmd_finalize_turn_gate_and_pass(tmp_path, monkeypatch):
+    """/定稿: 门禁降为结构完整(designMd 非空); acceptance/scope 缺失仅警告放行。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import websocket as ws
+
+    # ① 无绑定需求 → 明确报错
+    res = asyncio.run(ws._cmd_finalize_turn({"id": "cv-x"}))
+    assert "未绑定需求" in res
+
+    # ② proposal(designMd 非空, 无 acceptance/scope) → 放行(warns 提示)
+    res2 = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-finalize", "designMd": "方案内容"},
+        root=None, project=None)
+    rid = res2["requirementId"]
+    cid = store.ConversationsStore.create({"kind": "requirement", "reqId": rid})["id"]
+    from topoone_app_architect.arch_routes import ctx as C
+    token = C._conv_var.set(cid)
+    C._req_var.set(rid)
+    try:
+        out = asyncio.run(ws._cmd_finalize_turn({"id": cid}))
+        assert "规约已确认" in out and "v1" in out and "/执行" in out
+        row = store.RequirementsStore.get(rid)
+        assert row["status"] == "ready"
+
+        # ③ 重复 /定稿 → 幂等提示
+        out3 = asyncio.run(ws._cmd_finalize_turn({"id": cid}))
+        assert "已确认" in out3
+    finally:
+        C._conv_var.reset(token)
+        C.reset_req(C._req_var.set(None))
+
+    # ④ designMd 为空 → 结构门禁拦截
+    res4 = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-empty", "requirementMd": "只有需求没有方案"},
+        root=None, project=None)
+    rid4 = res4["requirementId"]
+    cid4 = store.ConversationsStore.create({"kind": "requirement", "reqId": rid4})["id"]
+    token4 = C._conv_var.set(cid4)
+    C._req_var.set(rid4)
+    try:
+        out4 = asyncio.run(ws._cmd_finalize_turn({"id": cid4}))
+        assert "门禁未过" in out4 and "designMd" in out4
+    finally:
+        C._conv_var.reset(token4)
+
+
+def test_guard_cmd_hints_by_req_state(tmp_path, monkeypatch):
+    """守卫卡指令提示: draft → /定稿; ready → /执行; 无绑定 → 空。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import websocket as ws
+    assert ws._guard_cmd_hints("cv-none") == []
+    res = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-hints", "designMd": "d"},
+        root=None, project=None)
+    rid = res["requirementId"]
+    cid = store.ConversationsStore.create({"kind": "requirement", "reqId": rid})["id"]
+    assert ws._guard_cmd_hints(cid) == ["/定稿"]
+    store.RequirementsStore.spec_confirm(rid)
+    assert ws._guard_cmd_hints(cid) == ["/执行"]

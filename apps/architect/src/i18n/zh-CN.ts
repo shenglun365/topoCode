@@ -37,15 +37,6 @@ export default {
       success: '已指派，需求进入执行中',
       error: '指派失败',
     },
-    needsInput: {
-      title: '需要你输入',
-      task: '任务',
-      clarify: '提问',
-      clarifyFrom: 'subagent 提问',
-      answerPh: '输入回答…',
-      send: '回答',
-      sending: '发送中…',
-    },
     empty: '选择左侧会话或新建一条需求会话',
   },
   nav: {
@@ -465,7 +456,7 @@ export default {
     },
     job: {
       stop: '停止作业',
-      resume: '继续执行',
+      resume: '/继续 转达',
       resumeHint: '把上方补充转达给执行工程师',
       accept: '验收',
       acceptHint: '查看差异+验收简报，通过=需求标记已完成',
@@ -491,8 +482,6 @@ export default {
       newChat: '新会话',
       switch: '切换会话',
       hint: '所有对话统一在本栏进行，会话全量持久化',
-      clarifyPending: 'Agent 提出了问题，等待你的回答',
-      clarifyPlaceholder: '输入回答…',
     },
     actions: {
       rename: '重命名',

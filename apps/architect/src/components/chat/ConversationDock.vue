@@ -15,7 +15,6 @@ import {
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
-import { busService, type NeedsInputItem } from '@/services/bus-service'
 import { namingService } from '@/services/naming-service'
 import { apiGet, apiPost } from '@/services/api-client'
 
@@ -111,9 +110,9 @@ async function summarizeTitle() {
 onMounted(() => {
   if (props.scope) conv.setScope(props.scope)
   void loadRecent()
-  niTimer = setInterval(() => void pollNeedsInput(), 5000)
+  syncTimer = setInterval(() => void pollRunningState(), 5000)
 })
-onUnmounted(() => { if (niTimer) clearInterval(niTimer) })
+onUnmounted(() => { if (syncTimer) clearInterval(syncTimer) })
 
 function switchTo(meta: ConversationMeta) {
   listOpen.value = false
@@ -160,14 +159,27 @@ const isExecutionConv = computed(() =>
   !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
   && !isRunning.value)
 
+/** 指令符号表(与后端 SESSION_CMDS 对齐): 引导消息 chips 点击填入对话框 */
+const SESSION_CMDS: Array<{ cmd: string; desc: string }> = [
+  { cmd: '/执行', desc: '预览执行方案' },
+  { cmd: '/确认执行', desc: '启动执行作业' },
+  { cmd: '/定稿', desc: '确认规约版本(ready)' },
+  { cmd: '/继续', desc: '转达补充给作业' },
+  { cmd: '/diff', desc: '查看作业差异' },
+  { cmd: '/调整', desc: '修订需求/方案' },
+]
+function fillCmd(cmd: string) {
+  conv.pushDraft(cmd)
+}
+
 /** 引导消息: 仅渲染进对话流(本地), 不发后端/不进上下文, 切换会话自然消失。 */
 const GUIDE_MD = [
   '⚡ **会话引导**（仅本地提示，不进入对话上下文）',
   '',
-  '- `执行方案` 生成执行预览 → `确认执行` 启动作业',
-  '- `方案调整` + 调整点 修订规约（生成新 draft 版本）',
-  '- 作业提问时直接回复补充 → `继续执行` 转达给 agent',
-  '- `查看差异` 查看作业产物；完成后可标记需求完成',
+  '- `/执行` 生成执行预览 → `/确认执行` 启动作业',
+  '- `/调整` + 调整点 修订规约（生成新 draft 版本）',
+  '- 作业提问时直接回复补充 → `/继续` 转达给 agent',
+  '- `/diff` 查看作业产物；完成后可标记需求完成',
 ].join('\n')
 const guideBusy = ref(false)
 async function showGuide() {
@@ -215,7 +227,7 @@ async function onSpecApply(p: { index: number; payload: Record<string, unknown> 
     })
     conv.pushLocalHint(
       String(r?.summary || '落库未产出结果')
-      + (r?.ok ? `；可发送「确认定稿」或「执行方案」继续。` : ''))
+      + (r?.ok ? '；可发送 `/定稿` 或 `/执行` 继续。' : ''))
   } catch (e) {
     conv.pushLocalHint(`⚠️ 写入需求失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
@@ -298,7 +310,7 @@ async function stopExec() {
 }
 function resumeJob() {
   if (inputLockedHint.value) return
-  void conv.send('继续执行', { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}) })
+  void conv.send('/继续', { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}) })
   onSent()
 }
 
@@ -366,36 +378,11 @@ async function onConventionIgnore(id: string) {
   try { await namingService.deleteConvention(id) } catch { /* 忽略 */ }
 }
 
-// ── 需要你输入(N): agent 澄清问题应答(原 AgentWorkbench 逻辑) ──
-const needsInput = ref<{ count: number; items: NeedsInputItem[] } | null>(null)
-const clarifyDraft = ref('')
-const clarifyBusy = ref(false)
-let niTimer: ReturnType<typeof setInterval> | null = null
-async function pollNeedsInput() {
+// ── running 相位轮询同步(workState/泵消息); 旧 bus 澄清通道已移除(指令符号体系) ──
+let syncTimer: ReturnType<typeof setInterval> | null = null
+async function pollRunningState() {
   if (!conv.dockOpen) return
-  try {
-    needsInput.value = await busService.needsInput()
-  } catch { /* broker 暂不可达 → 保持上次值 */ }
   void syncRunningState()          // running 相位准实时同步(workState/泵消息)
-}
-const pendingClarify = computed<NeedsInputItem | null>(() => {
-  const items = needsInput.value?.items ?? []
-  const reqId = conv.activeReqId
-  return items.find((i) => i.type === 'clarify' && (!reqId || !i.reqId || i.reqId === reqId)) ?? null
-})
-async function answerClarify() {
-  const c = pendingClarify.value
-  const text = clarifyDraft.value.trim()
-  if (!c || !text || clarifyBusy.value) return
-  clarifyBusy.value = true
-  try {
-    await busService.publish('user', c.src || 'plan', 'interaction.answer',
-      { replyTo: c.id, reqId: conv.activeReqId || c.reqId || '', answer: text })
-    conv.turns.push({ role: 'user', content: text })
-    clarifyDraft.value = ''
-  } finally {
-    clarifyBusy.value = false
-  }
 }
 </script>
 
@@ -499,34 +486,6 @@ async function answerClarify() {
     </div>
 
     <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
-    <!-- 澄清应答横幅 -->
-    <div
-      v-if="pendingClarify"
-      class="shrink-0 border-b border-ctp-surface0 bg-ctp-yellow/5 px-3 py-2"
-    >
-      <div class="flex items-start gap-1.5">
-        <ExclamationCircleIcon class="mt-0.5 h-3.5 w-3.5 shrink-0 text-ctp-yellow" />
-        <p class="flex-1 text-[11px] leading-relaxed text-ctp-subtext1">
-          {{ pendingClarify.label || t('session.dock.clarifyPending') }}
-        </p>
-      </div>
-      <div class="mt-1.5 flex items-center gap-1.5">
-        <input
-          v-model="clarifyDraft"
-          class="input !py-1 flex-1 text-xs"
-          :placeholder="t('session.dock.clarifyPlaceholder')"
-          @keydown.enter="answerClarify"
-        >
-        <button
-          class="btn btn-sm btn-blue shrink-0"
-          :disabled="clarifyBusy || !clarifyDraft.trim()"
-          @click="answerClarify"
-        >
-          <PaperAirplaneIcon class="h-3 w-3" />
-        </button>
-      </div>
-    </div>
-
     <!-- 对话主体 -->
     <div class="min-h-0 flex-1">
       <!-- roles 声明器(能力声明即用, 不锁定) -->
@@ -616,6 +575,7 @@ async function answerClarify() {
         @job-accept="openAccept"
         @job-resume="resumeJob"
         @guard-repair="onGuardRepair"
+        @fill-cmd="fillCmd"
         @spec-apply="onSpecApply"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"

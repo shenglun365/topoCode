@@ -1726,17 +1726,17 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
 @register_architect_tool(
     "req.finalize",
     "规约确认(交托门禁)：把当前 draft 版本确认为可执行(confirmed/ready)。"
-    "确认语义：用户表示 确认存入/同意/确认方案/可以执行/确认执行 等确认意图时调用。"
-    "门禁：designMd(方案)与 acceptance(验收标准)非空；allowedScope 必须可解析出"
-    "文件/目录(或用户显式接受无边界风险)。确认后旧 confirmed 版本自动废弃(superseded)。"
-    "参数 reqId 可选(缺省取会话绑定需求)。",
+    "通常由用户指令 `/定稿` 触发(系统直通, 模型仅在用户明确要求时代调)。"
+    "门禁(结构完整性, 不评判语义)：designMd 非空; acceptance 若提供必须为数组且语法有效。"
+    "缺失项不拦截, 仅在结果中如实提示。确认后旧 confirmed 版本自动废弃(superseded)。"
+    "参数 reqId 勿传(系统自动取会话绑定需求)。",
 )
 def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
                       project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法确认"}
+        return {"ok": False, "error": "当前会话未绑定需求，无法确认。请先在对话中形成需求(req.propose)"}
     row = store.RequirementsStore.get(req_id)
     if not row:
         return {"ok": False, "error": f"需求 {req_id} 不存在"}
@@ -1746,34 +1746,32 @@ def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
     if not active:
         return {"ok": False, "error": "无生效规约版本"}
     if active.get("state") == "confirmed":
-        return {"ok": True, "reqId": req_id, "ver": active.get("ver"),
-                "hint": "当前版本已确认(ready)，可直接「执行方案」"}
+        return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "already": True,
+                "hint": "当前版本已确认(ready)，可直接 `/执行`"}
     snap = active.get("snapshot") or {}
-    missing = []
+    # 结构门禁(放宽裁决): designMd 非空即可放行; 其余缺失只提示不拦截
     if not (snap.get("designMd") or "").strip():
-        missing.append("方案(designMd)")
+        return {"ok": False, "error": "规约确认门禁未过——方案(designMd)为空(结构不完整)。"
+                "请先完善方案(req.propose / req.amend)再 `/定稿`。"}
+    warns = []
     if not (snap.get("acceptance") or []):
-        missing.append("验收标准(acceptance)")
-    if missing:
-        return {"ok": False, "error": f"规约确认门禁未过——缺少：{'、'.join(missing)}。"
-                "请先完善(继续对话或 req.propose 更新)再确认。"}
+        warns.append("验收标准(acceptance)未定义")
     scope_files = parse_scope_files(snap.get("allowedScope") or [])
-    boundary_note = ""
     if not scope_files:
-        boundary_note = ("\n⚠️ 允许改动范围未解析出文件/目录——并行执行互斥将无法保护本需求，"
-                         "建议补充明确的文件/目录边界。")
+        warns.append("允许改动范围未解析出文件/目录(并行互斥无法保护本需求)")
+    warn_note = ("；⚠️ " + "；".join(warns)) if warns else ""
     res = store.RequirementsStore.spec_confirm(req_id)
     if not res.get("ok"):
         return res
     try:
         log_conv_event(ctx.get_conv(),
                        f"✅ **规约已确认**：`{req_id}` v{active.get('ver')}（ready，可执行）"
-                       + boundary_note)
+                       + warn_note)
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "status": "ready",
-            "boundaryFiles": sorted(scope_files),
-            "hint": "规约已确认(ready)；在会话中发送「执行方案」预览并确认执行"}
+            "boundaryFiles": sorted(scope_files), "warns": warns,
+            "hint": "规约已确认(ready)；发送 `/执行` 预览并 `/确认执行` 启动作业" + warn_note}
 
 
 @register_architect_tool(
@@ -1879,42 +1877,6 @@ def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
 
 
 # ── 澄清提问工具(plan agent → 用户，经 broker 总线，「需要你输入」可见) ──
-
-@register_architect_tool(
-    "interaction.clarify",
-    "澄清提问：执行中发现信息不足/存在歧义/需要用户决策时，向用户提问"
-    "(经 broker 总线发布；工作台「需要你输入」会提示用户回答，"
-    "用户回答会作为新消息注入本会话，你在下一回合可见)。"
-    "参数：message(问题文本，简洁明确，一次只问一个关键问题)。",
-)
-def tool_interaction_clarify(message: str = "",
-                             root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
-    from . import ctx
-    from .bus_client import get_bus
-    req_id = ctx.get_req()
-    if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求，无法提问"}
-    message = (message or "").strip()
-    if not message:
-        return {"ok": False, "error": "缺少提问内容(message)"}
-    pub = get_bus().publish("plan", "user", "interaction.clarify",
-                            {"reqId": req_id, "message": message})
-    if pub is None:
-        return {"ok": False, "error": "agent-bus broker 不可达，无法发布提问"}
-    # PR1 双维度: agent 明确请求用户输入 → 查看状态=待回复
-    try:
-        conv_id = ctx.get_conv()
-        if conv_id:
-            from . import store as _store
-            _store.ConversationsStore.update(conv_id, {"reviewState": "awaiting_reply"})
-    except Exception:  # noqa: BLE001
-        pass
-    return {
-        "ok": True, "reqId": req_id, "messageId": pub.get("id"),
-        "summary": "已向用户提问(工作台「需要你输入」可见)；继续当前回合的其它工作，"
-                   "用户回答会在下一回合注入本会话。",
-    }
-
 
 # ── LLM 通道: 复用主后端 ai chat ─────────────────────────────────────
 
@@ -2278,19 +2240,17 @@ _CAPABILITY_DOC = (
     "- convention.propose：把观察到的命名重复模式固化为命名规约提案(pending，待设计者确认/忽略)\n"
     "- contract.propose：把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)\n"
     "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
-    "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n"
-    "- interaction.clarify：澄清提问(信息不足/存在歧义/需要用户决策时向用户提问；用户回答会在下一回合注入本会话)\n"
-    "- req.finalize：规约确认(交托门禁)：用户表示确认(确认方案/同意/可以执行)时调用，"
-    "把当前 draft 确认为 ready。参数 {\"reqId\"?: \"缺省取会话绑定需求\"}\n"
+    "- req.finalize：规约确认(交托门禁)——通常由用户指令 `/定稿` 系统直通，"
+    "模型仅在用户明确要求时代调，把当前 draft 确认为 ready。reqId 勿传(系统自动取会话绑定需求)\n"
     "- req.propose：需求提案(新建或幂等更新)——对话产出完整需求/方案时调用，"
     "创建新需求或更新会话绑定需求的 draft 版本。"
     "参数 {\"title\", \"requirementMd\"?, \"designMd\"?, \"allowedScopeMd\"?, "
     "\"forbiddenScopeMd\"?, \"acceptanceMd\"?, \"assessmentMd\"?, \"priority\"?, "
     "\"estMin\"?, \"newRequirement\"?: true 强制新建}\n"
     "- req.amend：需求修订(通用)——用户对既有需求 补充/完善/调整 时调用，追加新 draft "
-    "版本(append-only)。参数 {\"reqId\"?(缺省会话绑定), \"designMd\"?, \"requirementMd\"?, "
-    "\"allowedScope\"[]?, \"forbiddenScope\"[]?, \"acceptance\"[]?, \"reasoning\"?(修订留痕)}\n"
-    "- interaction.clarify：澄清提问(信息不足/存在歧义/需要用户决策时向用户提问；用户回答会在下一回合注入本会话)\n"
+    "版本(append-only)。reqId 勿传(系统自动取会话绑定需求)。"
+    "参数 {\"designMd\"?, \"requirementMd\"?, \"allowedScope\"[]?, \"forbiddenScope\"[]?, "
+    "\"acceptance\"[]?, \"reasoning\"?(修订留痕)}\n"
     "- ctx.search：跨会话检索历史上下文(单元/消息/备案文档)——回答涉及历史讨论/已有结论时先检索，避免重复讨论\n"
     "- ctx.get：读取指定会话的上下文包(摘要+关键单元+备案文档清单)\n"
     "- ctx.summarize：生成/刷新会话摘要\n"
@@ -2307,10 +2267,12 @@ _CAPABILITY_DOC = (
     "严禁不调用工具就输出『已启动/报告/条数/检查结果』等编造结论。\n"
     "需求落库纪律(必须遵守)：\n"
     "1. 修改既有需求(用户确认后补充约束/调整方案/完善规约) → 必须用 [TOOL_CALL] 调 "
-    "req.amend(带 reqId)，严禁重新 req.propose 或输出裸 JSON 围栏当作工具调用；\n"
-    "2. RQ 编号只来自工具返回(如 req.propose 的 requirementId)，严禁自造编号"
-    "(格式如 RQ-XXX-001 的自造编号会被系统守卫拦截)；\n"
-    "3. 确认(draft→ready)只能由用户显式发起 → req.finalize；修订(req.amend)时不要顺带调用它。\n"
+    "req.amend，严禁重新 req.propose 或输出裸 JSON 围栏当作工具调用；\n"
+    "2. RQ 编号/数据 ID 一律由系统管理：工具调用不传 reqId(系统自动取会话绑定)，"
+    "回复中的编号只来自工具返回，严禁自造编号(会被系统守卫拦截)；\n"
+    "3. 确认(draft→ready)由用户指令 `/定稿` 发起(系统直通)；修订(req.amend)时不要顺带调用 req.finalize。\n"
+    "会话指令符号(系统处理，与模型无关)：用户消息以 / 开头(/执行 /确认执行 /定稿 /继续 /diff /调整)时"
+    "由系统直接执行确定性动作——模型不会收到这类消息，也不要在回复中代用户发出指令。\n"
     "各工具的参数：\n"
     '- kb.asset.search: {"text": "检索关键词", "preferred": ["资产ID(可选)"]}\n'
     '- kb.code_mappings: {"asset_ids": ["资产ID"]}\n'
@@ -2337,9 +2299,8 @@ _CAPABILITY_DOC = (
     '- convention.propose: {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}\n'
     '- contract.propose: {"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)\n'
     '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
-    '- req.finalize: {"reqId"?: "缺省会话绑定需求"}——门禁校验(designMd/acceptance 非空)\n'
-    '- req.propose / req.amend: 参数形状见上方能力清单\n'
-    '- interaction.clarify: {"message": "<问题文本>"}\n'
+    '- req.finalize: {}——reqId 勿传(系统自动取会话绑定需求)；门禁=结构完整(designMd 非空)\n'
+    '- req.propose / req.amend: 参数形状见上方能力清单(reqId 同样勿传)\n'
     '- capability.evaluate: {"target": "plan|execution", "execId"?: "ex-…(execution 时必填)}\n'
     '- capability.mine: {"conversation"?: "cv-…(缺省当前会话)}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"

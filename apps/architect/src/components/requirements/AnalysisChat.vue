@@ -56,6 +56,7 @@ const emit = defineEmits<{
   'job-resume': []
   'guard-repair': [p: { index: number; meta: Record<string, any>; action: string }]
   'spec-apply': [p: { index: number; payload: Record<string, unknown> }]
+  'fill-cmd': [cmd: string]
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
   'goto-acceptance': []
@@ -86,6 +87,12 @@ function onGuardAction(index: number, s: { action: string; label: string }) {
   } finally {
     setTimeout(() => { guardBusyIdx.value = -1 }, 800)
   }
+}
+
+// ── 指令符号 chips: 本地提示/守卫/系统消息中出现的 /指令 渲染为标签, 点击填入对话框 ──
+const CMD_TOKENS = ['/执行', '/确认执行', '/定稿', '/继续', '/diff', '/调整']
+function cmdChipsOf(text: string): string[] {
+  return CMD_TOKENS.filter((c) => (text || '').includes(c))
 }
 
 // ── 规约 JSON 识别(字段签名): 「写入需求」按钮的显示条件与载荷提取 ──
@@ -688,6 +695,20 @@ onUnmounted(() => {
           </div>
           <ChatMessageBlocks :content="m.content" />
 
+          <!-- 指令符号 chips: 本地提示(hint)/作业事件消息中出现的 /指令 → 点击填入对话框 -->
+          <div
+            v-if="['hint', 'job_done', 'job_input'].includes(m.meta?.kind) && cmdChipsOf(m.content).length"
+            class="mt-2 flex flex-wrap items-center gap-1.5"
+          >
+            <button
+              v-for="c in cmdChipsOf(m.content)"
+              :key="c"
+              class="btn btn-xs btn-blue !px-2 font-mono"
+              title="点击填入输入框"
+              @click="emit('fill-cmd', c)"
+            >{{ c }}</button>
+          </div>
+
           <!-- 作业事件卡操作(生命周期重构): done→验收 / waiting_input→继续执行快捷 -->
           <div
             v-if="m.meta?.kind === 'job_done'"
@@ -752,7 +773,7 @@ onUnmounted(() => {
                 </p>
               </div>
             </div>
-            <div class="mt-1.5 flex items-center gap-1.5">
+            <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
               <button
                 v-for="s in (m.meta.suggestions || [])"
                 :key="s.action"
@@ -762,6 +783,20 @@ onUnmounted(() => {
                 :title="`点击执行：${s.label}`"
                 @click="onGuardAction(i, s)"
               >{{ guardBusyIdx === i ? '…' : s.label }}</button>
+              <button
+                v-for="c in cmdChipsOf(m.content)"
+                :key="c"
+                class="btn btn-xs btn-blue !px-2 font-mono"
+                title="点击填入输入框"
+                @click="emit('fill-cmd', c)"
+              >{{ c }}</button>
+              <button
+                v-for="c in (m.meta.cmds || [])"
+                :key="'meta-' + c"
+                class="btn btn-xs btn-blue !px-2 font-mono"
+                title="点击填入输入框"
+                @click="emit('fill-cmd', c)"
+              >{{ c }}</button>
             </div>
           </div>
 

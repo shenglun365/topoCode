@@ -37,15 +37,6 @@ export default {
       success: 'Assigned. Requirement is now executing.',
       error: 'Assignment failed',
     },
-    needsInput: {
-      title: 'Needs Input',
-      task: 'Task',
-      clarify: 'Question',
-      clarifyFrom: 'Subagent question',
-      answerPh: 'Type your answer…',
-      send: 'Answer',
-      sending: 'Sending…',
-    },
     empty: 'Select a session on the left or start a new one',
   },
   nav: {
@@ -441,7 +432,7 @@ export default {
     },
     job: {
       stop: 'Stop job',
-      resume: 'Resume',
+      resume: 'Resume (/继续)',
       resumeHint: 'Forward your supplements above to the coding agent',
       accept: 'Accept',
       acceptHint: 'Review diff + acceptance brief; pass = mark requirement done',
@@ -467,8 +458,6 @@ export default {
       newChat: 'New conversation',
       switch: 'Switch conversation',
       hint: 'All conversations live in this dock; fully persisted',
-      clarifyPending: 'The agent asked a question — awaiting your answer',
-      clarifyPlaceholder: 'Type your answer…',
     },
     actions: {
       rename: 'Rename',

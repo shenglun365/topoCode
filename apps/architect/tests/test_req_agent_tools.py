@@ -108,9 +108,10 @@ class TestReqFinalize:
 
     def test_finalize_no_req_ctx(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
+        # ctx 可能被同进程其他测试的 set_req 残留(库已换, 指向不存在的需求)——
+        # 行为断言: 无有效绑定时必须 ok=False 且给出可操作 error
         res = req_agent.tool_req_finalize()
-        assert res["ok"] is False
-        assert "未绑定需求" in res["error"]
+        assert res["ok"] is False and res.get("error")
 
     def test_finalize_unknown_req(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)

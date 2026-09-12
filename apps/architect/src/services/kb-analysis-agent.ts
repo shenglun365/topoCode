@@ -25,7 +25,7 @@ export type ChatStage = 'design' | 'implement' | 'evaluate' | 'accept'
 /** 工具名 → 阶段推导(前向兼容: WS3+ 的 coding.task / evaluate / acceptance 工具落地即生效)。 */
 export function stageOfTool(tool: string): ChatStage | '' {
   const t = tool || ''
-  if (/^probe\.run$|^coding\.task\.plan/.test(t)) return 'design'
+  if (/^probe\.run$/.test(t)) return 'design'
   if (/^coding\.task\.|^execution\./.test(t)) return 'implement'
   if (/^capability\.evaluate$|^evaluate\./.test(t)) return 'evaluate'
   if (/^acceptance\.|^contract\.propose$/.test(t)) return 'accept'

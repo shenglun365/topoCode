@@ -240,7 +240,7 @@ def run_evaluate(conv_id: str, root: Optional[str] = None, project: Optional[str
     plan = _latest_plan()
     if (target or "plan") == "plan":
         if not plan:
-            return {"error": "会话无 plan 契约——先调用 coding.task.plan 生成方案后再评估"}
+            return {"error": "会话无 plan 契约——无方案可供评估"}
         file_spans = plan.get("files") or []
         foot = change_footprint(root, project, file_spans)
         md_lines = [f"# 方案评估", "", f"**方案**: {plan.get('summary') or '-'}", ""]
