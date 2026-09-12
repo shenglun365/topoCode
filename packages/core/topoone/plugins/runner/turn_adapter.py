@@ -23,6 +23,8 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -71,6 +73,388 @@ class TurnAdapter:
         """作业结束释放资源(serve/sidecar 等); 默认无需。"""
 
 
+
+# ────────────────── 执行器进程管理(自包含, executors/ 已退役) ──────────────────
+
+HEALTH_PATH = "/global/health"
+
+
+class ServeProc:
+    """按项目根托管的 opencode serve 进程。"""
+
+    def __init__(self, root: str, url: str, port: int):
+        self.root = os.path.abspath(root)
+        self.url = url
+        self.port = port
+        self.proc: Optional[subprocess.Popen] = None  # None = 外部已起的 serve
+        self.created_at = time.time()
+
+
+class OpenCodeServeManager:
+    """项目根 → serve 实例注册表（进程内单例，端口探活分配）。"""
+
+    def __init__(self, opencode_bin: str = "", base_port: int = 3478, auto_start: bool = True):
+        self._bin = opencode_bin or shutil.which("opencode") or "opencode"
+        self._base_port = base_port
+        self._auto_start = auto_start
+        self._by_root: dict[str, ServeProc] = {}
+
+    def _log_path(self, port: int) -> str:
+        d = os.path.join(os.path.expanduser("~"), ".topocode", "runner")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, f"opencode-serve-{port}.log")
+
+    async def _healthy(self, url: str) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.get(f"{url}{HEALTH_PATH}")
+                return r.status_code == 200
+        except Exception:  # noqa: BLE001
+            return False
+
+    async def _find_port(self) -> int:
+        for off in range(0, 24):
+            port = self._base_port + off
+            if await self._healthy(f"http://127.0.0.1:{port}"):
+                continue  # 已被占用（可能是别的项目的 serve）
+            return port
+        return self._base_port
+
+    async def ensure(self, root: str) -> ServeProc:
+        root = os.path.abspath(root or os.getcwd())
+        sp = self._by_root.get(root)
+        if sp and await self._healthy(sp.url):
+            return sp
+        if sp and sp.proc is not None and sp.proc.poll() is None:
+            # 进程在但健康检查未过：给一次等待
+            for _ in range(10):
+                if await self._healthy(sp.url):
+                    return sp
+                await asyncio.sleep(1.0)
+        # 拉起（或复用已健康的外部 serve）；候选端口被占/启动失败自动换下一个
+        port = await self._find_port()
+        url = f"http://127.0.0.1:{port}"
+        if not await self._healthy(url) and self._auto_start:
+            last_err = ""
+            for off in range(0, 24):
+                port = self._base_port + off
+                url = f"http://127.0.0.1:{port}"
+                if await self._healthy(url):
+                    continue  # 已被占用（可能是别的项目的 serve）
+                try:
+                    return await self._spawn(root, port, url)
+                except Exception as e:  # noqa: BLE001
+                    last_err = f"port {port}: {e}"
+            raise RuntimeError(f"opencode serve 启动失败 root={root}: {last_err}")
+        if not await self._healthy(url):
+            raise RuntimeError(f"opencode serve 不可达 {url} 且未启用自动拉起")
+        # 外部 serve 可能属于别的项目根——复用会串工作区。注册表未命中(或旧条目
+        # 进程已死)时一律不复用未知 serve, 走自动拉起换端口
+        if (sp is None or (sp.proc is not None and sp.proc.poll() is not None)) \
+                and self._auto_start:
+            for off in range(0, 24):
+                port2 = self._base_port + off
+                url2 = f"http://127.0.0.1:{port2}"
+                if await self._healthy(url2):
+                    continue
+                return await self._spawn(root, port2, url2)
+            raise RuntimeError(f"opencode serve 无可用端口 root={root}")
+        sp = sp or ServeProc(root, url, port)
+        self._by_root[root] = sp
+        return sp
+
+    async def _spawn(self, root: str, port: int, url: str) -> ServeProc:
+        log = open(self._log_path(port), "ab")  # noqa: SIM115
+        proc = subprocess.Popen(
+            [self._bin, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
+            cwd=root, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        sp = ServeProc(root, url, port)
+        sp.proc = proc
+        for _ in range(30):
+            if await self._healthy(url):
+                self._by_root[root] = sp
+                logger.info("[opencode] serve started pid=%s port=%s root=%s",
+                            proc.pid, port, root)
+                return sp
+            if proc.poll() is not None:
+                break
+            await asyncio.sleep(1.0)
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+        raise RuntimeError(f"opencode serve 启动失败 port={port} root={root}（见 {self._log_path(port)}）")
+
+    def dispose_root(self, root: str) -> None:
+        """释放该根的 serve 实例(probe worktree 用完即清，防实例堆积)。"""
+        sp = self._by_root.pop(root, None)
+        if sp is None:
+            return
+        proc = getattr(sp, "proc", None)
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+        logger.info("[opencode] serve disposed root=%s", root)
+
+
+_MANAGER: Optional[OpenCodeServeManager] = None
+
+
+def _default_token() -> str:
+    for p in (os.environ.get("TOPOCODE_TOKEN_FILE"),
+              os.path.join(os.path.expanduser("~"), ".topocode", "token")):
+        if p and os.path.isfile(p):
+            try:
+                return open(p).read().strip()
+            except Exception:  # noqa: BLE001
+                pass
+    return ""
+
+
+class _SidecarProcess:
+    """单例 sidecar 进程：懒拉起、崩溃自动重启、请求-响应关联。"""
+
+    def __init__(self, node_bin: str, script: str):
+        self._node = node_bin or "node"
+        self._script = script
+        self._proc: Optional[asyncio.subprocess.Process] = None
+        self._lock = asyncio.Lock()
+        self._req_id = 0
+        self._pending: dict[int, asyncio.Future] = {}
+        self._reader_task: Optional[asyncio.Task] = None
+        self._event_handler = None  # callable(params)
+
+    def set_event_handler(self, handler) -> None:
+        self._event_handler = handler
+
+    async def _start_locked(self) -> None:
+        if self._proc and self._proc.returncode is None:
+            return
+        run_dir = os.path.join(os.path.expanduser("~"), ".topocode", "runner")
+        os.makedirs(run_dir, exist_ok=True)
+        self._proc = await asyncio.create_subprocess_exec(
+            self._node, self._script,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=open(os.path.join(run_dir, "cline-sidecar.log"), "ab"),  # noqa: SIM115
+            limit=16 * 1024 * 1024,
+        )
+        self._reader_task = asyncio.create_task(self._read_loop())
+        # 等 ready 事件（直接内发，避免与 ensure 的锁重入死锁）
+        try:
+            await asyncio.wait_for(self._send_and_wait("ping"), timeout=30.0)
+        except Exception as e:  # noqa: BLE001
+            await self.kill()
+            raise RuntimeError(f"cline sidecar 启动失败: {e}") from e
+        logger.info("[cline] sidecar started pid=%s", self._proc.pid)
+
+    async def _send_and_wait(self, method: str, params: dict | None = None,
+                             timeout: float = 3600.0):
+        """假定进程已就绪的裸请求（不经过 ensure/锁）。"""
+        if not self._proc or self._proc.returncode is not None or not self._proc.stdin:
+            raise RuntimeError("sidecar not running")
+        self._req_id += 1
+        rid = self._req_id
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._pending[rid] = fut
+        payload = {"id": rid, "method": method, "params": params or {}}
+        self._proc.stdin.write((json.dumps(payload) + "\n").encode())
+        await self._proc.stdin.drain()
+        return await asyncio.wait_for(fut, timeout=timeout)
+
+    async def ensure(self) -> None:
+        async with self._lock:
+            await self._start_locked()
+
+    async def kill(self) -> None:
+        proc, self._proc = self._proc, None
+        if self._reader_task:
+            self._reader_task.cancel()
+            self._reader_task = None
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("sidecar restarting"))
+        self._pending.clear()
+        if proc and proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+    async def _read_loop(self) -> None:
+        proc = self._proc
+        try:
+            while proc and proc.returncode is None:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                try:
+                    msg = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                if "id" in msg and (msg.get("result") is not None or msg.get("error") is not None):
+                    fut = self._pending.pop(msg["id"], None)
+                    if fut and not fut.done():
+                        if msg.get("error"):
+                            fut.set_exception(RuntimeError(msg["error"].get("message", "error")))
+                        else:
+                            fut.set_result(msg.get("result"))
+                elif msg.get("method") == "event" and self._event_handler:
+                    try:
+                        self._event_handler(msg.get("params") or {})
+                    except Exception:  # noqa: BLE001
+                        pass
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[cline] sidecar read loop died: %s", e)
+        # 进程退出：使所有挂起请求失败，触发上层重启
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("cline sidecar exited"))
+        self._pending.clear()
+
+    async def call(self, method: str, params: dict | None = None, timeout: float = 3600.0):
+        async with self._lock:
+            await self._start_locked()
+        return await self._send_and_wait(method, params, timeout=timeout)
+
+
+_EVENT_DONE_HINTS = ("turn/completed", "turn/failed", "turn/cancelled")
+
+
+class _AppServerProcess:
+    """常驻 codex app-server 子进程（行分隔 JSON-RPC）。"""
+
+    def __init__(self, codex_bin: str, cwd: str, codex_home: str = ""):
+        self._bin = codex_bin
+        self._cwd = cwd
+        self._codex_home = os.path.expanduser(codex_home) if codex_home else ""
+        self._proc: Optional[asyncio.subprocess.Process] = None
+        self._lock = asyncio.Lock()
+        self._req_id = 0
+        self._pending: dict[int, asyncio.Future] = {}
+        self.events: list[dict] = []  # 最近事件（ring）
+        self._waiters: list[tuple[str, asyncio.Event]] = []
+        # 通道状态(看门狗/适配层探测): read loop 退出即断流
+        self.dead: bool = False
+        self.dead_reason: str = ""
+
+    async def _start_locked(self) -> None:
+        if self._proc and self._proc.returncode is None:
+            return
+        env = dict(os.environ)
+        if self._codex_home:
+            os.makedirs(self._codex_home, exist_ok=True)
+            env["CODEX_HOME"] = self._codex_home  # 多实例隔离（各自 config.toml 指向不同模型）
+        run_dir = os.path.join(os.path.expanduser("~"), ".topocode", "runner")
+        os.makedirs(run_dir, exist_ok=True)
+        self._proc = await asyncio.create_subprocess_exec(
+            self._bin, "app-server",
+            cwd=self._cwd, env=env,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=open(os.path.join(run_dir, "codex-appserver.log"), "ab"),  # noqa: SIM115
+            limit=16 * 1024 * 1024,
+        )
+        self._reader = asyncio.create_task(self._read_loop())
+        try:
+            await asyncio.wait_for(self._send_and_wait("initialize", {
+                "clientInfo": {"name": "topoone-runner", "title": "TopoOne Runner",
+                               "version": "0.1.0"}}), timeout=30.0)
+        except Exception as e:  # noqa: BLE001
+            await self.kill()
+            raise RuntimeError(f"codex app-server 启动失败: {e}") from e
+        logger.info("[codex] app-server started pid=%s", self._proc.pid)
+
+    async def _send_and_wait(self, method: str, params: dict | None = None,
+                             timeout: float = 3600.0):
+        if not self._proc or self._proc.returncode is not None or not self._proc.stdin:
+            raise RuntimeError("codex app-server not running")
+        self._req_id += 1
+        rid = self._req_id
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self._pending[rid] = fut
+        payload = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}
+        self._proc.stdin.write((json.dumps(payload) + "\n").encode())
+        await self._proc.stdin.drain()
+        return await asyncio.wait_for(fut, timeout=timeout)
+
+    async def call(self, method: str, params: dict | None = None,
+                   timeout: float = 3600.0):
+        async with self._lock:
+            await self._start_locked()
+        return await self._send_and_wait(method, params, timeout=timeout)
+
+    async def _read_loop(self) -> None:
+        proc = self._proc
+        try:
+            while proc and proc.returncode is None:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                try:
+                    msg = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                if msg.get("id") is not None and ("result" in msg or "error" in msg):
+                    fut = self._pending.pop(msg["id"], None)
+                    if fut and not fut.done():
+                        if "error" in msg:
+                            fut.set_exception(RuntimeError(
+                                str((msg["error"] or {}).get("message") or msg["error"])))
+                        else:
+                            fut.set_result(msg.get("result"))
+                elif msg.get("method"):
+                    ev = {"method": msg["method"], "params": msg.get("params") or {}}
+                    self.events.append(ev)
+                    if len(self.events) > 4000:
+                        del self.events[:2000]
+                    for m, w in self._waiters:
+                        if m == ev["method"]:
+                            w.set()
+        except asyncio.CancelledError:
+            self.dead = True
+            self.dead_reason = "read loop cancelled"
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[codex] read loop died: %s", e)
+            self.dead = True
+            self.dead_reason = str(e)[:300] or "read loop died"
+        else:
+            # while 正常退出(stdout EOF/进程结束) → 通道断流
+            self.dead = True
+            self.dead_reason = "app-server stdout EOF"
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("codex app-server exited"))
+        self._pending.clear()
+
+    def wait_event(self, method: str, start_idx: int) -> asyncio.Event:
+        """注册等待某事件（从 start_idx 之后的新事件）。"""
+        ev = asyncio.Event()
+        self._waiters.append((method, ev))
+        return ev
+
+    def events_since(self, idx: int) -> list[dict]:
+        return self.events[idx:]
+
+    async def kill(self) -> None:
+        proc, self._proc = self._proc, None
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(RuntimeError("codex app-server restarting"))
+        self._pending.clear()
+        if proc and proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+
+
 # ─────────────────────────── opencode serve ───────────────────────────
 
 
@@ -84,7 +468,6 @@ class OpenCodeTurnAdapter(TurnAdapter):
 
     def __init__(self, base_port: int = 3478, auto_start: bool = True,
                  base_url: str = "", opencode_bin: str = "", executor_id: str = "opencode"):
-        from .executors.opencode import OpenCodeServeManager
         self.executor_id = executor_id
         self.executor_type = "opencode"
         self._mgr = OpenCodeServeManager(base_port=base_port, auto_start=auto_start,
@@ -230,7 +613,6 @@ class ClineTurnAdapter(TurnAdapter):
     """
 
     def __init__(self, config: Dict[str, Any], executor_id: str = "cline"):
-        from .executors.cline import _SidecarProcess, _default_token
         self.executor_id = executor_id
         self.executor_type = "cline-sdk"
         self._node = str(config.get("node_bin") or "node")
@@ -326,7 +708,6 @@ class _AppServerProxy:
     """
 
     def __init__(self, codex_bin: str, codex_home: str = ""):
-        from .executors.codex_server import _AppServerProcess
         self.proc = _AppServerProcess(codex_bin, cwd=os.getcwd(),
                                       codex_home=codex_home)
         self.dead = False

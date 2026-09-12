@@ -1,296 +1,54 @@
-"""Coding Agent Runner — tAgent 任务树调度宿主（独立进程 :3458）。
+"""Coding Agent Runner — 会话作业执行宿主(单一执行面)。
 
-只做接线（INTEGRATION.md §2）：端点直接映射 TaskTreeScheduler 同名方法，无业务逻辑。
-- 启动经 AgentGateway 组装 ExecutorPool（architect 注册表 > env 兼容 > 内置默认）；
-- 树状态持久化 runner.db（独立 SQLite，与主库隔离）→ 进程重启断点续跑；
-- WS 事件流：on_event=(tree_id, ev) → 按 tree 订阅推送 ev.to_dict()；
-- 会话执行器（opencode 会话化 / cline sidecar / codex app-server）支持
-  /api/executors/refresh 热刷新与 /api/agent-sessions/{inject,abort}。
+执行原语: implement.ImplementJob(TurnAdapter 适配 opencode/cline/codex)。
+probe(方案草图)复用同一适配面的一次性单回合(worktree 快照, 用完即清)。
 
-执行器配置：architect 系统管理（arch_collab_config["agent.executors"]）；
-旧 env（RUNNER_DEFAULT_EXECUTOR/OPENCODE_SERVE_URL/CODEX_CMD/CLAUDE_CMD）仍兼容。
+历史: SE 树调度器(TaskTreeScheduler/ExecutorPool/runner.db)已整体退役,
+执行器配置由 architect 单源管理(arch_collab_config), 作业按 executorId
+显式路由(build_adapter), 不再存在 runner 侧执行器池与启动期配置拉取。
 """
-
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import os
-import sqlite3
 import subprocess
 import time
 import uuid
 from typing import Optional
 
-import uvicorn
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-
-from topocode_agent.orchestration import CodingTaskTree
-from topocode_agent.orchestration.scheduler import TaskTreeScheduler
-
-from .gateway import AgentGateway
+from fastapi import FastAPI, Request
 
 logger = logging.getLogger(__name__)
 
-PORT = int(os.environ.get("CODING_AGENT_RUNNER_PORT", "3458"))
+app = FastAPI(title="coding-agent-runner")
+
+PORT = int(os.environ.get("RUNNER_PORT", "3458"))
 DATA_DIR = os.environ.get("TOPOCODE_DB_DIR") or os.path.join(
     os.path.expanduser("~"), ".topocode")
-RUNNER_DIR = os.path.join(DATA_DIR, "runner")
-RUNNER_DB = os.path.join(RUNNER_DIR, "runner.db")
-STATE_DIR = os.path.join(RUNNER_DIR, "state")
+STATE_DIR = os.path.join(DATA_DIR, "runner", "state")
 
-os.makedirs(RUNNER_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(STATE_DIR, exist_ok=True)
 
-app = FastAPI(title="Coding Agent Runner")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
+def _git(args: list, cwd: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                          text=True, check=check)
 
-# ── runner.db（独立 SQLite，树状态持久化） ──
-
-class RunnerDB:
-    def __init__(self, path: str):
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS task_trees ("
-            "id TEXT PRIMARY KEY, tree_json TEXT NOT NULL, status TEXT NOT NULL, "
-            "project_root TEXT, context_json TEXT, created_at TEXT, updated_at TEXT)")
-        self._conn.commit()
-
-    def upsert(self, tree_id: str, tree: CodingTaskTree, context: dict,
-               project_root: str = "") -> None:
-        import datetime
-        now = datetime.datetime.now().isoformat()
-        status = getattr(tree, "status", "") or ""
-        self._conn.execute(
-            "INSERT INTO task_trees (id, tree_json, status, project_root, context_json, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET tree_json=excluded.tree_json, "
-            "status=excluded.status, updated_at=excluded.updated_at",
-            (tree_id, json.dumps(tree.to_dict(), ensure_ascii=False), status,
-             project_root, json.dumps(context or {}, ensure_ascii=False), now, now))
-        self._conn.commit()
-
-    def all_pending(self) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT * FROM task_trees WHERE status NOT IN ('done','cancelled') "
-            "ORDER BY updated_at").fetchall()
-        return [dict(r) for r in rows]
-
-
-# ── WS 事件订阅（按 tree_id） ──
-
-class EventHub:
-    def __init__(self):
-        self._subscribers: dict[str, set[asyncio.Queue]] = {}
-
-    def subscribe(self, tree_id: str) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=1000)
-        self._subscribers.setdefault(tree_id, set()).add(q)
-        return q
-
-    def unsubscribe(self, tree_id: str, q: asyncio.Queue) -> None:
-        subs = self._subscribers.get(tree_id)
-        if subs:
-            subs.discard(q)
-            if not subs:
-                self._subscribers.pop(tree_id, None)
-
-    def publish(self, tree_id: str, payload: dict) -> None:
-        for q in list(self._subscribers.get(tree_id, ())):
-            try:
-                q.put_nowait(payload)
-            except asyncio.QueueFull:
-                logger.warning("[runner] event queue full for %s, dropping", tree_id)
-
-
-# ── 宿主状态 ──
-
-class RunnerState:
-    db: RunnerDB
-    pool: ExecutorPool
-    scheduler: TaskTreeScheduler
-    hub: EventHub
-    gateway: AgentGateway
-
-
-state: RunnerState
-
-
-def init_runner() -> None:
-    global state
-    db = RunnerDB(RUNNER_DB)
-    gateway = AgentGateway()
-    pool, _entries = asyncio.run(gateway.build_pool(boot=True))
-    hub = EventHub()
-    scheduler = TaskTreeScheduler(
-        pool,
-        on_event=lambda tree_id, ev: hub.publish(tree_id, ev.to_dict()),
-        project_root="",
-        state_dir=STATE_DIR,
-    )
-    state = RunnerState()
-    state.db, state.pool, state.scheduler, state.hub = db, pool, scheduler, hub
-    state.gateway = gateway
-
-    # 重启恢复：未终态树重新 submit（保留原 id 与 status，未 done 节点自动续跑）
-    for row in db.all_pending():
-        try:
-            tree = CodingTaskTree.from_dict(json.loads(row["tree_json"]))
-            tree_id = row["id"]
-            scheduler.submit(
-                tree, context=json.loads(row["context_json"] or "{}"), tree_id=tree_id)
-            logger.info("[runner] restored tree %s (status=%s)", tree_id, row["status"])
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[runner] restore tree %s failed: %s", row["id"], e)
-
-
-def persist(tree_id: str) -> None:
-    tree = state.scheduler.get_tree(tree_id)
-    if tree is None:
-        return
-    state.db.upsert(tree_id, tree, state.scheduler.get_context(tree_id),
-                    project_root=os.environ.get("RUNNER_PROJECT_ROOT", ""))
-
-
-# ── 端点（INTEGRATION.md §2.2） ──
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "coding-agent-runner", "port": PORT,
-            "executors": await state.pool.health()}
+    return {"status": "ok", "service": "coding-agent-runner", "port": PORT}
 
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "executors": await state.pool.health()}
-
-
-@app.post("/api/trees")
-async def submit_tree(request: Request):
-    body = await request.json()
-    tree = CodingTaskTree.from_dict(body["tree"])
-    tree_id = state.scheduler.submit(tree, context=body.get("context") or {})
-    persist(tree_id)
-    logger.info("[runner] tree submitted: %s nodes=%d", tree_id, len(tree.roots))
-    return {"tree_id": tree_id}
-
-
-@app.get("/api/trees/{tree_id}")
-async def get_tree(tree_id: str):
-    tree = state.scheduler.get_tree(tree_id)
-    if tree is None:
-        return {"error": "tree not found"}
-    return {"tree": tree.to_dict(), "progress": state.scheduler.progress(tree_id)}
-
-
-@app.websocket("/api/trees/{tree_id}/events")
-async def tree_events(websocket: WebSocket, tree_id: str):
-    await websocket.accept()
-    q = state.hub.subscribe(tree_id)
-    try:
-        while True:
-            payload = await q.get()
-            await websocket.send_json(payload)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        state.hub.unsubscribe(tree_id, q)
-
-
-@app.post("/api/trees/{tree_id}/pause")
-async def pause(tree_id: str):
-    return {"ok": state.scheduler.pause(tree_id)}
-
-
-@app.post("/api/trees/{tree_id}/resume")
-async def resume(tree_id: str):
-    return {"ok": state.scheduler.resume(tree_id)}
-
-
-@app.post("/api/trees/{tree_id}/cancel")
-async def cancel(tree_id: str):
-    ok = state.scheduler.cancel(tree_id)
-    persist(tree_id)
-    return {"ok": ok}
-
-
-@app.post("/api/trees/{tree_id}/retry")
-async def retry(tree_id: str, request: Request):
-    body = await request.json()
-    ok = state.scheduler.retry(tree_id, body["task_id"])
-    persist(tree_id)
-    return {"ok": ok}
-
-
-@app.post("/api/trees/{tree_id}/skip")
-async def skip(tree_id: str, request: Request):
-    body = await request.json()
-    ok = state.scheduler.skip(tree_id, body["task_id"])
-    persist(tree_id)
-    return {"ok": ok}
-
-
-@app.put("/api/trees/{tree_id}")
-async def update_tree(tree_id: str, request: Request):
-    body = await request.json()
-    state.scheduler.update_tree(tree_id, CodingTaskTree.from_dict(body["tree"]))
-    persist(tree_id)
     return {"ok": True}
 
 
-@app.post("/api/trees/{tree_id}/rejudge")
-async def rejudge(tree_id: str, request: Request):
-    body = await request.json()
-    state.scheduler.rejudge(tree_id, body.get("task_ids") or [])
-    persist(tree_id)
-    return {"ok": True}
-
-
-@app.post("/api/executors/refresh")
-async def refresh_executors():
-    """architect 配置保存后触发：重建执行器并原子换池。"""
-    entries = await state.gateway.apply_to(state.scheduler)
-    state.pool = state.scheduler._pool  # noqa: SLF001
-    return {"ok": True, "executors": state.pool.available(), "entries": entries}
-
-
-@app.get("/api/executors")
-async def list_executors():
-    return {"executors": state.pool.available(),
-            "health": await state.pool.health()}
-
-
-@app.post("/api/agent-sessions/inject")
-async def agent_session_inject(request: Request):
-    body = await request.json()
-    return await state.gateway.inject(body.get("sessionKey", ""),
-                                      body.get("message", ""))
-
-
-@app.post("/api/agent-sessions/abort")
-async def agent_session_abort(request: Request):
-    body = await request.json()
-    return await state.gateway.abort_session(body.get("sessionKey", ""))
-
-
-@app.post("/api/trees/{tree_id}/run")
-async def run_tree(tree_id: str):
-    # 非阻塞：内部 run_async
-    state.scheduler.run_async(tree_id)
-    return {"progress": state.scheduler.progress(tree_id)}
-
-
-# ── P3 probe 模式(worktree 方案A)：方案草图——只读分析+伪diff，不建分支不落地 ──
+# ── probe: worktree 方案草图(一次性单回合, 与 implement 同一适配面) ──
 
 _PROBE_HARNESS = (
     "【probe 方案草图模式】\n"
@@ -302,64 +60,31 @@ _PROBE_HARNESS = (
 )
 
 
-_PLAN_HARNESS = (
-    "【plan 只读分析模式】\n"
-    "- 你在 git worktree 快照中工作，改动不影响主工作区\n"
-    "- 禁止修改任何业务代码/配置文件；禁止 git commit/branch/push/checkout；禁止构建/测试/安装依赖\n"
-    "- 通读相关代码理解现状后，必须用 write_to_file 工具把结构化改动方案写入 __PLAN_FILE__ 文件(UTF-8, JSON)：\n"
-    '  {"files": [{"path": "相对路径", "lines": [{"start": 行号, "end": 行号, "intent": "此处要做什么"}],'
-    ' "intent": "该文件整体意图", "confidence": 0.0~1.0}], "summary": "一句话方案", "risks": ["风险…"]}\n'
-    "- 行号基于当前快照真实行号；新增文件 lines 可为空数组并在 intent 说明\n"
-    "- 除 __PLAN_FILE__ 外不得创建/改动任何文件\n"
-    "- 唯一交付物就是 __PLAN_FILE__ 文件本身；禁止只把方案写在回复文本里——写完文件后回复「done」即可\n"
-)
+class _ProbeJob:
+    """probe 一次性回合的 job 形参 shim(TurnAdapter 鸭子类型)。"""
 
-
-def _extract_json_object(text: str):
-    """从模型产物中容错抽取首个平衡 JSON 对象(容忍围栏/前后缀文本)。"""
-    s = (text or "").strip()
-    if s.startswith("```"):
-        s = s.split("\n", 1)[1] if "\n" in s else s
-        s = s.rsplit("```", 1)[0]
-    i = s.find("{")
-    if i < 0:
-        return None
-    depth, in_str, esc = 0, False, False
-    for j in range(i, len(s)):
-        ch = s[j]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-        elif ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    import json as _json
-                    return _json.loads(s[i:j + 1])
-                except Exception:
-                    return None
-    return None
-
-
-def _git(args: list, cwd: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, check=check)
+    def __init__(self, wt: str, model: str, turn_timeout: float):
+        self.id = f"probe-{uuid.uuid4().hex[:8]}"
+        self.wt = wt
+        self.model = model or ""
+        self.session_id = ""
+        self.serve_url = ""
+        self.last_activity_ts = time.time()
+        self.last_error = ""
+        self.turn_timeout = turn_timeout
+        self.sse_stop = None
 
 
 @app.post("/api/probe")
 async def run_probe(request: Request):
     """probe: worktree 快照上执行 coding agent 产出方案草图 + diff。
 
-    body: {root, baseCommit?, instruction, files?, executorId?, timeoutS?}
-    返回 {ok, status, changedFiles, diff, summary, worktree}。结束即清理 worktree。
+    body: {root, baseCommit?, instruction, files?, model?,
+           executorId?, executorType?, executorConfig?, timeoutS?}
+    返回 {ok, status, changedFiles, diff, summary, executorError}。结束即清理 worktree。
     """
+    from .turn_adapter import build_adapter
+
     body = await request.json()
     root = os.path.abspath(body.get("root") or "")
     instruction = (body.get("instruction") or "").strip()
@@ -368,9 +93,16 @@ async def run_probe(request: Request):
     if not instruction:
         return {"ok": False, "error": "instruction 为空"}
     base = body.get("baseCommit") or "HEAD"
-    executor_id = (body.get("executorId") or "").strip()
     files = [str(f) for f in (body.get("files") or []) if str(f).strip()]
     timeout_s = min(max(int(body.get("timeoutS") or 900), 60), 3600)
+
+    try:
+        adapter = build_adapter(
+            str(body.get("executorType") or ""),
+            str(body.get("executorId") or ""),
+            dict(body.get("executorConfig") or {}))
+    except RuntimeError as e:
+        return {"ok": False, "error": str(e)}
 
     probe_dir = os.path.join(STATE_DIR, "probes")
     os.makedirs(probe_dir, exist_ok=True)
@@ -384,179 +116,67 @@ async def run_probe(request: Request):
     if r.returncode != 0:
         return {"ok": False, "error": f"worktree 创建失败: {r.stderr.strip()[:300]}"}
 
-    tree = CodingTaskTree.from_dict({"roots": [{
-        "id": "PROBE", "title": instruction[:120] or "方案草图",
-        "kind": "task", "files": files, "executor_id": executor_id,
-        "context": [_PROBE_HARNESS, instruction],
-    }]})
-    tree_id = state.scheduler.submit(tree, context={
-        "root": wt, "requirement": "probe: 方案草图", "branch": "", "baseCommit": base,
-    })
-    persist(tree_id)
-    state.scheduler.run_async(tree_id)
+    prompt = _PROBE_HARNESS
+    if files:
+        prompt += "\n相关文件：\n" + "\n".join(f"- {f}" for f in files[:50]) + "\n"
+    prompt += "\n" + instruction
 
-    deadline = time.time() + timeout_s
-    progress: dict = {}
+    job = _ProbeJob(wt, str(body.get("model") or ""), float(timeout_s))
+    status, executor_error = "done", ""
     try:
-        while time.time() < deadline:
-            await asyncio.sleep(3.0)
-            progress = state.scheduler.progress(tree_id)
-            if progress.get("terminal"):
-                break
-        # diff 提取(未跟踪文件 intent-to-add 纳入)
+        try:
+            await adapter.start_session(job)
+            outcome = await asyncio.wait_for(adapter.run_turn(job, prompt),
+                                             timeout=float(timeout_s))
+            if getattr(outcome, "output", None) is None and job.last_error:
+                status, executor_error = "failed", job.last_error[:500]
+        except asyncio.TimeoutError:
+            status, executor_error = "timeout", f"probe 回合超时({timeout_s}s)"
+            try:
+                await adapter.abort(job)
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception as e:  # noqa: BLE001
+            status, executor_error = "failed", str(e)[:500]
+
+        # diff 提取(未跟踪文件 intent-to-add 纳入)——须在 worktree 清理前
         _git(["add", "-A", "-N"], cwd=wt, check=False)
         d = _git(["diff"], cwd=wt, check=False)
         st = _git(["status", "--porcelain"], cwd=wt, check=False)
         changed = [line[3:].strip() for line in st.stdout.splitlines() if line.strip()]
-        node = (progress.get("nodes") or [{}])[0]
         add = del_ = 0
         for line in d.stdout.splitlines():
             if line.startswith("+") and not line.startswith("+++"):
                 add += 1
             elif line.startswith("-") and not line.startswith("---"):
                 del_ += 1
-        summary = (f"probe {'完成' if node.get('status') == 'done' else node.get('status')}; "
-                   f"{len(changed)} 个文件变更(+{add}/-{del_} 行)")
-        return {
-            "ok": node.get("status") == "done",
-            "status": node.get("status") or "unknown",
-            "treeId": tree_id,
-            "changedFiles": changed,
-            "diff": d.stdout[:200_000],
-            "summary": summary,
-            "worktree": wt,
-        }
     finally:
+        try:
+            adapter.dispose(job)
+        except Exception:  # noqa: BLE001
+            pass
         _cleanup_worktree()
-        # opencode serve 按根托管 → worktree 专用实例即用即弃
-        try:
-            from .executors.opencode import manager
-            m = manager()
-            if m is not None:
-                m.dispose_root(wt)
-        except Exception:  # noqa: BLE001
-            pass
 
-
-@app.post("/api/plan")
-async def run_plan_mode(request: Request):
-    """plan 只读分析: worktree 快照上 coding agent 产出结构化方案(文件→行区间→意图+置信度)。
-
-    body: {root, baseCommit?, instruction, files?, executorId?, timeoutS?}
-    输出通道=快照根下的 __PLAN_FILE__ 计划文件(所有 executor 通用)；
-    只读校验: 计划文件之外的变更计为 sideEffectFiles(违反只读约定, 如实上报)。
-    返回 {ok, status, plan, raw, sideEffectFiles, summary}。结束即清理 worktree。
-    """
-    body = await request.json()
-    root = os.path.abspath(body.get("root") or "")
-    instruction = (body.get("instruction") or "").strip()
-    if not root or not os.path.isdir(root):
-        return {"ok": False, "error": "root 无效"}
-    if not instruction:
-        return {"ok": False, "error": "instruction 为空"}
-    base = body.get("baseCommit") or "HEAD"
-    executor_id = (body.get("executorId") or "").strip()
-    files = [str(f) for f in (body.get("files") or []) if str(f).strip()]
-    timeout_s = min(max(int(body.get("timeoutS") or 900), 60), 3600)
-
-    plan_rel = ".topo-plan.json"
-    probe_dir = os.path.join(STATE_DIR, "probes")
-    os.makedirs(probe_dir, exist_ok=True)
-    wt = os.path.join(probe_dir, f"plan-{int(time.time() * 1000)}")
-
-    def _cleanup_worktree() -> None:
-        _git(["worktree", "remove", "--force", wt], cwd=root, check=False)
-        _git(["worktree", "prune"], cwd=root, check=False)
-
-    r = _git(["worktree", "add", "--detach", wt, base], cwd=root, check=False)
-    if r.returncode != 0:
-        return {"ok": False, "error": f"worktree 创建失败: {r.stderr.strip()[:300]}"}
-
-    tree = CodingTaskTree.from_dict({"roots": [{
-        "id": "PLAN", "title": instruction[:120] or "方案分析",
-        "kind": "task", "files": files, "executor_id": executor_id,
-        "context": [_PLAN_HARNESS.replace("__PLAN_FILE__", plan_rel), instruction],
-    }]})
-    tree_id = state.scheduler.submit(tree, context={
-        "root": wt, "requirement": "plan: 只读方案分析", "branch": "", "baseCommit": base,
-    })
-    persist(tree_id)
-    state.scheduler.run_async(tree_id)
-
-    deadline = time.time() + timeout_s
-    progress: dict = {}
-    try:
-        while time.time() < deadline:
-            await asyncio.sleep(3.0)
-            progress = state.scheduler.progress(tree_id)
-            if progress.get("terminal"):
-                break
-        node = (progress.get("nodes") or [{}])[0]
-        status = node.get("status") or "unknown"
-        # 执行器错误细节(progress 不带, 直接读节点对象; 诊断只读约定违反/模型失败等)
-        executor_error = ""
-        agent_output = ""
-        try:
-            tree_obj = state.scheduler._trees.get(tree_id)
-            if tree_obj:
-                leafs = [n for n in tree_obj.all_nodes() if n.id == "PLAN"]
-                executor_error = str(getattr(leafs[0], "error", "") or "")[:1000]
-                agent_output = str(getattr(leafs[0], "output", "") or "")
-        except Exception:  # noqa: BLE001
-            pass
-        # 计划文件读取 + 只读校验(未跟踪 intent-to-add 纳入 status)
-        plan_path = os.path.join(wt, plan_rel)
-        raw = ""
-        try:
-            with open(plan_path, "r", encoding="utf-8", errors="replace") as fh:
-                raw = fh.read()
-        except Exception:
-            pass
-        # 弱模型可能把方案只写在回复文本里——从 agent 输出兜底抽取
-        if not raw and agent_output:
-            raw = agent_output
-        plan_found_in_file = bool(raw) and os.path.isfile(plan_path)
-        _git(["add", "-A", "-N"], cwd=wt, check=False)
-        st = _git(["status", "--porcelain"], cwd=wt, check=False)
-        changed = [line[3:].strip() for line in st.stdout.splitlines() if line.strip()]
-        side = [f for f in changed if f != plan_rel]
-        plan = _extract_json_object(raw) if raw else None
-        n_files = len((plan or {}).get("files") or [])
-        summary = (f"plan {status}; 方案覆盖 {n_files} 个文件"
-                   + ("" if plan_found_in_file or not plan else "; ⚠️ 方案取自回复文本(未写计划文件)")
-                   + (f"; ⚠️ 只读约定被违反({len(side)} 个计划外变更)" if side else ""))
-        return {
-            "ok": status == "done" and plan is not None,
-            "status": status,
-            "treeId": tree_id,
-            "executorError": executor_error,
-            "plan": plan,
-            "planFileFound": plan_found_in_file,
-            "raw": raw[:20_000],
-            "sideEffectFiles": side,
-            "changedFiles": changed,
-            "summary": summary,
-        }
-    finally:
-        _cleanup_worktree()
-        try:
-            from .executors.opencode import manager
-            m = manager()
-            if m is not None:
-                m.dispose_root(wt)
-        except Exception:  # noqa: BLE001
-            pass
+    summary = (f"probe {status}; {len(changed)} 个文件变更(+{add}/-{del_} 行)"
+               + (f"; 执行器异常: {executor_error[:200]}" if executor_error else ""))
+    return {
+        "ok": status == "done",
+        "status": status,
+        "changedFiles": changed,
+        "diff": d.stdout[:200_000],
+        "summary": summary,
+        "executorError": executor_error,
+    }
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
     from topoone.http_logging import install_heartbeat_filter
     install_heartbeat_filter()
-    init_runner()
-    # 实施作业宿主(会话驱动真实实施: worktree 保留 + opencode 会话 + 双向缓冲)
     from . import implement
     implement.register(app)
-    logger.info("[runner] starting on port %s (executors=%s)", PORT, state.pool.available())
+    logger.info("[runner] starting on port %s (execution plane: TurnAdapter)", PORT)
+    import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")
 
 

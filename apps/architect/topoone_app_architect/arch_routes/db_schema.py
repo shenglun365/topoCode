@@ -90,19 +90,6 @@ ARCH_MAIN_TABLES_SQL = """
     -- 消息类型(topic): execution.handoff / interaction.clarify / interaction.answer /
     --   plan.revise / execution.progress / execution.result / execution.amend
     -- from/to: plan | coding | runner | monitor | user | *
-    CREATE TABLE IF NOT EXISTS arch_bus_messages (
-        id TEXT PRIMARY KEY,
-        src TEXT NOT NULL DEFAULT '',         -- 源 agent: plan | coding | runner | user | *
-        dst TEXT NOT NULL DEFAULT '',         -- 目标 agent: plan | coding | runner | monitor | *
-        topic TEXT NOT NULL DEFAULT '',
-        payload TEXT,                         -- JSON: 消息体
-        status TEXT DEFAULT 'pending',        -- pending | delivered | failed
-        error TEXT,                           -- 失败原因
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_arch_bus_status ON arch_bus_messages(status);
-    CREATE INDEX IF NOT EXISTS idx_arch_bus_dst ON arch_bus_messages(dst, status);
 
 """
 
@@ -581,11 +568,21 @@ def _seed_roles(db) -> None:
         db.commit()
 
 
+# 已退役表(重整裁决: 清除旧数据, 不做兼容)
+_DROPPED_TABLES = ("arch_bus_messages",)
+
+
+def _drop_retired_tables(db) -> None:
+    for t in _DROPPED_TABLES:
+        db.execute(f"DROP TABLE IF EXISTS {t}")
+
+
 def architect_db_migrations(db) -> None:
     """architect 主库增量迁移(旧库补列/补表)。幂等: 已存在跳过。"""
     db.executescript(ARCH_MAIN_TABLES_SQL)
     db.executescript(SESSION_ROLE_TABLE_SQL)
     _seed_roles(db)
+    _drop_retired_tables(db)
     _main_migrations(db)
 
 

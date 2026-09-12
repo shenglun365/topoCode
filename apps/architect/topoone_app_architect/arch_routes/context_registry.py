@@ -351,7 +351,6 @@ def run_probe(conv_id: str, instruction: str, root: str,
     """
     import httpx
     import os as _os
-    from .runner_gateway import get_runner
 
     if not (instruction or "").strip():
         return {"error": "instruction 为空"}
@@ -364,7 +363,7 @@ def run_probe(conv_id: str, instruction: str, root: str,
         "timeoutS": timeout_s,
     }
     # 环境变量调用时覆盖(get_runner 单例可能缓存旧 base_url；测试/多 runner 场景)
-    base = _os.environ.get("RUNNER_BASE_URL") or get_runner().base_url
+    base = (_os.environ.get("RUNNER_BASE_URL") or "http://127.0.0.1:3458").rstrip("/")
     try:
         with httpx.Client(timeout=timeout_s + 60) as client:
             r = client.post(f"{base}/api/probe", json=payload)
@@ -516,75 +515,3 @@ def register_probe_tool() -> None:
 
 
 # ── WS3: coding 任务通道(plan 只读方案 / execute 正式执行) ─────────────
-
-def run_plan_mode(conv_id: str, instruction: str, root: str,
-                  executor_id: str = "", files: Optional[list] = None,
-                  base_commit: str = "", timeout_s: int = 900) -> dict:
-    """调 runner /api/plan(只读分析) → 结构化方案落 artifact 单元(type=plan, importance=1)。
-
-    plan 契约: {files: [{path, lines: [{start,end,intent}], intent, confidence}],
-    summary, risks}；行号基于分析时点的 git 快照。
-    """
-    import httpx
-    import os as _os
-    from .runner_gateway import get_runner
-
-    payload = {
-        "root": root, "instruction": instruction.strip(),
-        "executorId": executor_id or "", "files": files or [],
-        "baseCommit": base_commit or "HEAD", "timeoutS": timeout_s,
-    }
-    base = _os.environ.get("RUNNER_BASE_URL") or get_runner().base_url
-    try:
-        with httpx.Client(timeout=timeout_s + 60) as client:
-            r = client.post(f"{base}/api/plan", json=payload)
-            result = r.json() if r.status_code == 200 else {"error": f"runner {r.status_code}"}
-    except Exception as e:  # noqa: BLE001
-        return {"error": f"runner 不可达: {e}"}
-    if result.get("ok"):
-        plan = result.get("plan") or {}
-        touched = [str(f.get("path")) for f in (plan.get("files") or []) if f.get("path")]
-        try:
-            store.ContextUnitsStore.create({
-                "conversationId": conv_id, "projectId": _project_of(conv_id),
-                "type": "plan",
-                "title": f"实现方案: {instruction.strip()[:40]}",
-                "content": json.dumps(plan, ensure_ascii=False)[:8000],
-                "refs": {"files": touched[:50]},
-                "importance": 1,
-            })
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[coding-task] plan artifact 单元写入失败: %s", e)
-    return result
-
-
-def assemble_task_brief(conv_id: str, root: str = "", project_id: str = "") -> str:
-    """coding 任务上下文构造(WS3): dossier 基座(不落单元) + 涉及语义资产(文件→资产影响面)。
-
-    任务简报装配: 会话结论 + 需求三段 + 规约 + 影响面资产清单。
-    """
-    dossier = assemble_dossier(conv_id, root=root or "", project_id=project_id,
-                               persist=False) or ""
-    try:
-        pid = project_id or _project_of(conv_id)
-        units = store.ContextUnitsStore.all(conversation_id=conv_id, limit=100) or []
-        mentioned: list[str] = []
-        for u in units:
-            for f in (u.get("refs") or {}).get("files") or []:
-                f = str(f)
-                if f and f not in mentioned:
-                    mentioned.append(f)
-        lines: list[str] = []
-        if mentioned:
-            for a in store.SemanticAssetsStore.all(pid, limit=4000) or []:
-                af = (a.get("file") or "") or ((a.get("scope") or {}).get("key") or "")
-                if af and af in mentioned:
-                    lines.append(f"- {a.get('kind')}/{a.get('level') or ''} "
-                                 f"`{a.get('name')}` @ `{af}`")
-        section = "\n\n## 涉及语义资产(影响面)\n" + (
-            "\n".join(lines[:24]) if lines
-            else "(会话未锚定具体文件——按指令范围自行定位)")
-        return _clip(dossier, 12000) + section
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[coding-task] 影响面装配失败: %s", e)
-        return _clip(dossier, 12000)

@@ -153,19 +153,6 @@ def _merge_secret_models(entries: list, old: dict) -> None:
                     m["apiKey"] = prev["apiKey"]
 
 
-def _post_runner(path: str, payload: dict | None = None, timeout: float = 8.0) -> Optional[dict]:
-    try:
-        req = urllib.request.Request(
-            f"{RUNNER_BASE_URL}{path}",
-            data=json.dumps(payload or {}).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode())
-    except Exception as e:  # noqa: BLE001
-        logger.info("[agent-executors] runner %s 不可达: %s", path, e)
-        return None
-
-
 def _get_runner(path: str, timeout: float = 5.0) -> Optional[dict]:
     try:
         with urllib.request.urlopen(f"{RUNNER_BASE_URL}{path}", timeout=timeout) as resp:
@@ -174,20 +161,16 @@ def _get_runner(path: str, timeout: float = 5.0) -> Optional[dict]:
         return None
 
 
-def refresh_runner() -> bool:
-    return bool(_post_runner("/api/executors/refresh"))
-
-
 # ── 路由 ──
 
 @router.get("/agent/executors")
 async def list_executors():
     """注册表（脱敏）+ runner 运行态（若可达）。"""
     entries = _normalize(load_executors())
-    runtime = _get_runner("/api/executors")
+    runtime = _get_runner("/health")
     return ok({
         "executors": _mask(entries),
-        "runtime": runtime or {"reachable": False},
+        "runtime": {"reachable": bool(runtime)} if runtime else {"reachable": False},
         "runnerBaseUrl": RUNNER_BASE_URL,
     })
 
@@ -221,9 +204,7 @@ async def put_executors(request: Request, background: BackgroundTasks):
     if msg:
         return err(msg)
     save_executors(entries)
-    background.add_task(refresh_runner)
-    return ok({"saved": len(entries), "runnerRefreshed": True,
-               "runnerRefresh": "background", "updatedAt": _ts()})
+    return ok({"saved": len(entries), "updatedAt": _ts()})
 
 
 @router.post("/agent/executors/probe")
