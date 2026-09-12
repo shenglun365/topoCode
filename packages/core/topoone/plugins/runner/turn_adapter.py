@@ -504,7 +504,14 @@ class OpenCodeTurnAdapter(TurnAdapter):
         self._sse_tasks[job.id] = asyncio.create_task(self._sse_loop(job))
 
     async def _sse_loop(self, job) -> None:
-        """常驻 SSE 订阅: 任意会话事件刷新 job.last_activity_ts; 错误记 job.last_error。"""
+        """常驻 SSE 订阅: 任意会话事件刷新 job.last_activity_ts; 错误记 job.last_error。
+
+        流式扩展预留: 当前只刷活动(看门狗)。若要把 agent 输出 token 流式
+        送达 architect 消息流, 在此对 message.part/message.updated 类事件
+        逐段 job.emit("text", 片段) 即可——事件环+WS 订阅面+泵(_handle_pump_event
+        落 job_progress)原生承载, 无需改架构。codex(_AppServerProcess 事件环)与
+        cline(sidecar events)同理由其通知回调扩展。
+        """
         stop: asyncio.Event = job.sse_stop
         url = job.serve_url
         async for client in _persist_client():

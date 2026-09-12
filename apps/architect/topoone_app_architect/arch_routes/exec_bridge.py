@@ -566,6 +566,10 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
       执行器端到端即时; 轮询型执行器仍按其已知时点推送);
     - 校准/降级: 订阅不可达或空闲超时 → snapshot 轮询(补漏事件+终态确认+
       连续不可达 lost 判定), 与订阅共用事件处理(seq 去重)。
+    - 事件粒度: 回合级(input_required/done/failed/progress)。流式 token 扩展
+      预留: runner 侧 adapter 逐段 emit("text") → WS 即推 → _handle_pump_event
+      原生落 job_progress 消息, 本层与架构零改动(见 runner implement.emit
+      与 turn_adapter._sse_loop 注释)。
     """
     logger.info("[exec-bridge] pump start conv=%s job=%s", conv_id, job_id)
     errs = 0

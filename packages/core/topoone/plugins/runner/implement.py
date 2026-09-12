@@ -118,6 +118,12 @@ class ImplementJob:
         self._subscribers: list = []   # WS 实时订阅队列(architect 泵)
 
     # ── 事件缓冲 + 实时扇出 ──
+    # 事件粒度: 回合级(done/input_required/failed/aborted/finished/user_input/
+    # session_ready)——非流式 token。流式扩展预留: adapter 在实时订阅回调
+    # (opencode _sse_loop / codex notifications / cline sidecar events)中
+    # 逐段 job.emit("text", 片段) 即可——事件环+WS 订阅面与 architect 泵
+    # (推送优先/轮询兜底, _handle_pump_event 对带 text 的事件落 job_progress
+    # 消息)原生承载, 无需改架构。
 
     def emit(self, kind: str, text: str = "", **extra: Any) -> int:
         self.seq += 1
@@ -439,6 +445,8 @@ def register(app: FastAPI) -> None:
         执行器实时(opencode SSE/codex notifications)→事件即产即推;
         执行器轮询型→事件仍按已知时点推送。?since=N 先回放环内 seq>N,
         再实时转发; done/failed 终态排空后关闭。客户端断线可携 since 重连续传。
+        流式扩展: 见 ImplementJob.emit 注释——adapter 逐段 emit("text") 即经本
+        端点推送, architect 泵落 job_progress 消息, 架构零改动。
         """
         job = _JOBS.get(job_id)
         if not job:
