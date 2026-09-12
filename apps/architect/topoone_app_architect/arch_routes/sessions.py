@@ -553,6 +553,7 @@ async def feed_to_coding(conv_id: str, request: Request):
         store.ConversationsStore.append_message({
             "id": store.next_id("m"), "conversationId": active_sub,
             "role": "user", "time": _ts(), "content": text[:12000],
+            "projectId": (conv.get("projectId") or ""),
             "meta": {"kind": "feed", "feedFrom": {"convId": conv_id,
                                                   "messageId": src_msg_id,
                                                   "at": _ts(),

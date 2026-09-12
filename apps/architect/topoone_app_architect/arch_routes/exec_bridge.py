@@ -339,10 +339,11 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
         "subSessionId": sub_id,
         "changedFiles": [], "failReason": "", "lastAgentNote": "", "lastAgentTs": 0,
     })
+    _pid = (conv or {}).get("projectId") or ""
     _append(sub_id, "user",
             f"🚀 作业启动（`{job_id}` 规约 v{spec_ver or '?'} 分支 `{branch}`）\n\n"
             + instruction[:4000],
-            msg_meta={"jobId": job_id, "kind": "job_start"})
+            msg_meta={"jobId": job_id, "kind": "job_start"}, project_id=_pid)
     _start_pump(conv_id, job_id, rid)
     return (f"🚀 实施作业已启动\n"
             f"- 作业 `{job_id}`　规约 v{spec_ver or '?'}　分支 `{branch}`\n"
@@ -486,7 +487,7 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                     _append(target, "assistant",
                             f"⏸ **执行工程师需要你的输入**（作业 `{job_id[:12]}…`）\n\n{clean}\n\n"
                             "回复补充内容后以 coding 收件人发送(或 `/继续`)转达；停止请用会话信息面板按钮。",
-                            msg_meta={"jobId": job_id, "kind": "job_input"})
+                            msg_meta={"jobId": job_id, "kind": "job_input"}, project_id=pid)
                     _job_upsert(conv_id, {"jobId": job_id, "status": "waiting_input",
                                           "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
                 elif kind == "done":
@@ -508,7 +509,7 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                     if sub_id:
                         _append(sub_id, "assistant",
                                 f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n{clean}",
-                                msg_meta={"jobId": job_id, "kind": "job_done_sub"})
+                                msg_meta={"jobId": job_id, "kind": "job_done_sub"}, project_id=pid)
                 elif kind == "failed":
                     _job_upsert(conv_id, {"jobId": job_id, "status": "failed",
                                           "endedAt": _ts(), "failReason": text[:400],
@@ -520,12 +521,12 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                     if sub_id:
                         _append(sub_id, "assistant",
                                 f"❌ 执行作业失败：{text}",
-                                msg_meta={"jobId": job_id, "kind": "job_failed_sub"})
+                                msg_meta={"jobId": job_id, "kind": "job_failed_sub"}, project_id=pid)
                 elif kind in ("aborted", "finished"):
                     _append(conv_id, "assistant", f"ℹ️ {text}")
                 elif text:
                     _append(target, "assistant", text,
-                            msg_meta={"jobId": job_id, "kind": "job_progress"})
+                            msg_meta={"jobId": job_id, "kind": "job_progress"}, project_id=pid)
                     _job_upsert(conv_id, {"jobId": job_id, "lastAgentTs": _ts()})
             status = snap.get("status") or ""
             if status in _TERMINAL:
