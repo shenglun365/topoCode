@@ -638,6 +638,7 @@ def _project_migrations(db) -> None:
         ("parent_conv_id", "TEXT DEFAULT ''"),
         ("executor_id", "TEXT DEFAULT ''"),
         ("session_ref", "TEXT DEFAULT ''"),
+        ("executor_model", "TEXT DEFAULT ''"),
     ])
     try:   # 索引须在补列之后创建(旧库表已存在, 建表段不带新列)
         db.execute("CREATE INDEX IF NOT EXISTS idx_arch_convs_parent "

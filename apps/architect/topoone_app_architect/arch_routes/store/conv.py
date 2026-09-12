@@ -122,6 +122,7 @@ class ConversationsStore:
             "parent_conv_id": data.get("parentConvId") or "",
             "executor_id": data.get("executorId") or "",
             "session_ref": data.get("sessionRef") or "",
+            "executor_model": data.get("executorModel") or "",
             "roles": _json.dumps(roles, ensure_ascii=False),
             "tags": data.get("tags"),
             "summary": data.get("summary") or "",

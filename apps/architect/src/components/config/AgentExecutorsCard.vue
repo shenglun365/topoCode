@@ -225,6 +225,13 @@ function detectBtnLabel(e: ExecEntry): string {
   return showDetected.value[k] ? t('config.executors.hideList') : t('config.executors.showList')
 }
 
+/** 执行器白名单模型名列表(默认模型下拉选项源)。 */
+function modelNames(e: ExecEntry): string[] {
+  return ((e.config as any)?.models || [])
+    .map((m: any) => m?.name || m?.model || '')
+    .filter(Boolean)
+}
+
 function isChecked(e: ExecEntry, model: string): boolean {
   return (e.config.models ?? []).some((m) => m.model === model)
 }
@@ -306,13 +313,13 @@ function isBuiltinExec(e: ExecEntry): boolean {
 const runnerReachable = computed(() => !!runtime.value?.executors)
 const srcDir = computed(() => project.project?.rootPath || '')
 
-const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'bool' | 'select'; options?: string[] }[]> = {
+const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'bool' | 'select' | 'model-select'; options?: string[] }[]> = {
   opencode: [
     { key: 'base_port', label: 'serve 端口', kind: 'num' },
     { key: 'auto_start', label: '自动拉起', kind: 'bool' },
     { key: 'permission', label: '权限策略', kind: 'select', options: ['auto', 'ask'] },
     { key: 'timeout', label: '超时(秒)', kind: 'num' },
-    { key: 'model', label: '默认模型(须在白名单内)' },
+    { key: 'model', label: '默认模型', kind: 'model-select' },
   ],
   'remote-agent': [
     { key: 'agent_url', label: '远端 serve URL' },
@@ -322,7 +329,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
   ],
   'codex-server': [
     { key: 'codex_bin', label: 'codex 路径' },
-    { key: 'model', label: '默认模型(须在白名单内)' },
+    { key: 'model', label: '默认模型', kind: 'model-select' },
     { key: 'codex_home', label: 'CODEX_HOME(隔离)' },
     { key: 'approval_policy', label: '审批策略', kind: 'select', options: ['never', 'on-request', 'on-failure', 'untrusted'] },
     { key: 'sandbox_mode', label: '沙箱', kind: 'select', options: ['workspace-write', 'read-only', 'danger-full-access'] },
@@ -330,7 +337,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
   ],
   'cline-sdk': [
     { key: 'provider_id', label: 'Provider' },
-    { key: 'model_id', label: '默认模型(须在白名单内)' },
+    { key: 'model_id', label: '默认模型', kind: 'model-select' },
     { key: 'base_url', label: '端点(本地必填, /v1)' },
     { key: 'api_key', label: 'API Key' },
     { key: 'max_iterations', label: '最大迭代', kind: 'num' },
@@ -535,6 +542,16 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                   type="checkbox"
                   class="accent-ctp-blue self-start mt-1"
                 >
+                <select
+                  v-else-if="f.kind === 'model-select' && modelNames(e).length"
+                  v-model="e.config[f.key]"
+                  class="input !py-0.5 !text-[11px] font-mono"
+                >
+                  <option value="">{{ t('config.executors.modelDefault') }}</option>
+                  <option v-if="e.config[f.key] && !modelNames(e).includes(e.config[f.key])"
+                    :value="e.config[f.key]">{{ e.config[f.key] }}(白名单外)</option>
+                  <option v-for="m in modelNames(e)" :key="m" :value="m">{{ m }}</option>
+                </select>
                 <input
                   v-else
                   v-model="e.config[f.key]"

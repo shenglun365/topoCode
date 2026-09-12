@@ -41,11 +41,16 @@ const props = defineProps<{
   jobState?: { role: string; executorId?: string; status?: string } | null
   /** 已绑定执行器 id(S2/S3): 空=未绑定——Coding 切换钮首击触发分配(bind-coding)。 */
   boundExecutorId?: string
+  /** 执行器白名单模型名列表(≥2 时显示模型 chip)。 */
+  executorModels?: string[]
+  /** 当前会话模型(空=默认)。 */
+  executorModel?: string
 }>()
 
 const emit = defineEmits<{
   send: [text: string, targetRole?: 'architect' | 'coding']
   'bind-coding': []
+  'set-model': [model: string]
   rename: [title: string]
   'summarize-title': []
   answers: [answers: Record<string, string>]
@@ -206,6 +211,16 @@ watch(() => props.jobState, (js) => {
   // 作业等待回复时默认收件人切 coding(可手动切回)
   if (js?.role === 'coding' && js.status === 'waiting_input') targetRole.value = 'coding'
 }, { immediate: true })
+
+// ── 模型 chip: 随选随生效(下次执行; 进行中作业模型已固化) ──
+const modelMenuOpen = ref(false)
+function onModelClick() {
+  modelMenuOpen.value = !modelMenuOpen.value
+}
+function pickModel(m: string) {
+  modelMenuOpen.value = false
+  if (m !== (props.executorModel || '')) emit('set-model', m)
+}
 
 function onCodingClick() {
   // 切换/分配共用一个位置: 未绑定执行器 → 首击触发分配(绑定弹窗); 已绑定 → 切换收件人
@@ -576,7 +591,7 @@ onUnmounted(() => {
 
 <template>
   <div class="relative flex flex-col h-full min-h-0 border border-ctp-surface0 rounded-lg overflow-hidden bg-ctp-crust/30">
-    <div class="panel-header shrink-0">
+    <div class="panel-header relative shrink-0">
       <span class="flex min-w-0 items-center gap-2">
         <ChatBubbleLeftRightIcon class="w-4 h-4 shrink-0 text-ctp-blue" />
         <input
@@ -636,6 +651,27 @@ onUnmounted(() => {
               : t('session.target.codingUnavailable')"
           @click="onCodingClick"
         >{{ t('session.target.coding') }}<template v-if="!props.boundExecutorId">?</template></span>
+        <span
+          v-if="props.boundExecutorId && (props.executorModels?.length ?? 0) >= 2"
+          class="chip cursor-pointer select-none !text-[10px] font-mono transition-colors"
+          :class="props.executorModel
+            ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
+          :title="t('session.target.modelHint')"
+          @click="onModelClick"
+        >{{ props.executorModel || t('session.target.modelDefault') }}</span>
+        <span
+          v-if="modelMenuOpen && (props.executorModels?.length ?? 0) >= 2"
+          class="absolute left-0 top-full z-50 mt-1 flex w-44 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg"
+        >
+          <button
+            v-for="m in ['', ...(props.executorModels || [])]"
+            :key="m || '__default__'"
+            class="rounded px-2 py-1 text-left text-[11px] font-mono transition-colors"
+            :class="m === (props.executorModel || '')
+              ? 'bg-ctp-blue/15 text-ctp-blue' : 'text-ctp-subtext1 hover:bg-ctp-surface0'"
+            @click="pickModel(m)"
+          >{{ m || t('session.target.modelDefault') }}</button>
+        </span>
       </span>
       <slot name="header-extra" />
     </div>

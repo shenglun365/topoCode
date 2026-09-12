@@ -613,3 +613,124 @@ def test_summarize_for_coding_llm_unreachable(tmp_path, monkeypatch):
     monkeypatch.setattr(ra, "llm_sync", _boom)
     text, ok = asyncio.run(S._summarize_for_coding("原始分析内容"))
     assert ok is False and text == "原始分析内容"
+
+
+# ── 会话级执行器模型: bind/切换/hint 优先级/running 固化/克隆继承 ──────
+
+def _patch_executors(monkeypatch, models=None):
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    monkeypatch.setattr(ae, "load_executors", lambda: [
+        {"id": "ex-m", "type": "opencode", "enabled": True,
+         "config": {"model": "", "models": [{"name": m} for m in (models or [])]}},
+    ])
+
+
+def test_bind_with_model_and_switch(tmp_path, monkeypatch):
+    """bind 带 model(白名单内/外) + POST /model 随时切换/无效值拒。"""
+    _setup(tmp_path, monkeypatch)
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    client = TestClient(build_app(data_dir=str(tmp_path / "arch")))
+    _h = lambda: {"Authorization": "Bearer test"}
+    _patch_executors(monkeypatch, models=["qwen-72b", "qwen-14b"])
+    c = client.post("/api/architect/sessions",
+                    json={"kind": "generic"}, headers=_h()).json()["data"]
+    # bind 白名单外 → 400
+    r = client.post(f"/api/architect/sessions/{c['id']}/bind",
+                    json={"executorId": "ex-m", "model": "ghost"},
+                    headers=_h())
+    assert r.json()["code"] == 400
+    # bind 白名单内 → 落 executorModel
+    r2 = client.post(f"/api/architect/sessions/{c['id']}/bind",
+                     json={"executorId": "ex-m", "model": "qwen-14b"},
+                     headers=_h()).json()["data"]
+    assert r2["executorModel"] == "qwen-14b"
+    # 切换/恢复默认
+    r3 = client.post(f"/api/architect/sessions/{c['id']}/model",
+                     json={"model": "qwen-72b"}, headers=_h()).json()["data"]
+    assert r3["executorModel"] == "qwen-72b" and "下次执行生效" in r3["summary"]
+    r4 = client.post(f"/api/architect/sessions/{c['id']}/model",
+                     json={"model": ""}, headers=_h()).json()["data"]
+    assert r4["executorModel"] == "" and "恢复默认" in r4["summary"]
+    # 无效值 → 400; 未绑定 → 400
+    assert client.post(f"/api/architect/sessions/{c['id']}/model",
+                       json={"model": "ghost"}, headers=_h()).json()["code"] == 400
+    c2 = client.post("/api/architect/sessions", json={"kind": "generic"},
+                     headers=_h()).json()["data"]
+    assert client.post(f"/api/architect/sessions/{c2['id']}/model",
+                       json={"model": "qwen-14b"}, headers=_h()).json()["code"] == 400
+
+
+def test_executor_hint_model_priority(tmp_path, monkeypatch):
+    """hint 模型优先级: conv.executorModel > config.models[0] > cfg.model。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import agent_executors as ae, websocket as ws
+    # 仅 cfg.model(无白名单) → cfg.model
+    monkeypatch.setattr(ae, "load_executors", lambda: [
+        {"id": "ex1", "type": "opencode", "enabled": True,
+         "config": {"model": "cfg-m", "models": []}}])
+    conv = {"executorId": "ex1", "executorModel": ""}
+    assert ws._executor_hint(conv)["model"] == "cfg-m"
+    # 白名单存在 → 首个
+    monkeypatch.setattr(ae, "load_executors", lambda: [
+        {"id": "ex1", "type": "opencode", "enabled": True,
+         "config": {"model": "cfg-m", "models": [{"name": "wl-1"}, {"name": "wl-2"}]}}])
+    assert ws._executor_hint(conv)["model"] == "wl-1"
+    # 会话选型最优先
+    assert ws._executor_hint({"executorId": "ex1", "executorModel": "wl-2"})["model"] == "wl-2"
+
+
+def test_running_job_model_frozen(tmp_path, monkeypatch):
+    """running 固化: 作业启动后切换会话模型, 已传 payload.model 不变。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import agent_executors as ae, exec_bridge, websocket as ws
+    _patch_executors(monkeypatch, models=["m-a", "m-b"])
+    monkeypatch.setattr(ws, "_executor_hint",
+                        lambda c: {"executorId": "ex-m", "executorType": "opencode",
+                                   "executorConfig": {}, "model": "m-a",
+                                   "basePort": None, "autoStart": None, "baseUrl": ""})
+    captured = {}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        captured.update(path=path, payload=payload)
+        if path == "/api/implement/running":
+            return {"ok": True, "jobs": []}
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "impl-f", "branch": "b", "worktree": "/tmp/w"}
+        return {"ok": True}
+
+    monkeypatch.setattr(exec_bridge, "_runner", _fake_runner)
+    monkeypatch.setattr("topoone_app_architect.arch_routes.execution.conv_root_project",
+                        lambda conv: (str(tmp_path), "proj-t"))
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    asyncio.run(_executor_preview_reset(conv))
+    asyncio.run(ws._executor_implement(
+        store.ConversationsStore.get(conv["id"]), None, confirmed=True))
+    assert captured["payload"]["model"] == "m-a"
+    # 会话切模型后, 既有作业 payload 不变(payload 已提交固化); 仅下次执行变化
+    monkeypatch.setattr(ws, "_executor_hint",
+                        lambda c: {"executorId": "ex-m", "executorType": "opencode",
+                                   "executorConfig": {}, "model": "m-b",
+                                   "basePort": None, "autoStart": None, "baseUrl": ""})
+    assert captured["payload"]["model"] == "m-a"
+
+
+def test_clone_carries_executor_model(tmp_path, monkeypatch):
+    """克隆继承源会话模型; 亦可显式指定。"""
+    _setup(tmp_path, monkeypatch)
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    client = TestClient(build_app(data_dir=str(tmp_path / "arch")))
+    _h = lambda: {"Authorization": "Bearer test"}
+    _patch_executors(monkeypatch, models=["qwen-72b", "qwen-14b"])
+    c = client.post("/api/architect/sessions",
+                    json={"kind": "generic", "executorId": "ex-m", "model": "qwen-14b"},
+                    headers=_h()).json()["data"]
+    assert c["executorModel"] == "qwen-14b"
+    d = client.post(f"/api/architect/sessions/{c['id']}/clone",
+                    json={"executorId": "ex-m"}, headers=_h()).json()["data"]
+    assert d["executorModel"] == "qwen-14b"      # 继承
+    e = client.post(f"/api/architect/sessions/{c['id']}/clone",
+                    json={"executorId": "ex-m", "model": "qwen-72b"},
+                    headers=_h()).json()["data"]
+    assert e["executorModel"] == "qwen-72b"      # 显式

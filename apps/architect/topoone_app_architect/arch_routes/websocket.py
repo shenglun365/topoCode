@@ -822,12 +822,19 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
     eid = ((conv or {}).get("executorId") or "").strip()
     if not eid:
         return None
+    conv_model = ((conv or {}).get("executorModel") or "").strip()
     try:
         from .agent_executors import load_executors
         for e in load_executors():
             if (e.get("id") or "") == eid:
                 cfg = e.get("config") or {}
-                models = e.get("models") or []
+                # 模型白名单真源: config.models[{name}](顶层 e.models 恒空——历史 bug 修正)
+                model_names = [str(m.get("name") or m.get("model") or "")
+                               for m in (cfg.get("models") or [])
+                               if (m.get("name") or m.get("model"))]
+                model = (conv_model
+                         or (model_names[0] if model_names else "")
+                         or cfg.get("model") or "")
                 return {"executorId": eid,
                         "executorType": e.get("type") or "",
                         "executorConfig": {
@@ -850,7 +857,7 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
                             "turnTimeout": cfg.get("turnTimeout"),
                             "stallSec": cfg.get("stallSec"),
                         },
-                        "model": (models[0] if models else "") or cfg.get("model") or "",
+                        "model": model,
                         "basePort": cfg.get("base_port"),
                         "autoStart": cfg.get("auto_start"),
                         "baseUrl": cfg.get("base_url") or cfg.get("serve_url") or ""}

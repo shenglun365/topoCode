@@ -92,6 +92,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "reviewState": c.get("reviewState") or "read",
             "roles": _roles_of(c),
             "executorId": c.get("executorId") or "",
+            "executorModel": c.get("executorModel") or "",
             "parentConvId": c.get("parentConvId") or "",
             "runningRole": _running_role_of(c),
             "tags": _tags_of(c),
@@ -153,16 +154,26 @@ async def create_session(request: Request):
         kind = "requirement"
     title = (data.get("title") or "").strip()
     executor_id = str(data.get("executorId") or "").strip()
+    executor_model = ""
     if executor_id:
         from .agent_executors import load_executors
-        if not any(e.get("id") == executor_id for e in load_executors()):
+        ex = next((e for e in load_executors() if e.get("id") == executor_id), None)
+        if not ex:
             return err(400, f"执行器实例不存在: {executor_id}")
+        executor_model = str(data.get("model") or "").strip()
+        if executor_model:
+            allowed = _executor_model_names(ex)
+            if allowed and executor_model not in allowed:
+                return err(400, f"模型 {executor_model} 不在执行器 {executor_id} 白名单内")
+            if not allowed:
+                executor_model = ""
     conv = store.ConversationsStore.create({
         "kind": kind,
         "projectId": data.get("projectId") or "",
         "title": title or f"{kind} 会话",
         "status": "active",
         "executorId": executor_id,
+        "executorModel": executor_model,
         "parentConvId": str(data.get("parentConvId") or "").strip(),
         "roles": ["architect"],
         "tags": _norm_tags(data) or {"modules": [], "groups": []},
@@ -303,6 +314,7 @@ def _conv_api(conv: dict) -> dict:
         "reviewState": conv.get("reviewState") or "read",
         "roles": _roles_of(conv),
         "executorId": conv.get("executorId") or "",
+        "executorModel": conv.get("executorModel") or "",
         "parentConvId": conv.get("parentConvId") or "",
         "sessionRef": conv.get("sessionRef") or "",
         "runningRole": _running_role_of(conv),
@@ -311,6 +323,13 @@ def _conv_api(conv: dict) -> dict:
         "createdAt": conv.get("createdAt"),
         "updatedAt": conv.get("updatedAt"),
     }
+
+
+def _executor_model_names(entry: dict) -> list:
+    """执行器白名单模型名(config.models[].name)。"""
+    return [str(m.get("name") or m.get("model") or "")
+            for m in ((entry.get("config") or {}).get("models") or [])
+            if (m.get("name") or m.get("model"))]
 
 
 @router.post("/sessions/{conv_id}/bind")
@@ -330,8 +349,48 @@ async def bind_executor(conv_id: str, request: Request):
     ex = next((e for e in load_executors() if e.get("id") == executor_id), None)
     if not ex:
         return err(400, f"执行器实例不存在: {executor_id}")
-    updated = store.ConversationsStore.update(conv_id, {"executorId": executor_id})
+    patch = {"executorId": executor_id}
+    model = str(data.get("model") or "").strip()
+    if model:
+        allowed = _executor_model_names(ex)
+        if allowed and model not in allowed:
+            return err(400, f"模型 {model} 不在执行器 {executor_id} 白名单内, "
+                            f"可选: {', '.join(allowed[:8])}")
+        patch["executorModel"] = model
+    updated = store.ConversationsStore.update(conv_id, patch)
     return ok(_conv_api(updated or conv))
+
+
+@router.post("/sessions/{conv_id}/model")
+async def set_session_model(conv_id: str, request: Request):
+    """切换会话执行器模型(随时生效于**下次执行**——进行中作业模型已固化, 不受影响)。
+
+    body: {model} 白名单内模型名 | ""(恢复默认=白名单首个)。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    if not (conv.get("executorId") or "").strip():
+        return err(400, "会话未绑定执行器, 先绑定再选模型")
+    data = await request.json()
+    model = str(data.get("model") or "").strip()
+    from .agent_executors import load_executors
+    ex = next((e for e in load_executors()
+               if e.get("id") == (conv.get("executorId") or "").strip()), None)
+    if not ex:
+        return err(400, f"绑定执行器 {conv.get('executorId')} 已不存在于注册表")
+    allowed = _executor_model_names(ex)
+    if model and allowed and model not in allowed:
+        return err(400, f"模型 {model} 不在执行器白名单内, 可选: {', '.join(allowed[:8])}")
+    if model and not allowed:
+        return err(400, "该执行器未配置模型白名单(config.models), 无可选模型")
+    updated = store.ConversationsStore.update(conv_id, {"executorModel": model})
+    note = ("恢复默认(白名单首个)" if not model
+            else f"模型已切换为 {model}")
+    running = _running_role_of(conv).get("role") == "coding"
+    return ok({"executorModel": model,
+               "summary": note + ("；进行中作业不受影响, 下次执行生效" if running
+                                  else "；下次执行生效")})
 
 
 @router.post("/sessions/{conv_id}/clone")
@@ -357,7 +416,8 @@ async def clone_session(conv_id: str, request: Request):
     pid = (conv.get("projectId") or "").strip()
     tok = _ctx.set_project(pid) if pid else None
     try:
-        return ok(_clone_into_project(conv, executor_id, tail_n, conv_id))
+        return ok(_clone_into_project(conv, executor_id, tail_n, conv_id,
+                                      model=str(data.get("model") or "").strip()))
     finally:
         if tok is not None:
             _ctx.reset_project(tok)
@@ -378,7 +438,8 @@ def _clone_seed_summary(conv_id: str) -> str:
         return ""
 
 
-def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str) -> dict:
+def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str,
+                        model: str = "") -> dict:
     new_conv = store.ConversationsStore.create({
         "kind": conv.get("kind") or "generic",
         "projectId": conv.get("projectId") or "",
@@ -386,6 +447,7 @@ def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str)
         "title": (conv.get("title") or "会话") + "(克隆)",
         "status": "active",
         "executorId": executor_id,
+        "executorModel": model or (conv.get("executorModel") or ""),
         "parentConvId": "",
         "roles": ["architect"],
         "meta": {"seedFrom": {"convId": conv_id, "at": _ts(),

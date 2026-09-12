@@ -441,6 +441,8 @@ export default {
       feedSummaryHint: 'Summarized feed (LLM-compressed conclusion only)',
     },
     target: {
+      modelHint: 'Pick executor model (applies to next run; running jobs keep theirs)',
+      modelDefault: '(default)',
       label: 'Role',
       architect: 'Architect',
       architectHint: 'Send to architect: free discussion',
@@ -1078,6 +1080,7 @@ export default {
 
 
     executors: {
+      modelDefault: '(default: first whitelisted)',
       add: 'Add executor',
       save: 'Save registry',
       saving: 'Saving…',

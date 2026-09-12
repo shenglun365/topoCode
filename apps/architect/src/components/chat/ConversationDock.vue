@@ -135,6 +135,28 @@ function emitRefreshAsset(id: string) {
   window.dispatchEvent(new CustomEvent('arch:refresh-asset', { detail: id }))
 }
 
+// ── 会话级执行器模型(随选随生效于下次执行; running 作业模型已固化) ──
+const boundModelNames = computed<string[]>(() => {
+  if (!boundExecutorId.value) return []
+  const ex = executorList.value.find((e) => e.id === boundExecutorId.value) as any
+  return ((ex?.config?.models) || [])
+    .map((m: any) => m?.name || m?.model || '').filter(Boolean)
+})
+const currentExecutorModel = computed(
+  () => ((conv.activeMeta as any)?.executorModel as string) || '')
+async function onSetModel(model: string) {
+  if (!conv.activeId) return
+  try {
+    const r = await apiPost<{ summary?: string }>(`/sessions/${conv.activeId}/model`,
+                                                  { model })
+    conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
+                        executorModel: model } as ConversationMeta
+    conv.pushLocalHint(String(r?.summary || '模型已切换'))
+  } catch (e: any) {
+    conv.pushLocalHint(`⚠️ 模型切换失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 // ── S3 coding 子会话池: 新建(清空自持上下文)/切换活跃/查看 ──
 interface SubSession { id: string; title: string; executorId?: string; sessionRef?: string
   hasSessionRef?: boolean; active?: boolean; status?: string
@@ -701,7 +723,10 @@ async function pollRunningState() {
         :read-only="(conv.activeMeta as any)?.status === 'archived'"
         :job-state="jobState"
         :bound-executor-id="boundExecutorId"
+        :executor-models="boundModelNames"
+        :executor-model="currentExecutorModel"
         @bind-coding="openRoles"
+        @set-model="onSetModel"
         @send="(text: string, role?: 'architect' | 'coding') => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(role ? { targetRole: role } : {}) }); onSent() }"
         @job-accept="openAccept"
         @job-resume="resumeJob"

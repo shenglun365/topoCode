@@ -465,6 +465,8 @@ export default {
       feedSummaryHint: '摘要转达(LLM 压缩为结论段后进入)',
     },
     target: {
+      modelHint: '选择执行器模型(下次执行生效; 进行中作业不受影响)',
+      modelDefault: '(默认)',
       label: '角色',
       architect: 'architect',
       architectHint: '发给 architect：自由对话/需求分析',
@@ -1107,6 +1109,7 @@ export default {
 
 
     executors: {
+      modelDefault: '(默认: 白名单首个)',
       add: '新增执行器',
       save: '保存注册表',
       saving: '保存中…',
