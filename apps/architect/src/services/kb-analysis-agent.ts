@@ -130,6 +130,8 @@ export interface ChatStreamOptions {
   diagramSkill?: boolean
   /** 语义资产 skill 场景（plan-C §4.1 按场景加载）：资产管理对话传 ['extract']。 */
   skillScenarios?: string[]
+  /** 收件人路由(S2 双收件人): 'architect'(缺省) 自由对话 | 'coding' 定向投递活跃作业。 */
+  targetRole?: 'architect' | 'coding'
   /** 是否有流式通道可用(后端不可达/未启用时回退一次性回复)。 */
   signal?: AbortSignal
 }
@@ -224,6 +226,7 @@ export async function chatStream(
       modelId: opts.modelId,
       diagramSkill: opts.diagramSkill,
       skillScenarios: opts.skillScenarios,
+      targetRole: opts.targetRole,
     })
 
     return await doneP

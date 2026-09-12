@@ -428,6 +428,13 @@ export default {
       markDone: 'Mark done',
       undoDone: 'Undo done',
     },
+    target: {
+      architect: 'Architect',
+      architectHint: 'Send to architect: free discussion',
+      coding: 'Coding',
+      codingUnavailable: 'No active coding job — start with /执行 + /确认执行',
+      codingPlaceholder: 'Supplement will be delivered to the running job…',
+    },
     workState: {
       running: 'Running',
       runningHint: 'External job running — input locked; auto-resumes on turn end',

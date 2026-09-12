@@ -110,6 +110,33 @@ def waiting_job(conv_id: str) -> Optional[dict]:
     return None
 
 
+def active_job(conv_id: str) -> Optional[dict]:
+    """最近活跃作业(waiting_input|running)——coding 收件人定向投递目标。"""
+    for j in reversed(jobs_of(conv_id)):
+        if (j.get("status") or "") in ("waiting_input", "running"):
+            return j
+    return None
+
+
+def running_role(conv_id: str) -> Optional[dict]:
+    """running 归属推导: 活跃作业 → {role:'coding', executorId}; 无 → None(architect)。"""
+    j = active_job(conv_id)
+    if not j:
+        return None
+    return {"role": "coding", "executorId": j.get("executorId") or "",
+            "jobId": j.get("jobId") or "", "status": j.get("status") or ""}
+
+
+def deliver_to_coding(conv_id: str, text: str) -> Dict[str, Any]:
+    """双收件人: coding 方向定向投递。
+    等待中(waiting_input)→立即转达开新回合; 回合执行中→runner 侧排队,
+    回合结束自动续跑; 终态/无作业→错误提示。"""
+    j = active_job(conv_id)
+    if not j:
+        return {"ok": False, "error": "no-active-job"}
+    return job_input(conv_id, j["jobId"], text)
+
+
 # ── 会话消息 ──
 
 def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = None,
@@ -257,14 +284,15 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
         "jobId": job_id, "branch": res.get("branch") or branch,
         "worktree": res.get("worktree") or "", "specVer": spec_ver,
         "reqId": rid, "status": "running", "startedAt": _ts(),
+        "executorId": (executor_hint or {}).get("executorId") or "",
         "changedFiles": [], "failReason": "", "lastAgentNote": "", "lastAgentTs": 0,
     })
     _start_pump(conv_id, job_id, rid)
     return (f"🚀 实施作业已启动\n"
             f"- 作业 `{job_id}`　规约 v{spec_ver or '?'}　分支 `{branch}`\n"
             f"- 交付：开发 + 单元测试 + 整体编译验收\n"
-            f"- **会话输入已锁定**(作业执行中)；agent 提问/完成/报错时自动恢复对话。\n"
-            f"- 需要 agent 继续时：回合结束后回复补充内容，发送「继续执行」转达。\n"
+            f"- 对话不受锁定：输入框可切换收件人（architect 继续分析 / coding 转达作业）。\n"
+            f"- 发给 coding 的补充：等待中→立即转达；执行回合中→自动排队续跑。\n"
             f"- 停止作业请用会话信息面板的「停止作业」按钮。")
 
 
@@ -274,7 +302,7 @@ def job_input(conv_id: str, job_id: str, text: str) -> Dict[str, Any]:
     if res and res.get("ok"):
         # 泵在 waiting_input 期间持续轮询(仅终态退出)——无需重启
         _job_upsert(conv_id, {"jobId": job_id, "status": "running"})
-        return {"ok": True}
+        return {"ok": True, "queued": bool(res.get("queued"))}
     return {"ok": False, "error": (res or {}).get("error") or "runner 不可达"}
 
 

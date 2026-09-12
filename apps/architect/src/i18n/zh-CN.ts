@@ -452,6 +452,13 @@ export default {
       markDone: '标记完成',
       undoDone: '撤销完成',
     },
+    target: {
+      architect: '架构师',
+      architectHint: '发给 architect：自由对话/需求分析',
+      coding: 'Coding',
+      codingUnavailable: '无活跃 coding 作业——先 /执行 + /确认执行 启动',
+      codingPlaceholder: '补充内容将转达给执行中的作业…',
+    },
     workState: {
       running: '执行中',
       runningHint: '外调作业执行中——输入锁定; 回合结束自动恢复',

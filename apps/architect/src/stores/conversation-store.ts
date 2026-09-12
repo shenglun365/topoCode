@@ -195,8 +195,8 @@ export const useConversationStore = defineStore('archConversation', () => {
   }
 
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子。 */
-  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string }) {
-    if (busy.value || !text.trim()) return
+  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; targetRole?: 'architect' | 'coding' }) {
+    if ((busy.value && opts?.targetRole !== 'coding') || !text.trim()) return
     // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里
     const arr = turns.value
     arr.push({ role: 'user', content: text })
@@ -215,6 +215,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         modelId: readModelPref('architect') || undefined,
         diagramSkill: diagramSkill.value,
         skillScenarios: opts?.skillScenarios,
+        targetRole: opts?.targetRole,
         signal: ac.signal,
       }, (ev) => {
         if (ev.conversationId) activeId.value = ev.conversationId

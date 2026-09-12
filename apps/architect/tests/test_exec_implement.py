@@ -323,3 +323,72 @@ def test_guard_cmd_hints_by_req_state(tmp_path, monkeypatch):
     assert ws._guard_cmd_hints(cid) == ["/定稿"]
     store.RequirementsStore.spec_confirm(rid)
     assert ws._guard_cmd_hints(cid) == ["/执行"]
+
+
+# ── S2 双收件人: coding 定向投递 / running 归属推导 ────────────────────
+
+def test_deliver_to_coding_no_active_job(tmp_path, monkeypatch):
+    """无活跃作业 → 明确报错(no-active-job)。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge
+    conv = store.ConversationsStore.create({"kind": "requirement", "reqId": "RQ-1"})
+    res = exec_bridge.deliver_to_coding(conv["id"], "补充")
+    assert res["ok"] is False and res["error"] == "no-active-job"
+
+
+def test_deliver_to_coding_queues_when_running(tmp_path, monkeypatch):
+    """running 回合中投递 → runner 侧排队(queued=True); 等待中 → 立即转达。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge, websocket as ws
+    calls = {}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        calls.update(path=path, payload=payload)
+        if path == "/api/implement/running":
+            return {"ok": True, "jobs": []}
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "impl-q", "branch": "b", "worktree": "/tmp/w"}
+        if path.endswith("/input"):
+            # runner user_input 语义: running 回合中 → queued
+            return {"ok": True, "queued": True}
+        return {"ok": True}
+
+    monkeypatch.setattr(exec_bridge, "_runner", _fake_runner)
+    monkeypatch.setattr("topoone_app_architect.arch_routes.execution.conv_root_project",
+                        lambda conv: (str(tmp_path), "proj-t"))
+    # 建会话 + waiting_input 作业(直接写账本)
+    store.ConversationsStore.create({"id": "cv-deliver", "kind": "requirement", "reqId": "RQ-1"})
+    exec_bridge._job_upsert("cv-deliver", {
+        "jobId": "impl-q", "status": "waiting_input", "executorId": "cline",
+        "branch": "b", "specVer": 1, "reqId": "RQ-1", "startedAt": 1,
+    })
+    res = exec_bridge.deliver_to_coding("cv-deliver", "补充内容")
+    assert res["ok"] is True
+    assert calls["path"] == "/api/implement/impl-q/input"
+    assert calls["payload"]["text"] == "补充内容"
+    # 投递后账本状态回 running(回合重启)
+    j = exec_bridge.active_job("cv-deliver")
+    assert j["status"] == "running" and j["executorId"] == "cline"
+
+    # running 归属推导
+    rr = exec_bridge.running_role("cv-deliver")
+    assert rr == {"role": "coding", "executorId": "cline",
+                  "jobId": "impl-q", "status": "running"}
+
+
+def test_running_role_in_session_api(tmp_path, monkeypatch):
+    """sessions API 行携带 runningRole 推导(纯提示字段)。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge, sessions as S
+    store.ConversationsStore.create({"id": "cv-rr", "kind": "generic"})
+    exec_bridge._job_upsert("cv-rr", {
+        "jobId": "j1", "status": "waiting_input", "executorId": "opencode",
+        "branch": "b", "specVer": 1, "reqId": "", "startedAt": 1,
+    })
+    conv = store.ConversationsStore.get("cv-rr")
+    api_row = S._conv_api(conv)
+    assert api_row["runningRole"]["role"] == "coding"
+    assert api_row["runningRole"]["executorId"] == "opencode"
+    # 无作业 → architect
+    conv2 = store.ConversationsStore.create({"kind": "generic"})
+    assert S._conv_api(conv2)["runningRole"]["role"] == "architect"

@@ -93,6 +93,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "roles": _roles_of(c),
             "executorId": c.get("executorId") or "",
             "parentConvId": c.get("parentConvId") or "",
+            "runningRole": _running_role_of(c),
             "tags": _tags_of(c),
             "summary": c.get("summary") or "",
             "msgCount": c.get("msgCount") or 0,
@@ -274,6 +275,22 @@ def _roles_of(conv: dict) -> list:
     return r if isinstance(r, list) and r else ["architect"]
 
 
+def _running_role_of(conv: dict) -> dict:
+    """running 归属推导(纯提示): 活跃作业(waiting_input|running) → coding+执行器。"""
+    meta = conv.get("meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (TypeError, ValueError):
+            meta = {}
+    jobs = (meta or {}).get("jobs") or []
+    for j in reversed(jobs):
+        if (j.get("status") or "") in ("waiting_input", "running"):
+            return {"role": "coding", "executorId": j.get("executorId") or "",
+                    "status": j.get("status") or ""}
+    return {"role": "architect", "executorId": "", "status": ""}
+
+
 def _conv_api(conv: dict) -> dict:
     return {
         "id": conv["id"],
@@ -287,6 +304,7 @@ def _conv_api(conv: dict) -> dict:
         "executorId": conv.get("executorId") or "",
         "parentConvId": conv.get("parentConvId") or "",
         "sessionRef": conv.get("sessionRef") or "",
+        "runningRole": _running_role_of(conv),
         "tags": _tags_of(conv),
         "summary": conv.get("summary") or "",
         "createdAt": conv.get("createdAt"),

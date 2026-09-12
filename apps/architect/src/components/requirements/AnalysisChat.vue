@@ -37,10 +37,12 @@ const props = defineProps<{
   showContractSkill?: boolean
   /** 作业执行锁(生命周期重构): 非空=running 输入锁定, 值为提示文案。 */
   inputLocked?: string | null
+  /** running 归属(S2): {role:'coding', executorId, status} 有活跃作业时非空。 */
+  jobState?: { role: string; executorId?: string; status?: string } | null
 }>()
 
 const emit = defineEmits<{
-  send: [text: string]
+  send: [text: string, targetRole?: 'architect' | 'coding']
   rename: [title: string]
   'summarize-title': []
   answers: [answers: Record<string, string>]
@@ -191,10 +193,18 @@ watch(
   { deep: true },
 )
 
+// ── 收件人切换(S2 双收件人): architect 自由对话 | coding 定向投递活跃作业 ──
+const targetRole = ref<'architect' | 'coding'>('architect')
+watch(() => props.jobState, (js) => {
+  // 作业等待回复时默认收件人切 coding(可手动切回)
+  if (js?.role === 'coding' && js.status === 'waiting_input') targetRole.value = 'coding'
+}, { immediate: true })
+
 function send() {
   if (props.inputLocked) return
-  if (!input.value.trim() || props.busy) return
-  emit('send', input.value.trim())
+  if (!input.value.trim()) return
+  if (props.busy && targetRole.value !== 'coding') return   // architect 回合流式中仍可转达 coding
+  emit('send', input.value.trim(), targetRole.value)
   input.value = ''
   resetInputHeight()
   nextTick(() => scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior: 'smooth' }))
@@ -1310,6 +1320,24 @@ onUnmounted(() => {
     </div>
 
     <div class="flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
+      <!-- 收件人切换(S2): architect 分析 / coding 转达作业 -->
+      <div class="flex shrink-0 flex-col gap-1 pb-0.5">
+        <button
+          class="btn !px-2 !py-1 !text-[10px]"
+          :class="targetRole === 'architect' ? 'btn-blue' : 'btn-ghost'"
+          :title="t('session.target.architectHint')"
+          @click="targetRole = 'architect'"
+        >🏗 {{ t('session.target.architect') }}</button>
+        <button
+          class="btn !px-2 !py-1 !text-[10px]"
+          :class="targetRole === 'coding' ? 'btn-blue' : 'btn-ghost'"
+          :disabled="props.jobState?.role !== 'coding'"
+          :title="props.jobState?.role === 'coding'
+            ? `${props.jobState.executorId || 'coding'} · ${props.jobState.status || ''}`
+            : t('session.target.codingUnavailable')"
+          @click="targetRole = 'coding'"
+        >⌨ {{ t('session.target.coding') }}</button>
+      </div>
       <textarea
         ref="inputRef"
         v-model="input"
@@ -1317,7 +1345,8 @@ onUnmounted(() => {
         class="input !py-2.5 text-xs resize-y min-h-0"
         :disabled="props.readOnly || !!props.inputLocked"
         :placeholder="props.inputLocked ? props.inputLocked
-          : (props.readOnly ? t('session.readOnlyHint') : t('requirement.chat.placeholder'))"
+          : (props.readOnly ? t('session.readOnlyHint')
+            : (targetRole === 'coding' ? t('session.target.codingPlaceholder') : t('requirement.chat.placeholder')))"
         @input="autoResize"
         @keydown="onInputKeydown"
       />

@@ -38,6 +38,27 @@ def _cmd_help_text() -> str:
     return "\n".join(lines)
 
 
+async def _deliver_coding_turn(conv: dict, text: str) -> str:
+    """coding 收件人: 定向投递到活跃作业(等待中→立即转达; 回合中→排队续跑)。"""
+    from . import exec_bridge
+    conv_id = (conv or {}).get("id") or ""
+    res = await asyncio.to_thread(exec_bridge.deliver_to_coding, conv_id, text)
+    if res.get("ok"):
+        j = exec_bridge.active_job(conv_id) or {}
+        queued = bool(res.get("queued"))
+        ex = j.get("executorId") or "coding"
+        if queued:
+            return (f"📥 已排队转达 `{ex}`（当前回合执行中，回合结束自动续跑）。"
+                    "architect 方向的讨论不受影响。")
+        return (f"➡️ 已转达 `{ex}`（作业继续）。"
+                "回合期间可继续以 architect 身份讨论，或等待 agent 下一次提问。")
+    err = str(res.get("error") or "")
+    if err == "no-active-job":
+        return ("没有活跃的 coding 作业。发送 `/执行` 预览并 `/确认执行` 启动作业后，"
+                "再把补充内容发给 coding 角色。")
+    return f"❌ 转达失败：{err or 'runner 不可达'}。可稍后重试。"
+
+
 def _guard_cmd_hints(conv_id: str) -> list:
     """守卫卡指令符号建议: 按绑定需求状态给 /定稿(draft) 或 /执行(ready)。"""
     try:
@@ -282,16 +303,6 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             _ctx.set_req(conv["reqId"])
     except Exception:
         pass
-    # 生命周期重构: running 相位输入锁定(裁决#6.1)——控制走 UI 停止按钮(REST),
-    # 并行讨论请复制上下文开新会话; 回合结束自动回 architect 态
-    if conv and (conv.get("workState") or "architect") == "running":
-        await websocket.send_json({"type": "error", "requestId": "",
-                                   "message": "作业执行中：会话输入已锁定。"
-                                              "可等待回合结束（自动恢复对话）、"
-                                              "在会话信息面板点击「停止作业」，或"
-                                              "复制本会话上下文到新会话继续讨论。"})
-        return
-
     user_msgs = [m for m in history if m.get("role") == "user" and (m.get("content") or "").strip()]
     last_user_msg_id = ""
     for m in user_msgs[-1:]:
@@ -308,6 +319,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # PR-A 角色能力 enforcement: executor 角色会话 → 技能场景以角色配置为准、
     # 工具白名单收紧(空=全量); architect 角色不受限。
     # 生命周期重构: 角色是能力声明(roles 数组)——无白名单/锁定; architect 恒为对话主体
+    # ---- 收件人路由(S2 双收件人) ----
+    # 指令符号优先(系统级确定性通道, 不受收件人影响);
+    # targetRole=coding → 活跃作业定向投递(等待中立即转达/回合中排队续跑);
+    # 其余(含缺省) → architect 自由对话。running 不再锁定输入。
+    target_role = str(data.get("targetRole") or "").strip()
     # ---- 会话指令符号分发(确定性, 无语义判断) ----
     #   /执行 → 执行预览; /确认执行 → 建作业; /定稿 → 规约确认(系统直通)
     #   /继续 → 增量回合; /diff → 作业差异; /调整 → req.amend 契约 + 主流程
@@ -335,6 +351,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             "修订完成后向用户复述变更点，并说明 `/执行` 将按新版本执行。")
     elif cmd:
         final_b = _cmd_help_text()
+    elif target_role == "coding":
+        final_b = await _deliver_coding_turn(conv, question)
     if final_b is not None:
         assistant_msg_id_b = store.next_id("m")
         store.ConversationsStore.append_message({
@@ -986,8 +1004,8 @@ async def _exec_resume_turn(conv: dict) -> str:
     job = exec_bridge.waiting_job(conv_id)
     if not job:
         if exec_bridge.is_running(conv_id):
-            return ("作业正在执行回合中(会话输入本应锁定)——请等待回合结束或"
-                    "在会话信息面板停止作业。")
+            return ("作业正在执行回合中——补充内容可直接以 coding 收件人发送(自动排队续跑)，"
+                    "或等待回合结束(多为等待回复)后再发 `/继续`。")
         return ("没有等待输入的作业。发送 `/执行` 按当前规约版本启动新作业"
                 "（会自动附带上次作业的前情简报）。")
     # 增量上下文: 上次 agent 事件消息之后的所有用户消息

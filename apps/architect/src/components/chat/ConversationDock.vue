@@ -232,9 +232,9 @@ async function onSpecApply(p: { index: number; payload: Record<string, unknown> 
     specApplyBusy.value = false
   }
 }
-// running 输入锁提示(裁决#6.1)
-const inputLockedHint = computed(() =>
-  isRunning.value ? t('session.workState.lockedHint') : null)
+// running 归属(S2 双收件人): 推导字段来自会话行(后端 runningRole), 不再锁定输入
+const jobState = computed(() =>
+  ((conv.activeMeta as any)?.runningRole as { role: string; executorId?: string; status?: string } | undefined) || null)
 
 // RQ 状态徽标 + 登记簿完成标记(第二入口, 裁决#3/#8)
 const reqStatus = ref<{ id: string; status?: string; activeVer?: number } | null>(null)
@@ -310,7 +310,6 @@ async function stopExec() {
   }
 }
 function resumeJob() {
-  if (inputLockedHint.value) return
   void conv.send('/继续', { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}) })
   onSent()
 }
@@ -575,8 +574,8 @@ async function pollRunningState() {
         @summarize-title="summarizeTitle"
         :diagram-skill="conv.diagramSkill"
         :read-only="(conv.activeMeta as any)?.status === 'archived'"
-        :input-locked="inputLockedHint"
-        @send="(text) => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}) }); onSent() }"
+        :job-state="jobState"
+        @send="(text: string, role?: 'architect' | 'coding') => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(role ? { targetRole: role } : {}) }); onSent() }"
         @job-accept="openAccept"
         @job-resume="resumeJob"
         @guard-repair="onGuardRepair"
@@ -610,9 +609,12 @@ async function pollRunningState() {
             >{{ reqStatus.status === 'done' ? t('session.reqState.undoDone') : t('session.reqState.markDone') }}</button>
             <span
               v-if="isRunning"
-              class="chip !text-[10px] animate-pulse bg-ctp-peach/15 text-ctp-peach"
+              class="chip !text-[10px] animate-pulse"
+              :class="jobState?.role === 'coding' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-blue/15 text-ctp-blue'"
               :title="t('session.workState.runningHint')"
-            >▶ {{ t('session.workState.running') }}</span>
+            >▶ {{ jobState?.role === 'coding'
+              ? `coding·${jobState.executorId || '?'}${jobState.status === 'waiting_input' ? ' · 等待回复' : ''}`
+              : t('session.workState.running') }}</span>
             <span
               v-if="boundExecutorId"
               class="chip !text-[10px] bg-ctp-mauve/15 text-ctp-mauve"
