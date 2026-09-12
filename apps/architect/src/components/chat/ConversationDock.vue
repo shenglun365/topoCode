@@ -743,24 +743,17 @@ async function pollRunningState() {
         @refresh-asset="emitRefreshAsset"
         @stop="conv.stop"
       >
-        <!-- 内联管理按钮: 紧跟收件人 chips(位置恒定, 不随会话创建跳动) -->
+        <!-- 内联按钮: 收件人组左侧(子会话); 执行器入口与 Coding 首击重复, 已去除 -->
         <template #header-inline>
-          <span class="flex shrink-0 items-center gap-1">
-            <button
-              class="btn !py-0 !px-2 !text-[10px]"
-              :title="t('session.role.manageTitle')"
-              @click="openRoles"
-            >{{ t('session.role.manage') }}</button>
-            <button
-              v-if="isMainSession"
-              class="btn !py-0 !px-2 !text-[10px]"
-              :title="t('session.subs.title')"
-              @click="openSubs"
-            >{{ t('session.subs.manage') }}<template v-if="codingSubs.length">({{ codingSubs.length }})</template></button>
-          </span>
+          <button
+            v-if="isMainSession"
+            class="btn !py-0 !px-2 !text-[10px]"
+            :title="t('session.subs.title')"
+            @click="openSubs"
+          >{{ t('session.subs.manage') }}<template v-if="codingSubs.length">({{ codingSubs.length }})</template></button>
         </template>
         <template #header-extra>
-          <div v-if="conv.activeId" class="ml-auto flex shrink-0 items-center gap-1.5">
+          <div v-if="conv.activeId" class="flex shrink-0 items-center gap-1.5">
             <span
               v-if="reqStatus && (conv.activeMeta as any)?.status !== 'archived'"
               class="chip !text-[10px]"

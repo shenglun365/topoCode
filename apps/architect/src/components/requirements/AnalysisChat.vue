@@ -591,11 +591,10 @@ onUnmounted(() => {
 
 <template>
   <div class="relative flex flex-col h-full min-h-0 border border-ctp-surface0 rounded-lg overflow-hidden bg-ctp-crust/30">
-    <!-- 布局: 左组(标题+收件人+内联按钮)整体靠左, header-extra(ml-auto)靠右;
-         左组恒为一个 flex 子项, 收件人 chips 位置不随右侧元素增减跳动 -->
+    <!-- 布局: 标题+状态区靠左(状态类动态增长只向右扩); 收件人组(ml-auto)恒靠右,
+         位置不随会话生命周期变化 -->
     <div class="panel-header relative shrink-0">
-      <span class="flex min-w-0 items-center">
-        <span class="flex min-w-0 items-center gap-2">
+      <span class="flex min-w-0 items-center gap-2">
         <ChatBubbleLeftRightIcon class="w-4 h-4 shrink-0 text-ctp-blue" />
         <input
           v-if="editingTitle"
@@ -630,9 +629,13 @@ onUnmounted(() => {
             </button>
           </span>
         </span>
+        <!-- 状态类(reqId/运行中/停止): 跟随标题向右增长, 不影响收件人组 -->
+        <slot name="header-extra" />
       </span>
-      <!-- 收件人切换(S2/S4'): 标题栏二选一(文字 tag); Coding 首击=分配执行器 -->
-      <span class="ml-1 flex shrink-0 items-center gap-1">
+      <!-- 收件人切换(S2/S4'): 靠右二选一(文字 tag); Coding 首击=分配执行器;
+           header-inline(子会话按钮)置于收件人组左侧 -->
+      <span class="ml-auto flex shrink-0 items-center gap-1">
+        <slot name="header-inline" />
         <span
           class="select-none text-[10px] text-ctp-overlay0"
           :title="t('session.target.architectHint')"
@@ -664,7 +667,7 @@ onUnmounted(() => {
         >{{ props.executorModel || t('session.target.modelDefault') }}</span>
         <span
           v-if="modelMenuOpen && (props.executorModels?.length ?? 0) >= 2"
-          class="absolute left-0 top-full z-50 mt-1 flex w-44 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg"
+          class="absolute right-0 top-full z-50 mt-1 flex w-44 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg"
         >
           <button
             v-for="m in ['', ...(props.executorModels || [])]"
@@ -675,11 +678,7 @@ onUnmounted(() => {
             @click="pickModel(m)"
           >{{ m || t('session.target.modelDefault') }}</button>
         </span>
-        <!-- 内联管理按钮(执行器/子会话): 紧跟收件人 chips, 位置恒定 -->
-        <slot name="header-inline" />
       </span>
-      </span>
-      <slot name="header-extra" />
     </div>
 
     <div
