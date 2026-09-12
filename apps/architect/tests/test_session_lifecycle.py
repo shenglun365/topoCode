@@ -53,45 +53,67 @@ def _mk_confirmed_req(rid, **snap):
 
 # ── 会话: roles 声明 + workState ──
 
-def test_session_roles_array_and_workstate(tmp_path, monkeypatch):
+def test_session_binding_and_workstate(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
-    store.SessionRolesStore.upsert({"id": "exec-1", "name": "E", "kind": "executor"})
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     assert store.ConversationsStore.roles_of(conv["id"]) == ["architect"]
-    store.ConversationsStore.set_roles(conv["id"], ["architect", "exec-1"])
-    assert store.ConversationsStore.roles_of(conv["id"]) == ["architect", "exec-1"]
+    assert (store.ConversationsStore.get(conv["id"]) or {}).get("executorId") == ""
+    store.ConversationsStore.update(conv["id"], {"executorId": "ex-1"})
+    assert (store.ConversationsStore.get(conv["id"]) or {}).get("executorId") == "ex-1"
     store.ConversationsStore.set_work_state(conv["id"], "running")
     assert store.ConversationsStore.work_state(conv["id"]) == "running"
     store.ConversationsStore.set_work_state(conv["id"], "architect")
     assert store.ConversationsStore.work_state(conv["id"]) == "architect"
 
 
-def test_rest_create_patch_roles_and_lifecycle(tmp_path, monkeypatch):
+def test_rest_bind_clone_and_lifecycle(tmp_path, monkeypatch):
     data = _setup(tmp_path, monkeypatch)
     client = _client(monkeypatch, data)
-    store.SessionRolesStore.upsert({"id": "exec-1", "name": "E", "kind": "executor"})
-    # roles 声明即用(不锁定)
+    # 注册两个执行器(collab config 单源)
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    monkeypatch.setattr(ae, "load_executors", lambda: [
+        {"id": "ex-1", "type": "opencode", "enabled": True, "config": {}, "models": []},
+        {"id": "ex-2", "type": "cline-sdk", "enabled": True, "config": {}, "models": []},
+    ])
+    # 创建即绑定
     c = client.post("/api/architect/sessions",
-                    json={"kind": "generic", "roles": ["exec-1"]}, headers=_h(client)).json()["data"]
-    assert c["roles"] == ["architect", "exec-1"]
-    assert c["workState"] == "architect"
-    # 声明不存在角色 → 400
+                    json={"kind": "generic", "executorId": "ex-1"}, headers=_h(client)).json()["data"]
+    assert c["executorId"] == "ex-1" and c["workState"] == "architect"
+    # 不存在执行器 → 400
     r = client.post("/api/architect/sessions",
-                    json={"kind": "generic", "roles": ["ghost"]}, headers=_h(client))
+                    json={"kind": "generic", "executorId": "ghost"}, headers=_h(client))
     assert r.status_code == 400
-    # status 仅 active|archived(running 语义已移至 workState)
+    # 已绑定再 bind → 409; PATCH 改绑定 → 409
+    r = client.post(f"/api/architect/sessions/{c['id']}/bind",
+                    json={"executorId": "ex-2"}, headers=_h(client))
+    assert r.json()["code"] == 409
+    r = client.patch(f"/api/architect/sessions/{c['id']}",
+                     json={"executorId": "ex-2"}, headers=_h(client))
+    assert r.json()["code"] == 409
+    # 克隆 → 新会话带新绑定 + seed 标记
+    r = client.post(f"/api/architect/sessions/{c['id']}/clone",
+                    json={"executorId": "ex-2"}, headers=_h(client))
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["executorId"] == "ex-2" and d["id"] != c["id"] and d["reqId"] == c["reqId"]
+    # 未绑定会话 bind → 成功; 二次 → 409
+    c2 = client.post("/api/architect/sessions",
+                     json={"kind": "generic"}, headers=_h(client)).json()["data"]
+    r = client.post(f"/api/architect/sessions/{c2['id']}/bind",
+                    json={"executorId": "ex-1"}, headers=_h(client))
+    assert r.status_code == 200 and r.json()["data"]["executorId"] == "ex-1"
+    r = client.post(f"/api/architect/sessions/{c2['id']}/bind",
+                    json={"executorId": "ex-2"}, headers=_h(client))
+    assert r.json()["code"] == 409
+    # status 仅 active|archived; 归档不可逆
     r = client.patch(f"/api/architect/sessions/{c['id']}",
                      json={"status": "running"}, headers=_h(client))
     assert r.status_code == 400
     r = client.patch(f"/api/architect/sessions/{c['id']}",
                      json={"status": "archived"}, headers=_h(client))
     assert r.status_code == 200 and r.json()["data"]["status"] == "archived"
-    # 归档不可逆 + roles 不可改
     r = client.patch(f"/api/architect/sessions/{c['id']}",
                      json={"status": "active"}, headers=_h(client))
-    assert r.status_code == 400
-    r = client.patch(f"/api/architect/sessions/{c['id']}",
-                     json={"roles": []}, headers=_h(client))
     assert r.status_code == 400
 
 

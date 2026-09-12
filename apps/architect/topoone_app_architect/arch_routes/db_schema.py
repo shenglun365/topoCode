@@ -168,6 +168,9 @@ ARCH_PROJECT_TABLES_SQL = """
         title TEXT DEFAULT '',
         status TEXT DEFAULT 'active',       -- 生命周期: active | archived(不可逆)
         work_state TEXT DEFAULT 'architect', -- 工作相位: architect(常态) | running(外调作业执行中)
+        parent_conv_id TEXT DEFAULT '',       -- 主会话 id(coding 子会话 → 主会话; 主会话为空)
+        executor_id TEXT DEFAULT '',          -- coding 执行器绑定(一次绑定不可换; 换=克隆)
+        session_ref TEXT DEFAULT '',          -- 执行器原生会话引用(opencode session id 等; 子会话复活用)
         review_state TEXT DEFAULT 'read',   -- 查看状态: read | unread | awaiting_reply | error
         roles TEXT,                         -- JSON: 角色集 [architect(恒), ...外调角色id]
         tags TEXT,                          -- JSON: {modules:[], groups:[]} 会话分类(会话中心)
@@ -177,6 +180,7 @@ ARCH_PROJECT_TABLES_SQL = """
         updated_at INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_arch_convs_kind ON arch_conversations(kind, project_id);
+    CREATE INDEX IF NOT EXISTS idx_arch_convs_parent ON arch_conversations(parent_conv_id);
 
     -- 备案文档(P1 会话中心)：会话派生的总结性文档(需求快照/开发简报/笔记)，
     -- 非流程实体——随时生成、随时增删(裁决2)。
@@ -510,23 +514,6 @@ CREATE TABLE IF NOT EXISTS arch_capability_proposals (
 ARCHITECT_DB_TABLES_SQL = ARCH_MAIN_TABLES_SQL + "\n" + ARCH_PROJECT_TABLES_SQL
 
 
-SESSION_ROLE_TABLE_SQL = """
-    -- 会话执行角色(P2 角色体系): architect 系统种子唯一不可删; executor 绑执行器实例
-    CREATE TABLE IF NOT EXISTS arch_session_roles (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,                 -- 显示名(区别多个 executor)
-        kind TEXT DEFAULT 'executor',       -- architect | executor
-        executor_id TEXT DEFAULT '',        -- agent.executors 实例 id(executor 角色必填)
-        model_id TEXT DEFAULT '',           -- 实例下模型参数(executor 角色)
-        skills TEXT,                        -- JSON: 角色技能场景白名单
-        tools TEXT,                         -- JSON: 工具调用白名单(harness/tools)
-        permissions TEXT,                   -- JSON: 权限配置(写文件/执行命令/网络等)
-        builtin INTEGER DEFAULT 0,          -- 系统内置(architect=1: 不可删不可改执行器)
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
-    );
-"""
-
 
 def _add_cols(db, table: str, cols: list) -> None:
     """幂等补列: 缺失列才 ALTER。"""
@@ -557,19 +544,8 @@ def _main_migrations(db) -> None:
     ])
 
 
-def _seed_roles(db) -> None:
-    """种子 architect 角色(系统内置唯一不可删)。"""
-    row = db.fetchall("SELECT id FROM arch_session_roles WHERE id = 'architect'")
-    if not row:
-        now = int(__import__("time").time() * 1000)
-        db.execute(
-            "INSERT INTO arch_session_roles (id, name, kind, builtin, created_at, updated_at) "
-            "VALUES ('architect', 'Architect', 'architect', 1, ?, ?)", (now, now))
-        db.commit()
-
-
 # 已退役表(重整裁决: 清除旧数据, 不做兼容)
-_DROPPED_TABLES = ("arch_bus_messages",)
+_DROPPED_TABLES = ("arch_bus_messages", "arch_session_roles")
 
 
 def _drop_retired_tables(db) -> None:
@@ -580,8 +556,6 @@ def _drop_retired_tables(db) -> None:
 def architect_db_migrations(db) -> None:
     """architect 主库增量迁移(旧库补列/补表)。幂等: 已存在跳过。"""
     db.executescript(ARCH_MAIN_TABLES_SQL)
-    db.executescript(SESSION_ROLE_TABLE_SQL)
-    _seed_roles(db)
     _drop_retired_tables(db)
     _main_migrations(db)
 
@@ -664,6 +638,13 @@ def _migrate_lifecycle_v2(db) -> None:
 
 
 def _project_migrations(db) -> None:
+    # 会话模型 v3: coding 子会话归属 + 执行器一次绑定 + 执行器会话引用
+    _add_cols(db, "arch_conversations", [
+        ("parent_conv_id", "TEXT DEFAULT ''"),
+        ("executor_id", "TEXT DEFAULT ''"),
+        ("session_ref", "TEXT DEFAULT ''"),
+    ])
+    _drop_retired_tables(db)
     # M0 冻结: 语义资产作废态（标准变更 → 整体作废，行保留可溯源；plan-C-M0 §6.4）
     _add_cols(db, "arch_semantic_assets", [
         ("voided_reason", "TEXT DEFAULT ''"),
@@ -758,8 +739,6 @@ def init_architect_db(db) -> None:
     「未绑定项目」的默认桶(无项目上下文时的读写落点)。
     """
     db.executescript(ARCH_MAIN_TABLES_SQL + "\n" + ARCH_PROJECT_TABLES_SQL)
-    db.executescript(SESSION_ROLE_TABLE_SQL)
-    _seed_roles(db)
     _main_migrations(db)
     _project_migrations(db)
 

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from .contract import AcceptanceStore, ContractItemStore, ContractPackageStore
-from .conv import ContextUnitsStore, ConversationsStore, DocsStore, InteractionsStore, McpCallsStore, UnitTestSessionsStore, UnitTestsStore, SessionRolesStore
+from .conv import ContextUnitsStore, ConversationsStore, DocsStore, InteractionsStore, McpCallsStore, UnitTestSessionsStore, UnitTestsStore
 from .semantic import AstCacheStore, SemanticAssetsStore, SemanticRefsStore
 from .blueprint import BlueprintsStore, CollabConfigStore, SnapshotsStore, StagingScansStore, TagsStore
 from .core import ProjectsStore, RequirementsStore

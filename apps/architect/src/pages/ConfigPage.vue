@@ -9,7 +9,6 @@ import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
-import SessionRolesCard from '@/components/config/SessionRolesCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t, te } = useI18n()
@@ -18,7 +17,6 @@ const { t, te } = useI18n()
 const TABS = [
   { key: 'instance', label: 'config.tabs.instance' },
   { key: 'executors', label: 'config.tabs.executors' },
-  { key: 'sessionRoles', label: 'config.tabs.sessionRoles' },
   { key: 'roleModels', label: 'config.tabs.roleModels' },
   { key: 'other', label: 'config.tabs.other' },
 ] as const
@@ -439,11 +437,6 @@ onMounted(() => { void loadCgStatus() })
         </div>
       </div>
     </div>
-    </div>
-
-    <!-- ═══ tab: 会话角色设置 ═══ -->
-    <div v-show="activeTab === 'sessionRoles'">
-      <SessionRolesCard />
     </div>
 
     <!-- ═══ tab: Coding Agent 执行器 ═══ -->

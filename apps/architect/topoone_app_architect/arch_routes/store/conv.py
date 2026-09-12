@@ -66,71 +66,6 @@ class UnitTestSessionsStore:
 
 
 
-class SessionRolesStore:
-    """会话执行角色(主库全局表; architect 系统种子 builtin=1 不可删)。"""
-
-    TABLE = "arch_session_roles"
-
-    @classmethod
-    def all(cls):
-        rows = _db().fetchall(f"SELECT * FROM {cls.TABLE} ORDER BY created_at ASC")
-        return [_row_to_api(r) for r in rows]
-
-    @classmethod
-    def get(cls, role_id: str):
-        row = _db().fetchone(f"SELECT * FROM {cls.TABLE} WHERE id = ?", (role_id,))
-        return _row_to_api(row) if row else None
-
-    @classmethod
-    def upsert(cls, data: dict) -> dict:
-        now = int(__import__("time").time() * 1000)
-        payload = {
-            "id": data.get("id") or data.get("name", "").strip().lower().replace(" ", "-"),
-            "name": data.get("name") or "",
-            "kind": data.get("kind") or "executor",
-            "executorId": data.get("executorId") or "",
-            "modelId": data.get("modelId") or "",
-            "skills": data.get("skills"),
-            "tools": data.get("tools"),
-            "permissions": data.get("permissions"),
-            "builtin": 1 if data.get("builtin") else 0,
-            "updatedAt": now,
-        }
-        existing = cls.get(payload["id"])
-        if existing:
-            # 内置角色只允许改能力配置(skills/tools/permissions), 不许改绑定
-            if existing.get("builtin"):
-                payload["kind"] = existing["kind"]
-                payload["executorId"] = existing.get("executorId") or ""
-            cols = list(payload)
-            db = _db()
-            db.execute(
-                f"UPDATE {cls.TABLE} SET {', '.join(f'{_to_snake(c)} = ?' for c in cols)} WHERE id = ?",
-                (*[_dumps(payload[c]) for c in cols], payload["id"]))
-            db.commit()
-            return cls.get(payload["id"])
-        payload["createdAt"] = now
-        cols = list(payload)
-        db = _db()
-        db.execute(
-            f"INSERT INTO {cls.TABLE} ({', '.join(_to_snake(c) for c in cols)}) "
-            f"VALUES ({', '.join('?' * len(cols))})",
-            tuple(_dumps(payload[c]) for c in cols))
-        db.commit()
-        return payload
-
-    @classmethod
-    def delete(cls, role_id: str) -> bool:
-        row = cls.get(role_id)
-        if not row or row.get("builtin"):
-            return False
-        db = _db()
-        cur = db.execute(f"DELETE FROM {cls.TABLE} WHERE id = ?", (role_id,))
-        db.commit()
-        return cur.rowcount > 0
-
-
-
 class ConversationsStore:
     """统一会话(阶段D 主干)：requirement/design/execution/unit-test 共用一张表+消息表。"""
 
@@ -184,6 +119,9 @@ class ConversationsStore:
             "status": data.get("status") or "active",
             "work_state": data.get("workState") or "architect",
             "review_state": data.get("reviewState") or "read",
+            "parent_conv_id": data.get("parentConvId") or "",
+            "executor_id": data.get("executorId") or "",
+            "session_ref": data.get("sessionRef") or "",
             "roles": _json.dumps(roles, ensure_ascii=False),
             "tags": data.get("tags"),
             "summary": data.get("summary") or "",

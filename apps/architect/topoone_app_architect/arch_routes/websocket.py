@@ -796,20 +796,12 @@ def _build_impl_instruction(rid: str, prior_brief: str = "") -> str:
 
 
 def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
-    """会话 roles 中的 executor 角色 → 其执行器配置提示(model/端口等)。"""
-    roles = []
-    try:
-        rr = (conv or {}).get("roles")
-        roles = rr if isinstance(rr, list) else []
-    except Exception:  # noqa: BLE001
-        pass
-    eid = ""
-    for rid_role in roles:
-        if rid_role and rid_role != "architect":
-            r = store.SessionRolesStore.get(rid_role)
-            if r and (r.get("kind") or "") == "executor" and r.get("executorId"):
-                eid = r["executorId"]
-                break
+    """会话绑定的执行器(executor_id) → 执行器配置提示(model/端口等)。
+
+    绑定模型 v3: conv.executor_id 直连 arch_collab_config 执行器注册表
+    (一次绑定, 换=克隆); 无绑定 → None(实施走缺省 opencode)。
+    """
+    eid = ((conv or {}).get("executorId") or "").strip()
     if not eid:
         return None
     try:

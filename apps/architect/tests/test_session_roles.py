@@ -1,4 +1,4 @@
-"""PR2 角色管理 REST + 执行器实例化(host/models) + 模型探活参数面。"""
+"""执行器实例化 REST(host/models) + 模型探活参数面(角色目录已退役)。"""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,37 +16,6 @@ def client(tmp_path):
 def _h(client):
     tok = client.get("/api/architect/health").json().get("data", {}).get("token")
     return {"Authorization": f"Bearer {tok}"} if tok else {}
-
-
-def test_roles_crud_and_protection(client):
-    h = _h(client)
-    roles = client.get("/api/architect/session-roles", headers=h).json()["data"]
-    assert any(r["id"] == "architect" and r["builtin"] for r in roles)
-    # executor 角色缺 executorId 拒绝
-    r = client.put("/api/architect/session-roles",
-                   json={"id": "exec-1", "name": "执行A", "kind": "executor"}, headers=h)
-    assert r.status_code == 400
-    # 正常建
-    r = client.put("/api/architect/session-roles",
-                   json={"id": "exec-1", "name": "执行A", "executorId": "opencode",
-                         "skills": ["coding"], "tools": ["write-file"]}, headers=h)
-    assert r.json()["data"]["executorId"] == "opencode"
-    # architect 不可删
-    r = client.delete("/api/architect/session-roles/architect", headers=h)
-    assert r.status_code == 400
-    # 建会话声明不存在角色拒绝
-    r = client.post("/api/architect/sessions",
-                    json={"kind": "generic", "roles": ["ghost"]}, headers=h)
-    assert r.status_code == 400
-    # 声明 executor 角色的会话存在 → 删角色拒绝
-    c = client.post("/api/architect/sessions",
-                    json={"kind": "generic", "roles": ["exec-1"]}, headers=h).json()["data"]
-    r = client.delete("/api/architect/session-roles/exec-1", headers=h)
-    assert r.status_code == 400
-    # 会话归档后可删
-    client.patch(f"/api/architect/sessions/{c['id']}", json={"status": "archived"}, headers=h)
-    r = client.delete("/api/architect/session-roles/exec-1", headers=h)
-    assert r.json()["data"]["deleted"] is True
 
 
 def test_executor_instance_models_validation(client):

@@ -159,82 +159,6 @@ _SKILL_INTROS = {
 }
 
 
-@router.get("/session-roles")
-async def list_session_roles():
-    roles = store.SessionRolesStore.all()
-    # 附执行器实例名(便于前端展示绑定对象)
-    try:
-        from .agent_executors import load_executors
-        ex_names = {e.get("id"): e.get("id") for e in load_executors()}
-    except Exception:  # noqa: BLE001
-        ex_names = {}
-    out = []
-    for r in roles:
-        r = dict(r)
-        r["executorLabel"] = ex_names.get(r.get("executorId") or "", "")
-        r["skillPool"] = _ROLE_SKILL_POOL
-        r["skillIntros"] = _SKILL_INTROS
-        out.append(r)
-    return ok(out)
-
-
-@router.put("/session-roles")
-async def put_session_role(request: Request):
-    """新增/更新角色(upsert)。内置 architect 角色仅允许改能力配置。"""
-    data = await request.json()
-    rid = str(data.get("id") or "").strip()
-    name = str(data.get("name") or "").strip()
-    if not rid or not name:
-        return err(400, "角色 id 与名称必填")
-    if rid == "architect" and str(data.get("kind") or "executor") != "architect":
-        return err(400, "architect 为系统内置角色, kind 不可改")
-    existing = store.SessionRolesStore.get(rid)
-    if not existing and str(data.get("kind") or "") == "executor":
-        if not str(data.get("executorId") or "").strip():
-            return err(400, "executor 角色必须绑定执行器实例(executorId)")
-    # 模型白名单校验: modelId 必须属于绑定执行器实例的模型表
-    # (运行时只在实例白名单内调用模型, 防止旁路高付费模型)
-    model_id = str(data.get("modelId") or "").strip()
-    if model_id and str(data.get("executorId") or "").strip():
-        from .agent_executors import load_executors
-        ex = next((e for e in load_executors()
-                   if e.get("id") == str(data.get("executorId")).strip()), None)
-        if not ex:
-            return err(400, f"执行器实例不存在: {data.get('executorId')}")
-        allowed = {str(m.get(k)) for m in (ex.get("config") or {}).get("models") or []
-                   for k in ("name", "model") if m.get(k)}
-        if allowed and model_id not in allowed:
-            return err(400, f"模型 {model_id} 不在执行器实例模型白名单内, 可选: {', '.join(sorted(allowed)[:8])}")
-    role = store.SessionRolesStore.upsert({
-        "id": rid, "name": name,
-        "kind": data.get("kind") or ("architect" if rid == "architect" else "executor"),
-        "executorId": data.get("executorId") or "",
-        "modelId": data.get("modelId") or "",
-        "skills": data.get("skills") or [],
-        "tools": data.get("tools") or [],
-        "permissions": data.get("permissions") or {},
-    })
-    return ok(role)
-
-
-@router.delete("/session-roles/{role_id}")
-async def delete_session_role(role_id: str):
-    """删除角色(内置 architect 拒绝; 被会话引用中的角色拒绝)。"""
-    role = store.SessionRolesStore.get(role_id)
-    if not role:
-        return err(404, "角色不存在")
-    if role.get("builtin"):
-        return err(400, "architect 为系统内置角色, 不可删除")
-    # 会话引用校验: 有活跃(未归档)会话使用该角色 → 拒绝删除
-    used = [c for c in store.ConversationsStore.all(limit=400)
-            if role_id in _roles_of(c)
-            and (c.get("status") or "active") != "archived"]
-    if used:
-        return err(400, f"仍有 {len(used)} 个未归档会话使用该角色, 不可删除")
-    store.SessionRolesStore.delete(role_id)
-    return ok({"deleted": True, "id": role_id})
-
-
 @router.post("/sessions")
 async def create_session(request: Request):
     data = await request.json()
@@ -242,20 +166,19 @@ async def create_session(request: Request):
     if kind not in SESSION_KINDS:
         kind = "requirement"
     title = (data.get("title") or "").strip()
-    roles = ["architect"]
-    for rid in (data.get("roles") or []):
-        rid = str(rid or "").strip()
-        if rid and rid != "architect":
-            if not store.SessionRolesStore.get(rid):
-                return err(400, f"角色不存在: {rid}")
-            if rid not in roles:
-                roles.append(rid)
+    executor_id = str(data.get("executorId") or "").strip()
+    if executor_id:
+        from .agent_executors import load_executors
+        if not any(e.get("id") == executor_id for e in load_executors()):
+            return err(400, f"执行器实例不存在: {executor_id}")
     conv = store.ConversationsStore.create({
         "kind": kind,
         "projectId": data.get("projectId") or "",
         "title": title or f"{kind} 会话",
         "status": "active",
-        "roles": roles,
+        "executorId": executor_id,
+        "parentConvId": str(data.get("parentConvId") or "").strip(),
+        "roles": ["architect"],
         "tags": _norm_tags(data) or {"modules": [], "groups": []},
         "meta": data.get("meta") or {},
     })
@@ -298,20 +221,9 @@ async def update_session(conv_id: str, request: Request):
         if rs not in REVIEW_STATES:
             return err(400, f"非法查看状态: {rs}(read|unread|awaiting_reply|error)")
         patch["reviewState"] = rs
-    # 角色集更新(生命周期重构: 声明即用, 不锁定; architect 恒在)
-    if "roles" in data:
-        if (conv.get("status") or "active") == "archived":
-            return err(400, "归档会话只读，不可更新角色")
-        roles = ["architect"]
-        for rid in (data.get("roles") or []):
-            rid = str(rid or "").strip()
-            if rid and rid != "architect":
-                if not store.SessionRolesStore.get(rid):
-                    return err(400, f"角色不存在: {rid}")
-                if rid not in roles:
-                    roles.append(rid)
-        if roles != _roles_of(conv):
-            patch["roles"] = roles
+    # 执行器绑定不可经 PATCH 变更(一次绑定; 换=克隆)——显式拒绝防误用
+    if "executorId" in data and str(data.get("executorId") or "").strip() != (conv.get("executorId") or ""):
+        return err(409, "执行器绑定不可修改(一次绑定)。请克隆会话绑定其他执行器。")
     tags = _norm_tags(data)
     if tags is not None:
         patch["tags"] = tags
@@ -387,11 +299,93 @@ def _conv_api(conv: dict) -> dict:
         "workState": conv.get("workState") or "architect",
         "reviewState": conv.get("reviewState") or "read",
         "roles": _roles_of(conv),
+        "executorId": conv.get("executorId") or "",
+        "parentConvId": conv.get("parentConvId") or "",
+        "sessionRef": conv.get("sessionRef") or "",
         "tags": _tags_of(conv),
         "summary": conv.get("summary") or "",
         "createdAt": conv.get("createdAt"),
         "updatedAt": conv.get("updatedAt"),
     }
+
+
+@router.post("/sessions/{conv_id}/bind")
+async def bind_executor(conv_id: str, request: Request):
+    """绑定 coding 执行器——一次绑定不可换(换=克隆)。architect 角色恒有, 不在绑定面。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    if (conv.get("executorId") or "").strip():
+        return err(409, f"已绑定执行器 {conv['executorId']}(一次绑定不可切换)。"
+                        "请克隆会话绑定其他执行器。")
+    data = await request.json()
+    executor_id = str(data.get("executorId") or "").strip()
+    if not executor_id:
+        return err(400, "executorId 必填")
+    from .agent_executors import load_executors
+    ex = next((e for e in load_executors() if e.get("id") == executor_id), None)
+    if not ex:
+        return err(400, f"执行器实例不存在: {executor_id}")
+    updated = store.ConversationsStore.update(conv_id, {"executorId": executor_id})
+    return ok(_conv_api(updated or conv))
+
+
+@router.post("/sessions/{conv_id}/clone")
+async def clone_session(conv_id: str, request: Request):
+    """克隆会话绑定其他执行器(种子: 摘要(LLM best-effort) + 尾部 N 条消息 + 作业前情简报)。
+
+    规约版本链经 reqId 绑定天然共享, 不做复制。meta.seedFrom 留审计标记。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    data = await request.json()
+    executor_id = str(data.get("executorId") or "").strip()
+    if not executor_id:
+        return err(400, "executorId 必填")
+    from .agent_executors import load_executors
+    if not any(e.get("id") == executor_id for e in load_executors()):
+        return err(400, f"执行器实例不存在: {executor_id}")
+    tail_n = min(max(int(data.get("tailMessages") or 10), 0), 40)
+
+    new_conv = store.ConversationsStore.create({
+        "kind": conv.get("kind") or "generic",
+        "projectId": conv.get("projectId") or "",
+        "reqId": conv.get("reqId") or "",
+        "title": (conv.get("title") or "会话") + "(克隆)",
+        "status": "active",
+        "executorId": executor_id,
+        "parentConvId": "",
+        "roles": ["architect"],
+        "meta": {"seedFrom": {"convId": conv_id, "at": _ts(),
+                              "prevExecutorId": conv.get("executorId") or ""}},
+    })
+    msgs = store.ConversationsStore.messages(conv_id, limit=tail_n * 2)[-tail_n:] \
+        if tail_n else []
+    now = _ts()
+    for m in msgs:
+        if not (m.get("content") or "").strip():
+            continue
+        store.ConversationsStore.append_message({
+            "id": store.next_id("m"), "conversationId": new_conv["id"],
+            "role": m.get("role") or "user", "time": now,
+            "content": m.get("content") or "",
+            "meta": {"kind": "seed", "seedFrom": m.get("id") or ""},
+        })
+    # 作业前情简报(源会话有作业史时)
+    try:
+        from .websocket import _prior_job_brief
+        brief = (_prior_job_brief(conv) or "").strip()
+        if brief:
+            store.ConversationsStore.append_message({
+                "id": store.next_id("m"), "conversationId": new_conv["id"],
+                "role": "assistant", "time": _ts(),
+                "content": f"📎 **前情简报**(克隆自 {conv_id})\n\n{brief}",
+                "meta": {"kind": "seed"},
+            })
+    except Exception:  # noqa: BLE001
+        pass
+    return ok(_conv_api(store.ConversationsStore.get(new_conv["id"]) or new_conv))
 
 
 @router.post("/sessions/{conv_id}/probe")

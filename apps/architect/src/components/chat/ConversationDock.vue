@@ -135,25 +135,23 @@ function emitRefreshAsset(id: string) {
   window.dispatchEvent(new CustomEvent('arch:refresh-asset', { detail: id }))
 }
 
-// ── PR3 角色条: 会话执行角色徽标 + 首次绑定执行角色(切换即锁定) ──
-interface RoleRow { id: string; name: string; kind: string; executorId: string }
-const roleNames = ref<Record<string, string>>({})
-const executorRoles = ref<RoleRow[]>([])
+// ── 执行器绑定(会话模型 v3): 一次绑定不可换; 换=克隆 ──
+interface ExecutorRow { id: string; type: string; enabled?: boolean }
+const executorList = ref<ExecutorRow[]>([])
+const boundExecutorId = computed(
+  () => ((conv.activeMeta as any)?.executorId as string) || '')
 // ── 生命周期重构: 工作相位 + 角色集声明 + 作业控制 ──
-async function loadRoleNames() {
+async function loadExecutors() {
   try {
-    const roles = await apiGet<RoleRow[]>('/session-roles')
-    roleNames.value = Object.fromEntries(roles.map((r) => [r.id, r.name]))
-  } catch { /* 徽标降级显示 id */ }
+    const r = await apiGet<{ executors: ExecutorRow[] }>('/agent/executors')
+    executorList.value = (r?.executors || []).filter((e) => e.enabled !== false)
+  } catch { /* 绑定器降级为空列表 */ }
 }
-onMounted(() => { void loadRoleNames() })
+onMounted(() => { void loadExecutors() })
 
 const workState = computed(() => ((conv.activeMeta as any)?.workState as string) || 'architect')
 const isRunning = computed(() => workState.value === 'running'
   && (conv.activeMeta as any)?.status !== 'archived')
-const activeRoles = computed<string[]>(
-  () => ((conv.activeMeta as any)?.roles as string[]) || ['architect'])
-
 // 绑定需求的 architect 态会话: 「引导」按钮可见(触发词提示按需输出)
 const isExecutionConv = computed(() =>
   !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
@@ -259,36 +257,39 @@ async function markReqDone(done: boolean) {
   }
 }
 
-// roles 声明器(能力声明即用, 不锁定)
+// 执行器绑定/克隆对话框: 未绑定 → bind(一次); 已绑定 → clone(换执行器开新会话)
 const rolesOpen = ref(false)
-const rolesDraft = ref<string[]>([])
+const rolesDraft = ref('')
 const rolesBusy = ref(false)
 const rolesMsg = ref('')
+const bindMode = computed<'bind' | 'clone'>(() => (boundExecutorId.value ? 'clone' : 'bind'))
 async function openRoles() {
   rolesMsg.value = ''
-  rolesDraft.value = [...activeRoles.value]
-  try {
-    const roles = await apiGet<RoleRow[]>('/session-roles')
-    executorRoles.value = roles.filter((r) => r.kind === 'executor')
-  } catch (e: any) {
-    rolesMsg.value = e?.message || String(e)
-  }
+  rolesDraft.value = ''
+  if (!executorList.value.length) await loadExecutors()
   rolesOpen.value = true
 }
-function toggleRole(id: string) {
-  rolesDraft.value = rolesDraft.value.includes(id)
-    ? rolesDraft.value.filter((x) => x !== id)
-    : [...rolesDraft.value, id]
-}
 async function saveRoles() {
-  if (!conv.activeId || rolesBusy.value) return
+  if (!conv.activeId || rolesBusy.value || !rolesDraft.value) return
   rolesBusy.value = true
   rolesMsg.value = ''
   try {
-    const updated = await sessionService.update(conv.activeId, { roles: rolesDraft.value } as any)
-    conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
-                        roles: (updated as any)?.roles ?? rolesDraft.value } as ConversationMeta
-    rolesOpen.value = false
+    if (bindMode.value === 'bind') {
+      const updated = await apiPost(`/sessions/${conv.activeId}/bind`,
+                                    { executorId: rolesDraft.value })
+      conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
+                          executorId: (updated as any)?.executorId ?? rolesDraft.value } as ConversationMeta
+      rolesOpen.value = false
+    } else {
+      const created = await apiPost(`/sessions/${conv.activeId}/clone`,
+                                    { executorId: rolesDraft.value })
+      rolesOpen.value = false
+      const newId = (created as any)?.id
+      if (newId) {
+        listOpen.value = false
+        await conv.openConversation({ id: newId } as ConversationMeta)
+      }
+    }
   } catch (e: any) {
     rolesMsg.value = e?.message || String(e)
   } finally {
@@ -503,31 +504,35 @@ async function pollRunningState() {
           </div>
           <div class="p-3 space-y-2">
             <p class="text-[11px] text-ctp-subtext0">{{ t('session.role.manageHint') }}</p>
+            <p v-if="boundExecutorId" class="text-[11px] text-ctp-blue break-all">
+              {{ t('session.role.bound') }}: {{ boundExecutorId }}
+            </p>
             <p v-if="rolesMsg" class="text-[11px] text-ctp-yellow break-all">{{ rolesMsg }}</p>
             <button
-              v-for="r in executorRoles"
-              :key="r.id"
+              v-for="e in executorList"
+              :key="e.id"
               class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors"
-              :class="rolesDraft.includes(r.id) ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40'"
-              @click="toggleRole(r.id)"
+              :class="rolesDraft === e.id ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40'"
+              @click="rolesDraft = e.id"
             >
               <span
-                class="h-3 w-3 shrink-0 rounded border"
-                :class="rolesDraft.includes(r.id) ? 'bg-ctp-blue border-ctp-blue' : 'border-ctp-overlay1'"
+                class="h-3 w-3 shrink-0 rounded-full border"
+                :class="rolesDraft === e.id ? 'bg-ctp-blue border-ctp-blue' : 'border-ctp-overlay1'"
               />
               <span class="min-w-0 flex-1">
-                <span class="block text-xs text-ctp-text">{{ r.name }}</span>
-                <span class="block text-[10px] text-ctp-subtext0">{{ t('session.role.executorOf') }}: {{ r.executorId || '—' }}</span>
+                <span class="block text-xs text-ctp-text">{{ e.id }}</span>
+                <span class="block text-[10px] text-ctp-subtext0">{{ t('session.role.executorOf') }}: {{ e.type || '—' }}</span>
               </span>
+              <span v-if="e.id === boundExecutorId" class="chip !text-[9px] bg-ctp-surface0/60">{{ t('session.role.bound') }}</span>
             </button>
-            <p v-if="!executorRoles.length" class="text-[11px] text-ctp-overlay1">
+            <p v-if="!executorList.length" class="text-[11px] text-ctp-overlay1">
               {{ t('session.role.noExecutors') }}
             </p>
             <button
               class="btn btn-primary w-full !py-1.5 text-xs"
-              :disabled="rolesBusy"
+              :disabled="rolesBusy || !rolesDraft"
               @click="saveRoles"
-            >{{ rolesBusy ? t('common.saving') : t('common.save') }}</button>
+            >{{ rolesBusy ? t('common.saving') : (bindMode === 'bind' ? t('session.role.bind') : t('session.role.clone')) }}</button>
           </div>
         </div>
       </div>
@@ -609,11 +614,10 @@ async function pollRunningState() {
               :title="t('session.workState.runningHint')"
             >▶ {{ t('session.workState.running') }}</span>
             <span
-              v-for="r in activeRoles.filter((x) => x !== 'architect')"
-              :key="r"
-              class="chip !text-[10px] bg-ctp-surface0/60 text-ctp-subtext1"
+              v-if="boundExecutorId"
+              class="chip !text-[10px] bg-ctp-mauve/15 text-ctp-mauve"
               :title="t('session.role.manageTitle')"
-            >{{ roleNames[r] || r }}</span>
+            >⌨ {{ boundExecutorId }}</span>
             <button
               class="btn !py-0 !px-2 !text-[10px]"
               :title="t('session.role.manageTitle')"

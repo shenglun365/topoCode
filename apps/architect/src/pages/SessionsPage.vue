@@ -77,14 +77,7 @@ const groupFilter = ref('')          // '' = 全部; group:<name> / module:<name
 const statusFilter = ref('all')      // 生命周期重构: all | active | running(workState) | archived
 
 // PR3 角色徽标: 会话列表显示 executor 角色名
-const roleMap = ref<Record<string, string>>({})
-async function loadRoles() {
-  try {
-    const { apiGet } = await import('@/services/api-client')
-    const roles = await apiGet<{ id: string; name: string; kind: string }[]>('/session-roles')
-    roleMap.value = Object.fromEntries((roles ?? []).map((r) => [r.id, r.name]))
-  } catch { /* 角色加载失败只影响徽标 */ }
-}
+async function loadRoles() { /* 角色目录已退役(执行器直绑); 保留空挂点防引用 */ }
 
 async function load() {
   loading.value = true
@@ -305,11 +298,10 @@ function reviewClass(rs?: string) {
               :title="t('session.workState.runningHint')"
             >▶ {{ t('session.workState.running') }}</span>
             <span
-              v-for="r in ((c as any).roles || []).filter((x: string) => x !== 'architect')"
-              :key="r"
-              class="chip shrink-0 bg-ctp-surface0/60 text-ctp-subtext1"
+              v-if="(c as any).executorId"
+              class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve"
               :title="t('session.role.roleTitle')"
-            >{{ roleMap[r] || r }}</span>
+            >⌨ {{ (c as any).executorId }}</span>
             <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
