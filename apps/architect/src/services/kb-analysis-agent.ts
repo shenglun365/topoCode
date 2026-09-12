@@ -99,6 +99,8 @@ export interface ChatStreamEvent {
   userMessageId?: string
   /** 本回合助手消息 id(done 携带)。 */
   messageId?: string
+  /** 本回合助手消息元数据(done 携带, 如守卫标记 meta.guard)。 */
+  meta?: Record<string, any>
   /** 工具进度(tool_call/tool_result)：工具名。 */
   tool?: string
   /** 工具进度(tool_result)：执行是否成功。 */
@@ -181,7 +183,8 @@ export async function chatStream(
     ws.on('done', (ev: any) => {
       const content = ev?.content ?? full
       full = content
-      onEvent({ type: 'done', content, conversationId: ev?.conversationId, messageId: ev?.messageId })
+      onEvent({ type: 'done', content, conversationId: ev?.conversationId,
+                messageId: ev?.messageId, meta: ev?.meta })
       finish()
       resolveDone(content)
     })

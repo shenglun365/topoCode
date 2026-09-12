@@ -93,3 +93,99 @@ def test_intent_patterns_cover_start_and_tool_announce():
     assert announced_tool_intent("我将开始创建模块目录结构") != ""
     # 纯结论性文本不命中
     assert announced_tool_intent("已完成模块创建, 构建通过。") == ""
+
+
+# ── 守卫卡片化范式: suggestions / repair_fabricated_claim / propose 回写 ──
+
+def test_guard_suggestions_amend_and_correct():
+    from topoone_app_architect.arch_routes.req_agent import guard_suggestions
+    s = guard_suggestions("定稿入池(转入待执行)", "req.finalize|req.amend", False)
+    labels = [x["label"] for x in s]
+    assert "修正落库" in labels and "更正声明" in labels
+    assert all(len(x["label"]) <= 8 for x in s)   # 指令简洁(点击区短文案)
+
+
+def test_guard_suggestions_finalize_only():
+    from topoone_app_architect.arch_routes.req_agent import guard_suggestions
+    s = guard_suggestions("已定稿", "req.finalize", True)
+    actions = [x["action"] for x in s]
+    assert "repair_finalize" in actions and "repair_retry" in actions
+
+
+def test_repair_fabricated_claim_amends(monkeypatch):
+    """裸 JSON 载荷 → 修复器提取为 req.amend 并真实执行。"""
+    import json
+    from topoone_app_architect.arch_routes import req_agent as ra
+
+    _ensure_req("RQ-GUARD-AM")
+    captured = {}
+
+    def fake_run_tool(name, args, root=None, project=None):
+        captured["name"], captured["args"] = name, args
+        return {"ok": True, "reqId": args.get("reqId"), "ver": 2}
+
+    raw = ("```json\n" + json.dumps({
+        "title": "非侵入式网关", "designMd": "插件化架构…",
+        "acceptanceMd": "- 编译通过",
+        "allowedScopeMd": "- modules/gw/\n",
+    }) + "\n```")
+    monkeypatch.setattr(ra, "llm_sync", lambda *a, **k: {"content":
+        f'[TOOL_CALL]{{"tool":"req.amend","arguments":{{"designMd":"插件化架构…",'
+        f'"acceptance":["编译通过"],"reasoning":"守卫修复"}}}}[/TOOL_CALL]'})
+    monkeypatch.setattr(ra, "run_arch_tool", fake_run_tool)
+    r = ra.repair_fabricated_claim("定稿入池(转入待执行)", "req.finalize|req.amend",
+                                   raw, req_id="RQ-GUARD-AM")
+    assert r["action"] == "amended"
+    assert captured["name"] == "req.amend"
+    assert captured["args"]["reqId"] == "RQ-GUARD-AM"   # 缺省回填会话绑定
+
+
+def test_repair_rejects_invented_reqid(monkeypatch):
+    """修复器产出自造编号 → 拒绝该调用, 不落库。"""
+    from topoone_app_architect.arch_routes import req_agent as ra
+
+    def fake_run_tool(name, args, root=None, project=None):  # 不应被调用
+        raise AssertionError("不应执行自造编号的落库")
+
+    monkeypatch.setattr(ra, "llm_sync", lambda *a, **k: {"content":
+        '[TOOL_CALL]{"tool":"req.amend","arguments":{"reqId":"RQ-NGW-001",'
+        '"designMd":"x"}}[/TOOL_CALL]'})
+    monkeypatch.setattr(ra, "run_arch_tool", fake_run_tool)
+    r = ra.repair_fabricated_claim("已定稿", "req.amend", "…", req_id="RQ-GUARD-AM")
+    assert r["action"] == "failed"
+
+
+def test_repair_correction_branch(monkeypatch):
+    """载荷不可信 → 更正声明(过 fabricated_claim 复查)。"""
+    from topoone_app_architect.arch_routes import req_agent as ra
+    monkeypatch.setattr(ra, "llm_sync", lambda *a, **k: {"content":
+        "【更正】需求定稿动作尚未发生，当前无已定稿的需求。"})
+    r = ra.repair_fabricated_claim("已定稿", "req.finalize", "…", req_id="")
+    assert r["action"] == "corrected"
+    assert "尚未发生" in r["summary"]
+
+
+def test_propose_writes_back_conv_reqid(monkeypatch):
+    """req.propose 新建需求 → 回写会话绑定(conv.reqId 后端真相源)。"""
+    from topoone_app_architect.arch_routes import req_agent as ra
+    from topoone_app_architect.arch_routes import store, ctx as ctx_mod
+
+    conv_id = f"cv-gw-test-{store.next_id('m')}"
+    store.ConversationsStore.create({"id": conv_id, "kind": "asset", "title": "回写测试"})
+    try:
+        monkeypatch.setattr(ctx_mod, "get_conv", lambda: conv_id, raising=False)
+        monkeypatch.setattr(ctx_mod, "get_req", lambda: "", raising=False)
+        r = ra.tool_req_propose(title="回写验证需求", designMd="方案x",
+                                acceptanceMd="- 验收y", newRequirement=True)
+        assert r["ok"]
+        row = store.ConversationsStore.get(conv_id)
+        assert (row.get("reqId") or "") == r["requirementId"]
+    finally:
+        try:
+            store.ConversationsStore.delete(conv_id)
+        except Exception:
+            pass
+        try:
+            store.RequirementsStore.delete(r["requirementId"])
+        except Exception:
+            pass

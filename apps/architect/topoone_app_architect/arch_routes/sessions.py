@@ -8,6 +8,7 @@
 
 项目路由: 与 /requirements 同口径, 经 ProjectContextMiddleware 的 ?project=。
 """
+import asyncio
 import json
 from typing import Optional
 
@@ -625,6 +626,31 @@ async def stop_exec_session(conv_id: str):
     if not store.ConversationsStore.get(conv_id):
         return err(404, "会话不存在")
     return ok({"message": exec_bridge.stop(conv_id, reason="user")})
+
+
+@router.post("/sessions/{conv_id}/guard-repair")
+async def session_guard_repair(conv_id: str, request: Request):
+    """守卫卡片指令(点击触发): 独立外循环修复编造声明并真实落库。
+
+    修复过程/结果不进会话消息(前端本地渲染), 只落登记簿等真实数据面。
+    body: {messageId, claim, need, content}
+    """
+    body = await request.json()
+    claim = str(body.get("claim") or "").strip()
+    need = str(body.get("need") or "").strip()
+    content = str(body.get("content") or "")
+    if not claim or not content:
+        return err(400, "缺少 claim 或 content")
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    from .req_agent import repair_fabricated_claim
+    res = await asyncio.to_thread(
+        repair_fabricated_claim, claim, need, content,
+        req_id=str(conv.get("reqId") or ""),
+        project=str(conv.get("projectId") or ""),
+        root="")
+    return ok(res)
 
 
 @router.post("/sessions/{conv_id}/guide")

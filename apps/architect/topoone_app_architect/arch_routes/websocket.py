@@ -570,7 +570,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 final_content = visible
 
     # ── 防编造守卫: 声称的落库/执行动作必须有本回合真实工具调用佐证 ──
+    # 范式(守卫卡片化): 不再自动补救(全对话重跑成本高且实测再编造)——
+    # 检出 → 消息 meta.guard 落库(元数据不进 LLM 上下文) + WS guard 事件 →
+    # 前端守卫卡片给出可点击指令; 用户点击 → guard-repair REST 独立外循环修复。
     claim, need = req_agent.fabricated_claim(final_content, tools_used)
+    guard_meta = None
     if claim:
         logger.warning("[kb-chat] 防编造守卫触发 conv=%s claim=%s need=%s", conv_id, claim, need)
         primary_need = need.split("|")[0] if need else ""
@@ -582,46 +586,31 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                         toolError=tool_errors.get(primary_need, ""))
         except Exception:  # noqa: BLE001
             pass
-        fail_line = (f"注意：{primary_need} 本回合已尝试执行但失败"
-                     f"（{tool_errors.get(primary_need, '')[:160]}）——"
-                     "请修正参数后重新调用，不要重复同样的参数形状。"
-                     if failed_try else "")
-        msgs.append({"role": "assistant", "content": final_content})
-        msgs.append({"role": "user", "content": (
-            f"[系统守卫] 你上述回复声称「{claim}」，但本回合并未实际调用 {need} "
-            "（或引用了不存在的需求编号）——该表述不成立。" + fail_line +
-            "现在二选一补救："
-            f"① 确需产出 → 立即输出 [TOOL_CALL] 调用 {need.split('|')[0]} 完成真实落库；"
-            "② 不应/无法产出 → 如实更正，说明该动作尚未发生。禁止再声称任何未执行的结果。")})
-        corr = await _sync_with_tools(websocket, msgs, root, project, eff_model,
-                                      max_rounds=2, tools_used=tools_used)
-        corr = req_agent.strip_tool_blocks(corr or "")
-        claim2, _ = req_agent.fabricated_claim(corr, tools_used)
-        if corr and not claim2:
-            for i in range(0, len(corr), 24):
-                d = corr[i:i + 24]
-                visible += d
-                await send_ev({"type": "chunk", "requestId": request_id, "delta": d})
-            final_content = visible
-        else:
-            # 修复2: 基于 final_content(含围栏失败通知等)追加, 不用 visible 重建——
-            # 否则真实失败原因被丢弃, 用户只见误导性守卫文案(cv-71 案例)
-            notice = req_agent.guard_notice(claim, need, tools_used, tool_errors)
-            final_content = final_content + notice
-            await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
+        guard_meta = {
+            "kind": "guard",
+            "claim": claim,
+            "need": need or "",
+            "failedTry": failed_try,
+            "toolError": tool_errors.get(primary_need, "")[:200],
+            "suggestions": req_agent.guard_suggestions(claim, need, failed_try),
+        }
 
     if final_content:
         assistant_msg_id = store.next_id("m")
-        store.ConversationsStore.append_message({
-            "id": assistant_msg_id, "conversationId": conv_id,
-            "role": "assistant", "time": _ts(), "content": final_content,
-        })
+        msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
+                   "role": "assistant", "time": _ts(), "content": final_content}
+        if guard_meta:
+            msg_row["meta"] = guard_meta   # 守卫元数据: 落库可重建卡片, 不进 LLM 上下文
+        store.ConversationsStore.append_message(msg_row)
         try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
         except Exception:  # noqa: BLE001
             pass
-        await send_ev({"type": "done", "conversationId": conv_id,
-                                   "content": final_content, "messageId": assistant_msg_id})
+        done_ev = {"type": "done", "conversationId": conv_id,
+                   "content": final_content, "messageId": assistant_msg_id}
+        if guard_meta:
+            done_ev["meta"] = guard_meta
+        await send_ev(done_ev)
         try:
             from . import llm_dataset as _lds
             _lds.record("llm_stream_done", ok=True,

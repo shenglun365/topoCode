@@ -227,6 +227,103 @@ def guard_notice(claim: str, need: str, tools_used=None,
             "不成立。请重试，或改用界面操作（方案生成按钮/任务执行页）。")
 
 
+def guard_suggestions(claim: str, need: str, tool_failed: bool = False) -> list:
+    """守卫卡片可点击指令(suggestions)——简洁 label, action 供 guard-repair 路由。
+
+    冗长说明由前端非点击文字区承载; 这里只产 指令集。
+    """
+    sugs = []
+    tools = (need or "").split("|")
+    if "req.amend" in tools:
+        sugs.append({"action": "repair_amend", "label": "修正落库"})
+    if "req.finalize" in tools and "req.amend" not in tools:
+        sugs.append({"action": "repair_finalize", "label": "确认定稿"})
+    if "req.propose" in tools:
+        sugs.append({"action": "repair_propose", "label": "创建提案"})
+    if tool_failed:
+        sugs.append({"action": "repair_retry", "label": "修正参数重试"})
+    if not sugs:
+        sugs.append({"action": "repair_amend", "label": "修正落库"})
+    sugs.append({"action": "correct", "label": "更正声明"})
+    return sugs
+
+
+_GUARD_REPAIR_TOOLS = ("req.amend", "req.finalize", "req.propose")
+
+
+def repair_fabricated_claim(claim: str, need: str, content: str, *,
+                            req_id: str = "", project: str = "",
+                            root: str = "", model_id: Optional[str] = None,
+                            tool_error: str = "") -> Dict[str, Any]:
+    """守卫独立外循环修复器(不经对话流): 从编造文本提取真实落库意图并执行。
+
+    与全量补救轮(_sync_with_tools)的区别: 极简上下文(守卫判定+编造文本+
+    佐证工具签名表+会话绑定 reqId)单独请求一次 LLM, 只产 [TOOL_CALL] JSON
+    或更正声明; 工具执行由本函数确定性完成(run_arch_tool), 杜绝补救轮再编造。
+
+    返回 {action: amended|finalized|proposed|corrected|failed, summary,
+          toolResult?, correction?}
+    """
+    sys_prompt = (
+        "你是需求落库修复器。用户看到的助手回复声称了未实际执行的动作(守卫拦截)，"
+        "但回复里可能包含可用于真实落库的完整规约内容(常见为 ```json 围栏载荷)。\n"
+        "任务二选一：\n"
+        "① 载荷信息足以落库 → 输出一个工具调用块：\n"
+        '   [TOOL_CALL]{"tool":"<工具名>","arguments":{…}}[/TOOL_CALL]\n'
+        "   可用工具与签名：\n"
+        + "".join(f"  - {n}: {_repair_param_table(_ARCH_TOOLS[n]['handler'])}\n"
+                  for n in _GUARD_REPAIR_TOOLS if n in _ARCH_TOOLS)
+        + ("   会话绑定需求(优先使用该 reqId): " + (req_id or "(无)") + "\n")
+        + (f"   上次执行失败原因(修正参数规避): {tool_error[:300]}\n" if tool_error else "")
+        + "② 载荷不可信/关键信息缺失 → 输出一行以【更正】开头的声明文本，"
+        "说明该动作尚未发生(不编造任何编号/状态)。\n"
+        "只输出 ①或② 之一，不要输出其它内容。")
+    user_content = (f"守卫判定: {claim}（需要佐证工具: {need}）\n\n"
+                    f"助手原文:\n{content[:6000]}")
+    res = llm_sync([{"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_content}],
+                   mode="chat", model_id=model_id, max_tokens=900)
+    raw = (res or {}).get("content") or ""
+    calls = extract_tool_calls(raw)
+    for c in calls:
+        name, args = c.get("tool"), c.get("arguments")
+        if name not in _GUARD_REPAIR_TOOLS or not isinstance(args, dict):
+            continue
+        # 确定性校验: reqId 必须真实存在(防修复器再次编造编号)
+        rid = str(args.get("reqId") or "").strip()
+        if rid and not store.RequirementsStore.get(rid):
+            continue
+        if not rid and req_id:
+            args["reqId"] = req_id          # 缺省绑定会话需求
+        if name == "req.propose" and not args.get("newRequirement") and req_id:
+            args["reqId"] = args.get("reqId") or req_id
+        result = run_arch_tool(name, args, root=root, project=project)
+        ok = not (isinstance(result, dict) and result.get("error"))
+        if ok:
+            rid_out = (result or {}).get("reqId") or (result or {}).get("requirementId") or req_id
+            ver = (result or {}).get("ver") or ""
+            action = {"req.amend": "amended", "req.finalize": "finalized",
+                      "req.propose": "proposed"}.get(name, name)
+            summary = (f"✅ 守卫修复完成：`{rid_out}`"
+                       + (f" v{ver}" if ver else "")
+                       + f"（{name} 真实落库）")
+            return {"action": action, "summary": summary, "toolResult": result}
+        return {"action": "failed",
+                "summary": f"修复执行失败({name})：{str((result or {}).get('error'))[:200]}",
+                "toolResult": result}
+    # ② 更正声明分支——复查只查自造编号(否定语境的声明天然含「已定稿」等字样,
+    #    套用完成语规则会自查自纠死锁); 编号真实性仍必须保证
+    corr = (raw or "").strip()
+    m = re.search(r"【更正】\s*(.+)", corr, re.DOTALL)
+    if m:
+        text = m.group(1).strip()[:600]
+        mentioned = set(re.findall(r"\bRQ-[A-Za-z0-9][A-Za-z0-9_-]*", text))
+        fake_ids = [r for r in mentioned if not store.RequirementsStore.get(r)]
+        if not fake_ids:
+            return {"action": "corrected", "summary": text, "correction": text}
+    return {"action": "failed", "summary": "修复器未能产出有效工具调用或更正声明"}
+
+
 _INTENT_PATTERNS = [
     re.compile(r"请等待我完成"),
     re.compile(r"我将(立即)?(执行|检索|调用|读取|开始|编写|创建)"),
@@ -1365,6 +1462,12 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     }
     _store.RequirementsStore.create(req)
     _sync_analysis_cache(req["id"], snapshot)
+    # 回写会话绑定(后端真相源): amend 契约/守卫修复/「执行方案」链路依赖 conv.reqId
+    if conv_id:
+        try:
+            _store.ConversationsStore.update(conv_id, {"reqId": req["id"]})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[req.propose] conv.reqId 回写失败 conv=%s: %s", conv_id, e)
     try:
         log_conv_event(conv_id,
                        f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
@@ -1932,23 +2035,37 @@ _CAPABILITY_DOC = (
     "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
     "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n"
     "- interaction.clarify：澄清提问(信息不足/存在歧义/需要用户决策时向用户提问；用户回答会在下一回合注入本会话)\n"
+    "- req.finalize：规约确认(交托门禁)：用户表示确认(确认方案/同意/可以执行)时调用，"
+    "把当前 draft 确认为 ready。参数 {\"reqId\"?: \"缺省取会话绑定需求\"}\n"
+    "- req.propose：需求提案(新建或幂等更新)——对话产出完整需求/方案时调用，"
+    "创建新需求或更新会话绑定需求的 draft 版本。"
+    "参数 {\"title\", \"requirementMd\"?, \"designMd\"?, \"allowedScopeMd\"?, "
+    "\"forbiddenScopeMd\"?, \"acceptanceMd\"?, \"assessmentMd\"?, \"priority\"?, "
+    "\"estMin\"?, \"newRequirement\"?: true 强制新建}\n"
+    "- req.amend：需求修订(通用)——用户对既有需求 补充/完善/调整 时调用，追加新 draft "
+    "版本(append-only)。参数 {\"reqId\"?(缺省会话绑定), \"designMd\"?, \"requirementMd\"?, "
+    "\"allowedScope\"[]?, \"forbiddenScope\"[]?, \"acceptance\"[]?, \"reasoning\"?(修订留痕)}\n"
+    "- interaction.clarify：澄清提问(信息不足/存在歧义/需要用户决策时向用户提问；用户回答会在下一回合注入本会话)\n"
     "- ctx.search：跨会话检索历史上下文(单元/消息/备案文档)——回答涉及历史讨论/已有结论时先检索，避免重复讨论\n"
     "- ctx.get：读取指定会话的上下文包(摘要+关键单元+备案文档清单)\n"
     "- ctx.summarize：生成/刷新会话摘要\n"
     "- probe.run：方案草图(probe)——调 coding agent 在代码快照上产出改动思路与伪 diff，供用户预览确认后再正式执行\n\n"
-    "- coding.task.plan：实现方案(plan 模式,只读)——装配任务上下文(会话结论+需求+规约+资产影响面)交 coding agent 隔离分析，"
-    "产出结构化方案(文件→行区间→意图+置信度)。「给需求拿方案」或先评估再执行时用\n"
-    "- coding.task.execute：正式执行(主工作区+分支协议)——会话绑定需求后创建/交接执行任务运行。「给需求拿结果」「按方案执行」时用\n"
     "- capability.evaluate：图文评估——target=plan 评估会话最新方案(变更足迹×语义资产影响面+关系子图图)；"
     "target=execution 评估执行结果(实际 diff 足迹 + 与方案的偏差集)。报告内资产卡可点击联动资产地图。方案确认前/执行完成后调用\n"
     "- capability.mine：能力提炼——扫描会话(消息+方案/回执单元)提炼 规约/流程/技巧/skill 提案入待审队列, "
     "设计者采纳后生效(规约入规约库/skill 文档注入能力文档)。会话出现可复用模式时主动提议\n\n"
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
-    '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
+    '[TOOL_CALL]{"tool":"<工具名>","arguments":{参数}}[/TOOL_CALL]\n'
     "硬性规则(防编造)：凡是会改数据或有真实执行结果的指令(提取/刷新/保存/定稿/委派执行等)，"
     "必须实际调用对应工具拿到同步返回的结果，再如实转述；"
     "严禁不调用工具就输出『已启动/报告/条数/检查结果』等编造结论。\n"
+    "需求落库纪律(必须遵守)：\n"
+    "1. 修改既有需求(用户确认后补充约束/调整方案/完善规约) → 必须用 [TOOL_CALL] 调 "
+    "req.amend(带 reqId)，严禁重新 req.propose 或输出裸 JSON 围栏当作工具调用；\n"
+    "2. RQ 编号只来自工具返回(如 req.propose 的 requirementId)，严禁自造编号"
+    "(格式如 RQ-XXX-001 的自造编号会被系统守卫拦截)；\n"
+    "3. 确认(draft→ready)只能由用户显式发起 → req.finalize；修订(req.amend)时不要顺带调用它。\n"
     "各工具的参数：\n"
     '- kb.asset.search: {"text": "检索关键词", "preferred": ["资产ID(可选)"]}\n'
     '- kb.code_mappings: {"asset_ids": ["资产ID"]}\n'
@@ -1975,14 +2092,9 @@ _CAPABILITY_DOC = (
     '- convention.propose: {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}\n'
     '- contract.propose: {"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)\n'
     '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
-    '- req.finalize: {"title", "description", "functionalScope"[], "entityBoundary"[], '
-    '"assetScope"[{assetId,assetType,role,source}], "estMin", "implementationPath", "assessmentSummary", '
-    '"allowedScope"[], "forbiddenScope"[], "acceptance"[], "reqId"?}(定稿纪律见 plan 技能)\n'
-    '- req.finalize 提示: assetScope 涉及资产若过期(stale/needsUpdate)会在定稿消息中'
-    '附带警告(不拦截); 建议 asset.semantic.refresh 刷新后执行\n'
+    '- req.finalize: {"reqId"?: "缺省会话绑定需求"}——门禁校验(designMd/acceptance 非空)\n'
+    '- req.propose / req.amend: 参数形状见上方能力清单\n'
     '- interaction.clarify: {"message": "<问题文本>"}\n'
-    '- coding.task.plan: {"instruction": "要做什么(一句话)", "files"?: "相关文件,逗号分隔", "executorId"?: "opencode|cline|…", "timeoutS"?: 900}\n'
-    '- coding.task.execute: {"adapter"?: "opencode(缺省)"}——需先 req.finalize 绑定需求\n'
     '- capability.evaluate: {"target": "plan|execution", "execId"?: "ex-…(execution 时必填)}\n'
     '- capability.mine: {"conversation"?: "cv-…(缺省当前会话)}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"

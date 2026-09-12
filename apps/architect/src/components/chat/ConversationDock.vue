@@ -183,6 +183,26 @@ async function showGuide() {
     guideBusy.value = false
   }
 }
+
+// ── 守卫卡片指令: guard-repair 独立外循环修复, 结果本地消息(不落库/不进上下文) ──
+const guardRepairBusy = ref(false)
+async function onGuardRepair(p: { index: number; meta: Record<string, any>; action: string }) {
+  if (guardRepairBusy.value || !conv.activeId) return
+  guardRepairBusy.value = true
+  try {
+    const m = conv.turns[p.index]
+    const r = await apiPost<Record<string, any>>(`/sessions/${conv.activeId}/guard-repair`, {
+      messageId: m?.id || '', claim: p.meta?.claim || '',
+      need: p.meta?.need || '', content: m?.content || '', action: p.action,
+    })
+    conv.pushLocalHint(
+      String(r?.summary || (r?.action === 'corrected' ? (r as any)?.correction : '') || '修复未产出结果'))
+  } catch (e) {
+    conv.pushLocalHint(`⚠️ 守卫修复失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    guardRepairBusy.value = false
+  }
+}
 // running 输入锁提示(裁决#6.1)
 const inputLockedHint = computed(() =>
   isRunning.value ? t('session.workState.lockedHint') : null)
@@ -576,6 +596,7 @@ async function answerClarify() {
         @send="(text) => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}) }); onSent() }"
         @job-accept="openAccept"
         @job-resume="resumeJob"
+        @guard-repair="onGuardRepair"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
         @toggle-diagram-skill="conv.toggleDiagramSkill"

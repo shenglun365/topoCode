@@ -230,6 +230,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         } else if (ev.type === 'done') {
           arr[idx].content = ev.content ?? arr[idx].content
           if (ev.messageId) arr[idx].id = ev.messageId
+          if (ev.meta) arr[idx].meta = ev.meta   // 守卫标记等元数据(卡片渲染用)
           // 用户正观看的会话流式完成 → 保持已读(后端落库时置了 unread)
           if (ev.conversationId && ev.conversationId === activeId.value) {
             sessionService.update(ev.conversationId, { reviewState: 'read' }).catch(() => { /* 无碍 */ })
