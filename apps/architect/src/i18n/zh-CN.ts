@@ -466,7 +466,7 @@ export default {
     },
     target: {
       label: '角色',
-      architect: '架构师',
+      architect: 'architect',
       architectHint: '发给 architect：自由对话/需求分析',
       coding: 'Coding',
       codingUnavailable: '无活跃 coding 作业——先 /执行 + /确认执行 启动',
