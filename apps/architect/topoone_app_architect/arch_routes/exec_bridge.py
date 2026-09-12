@@ -387,7 +387,7 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
     _pid = (conv or {}).get("projectId") or ""
     _append(sub_id, "user",
             f"🚀 作业启动（`{job_id}` 规约 v{spec_ver or '?'} 分支 `{branch}`）\n\n"
-            + instruction[:4000],
+            + str(payload.get("instruction") or instruction)[:4000],
             msg_meta={"jobId": job_id, "kind": "job_start"}, project_id=_pid)
     _start_pump(conv_id, job_id, rid)
     return (f"🚀 实施作业已启动\n"
