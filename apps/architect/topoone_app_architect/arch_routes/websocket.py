@@ -84,15 +84,50 @@ def _guard_cmd_hints(conv_id: str) -> list:
 
 
 async def _cmd_finalize_turn(conv: dict) -> str:
-    """/定稿: 系统直通规约确认——reqId 由会话绑定注入, 模型不参与。"""
+    """/定稿: 系统直通规约确认——reqId 由会话绑定注入, 模型不参与。
+
+    门禁不过(常见 designMd 空)时先做确定性补救: 扫最近 assistant 消息提取
+    规约载荷(```proposal/```json 围栏)——提取到 → apply 落新 draft 版本后再
+    定稿(模型已产出过完整规约但 propose 参数不全的场景); 仍不过 → 给出
+    可操作下一步(/调整 补方案), 不再是干巴巴的拒绝。
+    """
     from .req_agent import tool_req_finalize
+    conv_id = (conv or {}).get("id") or ""
     res = await asyncio.to_thread(tool_req_finalize, "", None, None)
     if res.get("ok"):
         if res.get("already"):   # 重复定稿(当前版本已 confirmed)
             return f"✅ {res.get('hint')}"
         return (f"✅ **规约已确认**：`{res.get('reqId')}` v{res.get('ver')}"
                 f"（ready，可执行）\n下一步：发送 `/执行` 预览执行方案。")
-    return f"❌ 定稿未通过：{res.get('error') or '未知原因'}"
+    err = str(res.get("error") or "未知原因")
+    if "designMd" in err or "结构不完整" in err:
+        # 确定性补救: 最近 assistant 消息里的规约载荷 → amend 后重试定稿
+        try:
+            from .req_agent import extract_spec_payload, apply_spec_payload
+            msgs = store.ConversationsStore.messages(conv_id, limit=30)
+            for m in reversed(msgs):
+                if m.get("role") != "assistant":
+                    continue
+                payload = extract_spec_payload(m.get("content") or "")
+                if payload:
+                    r2 = apply_spec_payload(
+                        payload, req_id=str(conv.get("reqId") or ""),
+                        project=str(conv.get("projectId") or ""), root="")
+                    if r2.get("ok"):
+                        res2 = await asyncio.to_thread(
+                            tool_req_finalize, "", None, None)
+                        if res2.get("ok"):
+                            return (f"✅ **规约已确认**：`{res2.get('reqId')}` "
+                                    f"v{res2.get('ver')}`（已从消息中的规约载荷补全并确认，"
+                                    "ready，可执行）\n下一步：发送 `/执行` 预览执行方案。")
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        return ("❌ 定稿未通过：方案(designMd)为空——规约只有需求目标、缺少实施方案。\n\n"
+                "**补全方式**：发送 `/调整` 进入修订模式，直接描述方案要点"
+                "（如：技术选型、脚本结构、监控判活方式、指数退避参数、重试上限逻辑），"
+                "我会整理成完整方案落为新版本；完成后再次 `/定稿` 即可。")
+    return f"❌ 定稿未通过：{err}"
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -305,7 +305,7 @@ def test_cmd_finalize_turn_gate_and_pass(tmp_path, monkeypatch):
     C._req_var.set(rid4)
     try:
         out4 = asyncio.run(ws._cmd_finalize_turn({"id": cid4}))
-        assert "门禁未过" in out4 and "designMd" in out4
+        assert "定稿未通过" in out4 and "designMd" in out4 and "/调整" in out4
     finally:
         C._conv_var.reset(token4)
 
@@ -818,3 +818,44 @@ def test_list_sessions_excludes_coding_subs(tmp_path, monkeypatch):
     assert "cv-l1" not in ids and conv["id"] in ids
     coding_only = asyncio.run(S.list_sessions(kind="coding"))
     assert "cv-l1" in [c["id"] for c in coding_only["data"]]
+
+
+def test_finalize_gate_recovery_from_spec_payload(tmp_path, monkeypatch):
+    """定稿门禁不过(designMd 空) → 从最近 assistant 消息的规约围栏载荷
+    确定性补救(amend 落新版本)后再定稿。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import ctx as _actx, websocket as ws, req_agent
+    import json as _json
+    # 换绑一个 designMd 空的 draft 需求(门禁不过场景)
+    r0 = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-门禁", "requirementMd": "只有目标", "newRequirement": True},
+        root=None, project=None)
+    rid0 = r0["requirementId"]
+    store.ConversationsStore.update(conv["id"], {"reqId": rid0})
+    conv = store.ConversationsStore.get(conv["id"])
+    _actx.set_conv(conv["id"]); _actx.set_req(rid0); _actx.set_project(conv["projectId"])
+    payload = {"title": "T", "requirementMd": "目标",
+               "designMd": "## 方案\n分三步", "acceptanceMd": ["编译通过"]}
+    store.ConversationsStore.append_message({
+        "id": "m-f1", "conversationId": conv["id"], "role": "assistant",
+        "time": 5000, "content": "方案如下\n```json\n" + _json.dumps(payload, ensure_ascii=False) + "\n```"})
+    out = asyncio.run(ws._cmd_finalize_turn(store.ConversationsStore.get(conv["id"])))
+    assert "规约已确认" in out and "补全" in out, out
+    row = store.RequirementsStore.get(rid0) or {}
+    sv = row.get("specVersions") or []
+    assert sv and "## 方案" in (sv[-1].get("snapshot") or {}).get("designMd", "")
+
+
+def test_finalize_gate_actionable_guidance(tmp_path, monkeypatch):
+    """无可补救载荷 → 拒绝文案给出可操作下一步(/调整), 而非干拒绝。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import ctx as _actx, websocket as ws, req_agent
+    r0 = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-门禁2", "requirementMd": "只有目标", "newRequirement": True},
+        root=None, project=None)
+    rid0 = r0["requirementId"]
+    store.ConversationsStore.update(conv["id"], {"reqId": rid0})
+    conv = store.ConversationsStore.get(conv["id"])
+    _actx.set_conv(conv["id"]); _actx.set_req(rid0); _actx.set_project(conv["projectId"])
+    out = asyncio.run(ws._cmd_finalize_turn(store.ConversationsStore.get(conv["id"])))
+    assert "定稿未通过" in out and "/调整" in out, out
