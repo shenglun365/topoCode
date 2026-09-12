@@ -734,3 +734,45 @@ def test_clone_carries_executor_model(tmp_path, monkeypatch):
                     json={"executorId": "ex-m", "model": "qwen-72b"},
                     headers=_h()).json()["data"]
     assert e["executorModel"] == "qwen-72b"      # 显式
+
+
+def test_resume_from_subsession_finds_parent_waiting_job(tmp_path, monkeypatch):
+    """子会话 /继续: job_input 提示落在子会话, 账本在主会话——沿父链找到
+    waiting 且 sub=本会话 的作业; 增量取子会话消息; 状态回写落主会话账本。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge, websocket as ws
+    sub = store.ConversationsStore.create({
+        "id": "cv-sub1", "kind": "coding", "projectId": conv["projectId"],
+        "reqId": rid, "title": "sub", "parentConvId": conv["id"],
+        "status": "active", "meta": {}})
+    exec_bridge._job_upsert(conv["id"], {
+        "jobId": "impl-x1", "branch": "exec/t", "status": "waiting_input",
+        "lastAgentTs": 1000, "changedFiles": [], "failReason": "",
+        "lastAgentNote": "q", "specVer": 1, "reqId": rid, "subSessionId": "cv-sub1"})
+    store.ConversationsStore.append_message(
+        {"id": "m-su1", "conversationId": "cv-sub1", "role": "user", "time": 2000,
+         "content": "环境可用 ubuntu 24.04, 可装 openresty"})
+    sent = {}
+    monkeypatch.setattr(exec_bridge, "_runner",
+                        lambda path, payload=None, timeout=12.0:
+                        sent.update(path=path, payload=payload) or {"ok": True})
+    out = asyncio.run(ws._exec_resume_turn(store.ConversationsStore.get("cv-sub1")))
+    assert "已转达" in out, out
+    assert "ubuntu 24.04" in sent["payload"]["text"]
+    # 状态回写落主会话账本(running), 子会话账本不被污染
+    jobs_p = exec_bridge.jobs_of(conv["id"])
+    assert any(j.get("jobId") == "impl-x1" and j.get("status") == "running"
+               for j in jobs_p)
+    assert not [j for j in exec_bridge.jobs_of("cv-sub1") if j.get("jobId") == "impl-x1"]
+
+
+def test_resume_from_subsession_no_match_falls_through(tmp_path, monkeypatch):
+    """父会话无 waiting 或 sub 非本会话 → 子会话 /继续 走「没有等待」引导。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import websocket as ws
+    sub = store.ConversationsStore.create({
+        "id": "cv-sub2", "kind": "coding", "projectId": conv["projectId"],
+        "reqId": rid, "title": "s2", "parentConvId": conv["id"],
+        "status": "active", "meta": {}})
+    out = asyncio.run(ws._exec_resume_turn(store.ConversationsStore.get("cv-sub2")))
+    assert "没有等待输入的作业" in out

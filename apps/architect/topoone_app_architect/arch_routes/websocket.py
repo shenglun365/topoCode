@@ -332,8 +332,21 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     cmd = parse_session_cmd(question)
     final_b = None
     amend_contract = None
-    if cmd == "确认执行":
-        final_b = await _executor_implement(conv, None, confirmed=True)
+    if cmd in ("执行", "确认执行") and (conv.get("kind") or "") == "coding":
+        # 子会话(coding)禁止再嵌套建子会话——作业由主会话统一管理
+        final_b = ("当前是 coding 子会话（由主会话的作业管理）。\n"
+                   "- 补充执行工程师的提问：直接发送（coding 收件人）或 `/继续`\n"
+                   "- 启动/重开作业：请到主会话操作 `/执行`")
+    elif cmd == "确认执行":
+        from . import exec_bridge as _eb
+        _wj = _eb.waiting_job(conv_id)
+        if _wj:
+            # 秩序: 待输入作业未处置(转达/停止)前不再叠新作业
+            final_b = (f"存在等待输入的作业 `{(_wj.get('jobId') or '')[:14]}…`——\n"
+                       "- 转达补充：回复内容后发 `/继续`\n"
+                       "- 或从会话信息面板**停止**该作业后再启动新作业")
+        else:
+            final_b = await _executor_implement(conv, None, confirmed=True)
     elif cmd == "执行":
         final_b = await _executor_implement(conv, None, confirmed=False)
     elif cmd == "定稿":
@@ -1011,7 +1024,16 @@ async def _exec_resume_turn(conv: dict) -> str:
     """
     from . import exec_bridge
     conv_id = (conv or {}).get("id") or ""
+    ledger_conv = conv_id   # 作业账本所有者(默认本会话; 跨会话续跑时=父会话)
     job = exec_bridge.waiting_job(conv_id)
+    if not job and (conv or {}).get("kind") == "coding":
+        # 子会话: job_input 提示落在子会话, 作业账本在主会话——
+        # 沿父链找 waiting 且 sub=当前会话 的作业(用户正是在此收到提示)
+        pid = str((conv or {}).get("parentConvId") or "")
+        pjob = exec_bridge.waiting_job(pid)
+        if pjob and pjob.get("subSessionId") == conv_id:
+            job = pjob
+            ledger_conv = pid   # 账本所有者: job_input 状态回写目标
     if not job:
         if exec_bridge.is_running(conv_id):
             return ("作业正在执行回合中——补充内容可直接以 coding 收件人发送(自动排队续跑)，"
@@ -1028,7 +1050,9 @@ async def _exec_resume_turn(conv: dict) -> str:
         return ("没有新补充的信息。请先回复执行工程师的问题，再发送 `/继续`。")
     payload = ("用户补充/回复(/继续)：\n\n" + "\n\n---\n\n".join(inc[:10]))
     res = await asyncio.to_thread(
-        exec_bridge.job_input, conv_id, job.get("jobId", ""), payload)
+        exec_bridge.job_input,
+        ledger_conv,
+        job.get("jobId", ""), payload)
     if res.get("ok"):
         return (f"➡️ 已转达执行工程师（{len(inc)} 条补充），作业继续。"
                 "回合期间可继续以 architect 身份讨论；agent 提问/完成/报错时恢复对话。")
