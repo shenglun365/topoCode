@@ -512,6 +512,34 @@ def _set_active_coding_session(conv_id: str, sub_id: str) -> None:
     store.ConversationsStore.update(conv_id, {"meta": meta})
 
 
+async def _summarize_for_coding(text: str) -> tuple:
+    """LLM 摘要转发(S4): 压缩为 coding 结论段(best-effort, 失败回退原文)。
+
+    返回 (文本, 是否经摘要)。LLM 不可达/空产出 → 原文 + False。
+    """
+    import asyncio
+    sys_prompt = (
+        "你是架构师到执行工程师的信息中继。把下面的分析内容压缩成给 coding agent "
+        "的直接结论段：\n"
+        "- 保留: 结论 / 约束 / 具体参数 / 接口要求 / 必须遵守的规则\n"
+        "- 剥离: 分析过程 / 备选方案讨论 / 寒暄 / 与实现无关的背景\n"
+        "- 保持原文的具体数值与技术术语, 不要泛化、不要新增推断\n"
+        "- 输出纯文本(可含短列表), 不加标题不加解释, 200 字以内"
+    )
+    try:
+        from .req_agent import llm_sync
+        res = await asyncio.to_thread(
+            llm_sync,
+            [{"role": "system", "content": sys_prompt},
+             {"role": "user", "content": text[:8000]}],
+            mode="chat", max_tokens=400)
+        content = ((res or {}).get("content") or "").strip() \
+            if isinstance(res, dict) else ""
+        return (content, True) if content else (text, False)
+    except Exception:  # noqa: BLE001
+        return (text, False)
+
+
 @router.post("/sessions/{conv_id}/feed")
 async def feed_to_coding(conv_id: str, request: Request):
     """投喂门: 主会话消息 → 规则过滤 → 落活跃 coding 子会话(审计 feedFrom) → 投递活跃作业。
@@ -539,6 +567,10 @@ async def feed_to_coding(conv_id: str, request: Request):
     if not text:
         return err(400, "转发内容为空")
 
+    summarized = False
+    if body.get("summarize") and text:
+        text, summarized = await _summarize_for_coding(text)
+
     meta = _meta_of(conv)
     active_sub = meta.get("activeCodingSession") or ""
     delivered, queued, feed_note = False, False, ""
@@ -557,6 +589,7 @@ async def feed_to_coding(conv_id: str, request: Request):
             "meta": {"kind": "feed", "feedFrom": {"convId": conv_id,
                                                   "messageId": src_msg_id,
                                                   "at": _ts(),
+                                                  "summarized": summarized,
                                                   "delivered": delivered, "queued": queued}},
         })
         feed_note = f"；已记录到子会话 {active_sub}"
@@ -565,7 +598,9 @@ async def feed_to_coding(conv_id: str, request: Request):
     summary = ("📥 已排队转达(回合结束自动续跑)" if queued
                else "➡️ 已转达作业" if delivered
                else "已记录(当前无活跃作业——下次 /执行 后生效于新上下文)")
-    return ok({"delivered": delivered, "queued": queued,
+    if summarized:
+        summary = "🧠 (摘要) " + summary
+    return ok({"delivered": delivered, "queued": queued, "summarized": summarized,
                "activeSub": active_sub, "summary": summary + feed_note})
 
 

@@ -847,6 +847,8 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
                             "codex_home": cfg.get("codex_home") or "",
                             "approval_policy": cfg.get("approval_policy") or "",
                             "sandbox_mode": cfg.get("sandbox_mode") or "",
+                            "turnTimeout": cfg.get("turnTimeout"),
+                            "stallSec": cfg.get("stallSec"),
                         },
                         "model": (models[0] if models else "") or cfg.get("model") or "",
                         "basePort": cfg.get("base_port"),
@@ -896,7 +898,7 @@ def _executor_preview_card(conv: dict, instruction: str, pending: dict) -> str:
         f"- 允许改动 {len(snap.get('allowedScope') or [])} 项 / "
         f"禁止改动 {len(snap.get('forbiddenScope') or [])} 项 / "
         f"验收标准 {len(snap.get('acceptance') or [])} 条",
-        "- 交付：开发 + 单元测试 + 整体编译验收；作业执行中会话输入锁定，"
+        "- 交付：开发 + 单元测试 + 整体编译验收；对话不锁定(收件人可切换 architect/coding)，"
         "agent 提问/完成/报错时自动恢复对话",
     ]
     design = str(snap.get("designMd") or "")[:400]
@@ -1021,7 +1023,7 @@ async def _exec_resume_turn(conv: dict) -> str:
         exec_bridge.job_input, conv_id, job.get("jobId", ""), payload)
     if res.get("ok"):
         return (f"➡️ 已转达执行工程师（{len(inc)} 条补充），作业继续。"
-                "回合期间会话输入锁定，agent 提问/完成/报错时自动恢复。")
+                "回合期间可继续以 architect 身份讨论；agent 提问/完成/报错时恢复对话。")
     return f"转达失败：{res.get('error') or 'runner 不可达'}。可稍后重试或 `/执行` 新作业。"
 
 

@@ -457,3 +457,159 @@ def test_coding_sessions_rest_and_feed(tmp_path, monkeypatch):
     r4 = client.post(f"/api/architect/sessions/{conv['id']}/feed",
                      json={"messageId": "m-hint"}, headers=_h())
     assert r4.json()["code"] == 400
+
+
+# ── S4: 摘要转发 / 代持注入 / 回合超时下发 ────────────────────────────
+
+def test_subsession_history_brief_budget(tmp_path, monkeypatch):
+    """代持简报: 只取近段, 预算受控, 跳过启动标记消息。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge
+    conv = store.ConversationsStore.create({"kind": "requirement"})
+    sub = store.ConversationsStore.create({"kind": "coding", "parentConvId": conv["id"]})
+    store.ConversationsStore.append_message({"id": "a1", "conversationId": sub["id"],
+        "role": "user", "time": 1, "content": "🚀 作业启动(应被跳过)"})
+    store.ConversationsStore.append_message({"id": "a2", "conversationId": sub["id"],
+        "role": "user", "time": 2, "content": "X" * 600})       # 超单条截断
+    store.ConversationsStore.append_message({"id": "a3", "conversationId": sub["id"],
+        "role": "assistant", "time": 3, "content": "结论: 桶大小可配置"})
+    brief = exec_bridge._subsession_history_brief(sub["id"], budget=1000)
+    assert "会话历史简报" in brief and "桶大小可配置" in brief
+    assert "作业启动" not in brief
+    assert len(brief) < 1600
+
+    # 空历史 → 空串
+    sub2 = store.ConversationsStore.create({"kind": "coding", "parentConvId": conv["id"]})
+    assert exec_bridge._subsession_history_brief(sub2["id"]) == ""
+
+
+def test_start_implement_injects_history_when_no_sessionref(tmp_path, monkeypatch):
+    """代持: sessionRef 空 + 子会话有历史 → instruction 注入简报;
+    sessionRef 有 → 不注入(复活路径)。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge, websocket as ws
+    captured = {}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        captured.update(path=path, payload=payload)
+        if path == "/api/implement/running":
+            return {"ok": True, "jobs": []}
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "impl-h", "branch": "b", "worktree": "/tmp/w"}
+        return {"ok": True}
+
+    monkeypatch.setattr(exec_bridge, "_runner", _fake_runner)
+    monkeypatch.setattr("topoone_app_architect.arch_routes.execution.conv_root_project",
+                        lambda conv: (str(tmp_path), "proj-t"))
+    monkeypatch.setattr(ws, "_executor_hint", lambda c: None)
+
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    sub = store.ConversationsStore.create({"kind": "coding", "parentConvId": conv["id"]})
+    store.ConversationsStore.append_message({"id": "h1", "conversationId": sub["id"],
+        "role": "assistant", "time": 1, "content": "此前结论: 限流桶要可配置"})
+    meta = exec_bridge._meta_dict_of(store.ConversationsStore.get(conv["id"]))
+    meta["activeCodingSession"] = sub["id"]
+    store.ConversationsStore.update(conv["id"], {"meta": meta})
+
+    async def _run():
+        return await ws._executor_implement(
+            store.ConversationsStore.get(conv["id"]), None, confirmed=True)
+
+    # ① 无 sessionRef → 代持注入
+    asyncio.run(_executor_preview_reset(conv))
+    out = asyncio.run(_run())
+    assert "作业已启动" in out
+    assert "会话历史简报" in captured["payload"]["instruction"]
+    assert "限流桶要可配置" in captured["payload"]["instruction"]
+    assert "sessionRef" not in captured["payload"]
+
+    # ② sessionRef 有 → 复活注入, 不带简报(先终态第①段作业——同一时间一个作业)
+    exec_bridge._job_upsert(conv["id"], {"jobId": "impl-h", "status": "done",
+                                          "endedAt": 1})
+    store.ConversationsStore.update(sub["id"], {"sessionRef": "ses-old"})
+    asyncio.run(_executor_preview_reset(conv))
+    out2 = asyncio.run(_run())
+    assert captured["payload"].get("sessionRef") == "ses-old"
+    assert "会话历史简报" not in captured["payload"]["instruction"]
+
+
+async def _executor_preview_reset(conv):
+    """清旧预览并重新生成(confirmed 需要有效 pending 才真正建作业)。"""
+    from topoone_app_architect.arch_routes import exec_bridge, websocket as _ws
+    meta = exec_bridge._meta_dict_of(store.ConversationsStore.get(conv["id"]))
+    meta.pop("execPending", None)
+    store.ConversationsStore.update(conv["id"], {"meta": meta})
+    await _ws._executor_implement(store.ConversationsStore.get(conv["id"]), None)
+
+
+def test_start_implement_passes_turn_timeouts(tmp_path, monkeypatch):
+    """S4 回合超时下发: executorConfig.turnTimeout/stallSec → payload。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge, websocket as ws
+    captured = {}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        captured.update(path=path, payload=payload)
+        if path == "/api/implement/running":
+            return {"ok": True, "jobs": []}
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "impl-t", "branch": "b", "worktree": "/tmp/w"}
+        return {"ok": True}
+
+    monkeypatch.setattr(exec_bridge, "_runner", _fake_runner)
+    monkeypatch.setattr("topoone_app_architect.arch_routes.execution.conv_root_project",
+                        lambda conv: (str(tmp_path), "proj-t"))
+    hint = {"executorId": "opencode", "executorType": "opencode",
+            "executorConfig": {"turnTimeout": 1200, "stallSec": 240, "model": ""}}
+    monkeypatch.setattr(ws, "_executor_hint", lambda c: hint)
+
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    asyncio.run(_executor_preview_reset(conv))
+    out = asyncio.run(ws._executor_implement(
+        store.ConversationsStore.get(conv["id"]), None, confirmed=True))
+    assert "作业已启动" in out
+    assert captured["payload"]["turnTimeout"] == 1200.0
+    assert captured["payload"]["stallSec"] == 240.0
+
+
+def test_feed_summarize_paths(tmp_path, monkeypatch):
+    """S4 摘要转发: LLM 成功→压缩文本+审计标记; 失败→回退原文。"""
+    _setup(tmp_path, monkeypatch)
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    from topoone_app_architect.arch_routes import sessions as S
+    client = TestClient(build_app(data_dir=str(tmp_path / "arch")))
+    _h = lambda: {"Authorization": "Bearer test"}
+    conv = store.ConversationsStore.create({"kind": "requirement"})
+    store.ConversationsStore.append_message({"id": "m-s1", "conversationId": conv["id"],
+        "role": "assistant", "time": 1,
+        "content": "经过 A/B/C 三方案对比与风险评估，结论：限流桶大小必须可配置(env BUCKET_SIZE)，默认 100。"})
+    # LLM 成功路径
+    async def _ok_sum(text):
+        return ("结论：限流桶大小可配置(BUCKET_SIZE)，默认 100。", True)
+    monkeypatch.setattr(S, "_summarize_for_coding", _ok_sum)
+    r = client.post(f"/api/architect/sessions/{conv['id']}/feed",
+                    json={"messageId": "m-s1", "summarize": True},
+                    headers=_h()).json()["data"]
+    assert r["summarized"] is True and "(摘要)" in r["summary"]
+    # LLM 失败路径(回退原文)
+    async def _fail_sum(text):
+        return (text, False)
+    monkeypatch.setattr(S, "_summarize_for_coding", _fail_sum)
+    r2 = client.post(f"/api/architect/sessions/{conv['id']}/feed",
+                     json={"text": "直接文本", "summarize": True},
+                     headers=_h()).json()["data"]
+    assert r2["summarized"] is False   # LLM 失败如实标记(原文透传)
+
+
+def test_summarize_for_coding_llm_unreachable(tmp_path, monkeypatch):
+    """LLM 不可达 → 回退原文 + False(不抛异常)。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import sessions as S
+
+    def _boom(*a, **k):
+        raise RuntimeError("llm down")
+    import topoone_app_architect.arch_routes.req_agent as ra
+    monkeypatch.setattr(ra, "llm_sync", _boom)
+    text, ok = asyncio.run(S._summarize_for_coding("原始分析内容"))
+    assert ok is False and text == "原始分析内容"

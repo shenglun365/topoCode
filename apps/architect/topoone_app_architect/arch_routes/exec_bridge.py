@@ -3,7 +3,7 @@
 生命周期重构 v2:
 - 多作业: 会话可并行多个外调作业; 账本 jobs[](conv.meta) 为唯一终态真相,
   runner _JOBS 仅运行态(重启即失 → lost 对账)
-- workState 聚合: 存在非终态作业 → 会话 running(输入锁定); 全部终态 → architect
+- workState 聚合: 存在非终态作业 → 会话 running(双收件人, 输入不锁); 全部终态 → architect
 - 纯下行泵: 作业事件(提问/进度/完成/失败)批量落会话消息——**无上行自动转发**
   (裁决#6.1); 用户补充经「继续执行」显式增量回合交回等待中的作业
 - 停止: 仅 UI 按钮(REST)调用 stop(); 无自然语言通道(裁决#5)
@@ -118,6 +118,39 @@ def _meta_dict_of(conv: dict) -> dict:
         except (TypeError, ValueError):
             meta = {}
     return meta or {}
+
+
+def _subsession_history_brief(sub_id: str, budget: int = 3000) -> str:
+    """architect 代持(S4): 执行器无原生会话保持(session_ref 空)时,
+    把子会话历史要点注入新作业 instruction——等效会话连续性。
+
+    取最近 8 条消息(用户补充/agent 产出尾部), 每条截断, 总预算受控。
+    """
+    try:
+        msgs = store.ConversationsStore.messages(sub_id, limit=200)[-8:]
+    except Exception:  # noqa: BLE001
+        return ""
+    lines = []
+    used = 0
+    for m in reversed(msgs):                      # 近者优先
+        role = "用户补充" if (m.get("role") or "") == "user" else "执行产出"
+        c = (m.get("content") or "").strip()
+        if not c or c.startswith("🚀"):
+            continue
+        frag = c[:400]
+        if used + len(frag) > budget:
+            frag = frag[: max(0, budget - used)]
+        if not frag:
+            break
+        lines.append(f"[{role}] {frag}")
+        used += len(frag)
+        if used >= budget:
+            break
+    if not lines:
+        return ""
+    lines.reverse()
+    return ("【会话历史简报(architect 代持——执行器无原生会话保持, 供你恢复上下文)】\n"
+            + "\n".join(lines))
 
 
 def _ensure_active_coding_session(conv: dict) -> str:
@@ -294,7 +327,7 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
     from .execution import conv_root_project
     conv_id = conv["id"]
     if is_running(conv_id):
-        return ("当前会话已有作业执行中（输入锁定）。请在会话信息面板停止作业，"
+        return ("当前会话已有作业执行中(同一时间一个作业)。请在会话信息面板停止作业，"
                 "或等待回合结束后再启动新作业。")
     root, project = conv_root_project(conv)
     if not root:
@@ -324,6 +357,18 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
     sub_row = store.ConversationsStore.get(sub_id) or {}
     if sub_row.get("sessionRef"):
         payload["sessionRef"] = sub_row["sessionRef"]
+    else:
+        # S4 代持: 无原生会话可复活(无状态执行器/会话丢失) → 子会话历史注入
+        brief = _subsession_history_brief(sub_id)
+        if brief:
+            payload["instruction"] = brief + "\n\n---\n\n" + payload["instruction"]
+
+    # S4 回合超时配置下发(执行器注册表 config → runner 看门狗参数)
+    _cfg = (executor_hint or {}).get("executorConfig") or {}
+    for k in ("turnTimeout", "stallSec"):
+        v = _cfg.get(k)
+        if isinstance(v, (int, float)) and v > 0:
+            payload[k] = float(v)
 
     res = _runner("/api/implement", payload, timeout=20.0)
     if not res or not res.get("ok"):

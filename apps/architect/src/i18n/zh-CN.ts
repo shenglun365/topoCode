@@ -461,6 +461,7 @@ export default {
       view: '查看消息流',
       empty: '暂无子会话——/确认执行 时自动创建，或点下方新建。',
       feedHint: '转达给 coding(过滤后进入子会话与作业)',
+      feedSummaryHint: '摘要转达(LLM 压缩为结论段后进入)',
     },
     target: {
       architect: '架构师',

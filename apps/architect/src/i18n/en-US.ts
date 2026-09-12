@@ -437,6 +437,7 @@ export default {
       view: 'Open stream',
       empty: 'No sub-sessions yet — auto-created on /确认执行, or create below.',
       feedHint: 'Feed to coding (filtered into sub-session & job)',
+      feedSummaryHint: 'Summarized feed (LLM-compressed conclusion only)',
     },
     target: {
       architect: 'Architect',

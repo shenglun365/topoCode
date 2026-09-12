@@ -184,14 +184,16 @@ function viewSub(id: string) {
 
 // ── S3 投喂门: 主会话消息 → 过滤 → 活跃子会话+作业 ──
 const feedBusyIdx = ref(-1)
-async function onFeedTurn(p: { index: number; id?: string }) {
+async function onFeedTurn(p: { index: number; id?: string; summarize?: boolean }) {
   if (feedBusyIdx.value >= 0 || !conv.activeId) return
   const m = conv.turns[p.index]
   if (!m) return
   feedBusyIdx.value = p.index
   try {
     const r = await apiPost<{ summary?: string; delivered?: boolean }>(
-      `/sessions/${conv.activeId}/feed`, { messageId: m.id || '', text: m.id ? undefined : m.content })
+      `/sessions/${conv.activeId}/feed`,
+      { messageId: m.id || '', text: m.id ? undefined : m.content,
+        ...(p.summarize ? { summarize: true } : {}) })
     conv.pushLocalHint(String(r?.summary || '已投喂'))
   } catch (e: any) {
     conv.pushLocalHint(`⚠️ 转达失败：${e instanceof Error ? e.message : String(e)}`)

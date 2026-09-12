@@ -48,7 +48,7 @@ const emit = defineEmits<{
   answers: [answers: Record<string, string>]
   'confirm-draft': []
   'delete-turn': [index: number]
-  'feed-turn': [p: { index: number; id?: string }]
+  'feed-turn': [p: { index: number; id?: string; summarize?: boolean }]
   'refresh-asset': [assetId: string]
   'toggle-diagram-skill': [enabled: boolean]
   'toggle-contract-skill': [enabled: boolean]
@@ -696,6 +696,15 @@ onUnmounted(() => {
               @click="emit('feed-turn', { index: i, id: (m as any).id })"
             >
               <PaperAirplaneIcon class="w-3 h-3 rotate-90" />
+            </button>
+            <button
+              v-if="m.role === 'assistant' && !(m.meta?.kind)"
+              class="text-ctp-overlay0 hover:text-ctp-yellow transition-colors p-0.5"
+              :title="t('session.subs.feedSummaryHint')"
+              :disabled="feedBusyIdx === i"
+              @click="emit('feed-turn', { index: i, id: (m as any).id, summarize: true })"
+            >
+              <SparklesIcon class="w-3 h-3" />
             </button>
             <button
               class="text-ctp-overlay0 hover:text-ctp-red transition-colors p-0.5"
