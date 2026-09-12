@@ -350,6 +350,18 @@ async def clone_session(conv_id: str, request: Request):
         return err(400, f"执行器实例不存在: {executor_id}")
     tail_n = min(max(int(data.get("tailMessages") or 10), 0), 40)
 
+    # 库路由: 源会话在项目库时, 克隆全程显式路由到同库(调用方无需带 project)
+    from . import ctx as _ctx
+    pid = (conv.get("projectId") or "").strip()
+    tok = _ctx.set_project(pid) if pid else None
+    try:
+        return ok(_clone_into_project(conv, executor_id, tail_n, conv_id))
+    finally:
+        if tok is not None:
+            _ctx.reset_project(tok)
+
+
+def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str) -> dict:
     new_conv = store.ConversationsStore.create({
         "kind": conv.get("kind") or "generic",
         "projectId": conv.get("projectId") or "",
@@ -387,7 +399,7 @@ async def clone_session(conv_id: str, request: Request):
             })
     except Exception:  # noqa: BLE001
         pass
-    return ok(_conv_api(store.ConversationsStore.get(new_conv["id"]) or new_conv))
+    return _conv_api(store.ConversationsStore.get(new_conv["id"]) or new_conv)
 
 
 @router.post("/sessions/{conv_id}/probe")
