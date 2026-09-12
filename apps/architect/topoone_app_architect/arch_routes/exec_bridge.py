@@ -241,6 +241,11 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
                          ("autoStart", "autoStart"), ("baseUrl", "baseUrl")):
         if executor_hint and executor_hint.get(k_src) not in (None, ""):
             payload[k_dst] = executor_hint[k_src]
+    # 执行器分发(多类型 coding agent 适配): 角色 executorId → runner 选 TurnAdapter
+    if executor_hint and executor_hint.get("executorId"):
+        payload["executorId"] = executor_hint["executorId"]
+        payload["executorType"] = executor_hint.get("executorType") or ""
+        payload["executorConfig"] = executor_hint.get("executorConfig") or {}
     res = _runner("/api/implement", payload, timeout=20.0)
     if not res or not res.get("ok"):
         err = (res or {}).get("error") or "runner 服务不可达(:3458)"

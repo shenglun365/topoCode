@@ -816,8 +816,29 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
             if (e.get("id") or "") == eid:
                 cfg = e.get("config") or {}
                 models = e.get("models") or []
-                return {"model": (models[0] if models else "") or cfg.get("model") or "",
-                        "basePort": cfg.get("base_port"), "autoStart": cfg.get("auto_start"),
+                return {"executorId": eid,
+                        "executorType": e.get("type") or "",
+                        "executorConfig": {
+                            "model": cfg.get("model") or "",
+                            "base_port": cfg.get("base_port"),
+                            "auto_start": cfg.get("auto_start"),
+                            "base_url": cfg.get("base_url") or cfg.get("serve_url") or "",
+                            "opencode_bin": cfg.get("opencode_bin") or "",
+                            "node_bin": cfg.get("node_bin") or "",
+                            "sidecar_script": cfg.get("sidecar_script") or "",
+                            "provider_id": cfg.get("provider_id") or "",
+                            "model_id": cfg.get("model_id") or "",
+                            "api_key": cfg.get("api_key") or "",
+                            "max_iterations": cfg.get("max_iterations"),
+                            "arch_url": cfg.get("arch_url") or "",
+                            "codex_bin": cfg.get("codex_bin") or "",
+                            "codex_home": cfg.get("codex_home") or "",
+                            "approval_policy": cfg.get("approval_policy") or "",
+                            "sandbox_mode": cfg.get("sandbox_mode") or "",
+                        },
+                        "model": (models[0] if models else "") or cfg.get("model") or "",
+                        "basePort": cfg.get("base_port"),
+                        "autoStart": cfg.get("auto_start"),
                         "baseUrl": cfg.get("base_url") or cfg.get("serve_url") or ""}
     except Exception:  # noqa: BLE001
         pass

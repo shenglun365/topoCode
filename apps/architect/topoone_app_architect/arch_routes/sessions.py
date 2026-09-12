@@ -615,6 +615,18 @@ def _guide_jobs_state(conv_id: str) -> list:
         return []
 
 
+@router.post("/sessions/{conv_id}/stop-exec")
+async def stop_exec_session(conv_id: str):
+    """UI 停止按钮(REST, 裁决#5): 结束会话全部运行中作业(保留 worktree/分支)。
+
+    作业句柄已不在 runner(重启清空)时 _runner 调用静默失败, 账本仍终态化。
+    """
+    from . import exec_bridge
+    if not store.ConversationsStore.get(conv_id):
+        return err(404, "会话不存在")
+    return ok({"message": exec_bridge.stop(conv_id, reason="user")})
+
+
 @router.post("/sessions/{conv_id}/guide")
 async def session_guide(conv_id: str):
     conv = store.ConversationsStore.get(conv_id)

@@ -1,4 +1,4 @@
-"""runner implement 作业宿主单测：注册/快照/输入缓冲/标记分类(不经真实 opencode)。
+"""runner implement 作业宿主单测：注册/快照/输入缓冲/标记分类(假 TurnAdapter)。
 
 Run: cd <repo> && python -m pytest packages/core/tests/test_runner_implement.py -q
 """
@@ -8,12 +8,34 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "topoone"))
 
+from topoone.plugins.runner.turn_adapter import TurnAdapter, TurnOutcome  # noqa: E402
 from topoone.plugins.runner.implement import ImplementJob  # noqa: E402
 
 
+class _FakeAdapter(TurnAdapter):
+    """可编程假执行器: run_turn 返回预置输出。"""
+
+    executor_id = "fake"
+
+    def __init__(self, output: str = ""):
+        self._output = output
+
+    async def start_session(self, job) -> None:
+        job.session_id = "s1"
+        job.serve_url = "fake://adapter"
+
+    async def run_turn(self, job, text: str) -> TurnOutcome:
+        return TurnOutcome(output=self._output or text, changed_files=[])
+
+    async def probe(self, job) -> "object":
+        raise NotImplementedError
+
+
 def _job(**kw) -> ImplementJob:
+    output = kw.pop("output", "")
     return ImplementJob("j1", root="/tmp/x", wt="/tmp/x-wt", base="HEAD",
-                        branch="exec/t", instruction="do", **kw)
+                        branch="exec/t", instruction="do",
+                        adapter=_FakeAdapter(output=output), **kw)
 
 
 def test_snapshot_and_events():
@@ -24,6 +46,7 @@ def test_snapshot_and_events():
     assert snap["status"] == "starting"
     assert [e["seq"] for e in snap["events"]] == [s2]
     assert "A 还是 B" in snap["events"][0]["text"]
+    assert snap["executorId"] == "fake"
 
 
 def test_user_input_queues_while_busy():
@@ -39,54 +62,26 @@ def test_user_input_queues_while_busy():
     assert not r2["ok"]
 
 
-def test_turn_marker_classification(monkeypatch):
-    """回合输出标记 → 状态分类(done/waiting_input)。"""
-    class _FakeResp:
-        def raise_for_status(self): pass
-        def json(self):
-            return {"parts": [{"type": "text", "text": self._text}]}
-    class _FakeClient:
-        def __init__(self, *a, **k): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        def post(self, url, json=None):
-            r = _FakeResp(); r._text = json["parts"][0]["text"]; return _wrap(r)
-        async def get(self, url): return _wrap(_FakeResp())
-    class _Wrap:
-        def __init__(self, r): self._r = r
-        def raise_for_status(self): pass
-        def json(self): return self._r.json()
-    def _wrap(r): return _Wrap(r)
+def test_turn_marker_classification():
+    """回合输出标记 → 状态分类(done/waiting_input/兜底)。"""
 
-    async def _fake_turn(j, text):
-        # 以假 client 跑真分类逻辑: 直接调内部方法并拦截 httpx
-        import topoone.plugins.runner.implement as impl
-        class _AC:
-            def __init__(self, *a, **k): pass
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): return False
-            async def post(self, url, json=None):
-                out = {"parts": [{"type": "text", "text": json["parts"][0]["text"]}]}
-                return _Resp(out)
-            async def get(self, url): return _Resp({})
-        class _Resp:
-            def __init__(self, data): self._d = data
-            def raise_for_status(self): pass
-            def json(self): return self._d
-        monkeypatch.setattr(impl.httpx, "AsyncClient", _AC)
-        await impl.ImplementJob._run_turn(j, text)
+    async def _turn(j, text):
+        await j._run_turn(text)
 
     # done 标记
-    j1 = _job(); j1.status = "running"; j1.session_id = "s"; j1.serve_url = "http://x"
-    asyncio.run(_fake_turn(j1, "完成 [[IMPLEMENT_DONE]] 摘要"))
+    j1 = _job(output="完成 [[IMPLEMENT_DONE]] 摘要")
+    j1.status = "running"
+    asyncio.run(_turn(j1, "x"))
     assert j1.status == "done"
     assert j1.events[-1]["kind"] == "done"
     # need_input 标记
-    j2 = _job(); j2.status = "running"; j2.session_id = "s"; j2.serve_url = "http://x"
-    asyncio.run(_fake_turn(j2, "需要确认 [[NEED_INPUT]] 用哪个方案?"))
+    j2 = _job(output="需要确认 [[NEED_INPUT]] 用哪个方案?")
+    j2.status = "running"
+    asyncio.run(_turn(j2, "x"))
     assert j2.status == "waiting_input"
     assert j2.events[-1]["kind"] == "input_required"
     # 无标记 → 兜底 waiting_input
-    j3 = _job(); j3.status = "running"; j3.session_id = "s"; j3.serve_url = "http://x"
-    asyncio.run(_fake_turn(j3, "我先做了些分析…"))
+    j3 = _job(output="我先做了些分析…")
+    j3.status = "running"
+    asyncio.run(_turn(j3, "x"))
     assert j3.status == "waiting_input"

@@ -43,6 +43,9 @@ class _AppServerProcess:
         self._pending: dict[int, asyncio.Future] = {}
         self.events: list[dict] = []  # 最近事件（ring）
         self._waiters: list[tuple[str, asyncio.Event]] = []
+        # 通道状态(看门狗/适配层探测): read loop 退出即断流
+        self.dead: bool = False
+        self.dead_reason: str = ""
 
     async def _start_locked(self) -> None:
         if self._proc and self._proc.returncode is None:
@@ -117,9 +120,17 @@ class _AppServerProcess:
                         if m == ev["method"]:
                             w.set()
         except asyncio.CancelledError:
-            pass
+            self.dead = True
+            self.dead_reason = "read loop cancelled"
+            raise
         except Exception as e:  # noqa: BLE001
             logger.warning("[codex] read loop died: %s", e)
+            self.dead = True
+            self.dead_reason = str(e)[:300] or "read loop died"
+        else:
+            # while 正常退出(stdout EOF/进程结束) → 通道断流
+            self.dead = True
+            self.dead_reason = "app-server stdout EOF"
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(RuntimeError("codex app-server exited"))

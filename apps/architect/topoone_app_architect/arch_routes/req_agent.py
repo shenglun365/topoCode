@@ -1258,14 +1258,18 @@ def parse_scope_files(lines: list) -> set:
     """边界声明行 → 文件/目录集合(互斥引擎的文件级口径)。
 
     识别: 目录(以 / 结尾) · 文件路径(含 / 且带扩展名) · 顶层路径段(如 src/)。
+    剥除括号补充说明——`modules/xxx/(更新目录结构及逻辑)` → `modules/xxx/`
+    (全角/半角括号, 说明文字混入会稀释互斥前缀匹配精度)。
     组件引用(comp:xxx)与自然语言不参与文件级互斥(组件级经 KB 口径单独解析)。
     """
+    import re as _re
     out: set = set()
     for ln in lines or []:
         t = str(ln or "").strip()
         if not t or t.startswith("comp:"):
             continue
-        # 剥常见前缀修饰
+        # 剥括号补充说明(全角/半角, 非嵌套)与常见前缀修饰
+        t = _re.sub(r"[（(][^（）()]*[)）]", "", t).strip()
         for prefix in ("./", "/"):
             if t.startswith(prefix):
                 t = t[len(prefix):]
