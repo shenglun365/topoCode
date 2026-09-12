@@ -591,8 +591,11 @@ onUnmounted(() => {
 
 <template>
   <div class="relative flex flex-col h-full min-h-0 border border-ctp-surface0 rounded-lg overflow-hidden bg-ctp-crust/30">
+    <!-- 布局: 左组(标题+收件人+内联按钮)整体靠左, header-extra(ml-auto)靠右;
+         左组恒为一个 flex 子项, 收件人 chips 位置不随右侧元素增减跳动 -->
     <div class="panel-header relative shrink-0">
-      <span class="flex min-w-0 items-center gap-2">
+      <span class="flex min-w-0 items-center">
+        <span class="flex min-w-0 items-center gap-2">
         <ChatBubbleLeftRightIcon class="w-4 h-4 shrink-0 text-ctp-blue" />
         <input
           v-if="editingTitle"
@@ -672,6 +675,9 @@ onUnmounted(() => {
             @click="pickModel(m)"
           >{{ m || t('session.target.modelDefault') }}</button>
         </span>
+        <!-- 内联管理按钮(执行器/子会话): 紧跟收件人 chips, 位置恒定 -->
+        <slot name="header-inline" />
+      </span>
       </span>
       <slot name="header-extra" />
     </div>

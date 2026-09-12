@@ -743,6 +743,22 @@ async function pollRunningState() {
         @refresh-asset="emitRefreshAsset"
         @stop="conv.stop"
       >
+        <!-- 内联管理按钮: 紧跟收件人 chips(位置恒定, 不随会话创建跳动) -->
+        <template #header-inline>
+          <span class="flex shrink-0 items-center gap-1">
+            <button
+              class="btn !py-0 !px-2 !text-[10px]"
+              :title="t('session.role.manageTitle')"
+              @click="openRoles"
+            >{{ t('session.role.manage') }}</button>
+            <button
+              v-if="isMainSession"
+              class="btn !py-0 !px-2 !text-[10px]"
+              :title="t('session.subs.title')"
+              @click="openSubs"
+            >{{ t('session.subs.manage') }}<template v-if="codingSubs.length">({{ codingSubs.length }})</template></button>
+          </span>
+        </template>
         <template #header-extra>
           <div v-if="conv.activeId" class="ml-auto flex shrink-0 items-center gap-1.5">
             <span
@@ -773,17 +789,6 @@ async function pollRunningState() {
               class="chip !text-[10px] bg-ctp-mauve/15 text-ctp-mauve"
               :title="t('session.role.manageTitle')"
             >⌨ {{ boundExecutorId }}</span>
-            <button
-              class="btn !py-0 !px-2 !text-[10px]"
-              :title="t('session.role.manageTitle')"
-              @click="openRoles"
-            >{{ t('session.role.manage') }}</button>
-            <button
-              v-if="isMainSession"
-              class="btn !py-0 !px-2 !text-[10px]"
-              :title="t('session.subs.title')"
-              @click="openSubs"
-            >{{ t('session.subs.manage') }}<template v-if="codingSubs.length">({{ codingSubs.length }})</template></button>
             <button
               v-if="isRunning"
               class="btn !py-0 !px-2 !text-[10px] btn-ghost !text-ctp-red"
