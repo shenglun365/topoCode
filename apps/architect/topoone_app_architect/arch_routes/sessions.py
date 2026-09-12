@@ -941,6 +941,12 @@ async def session_guard_repair(conv_id: str, request: Request):
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
+    # 请求级会话上下文: req.propose 落库后回写 conv.reqId 绑定/ownerConv 证据链
+    # (与 WS 路径 websocket.set_conv/set_project 对齐; 缺失则新建需求与会话脱钩、
+    # 且落库进主库默认桶而非项目库)
+    from . import ctx as _ctx
+    _ctx.set_conv(conv_id)
+    _ctx.set_project(str(conv.get("projectId") or ""))
     from .req_agent import repair_fabricated_claim
     res = await asyncio.to_thread(
         repair_fabricated_claim, claim, need, content,

@@ -263,7 +263,7 @@ _SPEC_FIELD_ALIASES: Dict[str, tuple] = {
     "requirementMd": ("requirementMd", "requirement", "requirement_md", "description"),
     "designMd": ("designMd", "design", "design_md"),
     "allowedScope": ("allowedScope", "allowedScopeMd", "allowed_scope", "allow", "scope"),
-    "forbiddenScope": ("forbiddenScope", "forbiddenScopeMd", "forbidden_scope", "forbid"),
+    "forbiddenScope": ("forbiddenScope", "forbiddenScopeMd", "forbidden_scope", "forbid", "antiGoals", "anti_goals"),
     "acceptance": ("acceptance", "acceptanceMd", "acceptance_md", "acceptanceCriteria"),
     "assessmentSummary": ("assessmentMd", "assessment", "assessment_md", "assessmentSummary"),
     "estMin": ("estMin", "est_min", "estimateMinutes"),
@@ -282,18 +282,47 @@ def is_spec_payload(obj: Any) -> bool:
     return hit >= 3
 
 
+def _repair_json_like(raw: str) -> str:
+    """LLM 伪 JSON 确定性自愈(零 LLM, 零误伤原则):
+
+    - `\"\"\"...\"\"\"`(含 `\"\"\"\"` 多引号闭合)字符串(JSON 不支持, LLM 高频习惯)
+      → 合法转义字符串;
+    - 尾逗号 ` ,} ` / ` ,] ` → 删除。
+    其余语法错误交给 L2(repair_spec_payload_format)。
+    """
+    def _tq(m: "re.Match") -> str:
+        return json.dumps(m.group(1))
+    raw = re.sub(r'"{3,}\s*(.*?)\s*"{3,}', _tq, raw, flags=re.DOTALL)
+    raw = re.sub(r",(\s*[}\]])", r"\1", raw)
+    return raw
+
+
 def extract_spec_payload(text: str) -> Optional[Dict[str, Any]]:
-    """从消息文本提取规约载荷(```json 围栏优先)。非规约形状 → None。"""
-    cands: List[str] = []
-    for m in re.finditer(r"```json\s*(\{.*?})\s*```", text or "", re.DOTALL):
-        cands.append(m.group(1))
-    for raw in cands:
-        try:
-            obj = json.loads(raw)
-        except Exception:  # noqa: BLE001
-            continue
-        if is_spec_payload(obj):
-            return obj
+    """从消息文本提取规约载荷(```json 围栏优先)。非规约形状 → None。
+
+    - 嵌套围栏免疫: 值内可含 ```diagram 等子围栏(其 ``` 会截断非贪婪
+      匹配)——对每个 ```json 起点逐个闭合候选(从近到远)尝试, 第一个
+      loads 成功且规约形状胜出;
+    - loads 失败先过 L0 伪 JSON 自愈(三引号/尾逗号)再判;
+      is_spec_payload 字段签名校验兜底防误吸。
+    """
+    text = text or ""
+    for jm in re.finditer(r"```json\s*", text):
+        rest = text[jm.end():]
+        for cm in re.finditer(r"```", rest):
+            cand = rest[:cm.start()].strip()
+            if not cand.startswith("{"):
+                continue
+            for raw in (cand, cand.rstrip().rstrip("`").rstrip()):
+                try:
+                    obj = json.loads(raw)
+                except Exception:  # noqa: BLE001
+                    try:
+                        obj = json.loads(_repair_json_like(raw))
+                    except Exception:  # noqa: BLE001
+                        continue
+                if is_spec_payload(obj):
+                    return obj
     return None
 
 
@@ -1703,6 +1732,7 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
                           "source": {"convId": conv_id, "actor": "architect"},
                           "reason": "初始提案", "createdAt": _ts()}],
         "ownerConv": conv_id, "sourceType": "asset-chat",
+        "projectId": project or "",
         "sourceConversationId": conv_id, "updatedAt": _ts(), "createdAt": _ts(),
     }
     _store.RequirementsStore.create(req)

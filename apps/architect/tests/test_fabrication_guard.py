@@ -336,3 +336,32 @@ def test_repair_fabricated_claim_prefers_deterministic(monkeypatch):
                                    req_id="RQ-GUARD-DET")
     assert r["action"] == "amended"
     assert captured["name"] == "req.amend"
+
+
+def test_extract_nested_fence_and_pseudo_json():
+    # 嵌套子围栏(designMd 内 ```diagram)不再截断外层 + L0 伪 JSON 自愈。
+    # cv-82 实案形态: 三引号字符串(含四引号闭合)由完整闭合扫描消化。
+    inner = "```diagram\n{\"nodes\":[{\"id\":\"a\"}]}\n```"
+    body = ('{\n'
+            '  "title": "网关构建",\n'
+            '  "requirementMd": """### 目标\n高性能网关。"""",\n'
+            f'  "designMd": """拓扑\n\n{inner}\n\n### 组件""",\n'
+            '  "acceptanceMd": ["P99 < 20ms",],\n'
+            '  "assessmentMd": {"estMin": 60},\n'
+            '}')
+    msg = "说明文字\n```json\n" + body + "\n```\n后续文字"
+    from topoone_app_architect.arch_routes.req_agent import extract_spec_payload
+    p = extract_spec_payload(msg)
+    assert p is not None, "嵌套围栏+三引号伪 JSON 应自愈提取"
+    assert p["title"] == "网关构建"
+    assert "```diagram" in p["designMd"], "designMd 应含嵌套子围栏全文"
+    assert p["requirementMd"].endswith("高性能网关。")
+    assert p["acceptanceMd"] == ["P99 < 20ms"], "尾逗号应自愈"
+
+
+def test_propose_routes_to_project_bucket(monkeypatch, tmp_path):
+    """req.propose 落库路由: 请求级 project ctx → 项目库桶(数据带 projectId)。"""
+    import inspect
+    from topoone_app_architect.arch_routes import req_agent
+    src = inspect.getsource(req_agent.tool_req_propose)
+    assert '"projectId": project or ""' in src, "propose 需求数据应携带 projectId(库路由)"
