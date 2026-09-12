@@ -628,6 +628,30 @@ async def stop_exec_session(conv_id: str):
     return ok({"message": exec_bridge.stop(conv_id, reason="user")})
 
 
+@router.post("/sessions/{conv_id}/spec-apply")
+async def session_spec_apply(conv_id: str, request: Request):
+    """消息流「写入需求」按钮: 规约 JSON 载荷确定性落库(零 LLM)。
+
+    三级降级内建(归一化自愈 → 字段降级 → LLM 格式修复); 载荷内 reqId 一律
+    丢弃, 落库目标取会话绑定需求(未完结 amend / 无绑定 propose 新建)。
+    body: {payload: {...}}
+    """
+    body = await request.json()
+    payload = body.get("payload")
+    if not isinstance(payload, dict) or not payload:
+        return err(400, "缺少 payload")
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    from .req_agent import apply_spec_payload
+    res = await asyncio.to_thread(
+        apply_spec_payload, payload,
+        req_id=str(conv.get("reqId") or ""),
+        project=str(conv.get("projectId") or ""),
+        root="")
+    return ok(res)
+
+
 @router.post("/sessions/{conv_id}/guard-repair")
 async def session_guard_repair(conv_id: str, request: Request):
     """守卫卡片指令(点击触发): 独立外循环修复编造声明并真实落库。

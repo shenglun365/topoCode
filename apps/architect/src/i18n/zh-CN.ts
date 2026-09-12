@@ -494,6 +494,8 @@ export default {
       renamePrompt: '会话标题',
       summarize: '生成摘要',
       guide: '指令引导',
+      applySpec: '写入需求',
+      applySpecHint: '按原文确定性落库（零模型转写）',
       editTags: '编辑标签/分组',
       groupsPrompt: '自定义分组(逗号分隔)',
       modulesPrompt: '关联模块(逗号分隔)',

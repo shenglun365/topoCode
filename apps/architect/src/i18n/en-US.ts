@@ -470,6 +470,8 @@ export default {
       renamePrompt: 'Session title',
       summarize: 'Summarize',
       guide: 'Guide',
+      applySpec: 'Apply as requirement',
+      applySpecHint: 'Deterministic apply from original JSON (no LLM rewrite)',
       editTags: 'Edit tags/groups',
       groupsPrompt: 'Custom groups (comma separated)',
       modulesPrompt: 'Modules (comma separated)',

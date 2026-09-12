@@ -189,3 +189,150 @@ def test_propose_writes_back_conv_reqid(monkeypatch):
             store.RequirementsStore.delete(r["requirementId"])
         except Exception:
             pass
+
+
+# ── 规约载荷确定性提取(三级降级) ──
+
+def _cv73_payload() -> dict:
+    """cv-73 真实载荷形状(编造 reqId + assetScope + implementationPath + 对象评估)。"""
+    return {
+        "title": "Nginx-Lua 高性能网关模块构建 (非侵入式)",
+        "description": "在现有 nginx-src 项目基础上…",
+        "requirementMd": "构建一个高可用、高性能的 API 网关插件…",
+        "designMd": "1. **组件架构**: 新增 L1 组件…",
+        "allowedScopeMd": ["新增独立组件目录 comm-ng-gw-plugin (L1)"],
+        "forbiddenScopeMd": ["修改 src/core/nginx.c"],
+        "acceptanceMd": ["编译产物可动态加载新模块"],
+        "assessmentMd": {"risk": "低", "benefit": "零侵入", "estMin": 120},
+        "priority": "P1",
+        "assetScope": [{"assetId": "comm-ng-gw-plugin", "assetType": "component",
+                        "role": "新组件 (L1)", "source": "proposed"}],
+        "implementationPath": ["1. 确认依赖", "2. 创建目录"],
+        "reqId": "RQ-NGW-001",
+    }
+
+
+def test_is_spec_payload_and_extract():
+    import json
+    from topoone_app_architect.arch_routes.req_agent import (
+        is_spec_payload, extract_spec_payload)
+    p = _cv73_payload()
+    assert is_spec_payload(p)
+    assert not is_spec_payload({"foo": 1, "bar": 2, "baz": 3})
+    msg = "前置说明\n```json\n" + json.dumps(p, ensure_ascii=False) + "\n```"
+    ext = extract_spec_payload(msg)
+    assert ext and ext["title"] == p["title"]
+    assert extract_spec_payload("无围栏普通回答") is None
+
+
+def test_apply_spec_payload_amends_bound(monkeypatch):
+    """绑定未完结需求 → req.amend；编造 reqId 丢弃；assessmentMd 对象拼接。"""
+    import json
+    from topoone_app_architect.arch_routes import req_agent as ra
+
+    _ensure_req("RQ-GUARD-AP")
+    captured = {}
+
+    def fake_run_tool(name, args, root=None, project=None):
+        captured["name"], captured["args"] = name, args
+        return {"ok": True, "reqId": "RQ-GUARD-AP", "ver": 2}
+
+    monkeypatch.setattr(ra, "run_arch_tool", fake_run_tool)
+    r = ra.apply_spec_payload(_cv73_payload(), req_id="RQ-GUARD-AP")
+    assert r["ok"] and r["action"] == "amended"
+    assert captured["name"] == "req.amend"
+    assert captured["args"]["reqId"] == "RQ-GUARD-AP"
+    assert "RQ-NGW-001" not in json.dumps(captured["args"])     # 编造编号不透传
+    assert "risk:低" in captured["args"]["assessmentSummary"]
+    assert any("estMin" in x for x in r["ignored"])   # amend 不支持 estMin
+    assert "实施路径" in captured["args"]["designMd"]            # implementationPath 附录
+    assert "资产范围" in captured["args"]["designMd"]
+    assert "reqId" in ",".join(r["ignored"]) or any("reqId" in x for x in r["ignored"])
+
+
+def test_apply_spec_payload_creates_when_unbound(monkeypatch):
+    """无绑定 → req.propose 新建(newRequirement)。"""
+    from topoone_app_architect.arch_routes import req_agent as ra
+    captured = {}
+
+    def fake_run_tool(name, args, root=None, project=None):
+        captured["name"], captured["args"] = name, args
+        return {"ok": True, "requirementId": "RQ-NEW-1", "ver": 1}
+
+    monkeypatch.setattr(ra, "run_arch_tool", fake_run_tool)
+    p = _cv73_payload()
+    r = ra.apply_spec_payload(p, req_id="")
+    assert r["ok"] and r["action"] == "proposed"
+    assert captured["name"] == "req.propose"
+    assert captured["args"].get("newRequirement") is True
+
+
+def test_apply_spec_payload_alias_and_string_forms(monkeypatch):
+    """级别 0 归一: 字段别名 + 边界字符串形态。"""
+    from topoone_app_architect.arch_routes import req_agent as ra
+    captured = {}
+
+    def fake_run_tool(name, args, root=None, project=None):
+        captured["args"] = args
+        return {"ok": True, "reqId": "RQ-GUARD-AP", "ver": 3}
+
+    monkeypatch.setattr(ra, "run_arch_tool", fake_run_tool)
+    _ensure_req("RQ-GUARD-AP")
+    payload = {
+        "name": "别名归一需求",                       # name → title
+        "design": "方案内容",                          # design → designMd
+        "allowed_scope": "- a/\n- b/c",               # 别名 + 字符串形态
+        "acceptance": "验收一行\n验收二行",
+    }
+    r = ra.apply_spec_payload(payload, req_id="RQ-GUARD-AP")
+    assert r["ok"] and r["repaired"] is False
+    # amend 不支持更名: name→title 归一后进入 ignored 并如实报告
+    assert any("title" in x for x in r["ignored"])
+    assert captured["args"]["allowedScope"] == ["a/", "b/c"]
+    assert "验收一行" in captured["args"]["acceptance"]
+    assert any("allowed_scope→allowedScope" in x for x in r["summary"].split(";"))
+
+
+def test_apply_spec_payload_broken_goes_llm_repair(monkeypatch):
+    """级别 2: 缺 title → LLM 格式修复 → 重过确定性映射落库。"""
+    from topoone_app_architect.arch_routes import req_agent as ra
+    _ensure_req("RQ-GUARD-BR")
+    captured = {}
+
+    def fake_run_tool(name, args, root=None, project=None):
+        captured["args"] = args
+        return {"ok": True, "reqId": "RQ-GUARD-BR", "ver": 4}
+
+    monkeypatch.setattr(ra, "run_arch_tool", fake_run_tool)
+    monkeypatch.setattr(ra, "repair_spec_payload_format", lambda text, req_id="": {
+        "title": "修复后的标题", "designMd": "修复方案", "acceptanceMd": ["验收"],
+    })
+    r = ra.apply_spec_payload({"foo": "未知字段一", "bar": {"嵌套": 1}},
+                              req_id="RQ-GUARD-BR")
+    assert r["ok"] and r["repaired"] is True
+    assert "修复通道" in r["summary"]
+    assert any("title" in x for x in r["ignored"])   # amend 不更名, 载荷 title 丢弃
+
+
+def test_repair_fabricated_claim_prefers_deterministic(monkeypatch):
+    """守卫修复前置确定性提取: content 有规约 JSON → 不走 LLM 直接落库。"""
+    import json as _json
+    from topoone_app_architect.arch_routes import req_agent as ra
+
+    _ensure_req("RQ-GUARD-DET")
+
+    def _no_llm(*a, **k):
+        raise AssertionError("有规约 JSON 时不应触发 LLM 外循环")
+
+    captured = {}
+    monkeypatch.setattr(ra, "llm_sync", _no_llm)
+    monkeypatch.setattr(ra, "run_arch_tool",
+                        lambda n, a, root=None, project=None: (
+                            captured.update(name=n, args=a) or
+                            {"ok": True, "reqId": "RQ-GUARD-DET", "ver": 2}))
+    p = _cv73_payload()
+    content = "编造定稿说明 RQ-NGW-001\n```json\n" + _json.dumps(p, ensure_ascii=False) + "\n```"
+    r = ra.repair_fabricated_claim("定稿入池", "req.amend", content,
+                                   req_id="RQ-GUARD-DET")
+    assert r["action"] == "amended"
+    assert captured["name"] == "req.amend"

@@ -55,6 +55,7 @@ const emit = defineEmits<{
   'job-accept': [meta: Record<string, any>]
   'job-resume': []
   'guard-repair': [p: { index: number; meta: Record<string, any>; action: string }]
+  'spec-apply': [p: { index: number; payload: Record<string, unknown> }]
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
   'goto-acceptance': []
@@ -84,6 +85,42 @@ function onGuardAction(index: number, s: { action: string; label: string }) {
     })
   } finally {
     setTimeout(() => { guardBusyIdx.value = -1 }, 800)
+  }
+}
+
+// ── 规约 JSON 识别(字段签名): 「写入需求」按钮的显示条件与载荷提取 ──
+const SPEC_FIELDS = [
+  'title', 'requirementMd', 'designMd', 'allowedScope', 'allowedScopeMd',
+  'forbiddenScope', 'forbiddenScopeMd', 'acceptance', 'acceptanceMd',
+  'assessmentMd', 'estMin', 'priority',
+]
+function parseSpecPayload(content: string): Record<string, unknown> | null {
+  if (!content) return null
+  const fences = [...content.matchAll(/```json\s*(\{[\s\S]*?})\s*```/g)]
+  for (const f of fences) {
+    try {
+      const obj = JSON.parse(f[1])
+      if (obj && typeof obj === 'object') {
+        const hits = SPEC_FIELDS.filter((k) => k in obj).length
+        if (hits >= 3) return obj
+      }
+    } catch { /* 下一个围栏 */ }
+  }
+  return null
+}
+function specPayloadOf(index: number): Record<string, unknown> | null {
+  return parseSpecPayload(props.turns[index]?.content || '')
+}
+const specBusyIdx = ref(-1)
+function onSpecApply(index: number) {
+  if (specBusyIdx.value >= 0) return
+  const payload = specPayloadOf(index)
+  if (!payload) return
+  specBusyIdx.value = index
+  try {
+    emit('spec-apply', { index, payload })
+  } finally {
+    setTimeout(() => { specBusyIdx.value = -1 }, 800)
   }
 }
 
@@ -673,6 +710,20 @@ onUnmounted(() => {
             <span class="text-[10px] text-ctp-overlay0">{{ t('session.job.resumeHint') }}</span>
           </div>
 
+          <!-- 规约 JSON 落库按钮(字段签名识别, 任何含载荷的助手消息) -->
+          <div
+            v-if="!m.meta?.kind && specPayloadOf(i)"
+            class="mt-2 flex items-center gap-2"
+          >
+            <button
+              class="btn btn-xs btn-primary"
+              :disabled="specBusyIdx === i"
+              title="按原文确定性落库为需求(零模型转写)"
+              @click="onSpecApply(i)"
+            >{{ specBusyIdx === i ? '…' : t('session.guard.applySpec') }}</button>
+            <span class="text-[10px] text-ctp-overlay0">{{ t('session.guard.applySpecHint') }}</span>
+          </div>
+
           <!-- 系统守卫卡: 可点击指令(点击 → guard-repair 独立外循环), 说明在文字区 -->
           <div
             v-else-if="m.meta?.kind === 'guard'"
@@ -690,6 +741,14 @@ onUnmounted(() => {
                 </p>
                 <p class="mt-1 text-[10px] text-ctp-overlay0">
                   点击指令将走独立修复通道从原文提取真实内容落库；过程与结果仅本地展示，不进入对话上下文。
+                </p>
+                <p
+                  v-if="m.meta.hasSpecJson || specPayloadOf(i)"
+                  class="mt-1 text-[11px] text-ctp-blue/90"
+                >
+                  💡 检测到本条回复包含结构化的规约 JSON。若其内容符合你的预期，可直接点「{{
+                    (m.meta.suggestions || []).find((x: any) => x.action === 'apply_json')?.label || '按原文落库'
+                  }}」将其写入需求约束（确定性代码路径，不经模型转写）；若内容有偏差，请先在对话中指出修正点。
                 </p>
               </div>
             </div>

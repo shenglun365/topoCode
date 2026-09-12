@@ -227,12 +227,16 @@ def guard_notice(claim: str, need: str, tools_used=None,
             "不成立。请重试，或改用界面操作（方案生成按钮/任务执行页）。")
 
 
-def guard_suggestions(claim: str, need: str, tool_failed: bool = False) -> list:
+def guard_suggestions(claim: str, need: str, tool_failed: bool = False,
+                      has_spec_json: bool = False) -> list:
     """守卫卡片可点击指令(suggestions)——简洁 label, action 供 guard-repair 路由。
 
     冗长说明由前端非点击文字区承载; 这里只产 指令集。
+    has_spec_json: 消息含规约形状 JSON → 「按原文落库」排最前(确定性路径优先)。
     """
     sugs = []
+    if has_spec_json:
+        sugs.append({"action": "apply_json", "label": "按原文落库"})
     tools = (need or "").split("|")
     if "req.amend" in tools:
         sugs.append({"action": "repair_amend", "label": "修正落库"})
@@ -251,6 +255,237 @@ def guard_suggestions(claim: str, need: str, tool_failed: bool = False) -> list:
 _GUARD_REPAIR_TOOLS = ("req.amend", "req.finalize", "req.propose")
 
 
+# ── 规约载荷确定性提取(消息流「写入需求」按钮 / 守卫前置提取共用) ──
+
+# 规约签名字段(识别+归一): 命中 ≥3 视为需求规约载荷
+_SPEC_FIELD_ALIASES: Dict[str, tuple] = {
+    "title": ("title", "name"),
+    "requirementMd": ("requirementMd", "requirement", "requirement_md", "description"),
+    "designMd": ("designMd", "design", "design_md"),
+    "allowedScope": ("allowedScope", "allowedScopeMd", "allowed_scope", "allow", "scope"),
+    "forbiddenScope": ("forbiddenScope", "forbiddenScopeMd", "forbidden_scope", "forbid"),
+    "acceptance": ("acceptance", "acceptanceMd", "acceptance_md", "acceptanceCriteria"),
+    "assessmentSummary": ("assessmentMd", "assessment", "assessment_md", "assessmentSummary"),
+    "estMin": ("estMin", "est_min", "estimateMinutes"),
+    "priority": ("priority",),
+}
+
+
+def is_spec_payload(obj: Any) -> bool:
+    """字段签名识别: dict 且规约字段(别名归一后)命中 ≥3。"""
+    if not isinstance(obj, dict):
+        return False
+    hit = 0
+    for aliases in _SPEC_FIELD_ALIASES.values():
+        if any(a in obj for a in aliases):
+            hit += 1
+    return hit >= 3
+
+
+def extract_spec_payload(text: str) -> Optional[Dict[str, Any]]:
+    """从消息文本提取规约载荷(```json 围栏优先)。非规约形状 → None。"""
+    cands: List[str] = []
+    for m in re.finditer(r"```json\s*(\{.*?})\s*```", text or "", re.DOTALL):
+        cands.append(m.group(1))
+    for raw in cands:
+        try:
+            obj = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            continue
+        if is_spec_payload(obj):
+            return obj
+    return None
+
+
+def _norm_scope_list(v: Any) -> List[str]:
+    """边界/验收字段: 数组或 markdown 字符串 → 行数组(级别 0 归一)。"""
+    if isinstance(v, list):
+        return [str(x).strip() for x in v if str(x or "").strip()]
+    if isinstance(v, str):
+        return [ln.strip().lstrip("-•* ").strip() for ln in v.splitlines() if ln.strip()]
+    return []
+
+
+def apply_spec_payload(payload: Dict[str, Any], req_id: str = "",
+                       project: str = "", root: str = "") -> Dict[str, Any]:
+    """规约载荷 → 确定性落库(零 LLM)。三级降级:
+
+    L0 归一化自愈(别名/类型/围栏/兜底合并) → L1 字段降级(可选缺失忽略,
+    ignored 报告) → L2 LLM 格式修复(repair_spec_payload_format, 产物再过本
+    函数 L0/L1 + reqId 校验) → L3 如实失败。落库目标: 绑定需求未完结 →
+    req.amend; 无绑定 → req.propose 新建(成功后工具内部回写会话绑定)。
+    载荷内 reqId 字段一律丢弃(防编造编号混入)。
+    """
+    ignored: List[str] = []
+    errors: List[str] = []
+    repaired = False
+    aliased: List[str] = []
+    known = {a for aliases in _SPEC_FIELD_ALIASES.values() for a in aliases}
+    obj = {k: v for k, v in (payload or {}).items() if isinstance(k, str)}
+    for k in list(obj.keys()):
+        if k not in known:
+            ignored.append(k)
+            obj.pop(k)
+    # L0: 别名归一
+    norm: Dict[str, Any] = {}
+    for canonical, aliases in _SPEC_FIELD_ALIASES.items():
+        for a in aliases:
+            if a in obj and obj[a] not in (None, ""):
+                norm[canonical] = obj[a]
+                if a != canonical:
+                    aliased.append(f"{a}→{canonical}")
+                break
+    title = str(norm.get("title") or "").strip()
+    design = str(norm.get("designMd") or "").strip()
+    reqmd = str(norm.get("requirementMd") or "").strip()
+    if not title and reqmd:
+        title = reqmd.splitlines()[0][:60]
+        aliased.append("requirementMd[0]→title")
+    # L1: 字段降级(缺/空可选字段直接不传)
+    assessment = norm.get("assessmentSummary")
+    summary_txt = ""
+    est_min = 0
+    if isinstance(assessment, dict):
+        parts = [f"{k}:{v}" for k, v in assessment.items() if k != "estMin" and v]
+        summary_txt = "; ".join(str(x) for x in parts)
+        try:
+            est_min = int(assessment.get("estMin") or 0)
+        except (TypeError, ValueError):
+            pass
+    elif assessment:
+        summary_txt = str(assessment)
+    if norm.get("estMin") and not est_min:
+        try:
+            est_min = int(norm.get("estMin"))
+        except (TypeError, ValueError):
+            errors.append("estMin 非整数, 已忽略")
+    priority = str(norm.get("priority") or "").strip()
+    allowed = _norm_scope_list(norm.get("allowedScope"))
+    forbidden = _norm_scope_list(norm.get("forbiddenScope"))
+    acceptance = _norm_scope_list(norm.get("acceptance"))
+    # 落库目标判定
+    rid = (req_id or "").strip()
+    row = store.RequirementsStore.get(rid) if rid else None
+    can_amend = bool(row and (row.get("doneMark") or 0) != 1)
+    if not title:
+        # L2: 格式/信息破损 → LLM 修复后重过确定性映射(一次); repaired 标记传播
+        fixed = repair_spec_payload_format(
+            json.dumps(payload, ensure_ascii=False)[:6000], req_id=rid)
+        if isinstance(fixed, dict):
+            r = apply_spec_payload(fixed, req_id=rid, project=project, root=root)
+            r["repaired"] = True
+            if r.get("ok"):
+                r["summary"] += "；格式已由修复通道修正"
+            return r
+        return {"ok": False, "action": "failed",
+                "summary": "载荷缺少需求标题(title)，且格式修复通道未能产出有效规约",
+                "errors": errors + ["signature-miss"], "ignored": ignored}
+    args: Dict[str, Any] = {"title": title}
+    if reqmd:
+        args["requirementMd"] = reqmd
+    if design:
+        extra = ""
+        impl_path = payload.get("implementationPath") if isinstance(payload, dict) else None
+        if isinstance(impl_path, list) and impl_path:
+            extra = ("\n\n## 实施路径\n"
+                     + "\n".join(f"{i + 1}. {x}" for i, x in enumerate(impl_path)))
+        asset_scope = payload.get("assetScope") if isinstance(payload, dict) else None
+        if isinstance(asset_scope, list) and asset_scope:
+            rows = [f"- {a.get('assetId')}({a.get('assetType')}/{a.get('role', '')})"
+                    for a in asset_scope if isinstance(a, dict) and a.get("assetId")]
+            extra += "\n\n## 资产范围\n" + "\n".join(rows)
+        args["designMd"] = design + extra
+    if allowed:
+        args["allowedScopeMd"] = "\n".join(f"- {x}" for x in allowed)
+    if forbidden:
+        args["forbiddenScopeMd"] = "\n".join(f"- {x}" for x in forbidden)
+    if acceptance:
+        args["acceptanceMd"] = "\n".join(f"- {x}" for x in acceptance)
+    if summary_txt:
+        args["assessmentMd"] = summary_txt
+    if est_min:
+        args["estMin"] = est_min
+    if priority in ("P0", "P1", "P2"):
+        args["priority"] = priority
+    if can_amend:
+        args["reqId"] = rid
+        # req.amend 签名是数组形态且不支持更名/评估分值——按目标分叉参数形状
+        args.pop("title", None)
+        args.pop("priority", None)
+        args.pop("estMin", None)
+        if title != rid and title:
+            ignored.append("title(amend 不更名)")
+        if "priority" in obj:
+            ignored.append("priority(amend 不支持)")
+        if est_min:
+            ignored.append("estMin(amend 不支持)")
+        if allowed:
+            args["allowedScope"] = allowed
+            args.pop("allowedScopeMd", None)
+        if forbidden:
+            args["forbiddenScope"] = forbidden
+            args.pop("forbiddenScopeMd", None)
+        if acceptance:
+            args["acceptance"] = acceptance
+            args.pop("acceptanceMd", None)
+        if summary_txt:
+            args["assessmentSummary"] = summary_txt
+            args.pop("assessmentMd", None)
+        args.setdefault("reasoning", "消息流「写入需求」确定性落库")
+    else:
+        args["newRequirement"] = True
+    result = run_arch_tool("req.amend" if can_amend else "req.propose",
+                           args, root=root, project=project)
+    if isinstance(result, dict) and result.get("error"):
+        return {"ok": False, "action": "failed",
+                "summary": f"落库执行失败: {str(result.get('error'))[:200]}",
+                "errors": errors, "ignored": ignored, "repaired": repaired}
+    out_rid = (result or {}).get("requirementId") or (result or {}).get("reqId") or rid
+    out_ver = (result or {}).get("ver") or ""
+    action = "amended" if can_amend else "proposed"
+    notes = []
+    if repaired:
+        notes.append("格式已由修复通道修正")
+    if aliased:
+        notes.append("字段归一: " + ", ".join(aliased[:6]))
+    if ignored:
+        notes.append(f"忽略未知字段: {', '.join(ignored[:8])}")
+    summary = (f"✅ 已按原文落库：`{out_rid}`"
+               + (f" v{out_ver}" if out_ver else "")
+               + f"（{'更新' if can_amend else '新建'}，经确定性映射，零模型转写）"
+               + ("；" + "；".join(notes) if notes else ""))
+    return {"ok": True, "action": action, "reqId": out_rid, "ver": out_ver,
+            "summary": summary, "ignored": ignored, "repaired": repaired,
+            "toolResult": result}
+
+
+def repair_spec_payload_format(text: str, req_id: str = "") -> Optional[Dict[str, Any]]:
+    """级别 2: 破损规约载荷的 LLM 格式修复(只修结构, 不发明内容)。
+
+    产物需调用方再过 apply_spec_payload 的确定性校验; 一次尝试失败返回 None。
+    """
+    sys_prompt = (
+        "你是需求规约载荷修复器。给定文本疑似一份需求规约的 JSON(可能语法破损/"
+        "字段名不规范/被截断)。请只修复 JSON 结构与字段命名以匹配工具签名，"
+        "不要新增不存在的信息，不要改动原本正确的字段值；无法恢复的字段留空或省略。\n"
+        "目标字段: " + ", ".join(f"{c}({','.join(a[:3])})"
+                                 for c, a in _SPEC_FIELD_ALIASES.items()) + "\n"
+        + (f"会话绑定需求编号: {req_id}(载荷内其它 reqId 编号一律丢弃)\n" if req_id else "")
+        + "只输出一个 ```json 围栏，内容为规约对象本身，不要任何其他文字。")
+    res = llm_sync([{"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": text[:6000]}],
+                   mode="chat", max_tokens=1200)
+    raw = (res or {}).get("content") or ""
+    m = re.search(r"```json\s*(\{.*?})\s*```", raw, re.DOTALL)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(1))
+        return obj if isinstance(obj, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def repair_fabricated_claim(claim: str, need: str, content: str, *,
                             req_id: str = "", project: str = "",
                             root: str = "", model_id: Optional[str] = None,
@@ -263,7 +498,17 @@ def repair_fabricated_claim(claim: str, need: str, content: str, *,
 
     返回 {action: amended|finalized|proposed|corrected|failed, summary,
           toolResult?, correction?}
+
+    前置确定性提取: content 含规约形状 JSON → 直接 apply_spec_payload 落库
+    (三级降级内建), 不经 LLM; 提取失败才走下方 LLM 外循环。
     """
+    payload = extract_spec_payload(content or "")
+    if payload:
+        r = apply_spec_payload(payload, req_id=req_id, project=project, root=root)
+        if r.get("ok"):
+            r.setdefault("summary", "")
+            return r
+        # 确定性提取失败(含 L2 修复后仍失败) → 记录后回落 LLM 外循环
     sys_prompt = (
         "你是需求落库修复器。用户看到的助手回复声称了未实际执行的动作(守卫拦截)，"
         "但回复里可能包含可用于真实落库的完整规约内容(常见为 ```json 围栏载荷)。\n"

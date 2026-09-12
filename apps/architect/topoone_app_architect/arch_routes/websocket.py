@@ -592,7 +592,10 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             "need": need or "",
             "failedTry": failed_try,
             "toolError": tool_errors.get(primary_need, "")[:200],
-            "suggestions": req_agent.guard_suggestions(claim, need, failed_try),
+            "hasSpecJson": req_agent.extract_spec_payload(final_content) is not None,
+            "suggestions": req_agent.guard_suggestions(
+                claim, need, failed_try,
+                has_spec_json=req_agent.extract_spec_payload(final_content) is not None),
         }
 
     if final_content:

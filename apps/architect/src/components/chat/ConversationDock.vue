@@ -203,6 +203,25 @@ async function onGuardRepair(p: { index: number; meta: Record<string, any>; acti
     guardRepairBusy.value = false
   }
 }
+
+// ── 「写入需求」按钮: 规约 JSON 确定性落库(零 LLM), 结果本地消息 ──
+const specApplyBusy = ref(false)
+async function onSpecApply(p: { index: number; payload: Record<string, unknown> }) {
+  if (specApplyBusy.value || !conv.activeId) return
+  specApplyBusy.value = true
+  try {
+    const r = await apiPost<Record<string, any>>(`/sessions/${conv.activeId}/spec-apply`, {
+      payload: p.payload,
+    })
+    conv.pushLocalHint(
+      String(r?.summary || '落库未产出结果')
+      + (r?.ok ? `；可发送「确认定稿」或「执行方案」继续。` : ''))
+  } catch (e) {
+    conv.pushLocalHint(`⚠️ 写入需求失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    specApplyBusy.value = false
+  }
+}
 // running 输入锁提示(裁决#6.1)
 const inputLockedHint = computed(() =>
   isRunning.value ? t('session.workState.lockedHint') : null)
@@ -597,6 +616,7 @@ async function answerClarify() {
         @job-accept="openAccept"
         @job-resume="resumeJob"
         @guard-repair="onGuardRepair"
+        @spec-apply="onSpecApply"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
         @toggle-diagram-skill="conv.toggleDiagramSkill"
