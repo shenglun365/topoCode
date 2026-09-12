@@ -1,7 +1,6 @@
 """
-export_service.py — 导出后台线程：JSONL 生成 + MD5 哈希 + zip 打包 + ZMQ 进度
+export_service.py — 导出后台线程：JSONL 生成 + zip 打包 + ZMQ 进度
 """
-import hashlib
 import json
 import logging
 import os
@@ -29,17 +28,6 @@ _export_lock = threading.Lock()
 def exports_dir_for(multi_db, project_id: str) -> str:
     """导出目录中心路径: {data_dir}/exports/{project_id}/（源码目录不再存放导出物）"""
     return os.path.join(multi_db.data_dir, EXPORT_DIR_NAME, project_id)
-
-
-def _md5_file(file_path: str) -> str:
-    h = hashlib.md5()
-    try:
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-    except (FileNotFoundError, PermissionError, OSError):
-        return ""
-    return h.hexdigest()
 
 
 def _make_rel(project_root: str):
@@ -137,7 +125,7 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
             json.dump(proj_info, f, ensure_ascii=False)
         _progress("Writing project.json")
 
-        # ── source_files.jsonl (含 MD5) ──
+        # ── source_files.jsonl ──
         all_source = project_db.fetchall(
             "SELECT * FROM source_files WHERE language != 'directory'"
         )
@@ -145,13 +133,10 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
         with open(os.path.join(tmp_dir, "source_files.jsonl"), "w", encoding="utf-8") as f:
             for row in all_source:
                 d = dict(row)
-                fp = d.get("file_path", "")
-                full_path = os.path.join(project_root, fp) if project_root else fp
-                d["md5_hash"] = _md5_file(full_path)
                 f.write(json.dumps(d, ensure_ascii=False, default=str) + "\n")
                 source_count += 1
         manifest["counts"]["source_files"] = source_count
-        _progress(f"source_files ({source_count} rows, with MD5)")
+        _progress(f"source_files ({source_count} rows)")
 
         # 逐 task 导出分析数据
         for tid in task_id_list:

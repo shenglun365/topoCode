@@ -12,7 +12,6 @@ from topoone.rpc.zmq_server import ZMQServer
 
 logger = logging.getLogger(__name__)
 
-from topoone.engine.service._common import _load_import_config
 def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
     """注册设置配置方法"""
     main_db = multi_db.main_db
@@ -486,47 +485,20 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             params.append(end_date)
         main_db.execute(sql, tuple(params))
 
-    # ==================== 导入配置 ====================
+    # ==================== 源码镜像根目录 ====================
+    # （文件范围忽略配置已随纯 git 视图机制移除：git 是文件清单唯一事实源）
 
-    @server.register("settings.getImportConfig")
-    def get_import_config():
-        """获取导入配置（忽略模式、自定义模式、额外 ignore 文件、源码镜像根目录）"""
-        cfg = _load_import_config(main_db)
+    @server.register("settings.getSourceMirrorRoot")
+    def get_source_mirror_root():
+        """获取源码镜像根目录（git 镜像工作副本的存放位置）"""
         mirror = multi_db.source_mirror_root()
-        return {
-            "ignore_mode": cfg["ignore_mode"], "ignoreMode": cfg["ignore_mode"],
-            "custom_patterns": cfg["custom_patterns"], "customPatterns": cfg["custom_patterns"],
-            "extra_ignore_files": cfg["extra_ignore_files"], "extraIgnoreFiles": cfg["extra_ignore_files"],
-            "source_mirror_root": mirror, "sourceMirrorRoot": mirror,
-        }
+        return {"source_mirror_root": mirror, "sourceMirrorRoot": mirror}
 
-    @server.register("settings.setImportConfig")
-    def set_import_config(ignore_mode: str = None, custom_patterns: list = None,
-                          extra_ignore_files: list = None,
-                          ignoreMode: str = None, customPatterns: list = None,
-                          extraIgnoreFiles: list = None, sourceMirrorRoot: str = None,
-                          source_mirror_root: str = None):
-        """保存导入配置（兼容 camelCase 与 snake_case 参数名）"""
+    @server.register("settings.setSourceMirrorRoot")
+    def set_source_mirror_root(sourceMirrorRoot: str = None, source_mirror_root: str = None):
+        """保存源码镜像根目录（兼容 camelCase 与 snake_case 参数名）"""
         now = datetime.now().isoformat()
-        mode_val = ignore_mode if ignore_mode is not None else ignoreMode
-        patterns_val = custom_patterns if custom_patterns is not None else customPatterns
-        files_val = extra_ignore_files if extra_ignore_files is not None else extraIgnoreFiles
         mirror_val = sourceMirrorRoot if sourceMirrorRoot is not None else source_mirror_root
-        if mode_val is not None:
-            main_db.execute(
-                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_ignore_mode", mode_val, now),
-            )
-        if patterns_val is not None:
-            main_db.execute(
-                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_custom_patterns", json.dumps(patterns_val), now),
-            )
-        if files_val is not None:
-            main_db.execute(
-                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_extra_ignore_files", json.dumps(files_val), now),
-            )
         if mirror_val is not None:
             mirror_val = str(mirror_val).strip()
             if mirror_val:
@@ -538,7 +510,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                     ("source_mirror_root", mirror_val, now),
                 )
         main_db.conn.commit()
-        return get_import_config()
+        return get_source_mirror_root()
 
     return server
 

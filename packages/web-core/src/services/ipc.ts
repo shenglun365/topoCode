@@ -12,7 +12,6 @@ import type {
   ModelConfigItem,
   AgentConfigItem,
   SkillConfigItem,
-  ImportConfig,
   TaskProgressEvent,
   TaskCompleteEvent,
   TaskErrorEvent,
@@ -640,25 +639,13 @@ function createRealIPC() {
       updateBindings: async (params: { bindings: Record<string, string> }) => {
         return await api.settings.updateBindings(params)
       },
-      getImportConfig: async () => {
-        const result: ImportConfig = await api.settings.getImportConfig()
-        const r: any = result || {}
-        return {
-          ignoreMode: r.ignoreMode || r.ignore_mode || 'strict',
-          extraIgnoreFiles: r.extraIgnoreFiles || r.extra_ignore_files || [],
-          customPatterns: r.customPatterns || r.custom_patterns || [],
-          sourceMirrorRoot: r.sourceMirrorRoot || r.source_mirror_root || '',
-        }
+      getSourceMirrorRoot: async () => {
+        const r: any = await api.settings.getSourceMirrorRoot()
+        return { sourceMirrorRoot: r?.sourceMirrorRoot || r?.source_mirror_root || '' }
       },
-      setImportConfig: async (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[]; sourceMirrorRoot?: string }) => {
-        const result: ImportConfig = await api.settings.setImportConfig(params)
-        const r: any = result || {}
-        return {
-          ignoreMode: r.ignoreMode || r.ignore_mode || 'strict',
-          extraIgnoreFiles: r.extraIgnoreFiles || r.extra_ignore_files || [],
-          customPatterns: r.customPatterns || r.custom_patterns || [],
-          sourceMirrorRoot: r.sourceMirrorRoot || r.source_mirror_root || '',
-        }
+      setSourceMirrorRoot: async (mirrorRoot: string) => {
+        const r: any = await api.settings.setSourceMirrorRoot(mirrorRoot)
+        return { sourceMirrorRoot: r?.sourceMirrorRoot || r?.source_mirror_root || '' }
       },
     },
 

@@ -2,7 +2,7 @@
 
 > 版本 v1.0 | 2026-09-10 | 性质：**产品方向讨论归档（评审结论 + 论证依据，不含实现逻辑）**
 > 讨论输入：产品决策「本地化部署优化适配、极致优化的本地小模型微调」；候选底座 MiniCPM5-1B/2B、Qwen3.5-0.8B/2B/4B 等高性能本地小模型
-> 关联文档：[product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md) §6 L 组专项（任务清单与排期以此为准）· [architect-review.md](architect-review.md) · [architect-reconstruction/plan-A.md](architect-reconstruction/plan-A.md) / [plan-B.md](architect-reconstruction/plan-B.md)
+> 关联文档：[product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md) §6 L 组专项（任务清单与排期以此为准）· [architect-review.md](architect-review.md) · [plan-A.md](archive/plan-A.md) / [plan-B.md](archive/plan-B.md)（已归档）
 > 代码依据：`packages/core/topoone/llm/`（16 个 prompt 模板 / OpenAI 兼容 provider 体系）· `agent/agent_workflow/workflows/`（7 个 workflow）· `arch_routes/semantic_assets.py`（L/M/H 分级 + AST 锚点）
 
 ---

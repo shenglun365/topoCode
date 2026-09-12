@@ -81,9 +81,7 @@ The AI analysis output language can be configured independently under **Settings
 
 ## Usage Guide
 
-For a detailed walkthrough, please refer to:
-- [English Usage Guide](docs/usage-guide-en.md)
-- [中文使用教程](docs/usage-guide-zh.md)
+A detailed walkthrough document is in progress. For now, please refer to the "Installation & Running", "LLM Configuration", "Web Service & AI Assistant" and "Development" sections above.
 
 ---
 

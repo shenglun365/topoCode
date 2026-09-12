@@ -2,7 +2,7 @@
 
 > 范围：`apps/architect`（前端 `@topo/app-architect` + 后端 `topoone_app_architect`）新增 **UI/UE 设计** 与 **原型生成** 能力的**整体规划**
 > 代码基线：分支 `dev-1`（约 2026-08-30）
-> 关联文档：`docs/architect-review.md`（architect 现状评估）、`docs/architecture-issues.md`（全仓四维度评估）
+> 关联文档：`docs/architect-review.md`（architect 现状评估）、`docs/archive/architecture-issues-0902.md`（全仓四维度评估，已归档）
 > 性质：**整体规划 / 架构方向。非详细设计** —— 不定义 IR 具体字段、不写 DDL、不拆任务清单
 > 更新日期：2026-09-02
 
@@ -188,7 +188,7 @@ UI 设计 IR   ← 单一事实源（tokens + 组件树 + 布局 + 交互 + 数�
 
 ## 10. 与既有文档的关系 & 后续
 
-- 本文件是 **architect UI/UE + 原型能力** 的**整体规划**；现状与问题见 `docs/architect-review.md`，全仓问题见 `docs/architecture-issues.md`。
+- 本文件是 **architect UI/UE + 原型能力** 的**整体规划**；现状与问题见 `docs/architect-review.md`，全仓问题见 `docs/archive/architecture-issues-0902.md`。
 - **后续详细设计（另行立项）**：
   1. UI 设计 IR 的 JSON Schema（对齐 topoOne `diagram.schema.json` 风格，分 concern）
   2. 数据表 DDL + `store.py` 扩展

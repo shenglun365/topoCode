@@ -4,7 +4,6 @@ import sqlite3
 import json
 import os
 import sys
-import hashlib
 import logging
 import threading
 import time
@@ -1937,18 +1936,6 @@ class MultiDBManager:
             except Exception:
                 pass
 
-        # file_hashes 表（导入导出校验用）
-        try:
-            project_db.execute("""
-                CREATE TABLE IF NOT EXISTS file_hashes (
-                    file_path TEXT PRIMARY KEY,
-                    md5_hash TEXT NOT NULL,
-                    updated_at TEXT DEFAULT (datetime('now'))
-                )
-            """)
-        except Exception:
-            pass
-
         # ── KB 版本化: source_files.version_from + 历史表 + 手动组件划分（兼容旧库）──
         try:
             cursor = project_db.execute("PRAGMA table_info(source_files)")
@@ -2181,14 +2168,6 @@ class MultiDBManager:
                 os.rmdir(proj_dir)
         except Exception:
             pass
-
-    def compute_md5(self, file_path: str) -> str:
-        """计算文件的 MD5 哈希"""
-        hash_md5 = hashlib.md5()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                hash_md5.update(chunk)
-        return hash_md5.hexdigest()
 
     def close_all(self):
         """关闭所有数据库连接"""

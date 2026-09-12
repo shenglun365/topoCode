@@ -39,5 +39,4 @@ class TestCoreImports:
         from topoone.engine.service import _common
         assert hasattr(engine_service, "register_project_methods")
         assert hasattr(engine_service, "register_all_engine_methods")
-        assert hasattr(_common, "GitIgnoreParser")
-        assert hasattr(_common, "MultiIgnoreParser")
+        assert hasattr(_common, "_ensure_topocode_dirs_in_gitignore")

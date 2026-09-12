@@ -138,6 +138,9 @@ export default { project: {
   },
   verify: {
     verifyFailed: '校验失败',
+    notGit: '项目目录不是 git 仓库，无法执行 git 校验；请重新导入（将自动初始化 git）。',
+    noBaseline: '尚无基线 commit（首次导入基线未建立），仅显示工作区未提交变更。',
+    dirty: '工作区未提交 {n} 项',
   },
   changes: {
     checkFailed: '检查失败',
@@ -170,9 +173,9 @@ export default { project: {
   selectFile: '选择文件',
   selected: '已选择',
   verifyFiles: '校验文件',
-  verifyMatched: '匹配',
-  verifyMismatch: '不匹配',
-  verifyMissing: '缺失',
+  verifyAdded: '新增',
+  verifyModified: '修改',
+  verifyDeleted: '删除',
   analyzeCodeHint: '静态导入建议选择独立静态源码目录',
   analyzeDuplicate: '该目录已存在对应项目',
   analyzeEmpty: '目录为空',

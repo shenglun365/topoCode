@@ -197,6 +197,45 @@ def diff_name_status(path: str, base: str, target: str,
     return {"added": added, "modified": modified, "deleted": deleted}
 
 
+def list_files(path: str, timeout: int = 300) -> List[str]:
+    """列举 git 跟踪的文件（相对路径，POSIX 分隔符）。
+
+    git 是文件清单的唯一事实源：嵌套 .gitignore 等忽略语义由 git 原生保证。
+    """
+    raw = _run_git(path, "ls-files", "-z", "--cached", timeout=timeout)
+    if not raw:
+        return []
+    return [f for f in raw.split("\0") if f]
+
+
+def status_porcelain(path: str, timeout: int = 300) -> dict:
+    """工作区未提交状态 → {added, modified, deleted}。
+
+    -uall 逐文件枚举未跟踪（?? 记 added）；R/C/T 记 modified。
+    """
+    raw = _run_git(path, "status", "--porcelain", "-uall", timeout=timeout)
+    out = {"added": [], "modified": [], "deleted": []}
+    if not raw:
+        return out
+    for line in raw.splitlines():
+        if len(line) < 4:
+            continue
+        x, y, p = line[0], line[1], line[3:].strip()
+        if " -> " in p:
+            p = p.split(" -> ", 1)[1].strip()
+        if x == "?" and y == "?":
+            out["added"].append(p)
+            continue
+        st = x if x != " " else y
+        if st == "A":
+            out["added"].append(p)
+        elif st == "D":
+            out["deleted"].append(p)
+        elif st in ("M", "R", "C", "T"):
+            out["modified"].append(p)
+    return out
+
+
 def checkout_ref(path: str, branch: Optional[str], head: Optional[str],
                  method: str = "pull", timeout: int = 900) -> str:
     """按用户选择的方式把 path 仓库推进到 (branch, head)。

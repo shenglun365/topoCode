@@ -1,10 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SupportedLocale } from '@/i18n'
-import type { ImportConfig } from '@topo/web-core/types/ipc'
-import { ipc } from '@topo/web-core/services/ipc'
 import { useStatusStore } from '@/stores/status'
 import { useAnalysisStore } from '@/stores/analysis'
+import { ipc } from '@topo/web-core/services/ipc'
 import { readLocale, writeLocale, readFontSize, setFontSize as applyFontSize } from '@topo/web-core/shell'
 import i18n from '@/i18n'
 
@@ -40,14 +39,6 @@ export const useSettingsStore = defineStore('settings', () => {
     const dir = resourceDirHistory.value[index]
     if (dir) setResourceProjectsDir(dir)
   }
-
-  // 导入配置
-  const importConfig = ref<ImportConfig>({
-    ignoreMode: 'strict',
-    customPatterns: [],
-    extraIgnoreFiles: [],
-  })
-  const importConfigLoading = ref(false)
 
   try {
     const saved = localStorage.getItem('projectPageSize')
@@ -164,39 +155,14 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  async function loadImportConfig() {
-    importConfigLoading.value = true
-    try {
-      importConfig.value = await ipc.settings.getImportConfig()
-    } catch (e) {
-      console.warn('Failed to load import config', e)
-    } finally {
-      importConfigLoading.value = false
-    }
-  }
-
-  async function saveImportConfig(params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[] }) {
-    importConfigLoading.value = true
-    try {
-      importConfig.value = await ipc.settings.setImportConfig(params)
-    } catch (e) {
-      console.warn('Failed to save import config', e)
-      throw e
-    } finally {
-      importConfigLoading.value = false
-    }
-  }
-
   return {
     activeTab, loading, locale, fontSize, autoSaveInterval, projectPageSize,
     backendStatus, pythonMemoryLimit, memoryLimitPending,
     zmqDealerPort, zmqPubPort, dealerPortStatus, pubPortStatus,
-    importConfig, importConfigLoading,
     resourceProjectsDir, resourceDirHistory,
     setProjectPageSize, initLocale, initFontSize, setLocale, setActiveTab, setFontSize,
     restartBackend, restartState, restartErrorMsg, hasRunningTasks,
     setPythonMemoryLimit, loadPythonMemoryLimit, testPort,
-    loadImportConfig, saveImportConfig,
     setResourceProjectsDir, restoreResourceDir,
   }
 })

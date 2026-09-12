@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { ipc } from '../../services/ipc'
 import { LocaleToggle } from '../../shell'
 import { authHeaders } from '../../services/api'
-import type { ImportConfig } from '../../types/ipc'
 
 const { t } = useI18n()
 
@@ -18,19 +17,19 @@ interface SystemApp {
 }
 
 const locale = ref<'zh-CN' | 'en-US'>('zh-CN')
-const importConfig = ref<ImportConfig>({ ignoreMode: 'strict', customPatterns: [], extraIgnoreFiles: [] })
+const sourceMirrorRoot = ref('')
 const apps = ref<SystemApp[]>([])
 const appsError = ref('')
 const restarting = ref<string | null>(null)
 
-async function loadImportConfig() {
+async function loadMirrorRoot() {
   try {
-    importConfig.value = await ipc.settings.getImportConfig()
+    sourceMirrorRoot.value = (await ipc.settings.getSourceMirrorRoot()).sourceMirrorRoot || ''
   } catch { /* ignore */ }
 }
 
-async function saveImportConfig() {
-  await ipc.settings.setImportConfig(importConfig.value)
+async function saveMirrorRoot() {
+  await ipc.settings.setSourceMirrorRoot(sourceMirrorRoot.value)
 }
 
 async function loadApps() {
@@ -62,7 +61,7 @@ function onLocale(l: string) {
 }
 
 onMounted(() => {
-  loadImportConfig()
+  loadMirrorRoot()
   loadApps()
 })
 </script>
@@ -81,24 +80,16 @@ onMounted(() => {
 
     <div class="section">
       <h4>{{ t('settings.general.importSection') }}</h4>
-      <div class="row">
-        <label>{{ t('settings.general.ignoreMode') }}
-          <select v-model="importConfig.ignoreMode">
-            <option value="strict">strict</option>
-            <option value="loose">loose</option>
-          </select>
-        </label>
-        <button class="btn btn-primary btn-sm" @click="saveImportConfig">{{ t('settings.general.saveImport') }}</button>
-      </div>
       <div class="row mirror-row">
         <label class="mirror-label">{{ t('settings.general.mirrorRoot') }}</label>
         <input
-          v-model="importConfig.sourceMirrorRoot"
+          v-model="sourceMirrorRoot"
           class="input mirror-input font-mono"
           :placeholder="t('settings.general.mirrorRootPlaceholder')"
         >
       </div>
       <p class="muted">{{ t('settings.general.mirrorRootHint') }}</p>
+      <button class="btn btn-primary btn-sm" @click="saveMirrorRoot">{{ t('settings.general.saveImport') }}</button>
     </div>
 
     <div class="section">

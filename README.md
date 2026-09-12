@@ -69,9 +69,7 @@ TopoCode 不是一句提示词生成架构图的效率工具，而是帮助你�
 
 ## 使用教程
 
-详细的使用流程请参考：
-- [中文使用教程](docs/usage-guide-zh.md)
-- [English Usage Guide](docs/usage-guide-en.md)
+详细使用流程文档编写中。当前请参考上方「安装与运行」「配置 LLM」「Web 服务 & AI 助手」「开发」章节。
 
 ---
 

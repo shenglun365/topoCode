@@ -108,7 +108,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
         clear_tables = [
             "source_files", "graph_node", "graph_edge", "graph_doc",
             "community_hierarchy", "community_llm_results", "report_subdocs",
-            "file_summaries", "file_hashes",
+            "file_summaries",
         ]
         logger.info(f"[Import] calling multi_db.get_project_db(project_id={project_id!r})")
         project_db = multi_db.get_project_db(project_id)
@@ -207,10 +207,6 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
                     # 设置 project_id
                     if "project_id" in row:
                         row["project_id"] = project_id
-                    # md5_hash 只在 source_files.jsonl 中存在（用于 file_hashes），
-                    # source_files 表本身没有此列，移除避免 INSERT 失败
-                    if table == "source_files" and "md5_hash" in row:
-                        del row["md5_hash"]
                     # report_subdocs 中概览文档 id 为 overall-{task_id}，task_id 重映射后需同步更新
                     if task_map and table == "report_subdocs" and "id" in row:
                         for old_tid, new_tid in task_map.items():
@@ -306,30 +302,6 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
             })
             step += 1
 
-        # ── file_hashes 表 ──
-        _update_status(import_id, IMPORT_STATUS_RUNNING, 93, "Writing file hash index")
-        _ensure_file_hashes_table(project_db)
-        source_path = os.path.join(tmp_dir, "source_files.jsonl")
-        if os.path.exists(source_path):
-            hash_rows = []
-            with open(source_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    row = json.loads(line)
-                    fp = row.get("file_path", "")
-                    md5 = row.get("md5_hash", "")
-                    if fp and md5:
-                        hash_rows.append((fp, md5))
-            if hash_rows:
-                project_db.executemany(
-                    "INSERT OR REPLACE INTO file_hashes (file_path, md5_hash, updated_at) VALUES (?, ?, datetime('now'))",
-                    hash_rows,
-                )
-                project_db.conn.commit()
-            logger.info(f"[Import] wrote {len(hash_rows)} file hashes")
-
         # ── 更新 project 统计 ──
         _update_status(import_id, IMPORT_STATUS_RUNNING, 96, "Updating project info")
         try:
@@ -392,20 +364,6 @@ def _bulk_insert(project_db, table: str, rows: list[dict]):
         params = [tuple(r.get(c) for c in col_names) for r in batch]
         project_db.executemany(sql, params)
     project_db.conn.commit()
-
-
-def _ensure_file_hashes_table(project_db):
-    try:
-        project_db.execute("""
-            CREATE TABLE IF NOT EXISTS file_hashes (
-                file_path TEXT PRIMARY KEY,
-                md5_hash TEXT NOT NULL,
-                updated_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        project_db.conn.commit()
-    except Exception:
-        pass
 
 
 def _update_status(import_id: str, status: str, progress: int,

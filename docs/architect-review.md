@@ -2,7 +2,8 @@
 
 > 范围：`apps/architect/` —— 前端 `@topo/app-architect`（`src/`）+ 后端 `topoone_app_architect`（:3470）+ `agent_bus`（:3486）
 > 代码基线：分支 `dev-1`（提交约 2026-08-30）
-> 关联文档：`docs/architecture-issues.md`（全仓四维度评估，本文是其 architect 专项展开）；`docs/architect-ui-prototype-design.md`（architect UI/UE + 原型生成能力整体规划）
+> 关联文档：`docs/archive/architecture-issues-0902.md`（全仓四维度评估，本文是其 architect 专项展开，已归档）；`docs/architect-ui-prototype-design.md`（architect UI/UE + 原型生成能力整体规划）
+> **历史快照提示**（2026-09-11）：本文基于 2026-08-30 基线。文中描述的 plans/exec tasks 状态机、SE 任务树派发等执行机制已退役（现行为 `execution.py` 会话驱动制，见 `exec_bridge.py`）；现行迭代方向以 [product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md) 为准。
 > 性质：**仅评估与修正方向，不含任何代码改动**
 > 更新日期：2026-09-02
 
@@ -67,7 +68,7 @@ architect 是 4 个子项目中**体量最大、最"自成体系"**的一个，�
 - 34 service（`api-client.ts` + `ws-client.ts` + `backend.ts` + ~30 领域 service）——**自带一套传输，几乎不复用 web-core 传输层**。
 - 16 store；i18n 2 大文件，`src/i18n/index.ts:7` **初始 `locale: 'zh-CN'` 硬编码**（用户选择经 `useArchSettingsStore.initLocale()` 后置应用）。
 - **半共享 web-core**：6 处 import `@topo/web-core/topoOne*`（`useDiagramRenderer`→`useTopoRender`、`ChatMessageBlocks`/`SemanticGraphView`→`TopoDiagram`、`contract-service`/`parse-message-blocks`→`core/types`、`AcceptancePanel`→`toMermaid`），但传输/i18n 各自独立。
-- 死依赖：`package.json` 声明 `cytoscape`+`cytoscape-cose-bilkent`+`marked`+`marked-highlight`，src 一处未 import（承 architecture-issues.md R5）。
+- 死依赖：`package.json` 声明 `cytoscape`+`cytoscape-cose-bilkent`+`marked`+`marked-highlight`，src 一处未 import（承 0902 评估 R5）。
 
 ### 2.7 工作流（`src/config/workflow.ts`）
 4 阶段 stepper（声明式，顺序即展示顺序）：`pool(需求提案)` → `design(需求池/概要设计)` → `execute(任务执行)` → `accept(单元测试/验收)`，每阶段带 `matches`（路由匹配）+ `isDone`（完成判定）。

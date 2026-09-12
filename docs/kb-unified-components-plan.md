@@ -2,7 +2,7 @@
 
 > 状态：**设计定稿；Stage 0~4 已完成（产出方引擎 + 口径切换 + 后端消费端 + 前端收敛，typecheck 零错）；待 Stage 5 清理勾稽**
 > 日期：2026-09-06　|　验证样本：6 项目（nginx-C / JS-TS / Java / Python / 小型×2），四语言四形态
-> 关联文档：[architecture-issues-0905.md](architecture-issues-0905.md)、[architecture-issues.md](architecture-issues.md)
+> 关联文档：[architecture-issues-0905.md](architecture-issues-0905.md)、[architecture-issues-0902.md](archive/architecture-issues-0902.md)（已归档）
 
 ---
 

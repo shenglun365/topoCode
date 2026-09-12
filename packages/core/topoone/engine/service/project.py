@@ -3,7 +3,6 @@ import logging
 
 import asyncio
 import time
-import hashlib
 import json
 import os
 import re
@@ -25,7 +24,7 @@ from topoone.engine.task_manager import (
 
 logger = logging.getLogger(__name__)
 
-from topoone.engine.service._common import GitIgnoreParser, IGNORE_FILE_PRIORITY, MultiIgnoreParser, _load_import_config, build_effective_ignore_patterns, should_ignore_file, _ensure_topocode_dirs_in_gitignore, _simple_hash, _IMPORT_JOBS
+from topoone.engine.service._common import _ensure_topocode_dirs_in_gitignore, _simple_hash, _IMPORT_JOBS
 import threading
 from topoone.engine.service._common import _DELETE_JOBS
 def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
@@ -286,20 +285,11 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(id)
         root_path = project["root_path"]
 
-        # 加载系统导入配置
-        import_config = _load_import_config(main_db)
-        effective_patterns = build_effective_ignore_patterns(import_config)
-
-        # 加载多种 ignore 文件
-        extra_ignore_files = import_config.get("extra_ignore_files", [])
-        ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
-        gitignore = MultiIgnoreParser().load_files(root_path, ignore_filenames)
-
         # 清空旧文件
         project_db.execute("DELETE FROM source_files")
 
-        # 重新扫描
-        file_count = _scan_file_tree(project_db, root_path, root_path, None, gitignore, extra_patterns=effective_patterns)
+        # 重新扫描（git ls-files 是文件清单唯一事实源）
+        file_count = _scan_file_tree(project_db, root_path)
 
         # 重新检测语言（从 source_files 统计最常见语言）
         lang_row = project_db.fetchone(
@@ -417,63 +407,16 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("project.checkFileChanges")
     async def check_file_changes(id: str):
-        """检查文件变更。
+        """检查文件变更（git 核心机制）。
 
         git 项目（git-local/git-remote）：比较 源仓库/上游 vs 镜像工作副本
-        （镜像自身与上次扫描一致是预期，不能自比），返回源侧新增/修改/删除清单；
-        静态遗留项目：沿用 source_files.content_hash 对比。
+        （镜像自身与上次扫描一致是预期，不能自比），返回源侧新增/修改/删除清单。
         """
         import asyncio
 
         project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
         if not project:
             raise ValueError(f"Project not found: {id}")
-
-        def _scan_files():
-            project_db = multi_db.get_project_db(id)
-            root_path = project["root_path"]
-
-            import_config = _load_import_config(main_db)
-            extra_ignore_files = import_config.get("extra_ignore_files", [])
-            ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
-            multi_ignore = MultiIgnoreParser().load_files(root_path, ignore_filenames)
-            effective_patterns = build_effective_ignore_patterns(import_config)
-
-            db_files = project_db.fetchall("SELECT file_path, content_hash FROM source_files")
-            db_file_map = {f["file_path"]: f["content_hash"] for f in db_files}
-
-            current_files = {}
-            for dirpath, dirnames, filenames in os.walk(root_path):
-                rel_root = os.path.relpath(dirpath, root_path)
-                dirnames[:] = [d for d in dirnames if not should_ignore_file(
-                    os.path.join(rel_root, d) if rel_root != '.' else d,
-                    multi_ignore, is_dir=True, extra_patterns=effective_patterns)]
-
-                for filename in filenames:
-                    full_path = os.path.join(dirpath, filename)
-                    rel_path = os.path.relpath(full_path, root_path).replace('\\', '/')
-                    if should_ignore_file(rel_path, multi_ignore,
-                                          extra_patterns=effective_patterns):
-                        continue
-                    content_hash = multi_db.compute_md5(full_path)
-                    current_files[rel_path] = content_hash
-
-            # 对比变更
-            added = []
-            modified = []
-            deleted = []
-
-            for rel_path, hash_val in current_files.items():
-                if rel_path not in db_file_map:
-                    added.append(rel_path)
-                elif db_file_map[rel_path] != hash_val:
-                    modified.append(rel_path)
-
-            for rel_path in db_file_map:
-                if rel_path not in current_files:
-                    deleted.append(rel_path)
-
-            return added, modified, deleted
 
         def _git_changes():
             from topoone.engine import git_service
@@ -529,18 +472,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             out["hasChanges"] = bool(diff["added"] or diff["modified"] or diff["deleted"])
             return out
 
-        mode = project.get("import_mode") or ""
-        if mode in ("git-local", "git-remote"):
-            result = await asyncio.to_thread(_git_changes)
-        else:
-            added, modified, deleted = await asyncio.to_thread(_scan_files)
-            has_changes = bool(added or modified or deleted)
-            result = {
-                "added": added,
-                "modified": modified,
-                "deleted": deleted,
-                "hasChanges": has_changes,
-            }
+        result = await asyncio.to_thread(_git_changes)
 
         if result.get("hasChanges"):
             main_db.update("projects", {"has_file_changes": 1}, "id = ?", (id,))
@@ -1912,34 +1844,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         main_db.execute(sql, tuple(params))
 
     # ==================== 导入配置 ====================
-
-    @server.register("settings.getImportConfig")
-    def get_import_config():
-        """获取导入配置（忽略模式、自定义模式、额外 ignore 文件）"""
-        return _load_import_config(main_db)
-
-    @server.register("settings.setImportConfig")
-    def set_import_config(ignore_mode: str = None, custom_patterns: list = None, extra_ignore_files: list = None):
-        """保存导入配置"""
-        now = datetime.now().isoformat()
-        if ignore_mode is not None:
-            main_db.execute(
-                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_ignore_mode", ignore_mode, now),
-            )
-        if custom_patterns is not None:
-            main_db.execute(
-                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_custom_patterns", json.dumps(custom_patterns), now),
-            )
-        if extra_ignore_files is not None:
-            main_db.execute(
-                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
-                ("import_extra_ignore_files", json.dumps(extra_ignore_files), now),
-            )
-        return _load_import_config(main_db)
-
-    return server
+    # （已随纯 git 视图机制移除：文件范围完全由 git 决定）
 
     return server
 
@@ -2444,28 +2349,16 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
             reuse_existing_project = True
         reassociated_id = None
 
-    # 加载系统导入配置
-    import_config = _load_import_config(main_db)
-    effective_patterns = build_effective_ignore_patterns(import_config)
-
-    # 加载多种 ignore 文件 (.gitignore, .dockerignore, .npmignore, .ignore 等)
-    extra_ignore_files = import_config.get("extra_ignore_files", [])
-    ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
-    logger.info(f"[import] loading ignore files: {ignore_filenames}")
-    gitignore = MultiIgnoreParser().load_files(effective_root, ignore_filenames)
-    logger.info(f"[import] ignore files loaded, elapsed {_t.time() - t0:.2f}s")
-
     now = datetime.now().isoformat()
     logger.info(f"[import] creating project db: {project_id}")
     project_db = multi_db.init_project_db(project_id, project_root=os.path.abspath(effective_root))
     logger.info(f"[import] project db created, elapsed {_t.time() - t0:.2f}s")
 
-    # 单次遍历：同时完成语言检测和文件扫描
+    # 单次遍历：同时完成语言检测和文件扫描（git ls-files 物化投影）
     logger.info(f"[import] starting file scan...")
     scan_t0 = _t.time()
     file_count, language = await _scan_and_import(
-        project_db, effective_root, gitignore, server, project_id,
-        extra_patterns=effective_patterns)
+        project_db, effective_root, server, project_id)
     scan_elapsed = _t.time() - scan_t0
     logger.info(f"[import] scan complete: {file_count} files, language={language}, elapsed {scan_elapsed:.2f}s")
 
@@ -2543,14 +2436,15 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
     logger.info(f"[import] ===== import complete: {project_id}, {file_count} files, total {total_elapsed:.2f}s =====")
 
     return main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
-async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParser | MultiIgnoreParser | None = None, server=None, project_id: str = "", extra_patterns: list[str] | None = None) -> tuple:
+async def _scan_and_import(project_db, root_path: str, server=None, project_id: str = "") -> tuple:
     """
-    单次遍历完成语言检测 + 文件扫描 + 事务批量写入
+    git 为文件清单唯一事实源：git ls-files → source_files 物化投影（批量写入）。
     返回 (file_count, primary_language)
     """
     import asyncio
-    import hashlib
     import time
+
+    from topoone.engine import git_service
 
     # 语言映射（显示名用于项目语言，小写名用于文件语言）
     LANG_MAP_DISPLAY = {
@@ -2585,112 +2479,79 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
 
     file_count = 0
     dir_count = 0
-    ignored_count = 0
     lang_counts = {}  # 扩展名 -> 计数
     batch_records = []  # 收集所有记录，事务批量写入
     BATCH_SIZE = 500  # 每 500 条提交一次
     scan_t0 = time.time()
 
-    async def _scan_dir(current_path: str, parent_path: str | None = None):
-        nonlocal file_count, dir_count, ignored_count
+    # git ls-files：文件清单唯一事实源（嵌套 .gitignore 等忽略语义由 git 原生保证）
+    tracked = git_service.list_files(root_path)
+    total_estimate = max(len(tracked), 1)
+    logger.info(f"[import] git ls-files: {len(tracked)} tracked files")
+
+    # KB 元数据目录防御性过滤（正常不会出现在 git 跟踪清单中）
+    def _kb_meta(rel: str) -> bool:
+        return (rel == '.topocode' or rel.startswith('.topocode/')
+                or rel == '.codegraph' or rel.startswith('.codegraph/')
+                or rel == '.git' or rel.startswith('.git/'))
+
+    seen_dirs: set = set()
+    for idx, rel_path in enumerate(tracked, 1):
+        if _kb_meta(rel_path):
+            continue
+
+        # 每处理 200 个文件释放一次 event loop 并打印进度
+        if idx % 200 == 0:
+            await asyncio.sleep(0)
+            elapsed = time.time() - scan_t0
+            progress_pct = min(int(idx / total_estimate * 100), 99)
+            logger.info(f"[import] scan progress: {idx}/{total_estimate} ({progress_pct}%), {dir_count} dirs, elapsed {elapsed:.1f}s")
+            if server and project_id:
+                server.publish("project", "import.progress", {
+                    "path": root_path,
+                    "progress": progress_pct,
+                    "fileCount": file_count,
+                    "totalEstimate": total_estimate,
+                    "phase": "scan",
+                })
+
+        # 合成祖先目录行（getFileTree 懒加载依赖 parent_path 结构）
+        parts = rel_path.split('/')[:-1]
+        for i in range(len(parts)):
+            d = '/'.join(parts[:i + 1])
+            if d in seen_dirs:
+                continue
+            seen_dirs.add(d)
+            dir_count += 1
+            batch_records.append((
+                f"dir-{_simple_hash(d)}", d, d.rsplit('/', 1)[-1],
+                "directory", 0, "", (d.rsplit('/', 1)[0] if '/' in d else None),
+            ))
+
+        full_path = os.path.join(root_path, rel_path.replace('/', os.sep))
+        ext = os.path.splitext(rel_path)[1].lower()
+
+        # 统计语言
+        if ext in LANG_MAP_DISPLAY:
+            lang_counts[ext] = lang_counts.get(ext, 0) + 1
+
+        file_id = f"file-{_simple_hash(rel_path)}"
+        language = LANG_MAP_FILE.get(ext) or ""
         try:
-            entries = list(os.scandir(current_path))
-        except PermissionError:
-            logger.warning(f"[import] permission denied: {current_path}")
-            return
+            size = int(os.stat(full_path).st_size)
+        except OSError:
+            size = 0
 
-        for entry in entries:
-            # 每处理 100 个条目释放一次 event loop 并打印进度
-            if file_count % 100 == 0 and file_count > 0:
-                await asyncio.sleep(0)
-                elapsed = time.time() - scan_t0
-                progress_pct = min(int(file_count / total_estimate * 100), 99)
-                logger.info(f"[import] scan progress: {file_count}/{total_estimate} ({progress_pct}%), {dir_count} dirs, {ignored_count} ignored, elapsed {elapsed:.1f}s")
-                if server and project_id:
-                    server.publish("project", "import.progress", {
-                        "path": root_path,
-                        "progress": progress_pct,
-                        "fileCount": file_count,
-                        "totalEstimate": total_estimate,
-                        "ignoredCount": ignored_count,
-                        "phase": "scan",
-                    })
+        base = rel_path.rsplit('/', 1)[-1]
+        fname = base.rsplit('.', 1)[0] if '.' in base else base
+        parent = rel_path.rsplit('/', 1)[0] if '/' in rel_path else None
+        batch_records.append((
+            file_id, rel_path, fname, language, size, "", parent
+        ))
+        file_count += 1
 
-            rel_path = os.path.relpath(entry.path, root_path).replace('\\', '/')
-
-            # KB 元数据目录永不索引（.topocode 会在初始化时被创建）；.codegraph 为
-            # codegraph 符号索引；.git 为仓库元数据
-            if rel_path == '.topocode' or rel_path.startswith('.topocode/') \
-                    or rel_path == '.codegraph' or rel_path.startswith('.codegraph/') \
-                    or rel_path == '.git' or rel_path.startswith('.git/'):
-                ignored_count += 1
-                continue
-
-            # 跳过被忽略的文件/目录
-            if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir(), extra_patterns):
-                ignored_count += 1
-                continue
-
-            ext = os.path.splitext(entry.name)[1].lower()
-
-            if entry.is_file():
-                # 统计语言
-                if ext in LANG_MAP_DISPLAY:
-                    lang_counts[ext] = lang_counts.get(ext, 0) + 1
-
-                # 计算文件哈希
-                content_hash = ""
-                try:
-                    hash_md5 = hashlib.md5()
-                    with open(entry.path, "rb") as f:
-                        for chunk in iter(lambda: f.read(65536), b""):
-                            hash_md5.update(chunk)
-                    content_hash = hash_md5.hexdigest()
-                except (PermissionError, OSError):
-                    pass
-
-                file_id = f"file-{_simple_hash(rel_path)}"
-                language = LANG_MAP_FILE.get(ext) or ""
-                try:
-                    size = int(entry.stat().st_size)
-                except OSError:
-                    size = 0
-
-                fname = rel_path.rsplit('/', 1)[-1].rsplit('.', 1)[0] if '.' in rel_path.rsplit('/', 1)[-1] else rel_path.rsplit('/', 1)[-1]
-                batch_records.append((
-                    file_id, rel_path, fname, language, size, content_hash, parent_path
-                ))
-                file_count += 1
-
-            elif entry.is_dir():
-                dir_id = f"dir-{_simple_hash(rel_path)}"
-                dname = rel_path.rsplit('/', 1)[-1]
-                batch_records.append((
-                    dir_id, rel_path, dname, "directory", 0, _simple_hash(rel_path), parent_path
-                ))
-                dir_count += 1
-
-                # 递归扫描子目录
-                await _scan_dir(entry.path, rel_path)
-
-    # 快速统计总文件数（用于进度百分比）
-    total_estimate = 0
-    logger.info(f"[import] estimating file count...")
-    try:
-        for dirpath, dirnames, filenames in os.walk(root_path):
-            total_estimate += len(filenames)
-    except Exception:
-        total_estimate = 0
-    if total_estimate > 0:
-        logger.info(f"[import] estimated file count: {total_estimate}")
-    else:
-        total_estimate = 1  # 避免除零
-
-    # 执行扫描
-    logger.info(f"[import] starting recursive scan: {root_path}")
-    await _scan_dir(root_path)
     scan_elapsed = time.time() - scan_t0
-    logger.info(f"[import] scan complete: {file_count} files, {dir_count} dirs, {ignored_count} ignored, elapsed {scan_elapsed:.2f}s")
+    logger.info(f"[import] scan complete: {file_count} files, {dir_count} dirs, elapsed {scan_elapsed:.2f}s")
 
     # 打印语言分布 Top 10
     if lang_counts:
@@ -2722,7 +2583,6 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                         "progress": min(write_pct, 99),
                         "fileCount": file_count,
                         "totalEstimate": total_estimate,
-                        "ignoredCount": ignored_count,
                         "phase": "write",
                         "batch": batch_num,
                         "totalBatches": num_batches,
@@ -2757,84 +2617,80 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
     logger.info(f"[import] _scan_and_import done: {file_count} files, language={primary_language}, total {total_elapsed:.2f}s")
 
     return file_count, primary_language
-def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str, parent_path: str = None, gitignore: GitIgnoreParser | MultiIgnoreParser | None = None, extra_patterns: list[str] | None = None) -> int:
+def _scan_file_tree(project_db: SQLiteContext, root_path: str) -> int:
     """
-    扫描文件树到项目库（相对路径 + MD5 哈希，应用 gitignore 过滤）
+    git ls-files → source_files 物化投影（相对路径，不算 MD5）
     返回文件数量
-
-    注意：此函数保留用于 sync_project 等其他场景，import_project 已使用 _scan_and_import
     """
+    from topoone.engine import git_service
+
+    lang_map = {
+        ".ts": "typescript", ".js": "javascript", ".jsx": "javascript", ".tsx": "typescript",
+        ".mts": "typescript", ".cts": "typescript", ".mjs": "javascript", ".cjs": "javascript",
+        ".py": "python", ".pyw": "python", ".go": "go", ".rs": "rust", ".java": "java",
+        ".c": "c", ".h": "c",
+        ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
+        ".cs": "c_sharp",
+        ".vue": "vue", ".html": "html", ".css": "css", ".scss": "scss",
+        ".json": "json", ".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
+        ".rb": "ruby", ".rake": "ruby", ".php": "php", ".inc": "php",
+        ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
+        ".scala": "scala", ".sc": "scala",
+        ".r": "r", ".sql": "sql", ".sh": "bash",
+        ".dart": "dart", ".lua": "lua", ".luau": "luau",
+        ".m": "objc", ".mm": "objc",
+        ".perl": "perl", ".pl": "perl",
+        ".elixir": "elixir", ".ex": "elixir", ".exs": "elixir",
+        ".erl": "erlang", ".hs": "haskell", ".ml": "ocaml",
+        ".zig": "zig", ".nim": "nim", ".v": "verilog",
+    }
+
+    batch = []
+    seen_dirs: set = set()
     file_count = 0
-    try:
-        for entry in os.scandir(current_path):
-            rel_path = os.path.relpath(entry.path, root_path).replace('\\', '/')
+    for rel_path in git_service.list_files(root_path):
+        # KB 元数据目录防御性过滤
+        if rel_path == '.topocode' or rel_path.startswith('.topocode/') \
+                or rel_path == '.codegraph' or rel_path.startswith('.codegraph/') \
+                or rel_path == '.git' or rel_path.startswith('.git/'):
+            continue
 
-            # 跳过被忽略的文件/目录
-            if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir(), extra_patterns):
+        # 合成祖先目录行（getFileTree 懒加载依赖 parent_path 结构）
+        parts = rel_path.split('/')[:-1]
+        for i in range(len(parts)):
+            d = '/'.join(parts[:i + 1])
+            if d in seen_dirs:
                 continue
+            seen_dirs.add(d)
+            batch.append((
+                f"dir-{_simple_hash(d)}", d, d.rsplit('/', 1)[-1],
+                "directory", 0, "", (d.rsplit('/', 1)[0] if '/' in d else None),
+            ))
 
-            ext = os.path.splitext(entry.name)[1].lower()
+        full_path = os.path.join(root_path, rel_path.replace('/', os.sep))
+        ext = os.path.splitext(rel_path)[1].lower()
+        try:
+            size = int(os.stat(full_path).st_size)
+        except OSError:
+            size = 0
+        base = rel_path.rsplit('/', 1)[-1]
+        fname = base.rsplit('.', 1)[0] if '.' in base else base
+        parent = rel_path.rsplit('/', 1)[0] if '/' in rel_path else None
+        batch.append((
+            f"file-{_simple_hash(rel_path)}", rel_path, fname,
+            lang_map.get(ext) or "", size, "", parent,
+        ))
+        file_count += 1
 
-            lang_map = {
-                ".ts": "typescript", ".js": "javascript", ".jsx": "javascript", ".tsx": "typescript",
-                ".mts": "typescript", ".cts": "typescript", ".mjs": "javascript", ".cjs": "javascript",
-                ".py": "python", ".pyw": "python", ".go": "go", ".rs": "rust", ".java": "java",
-                ".c": "c", ".h": "c",
-                ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
-                ".cs": "c_sharp",
-                ".vue": "vue", ".html": "html", ".css": "css", ".scss": "scss",
-                ".json": "json", ".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
-                ".rb": "ruby", ".rake": "ruby", ".php": "php", ".inc": "php",
-                ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
-                ".scala": "scala", ".sc": "scala",
-                ".r": "r", ".sql": "sql", ".sh": "bash",
-                ".dart": "dart", ".lua": "lua", ".luau": "luau",
-                ".m": "objc", ".mm": "objc",
-                ".perl": "perl", ".pl": "perl",
-                ".elixir": "elixir", ".ex": "elixir", ".exs": "elixir",
-                ".erl": "erlang", ".hs": "haskell", ".ml": "ocaml",
-                ".zig": "zig", ".nim": "nim", ".v": "verilog",
-            }
-
-            if entry.is_file():
-                content_hash = _compute_file_hash(entry.path)
-                file_id = f"file-{_simple_hash(rel_path)}"
-                language = lang_map.get(ext) or ""
-                size = int(entry.stat().st_size)
-
-                fname = rel_path.rsplit('/', 1)[-1].rsplit('.', 1)[0] if '.' in rel_path.rsplit('/', 1)[-1] else rel_path.rsplit('/', 1)[-1]
-                project_db.execute(
-                    """INSERT OR REPLACE INTO source_files
-                       (id, file_path, file_name, language, size, content_hash, parent_path)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (file_id, rel_path, fname, language, size, content_hash, parent_path),
-                )
-                file_count += 1
-            elif entry.is_dir():
-                dir_id = f"dir-{_simple_hash(rel_path)}"
-                dname = rel_path.rsplit('/', 1)[-1]
-                project_db.execute(
-                    """INSERT OR REPLACE INTO source_files
-                       (id, file_path, file_name, language, size, content_hash, parent_path)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (dir_id, rel_path, dname, "directory", 0, _simple_hash(rel_path), parent_path),
-                )
-                file_count += _scan_file_tree(project_db, root_path, entry.path, rel_path, gitignore)
-    except PermissionError:
-        pass
+    if batch:
+        project_db.executemany(
+            """INSERT OR REPLACE INTO source_files
+               (id, file_path, file_name, language, size, content_hash, parent_path)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            batch,
+        )
 
     return file_count
-def _compute_file_hash(file_path: str) -> str:
-    """计算文件的 MD5 哈希"""
-    import hashlib
-    hash_md5 = hashlib.md5()
-    try:
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                hash_md5.update(chunk)
-        return hash_md5.hexdigest()
-    except (PermissionError, OSError):
-        return ""
 def _simple_hash(path: str) -> str:
     """简单哈希"""
     import hashlib

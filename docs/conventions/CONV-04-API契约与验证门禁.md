@@ -6,7 +6,7 @@
 
 | API 段 | Owner | 传输 | 备注 |
 |---|---|---|---|
-| `POST /api/rpc/{method}`（204 核心方法：project.*·analysis.*·settings.*·llm.*·model.*·system.*·resource.*·architecture.*） | 核心组 | RPC（body=params，返回 `{result}`） | 冻结基线 `packages/core/rpc-method-baseline.json` |
+| `POST /api/rpc/{method}`（218 核心方法：project.*·analysis.*·settings.*·llm.*·model.*·system.*·resource.*·architecture.*） | 核心组 | RPC（body=params，返回 `{result}`） | 冻结基线 `packages/core/rpc-method-baseline.json` |
 | RPC `knowledge.*` | 工作台组 | RPC（gateway 命名空间路由 → kb） | workbench manifest `rpc_namespaces` |
 | RPC `render.*`·`doc.*` | 文档组 | RPC（→ docs :3481） | docs manifest `rpc_namespaces` |
 | REST `/api/chat`·`/api/models`·`/api/skills`·`/api/template-locale`·`/api/drafts`·`/api/notes` | 对话组 | REST（gateway 反代 → chat :3483） | 响应 `{code,message,data}` |
@@ -90,7 +90,7 @@ GET/POST /api/architect/...
 | 门禁 | 内容 | 命令/判据 |
 |---|---|---|
 | G1 冷启动 | fresh venv `pip install -e packages/core` + `npm install && npm run build` | 安装/构建零错 |
-| G2 RPC 基线 | 204 方法集一致 | `python3 scripts/check-rpc-parity.py` |
+| G2 RPC 基线 | 218 方法集一致 | `python3 scripts/check-rpc-parity.py` |
 | G3 后端测试 | core + 4 app pytest 全绿 | `npm run test:py`（当前 252） |
 | G4 前端类型 | 全 workspace type-check | `npm run type-check` |
 | G5 前端构建 | 全量 build（core bundle + portal + 4 app） | `npm run build` |

@@ -3,7 +3,7 @@
 > 范围：全仓 —— `packages/core`（后端核心框架）+ `packages/web-core` / `packages/graph-kernel`（前端共享内核）+ `apps/*`（4 个子项目）
 > 代码基线：分支工作区（约 2026-09-05）
 > 性质：**问题记录 + 逐项展开的实施方案（含拆分蓝图/步骤/验证/风险），尚未实施**
-> 前序文档：[architecture-issues.md](architecture-issues.md)（2026-09-02 评估，下称"0902 评估"）
+> 前序文档：[architecture-issues-0902.md](archive/architecture-issues-0902.md)（2026-09-02 评估，已归档，下称"0902 评估"）
 > 分级口径：沿用 0902 评估 —— P0 正确性 / P1 一致性 / P2 结构性 / P3 架构级（需决策）
 
 ---

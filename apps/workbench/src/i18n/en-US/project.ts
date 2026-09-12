@@ -137,6 +137,9 @@ export default { project: {
   },
   verify: {
     verifyFailed: 'Verification failed',
+    notGit: 'Project directory is not a git repository; git verification unavailable. Please re-import (git will be auto-initialized).',
+    noBaseline: 'No baseline commit yet (first-import baseline not established); only uncommitted worktree changes are shown.',
+    dirty: '{n} uncommitted in worktree',
   },
   changes: {
     checkFailed: 'Check failed',
@@ -169,9 +172,9 @@ export default { project: {
   selectFile: 'Select File',
   selected: 'Selected',
   verifyFiles: 'Verify Files',
-  verifyMatched: 'Matched',
-  verifyMismatch: 'Mismatched',
-  verifyMissing: 'Missing',
+  verifyAdded: 'Added',
+  verifyModified: 'Modified',
+  verifyDeleted: 'Deleted',
   analyzeCodeHint: 'For static import, a dedicated static source directory is recommended',
   analyzeDuplicate: 'A project already exists for this directory',
   analyzeEmpty: 'Directory is empty',

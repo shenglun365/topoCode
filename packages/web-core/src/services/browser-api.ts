@@ -216,8 +216,8 @@ export function createBrowserAPI(): any {
     updateSkill: (params: any) => callRpc('settings.updateSkill', params || {}),
     getBindings: () => callRpc('settings.getBindings', {}),
     updateBindings: (params: any) => callRpc('settings.updateBindings', params || {}),
-    getImportConfig: () => callRpc('settings.getImportConfig', {}),
-    setImportConfig: (params: any) => callRpc('settings.setImportConfig', params || {}),
+    getSourceMirrorRoot: () => callRpc('settings.getSourceMirrorRoot', {}),
+    setSourceMirrorRoot: (mirrorRoot: string) => callRpc('settings.setSourceMirrorRoot', { sourceMirrorRoot: mirrorRoot }),
   }
   const model = {
     getUsageStats: (modelId?: string, startDate?: string, endDate?: string) =>

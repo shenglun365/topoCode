@@ -19,11 +19,11 @@
 | `topoone/manifest.py` | AppManifest 数据类 + `discover_apps`/`validate_registry`（冲突即 ManifestError） | 被 gateway/supervisor 调用 |
 | `topoone/config.py` / `logging_config.py` / `http_logging.py` / `service_common.py` | 全局配置/日志/HTTP 日志/服务公共件 | — |
 | `packages/core/tests/`（16 文件） | 核心 pytest | — |
-| `packages/core/rpc-method-baseline.json` | **RPC 204 方法冻结基线**（`scripts/rpc-baseline.py` 生成） | — |
+| `packages/core/rpc-method-baseline.json` | **RPC 218 方法冻结基线**（`scripts/rpc-baseline.py` 生成） | — |
 
 ## 2. 冻结契约（破坏 = 事故，须核心组评审）
 
-### 2.1 RPC 方法基线（204）
+### 2.1 RPC 方法基线（218）
 - 基线文件：`packages/core/rpc-method-baseline.json`；生成：`python3 scripts/rpc-baseline.py`；比对：`python3 scripts/check-rpc-parity.py`。
 - **只增不删不改语义**：新增方法允许（须更新基线 + 全量回归）；删除/改名/改参数语义禁止（需两个大版本过渡期 + 所有调用方迁移）。
 
@@ -69,7 +69,7 @@ DB 文件位置与表归属见 CONV-04 §5。**任何模块不得移动/改名�
 
 | 接口 | 方式 | 说明 |
 |---|---|---|
-| RPC 方法 | 前端 `POST /api/rpc/{method}`（body=params）；进程内 `HttpAgentManager`/ZMQ | 204 方法基线 |
+| RPC 方法 | 前端 `POST /api/rpc/{method}`（body=params）；进程内 `HttpAgentManager`/ZMQ | 218 方法基线 |
 | 事件流 | WS `/ws/events?token=`（ZMQ SUB 5680 转发） | 任务/导入/LLM 流式 |
 | 子项目 RPC 命名空间 | app 在 `python_entry` 中注册（如 `knowledge.*`/`render.*`/`doc.*`），经 gateway 命名空间路由到 owner 进程 | 见 CONV-04 §1 |
 | LLM 调用 | llm 服务 `llm.chat`（ZMQ/HTTP，PUB 5682 流式） | 子项目不得自持 LLM 客户端直连 provider（chat 内置客户端为遗留，M12 任务 12.6 待瘦身） |

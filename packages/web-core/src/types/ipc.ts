@@ -417,15 +417,6 @@ export interface SkillConfigItem {
   enabled: boolean
 }
 
-/** 导入配置 */
-export interface ImportConfig {
-  ignoreMode: 'standard' | 'strict' | 'minimal'
-  extraIgnoreFiles: string[]
-  customPatterns: string[]
-  /** 源码镜像根目录（基线代码拉取位置，默认 {data-dir}/source-cache） */
-  sourceMirrorRoot?: string
-}
-
 /** 后端状态 */
 export interface BackendStatus {
   status: 'running' | 'stopped' | 'error' | 'restarting'
@@ -705,8 +696,8 @@ export interface IPCAPI {
     updateSkill: (params: { id: string; enabled: boolean }) => Promise<SkillConfigItem>
     getBindings: () => Promise<Record<string, string>>
     updateBindings: (params: { bindings: Record<string, string> }) => Promise<Record<string, string>>
-    getImportConfig: () => Promise<ImportConfig>
-    setImportConfig: (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[]; sourceMirrorRoot?: string }) => Promise<ImportConfig>
+    getSourceMirrorRoot: () => Promise<{ sourceMirrorRoot: string }>
+    setSourceMirrorRoot: (mirrorRoot: string) => Promise<{ sourceMirrorRoot: string }>
   }
 
   // 模型用量统计
@@ -746,7 +737,7 @@ export interface IPCAPI {
     importProjectArchive: (archivePath: string) => Promise<{ importId: string }>
     importStatus: (importId: string) => Promise<{ status: string; progress: number; message: string; result?: { projectId: string; projectName: string } }>
     verifyFiles: (projectId: string) => Promise<{ verifyId: string }>
-    verifyStatus: (verifyId: string) => Promise<{ status: string; progress: number; message: string; result?: { total: number; matched: number; mismatch: number; missing: number; matchRate: number; details: Array<{ filePath: string; status: string; expectedHash: string; actualHash: string }> } }>
+    verifyStatus: (verifyId: string) => Promise<{ status: string; progress: number; message: string; result?: { mode: 'git'; baseline: string; head: string; branch: string; dirty: number; added: string[]; modified: string[]; deleted: string[]; total: number; note: string; details: Array<{ filePath: string; status: 'added' | 'modified' | 'deleted' }> } }>
   }
 
   // LLM Session 管理 (v2)

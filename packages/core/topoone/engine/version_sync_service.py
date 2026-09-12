@@ -1,17 +1,18 @@
 """version_sync_service.py — KB 版本基线 + 增量更新服务（P0 地基）。
 
 职责：
-  - 计算当前磁盘文件清单 (manifest, content_hash)
-  - 对比上一 KB 基线 manifest，产出文件级 delta (A/M/D)
+  - git ls-files 物化当前 worktree 文件清单 (manifest)
+  - delta = 相邻两个基线 commit（baseline.git）的 `git diff --name-status`
   - 注册新版本基线 project_versions + 记录 delta project_version_files
   - 活表/历史表 δ 归档：source_files → source_files_history
   - 逐环节影响评估（变更幅度/影响范围），供用户选择更新环节
   - 更新请求状态机（architect 待更新标记 → KB 确认 → 拉代码）
   - VersionViewer：快速重建任意基线 head 的完整文件清单
 
-设计原则（KB 语义）：
-  - 只向前，不向后；对比仅在 KB 基线之间，不依赖 git 祖先。
-  - delta 一律 = content-hash 文件级 diff，对切分支/force-push 鲁棒。
+设计原则（git 核心语义）：
+  - git 是文件清单与变更判定的唯一事实源；嵌套 .gitignore 等由 git 原生保证。
+  - delta 一律 = baseline.git 中相邻基线 commit 的 git diff（--no-renames），
+    对切分支/force-push 鲁棒；无基线时回退路径集 diff（仅 A/D）。
   - 分析环节的增量执行（AST/图/组件/LLM）属 P1-P3，本模块提供 stage plan 钩子。
 """
 
@@ -23,14 +24,7 @@ import uuid
 from datetime import datetime
 
 from topoone.db.manager import MultiDBManager, SQLiteContext
-from topoone.engine.service._common import (
-    MultiIgnoreParser,
-    should_ignore_file,
-    build_effective_ignore_patterns,
-    _load_import_config,
-    IGNORE_FILE_PRIORITY,
-    _simple_hash,
-)
+from topoone.engine.service._common import _simple_hash
 
 logger = logging.getLogger(__name__)
 
@@ -91,18 +85,6 @@ def _camel_row(row: dict) -> dict:
     return {_to_camel(k): v for k, v in row.items()}
 
 
-def _md5_file(path: str) -> str:
-    import hashlib
-    try:
-        h = hashlib.md5()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except (PermissionError, OSError):
-        return ""
-
-
 def _rel_name(rel_path: str) -> str:
     base = rel_path.rsplit('/', 1)[-1]
     if '.' in base:
@@ -110,60 +92,37 @@ def _rel_name(rel_path: str) -> str:
     return base
 
 
-def compute_manifest(root: str, main_db) -> dict:
-    """扫描磁盘根目录，返回 {rel_path: {content_hash, size, language, file_name, mtime}}。
+def compute_manifest(root: str) -> dict:
+    """git ls-files 物化当前 worktree 文件清单（git 为唯一事实源）。
 
-    应用系统导入配置 + 多 ignore 文件（.gitignore 等）。
+    返回 {rel_path: {content_hash, size, language, file_name, mtime}}；
+    content_hash 已随 MD5 机制废弃（恒为 ''，仅保持行结构兼容）。
     """
+    from topoone.engine import git_service
+
     manifest: dict = {}
     if not root or not os.path.isdir(root):
         return manifest
-
-    import_config = _load_import_config(main_db)
-    extra_patterns = build_effective_ignore_patterns(import_config)
-    parser = MultiIgnoreParser()
-    try:
-        ignore_filenames = IGNORE_FILE_PRIORITY + import_config.get("extra_ignore_files", [])
-        parser.load_files(root, ignore_filenames)
-    except Exception as e:
-        logger.warning(f"[manifest] ignore file load failed: {e}")
-
-    try:
-        for dirpath, dirnames, filenames in os.walk(root):
-            rel_root = os.path.relpath(dirpath, root)
-            # KB 元数据目录永不索引；.codegraph 为 codegraph 索引；.git 为仓库元数据
-            if rel_root in (".topocode", ".codegraph", ".git"):
-                dirnames[:] = []
-                continue
-            dirnames[:] = [
-                d for d in dirnames
-                if not should_ignore_file(os.path.join(rel_root, d) if rel_root != '.' else d,
-                                          parser, is_dir=True, extra_patterns=extra_patterns)
-            ]
-            for filename in filenames:
-                full = os.path.join(dirpath, filename)
-                rel = os.path.relpath(full, root).replace('\\', '/')
-                if rel.startswith(".topocode/") or rel.startswith(".codegraph/") or rel.startswith(".git/"):
-                    continue
-                if should_ignore_file(rel, parser, extra_patterns=extra_patterns):
-                    continue
-                try:
-                    st = os.stat(full)
-                    size = int(st.st_size)
-                    mtime = float(st.st_mtime)
-                except OSError:
-                    size = 0
-                    mtime = 0.0
-                ext = os.path.splitext(filename)[1].lower()
-                manifest[rel] = {
-                    "content_hash": _md5_file(full),
-                    "size": size,
-                    "language": EXT_LANG.get(ext, ""),
-                    "file_name": _rel_name(rel),
-                    "mtime": mtime,
-                }
-    except PermissionError:
-        pass
+    for rel in git_service.list_files(root):
+        # KB 元数据目录防御性过滤（正常不会出现在 git 跟踪清单中）
+        if rel.startswith(".topocode/") or rel.startswith(".codegraph/") or rel.startswith(".git/"):
+            continue
+        full = os.path.join(root, rel.replace('/', os.sep))
+        try:
+            st = os.stat(full)
+            size = int(st.st_size)
+            mtime = float(st.st_mtime)
+        except OSError:
+            size = 0
+            mtime = 0.0
+        ext = os.path.splitext(rel)[1].lower()
+        manifest[rel] = {
+            "content_hash": "",
+            "size": size,
+            "language": EXT_LANG.get(ext, ""),
+            "file_name": _rel_name(rel),
+            "mtime": mtime,
+        }
     return manifest
 
 
@@ -189,13 +148,16 @@ def read_latest_manifest(project_db: SQLiteContext) -> dict:
     return out
 
 
-def diff_manifests(old: dict, new: dict) -> dict:
-    """content-hash 文件级 diff → {'added': [], 'modified': [], 'deleted': []}"""
+def _diff_paths(old: dict, new: dict) -> dict:
+    """路径集 diff（无内容哈希可比时的兜底）→ {'added': [], 'modified': [], 'deleted': []}。
+
+    modified 仅在 mtime 变化时判定（弱信号），其余归并到 added/deleted。
+    """
     added, modified, deleted = [], [], []
     for path, meta in new.items():
         if path not in old:
             added.append(path)
-        elif old[path].get("content_hash") != meta.get("content_hash"):
+        elif old[path].get("mtime") != meta.get("mtime"):
             modified.append(path)
     for path in old:
         if path not in new:
@@ -310,12 +272,11 @@ def build_stage_plan(project_id: str, project_db: SQLiteContext, main_db,
 
 
 def _archive_and_apply(project_db: SQLiteContext, old: dict, new: dict,
-                       new_version_id: str) -> int:
-    """δ 归档 + 活表更新 source_files。
+                       new_version_id: str, delta: dict) -> int:
+    """δ 归档 + 活表更新 source_files。delta 由 git diff 给出。
 
     返回归档行数。
     """
-    delta = diff_manifests(old, new)
     hist = "source_files_history"
     archived = 0
 
@@ -440,15 +401,16 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
          branch: str = "", head: str = "", label: str = "",
          stages: dict | None = None, force: bool = False,
          request_id: str | None = None, task_id: str | None = None) -> dict:
-    """执行一次 KB 基线更新（增量 δ 归档）。
+    """执行一次 KB 基线更新（增量 δ 归档，git 核心机制）。
 
-    1. 读上一基线 manifest（source_files 活表）
-    2. 扫描当前磁盘 manifest
-    3. content-hash diff → delta
-    4. 归档过期行到 source_files_history + 更新活表
-    5. 注册新版本 + 记录 delta
-    6. 返回 stage plan（P1-P3 将据此执行增量分析）
+    1. 快照当前 worktree 进 baseline.git（git 为唯一事实源）
+    2. delta = 相邻两个基线 commit 的 `git diff --name-status`（无基线回退路径集 diff）
+    3. 归档过期行到 source_files_history + 更新活表
+    4. 注册新版本 + 记录 delta
+    5. 返回 stage plan（P1-P3 将据此执行增量分析）
     """
+    from topoone.engine import git_service
+
     main_db = multi_db.main_db
     project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
     if not project:
@@ -460,18 +422,35 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
         raise ValueError(f"Project root not a directory: {root}")
 
     old_manifest = read_latest_manifest(project_db)
-    new_manifest = compute_manifest(root, main_db)
 
-    delta = diff_manifests(old_manifest, new_manifest)
-
-    # 分支切换判定（major）
+    # 上一版本基线 commit（先取，注册新版本前置条件）
     latest = main_db.fetchone(
         "SELECT * FROM project_versions WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (project_id,),
     )
-    branch_switched = False
-    if latest and branch and latest["branch"] and latest["branch"] != branch:
-        branch_switched = True
+    prev_baseline = (latest.get("baseline_commit") or "").strip() if latest else ""
+
+    # 快照当前 worktree 进项目自有基线仓库（baseline.git）
+    baseline_repo = os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git")
+    src = project.get("remote_url") or project.get("local_repo_path") or ""
+    baseline_commit = ""
+    try:
+        baseline_commit = git_service.snapshot_baseline(
+            root, baseline_repo,
+            f"baseline: {src}#{branch or ''}@{head or ''} (sync)")
+    except Exception as e:
+        logger.warning(f"[sync] baseline snapshot failed for {project_id}: {e}")
+
+    # delta = 基线 commit 间的 git diff；无基线时回退路径集 diff
+    if baseline_commit and prev_baseline:
+        delta = git_service.diff_name_status(baseline_repo, prev_baseline, baseline_commit)
+    elif baseline_commit:
+        delta = {"added": list(compute_manifest(root).keys()), "modified": [], "deleted": []}
+    else:
+        delta = _diff_paths(old_manifest, compute_manifest(root))
+
+    # 分支切换判定（major）
+    branch_switched = bool(latest and branch and latest["branch"] and latest["branch"] != branch)
     total_changed = len(delta["added"]) + len(delta["modified"]) + len(delta["deleted"])
     change_type = "major" if branch_switched else "minor"
 
@@ -491,21 +470,9 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
         }
 
     new_version_id = _new_version_id()
-    archived = _archive_and_apply(project_db, old_manifest, new_manifest, new_version_id)
+    new_manifest = compute_manifest(root)
+    archived = _archive_and_apply(project_db, old_manifest, new_manifest, new_version_id, delta)
     project_db.conn.commit()
-
-    # git 项目：把更新后的 worktree 快照进项目自有基线仓库（baseline.git）
-    baseline_commit = ""
-    if project.get("import_mode") in ("git-local", "git-remote") and root and os.path.isdir(root):
-        try:
-            from topoone.engine import git_service
-            if git_service.is_git_repo(root):
-                src = project.get("remote_url") or project.get("local_repo_path") or ""
-                baseline_commit = git_service.snapshot_baseline(
-                    root, os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git"),
-                    f"baseline: {src}#{branch or ''}@{head or ''} (sync)")
-        except Exception as e:
-            logger.warning(f"[sync] baseline snapshot failed for {project_id}: {e}")
 
     version = register_version(
         multi_db, project_id,
@@ -565,21 +532,43 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
 
 def preview(multi_db: MultiDBManager, project_id: str, *,
             branch: str = "", head: str = "") -> dict:
-    """预览变更幅度/影响范围，不写入任何数据。"""
+    """预览变更幅度/影响范围。
+
+    不写项目库/主库；baseline.git 快照为 KB 内部缓存（sync 将复用同一 commit）。
+    """
+    from topoone.engine import git_service
+
     main_db = multi_db.main_db
     project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
     if not project:
         raise ValueError(f"Project not found: {project_id}")
     project_db = multi_db.get_project_db(project_id)
     root = project["root_path"]
-    old_manifest = read_latest_manifest(project_db)
-    new_manifest = compute_manifest(root, main_db) if os.path.isdir(root) else {}
-    delta = diff_manifests(old_manifest, new_manifest)
 
+    old_manifest = read_latest_manifest(project_db)
     latest = main_db.fetchone(
         "SELECT * FROM project_versions WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (project_id,),
     )
+    prev_baseline = (latest.get("baseline_commit") or "").strip() if latest else ""
+
+    baseline_repo = os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git")
+    src = project.get("remote_url") or project.get("local_repo_path") or ""
+    baseline_commit = ""
+    try:
+        baseline_commit = git_service.snapshot_baseline(
+            root, baseline_repo,
+            f"baseline: {src}#{branch or ''}@{head or ''} (preview)")
+    except Exception as e:
+        logger.warning(f"[preview] baseline snapshot failed for {project_id}: {e}")
+
+    if baseline_commit and prev_baseline:
+        delta = git_service.diff_name_status(baseline_repo, prev_baseline, baseline_commit)
+    elif baseline_commit:
+        delta = {"added": list(compute_manifest(root).keys()), "modified": [], "deleted": []}
+    else:
+        delta = _diff_paths(old_manifest, compute_manifest(root))
+
     branch_switched = bool(latest and branch and latest["branch"] and latest["branch"] != branch)
     plan = build_stage_plan(project_id, project_db, main_db, delta, branch_switched)
     plan["delta"] = delta
@@ -717,10 +706,33 @@ def materialize(multi_db: MultiDBManager, project_id: str, version_id: str) -> l
 
 def diff_versions(multi_db: MultiDBManager, project_id: str,
                   from_id: str, to_id: str) -> dict:
-    """对比两个 KB 基线的文件级差异（P0 为 manifest 级；P1+ 扩展分析差异）。"""
-    from_files = {r["file_path"]: r for r in materialize(multi_db, project_id, from_id)}
-    to_files = {r["file_path"]: r for r in materialize(multi_db, project_id, to_id)}
-    d = diff_manifests(from_files, to_files)
+    """对比两个 KB 基线的文件级差异（P0 为文件级；P1+ 扩展分析差异）。
+
+    git 核心优先：两版本基线 commit 在 baseline.git 中的 git diff；
+    基线缺失时回退物化清单的路径集 diff。
+    """
+    from topoone.engine import git_service
+
+    main_db = multi_db.main_db
+    rows = main_db.fetchall(
+        "SELECT id, baseline_commit FROM project_versions WHERE id IN (?, ?) AND project_id = ?",
+        (from_id, to_id, project_id),
+    )
+    bc = {r["id"]: (r.get("baseline_commit") or "").strip() for r in rows}
+    fb, tb = bc.get(from_id, ""), bc.get(to_id, "")
+
+    d = None
+    if fb and tb and fb != tb:
+        baseline_repo = os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git")
+        if os.path.isdir(baseline_repo):
+            try:
+                d = git_service.diff_name_status(baseline_repo, fb, tb)
+            except git_service.GitError as e:
+                logger.warning(f"[version.diff] git diff failed: {e}")
+    if d is None:
+        d = _diff_paths(
+            {r["file_path"]: r for r in materialize(multi_db, project_id, from_id)},
+            {r["file_path"]: r for r in materialize(multi_db, project_id, to_id)})
     return {
         "fromVersion": from_id,
         "toVersion": to_id,

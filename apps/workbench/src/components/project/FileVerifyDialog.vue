@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, CheckCircleIcon, XCircleIcon, QuestionMarkCircleIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, PlusCircleIcon, PencilSquareIcon, TrashIcon } from '@heroicons/vue/24/outline'
 
 const { t } = useI18n()
 
@@ -10,17 +10,20 @@ const emit = defineEmits<{ close: [] }>()
 
 interface VerifyDetail {
   filePath: string
-  status: 'matched' | 'mismatch' | 'missing'
-  expectedHash: string
-  actualHash: string
+  status: 'added' | 'modified' | 'deleted'
 }
 
 interface VerifyResult {
+  mode: 'git'
+  baseline: string
+  head: string
+  branch: string
+  dirty: number
+  added: string[]
+  modified: string[]
+  deleted: string[]
   total: number
-  matched: number
-  mismatch: number
-  missing: number
-  matchRate: number
+  note: string
   details: VerifyDetail[]
 }
 
@@ -75,7 +78,7 @@ function startPolling() {
     } catch {
       // ignore
     }
-  }, 10000)
+  }, 1000)
 }
 
 function close() {
@@ -89,16 +92,20 @@ const filteredDetails = () => {
   return result.value.details.filter(d => d.status === filterStatus.value)
 }
 
+function shortHash(h: string): string {
+  return h ? h.slice(0, 8) : '-'
+}
+
 function statusIcon(status: string) {
-  if (status === 'matched') return CheckCircleIcon
-  if (status === 'mismatch') return XCircleIcon
-  return QuestionMarkCircleIcon
+  if (status === 'added') return PlusCircleIcon
+  if (status === 'modified') return PencilSquareIcon
+  return TrashIcon
 }
 
 function statusColor(status: string) {
-  if (status === 'matched') return 'var(--success)'
-  if (status === 'mismatch') return 'var(--error)'
-  return 'var(--text-muted)'
+  if (status === 'added') return 'var(--success)'
+  if (status === 'modified') return 'var(--warning)'
+  return 'var(--error)'
 }
 </script>
 
@@ -151,48 +158,43 @@ function statusColor(status: string) {
         </div>
 
         <template v-if="result">
+          <div
+            v-if="result.note === 'not-git'"
+            class="notice-section"
+          >
+            {{ t('project.verify.notGit') }}
+          </div>
+          <div
+            v-else-if="result.note === 'no-baseline'"
+            class="notice-section"
+          >
+            {{ t('project.verify.noBaseline') }}
+          </div>
+
           <div class="result-summary">
-            <div
-              class="match-ring"
-              :class="{ 'high': result.matchRate >= 80, 'mid': result.matchRate >= 50 && result.matchRate < 80, 'low': result.matchRate < 50 }"
-            >
-              <svg
-                viewBox="0 0 120 120"
-                class="ring-svg"
-              >
-                <circle
-                  cx="60"
-                  cy="60"
-                  r="52"
-                  fill="none"
-                  stroke="var(--bg-tertiary)"
-                  stroke-width="8"
-                />
-                <circle
-                  cx="60"
-                  cy="60"
-                  r="52"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="8"
-                  :stroke-dasharray="`${result.matchRate / 100 * 327} 327`"
-                  transform="rotate(-90, 60, 60)"
-                  stroke-linecap="round"
-                />
-              </svg>
-              <div class="match-rate-text">
-                {{ result.matchRate }}%
-              </div>
+            <div class="baseline-info">
+              <span
+                v-if="result.branch"
+                class="chip"
+              >{{ result.branch }}</span>
+              <span class="hash-pair">
+                git diff <code>{{ shortHash(result.baseline) }}</code>
+                <span class="arrow">→</span> <code>{{ shortHash(result.head) }}</code>
+              </span>
+              <span
+                v-if="result.dirty > 0"
+                class="chip dirty"
+              >{{ t('project.verify.dirty', { n: result.dirty }) }}</span>
             </div>
             <div class="stats">
               <div class="stat-row">
-                <CheckCircleIcon class="stat-icon matched" /><span>{{ t('project.verifyMatched') }}: {{ result.matched }}</span>
+                <PlusCircleIcon class="stat-icon added" /><span>{{ t('project.verifyAdded') }}: {{ result.added.length }}</span>
               </div>
               <div class="stat-row">
-                <XCircleIcon class="stat-icon mismatched" /><span>{{ t('project.verifyMismatch') }}: {{ result.mismatch }}</span>
+                <PencilSquareIcon class="stat-icon modified" /><span>{{ t('project.verifyModified') }}: {{ result.modified.length }}</span>
               </div>
               <div class="stat-row">
-                <QuestionMarkCircleIcon class="stat-icon missing" /><span>{{ t('project.verifyMissing') }}: {{ result.missing }}</span>
+                <TrashIcon class="stat-icon deleted" /><span>{{ t('project.verifyDeleted') }}: {{ result.deleted.length }}</span>
               </div>
             </div>
           </div>
@@ -205,14 +207,14 @@ function statusColor(status: string) {
               <option value="all">
                 {{ t('common.all') }} ({{ result.total }})
               </option>
-              <option value="matched">
-                {{ t('project.verifyMatched') }} ({{ result.matched }})
+              <option value="added">
+                {{ t('project.verifyAdded') }} ({{ result.added.length }})
               </option>
-              <option value="mismatch">
-                {{ t('project.verifyMismatch') }} ({{ result.mismatch }})
+              <option value="modified">
+                {{ t('project.verifyModified') }} ({{ result.modified.length }})
               </option>
-              <option value="missing">
-                {{ t('project.verifyMissing') }} ({{ result.missing }})
+              <option value="deleted">
+                {{ t('project.verifyDeleted') }} ({{ result.deleted.length }})
               </option>
             </select>
           </div>
@@ -250,6 +252,7 @@ function statusColor(status: string) {
           <button
             v-if="result"
             class="btn btn-primary btn-sm"
+            :disabled="verifying"
             @click="startVerify"
           >
             <ArrowPathIcon class="icon-sm" /> {{ t('common.refresh') }}
@@ -262,7 +265,7 @@ function statusColor(status: string) {
 
 <style scoped>
 .dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; }
-.dialog-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: calc(10px * var(--ui-scale, 1)); min-width: calc(480px * var(--ui-scale, 1)); max-width: calc(560px * var(--ui-scale, 1)); max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.25); }
+.dialog-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: calc(10px * var(--ui-scale, 1)); min-width: calc(480px * var(--ui-scale, 1)); max-width: calc(640px * var(--ui-scale, 1)); max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.25); }
 .dialog-header { display: flex; align-items: center; justify-content: space-between; padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border); }
 .dialog-title { font-size: calc(13px * var(--ui-scale, 1)); font-weight: 600; color: var(--text-primary); }
 .dialog-close { font-size: calc(18px * var(--ui-scale, 1)); color: var(--text-muted); background: none; border: none; cursor: pointer; padding: 0 calc(4px * var(--ui-scale, 1)); }
@@ -276,19 +279,19 @@ function statusColor(status: string) {
 .progress-info { font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); text-align: center; }
 .error-section { padding: calc(20px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); }
 .error-msg { font-size: calc(12px * var(--ui-scale, 1)); color: var(--error); text-align: center; }
-.result-summary { padding: calc(16px * var(--ui-scale, 1)); display: flex; align-items: center; gap: calc(20px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border); }
-.match-ring { position: relative; width: calc(80px * var(--ui-scale, 1)); height: calc(80px * var(--ui-scale, 1)); flex-shrink: 0; }
-.ring-svg { width: 100%; height: 100%; }
-.match-ring.high { color: var(--success); }
-.match-ring.mid { color: #f59e0b; }
-.match-ring.low { color: var(--error); }
-.match-rate-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(16px * var(--ui-scale, 1)); font-weight: 700; font-family: var(--font-mono); }
-.stats { display: flex; flex-direction: column; gap: calc(4px * var(--ui-scale, 1)); }
+.notice-section { margin: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)) 0; padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1)); border: 1px solid var(--warning); border-radius: calc(6px * var(--ui-scale, 1)); color: var(--warning); font-size: calc(11px * var(--ui-scale, 1)); }
+.result-summary { padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); display: flex; flex-direction: column; gap: calc(10px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border); }
+.baseline-info { display: flex; align-items: center; gap: calc(8px * var(--ui-scale, 1)); flex-wrap: wrap; font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); }
+.hash-pair code { font-family: var(--font-mono); background: var(--bg-tertiary); padding: 1px calc(5px * var(--ui-scale, 1)); border-radius: calc(4px * var(--ui-scale, 1)); color: var(--text-primary); }
+.hash-pair .arrow { margin: 0 calc(2px * var(--ui-scale, 1)); }
+.chip { background: var(--bg-tertiary); border-radius: calc(4px * var(--ui-scale, 1)); padding: 1px calc(8px * var(--ui-scale, 1)); font-size: calc(10px * var(--ui-scale, 1)); }
+.chip.dirty { color: var(--warning); }
+.stats { display: flex; gap: calc(16px * var(--ui-scale, 1)); }
 .stat-row { display: flex; align-items: center; gap: calc(6px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-primary); }
 .stat-icon { width: calc(14px * var(--ui-scale, 1)); height: calc(14px * var(--ui-scale, 1)); }
-.stat-icon.matched { color: var(--success); }
-.stat-icon.mismatched { color: var(--error); }
-.stat-icon.missing { color: var(--text-muted); }
+.stat-icon.added { color: var(--success); }
+.stat-icon.modified { color: var(--warning); }
+.stat-icon.deleted { color: var(--error); }
 .filter-bar { padding: calc(6px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border); }
 .filter-select { font-size: calc(11px * var(--ui-scale, 1)); padding: calc(3px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1)); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: calc(4px * var(--ui-scale, 1)); color: var(--text-primary); }
 .detail-list { flex: 1; overflow-y: auto; padding: calc(4px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); max-height: calc(300px * var(--ui-scale, 1)); }

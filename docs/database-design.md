@@ -287,7 +287,7 @@ KB 项目库的版本化方案（`ensure_history_table`）：
 | `ai_sessions` + `ai_session_changes` / `ai_session_issues` | AI 编码会话追踪 | 变更前后签名/内容对比；问题 severity 索引 |
 | `model_daily_usage` | 模型每日用量 | UNIQUE(model_id, date) upsert 累计 |
 | `agent_task_history` | Agent 任务历史 | agent_id UNIQUE；idx(task_id, created_at DESC) |
-| `components` / `ai_qa` / `project_config` / `file_hashes` | 组件 / QA 记录 / 项目级 KV / 导入导出校验 | 辅助表 |
+| `components` / `ai_qa` / `project_config` | 组件 / QA 记录 / 项目级 KV | 辅助表 |
 
 ### 5.4 architect.db（Architect 主库）
 
