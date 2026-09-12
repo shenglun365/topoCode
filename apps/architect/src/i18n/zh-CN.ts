@@ -416,6 +416,11 @@ export default {
     generatedAt: '生成于',
     linkHint: '绿色=执行(→基线管理资产 diff) · 蓝色=会话 · 黄色=备案文档',
   },
+  req: {
+    status: {
+      raw: '原始', draft: '草案', ready: '可执行', done: '已完成', cancelled: '已取消',
+    },
+  },
   session: {
     stage: { design: '设计', implement: '实现', evaluate: '评估', accept: '验收' },
     mine: '提炼能力',

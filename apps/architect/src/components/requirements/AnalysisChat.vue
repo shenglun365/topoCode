@@ -720,8 +720,8 @@ onUnmounted(() => {
               :disabled="specBusyIdx === i"
               title="按原文确定性落库为需求(零模型转写)"
               @click="onSpecApply(i)"
-            >{{ specBusyIdx === i ? '…' : t('session.guard.applySpec') }}</button>
-            <span class="text-[10px] text-ctp-overlay0">{{ t('session.guard.applySpecHint') }}</span>
+            >{{ specBusyIdx === i ? '…' : t('session.actions.applySpec') }}</button>
+            <span class="text-[10px] text-ctp-overlay0">{{ t('session.actions.applySpecHint') }}</span>
           </div>
 
           <!-- 系统守卫卡: 可点击指令(点击 → guard-repair 独立外循环), 说明在文字区 -->

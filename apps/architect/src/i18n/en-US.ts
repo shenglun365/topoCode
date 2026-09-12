@@ -392,6 +392,11 @@ export default {
     generatedAt: 'Generated at',
     linkHint: 'green=exec(→baseline asset diff) · blue=session · yellow=doc',
   },
+  req: {
+    status: {
+      raw: 'raw', draft: 'draft', ready: 'ready', done: 'done', cancelled: 'cancelled',
+    },
+  },
   session: {
     stage: { design: 'Design', implement: 'Implement', evaluate: 'Evaluate', accept: 'Accept' },
     mine: 'Mine capabilities',
