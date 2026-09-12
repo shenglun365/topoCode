@@ -235,6 +235,7 @@ def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] 
     if conflict:
         return f"⛔ {conflict}"
     payload = {"root": root, "instruction": instruction, "branchName": branch,
+               "projectId": project,
                "boundaries": {"files": boundary_files, "components": [],
                               "readOnly": False}}
     for k_src, k_dst in (("model", "model"), ("basePort", "basePort"),
