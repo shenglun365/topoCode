@@ -91,6 +91,8 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "workState": c.get("workState") or "architect",
             "reviewState": c.get("reviewState") or "read",
             "roles": _roles_of(c),
+            "executorId": c.get("executorId") or "",
+            "parentConvId": c.get("parentConvId") or "",
             "tags": _tags_of(c),
             "summary": c.get("summary") or "",
             "msgCount": c.get("msgCount") or 0,

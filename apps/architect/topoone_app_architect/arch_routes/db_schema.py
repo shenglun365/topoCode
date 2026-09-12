@@ -180,7 +180,6 @@ ARCH_PROJECT_TABLES_SQL = """
         updated_at INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_arch_convs_kind ON arch_conversations(kind, project_id);
-    CREATE INDEX IF NOT EXISTS idx_arch_convs_parent ON arch_conversations(parent_conv_id);
 
     -- 备案文档(P1 会话中心)：会话派生的总结性文档(需求快照/开发简报/笔记)，
     -- 非流程实体——随时生成、随时增删(裁决2)。
@@ -644,6 +643,11 @@ def _project_migrations(db) -> None:
         ("executor_id", "TEXT DEFAULT ''"),
         ("session_ref", "TEXT DEFAULT ''"),
     ])
+    try:   # 索引须在补列之后创建(旧库表已存在, 建表段不带新列)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_arch_convs_parent "
+                   "ON arch_conversations(parent_conv_id)")
+    except Exception:  # noqa: BLE001
+        pass
     _drop_retired_tables(db)
     # M0 冻结: 语义资产作废态（标准变更 → 整体作废，行保留可溯源；plan-C-M0 §6.4）
     _add_cols(db, "arch_semantic_assets", [
