@@ -123,7 +123,7 @@ def running_role(conv_id: str) -> Optional[dict]:
     j = active_job(conv_id)
     if not j:
         return None
-    return {"role": "coding", "executorId": j.get("executorId") or "",
+    return {"role": "coding", "executorId": j.get("executorId") or "opencode",
             "jobId": j.get("jobId") or "", "status": j.get("status") or ""}
 
 

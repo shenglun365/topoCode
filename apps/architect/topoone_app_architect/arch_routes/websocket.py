@@ -46,7 +46,7 @@ async def _deliver_coding_turn(conv: dict, text: str) -> str:
     if res.get("ok"):
         j = exec_bridge.active_job(conv_id) or {}
         queued = bool(res.get("queued"))
-        ex = j.get("executorId") or "coding"
+        ex = j.get("executorId") or "opencode"
         if queued:
             return (f"📥 已排队转达 `{ex}`（当前回合执行中，回合结束自动续跑）。"
                     "architect 方向的讨论不受影响。")
