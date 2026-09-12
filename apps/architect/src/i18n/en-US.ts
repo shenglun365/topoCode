@@ -420,6 +420,7 @@ export default {
       noExecutors: 'No executors — configure in Settings',
       roleTitle: 'Executor binding',
       bound: 'Bound',
+      bindHint: 'First click binds a coding executor (immutable)',
       bind: 'Bind',
       clone: 'Clone & switch',
     },

@@ -444,6 +444,7 @@ export default {
       noExecutors: '暂无可用执行器——请到设置页「Coding Agent 执行器」配置',
       roleTitle: '执行器绑定',
       bound: '已绑定',
+      bindHint: '首次点击=分配 coding 执行器(一次绑定不可切换)',
       bind: '绑定',
       clone: '克隆并切换',
     },

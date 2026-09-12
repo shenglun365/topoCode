@@ -39,10 +39,13 @@ const props = defineProps<{
   inputLocked?: string | null
   /** running 归属(S2): {role:'coding', executorId, status} 有活跃作业时非空。 */
   jobState?: { role: string; executorId?: string; status?: string } | null
+  /** 已绑定执行器 id(S2/S3): 空=未绑定——Coding 切换钮首击触发分配(bind-coding)。 */
+  boundExecutorId?: string
 }>()
 
 const emit = defineEmits<{
   send: [text: string, targetRole?: 'architect' | 'coding']
+  'bind-coding': []
   rename: [title: string]
   'summarize-title': []
   answers: [answers: Record<string, string>]
@@ -203,6 +206,15 @@ watch(() => props.jobState, (js) => {
   // 作业等待回复时默认收件人切 coding(可手动切回)
   if (js?.role === 'coding' && js.status === 'waiting_input') targetRole.value = 'coding'
 }, { immediate: true })
+
+function onCodingClick() {
+  // 切换/分配共用一个位置: 未绑定执行器 → 首击触发分配(绑定弹窗); 已绑定 → 切换收件人
+  if (!props.boundExecutorId) {
+    emit('bind-coding')
+    return
+  }
+  targetRole.value = 'coding'
+}
 
 function send() {
   if (props.inputLocked) return
@@ -600,6 +612,24 @@ onUnmounted(() => {
             </button>
           </span>
         </span>
+      </span>
+      <!-- 收件人切换(S2/S4'): 标题栏二选一; Coding 首击=分配执行器 -->
+      <span class="ml-1 flex shrink-0 items-center gap-0.5">
+        <button
+          class="btn !px-1.5 !py-0.5 !text-[10px]"
+          :class="targetRole === 'architect' ? 'btn-blue' : 'btn-ghost'"
+          :title="t('session.target.architectHint')"
+          @click="targetRole = 'architect'"
+        >🏗 {{ t('session.target.architect') }}</button>
+        <button
+          class="btn !px-1.5 !py-0.5 !text-[10px]"
+          :class="targetRole === 'coding' ? 'btn-blue' : 'btn-ghost'"
+          :title="!props.boundExecutorId ? t('session.role.bindHint')
+            : props.jobState?.role === 'coding'
+              ? `${props.jobState.executorId || 'coding'} · ${props.jobState.status || ''}`
+              : t('session.target.codingUnavailable')"
+          @click="onCodingClick"
+        >⌨ {{ t('session.target.coding') }}<template v-if="!props.boundExecutorId">?</template></button>
       </span>
       <slot name="header-extra" />
     </div>
@@ -1342,24 +1372,6 @@ onUnmounted(() => {
     </div>
 
     <div class="flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
-      <!-- 收件人切换(S2): architect 分析 / coding 转达作业 -->
-      <div class="flex shrink-0 flex-col gap-1 pb-0.5">
-        <button
-          class="btn !px-2 !py-1 !text-[10px]"
-          :class="targetRole === 'architect' ? 'btn-blue' : 'btn-ghost'"
-          :title="t('session.target.architectHint')"
-          @click="targetRole = 'architect'"
-        >🏗 {{ t('session.target.architect') }}</button>
-        <button
-          class="btn !px-2 !py-1 !text-[10px]"
-          :class="targetRole === 'coding' ? 'btn-blue' : 'btn-ghost'"
-          :disabled="props.jobState?.role !== 'coding'"
-          :title="props.jobState?.role === 'coding'
-            ? `${props.jobState.executorId || 'coding'} · ${props.jobState.status || ''}`
-            : t('session.target.codingUnavailable')"
-          @click="targetRole = 'coding'"
-        >⌨ {{ t('session.target.coding') }}</button>
-      </div>
       <textarea
         ref="inputRef"
         v-model="input"

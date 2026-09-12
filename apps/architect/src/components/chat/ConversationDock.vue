@@ -700,6 +700,8 @@ async function pollRunningState() {
         :diagram-skill="conv.diagramSkill"
         :read-only="(conv.activeMeta as any)?.status === 'archived'"
         :job-state="jobState"
+        :bound-executor-id="boundExecutorId"
+        @bind-coding="openRoles"
         @send="(text: string, role?: 'architect' | 'coding') => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(role ? { targetRole: role } : {}) }); onSent() }"
         @job-accept="openAccept"
         @job-resume="resumeJob"
