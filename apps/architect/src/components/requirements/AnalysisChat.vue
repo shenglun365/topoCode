@@ -621,7 +621,7 @@ onUnmounted(() => {
             ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
           :title="t('session.target.architectHint')"
           @click="targetRole = 'architect'"
-        >🏗 {{ t('session.target.architect') }}</span>
+        >{{ t('session.target.architect') }}</span>
         <span
           class="chip cursor-pointer select-none !text-[10px] transition-colors"
           :class="targetRole === 'coding'
@@ -631,7 +631,7 @@ onUnmounted(() => {
               ? `${props.jobState.executorId || 'coding'} · ${props.jobState.status || ''}`
               : t('session.target.codingUnavailable')"
           @click="onCodingClick"
-        >⌨ {{ t('session.target.coding') }}<template v-if="!props.boundExecutorId">?</template></span>
+        >{{ t('session.target.coding') }}<template v-if="!props.boundExecutorId">?</template></span>
       </span>
       <slot name="header-extra" />
     </div>
