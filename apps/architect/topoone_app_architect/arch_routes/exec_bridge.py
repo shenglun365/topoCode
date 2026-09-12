@@ -476,14 +476,133 @@ def _cancel_pumps(conv_id: str) -> None:
         t.cancel()
 
 
+def _pump_ctx(conv_id: str, job_id: str, rid: str) -> dict:
+    """泵上下文: 子会话宿主/库路由等每轮可刷新的派生量。"""
+    pid = (store.ConversationsStore.get(conv_id) or {}).get("projectId") or ""
+    sub_id = ""
+    jb = next((j for j in jobs_of(conv_id) if j.get("jobId") == job_id), None)
+    if jb and jb.get("subSessionId"):
+        sub_id = jb["subSessionId"]
+    return {"convId": conv_id, "jobId": job_id, "rid": rid, "pid": pid,
+            "subId": sub_id, "target": sub_id or conv_id}
+
+
+def _handle_pump_event(ev: dict, ctx: dict) -> None:
+    """单事件 → 会话消息/账本(WS 推送与轮询校准共用)。"""
+    conv_id, job_id = ctx["convId"], ctx["jobId"]
+    sub_id, target, pid = ctx["subId"], ctx["target"], ctx["pid"]
+    kind = ev.get("kind") or ""
+    if kind in ("user_input", "session_ready"):
+        return
+    text = (ev.get("text") or "").strip()
+    if kind == "input_required":
+        clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
+        _append(target, "assistant",
+                f"⏸ **执行工程师需要你的输入**（作业 `{job_id[:12]}…`）\n\n{clean}\n\n"
+                "回复补充内容后以 coding 收件人发送(或 `/继续`)转达；停止请用会话信息面板按钮。",
+                msg_meta={"jobId": job_id, "kind": "job_input"}, project_id=pid)
+        _job_upsert(conv_id, {"jobId": job_id, "status": "waiting_input",
+                              "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
+    elif kind == "done":
+        clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()
+        changed = ev.get("changedFiles") or []
+        _job_upsert(conv_id, {"jobId": job_id, "status": "done",
+                              "endedAt": _ts(), "changedFiles": changed,
+                              "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
+        brief = _acceptance_brief(conv_id, ctx["rid"], changed)
+        files = ("\n".join(f"- `{f}`" for f in changed[:20])
+                 if changed else "- (无变更文件)")
+        _append(conv_id, "assistant",
+                f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n"
+                f"{clean}\n\n**变更文件**：\n{files}\n\n---\n**验收简报**\n{brief}\n\n"
+                "请验收：点本消息下方「验收」查看差异并判定；"
+                "通过=需求标记已完成；需返工=回复意见后「继续执行」或调整规约。",
+                msg_meta={"jobId": job_id, "kind": "job_done",
+                          "branch": (jobs_of(conv_id)[-1] or {}).get("branch", "")})
+        if sub_id:
+            _append(sub_id, "assistant",
+                    f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n{clean}",
+                    msg_meta={"jobId": job_id, "kind": "job_done_sub"}, project_id=pid)
+    elif kind == "failed":
+        _job_upsert(conv_id, {"jobId": job_id, "status": "failed",
+                              "endedAt": _ts(), "failReason": text[:400],
+                              "lastAgentTs": _ts()})
+        _append(conv_id, "assistant",
+                f"❌ 执行作业失败：{text}\n分支已保留。"
+                "排查后 `/执行` 重试(自动附前情简报)。",
+                msg_meta={"jobId": job_id, "kind": "job_failed"})
+        if sub_id:
+            _append(sub_id, "assistant",
+                    f"❌ 执行作业失败：{text}",
+                    msg_meta={"jobId": job_id, "kind": "job_failed_sub"}, project_id=pid)
+    elif kind in ("aborted", "finished"):
+        _append(conv_id, "assistant", f"ℹ️ {text}")
+    elif text:
+        _append(target, "assistant", text,
+                msg_meta={"jobId": job_id, "kind": "job_progress"}, project_id=pid)
+        _job_upsert(conv_id, {"jobId": job_id, "lastAgentTs": _ts()})
+
+
+async def _ws_connect(job_id: str, since: int):
+    """连接 runner 作业事件实时订阅面(失败返回 None——泵降级轮询)。"""
+    try:
+        import websockets
+        url = (RUNNER_BASE.replace("https://", "wss://").replace("http://", "ws://")
+               + f"/api/implement/{job_id}/events?since={since}")
+        return await asyncio.wait_for(
+            websockets.connect(url, open_timeout=3.0, max_size=4 * 1024 * 1024), 4.0)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+_WS_IDLE_SEC = 10.0        # 订阅空闲窗口(超时→snapshot 校准一轮, 保留 lost/终态判定)
+_WS_RETRY_GAP = 4          # 订阅失败后的重试间隔(轮询轮)
+
+
 async def _pump(conv_id: str, job_id: str, rid: str) -> None:
-    """下行事件 → 会话消息; 终态落账本 + workState 聚合 + 验收简报。"""
+    """上行通道(执行器能力自适应): WS 实时订阅优先, 轮询校准兜底。
+
+    - 订阅模式: runner 事件即产即推(opencode SSE/codex notifications 等实时
+      执行器端到端即时; 轮询型执行器仍按其已知时点推送);
+    - 校准/降级: 订阅不可达或空闲超时 → snapshot 轮询(补漏事件+终态确认+
+      连续不可达 lost 判定), 与订阅共用事件处理(seq 去重)。
+    """
     logger.info("[exec-bridge] pump start conv=%s job=%s", conv_id, job_id)
     errs = 0
     last_seq = 0
+    ws = None
+    ws_gap = 0
     try:
         while True:
-            await asyncio.sleep(POLL_INTERVAL)
+            # ① 实时订阅优先
+            if ws is None and ws_gap <= 0:
+                ws = await _ws_connect(job_id, last_seq)
+                if ws is None:
+                    ws_gap = _WS_RETRY_GAP
+                    await asyncio.sleep(POLL_INTERVAL)
+            if ws is not None:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=_WS_IDLE_SEC)
+                    ev = json.loads(raw)
+                    if int(ev.get("seq") or 0) <= last_seq:
+                        continue
+                    last_seq = int(ev.get("seq") or 0)
+                    _handle_pump_event(ev, _pump_ctx(conv_id, job_id, rid))
+                    if ev.get("kind") in ("done", "failed"):
+                        return
+                    continue
+                except Exception:  # noqa: BLE001
+                    try:
+                        await ws.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    ws = None
+                    ws_gap = 1     # 空闲超时/断流 → 校准一轮后再重连
+            else:
+                ws_gap = max(0, ws_gap - 1)
+                await asyncio.sleep(POLL_INTERVAL)
+
+            # ② snapshot 校准(订阅空闲/降级共用): 补漏 + 终态确认 + lost
             snap = await asyncio.to_thread(
                 _runner, f"/api/implement/{job_id}?since={last_seq}", None, 12.0)
             if snap is None:
@@ -494,24 +613,19 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                                           "failReason": "runner 连续不可达"})
                     _append(conv_id, "assistant",
                             "⚠️ 与作业失去联系(runner 不可达)——已记为 lost。"
-                            "「执行方案」重试会自动附上前情简报。")
+                            "`/执行` 重试会自动附上前情简报。")
                     return
                 continue
             errs = 0
             if not snap.get("ok"):
-                # 作业不在 runner(404) → lost
                 _job_upsert(conv_id, {"jobId": job_id, "status": "lost",
                                       "endedAt": _ts(), "failReason": "作业句柄丢失(runner 重启?)"})
                 _append(conv_id, "assistant",
                         "⚠️ 作业句柄已丢失(runner 重启)——已记为 lost。"
-                        "「执行方案」重试将自动附前情简报。")
+                        "`/执行` 重试将自动附前情简报。")
                 return
-            pid = (store.ConversationsStore.get(conv_id) or {}).get("projectId") or ""
-            # S3: 事件消息流落子会话(done/failed 主会话保留完整卡); session_ref 回填
-            sub_id = ""
-            jb = next((j for j in jobs_of(conv_id) if j.get("jobId") == job_id), None)
-            if jb and jb.get("subSessionId"):
-                sub_id = jb["subSessionId"]
+            ctx = _pump_ctx(conv_id, job_id, rid)
+            sub_id = ctx["subId"]
             sid = (snap.get("sessionId") or "").strip()
             if sid and sub_id:
                 try:
@@ -520,59 +634,11 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
                         store.ConversationsStore.update(sub_id, {"sessionRef": sid})
                 except Exception:  # noqa: BLE001
                     pass
-            target = sub_id or conv_id
             for ev in snap.get("events") or []:
-                last_seq = max(last_seq, ev.get("seq", 0))
-                kind = ev.get("kind") or ""
-                if kind in ("user_input", "session_ready"):
+                if int(ev.get("seq") or 0) <= last_seq:
                     continue
-                text = (ev.get("text") or "").strip()
-                if kind == "input_required":
-                    clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
-                    _append(target, "assistant",
-                            f"⏸ **执行工程师需要你的输入**（作业 `{job_id[:12]}…`）\n\n{clean}\n\n"
-                            "回复补充内容后以 coding 收件人发送(或 `/继续`)转达；停止请用会话信息面板按钮。",
-                            msg_meta={"jobId": job_id, "kind": "job_input"}, project_id=pid)
-                    _job_upsert(conv_id, {"jobId": job_id, "status": "waiting_input",
-                                          "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
-                elif kind == "done":
-                    clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()
-                    changed = ev.get("changedFiles") or []
-                    _job_upsert(conv_id, {"jobId": job_id, "status": "done",
-                                          "endedAt": _ts(), "changedFiles": changed,
-                                          "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
-                    brief = _acceptance_brief(conv_id, rid, changed)
-                    files = ("\n".join(f"- `{f}`" for f in changed[:20])
-                             if changed else "- (无变更文件)")
-                    _append(conv_id, "assistant",
-                            f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n"
-                            f"{clean}\n\n**变更文件**：\n{files}\n\n---\n**验收简报**\n{brief}\n\n"
-                            "请验收：点本消息下方「验收」查看差异并判定；"
-                            "通过=需求标记已完成；需返工=回复意见后「继续执行」或调整规约。",
-                            msg_meta={"jobId": job_id, "kind": "job_done",
-                                      "branch": (jobs_of(conv_id)[-1] or {}).get("branch", "")})
-                    if sub_id:
-                        _append(sub_id, "assistant",
-                                f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n{clean}",
-                                msg_meta={"jobId": job_id, "kind": "job_done_sub"}, project_id=pid)
-                elif kind == "failed":
-                    _job_upsert(conv_id, {"jobId": job_id, "status": "failed",
-                                          "endedAt": _ts(), "failReason": text[:400],
-                                          "lastAgentTs": _ts()})
-                    _append(conv_id, "assistant",
-                            f"❌ 执行作业失败：{text}\n分支已保留。"
-                            "排查后 `/执行` 重试(自动附前情简报)。",
-                            msg_meta={"jobId": job_id, "kind": "job_failed"})
-                    if sub_id:
-                        _append(sub_id, "assistant",
-                                f"❌ 执行作业失败：{text}",
-                                msg_meta={"jobId": job_id, "kind": "job_failed_sub"}, project_id=pid)
-                elif kind in ("aborted", "finished"):
-                    _append(conv_id, "assistant", f"ℹ️ {text}")
-                elif text:
-                    _append(target, "assistant", text,
-                            msg_meta={"jobId": job_id, "kind": "job_progress"}, project_id=pid)
-                    _job_upsert(conv_id, {"jobId": job_id, "lastAgentTs": _ts()})
+                last_seq = max(last_seq, int(ev.get("seq") or 0))
+                _handle_pump_event(ev, ctx)
             status = snap.get("status") or ""
             if status in _TERMINAL:
                 _job_upsert(conv_id, {"jobId": job_id, "status": status,

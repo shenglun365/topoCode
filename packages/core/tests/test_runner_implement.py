@@ -3,6 +3,8 @@
 Run: cd <repo> && python -m pytest packages/core/tests/test_runner_implement.py -q
 """
 import asyncio
+
+import pytest
 import os
 import sys
 
@@ -85,3 +87,35 @@ def test_turn_marker_classification():
     j3.status = "running"
     asyncio.run(_turn(j3, "x"))
     assert j3.status == "waiting_input"
+
+
+# ── 作业事件实时订阅面(WS): 回放 + 实时扇出 + 终态关闭 ────────────────
+
+@pytest.mark.asyncio
+async def test_implement_events_ws(tmp_path, monkeypatch):
+    """emit 扇出: 订阅者即时收到; since 回放; done 终态服务端关闭。"""
+    from topoone.plugins.runner import implement as impl
+    from topoone.plugins.runner.turn_adapter import TurnAdapter, TurnOutcome
+
+    class _SyncAdapter(TurnAdapter):
+        executor_id, executor_type = "fake", "fake"
+        async def start_session(self, job): job.session_id = "s"
+        async def run_turn(self, job, text): return TurnOutcome(output=text)
+        async def probe(self, job):
+            from topoone.plugins.runner.turn_adapter import TurnProbe
+            return TurnProbe(status="idle", last_activity_ts=1.0)
+
+    job = impl.ImplementJob("impl-ws-test", "/r", "/w", "HEAD", "b", "hello",
+                            adapter=_SyncAdapter())
+    job.emit("session_ready", "ready")     # 订阅前: 只进环(WS 端点靠 since 回放)
+    q = job.subscribe()
+    job.emit("user_input", "hi")            # 订阅后: 实时扇出
+    got = q.get_nowait()
+    assert got["kind"] == "user_input" and got["seq"] >= 2
+    seq0 = got["seq"]
+    job.unsubscribe(q)
+    job.emit("aborted", "no sub")
+    with pytest.raises(Exception):
+        q.get_nowait()                       # 退订后不再收
+    # 环内回放语义(snapshot since 语义由 WS 端点使用, 这里验环)
+    assert [e["seq"] for e in job.events if e["seq"] > seq0]

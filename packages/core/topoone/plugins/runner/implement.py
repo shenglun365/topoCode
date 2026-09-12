@@ -36,7 +36,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 
 from .turn_adapter import TurnAdapter, build_adapter
 
@@ -115,8 +115,9 @@ class ImplementJob:
         self.last_activity_ts = self.created_at
         self.last_error = ""
         self.sse_stop: Optional[asyncio.Event] = None
+        self._subscribers: list = []   # WS 实时订阅队列(architect 泵)
 
-    # ── 事件缓冲 ──
+    # ── 事件缓冲 + 实时扇出 ──
 
     def emit(self, kind: str, text: str = "", **extra: Any) -> int:
         self.seq += 1
@@ -127,7 +128,26 @@ class ImplementJob:
         if len(self.events) > _MAX_EVENTS:
             self.events = self.events[-_MAX_EVENTS:]
         self.updated_at = time.time()
+        # 实时扇出(非阻塞; 满队列丢最旧——订阅端有 snapshot 兜底校准)
+        for q in list(self._subscribers):
+            try:
+                if q.full():
+                    q.get_nowait()
+                q.put_nowait(ev)
+            except Exception:  # noqa: BLE001
+                pass
         return ev["seq"]
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q) -> None:
+        try:
+            self._subscribers.remove(q)
+        except ValueError:
+            pass
 
     def snapshot(self, since: int = 0) -> Dict[str, Any]:
         return {"jobId": self.id, "status": self.status, "error": self.error,
@@ -411,3 +431,43 @@ def register(app: FastAPI) -> None:
         if not job:
             return {"ok": False, "error": "作业不存在"}
         return {"ok": True, **job.diff()}
+
+    @app.websocket("/api/implement/{job_id}/events")
+    async def implement_events(websocket: WebSocket, job_id: str):
+        """作业事件实时订阅(上行通道推送面, 执行器能力自适应)。
+
+        执行器实时(opencode SSE/codex notifications)→事件即产即推;
+        执行器轮询型→事件仍按已知时点推送。?since=N 先回放环内 seq>N,
+        再实时转发; done/failed 终态排空后关闭。客户端断线可携 since 重连续传。
+        """
+        job = _JOBS.get(job_id)
+        if not job:
+            await websocket.close(code=4404)
+            return
+        await websocket.accept()
+        try:
+            since = 0
+            qs = (websocket.query_params.get("since") or "0").strip()
+            try:
+                since = int(qs)
+            except ValueError:
+                since = 0
+            # 回放环内积压(订阅竞态窗口的补齐)
+            for e in list(job.events):
+                if e.get("seq", 0) > since:
+                    await websocket.send_json(e)
+            if job.status in ("done", "failed", "stopped"):
+                return
+            q = job.subscribe()
+            try:
+                while True:
+                    ev = await asyncio.wait_for(q.get(), timeout=60.0)
+                    await websocket.send_json(ev)
+                    if ev.get("kind") in ("done", "failed"):
+                        return
+            finally:
+                job.unsubscribe(q)
+        except WebSocketDisconnect:
+            pass
+        except Exception:  # noqa: BLE001
+            pass
