@@ -824,7 +824,7 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
         return None
     conv_model = ((conv or {}).get("executorModel") or "").strip()
     try:
-        from .agent_executors import load_executors
+        from .agent_executors import load_executors, _default_sidecar_path
         for e in load_executors():
             if (e.get("id") or "") == eid:
                 cfg = e.get("config") or {}
@@ -844,7 +844,8 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
                             "base_url": cfg.get("base_url") or cfg.get("serve_url") or "",
                             "opencode_bin": cfg.get("opencode_bin") or "",
                             "node_bin": cfg.get("node_bin") or "",
-                            "sidecar_script": cfg.get("sidecar_script") or "",
+                            "sidecar_script": cfg.get("sidecar_script")
+                                or _default_sidecar_path(),
                             "provider_id": cfg.get("provider_id") or "",
                             "model_id": cfg.get("model_id") or "",
                             "api_key": cfg.get("api_key") or "",

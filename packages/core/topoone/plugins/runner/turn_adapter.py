@@ -215,6 +215,14 @@ def _default_token() -> str:
     return ""
 
 
+def _default_sidecar_script() -> str:
+    """sidecar 脚本默认路径: turn_adapter → runner → plugins → topoone → core
+    → packages → 仓库根/packages/agent-sidecar/dist/index.js。
+    config 未显式携带时回退(architect 侧注册表默认值为空串)。"""
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+    return os.path.join(root, "agent-sidecar", "dist", "index.js")
+
+
 class _SidecarProcess:
     """单例 sidecar 进程：懒拉起、崩溃自动重启、请求-响应关联。"""
 
@@ -248,7 +256,9 @@ class _SidecarProcess:
             await asyncio.wait_for(self._send_and_wait("ping"), timeout=30.0)
         except Exception as e:  # noqa: BLE001
             await self.kill()
-            raise RuntimeError(f"cline sidecar 启动失败: {e}") from e
+            raise RuntimeError(
+                f"cline sidecar 启动失败: {str(e) or type(e).__name__} "
+                f"(script={self._script})") from e
         logger.info("[cline] sidecar started pid=%s", self._proc.pid)
 
     async def _send_and_wait(self, method: str, params: dict | None = None,
@@ -627,7 +637,8 @@ class ClineTurnAdapter(TurnAdapter):
         self.executor_id = executor_id
         self.executor_type = "cline-sdk"
         self._node = str(config.get("node_bin") or "node")
-        self._script = str(config.get("sidecar_script") or "")
+        self._script = (str(config.get("sidecar_script") or "").strip()
+                        or _default_sidecar_script())
         self._provider_id = str(config.get("provider_id") or "")
         self._model_id = str(config.get("model_id") or "")
         self._api_key = str(config.get("api_key") or "")

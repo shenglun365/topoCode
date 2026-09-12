@@ -298,3 +298,15 @@ def test_opencode_adapter_reuses_preset_session(monkeypatch):
     asyncio.run(a.start_session(j))
     assert j.session_id == "ses-old"   # 未被覆盖
     assert created["n"] == 0           # 未新建会话
+
+
+def test_cline_sidecar_script_default_fallback(tmp_path):
+    """config 未携 sidecar_script(architect 注册表默认空串) → runner 回退包内默认路径。"""
+    import os
+    from topoone.plugins.runner.turn_adapter import (
+        ClineTurnAdapter, _default_sidecar_script)
+    a = ClineTurnAdapter({"sidecar_script": ""})
+    assert a._script == _default_sidecar_script()
+    assert os.path.isfile(a._script), "默认 sidecar 脚本应存在(需 npm run build -w packages/agent-sidecar)"
+    b = ClineTurnAdapter({"sidecar_script": str(tmp_path / "x.js")})
+    assert b._script == str(tmp_path / "x.js"), "显式配置不覆盖"
