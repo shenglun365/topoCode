@@ -859,3 +859,14 @@ def test_finalize_gate_actionable_guidance(tmp_path, monkeypatch):
     _actx.set_conv(conv["id"]); _actx.set_req(rid0); _actx.set_project(conv["projectId"])
     out = asyncio.run(ws._cmd_finalize_turn(store.ConversationsStore.get(conv["id"])))
     assert "定稿未通过" in out and "/调整" in out, out
+
+
+def test_chat_system_prompt_no_reject_boundary():
+    """自由对话 system 含职责边界: 弱相关需求不拒做(用户主权, 提示不打断)。"""
+    from topoone_app_architect.arch_routes import req_agent
+    import inspect
+    fn = next(o for n, o in inspect.getmembers(req_agent, inspect.isfunction)
+              if "system" in n.lower() and "chat" in (inspect.getsource(o)[:400].lower() + n.lower()))
+    src = inspect.getsource(fn)
+    assert "不拒做" in src and "职责边界" in src, "system 提示应含职责边界(弱相关受理)"
+    assert "designMd" in src, "边界提示应同步强调 designMd 完整性"
