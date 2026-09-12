@@ -613,23 +613,25 @@ onUnmounted(() => {
           </span>
         </span>
       </span>
-      <!-- 收件人切换(S2/S4'): 标题栏二选一; Coding 首击=分配执行器 -->
-      <span class="ml-1 flex shrink-0 items-center gap-0.5">
-        <button
-          class="btn !px-1.5 !py-0.5 !text-[10px]"
-          :class="targetRole === 'architect' ? 'btn-blue' : 'btn-ghost'"
+      <!-- 收件人切换(S2/S4'): 标题栏二选一(文字 tag); Coding 首击=分配执行器 -->
+      <span class="ml-1 flex shrink-0 items-center gap-1">
+        <span
+          class="chip cursor-pointer select-none !text-[10px] transition-colors"
+          :class="targetRole === 'architect'
+            ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
           :title="t('session.target.architectHint')"
           @click="targetRole = 'architect'"
-        >🏗 {{ t('session.target.architect') }}</button>
-        <button
-          class="btn !px-1.5 !py-0.5 !text-[10px]"
-          :class="targetRole === 'coding' ? 'btn-blue' : 'btn-ghost'"
+        >🏗 {{ t('session.target.architect') }}</span>
+        <span
+          class="chip cursor-pointer select-none !text-[10px] transition-colors"
+          :class="targetRole === 'coding'
+            ? 'bg-ctp-mauve/15 text-ctp-mauve' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
           :title="!props.boundExecutorId ? t('session.role.bindHint')
             : props.jobState?.role === 'coding'
               ? `${props.jobState.executorId || 'coding'} · ${props.jobState.status || ''}`
               : t('session.target.codingUnavailable')"
           @click="onCodingClick"
-        >⌨ {{ t('session.target.coding') }}<template v-if="!props.boundExecutorId">?</template></button>
+        >⌨ {{ t('session.target.coding') }}<template v-if="!props.boundExecutorId">?</template></span>
       </span>
       <slot name="header-extra" />
     </div>
