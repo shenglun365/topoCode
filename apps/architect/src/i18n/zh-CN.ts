@@ -465,6 +465,7 @@ export default {
       feedSummaryHint: '摘要转达(LLM 压缩为结论段后进入)',
     },
     target: {
+      label: '角色',
       architect: '架构师',
       architectHint: '发给 architect：自由对话/需求分析',
       coding: 'Coding',

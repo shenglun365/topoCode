@@ -441,6 +441,7 @@ export default {
       feedSummaryHint: 'Summarized feed (LLM-compressed conclusion only)',
     },
     target: {
+      label: 'Role',
       architect: 'Architect',
       architectHint: 'Send to architect: free discussion',
       coding: 'Coding',

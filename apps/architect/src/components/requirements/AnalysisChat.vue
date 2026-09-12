@@ -616,6 +616,10 @@ onUnmounted(() => {
       <!-- 收件人切换(S2/S4'): 标题栏二选一(文字 tag); Coding 首击=分配执行器 -->
       <span class="ml-1 flex shrink-0 items-center gap-1">
         <span
+          class="select-none text-[10px] text-ctp-overlay0"
+          :title="t('session.target.architectHint')"
+        >{{ t('session.target.label') }}</span>
+        <span
           class="chip cursor-pointer select-none !text-[10px] transition-colors"
           :class="targetRole === 'architect'
             ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
