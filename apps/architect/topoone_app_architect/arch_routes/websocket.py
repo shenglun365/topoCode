@@ -42,9 +42,15 @@ async def _deliver_coding_turn(conv: dict, text: str) -> str:
     """coding 收件人: 定向投递到活跃作业(等待中→立即转达; 回合中→排队续跑)。"""
     from . import exec_bridge
     conv_id = (conv or {}).get("id") or ""
-    res = await asyncio.to_thread(exec_bridge.deliver_to_coding, conv_id, text)
+    # 子会话(作业账本在主会话): 沿父链找 active 且 sub=本会话 的作业
+    cid = conv_id
+    if (conv.get("kind") or "") == "coding":
+        pj = exec_bridge.active_job(str(conv.get("parentConvId") or ""))
+        if pj and pj.get("subSessionId") == conv_id:
+            cid = str(conv.get("parentConvId") or "")
+    res = await asyncio.to_thread(exec_bridge.deliver_to_coding, cid, text)
     if res.get("ok"):
-        j = exec_bridge.active_job(conv_id) or {}
+        j = exec_bridge.active_job(cid) or {}
         queued = bool(res.get("queued"))
         ex = j.get("executorId") or "opencode"
         if queued:

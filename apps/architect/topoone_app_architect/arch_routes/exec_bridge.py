@@ -497,10 +497,17 @@ def _handle_pump_event(ev: dict, ctx: dict) -> None:
     text = (ev.get("text") or "").strip()
     if kind == "input_required":
         clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
-        _append(target, "assistant",
+        # 双落: 主会话=交互卡(用户在主会话即可见可回复——同步 running 子会话信息),
+        # 子会话=同步简版(coding 侧上下文)。回复路径: 主/子会话 coding 收件人
+        # 或 /继续 均可(deliver/resume 已支持跨会话找父会话账本)。
+        _append(conv_id, "assistant",
                 f"⏸ **执行工程师需要你的输入**（作业 `{job_id[:12]}…`）\n\n{clean}\n\n"
                 "回复补充内容后以 coding 收件人发送(或 `/继续`)转达；停止请用会话信息面板按钮。",
                 msg_meta={"jobId": job_id, "kind": "job_input"}, project_id=pid)
+        if sub_id:
+            _append(sub_id, "assistant",
+                    f"⏸ **执行工程师需要你的输入**\n\n{clean}",
+                    msg_meta={"jobId": job_id, "kind": "job_input_sub"}, project_id=pid)
         _job_upsert(conv_id, {"jobId": job_id, "status": "waiting_input",
                               "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
     elif kind == "done":

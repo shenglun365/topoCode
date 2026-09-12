@@ -776,3 +776,45 @@ def test_resume_from_subsession_no_match_falls_through(tmp_path, monkeypatch):
         "status": "active", "meta": {}})
     out = asyncio.run(ws._exec_resume_turn(store.ConversationsStore.get("cv-sub2")))
     assert "没有等待输入的作业" in out
+
+
+def test_deliver_coding_from_subsession_routes_to_parent(tmp_path, monkeypatch):
+    """子会话以 coding 收件人发送 → 沿父链找 active 且 sub=本会话 的作业投递。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge, websocket as ws
+    sub = store.ConversationsStore.create({
+        "id": "cv-d1", "kind": "coding", "projectId": conv["projectId"],
+        "reqId": rid, "title": "d", "parentConvId": conv["id"],
+        "status": "active", "meta": {}})
+    exec_bridge._job_upsert(conv["id"], {
+        "jobId": "impl-d1", "branch": "exec/t", "status": "waiting_input",
+        "lastAgentTs": 1000, "changedFiles": [], "failReason": "",
+        "lastAgentNote": "q", "specVer": 1, "reqId": rid,
+        "subSessionId": "cv-d1", "executorId": "cline"})
+    sent = {}
+    monkeypatch.setattr(exec_bridge, "_runner",
+                        lambda path, payload=None, timeout=15.0:
+                        sent.update(path=path) or {"ok": True})
+    out = asyncio.run(ws._deliver_coding_turn(
+        store.ConversationsStore.get("cv-d1"), "环境可用 ubuntu"))
+    assert "已转达" in out, out
+    assert "/input" in sent["path"]
+    # 状态回写落主会话账本
+    assert any(j.get("jobId") == "impl-d1" and j.get("status") == "running"
+               for j in exec_bridge.jobs_of(conv["id"]))
+    assert not [j for j in exec_bridge.jobs_of("cv-d1") if j.get("jobId") == "impl-d1"]
+
+
+def test_list_sessions_excludes_coding_subs(tmp_path, monkeypatch):
+    """会话列表排除 coding 子会话(防污染); 显式 kind=coding 不受影响。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    store.ConversationsStore.create({
+        "id": "cv-l1", "kind": "coding", "projectId": conv["projectId"],
+        "reqId": rid, "title": "sub-l", "parentConvId": conv["id"],
+        "status": "active", "meta": {}})
+    from topoone_app_architect.arch_routes import sessions as S
+    default = asyncio.run(S.list_sessions())
+    ids = [c["id"] for c in default["data"]]
+    assert "cv-l1" not in ids and conv["id"] in ids
+    coding_only = asyncio.run(S.list_sessions(kind="coding"))
+    assert "cv-l1" in [c["id"] for c in coding_only["data"]]

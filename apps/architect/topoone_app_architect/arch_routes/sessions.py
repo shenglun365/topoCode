@@ -77,8 +77,12 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
 
     scope=all: 跨全库(主库+各项目库)汇总 —— 会话中心统一视图, 不受 ?project= 限制。
     """
+    # coding 子会话不进列表(防污染): 经主会话「子会话池」弹层管理/进入;
+    # 显式 ?kind=coding 查询(子会话管理面)不受影响
     rows = store.ConversationsStore.summaries(
         kind=kind or None, limit=limit, all_scopes=(scope == "all"))
+    if kind != "coding":
+        rows = [c for c in rows if (c.get("kind") or "") != "coding"]
     items = []
     for c in rows:
         title = c.get("title") or ""
