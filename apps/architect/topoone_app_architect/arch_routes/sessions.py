@@ -144,23 +144,6 @@ async def put_groups(request: Request):
     return ok({"groups": names})
 
 
-# ── PR2 角色管理: architect 系统角色(唯一/不可删) + executor 绑执行器实例 ──
-
-_ROLE_SKILL_POOL = ["extract", "plan", "coding", "capability", "accept", "naming", "contract", "linenote"]
-
-# 技能场景简介(功能/使用场景一句话, 前端 tooltip+已选说明展示)
-_SKILL_INTROS = {
-    "extract": "对话式语义提取——从对话/代码中识别接口、实体与语义结构。用于需求澄清、资产盘点。",
-    "plan": "方案生成——产出执行方案与任务分解。用于需求入池后的设计阶段。",
-    "coding": "coding agent 委派——把编码任务委派给绑定的执行器实例。executor 角色默认启用。",
-    "capability": "能力评估与提炼——执行结果图文评估、从历史会话沉淀规约与技巧。",
-    "accept": "验收比对——对照验收标准逐条核对交付物。建议搭配强模型。",
-    "naming": "命名治理——实体/接口命名规范化与冲突检测。用于认知编辑前审计。",
-    "contract": "接口契约——契约条款生成与一致性校验。用于跨模块/跨团队接口对齐。",
-    "linenote": "代码逐行解读——为存量代码生成逐行讲解与知识沉淀。",
-}
-
-
 @router.post("/sessions")
 async def create_session(request: Request):
     data = await request.json()
@@ -361,6 +344,21 @@ async def clone_session(conv_id: str, request: Request):
             _ctx.reset_project(tok)
 
 
+def _clone_seed_summary(conv_id: str) -> str:
+    """克隆摘要种子(LLM best-effort): 源会话已有摘要直接用, 否则尝试生成; 失败返回空。"""
+    try:
+        conv = store.ConversationsStore.get(conv_id) or {}
+        summary = (conv.get("summary") or "").strip()
+        if summary:
+            return summary
+        from .context_registry import summarize_conversation
+        summary = ((summarize_conversation(conv_id, force=True) or {})
+                   .get("summary") or "").strip()
+        return summary
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str) -> dict:
     new_conv = store.ConversationsStore.create({
         "kind": conv.get("kind") or "generic",
@@ -374,6 +372,15 @@ def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str)
         "meta": {"seedFrom": {"convId": conv_id, "at": _ts(),
                               "prevExecutorId": conv.get("executorId") or ""}},
     })
+    # 摘要种子(best-effort, 失败静默跳过)
+    summary = _clone_seed_summary(conv_id)
+    if summary:
+        store.ConversationsStore.append_message({
+            "id": store.next_id("m"), "conversationId": new_conv["id"],
+            "role": "assistant", "time": _ts(),
+            "content": f"📋 **会话摘要**(克隆自 {conv_id})\n\n{summary[:2000]}",
+            "meta": {"kind": "seed"},
+        })
     msgs = store.ConversationsStore.messages(conv_id, limit=tail_n * 2)[-tail_n:] \
         if tail_n else []
     now = _ts()

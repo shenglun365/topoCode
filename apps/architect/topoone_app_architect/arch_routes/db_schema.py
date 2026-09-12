@@ -86,10 +86,6 @@ ARCH_MAIN_TABLES_SQL = """
         value TEXT DEFAULT ''
     );
 
-    -- agent_bus 持久化消息队列(全局跨 agent 总线；broker 进程轮询本表分发)。
-    -- 消息类型(topic): execution.handoff / interaction.clarify / interaction.answer /
-    --   plan.revise / execution.progress / execution.result / execution.amend
-    -- from/to: plan | coding | runner | monitor | user | *
 
 """
 
@@ -646,6 +642,11 @@ def _project_migrations(db) -> None:
     try:   # 索引须在补列之后创建(旧库表已存在, 建表段不带新列)
         db.execute("CREATE INDEX IF NOT EXISTS idx_arch_convs_parent "
                    "ON arch_conversations(parent_conv_id)")
+    except Exception:  # noqa: BLE001
+        pass
+    try:   # 角色目录退役: roles 列旧绑定数据清洗(新模型绑定面=executor_id)
+        db.execute("UPDATE arch_conversations SET roles = '[\"architect\"]' "
+                   "WHERE roles IS NOT NULL AND roles != '[\"architect\"]'")
     except Exception:  # noqa: BLE001
         pass
     _drop_retired_tables(db)

@@ -8,8 +8,8 @@
   serve-generic 旧一次性 serve 端点（/run 协议）
   mock          测试用
 
-runner 启动经 GET /agent/executors/runtime 拉取（X-Internal token）；
-保存后 POST {RUNNER}/api/executors/refresh 原子换池。
+执行器配置为 architect 单源；作业按 executorId 显式路由到 runner
+(POST /api/implement 携 executorType/executorConfig)，runner 无执行器池。
 """
 
 from __future__ import annotations
@@ -210,7 +210,7 @@ async def put_executors(request: Request, background: BackgroundTasks):
 @router.post("/agent/executors/probe")
 async def probe_executor(request: Request):
     """单条配置探活：本地可探的（opencode 端口/serve url/cline sidecar 文件）直接探，
-    会话型执行器委托 runner 健康检查。"""
+    会话型执行器经本地进程/端口探测。"""
     body = await request.json()
     entry = body.get("entry") or {}
     etype, cfg = entry.get("type"), entry.get("config") or {}

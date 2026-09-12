@@ -23,7 +23,6 @@ import time
 import urllib.request
 
 ARCH = os.environ.get("ARCH_BASE_URL", "http://127.0.0.1:3470")
-RUNNER = os.environ.get("RUNNER_BASE_URL", "http://127.0.0.1:3458")
 DATA_DIR = os.environ.get("TOPOCODE_DATA_DIR", os.path.expanduser("~/.topocode"))
 
 # ── 用户决策（2026-09 配置）────────────────────────────────
@@ -188,18 +187,13 @@ def main() -> int:
     d = r.get("data") or {}
     print(f"  ✓ saved={d.get('saved')} runnerRefreshed={d.get('runnerRefreshed')}")
 
-    print("═　runner 热刷新确认（等待池替换生效）")
+    # 执行器配置为 architect 单源; runner 无执行器池(作业按 executorId 显式路由)
+    # 确认面: 回读注册表
+    rt = _get(f"{ARCH}/api/architect/agent/executors")
+    saved_ids = {e.get("id") for e in ((rt.get("data") or {}).get("executors") or [])}
     want = {e["id"] for e in entries if e.get("enabled", True)}
-    pool = []
-    for _ in range(10):
-        time.sleep(1.0)
-        rt = _get(f"{RUNNER}/api/executors")
-        pool = rt.get("executors") or []
-        if want.issubset(set(pool)):
-            break
-    ok = want.issubset(set(pool))
-    mark = "✓" if ok else "✗（architect 瞬时不稳会回退内置池，稍后重跑 --check 或手动刷新）"
-    print(f"  {mark} executors: {pool}")
+    mark = "✓" if want.issubset(saved_ids) else "✗ 回读不一致, 请重跑 --check"
+    print(f"  {mark} 注册表: {sorted(saved_ids)}")
 
     print("═　codex 配置解析验证")
     probe_codex_config(os.path.join(DATA_DIR, "codex-home-27b"), "codex-27b")
