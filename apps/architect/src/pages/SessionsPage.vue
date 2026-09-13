@@ -4,7 +4,7 @@
  * 组织维度: 时间/模块/自定义分组(元数据)；流程视图=过滤器。
  * 详情: 摘要/备案文档/关联执行；对话本体在全局会话栏(ConversationDock)。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -92,6 +92,8 @@ async function load() {
   }
 }
 onMounted(async () => {
+  // 会话集合变更(右栏对话新建/更新会话) → 左侧列表同步刷新(免手动刷新页面)
+  window.addEventListener('arch:sessions-changed', onSessionsChanged)
   await load()
   // 项目名称映射(引用复制用): arch_projects 全量, 失败静默(降级显示 projectId)
   try {
@@ -105,6 +107,9 @@ onMounted(async () => {
     if (meta) openInDock(meta)
   }
 })
+
+function onSessionsChanged() { void load() }
+onUnmounted(() => window.removeEventListener('arch:sessions-changed', onSessionsChanged))
 
 // ── 时间分桶 ──
 const DAY = 86400000

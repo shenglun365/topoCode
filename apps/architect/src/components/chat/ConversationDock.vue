@@ -58,6 +58,7 @@ async function archiveActive() {
   try {
     const r = await sessionService.update(conv.activeId, { status: 'archived' } as any)
     ;(conv.activeMeta as any).status = 'archived'
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: conv.activeId }))
     if ((r as any)?.mineableHint && activeProject()) {
       if (await dialog.confirm(t('session.mineOnEnd'))) await mineActive()
     }
@@ -93,7 +94,7 @@ async function commitTitle(title: string) {
   conv.activeTitle = title
   if (conv.activeId) {
     try { await sessionService.update(conv.activeId, { title }) } catch { /* 保存失败保持本地 */ }
-    void loadRecent()
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: conv.activeId }))
   }
 }
 async function summarizeTitle() {
@@ -102,7 +103,7 @@ async function summarizeTitle() {
   try {
     const updated = await sessionService.summarize(conv.activeId, true)
     conv.activeTitle = updated.title || conv.activeTitle
-    void loadRecent()
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: conv.activeId }))
   } catch { /* 摘要失败静默 */ } finally {
     titleSummarizing.value = false
   }
@@ -110,9 +111,15 @@ async function summarizeTitle() {
 onMounted(() => {
   if (props.scope) conv.setScope(props.scope)
   void loadRecent()
+  // 会话集合变更(store 广播: 新建/回合完成/归档/改名) → dock 列表同步刷新
+  window.addEventListener('arch:sessions-changed', onSessionsChanged)
   syncTimer = setInterval(() => void pollRunningState(), 5000)
 })
-onUnmounted(() => { if (syncTimer) clearInterval(syncTimer) })
+onUnmounted(() => {
+  if (syncTimer) clearInterval(syncTimer)
+  window.removeEventListener('arch:sessions-changed', onSessionsChanged)
+})
+function onSessionsChanged() { void loadRecent() }
 
 function switchTo(meta: ConversationMeta) {
   listOpen.value = false

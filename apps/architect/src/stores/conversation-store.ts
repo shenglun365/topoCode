@@ -111,6 +111,14 @@ export const useConversationStore = defineStore('archConversation', () => {
     busyLabel.value = ''
   }
 
+  /**
+   * 会话集合变更广播(新建/更新)：左侧会话列表(SessionsPage)与各 dock 实例
+   * 监听刷新——新会话在首条消息发送时才由后端创建，列表无从本地感知。
+   */
+  function notifySessionsChanged(convId?: string) {
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: convId || '' }))
+  }
+
   function applyConversation(conv: { id: string; reqId?: string; kind?: string; title?: string; messages?: { id?: string; role: 'user' | 'assistant'; content: string }[] }) {
     const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
     // 旧会话可能累积了重复的页面引导消息——相邻同文 assistant 消息折叠为一条
@@ -204,6 +212,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     busy.value = true
     beginProgress()
     const ac = new AbortController(); abortCtl.value = ac
+    const hadNoConv = !activeId.value
+    let convNotified = false
     try {
       // 本地引导消息(meta.kind='hint')纯前端提示, 不进入模型上下文
       const msgs = arr.slice(0, -1).filter((m) => m.meta?.kind !== 'hint').map((m) => ({ role: m.role, content: m.content }))
@@ -218,7 +228,14 @@ export const useConversationStore = defineStore('archConversation', () => {
         targetRole: opts?.targetRole,
         signal: ac.signal,
       }, (ev) => {
-        if (ev.conversationId) activeId.value = ev.conversationId
+        if (ev.conversationId) {
+          activeId.value = ev.conversationId
+          // 新会话落库(首条消息创建) → 广播列表刷新(左侧会话列表同步可见)
+          if (hadNoConv && !convNotified) {
+            convNotified = true
+            notifySessionsChanged(ev.conversationId)
+          }
+        }
         onProgressEvent(ev)
         // 页面钩子(资产提取/规约提议等页面反应)
         for (const fn of hooks) fn(ev, { turnIndex: idx })
@@ -236,6 +253,7 @@ export const useConversationStore = defineStore('archConversation', () => {
           if (ev.conversationId && ev.conversationId === activeId.value) {
             sessionService.update(ev.conversationId, { reviewState: 'read' }).catch(() => { /* 无碍 */ })
           }
+          notifySessionsChanged(ev.conversationId)
           void refreshActiveMeta()
         } else if (ev.type === 'tool_result') {
           const stage = stageOfTool(ev.tool)
