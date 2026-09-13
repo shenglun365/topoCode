@@ -1504,8 +1504,7 @@ onUnmounted(() => {
         ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
       </button>
       <button
-        class="btn btn-xs !px-1.5"
-        :class="props.diagramSkill ? 'btn-blue' : 'btn-ghost'"
+        class="btn btn-xs btn-ghost !px-1.5"
         :disabled="busy"
         :title="`${t('assetChat.extractPlan.button')} — /方案`"
         @click="fillExtractPlan"
