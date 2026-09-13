@@ -214,13 +214,18 @@ watch(
 )
 
 // ── 收件人切换(S2 双收件人): architect 自由对话 | coding 定向投递活跃作业 ──
-// 角色即视图: architect=主会话信息流, coding=coding 子会话信息流(role-change 上抛切换)
+// 角色即视图: architect=主会话信息流, coding=coding 子会话信息流。
+// 视图切换仅在用户显式点击时上抛(role-change)——jobState 自动指收件人
+// (waiting→coding)不联动视图, 避免打断用户当前视图。
 const targetRole = ref<'architect' | 'coding'>('architect')
 watch(() => props.jobState, (js) => {
-  // 作业等待回复时默认收件人切 coding(可手动切回)
+  // 作业等待回复时默认收件人切 coding(可手动切回; 不切视图)
   if (js?.role === 'coding' && js.status === 'waiting_input') targetRole.value = 'coding'
 }, { immediate: true })
-watch(targetRole, (r) => emit('role-change', r))
+function pickRole(r: 'architect' | 'coding') {
+  targetRole.value = r
+  emit('role-change', r)
+}
 
 // ── 模型 chip: 随选随生效(下次执行; 进行中作业模型已固化) ──
 const modelMenuOpen = ref(false)
@@ -233,12 +238,12 @@ function pickModel(m: string) {
 }
 
 function onCodingClick() {
-  // 切换/分配共用一个位置: 未绑定执行器 → 首击触发分配(绑定弹窗); 已绑定 → 切换收件人
+  // 切换/分配共用一个位置: 未绑定执行器 → 首击触发分配(绑定弹窗); 已绑定 → 切换收件人+视图
   if (!props.boundExecutorId) {
     emit('bind-coding')
     return
   }
-  targetRole.value = 'coding'
+  pickRole('coding')
 }
 
 function send() {
@@ -686,7 +691,7 @@ onUnmounted(() => {
           :class="targetRole === 'architect'
             ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
           :title="t('session.target.architectHint')"
-          @click="targetRole = 'architect'"
+          @click="pickRole('architect')"
         >{{ t('session.target.architect') }}</span>
         <span
           class="chip cursor-pointer select-none !text-[10px] transition-colors relative"

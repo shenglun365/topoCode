@@ -817,10 +817,16 @@ def test_deliver_coding_from_subsession_routes_to_parent(tmp_path, monkeypatch):
     monkeypatch.setattr(exec_bridge, "_runner",
                         lambda path, payload=None, timeout=15.0:
                         sent.update(path=path) or {"ok": True})
-    out = asyncio.run(ws._deliver_coding_turn(
+    out, target = asyncio.run(ws._deliver_coding_turn(
         store.ConversationsStore.get("cv-d1"), "环境可用 ubuntu"))
     assert "已转达" in out, out
+    assert target == "cv-d1", "回执落库目标应为 coding 子会话"
     assert "/input" in sent["path"]
+    # 用户消息落 coding 子会话(信息流分离), 主会话不落(回执由 WS 主循环落 target)
+    sub_texts = [m.get("content") for m in store.ConversationsStore.messages("cv-d1")]
+    assert "环境可用 ubuntu" in sub_texts
+    main_texts = [m.get("content") for m in store.ConversationsStore.messages(conv["id"])]
+    assert "环境可用 ubuntu" not in main_texts
     # 状态回写落主会话账本
     assert any(j.get("jobId") == "impl-d1" and j.get("status") == "running"
                for j in exec_bridge.jobs_of(conv["id"]))

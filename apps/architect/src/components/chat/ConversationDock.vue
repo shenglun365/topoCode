@@ -132,7 +132,13 @@ let evtReconnect: ReturnType<typeof setTimeout> | null = null
 let refreshPending: ReturnType<typeof setTimeout> | null = null
 function onConvEvent(d: any) {
   if (d?.type === 'sub-unread' && d.conversationId === conv.activeId) {
-    conv.subUnread = Number(d.count) || 0
+    // coding 视图正看着子会话流 → 即时清零(badge 不虚涨)
+    if (conv.viewMode === 'coding') {
+      conv.subUnread = 0
+      apiPost(`/sessions/${conv.activeId}/sub-seen`, {}).catch(() => {})
+    } else {
+      conv.subUnread = Number(d.count) || 0
+    }
     return
   }
   if (d?.type !== 'conv-message' || !d.conversationId) return
@@ -152,6 +158,7 @@ function onConvEvent(d: any) {
     }, 400)
   }
 }
+
 function connectConvEvents() {
   try {
     evtSource = new EventSource(`${apiBaseUrl()}/events`)
@@ -168,6 +175,17 @@ function disconnectConvEvents() {
   evtSource?.close()
   evtSource = null
   if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
+}
+
+/** 发送入口: coding 方向在主视图发出时(jobState 自动指收件人场景) → 先切
+ * coding 视图再发(消息落子会话, 本地回合与落库一致, 刷新不丢)。 */
+async function onSendChat(text: string, role?: 'architect' | 'coding') {
+  if (role === 'coding' && conv.viewMode !== 'coding') {
+    const ok = await conv.setViewMode('coding')
+    if (!ok) conv.pushLocalHint('暂无 coding 子会话——`/执行` 启动作业后自动创建')
+  }
+  conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(role ? { targetRole: role } : {}) })
+  onSent()
 }
 
 /** 角色即视图: coding → 切子会话信息流(无子会话提示); architect → 回主会话流。 */
@@ -804,7 +822,7 @@ async function pollRunningState() {
         @role-change="onRoleChange"
         @bind-coding="openRoles"
         @set-model="onSetModel"
-        @send="(text: string, role?: 'architect' | 'coding') => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(role ? { targetRole: role } : {}) }); onSent() }"
+        @send="onSendChat"
         @job-accept="openAccept"
         @job-resume="resumeJob"
         @guard-repair="onGuardRepair"

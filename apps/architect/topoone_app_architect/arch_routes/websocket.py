@@ -38,7 +38,11 @@ def _cmd_help_text() -> str:
 
 
 async def _deliver_coding_turn(conv: dict, text: str) -> str:
-    """coding 收件人: 定向投递到活跃作业(等待中→立即转达; 回合中→排队续跑)。"""
+    """coding 收件人: 定向投递到活跃作业(等待中→立即转达; 回合中→排队续跑)。
+
+    用户消息与回执均落 coding 子会话(信息流分离——coding 视图完整可还原,
+    主会话不落, 避免 /继续 增量误扫与主流混杂)。返回 (回执文案, 落库会话id)。
+    """
     from . import exec_bridge
     conv_id = (conv or {}).get("id") or ""
     # 子会话(作业账本在主会话): 沿父链找 active 且 sub=本会话 的作业
@@ -47,18 +51,24 @@ async def _deliver_coding_turn(conv: dict, text: str) -> str:
         pj = exec_bridge.active_job(str(conv.get("parentConvId") or ""))
         if pj and pj.get("subSessionId") == conv_id:
             cid = str(conv.get("parentConvId") or "")
-    # 用户消息落 coding 子会话(coding 视图信息流完整性; 主会话不落——分离裁决)
-    try:
-        from .exec_bridge import _meta_dict_of
-        meta = _meta_dict_of(store.ConversationsStore.get(cid) or {})
-        sub_id = str(meta.get("activeCodingSession") or "")
-        if sub_id and store.ConversationsStore.get(sub_id):
-            store.ConversationsStore.append_message({
-                "id": store.next_id("m"), "conversationId": sub_id,
-                "role": "user", "time": _ts(), "content": text,
-            })
-    except Exception:  # noqa: BLE001
-        pass
+    # 用户消息落 coding 子会话(信息流分离): 子会话直发=自身; 主会话方向=活跃子
+    sub_target = ""
+    if (conv.get("kind") or "") == "coding":
+        sub_target = conv_id
+    else:
+        try:
+            from .exec_bridge import _meta_dict_of
+            meta = _meta_dict_of(store.ConversationsStore.get(cid) or {})
+            sid = str(meta.get("activeCodingSession") or "")
+            if sid and store.ConversationsStore.get(sid):
+                sub_target = sid
+        except Exception:  # noqa: BLE001
+            pass
+    if sub_target:
+        store.ConversationsStore.append_message({
+            "id": store.next_id("m"), "conversationId": sub_target,
+            "role": "user", "time": _ts(), "content": text,
+        })
     res = await asyncio.to_thread(exec_bridge.deliver_to_coding, cid, text)
     if res.get("ok"):
         j = exec_bridge.active_job(cid) or {}
@@ -66,14 +76,15 @@ async def _deliver_coding_turn(conv: dict, text: str) -> str:
         ex = j.get("executorId") or "opencode"
         if queued:
             return (f"📥 已排队转达 `{ex}`（当前回合执行中，回合结束自动续跑）。"
-                    "architect 方向的讨论不受影响。")
+                    "architect 方向的讨论不受影响。", sub_target or cid)
         return (f"➡️ 已转达 `{ex}`（作业继续）。"
-                "回合期间可继续以 architect 身份讨论，或等待 agent 下一次提问。")
+                "回合期间可继续以 architect 身份讨论，或等待 agent 下一次提问。",
+                sub_target or cid)
     err = str(res.get("error") or "")
     if err == "no-active-job":
         return ("没有活跃的 coding 作业。发送 `/执行` 启动作业后，"
-                "再把补充内容发给 coding 角色。")
-    return f"❌ 转达失败：{err or 'runner 不可达'}。可稍后重试。"
+                "再把补充内容发给 coding 角色。", sub_target or cid)
+    return (f"❌ 转达失败：{err or 'runner 不可达'}。可稍后重试。", sub_target or cid)
 
 
 def _guard_cmd_hints(conv_id: str) -> list:
@@ -356,13 +367,17 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     except Exception:
         pass
     user_msgs = [m for m in history if m.get("role") == "user" and (m.get("content") or "").strip()]
+    # 收件人路由提前解析: coding 方向的 user 消息只落 coding 子会话(信息流分离,
+    # _deliver_coding_turn 内落库), 主会话不落——避免双落与 /继续 增量误扫。
+    target_role = str(data.get("targetRole") or "").strip()
     last_user_msg_id = ""
-    for m in user_msgs[-1:]:
-        last_user_msg_id = store.next_id("m")
-        store.ConversationsStore.append_message({
-            "id": last_user_msg_id, "conversationId": conv_id,
-            "role": "user", "time": now, "content": m.get("content", ""),
-        })
+    if target_role != "coding":
+        for m in user_msgs[-1:]:
+            last_user_msg_id = store.next_id("m")
+            store.ConversationsStore.append_message({
+                "id": last_user_msg_id, "conversationId": conv_id,
+                "role": "user", "time": now, "content": m.get("content", ""),
+            })
 
     # ---- 上下文: 能力文档 + 历史(带软拒绝范围) + 按场景 skill 文档 ----
     skill_scenarios = data.get("skillScenarios") or []
@@ -373,9 +388,9 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # 生命周期重构: 角色是能力声明(roles 数组)——无白名单/锁定; architect 恒为对话主体
     # ---- 收件人路由(S2 双收件人) ----
     # 指令符号优先(系统级确定性通道, 不受收件人影响);
-    # targetRole=coding → 活跃作业定向投递(等待中立即转达/回合中排队续跑);
+    # targetRole=coding → 活跃作业定向投递(等待中立即转达; 回合中→排队续跑);
     # 其余(含缺省) → architect 自由对话。running 不再锁定输入。
-    target_role = str(data.get("targetRole") or "").strip()
+    # (target_role 已提前解析——user 落库分流依赖)
     # ---- 会话指令符号分发(确定性, 无语义判断) ----
     #   /执行 → 一步启动作业(定稿即确认, 质量由定稿门禁保证); /定稿 → 规约确认(系统直通)
     #   /继续 → 增量回合; /diff → 作业差异; /调整 → req.amend 契约 + 主流程
@@ -384,6 +399,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     cmd = parse_session_cmd(question)
     final_b = None
     amend_contract = None
+    final_target = ""   # 非空=回执落库目标会话(coding 方向=子会话)
     if cmd in ("执行", "确认执行") and (conv.get("kind") or "") == "coding":
         # 子会话(coding)禁止再嵌套建子会话——作业由主会话统一管理
         final_b = ("当前是 coding 子会话（由主会话的作业管理）。\n"
@@ -415,11 +431,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     elif cmd:
         final_b = _cmd_help_text()
     elif target_role == "coding":
-        final_b = await _deliver_coding_turn(conv, question)
+        final_b, final_target = await _deliver_coding_turn(conv, question)
     if final_b is not None:
         assistant_msg_id_b = store.next_id("m")
         store.ConversationsStore.append_message({
-            "id": assistant_msg_id_b, "conversationId": conv_id,
+            "id": assistant_msg_id_b, "conversationId": final_target or conv_id,
             "role": "assistant", "time": _ts(), "content": final_b,
         })
         try:
@@ -1168,12 +1184,22 @@ async def _exec_resume_turn(conv: dict) -> str:
                     "或等待回合结束(多为等待回复)后再发 `/继续`。")
         return ("没有等待输入的作业。发送 `/执行` 按当前规约版本启动新作业"
                 "（会自动附带上次作业的前情简报）。")
-    # 增量上下文: 上次 agent 事件消息之后的所有用户消息
+    # 增量上下文: 上次 agent 事件消息之后的所有用户消息(信息流分离: 主会话
+    # 无增量时扫 coding 子会话——两视图的回复都能经 /继续 转达)
     msgs = store.ConversationsStore.messages(conv_id, limit=30)
     cut_ts = job.get("lastAgentTs") or 0
     inc = [m.get("content", "").strip() for m in msgs
            if m.get("role") == "user" and (m.get("time") or 0) > cut_ts
            and (m.get("content") or "").strip()]
+    if not inc:
+        from .exec_bridge import _meta_dict_of
+        meta = _meta_dict_of(store.ConversationsStore.get(conv_id) or {})
+        sub_id = str(meta.get("activeCodingSession") or "")
+        if sub_id:
+            for m in store.ConversationsStore.messages(sub_id, limit=30):
+                if m.get("role") == "user" and (m.get("time") or 0) > cut_ts \
+                        and (m.get("content") or "").strip():
+                    inc.append(m.get("content", "").strip())
     if not inc:
         # 熔断(cv-140 教训): /继续 无实质补充连续 3 次 → 自动停止作业, 防 ping-pong 空转
         strikes = int(job.get("noInputStrikes") or 0) + 1
