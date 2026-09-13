@@ -17,7 +17,7 @@ import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { namingService } from '@/services/naming-service'
-import { apiBaseUrl, apiGet, apiPost } from '@/services/api-client'
+import { apiBaseUrl, apiGet, apiPost, getToken } from '@/services/api-client'
 
 const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
@@ -162,7 +162,10 @@ function onConvEvent(d: any) {
 
 function connectConvEvents() {
   try {
-    evtSource = new EventSource(`${apiBaseUrl()}/events`)
+    // EventSource 不能带 Authorization header → 网关鉴权走 ?token= (与 WS 同法)
+    const tok = getToken()
+    const qs = tok ? `?token=${encodeURIComponent(tok)}` : ''
+    evtSource = new EventSource(`${apiBaseUrl()}/events${qs}`)
     evtSource.onmessage = (ev) => {
       try { onConvEvent(JSON.parse(ev.data)) } catch { /* 非事件帧忽略 */ }
     }
