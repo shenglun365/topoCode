@@ -994,11 +994,29 @@ def _build_impl_instruction(rid: str, prior_brief: str = "") -> str:
                          "请立即 [[NEED_INPUT]] 报告\"规约为空\", 不要猜测实施。")
     if a.get("functionalScope"):
         parts.append("## 需求目标\n" + "\n".join(f"- {x}" for x in a["functionalScope"]))
+    parts.append(
+        "## 工作环境(重要, 先读)\n"
+        "- 你在项目源码仓库的**隔离 worktree 分支**执行, pwd 即源码树根——"
+        "先浏览仓库(README/构建文件/目录结构)理解项目, 再动手。\n"
+        "- 交付物一律**写入源码树**(新文件/修改/文档, git 分支内); "
+        "**不要写系统路径**(/etc /usr /opt 等运行时部署位置)——环境搭建与部署"
+        "由用户手工执行, 你提供文件与部署说明即可。\n"
+        "- 环境类问题(sudo/依赖/编译工具)先自主查证仓库与 README; "
+        "只对**需求歧义**集中一次性提问, 不要为环境搭建反复提问。")
     if a.get("designMd") or a.get("implementationPath"):
         parts.append("## 实现方案(遵循执行)\n"
                      + str(a.get("designMd") or a.get("implementationPath")))
     if a.get("allowedScope"):
-        parts.append("## 允许增删改\n" + "\n".join(f"- {x}" for x in a["allowedScope"]))
+        scope_lines = [str(x) for x in a["allowedScope"]]
+        abs_paths = [s for s in scope_lines if s.strip().startswith("/")]
+        if abs_paths:
+            parts.append(
+                "## 允许增删改\n" + "\n".join(f"- {x}" for x in scope_lines)
+                + "\n> 注: 其中以 `/` 开头的是**运行时部署路径**(用户环境的目标位置)"
+                "——请在源码树中创建对应文件(或等价物)并附部署说明, "
+                "不要尝试直接写这些系统路径。")
+        else:
+            parts.append("## 允许增删改\n" + "\n".join(f"- {x}" for x in scope_lines))
     if a.get("forbiddenScope"):
         parts.append("## 一定不能动\n" + "\n".join(f"- {x}" for x in a["forbiddenScope"]))
     if a.get("acceptance"):

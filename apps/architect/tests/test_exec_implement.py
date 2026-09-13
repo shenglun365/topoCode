@@ -1037,3 +1037,30 @@ def test_pump_progress_updates_ledger_and_broadcast(tmp_path, monkeypatch):
     # SSE 广播
     assert broadcast and broadcast[-1]["type"] == "job-progress" \
         and broadcast[-1]["toolCount"] == 12
+
+
+def test_impl_instruction_worktree_semantics(tmp_path, monkeypatch):
+    """指令含工作环境段(worktree/不写系统路径/环境先自查); allowedScope 绝对
+    路径标注为部署路径(cv-142 教训: agent 在 worktree 里试图改 /etc/nginx)。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import websocket as ws
+    res = req_agent.run_arch_tool(
+        "req.propose",
+        {"title": "T-部署路径", "requirementMd": "目标",
+         "designMd": "方案", "allowedScopeMd": "/etc/nginx/conf.d/hello.lua (新增)"},
+        root=None, project=None)
+    rid = res["requirementId"]
+    req_agent.run_arch_tool("req.finalize", {"reqId": rid}, root=None, project=None)
+    txt = ws._build_impl_instruction(rid)
+    assert "隔离 worktree 分支" in txt and "不要写系统路径" in txt
+    assert "部署由用户手工执行" in txt
+    assert "运行时部署路径" in txt and "/etc/nginx/conf.d/hello.lua" in txt
+    # 相对路径场景无部署标注(不误导)
+    res2 = req_agent.run_arch_tool(
+        "req.propose",
+        {"title": "T-相对路径", "designMd": "方案", "allowedScopeMd": "modules/x/"},
+        root=None, project=None)
+    rid2 = res2["requirementId"]
+    txt2 = ws._build_impl_instruction(rid2)
+    assert "运行时部署路径" not in txt2
+    assert "隔离 worktree 分支" in txt2
