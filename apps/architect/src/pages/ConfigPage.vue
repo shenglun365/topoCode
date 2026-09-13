@@ -215,11 +215,15 @@ async function addManual() {
   }
 }
 
-async function removeManualModel(id: string) {
+async function removeModel(m: ArchLlmModel) {
+  const tip = m.source === 'imported'
+    ? t('config.llm.unlinkImportedTip')
+    : t('config.llm.deleteManualTip')
+  if (!window.confirm(tip)) return
   if (await backendUp()) {
-    await apiDelete<{ id: string }>(`/llm/models/${id}`).catch(() => {})
+    await apiDelete<{ id: string }>(`/llm/models/${m.id}`).catch(() => {})
   }
-  llmModels.value = llmModels.value.filter((m) => m.id !== id)
+  llmModels.value = llmModels.value.filter((x) => x.id !== m.id)
 }
 
 loadLlm()
@@ -531,20 +535,18 @@ onMounted(() => { void loadCgStatus() })
               @click="probeLlm(m)"
             >{{ t('config.executors.modelProbe') }}</button>
             <button
-              v-if="m.source === 'manual'"
               class="btn !py-0.5 !px-2 !text-[11px]"
-              :title="t('config.llm.editManual')"
+              :title="m.source === 'imported' ? t('config.llm.editImported') : t('config.llm.editManual')"
               @click="startEditManual(m)"
             >
               <PencilSquareIcon class="w-3 h-3" />{{ t('config.llm.editManualBtn') }}
             </button>
             <button
-              v-if="m.source === 'manual'"
               class="btn !py-0.5 !px-2 !text-[11px] text-ctp-red"
-              :title="t('config.llm.deleteManual')"
-              @click="removeManualModel(m.id)"
+              :title="m.source === 'imported' ? t('config.llm.unlinkImported') : t('config.llm.deleteManual')"
+              @click="removeModel(m)"
             >
-              <TrashIcon class="w-3 h-3" />{{ t('config.llm.delete') }}
+              <TrashIcon class="w-3 h-3" />{{ m.source === 'imported' ? t('config.llm.unlinkBtn') : t('config.llm.delete') }}
             </button>
           </div>
         </div>

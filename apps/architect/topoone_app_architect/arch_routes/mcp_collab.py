@@ -265,6 +265,7 @@ def _sync_manual_to_kb(entry: dict) -> dict:
         for row in rows or []:
             if str(row.get("model") or "").strip() == model_name:
                 entry["id"] = row["id"]          # 绑定主库 id
+                entry["kbShared"] = True          # 复用 KB 自有条目——删除时不可动主库
                 return entry
         provider = str(entry.get("provider") or "").strip().lower()
         if provider not in _KB_PROVIDERS:
@@ -275,6 +276,7 @@ def _sync_manual_to_kb(entry: dict) -> dict:
                       ownerApp="architect")
         if isinstance(row, dict) and row.get("id"):
             entry["id"] = row["id"]
+            entry.pop("kbShared", None)           # 注册到 architect 专属域——删除时可清理
     except Exception as e:  # noqa: BLE001
         logging.getLogger("arch.mcp_collab").warning(
             "[llm-manual] 主库同步失败(条目保留本地, 探测将回退默认模型): %s", e)
@@ -309,20 +311,25 @@ async def add_manual_llm_model_route(request: Request):
 
 @router.put("/llm/models/manual/{model_id}")
 async def update_manual_llm_model_route(model_id: str, request: Request):
-    """修改手动添加的模型条目。Body: { name?, provider?, model?, url? }——仅 manual
-    可改(导入项以主库为源, 重新导入会覆盖, 请在主后端模型库修改)。"""
+    """修改模型条目。Body: { name?, provider?, model?, url? }
+
+    - manual: 直接修改后重同步主库绑定;
+    - imported: 修改后转为 manual(独立条目, KB 重新导入不覆盖——同 identity
+      的 KB 项会被 preserved 跳过; id 保持主库绑定, 推理路由不受影响)。
+    """
     body = await request.json() or {}
     models = get_llm_models()
     target = next((m for m in models if m.get("id") == model_id), None)
     if not target:
         return err(404, "模型条目不存在")
-    if target.get("source") != "manual":
-        return err(400, "KB 导入项不可在此修改(以主库为源)，请在主后端模型库调整后重新导入")
+    if target.get("source") not in ("manual", "imported"):
+        return err(400, "不可修改的条目")
     name = str(body.get("name") or target.get("name") or "").strip()
     model_val = str(body.get("model") or target.get("model") or "").strip()
     if not name or not model_val:
         return err(400, "name 与 model 必填")
     target.update({
+        "source": "manual",
         "name": name,
         "provider": str(body.get("provider") or target.get("provider") or "custom").strip() or "custom",
         "model": model_val,
@@ -336,14 +343,29 @@ async def update_manual_llm_model_route(model_id: str, request: Request):
 
 @router.delete("/llm/models/{model_id}")
 async def delete_llm_model_route(model_id: str):
-    """删除手动模型条目(不影响 KB 导入项)。"""
+    """删除模型条目(均不动 KB 主库自有配置):
+
+    - imported: 仅解除导入——architect 端移除, 主库条目保留, 重新导入可恢复;
+    - manual  : 移除 architect 条目; 若其绑定 id 是主库 architect 域注册条目
+                (kbShared 非真) → 同步清理, 防孤儿堆积。
+    """
     models = get_llm_models()
     target = next((m for m in models if m.get("id") == model_id), None)
     if not target:
         return err(404, "Model not found")
-    if target.get("source") != "manual":
-        return err(400, "KB 导入项不可删除，请通过重新导入刷新")
+    if target.get("source") not in ("manual", "imported"):
+        return err(400, "不可删除的条目")
+    if target.get("source") == "manual" and not target.get("kbShared") \
+            and not str(model_id).startswith("man-"):
+        try:
+            from .kb_gateway import call_kb
+            call_kb("settings.removeModel", id=model_id)
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger("arch.mcp_collab").warning(
+                "[llm-manual] 主库注册条目清理失败(本地条目仍删除): %s", e)
     save_llm_models([m for m in models if m.get("id") != model_id])
+    if store.CollabConfigStore.get("llm.modelId", "") == model_id:
+        store.CollabConfigStore.set("llm.modelId", "")
     return ok({"id": model_id})
 
 

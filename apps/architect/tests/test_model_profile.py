@@ -292,11 +292,50 @@ def test_manual_model_update_route(tmp_path, monkeypatch):
     # 存储已更新
     rows = [m for m in M.get_llm_models() if m.get("id") == mid]
     assert rows and rows[0]["model"] == "new-model"
-    # imported 条目拒绝修改
-    M.save_llm_models([{"source": "imported", "id": "imp-1", "name": "n", "model": "m"}])
+    # imported 条目编辑 → 转正为 manual(KB 重新导入不覆盖)
+    M.save_llm_models([{"source": "imported", "id": "imp-1", "name": "n", "model": "m",
+                        "provider": "lm-studio", "url": "http://u"}])
     res2 = asyncio.run(M.update_manual_llm_model_route("imp-1", FakeReq({"name": "x"})))
-    body2 = res2.body.decode() if hasattr(res2, "body") else str(res2)
-    assert "不可在此修改" in body2 or "400" in body2
+    data2 = res2.body["data"] if hasattr(res2, "body") else res2["data"]
+    assert data2["source"] == "manual" and data2["name"] == "x"
+
+
+def test_model_delete_route(tmp_path, monkeypatch):
+    """删除分流: imported 仅解除导入(不动主库); manual 清理主库注册条目;
+    kbShared(复用 KB 自有)不删主库; 选中偏好指向被删条目时清空。"""
+    import asyncio
+    import topoone_app_architect.arch_routes.ctx as C
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import mcp_collab as M
+    from topoone_app_architect.arch_routes import kb_gateway
+
+    removed = []
+    monkeypatch.setattr(kb_gateway, "call_kb",
+                        lambda method, **kw: removed.append(kw.get("id")) or [])
+
+    M.save_llm_models([
+        {"source": "imported", "id": "model-kb1", "name": "a", "model": "m1"},
+        {"source": "manual", "id": "model-arch1", "name": "b", "model": "m2"},      # 注册绑定
+        {"source": "manual", "id": "model-kb9", "name": "c", "model": "m3",
+         "kbShared": True},                                                          # 复用 KB 自有
+    ])
+    from topoone_app_architect.arch_routes import store as _st
+    _st.CollabConfigStore.set("llm.modelId", "model-kb1")
+
+    # imported: 仅本地移除, 不触主库
+    asyncio.run(M.delete_llm_model_route("model-kb1"))
+    assert removed == [], "解除导入不得动主库"
+    assert [m["id"] for m in M.get_llm_models()] == ["model-arch1", "model-kb9"]
+    assert _st.CollabConfigStore.get("llm.modelId", "") == "", "选中偏好应清空"
+
+    # manual 注册绑定: 清理主库 architect 域条目
+    asyncio.run(M.delete_llm_model_route("model-arch1"))
+    assert removed == ["model-arch1"]
+
+    # manual 复用 KB 自有(kbShared): 不删主库
+    asyncio.run(M.delete_llm_model_route("model-kb9"))
+    assert removed == ["model-arch1"]
+    assert M.get_llm_models() == []
 
 
 def test_manual_model_kb_sync_binds_id(tmp_path, monkeypatch):
