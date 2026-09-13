@@ -934,3 +934,30 @@ def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
     kept = store.RequirementsStore.get(rid_ready) or {}
     assert kept.get("status") == "ready", "已定稿需求是项目资产应保留"
     assert kept.get("ownerConv", "x") in ("", None), "保留需求的 ownerConv 悬空引用应清空"
+
+
+def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
+    """跨库级联: 会话在主库默认桶(无活跃项目写入), 需求在项目库——删除会话时
+    项目库需求同样清理(draft 删/ready 清 ownerConv), 消息同桶删净不残留。"""
+    from topoone_app_architect.arch_routes import sessions as S, exec_bridge, ctx as C
+    monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
+    _mk_fixture(tmp_path, monkeypatch)
+
+    conv = store.ConversationsStore.create({"id": "cv-xdb", "title": "跨库"})
+    store.ConversationsStore.append_message(
+        {"conversationId": "cv-xdb", "role": "user", "content": "hi"})
+    pdb = C.project_db("proj-xdb", create=True)
+    pdb.execute(
+        "INSERT INTO arch_requirements (id, title, status, source_conversation_id) "
+        "VALUES ('RQ-X1', 'draft跨库', 'draft', 'cv-xdb')")
+    pdb.execute(
+        "INSERT INTO arch_requirements (id, title, status, source_conversation_id, owner_conv) "
+        "VALUES ('RQ-X2', 'ready跨库', 'ready', 'cv-xdb', 'cv-xdb')")
+    pdb.commit()
+
+    assert S._delete_session_cascade("cv-xdb") == 1
+    assert C.db().fetchall(
+        "SELECT * FROM arch_conversation_messages WHERE conversation_id='cv-xdb'") == [], "消息应删净"
+    rows = {r["id"]: r for r in pdb.fetchall("SELECT * FROM arch_requirements")}
+    assert "RQ-X1" not in rows, "项目库 draft 需求应跨库级联删除"
+    assert rows["RQ-X2"]["owner_conv"] == "", "项目库 ready 需求 ownerConv 应清空"
