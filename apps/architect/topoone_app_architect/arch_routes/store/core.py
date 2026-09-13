@@ -87,6 +87,11 @@ class RequirementsStore:
     def update(cls, req_id: str, data: dict) -> Optional[dict]:
         return _update(cls.TABLE, req_id, data)
 
+    @classmethod
+    def delete(cls, req_id: str) -> bool:
+        """删除需求(级联删除会话时清理孤儿提案用; 版本链随行内 JSON 一并销毁)。"""
+        return _delete(cls.TABLE, req_id)
+
     # ── 规约版本链 ──
 
     @classmethod

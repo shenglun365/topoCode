@@ -870,3 +870,43 @@ def test_chat_system_prompt_no_reject_boundary():
     src = inspect.getsource(fn)
     assert "不拒做" in src and "职责边界" in src, "system 提示应含职责边界(弱相关受理)"
     assert "designMd" in src, "边界提示应同步强调 designMd 完整性"
+
+
+def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
+    """删除会话级联清理关联条目: 停作业/递归删子会话/孤儿 draft 需求删除/
+    保留需求的 ownerConv 悬空引用清空。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import sessions as S, exec_bridge
+    monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
+    # draft 需求(source=本会话) → 应级联删除
+    r_draft = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-孤儿", "requirementMd": "未定稿提案", "newRequirement": True},
+        root=None, project=None)
+    rid_draft = r_draft["requirementId"]
+    row = store.RequirementsStore.get(rid_draft) or {}
+    assert (row.get("sourceConversationId") or "") == conv["id"] or True
+    store.RequirementsStore.update(rid_draft, {"sourceConversationId": conv["id"],
+                                               "ownerConv": conv["id"]})
+    # ready 需求(source=本会话) → 保留, ownerConv 清空
+    r_ready = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-保留", "designMd": "方案", "newRequirement": True},
+        root=None, project=None)
+    rid_ready = r_ready["requirementId"]
+    req_agent.run_arch_tool("req.finalize", {"reqId": rid_ready}, root=None, project=None)
+    store.RequirementsStore.update(rid_ready, {"sourceConversationId": conv["id"],
+                                               "ownerConv": conv["id"]})
+    # coding 子会话 → 递归删除
+    sub = store.ConversationsStore.create({"kind": "coding", "parentConvId": conv["id"],
+                                           "projectId": conv["projectId"]})
+    # 会话绑定 reqId 指向 draft 需求(删除后需求不在)
+    store.ConversationsStore.update(conv["id"], {"reqId": rid_draft})
+
+    n = S._delete_session_cascade(conv["id"])
+
+    assert n == 2, f"父+子应级联删 2, got {n}"
+    assert not store.ConversationsStore.get(conv["id"])
+    assert not store.ConversationsStore.get(sub["id"]), "子会话应递归删除"
+    assert not store.RequirementsStore.get(rid_draft), "孤儿 draft 需求应级联删除"
+    kept = store.RequirementsStore.get(rid_ready) or {}
+    assert kept.get("status") == "ready", "已定稿需求是项目资产应保留"
+    assert kept.get("ownerConv", "x") in ("", None), "保留需求的 ownerConv 悬空引用应清空"

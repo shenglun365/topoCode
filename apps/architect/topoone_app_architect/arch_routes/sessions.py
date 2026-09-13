@@ -246,8 +246,36 @@ async def update_session(conv_id: str, request: Request):
 async def delete_session(conv_id: str):
     if not store.ConversationsStore.get(conv_id):
         return err(404, "会话不存在")
+    cascade = _delete_session_cascade(conv_id)
+    return ok({"deleted": True, "id": conv_id, "cascadeConversations": cascade})
+
+
+def _delete_session_cascade(conv_id: str) -> int:
+    """级联删除会话及其关联数据条目(左侧删除 → 库内不留孤儿):
+
+    - 停止该会话运行中作业(账本将随消息删除, 先终态化避免 runner 侧跑飞)
+    - 递归删除 coding 子会话(parent_conv_id 链)
+    - 需求: sourceConversationId=本会话且未定稿(draft/cancelled)的提案 → 删
+      (孤儿提案无演进上下文); 已定稿/完结(ready/done)是项目资产 → 保留,
+      仅清空悬空 ownerConv 引用
+    - 本体 + 消息(含 job_* 账本消息)随 ConversationsStore.delete
+
+    返回级联删除的会话数(含自身)。"""
+    from . import exec_bridge
+    try:
+        exec_bridge.stop(conv_id, reason="deleted")  # 无运行作业时为 no-op
+    except Exception:  # noqa: BLE001 — runner 不可达不阻断删除
+        pass
+    n = 0
+    for sub in store.ConversationsStore.by_parent(conv_id):
+        n += _delete_session_cascade(sub["id"])
+    for r in store.RequirementsStore.all():
+        if r.get("sourceConversationId") == conv_id and (r.get("status") or "draft") in ("draft", "cancelled"):
+            store.RequirementsStore.delete(r["id"])
+        elif r.get("ownerConv") == conv_id:
+            store.RequirementsStore.update(r["id"], {"ownerConv": ""})
     store.ConversationsStore.delete(conv_id)
-    return ok({"deleted": True, "id": conv_id})
+    return n + 1
 
 
 @router.get("/sessions/{conv_id}/messages")
