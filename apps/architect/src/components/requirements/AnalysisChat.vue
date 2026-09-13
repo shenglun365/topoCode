@@ -887,9 +887,10 @@ onUnmounted(() => {
           </div>
           <ChatMessageBlocks :content="m.content" />
 
-          <!-- 指令符号 chips: 本地提示(hint)/作业事件消息中出现的 /指令 → 点击填入对话框 -->
+          <!-- 指令符号 chips: 消息中出现的 /指令 → 点击填入对话框(所有助手消息,
+               含系统回执「发送 /执行 …」等引导) -->
           <div
-            v-if="['hint', 'job_done', 'job_input'].includes(m.meta?.kind) && cmdChipsOf(m.content).length"
+            v-if="m.role === 'assistant' && cmdChipsOf(m.content).length"
             class="mt-2 flex flex-wrap items-center gap-1.5"
           >
             <button
