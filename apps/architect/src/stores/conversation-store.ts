@@ -363,12 +363,15 @@ export const useConversationStore = defineStore('archConversation', () => {
   }
 
   async function deleteTurn(index: number) {
-    const turn = turns.value[index]
+    // 信息流分离: coding 视图删除子会话消息, 主视图删除主会话消息
+    const arr = viewMode.value === 'coding' ? subTurns.value : turns.value
+    const convId = viewMode.value === 'coding' ? activeSubId.value : activeId.value
+    const turn = arr[index]
     if (!turn) return
     const msgId = turn.id
-    turns.value.splice(index, 1)
-    if (msgId && activeId.value) {
-      requirementService.deleteMessage(activeId.value, msgId).catch(() => { /* 本地已删, 后端失败忽略 */ })
+    arr.splice(index, 1)
+    if (msgId && convId) {
+      requirementService.deleteMessage(convId, msgId).catch(() => { /* 本地已删, 后端失败忽略 */ })
     }
   }
 
