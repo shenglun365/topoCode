@@ -10,7 +10,7 @@ import { useRouter } from 'vue-router'
 import {
   XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
   ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
-  PencilSquareIcon, SparklesIcon,
+  PencilSquareIcon, SparklesIcon, BookOpenIcon, ArchiveBoxIcon, CubeTransparentIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import { useConversationStore } from '@/stores/conversation-store'
@@ -196,6 +196,14 @@ async function onRoleChange(role: 'architect' | 'coding') {
   } else {
     void conv.setViewMode('main')
   }
+}
+
+/** 本地命令(/摘要 /提炼 /归档 /引导): 与工具条按钮同动作。 */
+function onLocalCmd(name: string) {
+  if (name === '摘要') { void summarizeTitle() }
+  else if (name === '提炼') { void mineActive() }
+  else if (name === '归档') { void archiveActive() }
+  else if (name === '引导') { showGuide() }
 }
 function onConversationRemoved(e: Event) {
   const id = (e as CustomEvent).detail as string
@@ -820,6 +828,7 @@ async function pollRunningState() {
         :executor-model="currentExecutorModel"
         :sub-unread="conv.subUnread"
         @role-change="onRoleChange"
+        @local-cmd="onLocalCmd"
         @bind-coding="openRoles"
         @set-model="onSetModel"
         @send="onSendChat"
@@ -880,32 +889,33 @@ async function pollRunningState() {
           </div>
         </template>
         <template #toolbar-extra>
+          <!-- 纯 icon 工具条(title 提示); 动作均可用 /命令 触达(引导/摘要/提炼/归档) -->
           <button
             v-if="isExecutionConv"
-            class="btn btn-xs btn-ghost"
+            class="btn btn-xs btn-ghost !px-1.5"
             :disabled="guideBusy"
-            :title="t('session.actions.guide')"
+            :title="`${t('session.actions.guide')} — /引导`"
             @click="showGuide"
-          >{{ guideBusy ? '…' : t('session.actions.guide') }}</button>
+          ><BookOpenIcon class="w-3.5 h-3.5" :class="guideBusy ? 'animate-pulse' : ''" /></button>
           <button
-            class="btn btn-xs"
+            class="btn btn-xs !px-1.5"
             :class="titleSummarizing ? 'btn-blue' : 'btn-ghost'"
             :disabled="titleSummarizing || !conv.activeId"
-            :title="t('session.actions.summarize')"
+            :title="`${t('session.actions.summarize')} — /摘要`"
             @click="summarizeTitle"
-          >{{ titleSummarizing ? '…' : t('session.actions.summarize') }}</button>
+          ><SparklesIcon class="w-3.5 h-3.5" :class="titleSummarizing ? 'animate-pulse' : ''" /></button>
           <button
-            class="btn btn-xs btn-ghost"
+            class="btn btn-xs btn-ghost !px-1.5"
             :disabled="mining || !activeProject()"
-            :title="t('session.mineOnEnd')"
+            :title="`${t('session.mine')} — /提炼`"
             @click="mineActive"
-          >{{ mining ? '…' : t('session.mine') }}</button>
+          ><CubeTransparentIcon class="w-3.5 h-3.5" :class="mining ? 'animate-pulse' : ''" /></button>
           <button
-            class="btn btn-xs btn-ghost"
+            class="btn btn-xs btn-ghost !px-1.5"
             :disabled="!conv.activeId || (conv.activeMeta as any)?.status === 'archived'"
-            :title="t('session.archiveHint')"
+            :title="`${t('session.archive')} — /归档`"
             @click="archiveActive"
-          >{{ t('session.archive') }}</button>
+          ><ArchiveBoxIcon class="w-3.5 h-3.5" /></button>
         </template>
       </AnalysisChat>
     </div>

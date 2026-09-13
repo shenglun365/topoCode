@@ -50,6 +50,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   send: [text: string, targetRole?: 'architect' | 'coding']
   'role-change': [role: 'architect' | 'coding']
+  'local-cmd': [name: string]
   'bind-coding': []
   'set-model': [model: string]
   rename: [title: string]
@@ -247,6 +248,15 @@ function onCodingClick() {
 function send() {
   if (!input.value.trim()) return
   if (props.busy && targetRole.value !== 'coding') return   // architect 回合流式中仍可转达 coding
+  // 本地命令拦截(绘图/方案/摘要/提炼/归档): 组件内或上抛宿主执行, 不发后端
+  const local = matchLocalCmd(input.value)
+  if (local) {
+    runLocalCmd(local)
+    input.value = ''
+    cmdMenuOpen.value = false
+    resetInputHeight()
+    return
+  }
   emit('send', input.value.trim(), targetRole.value)
   input.value = ''
   cmdMenuOpen.value = false
@@ -262,13 +272,29 @@ const SESSION_CMD_LIST = [
   { name: '调整', desc: '进入需求修订模式(补充方案/边界/验收)' },
   { name: 'diff', desc: '查看最近作业改动差异' },
 ]
+/** 本地命令(前端拦截, 不发后端): 会话操作/状态切换——与工具条按钮同动作。 */
+const LOCAL_CMD_LIST = [
+  { name: '绘图', desc: '切换绘图增强(IR→代码)' },
+  { name: '方案', desc: '预填方案生成指令' },
+  { name: '摘要', desc: '生成会话标题与摘要' },
+  { name: '提炼', desc: '提炼会话为数据资产' },
+  { name: '归档', desc: '结束会话(有可提炼内容时提示)' },
+  { name: '引导', desc: '显示会话使用引导(本地提示)' },
+]
 const cmdMenuOpen = ref(false)
 const cmdFilter = computed(() => {
   const v = input.value.trim()
   if (!v.startsWith('/')) return []
   const q = v.slice(1).toLowerCase()
-  return SESSION_CMD_LIST.filter((c) => c.name.toLowerCase().startsWith(q))
+  return [...SESSION_CMD_LIST, ...LOCAL_CMD_LIST].filter((c) => c.name.toLowerCase().startsWith(q))
 })
+/** 精确命中本地命令(拦截: 本地执行, 不发后端)。 */
+function matchLocalCmd(v: string): string | null {
+  const t = v.trim()
+  if (!t.startsWith('/')) return null
+  const name = t.slice(1)
+  return LOCAL_CMD_LIST.some((c) => c.name === name) ? name : null
+}
 watch(cmdFilter, (list) => { cmdMenuOpen.value = list.length > 0 && input.value.trim().startsWith('/') })
 function pickCmd(name: string) {
   input.value = `/${name}`
@@ -282,6 +308,16 @@ function onCmdMenuKeydown(e: KeyboardEvent) {
     input.value = `/${cmdFilter.value[0].name}`
     cmdMenuOpen.value = false
     e.preventDefault()
+  }
+}
+/** 本地命令分发: 绘图/方案在组件内执行; 摘要/提炼/归档上抛宿主(与工具条同动作)。 */
+function runLocalCmd(name: string) {
+  if (name === '绘图') {
+    emit('toggle-diagram-skill', !props.diagramSkill)
+  } else if (name === '方案') {
+    fillExtractPlan()
+  } else {
+    emit('local-cmd', name)
   }
 }
 
@@ -1448,12 +1484,13 @@ onUnmounted(() => {
       </div>
     </transition>
 
-    <div class="flex items-center gap-2 border-t border-ctp-surface0 px-2.5 py-1.5 shrink-0">
+    <div class="flex items-center gap-1 border-t border-ctp-surface0 px-2.5 py-1.5 shrink-0">
+      <!-- 工具条: 纯 icon(悬停 title 提示); 动作均可用 /命令 触达(见命令浮层) -->
       <button
-        class="btn btn-xs"
+        class="btn btn-xs !px-1.5"
         :class="props.diagramSkill ? 'btn-blue' : 'btn-ghost'"
         :disabled="busy"
-        :title="t('requirement.chat.diagramSkillHint')"
+        :title="`${t('requirement.chat.diagramSkill')} — /绘图`"
         @click="emit('toggle-diagram-skill', !props.diagramSkill)"
       >
         <svg
@@ -1465,23 +1502,20 @@ onUnmounted(() => {
           stroke-linecap="round"
           stroke-linejoin="round"
         ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
-        {{ t('requirement.chat.diagramSkill') }}
       </button>
       <button
-        class="btn btn-xs"
+        class="btn btn-xs !px-1.5"
         :class="props.diagramSkill ? 'btn-blue' : 'btn-ghost'"
         :disabled="busy"
-        :title="t('assetChat.extractPlan.hint')"
+        :title="`${t('assetChat.extractPlan.button')} — /方案`"
         @click="fillExtractPlan"
       >
         <SparklesIcon class="w-3.5 h-3.5" />
-        {{ t('assetChat.extractPlan.button') }}
       </button>
       <slot name="toolbar-extra" />
-      <span v-if="props.showContractSkill === undefined || props.showContractSkill" class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.diagramSkillHint') }}</span>
       <button
         v-if="props.showContractSkill"
-        class="btn btn-xs"
+        class="btn btn-xs !px-1.5"
         :class="props.contractSkill ? 'btn-green' : 'btn-ghost'"
         :disabled="busy"
         :title="t('requirement.chat.contractSkillHint')"
@@ -1496,24 +1530,33 @@ onUnmounted(() => {
           stroke-linecap="round"
           stroke-linejoin="round"
         ><path d="M9 12h6" /><path d="M9 16h6" /><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-        {{ t('requirement.chat.contractSkill') }}
       </button>
-      <span v-if="props.showContractSkill && props.contractSkill" class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.contractSkillHint') }}</span>
     </div>
 
     <div class="relative flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
-      <!-- `/` 命令提示浮层(与后端 SESSION_CMDS 同步) -->
+      <!-- `/` 命令提示浮层(会话指令发后端 + 会话操作本地执行) -->
       <div
         v-if="cmdMenuOpen"
-        class="absolute bottom-full left-2 z-50 mb-1 w-64 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg flex"
+        class="absolute bottom-full left-2 z-50 mb-1 w-72 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg flex"
       >
+        <span class="px-2 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话指令</span>
         <button
-          v-for="c in cmdFilter"
+          v-for="c in cmdFilter.filter((x) => SESSION_CMD_LIST.includes(x))"
           :key="c.name"
           class="rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
           @click="pickCmd(c.name)"
         >
           <span class="font-mono text-ctp-blue">/{{ c.name }}</span>
+          <span class="ml-1.5 text-ctp-subtext0">{{ c.desc }}</span>
+        </button>
+        <span class="px-2 pt-1 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话操作</span>
+        <button
+          v-for="c in cmdFilter.filter((x) => LOCAL_CMD_LIST.includes(x))"
+          :key="c.name"
+          class="rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+          @click="pickCmd(c.name)"
+        >
+          <span class="font-mono text-ctp-mauve">/{{ c.name }}</span>
           <span class="ml-1.5 text-ctp-subtext0">{{ c.desc }}</span>
         </button>
       </div>
