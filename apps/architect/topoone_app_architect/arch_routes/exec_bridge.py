@@ -858,6 +858,7 @@ def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
             {"keepWorktree": True}, timeout=30.0)
     store.TasksStore.finish(task_id, "cancelled", reason or "用户停止")
     _cancel_pumps(task["conversationId"])
+    _task_reaggregate_work_state(task["conversationId"])
     t = store.TasksStore.get(task_id) or {}
     _publish_task(task["conversationId"], t)
     return {"ok": True, "task": t}

@@ -152,8 +152,9 @@ function onConvEvent(d: any) {
     return
   }
   if (d?.type === 'task') {
-    // v2 任务状态变更: 更新任务清单 + 重拉消息(任务卡/回执落流)
+    // v2 任务状态变更: 任务清单 + 会话元数据(runningRole/workState 实时) + 消息
     void conv.refreshTasks()
+    void conv.refreshActiveMeta()
     _debounceRefresh()
     return
   }
