@@ -501,18 +501,22 @@ def repair_spec_payload_format(text: str, req_id: str = "") -> Optional[Dict[str
                                  for c, a in _SPEC_FIELD_ALIASES.items()) + "\n"
         + (f"会话绑定需求编号: {req_id}(载荷内其它 reqId 编号一律丢弃)\n" if req_id else "")
         + "只输出一个 ```json 围栏，内容为规约对象本身，不要任何其他文字。")
-    res = llm_sync([{"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": text[:6000]}],
-                   mode="chat", max_tokens=1200)
-    raw = (res or {}).get("content") or ""
-    m = re.search(r"```json\s*(\{.*?})\s*```", raw, re.DOTALL)
-    if not m:
-        return None
-    try:
-        obj = json.loads(m.group(1))
-        return obj if isinstance(obj, dict) else None
-    except Exception:  # noqa: BLE001
-        return None
+    from .adaptation import RepairTask, run_repair_loop
+
+    def _parse(raw: str):
+        m = re.search(r"```json\s*(\{.*?})\s*```", raw, re.DOTALL)
+        if not m:
+            return None
+        try:
+            obj = json.loads(m.group(1))
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    out = run_repair_loop(RepairTask(
+        task_id="spec_format", system=sys_prompt, user=text[:6000],
+        parse=_parse, max_tokens=1200, dataset_kind="repair_spec_format"))
+    return out.get("parsed") if isinstance(out.get("parsed"), dict) else None
 
 
 def repair_fabricated_claim(claim: str, need: str, content: str, *,
@@ -554,48 +558,67 @@ def repair_fabricated_claim(claim: str, need: str, content: str, *,
         "只输出 ①或② 之一，不要输出其它内容。")
     user_content = (f"守卫判定: {claim}（需要佐证工具: {need}）\n\n"
                     f"助手原文:\n{content[:6000]}")
-    res = llm_sync([{"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_content}],
-                   mode="chat", model_id=model_id, max_tokens=900)
-    raw = (res or {}).get("content") or ""
-    calls = extract_tool_calls(raw)
-    for c in calls:
-        name, args = c.get("tool"), c.get("arguments")
-        if name not in _GUARD_REPAIR_TOOLS or not isinstance(args, dict):
-            continue
-        # 确定性校验: reqId 必须真实存在(防修复器再次编造编号)
-        rid = str(args.get("reqId") or "").strip()
-        if rid and not store.RequirementsStore.get(rid):
-            continue
-        if not rid and req_id:
-            args["reqId"] = req_id          # 缺省绑定会话需求
-        if name == "req.propose" and not args.get("newRequirement") and req_id:
-            args["reqId"] = args.get("reqId") or req_id
-        result = run_arch_tool(name, args, root=root, project=project)
-        ok = not (isinstance(result, dict) and result.get("error"))
-        if ok:
-            rid_out = (result or {}).get("reqId") or (result or {}).get("requirementId") or req_id
-            ver = (result or {}).get("ver") or ""
-            action = {"req.amend": "amended", "req.finalize": "finalized",
-                      "req.propose": "proposed"}.get(name, name)
-            summary = (f"✅ 守卫修复完成：`{rid_out}`"
-                       + (f" v{ver}" if ver else "")
-                       + f"（{name} 真实落库）")
-            return {"action": action, "summary": summary, "toolResult": result}
-        return {"action": "failed",
-                "summary": f"修复执行失败({name})：{str((result or {}).get('error'))[:200]}",
-                "toolResult": result}
-    # ② 更正声明分支——复查只查自造编号(否定语境的声明天然含「已定稿」等字样,
-    #    套用完成语规则会自查自纠死锁); 编号真实性仍必须保证
-    corr = (raw or "").strip()
-    m = re.search(r"【更正】\s*(.+)", corr, re.DOTALL)
-    if m:
-        text = m.group(1).strip()[:600]
-        mentioned = set(re.findall(r"\bRQ-[A-Za-z0-9][A-Za-z0-9_-]*", text))
-        fake_ids = [r for r in mentioned if not store.RequirementsStore.get(r)]
-        if not fake_ids:
-            return {"action": "corrected", "summary": text, "correction": text}
-    return {"action": "failed", "summary": "修复器未能产出有效工具调用或更正声明"}
+    from .adaptation import RepairTask, run_repair_loop
+
+    def _parse(raw: str):
+        """产物结构统一: {calls: [...], correction: ""}；raw 空才无效。"""
+        if not (raw or "").strip():
+            return None
+        corr = ""
+        m = re.search(r"【更正】\s*(.+)", raw, re.DOTALL)
+        if m:
+            corr = m.group(1).strip()[:600]
+        return {"calls": extract_tool_calls(raw) or [], "correction": corr}
+
+    def _execute(parsed: Dict[str, Any]) -> Dict[str, Any]:
+        for c in parsed.get("calls") or []:
+            name, args = c.get("tool"), c.get("arguments")
+            if name not in _GUARD_REPAIR_TOOLS or not isinstance(args, dict):
+                continue
+            # 确定性校验: reqId 必须真实存在(防修复器再次编造编号)
+            rid = str(args.get("reqId") or "").strip()
+            if rid and not store.RequirementsStore.get(rid):
+                continue
+            if not rid and req_id:
+                args["reqId"] = req_id          # 缺省绑定会话需求
+            if name == "req.propose" and not args.get("newRequirement") and req_id:
+                args["reqId"] = args.get("reqId") or req_id
+            result = run_arch_tool(name, args, root=root, project=project)
+            ok = not (isinstance(result, dict) and result.get("error"))
+            if ok:
+                rid_out = (result or {}).get("reqId") or (result or {}).get("requirementId") or req_id
+                ver = (result or {}).get("ver") or ""
+                action = {"req.amend": "amended", "req.finalize": "finalized",
+                          "req.propose": "proposed"}.get(name, name)
+                summary = (f"✅ 守卫修复完成：`{rid_out}`"
+                           + (f" v{ver}" if ver else "")
+                           + f"（{name} 真实落库）")
+                return {"ok": True, "action": action, "summary": summary,
+                        "toolResult": result}
+            return {"ok": False, "action": "failed",
+                    "summary": f"修复执行失败({name})：{str((result or {}).get('error'))[:200]}",
+                    "toolResult": result}
+        # ② 更正声明分支——复查只查自造编号(否定语境的声明天然含「已定稿」等字样,
+        #    套用完成语规则会自查自纠死锁); 编号真实性仍必须保证
+        text = str(parsed.get("correction") or "")
+        if text:
+            mentioned = set(re.findall(r"\bRQ-[A-Za-z0-9][A-Za-z0-9_-]*", text))
+            fake_ids = [r for r in mentioned if not store.RequirementsStore.get(r)]
+            if not fake_ids:
+                return {"ok": True, "action": "corrected", "summary": text,
+                        "correction": text}
+        return {"ok": False, "action": "failed",
+                "summary": "修复器未能产出有效工具调用或更正声明"}
+
+    out = run_repair_loop(RepairTask(
+        task_id="guard_repair", system=sys_prompt, user=user_content,
+        parse=_parse, execute=_execute, max_tokens=900,
+        model_id=model_id or "", dataset_kind="guard_repair",
+        meta={"claim": str(claim)[:200], "need": str(need)[:80]}))
+    res2 = out.get("result") or {}
+    res2.pop("ok", None)
+    return res2 if res2.get("action") else {"action": "failed",
+                                            "summary": out.get("summary") or "修复外循环失败"}
 
 
 _INTENT_PATTERNS = [
@@ -2087,7 +2110,8 @@ def _repair_param_table(fn: Callable) -> str:
 def repair_tool_args(name: str, args: Dict[str, Any], error: str, *,
                      model_id: Optional[str] = None,
                      context_hint: str = "") -> Optional[Dict[str, Any]]:
-    """聚焦修复外循环：极简上下文单独请求一次 LLM，仅修复 arguments JSON。
+    """聚焦修复外循环(经 adaptation.repair_loop 统一执行)：极简上下文单独请求
+    一次 LLM，仅修复 arguments JSON。
 
     与全量重试的区别：不带对话历史/工具权限/能力文档——只有 工具说明+参数表+
     原始 args+错误(+一句会话语义提示)，小模型在无干扰上下文下做纯 JSON 变换
@@ -2112,44 +2136,40 @@ def repair_tool_args(name: str, args: Dict[str, Any], error: str, *,
                   f"错误: {str(error)[:400]}"]
     if context_hint:
         user_parts.append(f"会话语义提示(仅供参考): {context_hint[:400]}")
-    t0 = _now_ms()
-    res = llm_sync([{"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": "\n".join(user_parts)}],
-                   mode="chat", model_id=model_id, max_tokens=700)
-    latency = _now_ms() - t0
-    raw = (res or {}).get("content") or ""
-    repaired = None
-    m = re.search(r"```json\s*(\{.*?\})\s*```", raw, re.DOTALL)
-    if m:
-        try:
-            data = json.loads(m.group(1))
-            if isinstance(data, dict) and isinstance(data.get("arguments"), dict):
-                call_name = data.get("tool") or name
-                if call_name == name:
-                    repaired = data["arguments"]
-        except Exception:  # noqa: BLE001
-            repaired = None
-    if not repaired:
-        fallback = extract_tool_calls(raw)
-        for c in fallback:
-            if c.get("tool") == name and isinstance(c.get("arguments"), dict):
-                repaired = c["arguments"]
-                break
-    # 修复结果仍过一遍确定性收敛，并带 root/project 空位由 run_arch_tool 注入
-    if isinstance(repaired, dict):
-        repaired = _coerce_args(fn, repaired)
-    ok = bool(repaired)
-    try:
-        from . import llm_dataset
-        llm_dataset.record("arg_repair", tool=name,
-                           argsBefore=args, error=error,
-                           argsAfter=repaired or "", ok=ok,
-                           model=model_id or "", latencyMs=latency)
-    except Exception:  # noqa: BLE001
-        pass
+    from .adaptation import RepairTask, run_repair_loop
+
+    def _parse(raw: str):
+        repaired = None
+        m = re.search(r"```json\s*(\{.*?})\s*```", raw, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(1))
+                if isinstance(data, dict) and isinstance(data.get("arguments"), dict):
+                    call_name = data.get("tool") or name
+                    if call_name == name:
+                        repaired = data["arguments"]
+            except Exception:  # noqa: BLE001
+                repaired = None
+        if not repaired:
+            fallback = extract_tool_calls(raw)
+            for c in fallback:
+                if c.get("tool") == name and isinstance(c.get("arguments"), dict):
+                    repaired = c["arguments"]
+                    break
+        # 修复结果仍过一遍确定性收敛，并带 root/project 空位由 run_arch_tool 注入
+        if isinstance(repaired, dict):
+            repaired = _coerce_args(fn, repaired)
+        return repaired
+
+    out = run_repair_loop(RepairTask(
+        task_id="arg_repair", system=sys_prompt, user="\n".join(user_parts),
+        parse=_parse, max_tokens=700, model_id=model_id or "",
+        dataset_kind="arg_repair",
+        meta={"tool": name, "argsBefore": args, "error": str(error)[:400]}))
+    repaired = out.get("parsed")
     logger.info("[arg-repair] %s ok=%s latency=%sms err=%s",
-                name, ok, latency, str(error)[:120])
-    return repaired
+                name, bool(repaired), out.get("latencyMs"), str(error)[:120])
+    return repaired if isinstance(repaired, dict) else None
 
 
 def run_tools_loop(msgs: List[Dict[str, str]], *,
@@ -2391,7 +2411,26 @@ def _diagram_skill_doc() -> str:
 
 def chat_system_prompt(root: Optional[str], project: Optional[str],
                        diagram_skill: bool = False,
-                       skill_scenarios: Optional[List[str]] = None) -> str:
+                       skill_scenarios: Optional[List[str]] = None,
+                       model_id: str = "") -> str:
+    """自由对话系统提示：经 prompt_registry 组装(块化/按模型档案分级/预算裁剪)。
+
+    等价模式(默认)下与旧拼接(header/边界/CAPABILITY/IR/📐/MCP/skill)逐字节
+    一致; prompt.overrides 可开单源模式(能力文档由工具注册表渲染)与分级预算。
+    model_id 非空 → 查模型能力档案取 tier(缺省 t1 保守档)。
+    """
+    from . import model_profile as _mp
+    from . import prompt_registry as _pr
+    tier = _mp.tier_of(model_id or "")
+    return _pr.render_system({
+        "root": root, "project": project, "diagram_skill": diagram_skill,
+        "skill_scenarios": skill_scenarios, "tier": tier, "model_id": model_id or ""})
+
+
+def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
+                              diagram_skill: bool = False,
+                              skill_scenarios: Optional[List[str]] = None) -> str:
+    """旧拼接实现(等价基线对照/回退用, 不再在生产链路上)。"""
     """自由对话系统提示：能力文档 + 当前项目/KB 上下文 + 范围限定(软拒绝)。
 
     绘图 IR(DiagramSchema) 参考默认注入(模型优先输出 ```diagram IR 围栏，前端转码)；

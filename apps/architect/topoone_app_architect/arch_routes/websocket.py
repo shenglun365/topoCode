@@ -427,15 +427,24 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                                    "content": final_b, "messageId": assistant_msg_id_b})
         return
 
-    msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
-                                skill_scenarios=[str(s) for s in skill_scenarios])
-    if amend_contract:
-        msgs.insert(1, {"role": "system", "content": amend_contract})
-
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，
     # 无角色命中时 eff_model=None → 回退全局偏好(既有链不变)。护栏 R3：per-call 参数。
     from . import agent_roles as _roles
     eff_model = _roles.resolve_role_model(_roles.scenario_role(skill_scenarios), model_id)
+
+    # 模型能力档案懒探测(后台执行不阻塞): 无档案模型首轮触发, 探测落档后
+    # 后续回合 system 按 tier 分级(小模型收紧预算, 大模型放开)
+    try:
+        from . import model_profile as _mp
+        _mp.get_profile_or_lazy(eff_model or model_id or "")
+    except Exception:  # noqa: BLE001
+        pass
+
+    msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
+                                skill_scenarios=[str(s) for s in skill_scenarios],
+                                model_id=eff_model or model_id or "")
+    if amend_contract:
+        msgs.insert(1, {"role": "system", "content": amend_contract})
 
     # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
     request_id = None
@@ -803,14 +812,17 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
 
 
 def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = False,
-                         skill_scenarios: Optional[List[str]] = None):
-    """组装 prompt: 能力文档(system) + 最近 N 条历史。diagram_skill 开启绘图增强(IR→代码)。
+                         skill_scenarios: Optional[List[str]] = None,
+                         model_id: str = ""):
+    """组装 prompt: 能力文档(system, 按模型档案 tier 分级+预算裁剪) + 最近 N 条历史。
 
     skill_scenarios 非空 → 按场景注入语义资产 skill 文档（资产管理对话='extract'）。
+    model_id 非空 → 查模型能力档案(小模型收紧预算/大模型放开)。
     """
     from .req_agent import chat_system_prompt
     msgs = [{"role": "system", "content": chat_system_prompt(
-        root, project, diagram_skill=diagram_skill, skill_scenarios=skill_scenarios)}]
+        root, project, diagram_skill=diagram_skill, skill_scenarios=skill_scenarios,
+        model_id=model_id)}]
     for m in history[-cap:]:
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and (m.get("content") or "").strip():
             msgs.append({"role": m["role"], "content": m["content"]})

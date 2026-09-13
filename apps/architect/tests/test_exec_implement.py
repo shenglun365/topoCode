@@ -862,14 +862,38 @@ def test_finalize_gate_actionable_guidance(tmp_path, monkeypatch):
 
 
 def test_chat_system_prompt_no_reject_boundary():
-    """自由对话 system 含职责边界: 弱相关需求不拒做(用户主权, 提示不打断)。"""
+    """自由对话 system 含职责边界: 弱相关需求不拒做(用户主权, 提示不打断)。
+
+    经 prompt_registry 组装后按渲染产物断言(不再检查函数源码)。
+    """
     from topoone_app_architect.arch_routes import req_agent
-    import inspect
-    fn = next(o for n, o in inspect.getmembers(req_agent, inspect.isfunction)
-              if "system" in n.lower() and "chat" in (inspect.getsource(o)[:400].lower() + n.lower()))
-    src = inspect.getsource(fn)
-    assert "不拒做" in src and "职责边界" in src, "system 提示应含职责边界(弱相关受理)"
-    assert "designMd" in src, "边界提示应同步强调 designMd 完整性"
+    s = req_agent.chat_system_prompt(None, None)
+    assert "不拒做" in s and "职责边界" in s, "system 提示应含职责边界(弱相关受理)"
+    assert "designMd" in s, "边界提示应同步强调 designMd 完整性"
+
+
+def test_chat_system_prompt_registry_equivalence():
+    """registry 等价模式: 与旧拼接逐字节一致(rstrip 尾空白); 单源模式可渲染。"""
+    from topoone_app_architect.arch_routes import req_agent, prompt_registry
+    for kw in ({}, {"diagram_skill": True}, {"skill_scenarios": ["plan"]}):
+        a = req_agent.chat_system_prompt(None, None, **kw)
+        b = req_agent.chat_system_prompt_legacy(None, None, **kw)
+        assert a.rstrip() == b.rstrip(), f"等价失败: {kw}"
+    # 单源模式: 注册表渲染能力文档(含协议+全部工具名)
+    doc = prompt_registry.capability_doc_from_tools()
+    from topoone_app_architect.arch_routes.req_agent import _ARCH_TOOLS
+    assert "[TOOL_CALL]" in doc
+    for name in ("req.propose", "req.amend", "kb.asset.search", "map.overview"):
+        assert name in doc, f"单源文档缺工具 {name}"
+
+
+def test_prompt_registry_budget_trim():
+    """预算裁剪: 小预算淘汰条件块(skill/ir), 恒置块(协议/边界)保留。"""
+    from topoone_app_architect.arch_routes import prompt_registry as pr
+    s = pr.render_system({"root": None, "project": None, "tier": 4,
+                          "skill_scenarios": ["plan"]})
+    assert "职责边界" in s and "[TOOL_CALL]" in s, "恒置块永不裁剪"
+    assert "技能" not in s or len(s) <= pr.budget_for(4) + 800, "t4 预算应显著收紧"
 
 
 def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):

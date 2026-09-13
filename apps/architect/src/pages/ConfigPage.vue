@@ -192,6 +192,39 @@ async function probeLlm(m: ArchLlmModel) {
     llmProbing.value[m.id] = `✗ ${e?.message || e}`
   }
 }
+
+// ── 模型能力探测(分级适配): 工具协议/JSON/指令边界 → tier 档案 ──
+const capProbing = ref<Record<string, string>>({})
+const capProfiles = ref<Record<string, any>>({})
+async function loadProfiles() {
+  try {
+    const d = await apiGet<{ profiles: any[] }>('/llm/model-profiles')
+    capProfiles.value = Object.fromEntries((d.profiles ?? []).map((p: any) => [p.modelId, p]))
+  } catch { /* 后端未就绪静默 */ }
+}
+loadProfiles()
+async function capabilityProbe(m: ArchLlmModel) {
+  capProbing.value[m.id] = '探测中…(~9 次小调用)'
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    const d = await apiPost<any>(`/llm/models/${m.id}/capability-probe`, {})
+    if (d?.reachable === false) {
+      capProbing.value[m.id] = `✗ ${d.summary || '模型不可达'}`
+    } else {
+      capProfiles.value = { ...capProfiles.value, [m.id]: d }
+      capProbing.value[m.id] = `✓ ${d.summary || `tier ${d.tier}`}`
+    }
+  } catch (e: any) {
+    capProbing.value[m.id] = `✗ ${e?.message || e}`
+  }
+}
+async function setManualTier(m: ArchLlmModel, tier: number) {
+  try {
+    const { apiPut } = await import('@/services/api-client')
+    const d = await apiPut<any>(`/llm/model-profiles/${m.id}`, { tier })
+    capProfiles.value = { ...capProfiles.value, [m.id]: d }
+  } catch { /* 静默 */ }
+}
 // ── 符号源(CodeGraph)开关：三档 + 状态(KV 持久化) ──
 const cgStatus = ref<CodegraphStatus | null>(null)
 const cgSaving = ref(false)
@@ -407,10 +440,30 @@ onMounted(() => { void loadCgStatus() })
             </div>
             <div class="flex-1" />
             <span
-              v-if="llmProbing[m.id]"
-              class="text-[10px] font-mono"
-              :class="llmProbing[m.id].startsWith('✓') ? 'text-ctp-green' : 'text-ctp-overlay0'"
-            >{{ llmProbing[m.id] }}</span>
+              v-if="capProfiles[m.id]"
+              class="chip !text-[10px] bg-ctp-mauve/15 text-ctp-mauve font-mono"
+              :title="capProfiles[m.id]?.summary || ''"
+            >t{{ capProfiles[m.id].tier }}</span>
+            <select
+              v-if="capProfiles[m.id]"
+              class="bg-ctp-surface0 text-[10px] rounded px-1 py-0.5 text-ctp-subtext0"
+              :value="capProfiles[m.id].tier"
+              title="手工调整能力档位(0=27B+ … 4=1-3B; 手工设定优先于探测)"
+              @change="setManualTier(m, +($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="i in 5" :key="i" :value="i - 1">t{{ i - 1 }}</option>
+            </select>
+            <span
+              v-if="capProbing[m.id]"
+              class="text-[10px] font-mono max-w-[260px] truncate"
+              :class="capProbing[m.id].startsWith('✓') ? 'text-ctp-green' : 'text-ctp-overlay0'"
+              :title="capProbing[m.id]"
+            >{{ capProbing[m.id] }}</span>
+            <button
+              class="btn !py-0 !px-2 !text-[10px]"
+              :title="t('config.llm.capProbeTip')"
+              @click="capabilityProbe(m)"
+            >{{ t('config.llm.capProbe') }}</button>
             <button
               class="btn !py-0 !px-2 !text-[10px]"
               @click="probeLlm(m)"

@@ -1138,6 +1138,8 @@ export default {
       mKey: 'API Key',
       mMaxTokens: 'max_tokens',
       modelProbe: '测试',
+      capProbe: '能力探测',
+      capProbeTip: '运行时能力探测(~9 次小调用): 工具协议/JSON 围栏/指令边界 → tier 档案, 驱动提示词分级与兜底策略',
       startServe: '拉起服务',
       stopServe: '关闭服务',
       stopping: '停止中…',

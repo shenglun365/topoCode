@@ -1109,6 +1109,8 @@ export default {
       mKey: 'API Key',
       mMaxTokens: 'max_tokens',
       modelProbe: 'Test',
+      capProbe: 'Capability Probe',
+      capProbeTip: 'Runtime capability probing (~9 small calls): tool protocol / JSON fence / instruction boundary → tier profile, drives prompt tiering & fallback strategies',
       startServe: 'Start Serve',
       stopServe: 'Stop Serve',
       stopping: 'Stopping…',

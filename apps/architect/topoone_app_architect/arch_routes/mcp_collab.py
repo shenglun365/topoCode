@@ -302,6 +302,34 @@ async def probe_llm_model_route(request: Request):
     return ok(_probe_llm_model(url, model, api_key))
 
 
+@router.get("/llm/model-profiles")
+async def get_model_profiles():
+    """全部模型能力档案(tier/caps/探测历史; 无档案模型不出现在列表)。"""
+    from . import model_profile
+    return ok({"profiles": list(model_profile.all_profiles().values()),
+               "tiers": model_profile.TIERS})
+
+
+@router.post("/llm/models/{model_id}/capability-probe")
+async def capability_probe_route(model_id: str):
+    """能力探测(同步执行, ~9 次小调用): 工具协议/JSON 围栏/指令边界 → tier 档案。"""
+    from . import model_profile
+    import asyncio
+    return ok(await asyncio.to_thread(model_profile.probe_model, model_id))
+
+
+@router.put("/llm/model-profiles/{model_id}")
+async def set_model_profile_route(model_id: str, request: Request):
+    """手工设置模型 tier(manual 优先级最高, 后续探测不覆盖)。Body: {tier}。"""
+    body = await request.json() or {}
+    try:
+        tier = int(body.get("tier"))
+    except (TypeError, ValueError):
+        return err(400, "缺少整数 tier (0-4)")
+    from . import model_profile
+    return ok(model_profile.set_manual_tier(model_id, tier))
+
+
 @router.get("/collab/interactions")
 async def list_interactions():
     return ok(store.InteractionsStore.all())
