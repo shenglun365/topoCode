@@ -272,6 +272,11 @@ def test_manual_model_update_route(tmp_path, monkeypatch):
         async def json(self):
             return self._b
 
+    # 隔离 KB: manual 同步走本地保留路径(不触真实主库)
+    from topoone_app_architect.arch_routes import kb_gateway
+    monkeypatch.setattr(kb_gateway, "call_kb",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("kb isolated")))
+
     async def _run():
         created = await M.add_manual_llm_model_route(FakeReq(
             {"name": "旧名", "model": "old-model", "provider": "custom", "url": "http://a"}))
@@ -292,3 +297,42 @@ def test_manual_model_update_route(tmp_path, monkeypatch):
     res2 = asyncio.run(M.update_manual_llm_model_route("imp-1", FakeReq({"name": "x"})))
     body2 = res2.body.decode() if hasattr(res2, "body") else str(res2)
     assert "不可在此修改" in body2 or "400" in body2
+
+
+def test_manual_model_kb_sync_binds_id(tmp_path, monkeypatch):
+    """manual 条目同步主库: 同名模型复用主库 id; 无匹配 → addModel 注册。
+
+    主库 id 是探测/对话链路的真实路由键(否则 llm.sync 回退 is_default)。
+    """
+    import topoone_app_architect.arch_routes.ctx as C
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import mcp_collab as M
+    from topoone_app_architect.arch_routes import kb_gateway
+    import topoone_app_architect.arch_routes.mcp_collab as M
+    calls = {"get": 0, "add": 0}
+
+    def fake_call_kb(method, **kw):
+        if method == "settings.getModels":
+            calls["get"] += 1
+            return [{"id": "model-kb42", "model": "qwen3.5-4b-mtp"}] if calls["get"] == 1 else []
+        calls["add"] += 1
+        return {"id": "model-new01", **kw}
+    monkeypatch.setattr(kb_gateway, "call_kb", fake_call_kb)
+    entry = M._sync_manual_to_kb({"id": "man-x", "name": "LMS-4b", "provider": "custom",
+                                  "model": "qwen3.5-4b-mtp", "url": "http://10.0.0.75:1234/v1"})
+    assert entry["id"] == "model-kb42", "同名应复用主库 id"
+
+    # 无匹配 → addModel 注册并取新 id
+    monkeypatch.setattr(kb_gateway, "call_kb",
+                        lambda method, **kw: ([] if method == "settings.getModels"
+                                              else {"id": "model-new02", **kw}))
+    entry2 = M._sync_manual_to_kb({"id": "man-y", "name": "LMS-2b", "provider": "custom",
+                                   "model": "qwen3.5-2b-mtp", "url": "http://x"})
+    assert entry2["id"] == "model-new02", "无匹配应注册主库并绑新 id"
+
+    # KB 不可达 → 保留本地 id 不抛出
+    def boom(*a, **kw):
+        raise RuntimeError("kb down")
+    monkeypatch.setattr(kb_gateway, "call_kb", boom)
+    entry3 = M._sync_manual_to_kb({"id": "man-z", "name": "n", "model": "m", "url": ""})
+    assert entry3["id"] == "man-z"

@@ -244,6 +244,41 @@ async def import_llm_models_route():
     })
 
 
+_KB_PROVIDERS = ("ollama", "lm-studio", "custom-local", "deepseek",
+                 "minimax-cn", "minimax-global", "openrouter", "custom-cloud")
+
+
+def _sync_manual_to_kb(entry: dict) -> dict:
+    """manual 条目同步主后端模型库(探测/对话链路经 llm.sync 只认主库 modelId)。
+
+    先按 model 名匹配既有主库条目(复用 id); 匹配不到 → settings.addModel 注册
+    (provider 映射到主库 CHECK 枚举, 默认 custom-local)。KB 不可达 → 条目保持
+    本地 id(探测会回退默认模型, 前端连通性测试仍可用直连 url)。
+    """
+    try:
+        from .kb_gateway import call_kb
+        raw = call_kb("settings.getModels")
+        rows = raw if isinstance(raw, list) else list((raw or {}).get("models") or [])
+        model_name = str(entry.get("model") or "").strip()
+        url_clean = str(entry.get("url") or "").rstrip("/")
+        for row in rows or []:
+            if str(row.get("model") or "").strip() == model_name:
+                entry["id"] = row["id"]          # 绑定主库 id
+                return entry
+        provider = str(entry.get("provider") or "").strip().lower()
+        if provider not in _KB_PROVIDERS:
+            provider = "lm-studio" if provider == "lms" else "custom-local"
+        row = call_kb("settings.addModel", name=str(entry.get("name") or model_name),
+                      provider=provider, model=model_name,
+                      url=url_clean, type=str(entry.get("type") or "local"))
+        if isinstance(row, dict) and row.get("id"):
+            entry["id"] = row["id"]
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger("arch.mcp_collab").warning(
+            "[llm-manual] 主库同步失败(条目保留本地, 探测将回退默认模型): %s", e)
+    return entry
+
+
 @router.post("/llm/models/manual")
 async def add_manual_llm_model_route(request: Request):
     """手动添加模型(独立于 KB)。Body: { name, provider?, model, url? }"""
@@ -263,6 +298,7 @@ async def add_manual_llm_model_route(request: Request):
         "isDefault": bool(body.get("isDefault")),
         "updatedAt": _ts(),
     }
+    entry = _sync_manual_to_kb(entry)
     models = [m for m in get_llm_models() if m.get("source") != "manual" or _model_identity(m) != _model_identity(entry)]
     models.append(entry)
     save_llm_models(models)
@@ -291,6 +327,7 @@ async def update_manual_llm_model_route(model_id: str, request: Request):
         "url": str(body.get("url") or "").strip(),
         "updatedAt": _ts(),
     })
+    target = _sync_manual_to_kb(target)
     save_llm_models(models)
     return ok(target)
 
