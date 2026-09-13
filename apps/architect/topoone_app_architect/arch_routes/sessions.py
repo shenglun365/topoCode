@@ -358,9 +358,12 @@ def _running_role_of(conv: dict) -> dict:
     jobs = (meta or {}).get("jobs") or []
     for j in reversed(jobs):
         if (j.get("status") or "") in ("waiting_input", "running"):
-            return {"role": "coding",
-                    "executorId": j.get("executorId") or "opencode",
-                    "status": j.get("status") or ""}
+            out = {"role": "coding",
+                   "executorId": j.get("executorId") or "opencode",
+                   "status": j.get("status") or ""}
+            if isinstance(j.get("progress"), dict):
+                out["progress"] = j["progress"]
+            return out
     return {"role": "architect", "executorId": "", "status": ""}
 
 

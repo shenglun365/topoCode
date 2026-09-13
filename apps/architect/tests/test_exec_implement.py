@@ -1015,3 +1015,25 @@ def test_pump_input_required_separates_streams(tmp_path, monkeypatch):
     meta = eb._meta_dict_of(store.ConversationsStore.get(conv["id"]))
     assert int(meta.get("subUnread") or 0) == 1
     assert eb.active_job(conv["id"]).get("status") == "waiting_input"
+
+
+def test_pump_progress_updates_ledger_and_broadcast(tmp_path, monkeypatch):
+    """执行进展(工具计数): 不落会话消息(防刷屏), 账本 progress 留痕 + SSE 广播。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.arch_routes import ws_events
+    broadcast = []
+    monkeypatch.setattr(ws_events, "publish", lambda ev: broadcast.append(ev))
+    eb._job_upsert(conv["id"], {"jobId": "impl-p1", "status": "running"})
+    eb._handle_pump_event(
+        {"kind": "progress", "toolCount": 12, "msgCount": 3},
+        {"convId": conv["id"], "jobId": "impl-p1", "rid": rid, "pid": "",
+         "subId": "", "target": conv["id"]})
+    # 账本留痕
+    j = next(x for x in eb.jobs_of(conv["id"]) if x["jobId"] == "impl-p1")
+    assert j["progress"]["toolCount"] == 12 and j["progress"]["msgCount"] == 3
+    # 不落消息
+    assert not any("工具" in (m.get("content") or "") for m in store.ConversationsStore.messages(conv["id"]))
+    # SSE 广播
+    assert broadcast and broadcast[-1]["type"] == "job-progress" \
+        and broadcast[-1]["toolCount"] == 12

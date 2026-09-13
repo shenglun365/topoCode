@@ -36,7 +36,7 @@ const props = defineProps<{
   /** 是否显示 🧾 开关(仅需求方案对话显示；资产管理/工作台不显示)。 */
   showContractSkill?: boolean
   /** running 归属(S2): {role:'coding', executorId, status} 有活跃作业时非空。 */
-  jobState?: { role: string; executorId?: string; status?: string } | null
+  jobState?: { role: string; executorId?: string; status?: string; progress?: { toolCount?: number; msgCount?: number; at?: number } } | null
   /** 已绑定执行器 id(S2/S3): 空=未绑定——Coding 切换钮首击触发分配(bind-coding)。 */
   boundExecutorId?: string
   /** 执行器白名单模型名列表(≥2 时显示模型 chip)。 */
@@ -761,6 +761,23 @@ onUnmounted(() => {
           >{{ m || t('session.target.modelDefault') }}</button>
         </span>
       </span>
+    </div>
+
+    <!-- coding 视图执行进展行(SSE 实时, 不落库): 工具调用/消息计数 + 状态 -->
+    <div
+      v-if="targetRole === 'coding' && props.jobState?.role === 'coding'"
+      class="flex items-center gap-2 border-b border-ctp-surface0 bg-ctp-mantle/40 px-3 py-1 text-[10px] shrink-0"
+    >
+      <span
+        class="inline-flex items-center gap-1"
+        :class="props.jobState.status === 'waiting_input' ? 'text-ctp-peach' : 'text-ctp-blue animate-pulse'"
+      >▶ {{ props.jobState.executorId || 'coding' }} · {{ props.jobState.status === 'waiting_input' ? '等待回复' : '执行中' }}</span>
+      <span v-if="(props.jobState as any).progress" class="font-mono text-ctp-subtext0">
+        ⚙ 工具 ×{{ (props.jobState as any).progress.toolCount ?? 0 }} · 消息 ×{{ (props.jobState as any).progress.msgCount ?? 0 }}
+      </span>
+      <span v-else class="text-ctp-overlay0">暂无进展数据(回合级事件到达时更新)</span>
+      <span class="flex-1" />
+      <span v-if="(props.jobState as any).progress?.at" class="text-ctp-overlay0 font-mono">{{ new Date((props.jobState as any).progress.at).toLocaleTimeString() }}</span>
     </div>
 
     <div

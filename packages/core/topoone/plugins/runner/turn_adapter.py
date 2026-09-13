@@ -516,14 +516,16 @@ class OpenCodeTurnAdapter(TurnAdapter):
     async def _sse_loop(self, job) -> None:
         """常驻 SSE 订阅: 任意会话事件刷新 job.last_activity_ts; 错误记 job.last_error。
 
-        流式扩展预留: 当前只刷活动(看门狗)。若要把 agent 输出 token 流式
-        送达 architect 消息流, 在此对 message.part/message.updated 类事件
-        逐段 job.emit("text", 片段) 即可——事件环+WS 订阅面+泵(_handle_pump_event
-        落 job_progress)原生承载, 无需改架构。codex(_AppServerProcess 事件环)与
-        cline(sidecar events)同理由其通知回调扩展。
+        执行进展(工具调用计数): message.updated 事件携带消息全量 parts——
+        按 message.id 记每条消息的工具 part 峰值, 汇总为作业级工具数;
+        30s 或新工具时 emit("progress") → 事件环 → architect 泵 → 前端进展 chip。
+        解析防御: 字段缺失时降级为事件活动计数, 不影响看门狗。
         """
         stop: asyncio.Event = job.sse_stop
         url = job.serve_url
+        msg_tools: Dict[str, int] = {}      # message.id → 该消息工具 part 峰值
+        last_emit_ts = 0.0
+        last_tool_count = -1
         async for client in _persist_client():
             try:
                 async with client.stream(
@@ -548,6 +550,24 @@ class OpenCodeTurnAdapter(TurnAdapter):
                             job.last_error = str(props.get("error") or ptype)[:400]
                         if ptype.startswith(("message.", "session.", "permission.")):
                             job.last_activity_ts = time.time()
+                        # ── 执行进展: 工具调用计数(每消息 parts 全量, 按 id 取峰值去重) ──
+                        if ptype.startswith("message."):
+                            msg = props.get("message") or props
+                            mid = str(msg.get("id") or "") or f"_{len(msg_tools)}"
+                            tools = 0
+                            for p in (msg.get("parts") or []):
+                                if str(p.get("type") or "") == "tool":
+                                    tools += 1
+                            if tools > msg_tools.get(mid, 0):
+                                msg_tools[mid] = tools
+                            now = time.time()
+                            total = sum(msg_tools.values())
+                            if total != last_tool_count and \
+                                    (total > last_tool_count + 4 or now - last_emit_ts > 30):
+                                last_tool_count = total
+                                last_emit_ts = now
+                                job.emit("progress", "", toolCount=total,
+                                         msgCount=len(msg_tools))
             except asyncio.CancelledError:
                 return
             except Exception as e:  # noqa: BLE001

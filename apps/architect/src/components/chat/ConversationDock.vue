@@ -132,6 +132,14 @@ let evtSource: EventSource | null = null
 let evtReconnect: ReturnType<typeof setTimeout> | null = null
 let refreshPending: ReturnType<typeof setTimeout> | null = null
 function onConvEvent(d: any) {
+  if (d?.type === 'job-progress' && d.conversationId === conv.activeId) {
+    // 执行进展(工具计数): 更新 activeMeta.runningRole.progress → chip/进展行响应
+    const rr = (conv.activeMeta as any)?.runningRole
+    if (rr) {
+      rr.progress = { toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now() }
+    }
+    return
+  }
   if (d?.type === 'sub-unread' && d.conversationId === conv.activeId) {
     // coding 视图正看着子会话流 → 即时清零(badge 不虚涨)
     if (conv.viewMode === 'coding') {
@@ -874,9 +882,9 @@ async function pollRunningState() {
               v-if="isRunning"
               class="chip !text-[10px] animate-pulse inline-flex items-center gap-1"
               :class="jobState?.role === 'coding' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-blue/15 text-ctp-blue'"
-              :title="t('session.workState.runningHint')"
+              :title="`${t('session.workState.runningHint')}${(jobState as any)?.progress ? `\\n工具调用 ×${(jobState as any).progress.toolCount} · 消息 ×${(jobState as any).progress.msgCount} · ${new Date((jobState as any).progress.at || 0).toLocaleTimeString()}` : ''}`"
             >▶ {{ jobState?.role === 'coding'
-              ? `coding·${jobState.executorId || '?'}${jobState.status === 'waiting_input' ? ' · 等待回复' : ''}`
+              ? `coding·${jobState.executorId || '?'}${jobState.status === 'waiting_input' ? ' · 等待回复' : (jobState as any)?.progress ? ` · ⚙×${(jobState as any).progress.toolCount}` : ''}`
               : t('session.workState.running') }}<button
                 class="ml-0.5 rounded px-1 text-ctp-red hover:bg-ctp-red/15"
                 :disabled="stopBusy"

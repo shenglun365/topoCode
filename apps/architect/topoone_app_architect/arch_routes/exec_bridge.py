@@ -565,6 +565,20 @@ def _handle_pump_event(ev: dict, ctx: dict) -> None:
             _append_sub(conv_id, sub_id, "assistant",
                         f"❌ 执行作业失败：{text}",
                         msg_meta={"jobId": job_id, "kind": "job_failed_sub"}, project_id=pid)
+    elif kind == "progress":
+        # 执行进展(工具调用计数): 不落消息(防刷屏)——账本留痕 + SSE 实时推
+        # 前端(主视图 ▶ chip 与 coding 视图进展行共享)。
+        prog = {"toolCount": int(ev.get("toolCount") or 0),
+                "msgCount": int(ev.get("msgCount") or 0),
+                "at": _ts()}
+        _job_upsert(conv_id, {"jobId": job_id, "progress": prog,
+                              "lastAgentTs": _ts()})
+        try:
+            from . import ws_events
+            ws_events.publish({"type": "job-progress", "conversationId": conv_id,
+                               "subConversationId": sub_id, "jobId": job_id, **prog})
+        except Exception:  # noqa: BLE001
+            pass
     elif kind in ("aborted", "finished"):
         _append(conv_id, "assistant", f"ℹ️ {text}")
     elif text:
