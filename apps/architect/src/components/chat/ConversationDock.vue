@@ -126,25 +126,37 @@ onUnmounted(() => {
 })
 function onSessionsChanged() { void loadRecent() }
 
-/** ── 会话事件流(SSE): coding 作业消息(job_input/进度/完成)双落主会话 → 实时刷新信息流 ── */
+/** ── 会话事件流(SSE): job 消息实时刷新 + coding 子会话未读 badge ── */
 let evtSource: EventSource | null = null
 let evtReconnect: ReturnType<typeof setTimeout> | null = null
 let refreshPending: ReturnType<typeof setTimeout> | null = null
+function onConvEvent(d: any) {
+  if (d?.type === 'sub-unread' && d.conversationId === conv.activeId) {
+    conv.subUnread = Number(d.count) || 0
+    return
+  }
+  if (d?.type !== 'conv-message' || !d.conversationId) return
+  if (d.conversationId === conv.activeId && conv.viewMode === 'main') {
+    // 主视图: 主会话新消息(作业 done 卡等) → 防抖重拉
+    if (refreshPending) clearTimeout(refreshPending)
+    refreshPending = setTimeout(() => {
+      refreshPending = null
+      void conv.refreshActiveMessages()
+    }, 400)
+  } else if (d.conversationId === conv.activeSubId && conv.viewMode === 'coding') {
+    // coding 视图: 活跃子会话新消息 → 重拉子流
+    if (refreshPending) clearTimeout(refreshPending)
+    refreshPending = setTimeout(() => {
+      refreshPending = null
+      void conv.refreshSubMessages()
+    }, 400)
+  }
+}
 function connectConvEvents() {
   try {
     evtSource = new EventSource(`${apiBaseUrl()}/events`)
     evtSource.onmessage = (ev) => {
-      try {
-        const d = JSON.parse(ev.data)
-        if (d?.type === 'conv-message' && d.conversationId && d.conversationId === conv.activeId) {
-          // 防抖: 短时多条事件(如双落消息)合并一次重拉
-          if (refreshPending) clearTimeout(refreshPending)
-          refreshPending = setTimeout(() => {
-            refreshPending = null
-            void conv.refreshActiveMessages()
-          }, 400)
-        }
-      } catch { /* 非事件帧忽略 */ }
+      try { onConvEvent(JSON.parse(ev.data)) } catch { /* 非事件帧忽略 */ }
     }
     evtSource.onerror = () => {
       disconnectConvEvents()
@@ -156,6 +168,16 @@ function disconnectConvEvents() {
   evtSource?.close()
   evtSource = null
   if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
+}
+
+/** 角色即视图: coding → 切子会话信息流(无子会话提示); architect → 回主会话流。 */
+async function onRoleChange(role: 'architect' | 'coding') {
+  if (role === 'coding') {
+    const ok = await conv.setViewMode('coding')
+    if (!ok) conv.pushLocalHint('暂无 coding 子会话——`/执行` 启动作业后自动创建')
+  } else {
+    void conv.setViewMode('main')
+  }
 }
 function onConversationRemoved(e: Event) {
   const id = (e as CustomEvent).detail as string
@@ -762,7 +784,7 @@ async function pollRunningState() {
 
       <AnalysisChat
         class="h-full"
-        :turns="conv.turns"
+        :turns="conv.viewMode === 'coding' ? conv.subTurns : conv.turns"
         :busy="conv.busy"
         :busy-label="conv.busyLabel"
         :tool-trail="conv.toolTrail"
@@ -778,6 +800,8 @@ async function pollRunningState() {
         :bound-executor-id="boundExecutorId"
         :executor-models="boundModelNames"
         :executor-model="currentExecutorModel"
+        :sub-unread="conv.subUnread"
+        @role-change="onRoleChange"
         @bind-coding="openRoles"
         @set-model="onSetModel"
         @send="(text: string, role?: 'architect' | 'coding') => { conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(role ? { targetRole: role } : {}) }); onSent() }"
@@ -796,14 +820,14 @@ async function pollRunningState() {
         @refresh-asset="emitRefreshAsset"
         @stop="conv.stop"
       >
-        <!-- 内联按钮: 收件人组左侧(子会话); 执行器入口与 Coding 首击重复, 已去除 -->
+        <!-- 内联按钮: 子会话池(多子会话管理; 单子会话时 Coding 入口即全部) -->
         <template #header-inline>
           <button
-            v-if="isMainSession"
+            v-if="isMainSession && codingSubs.length > 1"
             class="btn !py-0 !px-2 !text-[10px]"
             :title="t('session.subs.title')"
             @click="openSubs"
-          >{{ t('session.subs.manage') }}<template v-if="codingSubs.length">({{ codingSubs.length }})</template></button>
+          >{{ t('session.subs.manage') }}({{ codingSubs.length }})</button>
         </template>
         <template #header-extra>
           <div v-if="conv.activeId" class="flex shrink-0 items-center gap-1.5">
@@ -824,24 +848,17 @@ async function pollRunningState() {
             >{{ reqStatus.status === 'done' ? t('session.reqState.undoDone') : t('session.reqState.markDone') }}</button>
             <span
               v-if="isRunning"
-              class="chip !text-[10px] animate-pulse"
+              class="chip !text-[10px] animate-pulse inline-flex items-center gap-1"
               :class="jobState?.role === 'coding' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-blue/15 text-ctp-blue'"
               :title="t('session.workState.runningHint')"
             >▶ {{ jobState?.role === 'coding'
               ? `coding·${jobState.executorId || '?'}${jobState.status === 'waiting_input' ? ' · 等待回复' : ''}`
-              : t('session.workState.running') }}</span>
-            <span
-              v-if="boundExecutorId"
-              class="chip !text-[10px] bg-ctp-mauve/15 text-ctp-mauve"
-              :title="t('session.role.manageTitle')"
-            >⌨ {{ boundExecutorId }}</span>
-            <button
-              v-if="isRunning"
-              class="btn !py-0 !px-2 !text-[10px] btn-ghost !text-ctp-red"
-              :disabled="stopBusy"
-              :title="t('session.job.stop')"
-              @click="stopExec"
-            >⏹ {{ t('session.job.stop') }}</button>
+              : t('session.workState.running') }}<button
+                class="ml-0.5 rounded px-1 text-ctp-red hover:bg-ctp-red/15"
+                :disabled="stopBusy"
+                :title="t('session.job.stop')"
+                @click.stop="stopExec"
+              >⏹</button></span>
           </div>
         </template>
         <template #toolbar-extra>

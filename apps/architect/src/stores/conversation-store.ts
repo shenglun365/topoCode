@@ -111,6 +111,60 @@ export const useConversationStore = defineStore('archConversation', () => {
     busyLabel.value = ''
   }
 
+  /** ── 信息流视图分离: 主会话(architect) / coding 子会话(coding) ── */
+  const viewMode = ref<'main' | 'coding'>('main')
+  const subTurns = ref<KbAnalysisTurn[]>([])
+  const activeSubId = ref('')
+  const subUnread = ref(0)
+
+  function _mapTurns(messages: { id?: string; role: 'user' | 'assistant'; content: string; meta?: any }[] | undefined) {
+    return (messages ?? [])
+      .filter((m) => m.content?.trim())
+      .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: m.meta }))
+      .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content))
+  }
+
+  async function setViewMode(mode: 'main' | 'coding'): Promise<boolean> {
+    if (mode === viewMode.value) return true
+    if (mode === 'coding') {
+      const okOpen = await openSubView()
+      if (!okOpen) return false
+    } else {
+      // 切回主视图: 主流可能有期间新消息(作业 done 卡等) → 重拉
+      void refreshActiveMessages()
+    }
+    viewMode.value = mode
+    return true
+  }
+
+  /** 打开 coding 视图(活跃子会话信息流); 无子会话返回 false(视图不切)。 */
+  async function openSubView(): Promise<boolean> {
+    if (!activeId.value) return false
+    try {
+      const { apiGet, apiPost } = await import('@/services/api-client')
+      const subs = await apiGet<any[]>(`/sessions/${activeId.value}/coding-sessions`)
+      const active = (subs || []).find((s) => s.active) || (subs || [])[0]
+      if (!active?.id) return false
+      activeSubId.value = active.id
+      const detail = await sessionService.messages(active.id)
+      subTurns.value = _mapTurns((detail as any)?.messages)
+      subUnread.value = 0
+      apiPost(`/sessions/${activeId.value}/sub-seen`, {}).catch(() => { /* 清零失败无碍 */ })
+      return true
+    } catch { return false }
+  }
+
+  /** coding 视图重拉(SSE: 活跃子会话新消息)。 */
+  async function refreshSubMessages() {
+    if (!activeSubId.value || viewMode.value !== 'coding') return
+    try {
+      const detail = await sessionService.messages(activeSubId.value)
+      if (viewMode.value === 'coding' && activeSubId.value) {
+        subTurns.value = _mapTurns((detail as any)?.messages)
+      }
+    } catch { /* 保持现状 */ }
+  }
+
   /**
    * 会话集合变更广播(新建/更新)：左侧会话列表(SessionsPage)与各 dock 实例
    * 监听刷新——新会话在首条消息发送时才由后端创建，列表无从本地感知。
@@ -133,6 +187,10 @@ export const useConversationStore = defineStore('archConversation', () => {
   /** 打开已有会话(dock 或会话中心触发): 载入持久化历史。 */
   async function openConversation(meta: Pick<ConversationMeta, 'id' | 'reqId' | 'title'>) {
     resetChat()
+    viewMode.value = 'main'
+    subTurns.value = []
+    activeSubId.value = (meta as any).activeCodingSession || ''
+    subUnread.value = (meta as any).subUnread || 0
     activeId.value = meta.id
     activeReqId.value = meta.reqId || ''
     activeTitle.value = meta.title || ''
@@ -197,6 +255,10 @@ export const useConversationStore = defineStore('archConversation', () => {
   /** 新会话(无类别——仅标题/摘要；阶段由消息级工具推导)。 */
   function newConversation(title = '') {
     resetChat()
+    viewMode.value = 'main'
+    subTurns.value = []
+    activeSubId.value = ''
+    subUnread.value = 0
     activeId.value = ''
     activeReqId.value = ''
     activeTitle.value = title
@@ -219,8 +281,9 @@ export const useConversationStore = defineStore('archConversation', () => {
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子。 */
   async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; targetRole?: 'architect' | 'coding' }) {
     if ((busy.value && opts?.targetRole !== 'coding') || !text.trim()) return
-    // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里
-    const arr = turns.value
+    // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里;
+    // coding 视图(子会话信息流)时回合落在 subTurns(信息流分离)
+    const arr = opts?.targetRole === 'coding' && viewMode.value === 'coding' ? subTurns.value : turns.value
     arr.push({ role: 'user', content: text })
     const idx = arr.push({ role: 'assistant', content: '' }) - 1
     busy.value = true
@@ -341,6 +404,7 @@ export const useConversationStore = defineStore('archConversation', () => {
     turns, busy, insertDraft, pushDraft,
     diagramSkill, toggleDiagramSkill,
     busyLabel, toolTrail,
+    viewMode, subTurns, activeSubId, subUnread, setViewMode, refreshSubMessages,
     registerChatHook,
     openConversation, newConversation, applyConversation, dropConversation,
     send, sendAnswers, deleteTurn, stop, refreshActiveMeta, refreshActiveMessages, pushLocalHint,

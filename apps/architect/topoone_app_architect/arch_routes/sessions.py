@@ -365,6 +365,12 @@ def _running_role_of(conv: dict) -> dict:
 
 
 def _conv_api(conv: dict) -> dict:
+    meta = conv.get("meta") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta or "{}")
+        except Exception:  # noqa: BLE001
+            meta = {}
     return {
         "id": conv["id"],
         "kind": conv.get("kind") or "generic",
@@ -381,6 +387,8 @@ def _conv_api(conv: dict) -> dict:
         "runningRole": _running_role_of(conv),
         "tags": _tags_of(conv),
         "summary": conv.get("summary") or "",
+        "subUnread": int(meta.get("subUnread") or 0),
+        "activeCodingSession": str(meta.get("activeCodingSession") or ""),
         "createdAt": conv.get("createdAt"),
         "updatedAt": conv.get("updatedAt"),
     }
@@ -617,6 +625,19 @@ async def activate_coding_session(conv_id: str, sub_id: str):
         return err(400, "该会话不属于此主会话的子会话池")
     _set_active_coding_session(conv_id, sub_id)
     return ok({"active": sub_id})
+
+
+@router.post("/sessions/{conv_id}/sub-seen")
+async def mark_sub_seen(conv_id: str):
+    """子会话未读清零(用户切到 coding 视图查看子会话信息流时调用)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    meta = _meta_of(conv)
+    if int(meta.get("subUnread") or 0):
+        meta["subUnread"] = 0
+        store.ConversationsStore.update(conv_id, {"meta": meta})
+    return ok({"subUnread": 0})
 
 
 def _meta_of(conv: dict) -> dict:

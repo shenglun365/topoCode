@@ -230,12 +230,27 @@ def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = No
         store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
     except Exception:  # noqa: BLE001
         pass
-    # 实时推送: 主会话前端(dock/SSE)收到后刷新信息流——coding 子会话事件
-    # 双落到主会话的消息无需手动刷新即见。
+    # 实时推送: 前端(SSE)收到后按会话刷新——coding 子会话事件即时可见。
     try:
         from . import ws_events
         ws_events.publish({"type": "conv-message", "conversationId": conv_id,
                            "msgId": payload["id"], "kind": (msg_meta or {}).get("kind", "")})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _append_sub(parent_conv_id: str, sub_id: str, role: str, content: str,
+                msg_meta: Optional[dict] = None, project_id: str = "") -> None:
+    """子会话消息写入 + 主会话未读计数 bump(用户在 architect 视图时经
+    Coding 入口 badge 感知, 不向主信息流双落全文——避免两种信息流混淆)。"""
+    _append(sub_id, role, content, msg_meta=msg_meta, project_id=project_id)
+    try:
+        meta = _meta_dict_of(store.ConversationsStore.get(parent_conv_id) or {})
+        meta["subUnread"] = int(meta.get("subUnread") or 0) + 1
+        store.ConversationsStore.update(parent_conv_id, {"meta": meta})
+        from . import ws_events
+        ws_events.publish({"type": "sub-unread", "conversationId": parent_conv_id,
+                           "count": meta["subUnread"]})
     except Exception:  # noqa: BLE001
         pass
 
@@ -505,17 +520,17 @@ def _handle_pump_event(ev: dict, ctx: dict) -> None:
     text = (ev.get("text") or "").strip()
     if kind == "input_required":
         clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
-        # 双落: 主会话=交互卡(用户在主会话即可见可回复——同步 running 子会话信息),
-        # 子会话=同步简版(coding 侧上下文)。回复路径: 主/子会话 coding 收件人
-        # 或 /继续 均可(deliver/resume 已支持跨会话找父会话账本)。
-        _append(conv_id, "assistant",
-                f"⏸ **执行工程师需要你的输入**（作业 `{job_id[:12]}…`）\n\n{clean}\n\n"
-                "回复补充内容后以 coding 收件人发送(或 `/继续`)转达；停止请用会话信息面板按钮。",
-                msg_meta={"jobId": job_id, "kind": "job_input"}, project_id=pid)
+        # 信息流分离(裁决): 等待输入只落 coding 子会话全文——主会话不双落,
+        # 由未读 badge + 作业状态 chip(等待回复)提示, 点 Coding 角色切子会话流。
         if sub_id:
-            _append(sub_id, "assistant",
-                    f"⏸ **执行工程师需要你的输入**\n\n{clean}",
-                    msg_meta={"jobId": job_id, "kind": "job_input_sub"}, project_id=pid)
+            _append_sub(conv_id, sub_id, "assistant",
+                        f"⏸ **执行工程师需要你的输入**\n\n{clean}",
+                        msg_meta={"jobId": job_id, "kind": "job_input_sub"}, project_id=pid)
+        else:
+            _append(conv_id, "assistant",
+                    f"⏸ **执行工程师需要你的输入**（作业 `{job_id[:12]}…`）\n\n{clean}\n\n"
+                    "回复补充内容后以 coding 收件人发送(或 `/继续`)转达；停止请用会话信息面板按钮。",
+                    msg_meta={"jobId": job_id, "kind": "job_input"}, project_id=pid)
         _job_upsert(conv_id, {"jobId": job_id, "status": "waiting_input",
                               "lastAgentNote": clean[:500], "lastAgentTs": _ts()})
     elif kind == "done":
@@ -535,9 +550,9 @@ def _handle_pump_event(ev: dict, ctx: dict) -> None:
                 msg_meta={"jobId": job_id, "kind": "job_done",
                           "branch": (jobs_of(conv_id)[-1] or {}).get("branch", "")})
         if sub_id:
-            _append(sub_id, "assistant",
-                    f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n{clean}",
-                    msg_meta={"jobId": job_id, "kind": "job_done_sub"}, project_id=pid)
+            _append_sub(conv_id, sub_id, "assistant",
+                        f"✅ **作业完成**（分支 `{(jobs_of(conv_id)[-1] or {}).get('branch', '')}`）\n\n{clean}",
+                        msg_meta={"jobId": job_id, "kind": "job_done_sub"}, project_id=pid)
     elif kind == "failed":
         _job_upsert(conv_id, {"jobId": job_id, "status": "failed",
                               "endedAt": _ts(), "failReason": text[:400],
@@ -547,14 +562,18 @@ def _handle_pump_event(ev: dict, ctx: dict) -> None:
                 "排查后 `/执行` 重试(自动附前情简报)。",
                 msg_meta={"jobId": job_id, "kind": "job_failed"})
         if sub_id:
-            _append(sub_id, "assistant",
-                    f"❌ 执行作业失败：{text}",
-                    msg_meta={"jobId": job_id, "kind": "job_failed_sub"}, project_id=pid)
+            _append_sub(conv_id, sub_id, "assistant",
+                        f"❌ 执行作业失败：{text}",
+                        msg_meta={"jobId": job_id, "kind": "job_failed_sub"}, project_id=pid)
     elif kind in ("aborted", "finished"):
         _append(conv_id, "assistant", f"ℹ️ {text}")
     elif text:
-        _append(target, "assistant", text,
-                msg_meta={"jobId": job_id, "kind": "job_progress"}, project_id=pid)
+        if sub_id:
+            _append_sub(conv_id, sub_id, "assistant", text,
+                        msg_meta={"jobId": job_id, "kind": "job_progress"}, project_id=pid)
+        else:
+            _append(target, "assistant", text,
+                    msg_meta={"jobId": job_id, "kind": "job_progress"}, project_id=pid)
         _job_upsert(conv_id, {"jobId": job_id, "lastAgentTs": _ts()})
 
 

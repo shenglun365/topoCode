@@ -983,3 +983,29 @@ def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
     rows = {r["id"]: r for r in pdb.fetchall("SELECT * FROM arch_requirements")}
     assert "RQ-X1" not in rows, "项目库 draft 需求应跨库级联删除"
     assert rows["RQ-X2"]["owner_conv"] == "", "项目库 ready 需求 ownerConv 应清空"
+
+
+def test_pump_input_required_separates_streams(tmp_path, monkeypatch):
+    """信息流分离: input_required 只落 coding 子会话全文, 主会话不落消息,
+    未读计数 bump(subUnread)——主视图经 Coding 入口 badge 感知。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    sub = store.ConversationsStore.create(
+        {"kind": "coding", "parentConvId": conv["id"], "reqId": rid, "title": "coding"})
+    eb._job_upsert(conv["id"], {"jobId": "impl-s1", "status": "running",
+                                "subSessionId": sub["id"]})
+    eb._handle_pump_event(
+        {"kind": "input_required", "text": "[[NEED_INPUT]]\n脚本用哪个 HTTP 库?"},
+        {"convId": conv["id"], "jobId": "impl-s1", "rid": rid, "pid": "",
+         "subId": sub["id"], "target": sub["id"]})
+
+    # 子会话: 全文等待卡
+    sub_msgs = store.ConversationsStore.messages(sub["id"])
+    assert any("执行工程师需要你的输入" in (m.get("content") or "") for m in sub_msgs)
+    # 主会话: 不落 job_input 消息(信息流分离)
+    main_msgs = store.ConversationsStore.messages(conv["id"])
+    assert not any("执行工程师需要你的输入" in (m.get("content") or "") for m in main_msgs)
+    # 未读计数 bump + 作业 waiting
+    meta = eb._meta_dict_of(store.ConversationsStore.get(conv["id"]))
+    assert int(meta.get("subUnread") or 0) == 1
+    assert eb.active_job(conv["id"]).get("status") == "waiting_input"

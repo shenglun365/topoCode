@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { kindChipClass } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
 import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon } from '@heroicons/vue/24/outline'
@@ -45,10 +45,13 @@ const props = defineProps<{
   executorModels?: string[]
   /** 当前会话模型(空=默认)。 */
   executorModel?: string
+  /** coding 子会话未读数(Coding 入口 badge; 切 coding 视图时清零)。 */
+  subUnread?: number
 }>()
 
 const emit = defineEmits<{
   send: [text: string, targetRole?: 'architect' | 'coding']
+  'role-change': [role: 'architect' | 'coding']
   'bind-coding': []
   'set-model': [model: string]
   rename: [title: string]
@@ -211,11 +214,13 @@ watch(
 )
 
 // ── 收件人切换(S2 双收件人): architect 自由对话 | coding 定向投递活跃作业 ──
+// 角色即视图: architect=主会话信息流, coding=coding 子会话信息流(role-change 上抛切换)
 const targetRole = ref<'architect' | 'coding'>('architect')
 watch(() => props.jobState, (js) => {
   // 作业等待回复时默认收件人切 coding(可手动切回)
   if (js?.role === 'coding' && js.status === 'waiting_input') targetRole.value = 'coding'
 }, { immediate: true })
+watch(targetRole, (r) => emit('role-change', r))
 
 // ── 模型 chip: 随选随生效(下次执行; 进行中作业模型已固化) ──
 const modelMenuOpen = ref(false)
@@ -242,8 +247,40 @@ function send() {
   if (props.busy && targetRole.value !== 'coding') return   // architect 回合流式中仍可转达 coding
   emit('send', input.value.trim(), targetRole.value)
   input.value = ''
+  cmdMenuOpen.value = false
   resetInputHeight()
   nextTick(() => scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior: 'smooth' }))
+}
+
+// ── `/` 命令提示(与后端 SESSION_CMDS 同步): 输入以 / 开头 → 过滤浮层, 点击填入 ──
+const SESSION_CMD_LIST = [
+  { name: '执行', desc: '启动执行作业(一步到位, 按当前定稿规约)' },
+  { name: '定稿', desc: '确认当前规约版本(结构门禁校验后 ready)' },
+  { name: '继续', desc: '把补充信息转达给等待中的作业' },
+  { name: '调整', desc: '进入需求修订模式(补充方案/边界/验收)' },
+  { name: 'diff', desc: '查看最近作业改动差异' },
+]
+const cmdMenuOpen = ref(false)
+const cmdFilter = computed(() => {
+  const v = input.value.trim()
+  if (!v.startsWith('/')) return []
+  const q = v.slice(1).toLowerCase()
+  return SESSION_CMD_LIST.filter((c) => c.name.toLowerCase().startsWith(q))
+})
+watch(cmdFilter, (list) => { cmdMenuOpen.value = list.length > 0 && input.value.trim().startsWith('/') })
+function pickCmd(name: string) {
+  input.value = `/${name}`
+  cmdMenuOpen.value = false
+  inputRef.value?.focus()
+}
+function onCmdMenuKeydown(e: KeyboardEvent) {
+  if (!cmdMenuOpen.value) return
+  if (e.key === 'Escape') { cmdMenuOpen.value = false; e.preventDefault() }
+  else if (e.key === 'Enter' && cmdFilter.value.length === 1) {
+    input.value = `/${cmdFilter.value[0].name}`
+    cmdMenuOpen.value = false
+    e.preventDefault()
+  }
 }
 
 const MIN_ROWS = 2
@@ -312,6 +349,7 @@ function resetInputHeight() {
 }
 /** Enter 发送；Ctrl/Cmd+Enter 手动插入换行(保证各浏览器一致)。 */
 function onInputKeydown(e: KeyboardEvent) {
+  onCmdMenuKeydown(e)
   if (e.key !== 'Enter') return
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault()
@@ -639,14 +677,10 @@ onUnmounted(() => {
         <!-- 状态类(reqId/运行中/停止): 跟随标题向右增长, 不影响收件人组 -->
         <slot name="header-extra" />
       </span>
-      <!-- 收件人切换(S2/S4'): 靠右二选一(文字 tag); Coding 首击=分配执行器;
+      <!-- 收件人切换(S2/S4'): 靠右二选一(角色即视图); Coding 首击=分配执行器;
            header-inline(子会话按钮)置于收件人组左侧 -->
       <span class="ml-auto flex shrink-0 items-center gap-1">
         <slot name="header-inline" />
-        <span
-          class="select-none text-[10px] text-ctp-overlay0"
-          :title="t('session.target.architectHint')"
-        >{{ t('session.target.label') }}</span>
         <span
           class="chip cursor-pointer select-none !text-[10px] transition-colors"
           :class="targetRole === 'architect'
@@ -655,7 +689,7 @@ onUnmounted(() => {
           @click="targetRole = 'architect'"
         >{{ t('session.target.architect') }}</span>
         <span
-          class="chip cursor-pointer select-none !text-[10px] transition-colors"
+          class="chip cursor-pointer select-none !text-[10px] transition-colors relative"
           :class="targetRole === 'coding'
             ? 'bg-ctp-mauve/15 text-ctp-mauve' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
           :title="!props.boundExecutorId ? t('session.role.bindHint')
@@ -663,7 +697,11 @@ onUnmounted(() => {
               ? `${props.jobState.executorId || 'coding'} · ${props.jobState.status || ''}`
               : t('session.target.codingUnavailable')"
           @click="onCodingClick"
-        >{{ t('session.target.coding') }}<template v-if="!props.boundExecutorId">?</template></span>
+        >{{ t('session.target.coding') }}<template v-if="props.boundExecutorId && props.jobState?.role === 'coding'">·{{ props.jobState.executorId || '?' }}</template><template v-if="!props.boundExecutorId">?</template><span
+          v-if="props.subUnread"
+          class="ml-1 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-ctp-red px-1 text-[9px] font-bold text-ctp-crust"
+          :title="`coding 子会话 ${props.subUnread} 条未读`"
+        >{{ props.subUnread > 9 ? '9+' : props.subUnread }}</span></span>
         <span
           v-if="props.boundExecutorId && (props.executorModels?.length ?? 0) >= 2"
           class="chip cursor-pointer select-none !text-[10px] font-mono transition-colors"
@@ -1461,7 +1499,22 @@ onUnmounted(() => {
       <span v-if="props.showContractSkill && props.contractSkill" class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.contractSkillHint') }}</span>
     </div>
 
-    <div class="flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
+    <div class="relative flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
+      <!-- `/` 命令提示浮层(与后端 SESSION_CMDS 同步) -->
+      <div
+        v-if="cmdMenuOpen"
+        class="absolute bottom-full left-2 z-50 mb-1 w-64 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg flex"
+      >
+        <button
+          v-for="c in cmdFilter"
+          :key="c.name"
+          class="rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+          @click="pickCmd(c.name)"
+        >
+          <span class="font-mono text-ctp-blue">/{{ c.name }}</span>
+          <span class="ml-1.5 text-ctp-subtext0">{{ c.desc }}</span>
+        </button>
+      </div>
       <textarea
         ref="inputRef"
         v-model="input"

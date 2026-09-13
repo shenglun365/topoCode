@@ -47,6 +47,18 @@ async def _deliver_coding_turn(conv: dict, text: str) -> str:
         pj = exec_bridge.active_job(str(conv.get("parentConvId") or ""))
         if pj and pj.get("subSessionId") == conv_id:
             cid = str(conv.get("parentConvId") or "")
+    # 用户消息落 coding 子会话(coding 视图信息流完整性; 主会话不落——分离裁决)
+    try:
+        from .exec_bridge import _meta_dict_of
+        meta = _meta_dict_of(store.ConversationsStore.get(cid) or {})
+        sub_id = str(meta.get("activeCodingSession") or "")
+        if sub_id and store.ConversationsStore.get(sub_id):
+            store.ConversationsStore.append_message({
+                "id": store.next_id("m"), "conversationId": sub_id,
+                "role": "user", "time": _ts(), "content": text,
+            })
+    except Exception:  # noqa: BLE001
+        pass
     res = await asyncio.to_thread(exec_bridge.deliver_to_coding, cid, text)
     if res.get("ok"):
         j = exec_bridge.active_job(cid) or {}
