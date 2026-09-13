@@ -11,6 +11,7 @@ import {
   XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
   ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
   PencilSquareIcon, SparklesIcon, BookOpenIcon, ArchiveBoxIcon, CubeTransparentIcon,
+  DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import { useConversationStore } from '@/stores/conversation-store'
@@ -903,7 +904,7 @@ async function pollRunningState() {
             :disabled="titleSummarizing || !conv.activeId"
             :title="`${t('session.actions.summarize')} — /摘要`"
             @click="summarizeTitle"
-          ><SparklesIcon class="w-3.5 h-3.5" :class="titleSummarizing ? 'animate-pulse' : ''" /></button>
+          ><DocumentTextIcon class="w-3.5 h-3.5" :class="titleSummarizing ? 'animate-pulse' : ''" /></button>
           <button
             class="btn btn-xs btn-ghost !px-1.5"
             :disabled="mining || !activeProject()"
