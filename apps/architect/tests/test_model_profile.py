@@ -322,13 +322,19 @@ def test_manual_model_kb_sync_binds_id(tmp_path, monkeypatch):
                                   "model": "qwen3.5-4b-mtp", "url": "http://10.0.0.75:1234/v1"})
     assert entry["id"] == "model-kb42", "同名应复用主库 id"
 
-    # 无匹配 → addModel 注册并取新 id
-    monkeypatch.setattr(kb_gateway, "call_kb",
-                        lambda method, **kw: ([] if method == "settings.getModels"
-                                              else {"id": "model-new02", **kw}))
+    # 无匹配 → addModel 注册并取新 id(注册到 architect 专属域, 不污染 KB 模型列表)
+    added = {}
+
+    def fake_add(method, **kw):
+        if method == "settings.getModels":
+            return []
+        added.update(kw)
+        return {"id": "model-new02", **kw}
+    monkeypatch.setattr(kb_gateway, "call_kb", fake_add)
     entry2 = M._sync_manual_to_kb({"id": "man-y", "name": "LMS-2b", "provider": "custom",
                                    "model": "qwen3.5-2b-mtp", "url": "http://x"})
     assert entry2["id"] == "model-new02", "无匹配应注册主库并绑新 id"
+    assert added.get("ownerApp") == "architect", "注册应带 ownerApp=architect 走专属域"
 
     # KB 不可达 → 保留本地 id 不抛出
     def boom(*a, **kw):

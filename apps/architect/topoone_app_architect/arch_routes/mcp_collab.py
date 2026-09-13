@@ -251,8 +251,9 @@ _KB_PROVIDERS = ("ollama", "lm-studio", "custom-local", "deepseek",
 def _sync_manual_to_kb(entry: dict) -> dict:
     """manual 条目同步主后端模型库(探测/对话链路经 llm.sync 只认主库 modelId)。
 
-    先按 model 名匹配既有主库条目(复用 id); 匹配不到 → settings.addModel 注册
-    (provider 映射到主库 CHECK 枚举, 默认 custom-local)。KB 不可达 → 条目保持
+    先在 KB 自有条目中按 model 名匹配(复用 id, 用户已在主后端配置过的不重复建);
+    匹配不到 → settings.addModel 注册到 architect 专属域(ownerApp='architect',
+    不污染 KB 模型列表, KB 导入也不会拉回造成重复配置)。KB 不可达 → 条目保持
     本地 id(探测会回退默认模型, 前端连通性测试仍可用直连 url)。
     """
     try:
@@ -270,7 +271,8 @@ def _sync_manual_to_kb(entry: dict) -> dict:
             provider = "lm-studio" if provider == "lms" else "custom-local"
         row = call_kb("settings.addModel", name=str(entry.get("name") or model_name),
                       provider=provider, model=model_name,
-                      url=url_clean, type=str(entry.get("type") or "local"))
+                      url=url_clean, type=str(entry.get("type") or "local"),
+                      ownerApp="architect")
         if isinstance(row, dict) and row.get("id"):
             entry["id"] = row["id"]
     except Exception as e:  # noqa: BLE001

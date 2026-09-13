@@ -16,9 +16,20 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
     """注册设置配置方法"""
     main_db = multi_db.main_db
 
+    def _ensure_owner_app_column():
+        """owner_app 列: 空/NULL = KB 自有模型; 非空(如 'architect') = 子应用注册
+        (推理按 id 取模型不受影响; 模型列表只展示 KB 自有条目, 防子应用注册污染)。"""
+        cols = [r["name"] for r in main_db.fetchall("PRAGMA table_info(model_configs)")]
+        if "owner_app" not in cols:
+            main_db.execute("ALTER TABLE model_configs ADD COLUMN owner_app TEXT DEFAULT ''")
+
+    _ensure_owner_app_column()
+
     @server.register("settings.getModels")
     def get_models():
-        rows = main_db.fetchall("SELECT * FROM model_configs ORDER BY is_default DESC, name")
+        rows = main_db.fetchall(
+            "SELECT * FROM model_configs WHERE COALESCE(owner_app, '') = '' "
+            "ORDER BY is_default DESC, name")
         for row in rows:
             row["isDefault"] = bool(row.get("is_default"))
             # 安全：不返回 api_key，只标记是否存在
@@ -35,11 +46,13 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("settings.addModel")
     def add_model(name: str, provider: str, model: str, url: str, type: str = "local", **kwargs):
         now = datetime.now().isoformat()
+        owner_app = str(kwargs.get("ownerApp") or "").strip()
 
-        # 去重: 同名 + 同 provider 的模型自动更新
+        # 去重: 同名 + 同 provider + 同 owner 域的模型自动更新
+        # (子应用注册的条目与 KB 自有条目互不覆盖)
         existing = main_db.fetchone(
-            "SELECT id FROM model_configs WHERE name = ? AND provider = ?",
-            (name, provider),
+            "SELECT id FROM model_configs WHERE name = ? AND provider = ? AND COALESCE(owner_app, '') = ?",
+            (name, provider, owner_app),
         )
         if existing:
             logger.info(f"[addModel] model already exists, auto-updating: {existing['id']} ({name}/{provider})")
@@ -64,6 +77,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             "url": clean_url,
             "type": type,
             "status": "offline",
+            "owner_app": owner_app or None,
             "is_default": 1 if kwargs.get("isDefault") else 0,
             "temperature": kwargs.get("temperature", 0.7),
             "max_tokens": kwargs.get("maxTokens", 16384),
