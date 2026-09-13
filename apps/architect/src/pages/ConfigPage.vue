@@ -494,9 +494,12 @@ onMounted(() => { void loadCgStatus() })
             <div class="flex-1" />
             <span
               v-if="capProfiles[m.id]"
-              class="chip !text-[10px] bg-ctp-mauve/15 text-ctp-mauve font-mono"
+              class="chip !text-[10px] font-mono"
+              :class="{ 'bg-ctp-mauve/15 text-ctp-mauve': capProfiles[m.id].source === 'probed',
+                       'bg-ctp-yellow/15 text-ctp-yellow': capProfiles[m.id].source === 'manual',
+                       'bg-ctp-overlay0/20 text-ctp-overlay1': !['probed', 'manual'].includes(capProfiles[m.id].source) }"
               :title="capProfiles[m.id]?.summary || ''"
-            >t{{ capProfiles[m.id].tier }}</span>
+            >{{ { probed: '已探测', manual: '手工档', heuristic: '启发式' }[capProfiles[m.id].source] || '启发式' }}</span>
             <select
               v-if="capProfiles[m.id]"
               class="bg-ctp-surface0 text-[10px] rounded px-1 py-0.5 text-ctp-subtext0"
