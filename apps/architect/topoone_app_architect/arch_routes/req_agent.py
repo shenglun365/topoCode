@@ -463,8 +463,9 @@ def apply_spec_payload(payload: Dict[str, Any], req_id: str = "",
         args.setdefault("reasoning", "消息流「写入需求」确定性落库")
     else:
         args["newRequirement"] = True
+    # v2: 系统确定性落库路径(写入需求按钮/守卫代落)——internal 放行退役拦截。
     result = run_arch_tool("req.amend" if can_amend else "req.propose",
-                           args, root=root, project=project)
+                           args, root=root, project=project, internal=True)
     if isinstance(result, dict) and result.get("error"):
         return {"ok": False, "action": "failed",
                 "summary": f"落库执行失败: {str(result.get('error'))[:200]}",
@@ -758,7 +759,15 @@ def _now_ms() -> int:
 
 # 归档会话上禁止的动作类工具(生成/落库/定稿/指派); 检索与读取类不在此列
 _ARCHIVED_DENY_TOOLS = {
-    "req.propose", "req.finalize", "contract.propose",
+    "req.propose", "req.finalize", "contract.propose", "task.propose",
+}
+
+# v2 统一会话: 规约状态机工具退役(命令路径已删)——模型误调时给出引导而非
+# 静默失败(P2 物理删除注册)。
+_RETIRED_TOOLS = {
+    "req.propose": "需求规约状态机已退役。请在对话中整理需求与方案, 方案成熟时调用 task.propose 创建实施任务卡。",
+    "req.finalize": "规约定稿已退役。任务经 task.propose 创建后由用户确认即可执行。",
+    "req.amend": "规约修订已退役。直接在对话中调整方案, 并以 task.propose 重新发起。",
 }
 
 
@@ -862,7 +871,8 @@ def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run_arch_tool(name: str, arguments: Dict[str, Any],
-                  root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
+                  root: Optional[str], project: Optional[str],
+                  internal: bool = False) -> Dict[str, Any]:
     """执行 architect 注册工具；缺失/异常返回 {error}。root/project 按签名自动注入。
 
     入参先经 _coerce_args 按签名注解类型收敛(小模型 dict/list 形状兜底)；
@@ -870,7 +880,13 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
     """
     entry = _ARCH_TOOLS.get(name)
     if not entry:
+        if name in _RETIRED_TOOLS:
+            return {"error": _RETIRED_TOOLS[name]}
         return {"error": f"未知工具: {name}"}
+    # v2: 退役工具只拦模型面调用; internal=True 为系统确定性路径(spec-apply/
+    # 守卫代落)——放行(P2 随规约域物理删除)。
+    if name in _RETIRED_TOOLS and not internal:
+        return {"error": _RETIRED_TOOLS[name]}
     # PR1 归档只读: 归档会话上拒绝动作类工具(落库/定稿/指派); 检索/读取/提炼放行
     if name in _ARCHIVED_DENY_TOOLS:
         try:
@@ -2544,6 +2560,40 @@ def llm_chat_start(messages: List[Dict[str, str]],
 
 
 # ── Skills 定义 ────────────────────────────────────────────────────────
+
+@register_architect_tool(
+    "task.propose",
+    "创建 coding subagent 实施任务卡(轻门禁: 用户确认后执行)。方案成熟/用户要求实施时调用。",
+)
+def tool_task_propose(title: str, instruction: str,
+                      executorType: Optional[str] = None,
+                      root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+    """v2 混合触发: architect 整理任务(目标/方案要点/边界/验收) → 用户确认。
+
+    instruction 写实质内容(需求目标/实现方案/允许范围/验收标准)——工作环境/
+    DoD 系统段由 confirm 时确定性注入, 不要重复。
+    """
+    from . import ctx as _ctx
+    from . import exec_bridge
+    conv_id = _ctx.get_conv() or ""
+    if not conv_id:
+        return {"error": "no-conversation"}
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return {"error": "conversation-not-found"}
+    if (conv.get("status") or "active") == "archived":
+        return {"error": "会话已归档(只读)"}
+    etype = (executorType or "").strip()
+    if etype not in ("cline", "opencode", "codex"):
+        etype = "opencode"
+    if not (instruction or "").strip():
+        return {"error": "instruction 缺少实质内容(为空)——请写实质任务内容(目标/方案/验收)"}
+    task = exec_bridge.propose_task(conv, title, instruction,
+                                    executor_hint={"executorType": etype,
+                                                   "executorId": conv.get("executorId") or ""})
+    return {"ok": True, "taskId": task["id"], "status": task.get("status"),
+            "hint": "任务卡已生成, 等待用户确认后执行; 请告知用户可确认/取消/调整。"}
+
 
 @register_architect_skill("req.clarify", "需求澄清：依据需求+KB 命中生成需用户确认的澄清问题清单", steps=2)
 def _skill_clarify():

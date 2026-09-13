@@ -18,6 +18,7 @@ import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { namingService } from '@/services/naming-service'
 import { apiBaseUrl, apiGet, apiPost, getToken } from '@/services/api-client'
+import { readModelPref } from '@topo/web-core/shell'
 
 const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
@@ -126,45 +127,38 @@ onUnmounted(() => {
   disconnectConvEvents()
 })
 function onSessionsChanged() { void loadRecent() }
+watch(() => conv.activeId, () => { if (conv.activeId) void maybeHintT4Model() })
 
 /** ── 会话事件流(SSE): job 消息实时刷新 + coding 子会话未读 badge ── */
 let evtSource: EventSource | null = null
 let evtReconnect: ReturnType<typeof setTimeout> | null = null
 let refreshPending: ReturnType<typeof setTimeout> | null = null
+function _debounceRefresh() {
+  if (refreshPending) clearTimeout(refreshPending)
+  refreshPending = setTimeout(() => {
+    refreshPending = null
+    void conv.refreshActiveMessages()
+  }, 400)
+}
+
 function onConvEvent(d: any) {
-  if (d?.type === 'job-progress' && d.conversationId === conv.activeId) {
-    // 执行进展(工具计数): 更新 activeMeta.runningRole.progress → chip/进展行响应
+  if (d?.conversationId && d.conversationId !== conv.activeId) return
+  if (d?.type === 'progress') {
+    // v2 执行进展(工具计数): 任务行 progress → TaskCard ⚙ 计数响应
+    const t = (conv.tasks || []).find((x: any) => x.id === d.taskId)
+    if (t) t.progress = { toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now() }
     const rr = (conv.activeMeta as any)?.runningRole
-    if (rr) {
-      rr.progress = { toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now() }
-    }
+    if (rr) rr.progress = { toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now() }
     return
   }
-  if (d?.type === 'sub-unread' && d.conversationId === conv.activeId) {
-    // coding 视图正看着子会话流 → 即时清零(badge 不虚涨)
-    if (conv.viewMode === 'coding') {
-      conv.subUnread = 0
-      apiPost(`/sessions/${conv.activeId}/sub-seen`, {}).catch(() => {})
-    } else {
-      conv.subUnread = Number(d.count) || 0
-    }
+  if (d?.type === 'task') {
+    // v2 任务状态变更: 更新任务清单 + 重拉消息(任务卡/回执落流)
+    void conv.refreshTasks()
+    _debounceRefresh()
     return
   }
-  if (d?.type !== 'conv-message' || !d.conversationId) return
-  if (d.conversationId === conv.activeId && conv.viewMode === 'main') {
-    // 主视图: 主会话新消息(作业 done 卡等) → 防抖重拉
-    if (refreshPending) clearTimeout(refreshPending)
-    refreshPending = setTimeout(() => {
-      refreshPending = null
-      void conv.refreshActiveMessages()
-    }, 400)
-  } else if (d.conversationId === conv.activeSubId && conv.viewMode === 'coding') {
-    // coding 视图: 活跃子会话新消息 → 重拉子流
-    if (refreshPending) clearTimeout(refreshPending)
-    refreshPending = setTimeout(() => {
-      refreshPending = null
-      void conv.refreshSubMessages()
-    }, 400)
+  if (d?.type === 'conv-message') {
+    _debounceRefresh()
   }
 }
 
@@ -189,25 +183,10 @@ function disconnectConvEvents() {
   if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
 }
 
-/** 发送入口: coding 方向在主视图发出时(jobState 自动指收件人场景) → 先切
- * coding 视图再发(消息落子会话, 本地回合与落库一致, 刷新不丢)。 */
-async function onSendChat(text: string, role?: 'architect' | 'coding') {
-  if (role === 'coding' && conv.viewMode !== 'coding') {
-    const ok = await conv.setViewMode('coding')
-    if (!ok) conv.pushLocalHint('暂无 coding 子会话——`/执行` 启动作业后自动创建')
-  }
-  conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(role ? { targetRole: role } : {}) })
+/** 发送入口: v2 agent=显式指派 subagent(无活跃任务时后端注入指派契约)。 */
+async function onSendChat(text: string) {
+  conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(sendAgent.value ? { agent: sendAgent.value } : {}) })
   onSent()
-}
-
-/** 角色即视图: coding → 切子会话信息流(无子会话提示); architect → 回主会话流。 */
-async function onRoleChange(role: 'architect' | 'coding') {
-  if (role === 'coding') {
-    const ok = await conv.setViewMode('coding')
-    if (!ok) conv.pushLocalHint('暂无 coding 子会话——`/执行` 启动作业后自动创建')
-  } else {
-    void conv.setViewMode('main')
-  }
 }
 
 /** 本地命令(/摘要 /提炼 /归档 /引导): 与工具条按钮同动作。 */
@@ -352,27 +331,44 @@ const isExecutionConv = computed(() =>
   !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
   && !isRunning.value)
 
-/** 指令符号表(与后端 SESSION_CMDS 对齐): 引导消息 chips 点击填入对话框
- *  (输入框 `/` 命令提示与此同源——改指令时两处同步) */
-const SESSION_CMDS: Array<{ cmd: string; desc: string }> = [
-  { cmd: '/执行', desc: '启动实施作业(一步到位)' },
-  { cmd: '/定稿', desc: '确认规约版本(ready)' },
-  { cmd: '/继续', desc: '转达补充给作业' },
-  { cmd: '/diff', desc: '查看作业差异' },
-  { cmd: '/调整', desc: '修订需求/方案' },
-]
-function fillCmd(cmd: string) {
-  conv.pushDraft(cmd)
+/** v2 模型软提示: 当前会话模型档位 t4(≤2B 级)时提示换 4B+——
+ * 测评实证 2B 档工具调用 0 收敛(探测/实操双低), 质量无保障。
+ * 每次会话打开提示一次(不弹窗不打断, 本地消息)。 */
+const t4Hinted = new Set<string>()
+let capProfilesCache: Record<string, any> | null = null
+async function maybeHintT4Model() {
+  const mid = readModelPref('architect') || ''
+  if (!mid || t4Hinted.has(conv.activeId) || t4Hinted.has(mid)) return
+  try {
+    if (!capProfilesCache) {
+      const d = await apiGet<{ profiles: any[] }>('/llm/model-profiles')
+      capProfilesCache = Object.fromEntries((d.profiles ?? []).map((p: any) => [p.modelId, p]))
+    }
+    const p = capProfilesCache[mid]
+    if (p && p.tier === 't4') {
+      t4Hinted.add(conv.activeId); t4Hinted.add(mid)
+      conv.pushLocalHint('💡 软性建议: 当前会话模型较小(t4 档)。近期测评显示 4B 以下模型工具调用收敛率接近 0, 质量无法保障——建议在模型设置中切换 4B 及以上模型。')
+    }
+  } catch { /* profiles 不可得 → 不提示 */ }
 }
+
+/** v2 发送方向选择: architect(缺省, 外循环) / cline(显式指派 subagent)。 */
+const sendAgent = ref('')
+const AGENT_CHOICES: Array<{ id: string; label: string; desc: string }> = [
+  { id: '', label: '@architect', desc: '外循环对话(缺省)' },
+  { id: 'cline', label: '@cline', desc: '指派 coding subagent(无活跃任务时由 architect 整理任务卡)' },
+]
+function setSendAgent(id: string) { sendAgent.value = id }
 
 /** 引导消息: 仅渲染进对话流(本地), 不发后端/不进上下文, 切换会话自然消失。 */
 const GUIDE_MD = [
   '⚡ **会话引导**（仅本地提示，不进入对话上下文）',
   '',
-  '- `/执行` 启动实施作业(一步到位, 定稿即确认)',
-  '- `/调整` + 调整点 修订规约（生成新 draft 版本）',
-  '- 作业提问时直接回复补充 → `/继续` 转达给 agent',
-  '- `/diff` 查看作业产物；完成后可标记需求完成',
+  '- 直接对话: architect 外循环帮你分析/设计方案',
+  '- 方案成熟时 architect 会出**任务卡**——确认后 coding subagent 开始执行',
+  '- 也可用输入框 @ 选择器直接指派 `@cline`',
+  '- subagent 提问(⏸)/完成(✅)/失败(❌)都落本会话流; 回复即转达',
+  '- 顶部 tab(全部/architect/coding)过滤查看两类消息',
 ].join('\n')
 const guideBusy = ref(false)
 async function showGuide() {
@@ -420,7 +416,7 @@ async function onSpecApply(p: { index: number; payload: Record<string, unknown> 
     })
     conv.pushLocalHint(
       String(r?.summary || '落库未产出结果')
-      + (r?.ok ? '；可发送 `/定稿` 或 `/执行` 继续。' : ''))
+      + (r?.ok ? '；可继续对话让 architect 发起任务。' : ''))
   } catch (e) {
     conv.pushLocalHint(`⚠️ 写入需求失败：${e instanceof Error ? e.message : String(e)}`)
   } finally {
@@ -816,7 +812,7 @@ async function pollRunningState() {
 
       <AnalysisChat
         class="h-full"
-        :turns="conv.viewMode === 'coding' ? conv.subTurns : conv.turns"
+        :turns="conv.displayTurns"
         :busy="conv.busy"
         :busy-label="conv.busyLabel"
         :tool-trail="conv.toolTrail"
@@ -832,8 +828,13 @@ async function pollRunningState() {
         :bound-executor-id="boundExecutorId"
         :executor-models="boundModelNames"
         :executor-model="currentExecutorModel"
-        :sub-unread="conv.subUnread"
-        @role-change="onRoleChange"
+        :send-agent="sendAgent"
+        :agent-filter="conv.agentFilter"
+        :tasks="conv.tasks"
+        @agent-filter="(v: any) => { conv.agentFilter = v }"
+        @set-agent="setSendAgent"
+        @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
+        @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
         @local-cmd="onLocalCmd"
         @bind-coding="openRoles"
         @set-model="onSetModel"
@@ -841,7 +842,6 @@ async function pollRunningState() {
         @job-accept="openAccept"
         @job-resume="resumeJob"
         @guard-repair="onGuardRepair"
-        @fill-cmd="fillCmd"
         @feed-turn="onFeedTurn"
         @spec-apply="onSpecApply"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"

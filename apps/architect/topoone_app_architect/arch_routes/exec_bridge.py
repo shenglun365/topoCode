@@ -218,10 +218,17 @@ def deliver_to_coding(conv_id: str, text: str) -> Dict[str, Any]:
 # ── 会话消息 ──
 
 def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = None,
-            project_id: str = "") -> None:
+            project_id: str = "", agent: str = "") -> None:
+    # 库路由: 未显式给项目 → 从会话行取(消息必须与会话同库, 防主库孤儿)
+    if not project_id:
+        try:
+            project_id = (store.ConversationsStore.get(conv_id) or {}).get("projectId") or ""
+        except Exception:  # noqa: BLE001
+            pass
     payload = {
         "id": store.next_id("m"), "conversationId": conv_id, "role": role,
         "time": _ts(), "content": content, "projectId": project_id,
+        "agent": agent or "",
     }
     if msg_meta:
         payload["meta"] = json.dumps(msg_meta, ensure_ascii=False)
@@ -230,11 +237,12 @@ def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = No
         store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
     except Exception:  # noqa: BLE001
         pass
-    # 实时推送: 前端(SSE)收到后按会话刷新——coding 子会话事件即时可见。
+    # 实时推送: 前端(SSE)收到后按会话刷新。
     try:
         from . import ws_events
         ws_events.publish({"type": "conv-message", "conversationId": conv_id,
-                           "msgId": payload["id"], "kind": (msg_meta or {}).get("kind", "")})
+                           "msgId": payload["id"], "agent": agent or "",
+                           "kind": (msg_meta or {}).get("kind", "")})
     except Exception:  # noqa: BLE001
         pass
 
@@ -700,3 +708,524 @@ async def _pump(conv_id: str, job_id: str, rid: str) -> None:
         raise
     except Exception as e:  # noqa: BLE001
         logger.warning("[exec-bridge] pump crashed conv=%s job=%s: %s", conv_id, job_id, e)
+
+
+# ══════════════════════════════════════════════════════════════════
+# v2 统一会话: coding subagent 任务模型(arch_tasks)
+# 设计: 任务回执以消息(agent=executor_type)落统一流, 本节只管生命周期。
+# 轻门禁: pending_confirm(任务卡确认) → running → waiting_input → 终态。
+# 解耦: 本层不感知 executor 内部(TurnAdapter 协议隔离), agent 标注 =
+# task.executorType(architect 泵统一写)。
+# ══════════════════════════════════════════════════════════════════
+
+_TASK_TERMINAL = ("done", "failed", "cancelled")
+_TASK_ACTIVE = ("pending_confirm", "running", "waiting_input")
+
+
+def propose_task(conv: dict, title: str, instruction: str,
+                 executor_hint: Optional[dict] = None) -> dict:
+    """轻门禁入口: 建任务(pending_confirm) + 任务卡消息落统一流。
+
+    由 LLM 工具 task.propose / architect 编排调用; 用户确认(REST/卡片按钮)
+    后 confirm_task 真正拉起 runner。"""
+    conv_id = conv["id"]
+    _pid = (conv or {}).get("projectId") or (conv or {}).get("project_id") or ""
+    etype = (executor_hint or {}).get("executorType") or "opencode"
+    task = store.TasksStore.create({
+        "conversationId": conv_id,
+        "projectId": _pid,
+        "reqId": (conv or {}).get("reqId") or "",
+        "title": (title or "").strip()[:120] or "实施任务",
+        "instruction": instruction,
+        "status": "pending_confirm",
+        "executorType": etype,
+        "executorId": (executor_hint or {}).get("executorId") or "",
+    })
+    _append(conv_id, "assistant",
+            f"📋 **任务待确认**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
+            + instruction[:2000]
+            + "\n\n---\n确认后开始执行; 可取消或要求 architect 调整。",
+            msg_meta={"kind": "task_card", "taskId": task["id"]},
+            project_id=_pid)
+    _publish_task(conv_id, task)
+    return task
+
+
+def confirm_task(task_id: str) -> dict:
+    """用户确认任务卡 → runner 建作业 + 泵启动(pending_confirm→running)。"""
+    task = store.TasksStore.get(task_id)
+    if not task:
+        return {"ok": False, "error": "task-not-found"}
+    if (task.get("status") or "") != "pending_confirm":
+        return {"ok": False, "error": f"task-status={task.get('status')}"}
+    conv = store.ConversationsStore.get(task["conversationId"])
+    if not conv:
+        return {"ok": False, "error": "conv-not-found"}
+    from .execution import conv_root_project
+    conv_id = conv["id"]
+    # 同会话活跃任务互斥(一次一个 subagent 回合)
+    other = next((t for t in store.TasksStore.of_conv(conv_id)
+                  if t["id"] != task_id and t.get("status") in ("running", "waiting_input")), None)
+    if other:
+        return {"ok": False,
+                "error": f"另一任务执行中({other['title']}), 停止或等待其结束"}
+    root, project = conv_root_project(conv)
+    if not root:
+        store.TasksStore.update(task_id, {"status": "failed",
+                                          "result_md": "无法解析项目根(会话未绑定项目)"})
+        return {"ok": False, "error": "no-project-root"}
+    rid = task.get("reqId") or ""
+    branch = f"task/{task_id.replace('task-', '')}"
+    boundary_files = _resolve_boundary_files(rid, root, project)
+    conflict = _check_mutex(conv, root, boundary_files)
+    if conflict:
+        store.TasksStore.finish(task_id, "failed", f"边界冲突: {conflict}")
+        return {"ok": False, "error": conflict}
+    payload = {"root": root, "instruction": _task_instruction(task),
+               "branchName": branch, "projectId": project,
+               "boundaries": {"files": boundary_files, "components": [],
+                              "readOnly": False}}
+    hint = executor_hint_by_id(task.get("executorId") or "", conv) or {}
+    for k in ("model", "basePort", "autoStart", "baseUrl"):
+        v = hint.get(k)
+        if v not in (None, ""):
+            payload[k] = v
+    if hint.get("executorId"):
+        payload["executorId"] = hint["executorId"]
+        payload["executorType"] = hint.get("executorType") or task.get("executorType") or "opencode"
+        payload["executorConfig"] = hint.get("executorConfig") or {}
+    # 回合超时配置下发(执行器注册表 config → runner 看门狗参数)
+    _cfg = hint.get("executorConfig") or {}
+    for k in ("turnTimeout", "stallSec"):
+        v = _cfg.get(k)
+        if isinstance(v, (int, float)) and v > 0:
+            payload[k] = float(v)
+    # 复活执行器原生会话(跨回合连续性): task 行持 sessionRef
+    if task.get("sessionRef"):
+        payload["sessionRef"] = task["sessionRef"]
+
+    res = _runner("/api/implement", payload, timeout=20.0)
+    if not res or not res.get("ok"):
+        err = (res or {}).get("error") or "runner 服务不可达(:3458)"
+        store.TasksStore.finish(task_id, "failed", err)
+        return {"ok": False, "error": err}
+    store.TasksStore.update(task_id, {
+        "status": "running", "runner_job_id": res["jobId"],
+        "worktree": res.get("worktree") or "", "branch": res.get("branch") or branch,
+        "session_ref": res.get("sessionId") or ""})
+    try:
+        store.ConversationsStore.set_work_state(conv_id, "running")
+    except Exception:  # noqa: BLE001
+        pass
+    agent = task.get("executorType") or "opencode"
+    pid = (conv or {}).get("projectId") or ""
+    _append(conv_id, "user",
+            f"🚀 **{task['title']}** 启动（`{res['jobId']}` 分支 `{branch}`）",
+            msg_meta={"kind": "task_start", "taskId": task_id}, project_id=pid)
+    _start_task_pump(conv_id, task_id, res["jobId"], rid, agent)
+    t = store.TasksStore.get(task_id) or {}
+    _publish_task(conv_id, t)
+    return {"ok": True, "task": t}
+
+
+def task_input(task_id: str, text: str) -> Dict[str, Any]:
+    """用户回复 → 转达 subagent(waiting_input 立即; running 排队续跑)。"""
+    task = store.TasksStore.get(task_id)
+    if not task or (task.get("status") or "") not in ("waiting_input", "running"):
+        return {"ok": False, "error": "task-not-active"}
+    res = _runner(f"/api/implement/{task.get('runnerJobId')}/input",
+                  {"text": text[:12000]}, 15.0)
+    if res and res.get("ok"):
+        if (task.get("status") or "") == "waiting_input":
+            store.TasksStore.update(task_id, {"status": "running"})
+            t = store.TasksStore.get(task_id) or {}
+            _publish_task(task["conversationId"], t)
+        return {"ok": True, "queued": bool(res.get("queued"))}
+    return {"ok": False, "error": (res or {}).get("error") or "runner 不可达"}
+
+
+def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
+    """停止任务(保留 worktree/分支)。"""
+    task = store.TasksStore.get(task_id)
+    if not task or (task.get("status") or "") in _TASK_TERMINAL:
+        return {"ok": False, "error": "task-not-active"}
+    if (task.get("status") or "") == "pending_confirm":
+        store.TasksStore.finish(task_id, "cancelled", reason or "用户取消")
+        t = store.TasksStore.get(task_id) or {}
+        _publish_task(task["conversationId"], t)
+        return {"ok": True, "task": t}
+    _runner(f"/api/implement/{task.get('runnerJobId')}/finish",
+            {"keepWorktree": True}, timeout=30.0)
+    store.TasksStore.finish(task_id, "cancelled", reason or "用户停止")
+    _cancel_pumps(task["conversationId"])
+    t = store.TasksStore.get(task_id) or {}
+    _publish_task(task["conversationId"], t)
+    return {"ok": True, "task": t}
+
+
+def active_task_of(conv_id: str) -> Optional[dict]:
+    """最新活跃任务(running/waiting_input 优先, 次 pending_confirm); 无则 None。"""
+    ts = store.TasksStore.of_conv(conv_id)
+    for t in reversed(ts):
+        if (t.get("status") or "") in ("running", "waiting_input"):
+            return t
+    for t in reversed(ts):
+        if (t.get("status") or "") == "pending_confirm":
+            return t
+    return None
+
+
+def _publish_task(conv_id: str, task: dict) -> None:
+    """任务状态变更 → SSE 单通道广播(前端 TaskCard/过滤器响应)。"""
+    try:
+        from . import ws_events
+        ws_events.publish({"type": "task", "conversationId": conv_id,
+                           "task": task})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _task_reaggregate_work_state(conv_id: str) -> None:
+    """任务终态后: 无其它活跃任务 → workState 回 architect 相位。"""
+    try:
+        if not active_task_of(conv_id):
+            store.ConversationsStore.set_work_state(conv_id, "architect")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ── 任务泵: 事件 → 统一流(agent 标注) ──
+
+_TASK_PUMPS: Dict[str, dict] = {}   # conv_id -> {job_id: asyncio.Task}
+
+
+def _start_task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
+                     agent: str) -> None:
+    jobs = _TASK_PUMPS.setdefault(conv_id, {})
+    old = jobs.get(job_id)
+    if old and not old.done():
+        return
+    jobs[job_id] = asyncio.create_task(
+        _task_pump(conv_id, task_id, job_id, rid, agent))
+
+
+def _task_ctx(conv_id: str, task_id: str, job_id: str, rid: str, agent: str) -> dict:
+    conv = store.ConversationsStore.get(conv_id) or {}
+    return {"convId": conv_id, "taskId": task_id, "jobId": job_id, "rid": rid,
+            "pid": conv.get("projectId") or "", "agent": agent}
+
+
+def _handle_task_event(ev: dict, ctx: dict) -> None:
+    """v2: runner 事件 → 任务生命周期 + 统一流消息(agent=executor)。
+
+    与旧 _handle_pump_event 并存(P2 清退旧路径); 差异:
+    - 无子会话: 全部落主流, agent=ctx.agent;
+    - input_required: 消息 + task waiting_input(无熔断计数——统一流天然往返);
+    - progress: task.progress + SSE progress(不落消息);
+    - done/failed: 终态 + result_md。
+    """
+    conv_id, task_id, job_id = ctx["convId"], ctx["taskId"], ctx["jobId"]
+    pid, agent = ctx["pid"], ctx["agent"]
+    kind = ev.get("kind") or ""
+    if kind in ("user_input", "session_ready"):
+        return
+    text = (ev.get("text") or "").strip()
+    task = store.TasksStore.get(task_id) or {}
+    title = task.get("title") or "任务"
+    if kind == "input_required":
+        clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
+        _append(conv_id, "assistant",
+                f"⏸ **{agent} 需要你的输入**（任务「{title}」）\n\n{clean}\n\n"
+                "直接回复即转达; 也可 @architect 讨论。",
+                msg_meta={"kind": "task_input", "taskId": task_id},
+                project_id=pid, agent=agent)
+        store.TasksStore.update(task_id, {"status": "waiting_input"})
+        _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+    elif kind == "done":
+        clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()
+        changed = ev.get("changedFiles") or []
+        brief = _acceptance_brief(conv_id, ctx["rid"], changed)
+        files = ("\n".join(f"- `{f}`" for f in changed[:20])
+                 if changed else "- (无变更文件)")
+        branch = (store.TasksStore.get(task_id) or {}).get("branch") or ""
+        _append(conv_id, "assistant",
+                f"✅ **任务完成**「{title}」（分支 `{branch}`）\n\n{clean}\n\n"
+                f"**变更文件**：\n{files}\n\n---\n**验收简报**\n{brief}",
+                msg_meta={"kind": "task_done", "taskId": task_id, "branch": branch},
+                project_id=pid, agent=agent)
+        store.TasksStore.finish(task_id, "done", clean[:2000])
+        _task_reaggregate_work_state(conv_id)
+        _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+    elif kind == "failed":
+        _append(conv_id, "assistant",
+                f"❌ **任务失败**「{title}」：{text}\n分支已保留, 可重新发起。",
+                msg_meta={"kind": "task_failed", "taskId": task_id},
+                project_id=pid, agent=agent)
+        store.TasksStore.finish(task_id, "failed", text[:2000])
+        _task_reaggregate_work_state(conv_id)
+        _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+    elif kind == "progress":
+        prog = {"toolCount": int(ev.get("toolCount") or 0),
+                "msgCount": int(ev.get("msgCount") or 0), "at": _ts()}
+        store.TasksStore.set_progress(task_id, prog)
+        try:
+            from . import ws_events
+            ws_events.publish({"type": "progress", "conversationId": conv_id,
+                               "taskId": task_id, **prog})
+        except Exception:  # noqa: BLE001
+            pass
+    elif kind in ("aborted", "finished"):
+        _append(conv_id, "assistant", f"ℹ️ {text}", project_id=pid, agent=agent)
+    elif text:
+        _append(conv_id, "assistant", text,
+                msg_meta={"kind": "task_progress", "taskId": task_id},
+                project_id=pid, agent=agent)
+
+
+async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
+                     agent: str) -> None:
+    """任务泵: 复用 WS 订阅+轮询校准骨架(与 _pump 同构, 事件走 task 路径)。"""
+    logger.info("[exec-bridge] task-pump start conv=%s task=%s job=%s",
+                conv_id, task_id, job_id)
+    errs = 0
+    last_seq = 0
+    ws = None
+    ws_gap = 0
+    try:
+        while True:
+            if ws is None and ws_gap <= 0:
+                ws = await _ws_connect(job_id, last_seq)
+                if ws is None:
+                    ws_gap = _WS_RETRY_GAP
+                    await asyncio.sleep(POLL_INTERVAL)
+            if ws is not None:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=_WS_IDLE_SEC)
+                    ev = json.loads(raw)
+                    if int(ev.get("seq") or 0) <= last_seq:
+                        continue
+                    last_seq = int(ev.get("seq") or 0)
+                    _handle_task_event(ev, _task_ctx(conv_id, task_id, job_id, rid, agent))
+                    if ev.get("kind") in ("done", "failed"):
+                        return
+                    continue
+                except Exception:  # noqa: BLE001
+                    try:
+                        await ws.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    ws = None
+                    ws_gap = 1
+            else:
+                ws_gap = max(0, ws_gap - 1)
+                await asyncio.sleep(POLL_INTERVAL)
+
+            snap = await asyncio.to_thread(
+                _runner, f"/api/implement/{job_id}?since={last_seq}", None, 12.0)
+            if snap is None:
+                errs += 1
+                if errs >= _MAX_CONSECUTIVE_ERR:
+                    store.TasksStore.finish(task_id, "failed", "runner 连续不可达")
+                    _append(conv_id, "assistant",
+                            f"⚠️ 任务「{(store.TasksStore.get(task_id) or {}).get('title', '')}」"
+                            "与 runner 失去联系, 已记为失败。",
+                            msg_meta={"kind": "task_failed", "taskId": task_id},
+                            agent=agent)
+                    _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+                    return
+                continue
+            errs = 0
+            if not snap.get("ok"):
+                store.TasksStore.finish(task_id, "failed", "作业句柄丢失(runner 重启?)")
+                _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+                return
+            ctx = _task_ctx(conv_id, task_id, job_id, rid, agent)
+            sid = (snap.get("sessionId") or "").strip()
+            if sid and (store.TasksStore.get(task_id) or {}).get("sessionRef") != sid:
+                try:
+                    store.TasksStore.update(task_id, {"session_ref": sid})
+                except Exception:  # noqa: BLE001
+                    pass
+            for ev in snap.get("events") or []:
+                if int(ev.get("seq") or 0) <= last_seq:
+                    continue
+                last_seq = max(last_seq, int(ev.get("seq") or 0))
+                _handle_task_event(ev, ctx)
+            if (snap.get("status") or "") in ("done", "failed", "stopped"):
+                # runner 终态(含 stopped→cancelled 语义); 事件流已落终态, 兜底校准
+                st = snap.get("status") or ""
+                t = store.TasksStore.get(task_id) or {}
+                if (t.get("status") or "") not in _TASK_TERMINAL:
+                    store.TasksStore.finish(
+                        task_id, "cancelled" if st == "stopped" else st)
+                    _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+                return
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[exec-bridge] task-pump crashed conv=%s task=%s: %s",
+                       conv_id, task_id, e)
+def _task_instruction(task: dict, prior_brief: str = "") -> str:
+    """任务指令组装: task.instruction(architect 整理) 为正文 + 绑定需求规约
+    补充(边界/验收) + 工作环境/DoD 系统段(确定性注入, 不依赖 LLM)。
+
+    prior_brief: 前情简报(重试时注入)。
+    """
+    rid = task.get("reqId") or ""
+    r = store.RequirementsStore.get(rid) or {} if rid else {}
+    active = store.RequirementsStore.spec_active(rid) or {} if rid else {}
+    a = (active.get("snapshot") or {}) if rid else {}
+    if not a and rid:
+        a = r.get("analysis") or {}
+    parts = [f"# 实施任务：{task.get('title') or '任务'}"
+             + (f"（{rid} · 规约 v{active.get('ver') or '?'}）" if rid else "")]
+    body = str(task.get("instruction") or "").strip()
+    if prior_brief:
+        parts.append("## 前情简报(上次作业)\n" + prior_brief)
+    # 方案兜底: designMd 未细化时用需求正文(requirementMd/desc)——agent 永远拿到实质任务,
+    # 不允许"只有标题+DoD"的空指令把作业打成 NEED_INPUT 空转(cv-140 教训)。
+    if body:
+        parts.append("## 任务上下文（architect 整理, 遵循执行）\n" + body)
+    desc_text = str(a.get("desc") or r.get("desc") or "").strip()
+    if body and not (a.get("designMd") or a.get("implementationPath")):
+        pass   # 正文已给——不做空方案警告
+    elif not (a.get("designMd") or a.get("implementationPath")):
+        if desc_text:
+            parts.append(
+                "> ⚠️ 本规约未细化实现方案(仅需求正文)。请基于以下需求描述自行设计并实施,"
+                "不确定处一次性集中提问, 不要每步暂停。\n\n## 需求描述\n" + desc_text)
+        else:
+            parts.append("> ⚠️ 本规约既无实现方案也无需求正文——若你无法从任务上下文推断目标, "
+                         "请立即 [[NEED_INPUT]] 报告\"规约为空\", 不要猜测实施。")
+    if a.get("functionalScope"):
+        parts.append("## 需求目标\n" + "\n".join(f"- {x}" for x in a["functionalScope"]))
+    parts.append(
+        "## 工作环境(重要, 先读)\n"
+        "- 你在项目源码仓库的**隔离 worktree 分支**执行, pwd 即源码树根——"
+        "先浏览仓库(README/构建文件/目录结构)理解项目, 再动手。\n"
+        "- 交付物一律**写入源码树**(新文件/修改/文档, git 分支内); "
+        "**不要写系统路径**(/etc /usr /opt 等运行时部署位置)——环境搭建与部署"
+        "由用户手工执行, 你提供文件与部署说明即可。\n"
+        "- 环境类问题(sudo/依赖/编译工具)先自主查证仓库与 README; "
+        "只对**需求歧义**集中一次性提问, 不要为环境搭建反复提问。")
+    if a.get("designMd") or a.get("implementationPath"):
+        parts.append("## 实现方案(遵循执行)\n"
+                     + str(a.get("designMd") or a.get("implementationPath")))
+    if a.get("allowedScope"):
+        scope_lines = [str(x) for x in a["allowedScope"]]
+        abs_paths = [s for s in scope_lines if s.strip().startswith("/")]
+        if abs_paths:
+            parts.append(
+                "## 允许增删改\n" + "\n".join(f"- {x}" for x in scope_lines)
+                + "\n> 注: 其中以 `/` 开头的是**运行时部署路径**(用户环境的目标位置)"
+                "——请在源码树中创建对应文件(或等价物)并附部署说明, "
+                "不要尝试直接写这些系统路径。")
+        else:
+            parts.append("## 允许增删改\n" + "\n".join(f"- {x}" for x in scope_lines))
+    if a.get("forbiddenScope"):
+        parts.append("## 一定不能动\n" + "\n".join(f"- {x}" for x in a["forbiddenScope"]))
+    if a.get("acceptance"):
+        parts.append("## 验收标准\n" + "\n".join(f"- {x}" for x in a["acceptance"]))
+    parts.append(
+        "## 交付定义(DoD)\n"
+        "1. 按方案完成代码实现；\n"
+        "2. 为新增/变更逻辑编写并运行单元测试(全部通过)；\n"
+        "3. 完成整体编译/构建验证(项目可编译、无链接错误)；\n"
+        "4. 全部完成后输出 [[IMPLEMENT_DONE]] 与摘要(变更文件/单测结果/编译结果/遗留项)；"
+        "任一环节需要用户操作、确认、澄清或补充信息时，输出 [[NEED_INPUT]] 与具体问题后结束回合等待。")
+    return "\n\n".join(parts)
+
+
+def _meta_get(conv: dict) -> dict:
+    import json as _json
+    meta = (conv or {}).get("meta")
+    if isinstance(meta, dict):
+        return meta          # row_to_api 已解析
+    try:
+        return _json.loads(meta or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _meta_set(conv_id: str, meta: dict) -> None:
+    import json as _json
+    store.ConversationsStore.update(conv_id, {"meta": _json.dumps(meta, ensure_ascii=False)})
+
+
+def _spec_updated_at(rid: str) -> int:
+    return int((store.RequirementsStore.get(rid) or {}).get("updatedAt") or 0)
+
+
+
+def _prior_job_brief(conv: dict) -> str:
+    """前情简报: 最近一条非完成作业的失败原因/实际改动/结论(重试上下文延续)。"""
+    jobs = _meta_get(conv).get("jobs") or []
+    for j in reversed(jobs):
+        if (j.get("status") or "") not in ("done",):
+            lines = []
+            if j.get("failReason"):
+                lines.append(f"- 上次结果: {str(j['failReason'])[:200]}")
+            if j.get("changedFiles"):
+                lines.append("- 已改动文件: " + ", ".join(j["changedFiles"][:12]))
+            if j.get("lastAgentNote"):
+                lines.append(f"- agent 结论: {str(j['lastAgentNote'])[:300]}")
+            if lines:
+                lines.append("- 请基于以上前情继续/修正，避免重复已完成的工作")
+                return "\n".join(lines)
+        break
+    return ""
+
+
+
+
+def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Optional[dict]:
+    """执行器 id → 注册表配置提示(model/端口/超时等)——v2 任务模型用。
+
+    原 websocket._executor_hint 泛化: 按 task.executorId 直查注册表;
+    无绑定 → None(缺省 opencode)。
+    """
+    eid = (executor_id or "").strip()
+    if not eid:
+        return None
+    conv_model = ((conv or {}).get("executorModel") or "").strip()
+    try:
+        from .agent_executors import load_executors, _default_sidecar_path
+        for e in load_executors():
+            if (e.get("id") or "") == eid:
+                cfg = e.get("config") or {}
+                model_names = [str(m.get("name") or m.get("model") or "")
+                               for m in (cfg.get("models") or [])
+                               if (m.get("name") or m.get("model"))]
+                model = (conv_model
+                         or (model_names[0] if model_names else "")
+                         or cfg.get("model") or "")
+                return {"executorId": eid,
+                        "executorType": e.get("type") or "",
+                        "executorConfig": {
+                            "model": cfg.get("model") or "",
+                            "base_port": cfg.get("base_port"),
+                            "auto_start": cfg.get("auto_start"),
+                            "base_url": cfg.get("base_url") or cfg.get("serve_url") or "",
+                            "opencode_bin": cfg.get("opencode_bin") or "",
+                            "node_bin": cfg.get("node_bin") or "",
+                            "sidecar_script": cfg.get("sidecar_script")
+                                or _default_sidecar_path(),
+                            "provider_id": cfg.get("provider_id") or "",
+                            "model_id": cfg.get("model_id") or "",
+                            "api_key": cfg.get("api_key") or "",
+                            "max_iterations": cfg.get("max_iterations"),
+                            "arch_url": cfg.get("arch_url") or "",
+                            "codex_bin": cfg.get("codex_bin") or "",
+                            "codex_home": cfg.get("codex_home") or "",
+                            "approval_policy": cfg.get("approval_policy") or "",
+                            "sandbox_mode": cfg.get("sandbox_mode") or "",
+                            "turnTimeout": cfg.get("turnTimeout"),
+                            "stallSec": cfg.get("stallSec"),
+                        },
+                        "model": model,
+                        "basePort": cfg.get("base_port"),
+                        "autoStart": cfg.get("auto_start"),
+                        "baseUrl": cfg.get("base_url") or cfg.get("serve_url") or ""}
+    except Exception:  # noqa: BLE001
+        pass
+    return None

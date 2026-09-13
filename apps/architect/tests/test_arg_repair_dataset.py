@@ -87,7 +87,7 @@ def test_run_arch_tool_cv71_shape_end_to_end(tmp_path, monkeypatch):
          "assessmentMd": {"benefits": "x", "estMin": 5},
          "acceptanceMd": ["验收一", "验收二"],
          "estMin": "12"},
-        root=None, project=None)
+        root=None, project=None, internal=True)
     assert res.get("ok") is True, res
     rid = res.get("requirementId")
     row = req_agent.store.RequirementsStore.get(rid)
@@ -140,7 +140,7 @@ def test_repair_tool_args_roundtrip(tmp_path, monkeypatch):
         {"title": "修复后提案", "assessmentMd": {"benefits": "x"}, "estMin": "20"},
         "执行失败: unhashable type: 'slice'", model_id="m9b")
     assert isinstance(fixed, dict)
-    res = req_agent.run_arch_tool("req.propose", fixed, root=None, project=None)
+    res = req_agent.run_arch_tool("req.propose", fixed, root=None, project=None, internal=True)
     assert res.get("ok") is True, res
 
     # 修复失败(模型输出不可解析) → None 回落守卫
@@ -151,34 +151,40 @@ def test_repair_tool_args_roundtrip(tmp_path, monkeypatch):
 
 
 def test_repair_channel_in_run_tools_loop(tmp_path, monkeypatch):
-    """降级通道(run_tools_loop)内: 首次形状错误→自动修复→工具成功→结果带标注。"""
+    """降级通道(run_tools_loop)内: 首次形状错误→自动修复→工具成功→结果带标注。
+
+    v2: 模型面 req.* 已退役(拦截不触发修复)——载体换 task.propose;
+    修复通道语义不变(缺参→聚焦修复→重执行)。"""
     _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import ctx as _ctx
+    from topoone_app_architect.arch_routes import store
+    conv = store.ConversationsStore.create({"projectId": "proj-test", "title": "修复通道"})
+    _ctx.set_conv(conv["id"])
     calls = {"n": 0}
 
     def _fake_llm_sync(messages, **kw):
         calls["n"] += 1
         sys_msg = messages[0].get("content") or ""
         if "参数修复器" in sys_msg:
-            # 聚焦修复请求: 返回补齐 title 的修正 args
+            # 聚焦修复请求: 返回补齐 title/instruction 的修正 args
             return {"content": "```json\n" + json.dumps(
-                {"tool": "req.propose",
-                 "arguments": {"title": "t2", "requirementMd": "r",
-                               "assessmentMd": "文本"}}) + "\n```"}
+                {"tool": "task.propose",
+                 "arguments": {"title": "t2", "instruction": "实现 X"}}) + "\n```"}
         if calls["n"] == 1:
-            # 模型首答: 缺 title(coerce 救不了) → 「缺少」错误触发修复外循环
-            return {"content": '[TOOL_CALL]{"tool":"req.propose","arguments":'
-                               '{"assessmentMd":{"a":1}}}[/TOOL_CALL]'}
+            # 模型首答: 缺 instruction(空) → 「为空」错误触发修复外循环
+            return {"content": '[TOOL_CALL]{"tool":"task.propose","arguments":'
+                               '{"title": "t1", "instruction": " "}}[/TOOL_CALL]'}
         # 修复成功后的结果回喂轮: 直接收尾
-        return {"content": "已基于工具结果完成提案。"}
+        return {"content": "已创建任务卡。"}
     monkeypatch.setattr(req_agent, "llm_sync", _fake_llm_sync)
-    res = req_agent.run_tools_loop([{"role": "user", "content": "生成提案"}],
+    res = req_agent.run_tools_loop([{"role": "user", "content": "发起任务"}],
                                    mode="chat", max_rounds=2)
     assert res.get("content"), res
     # 聚焦修复请求确实发生过(首答 + 修复 + 结果收尾 ≥ 3 次)
     assert calls["n"] >= 3, calls
-    # 落库真实发生(修复后的 args 被重执行)
-    rows = req_agent.store.RequirementsStore.all()
-    assert any(r.get("title") == "t2" for r in rows)
+    # 任务卡真实创建(修复后的 args 被重执行)
+    ts = store.TasksStore.of_conv(conv["id"])
+    assert any(t.get("title") == "t2" and t.get("status") == "pending_confirm" for t in ts)
 
 
 # ── llm_dataset 采集 ──────────────────────────────────────────────────

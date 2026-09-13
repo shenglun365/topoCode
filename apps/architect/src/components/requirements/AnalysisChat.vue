@@ -7,6 +7,7 @@ import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
+import TaskCard from '@/components/chat/TaskCard.vue'
 import { apiPost } from '@/services/api-client'
 import type { SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
@@ -43,13 +44,20 @@ const props = defineProps<{
   executorModels?: string[]
   /** 当前会话模型(空=默认)。 */
   executorModel?: string
-  /** coding 子会话未读数(Coding 入口 badge; 切 coding 视图时清零)。 */
-  subUnread?: number
+  /** v2 发送方向: ''=architect(缺省) | 'cline'(显式指派 subagent)。 */
+  sendAgent?: string
+  /** v2 agent 过滤器(all/architect/coding)。 */
+  agentFilter?: 'all' | 'architect' | 'coding'
+  /** v2 coding subagent 任务清单(arch_tasks, 倒序; TaskCard 渲染用)。 */
+  tasks?: Array<Record<string, any>>
 }>()
 
 const emit = defineEmits<{
-  send: [text: string, targetRole?: 'architect' | 'coding']
-  'role-change': [role: 'architect' | 'coding']
+  send: [text: string]
+  'set-agent': [id: string]
+  'agent-filter': [v: 'all' | 'architect' | 'coding']
+  'task-confirm': [taskId: string]
+  'task-cancel': [taskId: string]
   'local-cmd': [name: string]
   'bind-coding': []
   'set-model': [model: string]
@@ -69,7 +77,6 @@ const emit = defineEmits<{
   'job-resume': []
   'guard-repair': [p: { index: number; meta: Record<string, any>; action: string }]
   'spec-apply': [p: { index: number; payload: Record<string, unknown> }]
-  'fill-cmd': [cmd: string]
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
   'goto-acceptance': []
@@ -211,18 +218,30 @@ watch(
   { deep: true },
 )
 
-// ── 收件人切换(S2 双收件人): architect 自由对话 | coding 定向投递活跃作业 ──
-// 角色即视图: architect=主会话信息流, coding=coding 子会话信息流。
-// 视图切换仅在用户显式点击时上抛(role-change)——jobState 自动指收件人
-// (waiting→coding)不联动视图, 避免打断用户当前视图。
-const targetRole = ref<'architect' | 'coding'>('architect')
-watch(() => props.jobState, (js) => {
-  // 作业等待回复时默认收件人切 coding(可手动切回; 不切视图)
-  if (js?.role === 'coding' && js.status === 'waiting_input') targetRole.value = 'coding'
-}, { immediate: true })
-function pickRole(r: 'architect' | 'coding') {
-  targetRole.value = r
-  emit('role-change', r)
+// ── v2 统一会话: agent 过滤 tab(纯 UI 过滤, 不切数据源) ──
+const AGENT_TABS: Array<{ id: 'all' | 'architect' | 'coding'; label: string }> = [
+  { id: 'all', label: '全部' },
+  { id: 'architect', label: 'architect' },
+  { id: 'coding', label: 'coding' },
+]
+function setAgentTab(v: 'all' | 'architect' | 'coding') {
+  emit('agent-filter', v)
+}
+/** v2 发送方向选择(@architect/@cline): 菜单本地, 值上抛宿主。 */
+const agentMenuOpen = ref(false)
+const AGENT_PICKS: Array<{ id: string; label: string; desc: string }> = [
+  { id: '', label: '@architect', desc: '外循环对话(缺省)' },
+  { id: 'cline', label: '@cline', desc: '指派 coding subagent(无活跃任务时由 architect 出任务卡)' },
+]
+function pickSendAgent(id: string) {
+  agentMenuOpen.value = false
+  emit('set-agent', id)
+}
+
+/** 任务卡定位: meta.taskId → 最新任务行(状态实时)。 */
+function taskById(id?: string) {
+  if (!id) return null
+  return (props.tasks || []).find((t) => t.id === id) || null
 }
 
 // ── 模型 chip: 随选随生效(下次执行; 进行中作业模型已固化) ──
@@ -235,18 +254,9 @@ function pickModel(m: string) {
   if (m !== (props.executorModel || '')) emit('set-model', m)
 }
 
-function onCodingClick() {
-  // 切换/分配共用一个位置: 未绑定执行器 → 首击触发分配(绑定弹窗); 已绑定 → 切换收件人+视图
-  if (!props.boundExecutorId) {
-    emit('bind-coding')
-    return
-  }
-  pickRole('coding')
-}
-
 function send() {
   if (!input.value.trim()) return
-  if (props.busy && targetRole.value !== 'coding') return   // architect 回合流式中仍可转达 coding
+  if (props.busy) return
   // 本地命令拦截(绘图/方案/摘要/提炼/归档): 组件内或上抛宿主执行, 不发后端
   const local = matchLocalCmd(input.value)
   if (local) {
@@ -256,21 +266,13 @@ function send() {
     resetInputHeight()
     return
   }
-  emit('send', input.value.trim(), targetRole.value)
+  emit('send', input.value.trim())
   input.value = ''
   cmdMenuOpen.value = false
   resetInputHeight()
   nextTick(() => scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior: 'smooth' }))
 }
 
-// ── `/` 命令提示(与后端 SESSION_CMDS 同步): 输入以 / 开头 → 过滤浮层, 点击填入 ──
-const SESSION_CMD_LIST = [
-  { name: '执行', desc: '启动执行作业(一步到位, 按当前定稿规约)' },
-  { name: '定稿', desc: '确认当前规约版本(结构门禁校验后 ready)' },
-  { name: '继续', desc: '把补充信息转达给等待中的作业' },
-  { name: '调整', desc: '进入需求修订模式(补充方案/边界/验收)' },
-  { name: 'diff', desc: '查看最近作业改动差异' },
-]
 /** 本地命令(前端拦截, 不发后端): 会话操作/状态切换——与工具条按钮同动作。 */
 const LOCAL_CMD_LIST = [
   { name: '绘图', desc: '切换绘图增强(IR→代码)' },
@@ -285,7 +287,7 @@ const cmdFilter = computed(() => {
   const v = input.value.trim()
   if (!v.startsWith('/')) return []
   const q = v.slice(1).toLowerCase()
-  return [...SESSION_CMD_LIST, ...LOCAL_CMD_LIST].filter((c) => c.name.toLowerCase().startsWith(q))
+  return LOCAL_CMD_LIST.filter((c) => c.name.toLowerCase().startsWith(q))
 })
 /** 精确命中本地命令(拦截: 本地执行, 不发后端)。 */
 function matchLocalCmd(v: string): string | null {
@@ -714,31 +716,18 @@ onUnmounted(() => {
         <!-- 状态类(reqId/运行中/停止): 跟随标题向右增长, 不影响收件人组 -->
         <slot name="header-extra" />
       </span>
-      <!-- 收件人切换(S2/S4'): 靠右二选一(角色即视图); Coding 首击=分配执行器;
-           header-inline(子会话按钮)置于收件人组左侧 -->
+      <!-- v2 agent 过滤 tab(纯 UI 过滤, 不切数据源) + 模型 chip -->
       <span class="ml-auto flex shrink-0 items-center gap-1">
         <slot name="header-inline" />
         <span
+          v-for="tab in AGENT_TABS"
+          :key="tab.id"
           class="chip cursor-pointer select-none !text-[10px] transition-colors"
-          :class="targetRole === 'architect'
+          :class="(props.agentFilter || 'all') === tab.id
             ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
-          :title="t('session.target.architectHint')"
-          @click="pickRole('architect')"
-        >{{ t('session.target.architect') }}</span>
-        <span
-          class="chip cursor-pointer select-none !text-[10px] transition-colors relative"
-          :class="targetRole === 'coding'
-            ? 'bg-ctp-mauve/15 text-ctp-mauve' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
-          :title="!props.boundExecutorId ? t('session.role.bindHint')
-            : props.jobState?.role === 'coding'
-              ? `${props.jobState.executorId || 'coding'} · ${props.jobState.status || ''}`
-              : t('session.target.codingUnavailable')"
-          @click="onCodingClick"
-        >{{ t('session.target.coding') }}<template v-if="props.boundExecutorId && props.jobState?.role === 'coding'">·{{ props.jobState.executorId || '?' }}</template><template v-if="!props.boundExecutorId">?</template><span
-          v-if="props.subUnread"
-          class="ml-1 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-ctp-red px-1 text-[9px] font-bold text-ctp-crust"
-          :title="`coding 子会话 ${props.subUnread} 条未读`"
-        >{{ props.subUnread > 9 ? '9+' : props.subUnread }}</span></span>
+          :title="tab.id === 'coding' ? '只看 coding subagent 产出(任务回执/进展)' : tab.id === 'architect' ? '只看 architect 外循环对话' : '全部消息'"
+          @click="setAgentTab(tab.id)"
+        >{{ tab.label }}</span>
         <span
           v-if="props.boundExecutorId && (props.executorModels?.length ?? 0) >= 2"
           class="chip cursor-pointer select-none !text-[10px] font-mono transition-colors"
@@ -765,7 +754,7 @@ onUnmounted(() => {
 
     <!-- coding 视图执行进展行(SSE 实时, 不落库): 工具调用/消息计数 + 状态 -->
     <div
-      v-if="targetRole === 'coding' && props.jobState?.role === 'coding'"
+      v-if="props.jobState?.role === 'coding'"
       class="flex items-center gap-2 border-b border-ctp-surface0 bg-ctp-mantle/40 px-3 py-1 text-[10px] shrink-0"
     >
       <span
@@ -794,6 +783,13 @@ onUnmounted(() => {
           class="flex-1 min-w-0 rounded-lg rounded-tl-none px-3 py-2 text-xs bg-ctp-surface0/80"
           :class="m.role === 'user' ? 'ring-1 ring-ctp-sky/20' : ''"
         >
+          <TaskCard
+            v-if="m.meta?.kind === 'task_card' && taskById(m.meta.taskId)"
+            :task="taskById(m.meta.taskId)!"
+            class="mb-2"
+            @confirm="(id: string) => emit('task-confirm', id)"
+            @cancel="(id: string) => emit('task-cancel', id)"
+          />
           <div class="flex items-center gap-1.5 mb-1">
             <svg
               v-if="m.role === 'user'"
@@ -812,6 +808,11 @@ onUnmounted(() => {
               />
               <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
             </svg>
+            <span
+              v-else-if="(m as any).agent"
+              class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach font-mono"
+              :title="`coding subagent(${(m as any).agent})产出`"
+            >⚙ {{ (m as any).agent }}</span>
             <span
               v-else
               class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve"
@@ -905,19 +906,6 @@ onUnmounted(() => {
 
           <!-- 指令符号 chips: 消息中出现的 /指令 → 点击填入对话框(所有助手消息,
                含系统回执「发送 /执行 …」等引导) -->
-          <div
-            v-if="m.role === 'assistant' && cmdChipsOf(m.content).length"
-            class="mt-2 flex flex-wrap items-center gap-1.5"
-          >
-            <button
-              v-for="c in cmdChipsOf(m.content)"
-              :key="c"
-              class="btn btn-xs btn-blue !px-2 font-mono"
-              title="点击填入输入框"
-              @click="emit('fill-cmd', c)"
-            >{{ c }}</button>
-          </div>
-
           <!-- 作业事件卡操作(生命周期重构): done→验收 / waiting_input→继续执行快捷 -->
           <div
             v-if="m.meta?.kind === 'job_done'"
@@ -1028,20 +1016,6 @@ onUnmounted(() => {
                 :title="`点击执行：${s.label}`"
                 @click="onGuardAction(i, s)"
               >{{ guardBusyIdx === i ? '…' : s.label }}</button>
-              <button
-                v-for="c in cmdChipsOf(m.content)"
-                :key="c"
-                class="btn btn-xs btn-blue !px-2 font-mono"
-                title="点击填入输入框"
-                @click="emit('fill-cmd', c)"
-              >{{ c }}</button>
-              <button
-                v-for="c in (m.meta.cmds || [])"
-                :key="'meta-' + c"
-                class="btn btn-xs btn-blue !px-2 font-mono"
-                title="点击填入输入框"
-                @click="emit('fill-cmd', c)"
-              >{{ c }}</button>
             </div>
           </div>
 
@@ -1549,17 +1523,7 @@ onUnmounted(() => {
         v-if="cmdMenuOpen"
         class="absolute bottom-full left-2 z-50 mb-1 w-72 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg flex"
       >
-        <span class="px-2 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话指令</span>
-        <button
-          v-for="c in cmdFilter.filter((x) => SESSION_CMD_LIST.includes(x))"
-          :key="c.name"
-          class="rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-          @click="pickCmd(c.name)"
-        >
-          <span class="font-mono text-ctp-blue">/{{ c.name }}</span>
-          <span class="ml-1.5 text-ctp-subtext0">{{ c.desc }}</span>
-        </button>
-        <span class="px-2 pt-1 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话操作</span>
+        <span class="px-2 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话操作(本地)</span>
         <button
           v-for="c in cmdFilter.filter((x) => LOCAL_CMD_LIST.includes(x))"
           :key="c.name"
@@ -1577,10 +1541,34 @@ onUnmounted(() => {
         class="input !py-2.5 text-xs resize-y min-h-0"
         :disabled="props.readOnly"
         :placeholder="props.readOnly ? t('session.readOnlyHint')
-          : (targetRole === 'coding' ? t('session.target.codingPlaceholder') : t('requirement.chat.placeholder'))"
+          : t('requirement.chat.placeholder')"
         @input="autoResize"
         @keydown="onInputKeydown"
       />
+      <!-- v2 发送方向选择(@architect/@cline) -->
+      <div class="relative shrink-0">
+        <button
+          class="chip !text-[10px] font-mono transition-colors"
+          :class="props.sendAgent ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
+          :title="props.sendAgent ? `指派 ${props.sendAgent}(点击切回 architect)` : '对话方向: architect 外循环(缺省)'"
+          @click="agentMenuOpen = !agentMenuOpen"
+        >{{ props.sendAgent ? `@${props.sendAgent}` : '@architect' }}<ChevronDownIcon class="w-2.5 h-2.5 inline ml-0.5" /></button>
+        <div
+          v-if="agentMenuOpen"
+          class="absolute bottom-full right-0 z-50 mb-1 w-64 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg flex"
+          @mouseleave="agentMenuOpen = false"
+        >
+          <button
+            v-for="a in AGENT_PICKS"
+            :key="a.id || 'arch'"
+            class="rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+            @click="pickSendAgent(a.id)"
+          >
+            <span class="font-mono" :class="a.id ? 'text-ctp-peach' : 'text-ctp-sky'">{{ a.label }}</span>
+            <span class="ml-1.5 text-ctp-subtext0">{{ a.desc }}</span>
+          </button>
+        </div>
+      </div>
       <button
         v-if="busy"
         class="btn btn-red !py-2.5 shrink-0 whitespace-nowrap"

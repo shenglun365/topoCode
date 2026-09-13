@@ -78,7 +78,7 @@ def test_md_lines_tolerates_list():
         "title": "数组字段冒烟", "designMd": "d",
         "allowedScopeMd": ["src/a", "src/b"], "forbiddenScopeMd": ["core/"],
         "acceptanceMd": ["构建通过"],
-    }, None, None)
+    }, None, None, internal=True)
     assert r.get("ok"), r
     row = store.RequirementsStore.get(r["requirementId"])
     assert row["analysis"]["allowedScope"] == ["src/a", "src/b"]
@@ -120,7 +120,7 @@ def test_repair_fabricated_claim_amends(monkeypatch):
     _ensure_req("RQ-GUARD-AM")
     captured = {}
 
-    def fake_run_tool(name, args, root=None, project=None):
+    def fake_run_tool(name, args, root=None, project=None, **_kw):
         captured["name"], captured["args"] = name, args
         return {"ok": True, "reqId": args.get("reqId"), "ver": 2}
 
@@ -144,7 +144,7 @@ def test_repair_rejects_invented_reqid(monkeypatch):
     """修复器产出自造编号 → 拒绝该调用, 不落库。"""
     from topoone_app_architect.arch_routes import req_agent as ra
 
-    def fake_run_tool(name, args, root=None, project=None):  # 不应被调用
+    def fake_run_tool(name, args, root=None, project=None, **_kw):  # 不应被调用
         raise AssertionError("不应执行自造编号的落库")
 
     monkeypatch.setattr(ra, "llm_sync", lambda *a, **k: {"content":
@@ -233,7 +233,7 @@ def test_apply_spec_payload_amends_bound(monkeypatch):
     _ensure_req("RQ-GUARD-AP")
     captured = {}
 
-    def fake_run_tool(name, args, root=None, project=None):
+    def fake_run_tool(name, args, root=None, project=None, **_kw):
         captured["name"], captured["args"] = name, args
         return {"ok": True, "reqId": "RQ-GUARD-AP", "ver": 2}
 
@@ -255,7 +255,7 @@ def test_apply_spec_payload_creates_when_unbound(monkeypatch):
     from topoone_app_architect.arch_routes import req_agent as ra
     captured = {}
 
-    def fake_run_tool(name, args, root=None, project=None):
+    def fake_run_tool(name, args, root=None, project=None, **_kw):
         captured["name"], captured["args"] = name, args
         return {"ok": True, "requirementId": "RQ-NEW-1", "ver": 1}
 
@@ -272,7 +272,7 @@ def test_apply_spec_payload_alias_and_string_forms(monkeypatch):
     from topoone_app_architect.arch_routes import req_agent as ra
     captured = {}
 
-    def fake_run_tool(name, args, root=None, project=None):
+    def fake_run_tool(name, args, root=None, project=None, **_kw):
         captured["args"] = args
         return {"ok": True, "reqId": "RQ-GUARD-AP", "ver": 3}
 
@@ -299,7 +299,7 @@ def test_apply_spec_payload_broken_goes_llm_repair(monkeypatch):
     _ensure_req("RQ-GUARD-BR")
     captured = {}
 
-    def fake_run_tool(name, args, root=None, project=None):
+    def fake_run_tool(name, args, root=None, project=None, **_kw):
         captured["args"] = args
         return {"ok": True, "reqId": "RQ-GUARD-BR", "ver": 4}
 
@@ -327,7 +327,7 @@ def test_repair_fabricated_claim_prefers_deterministic(monkeypatch):
     captured = {}
     monkeypatch.setattr(ra, "llm_sync", _no_llm)
     monkeypatch.setattr(ra, "run_arch_tool",
-                        lambda n, a, root=None, project=None: (
+                        lambda n, a, root=None, project=None, **_kw: (
                             captured.update(name=n, args=a) or
                             {"ok": True, "reqId": "RQ-GUARD-DET", "ver": 2}))
     p = _cv73_payload()

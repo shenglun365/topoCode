@@ -35,6 +35,8 @@ export function stageOfTool(tool: string): ChatStage | '' {
 export interface KbAnalysisTurn {
   role: 'user' | 'assistant'
   content: string
+  /** v2 统一会话: 消息产出 agent(''=architect 外循环; cline/opencode/codex=subagent)。 */
+  agent?: string
   /** 阶段标注(设计/实现/评估/验收)：本回合内工具调用推导。 */
   stage?: ChatStage
   /** 推理内容(thinking)：独立于正文，前端可折叠展示。 */
@@ -130,8 +132,10 @@ export interface ChatStreamOptions {
   diagramSkill?: boolean
   /** 语义资产 skill 场景（plan-C §4.1 按场景加载）：资产管理对话传 ['extract']。 */
   skillScenarios?: string[]
-  /** 收件人路由(S2 双收件人): 'architect'(缺省) 自由对话 | 'coding' 定向投递活跃作业。 */
-  targetRole?: 'architect' | 'coding'
+  /** v2 subagent 路由: 显式指派执行器(cline 等); 缺省 architect 自由对话。 */
+  agent?: string
+  /** v2: 显式指定转达目标任务 id(缺省=最新活跃任务)。 */
+  attachTo?: string
   /** 是否有流式通道可用(后端不可达/未启用时回退一次性回复)。 */
   signal?: AbortSignal
 }
@@ -226,7 +230,8 @@ export async function chatStream(
       modelId: opts.modelId,
       diagramSkill: opts.diagramSkill,
       skillScenarios: opts.skillScenarios,
-      targetRole: opts.targetRole,
+      agent: opts.agent,
+      attachTo: opts.attachTo,
     })
 
     return await doneP

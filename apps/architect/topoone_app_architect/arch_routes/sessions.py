@@ -13,6 +13,7 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, Request
+import fastapi
 from fastapi.responses import StreamingResponse
 
 from .common import _ts, ok, err
@@ -295,6 +296,20 @@ def _delete_session_cascade(conv_id: str) -> int:
         exec_bridge.stop(conv_id, reason="deleted")  # 无运行作业时为 no-op
     except Exception:  # noqa: BLE001 — runner 不可达不阻断删除
         pass
+    # v2: 活跃任务终态化(runner 侧停止) + 任务行级联删除
+    try:
+        from .store import TasksStore
+        for t in TasksStore.of_conv(conv_id):
+            if (t.get("status") or "") in ("running", "waiting_input", "pending_confirm"):
+                if t.get("runnerJobId"):
+                    try:
+                        exec_bridge._runner(f"/api/implement/{t['runnerJobId']}/finish",
+                                            {"keepWorktree": True}, timeout=10.0)
+                    except Exception:  # noqa: BLE001
+                        pass
+        TasksStore.delete_by_conv(conv_id)
+    except Exception:  # noqa: BLE001
+        pass
     n = 0
     for sub in store.ConversationsStore.by_parent(conv_id):
         n += _delete_session_cascade(sub["id"])
@@ -348,7 +363,22 @@ def _roles_of(conv: dict) -> list:
 
 
 def _running_role_of(conv: dict) -> dict:
-    """running 归属推导(纯提示): 活跃作业(waiting_input|running) → coding+执行器。"""
+    """running 归属推导(纯提示): v2 活跃任务(running|waiting_input) → coding+执行器。
+
+    任务账本(arch_tasks)驱动; 旧 jobs 账本兜底(存量会话只读兼容)。"""
+    try:
+        from . import exec_bridge as _eb
+        t = _eb.active_task_of(conv["id"]) if conv.get("id") else None
+        if t and (t.get("status") or "") in ("running", "waiting_input"):
+            out = {"role": "coding",
+                   "executorId": t.get("executorType") or "opencode",
+                   "status": t.get("status") or "",
+                   "taskId": t.get("id") or ""}
+            if isinstance(t.get("progress"), dict):
+                out["progress"] = t["progress"]
+            return out
+    except Exception:  # noqa: BLE001
+        pass
     meta = conv.get("meta")
     if isinstance(meta, str):
         try:
@@ -365,6 +395,17 @@ def _running_role_of(conv: dict) -> dict:
                 out["progress"] = j["progress"]
             return out
     return {"role": "architect", "executorId": "", "status": ""}
+
+
+def _tasks_of_conv(conv: dict) -> list:
+    """v2 统一会话: 会话任务清单(arch_tasks, 倒序)。失败静默(旧库无表)。"""
+    try:
+        from .store import TasksStore
+        ts = TasksStore.of_conv(conv.get("id") or "") or []
+        ts.sort(key=lambda t: (t.get("createdAt") or 0), reverse=True)
+        return ts
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _conv_api(conv: dict) -> dict:
@@ -388,6 +429,7 @@ def _conv_api(conv: dict) -> dict:
         "parentConvId": conv.get("parentConvId") or "",
         "sessionRef": conv.get("sessionRef") or "",
         "runningRole": _running_role_of(conv),
+        "tasks": _tasks_of_conv(conv),
         "tags": _tags_of(conv),
         "summary": conv.get("summary") or "",
         "subUnread": int(meta.get("subUnread") or 0),
@@ -1073,3 +1115,59 @@ async def session_guide(conv_id: str):
     if not content:
         return _fallback()
     return ok({"text": content, "fallback": False})
+
+
+# ── v2 统一会话: coding subagent 任务 REST(轻门禁/投递/停止) ──
+
+@router.post("/tasks/{task_id}/confirm")
+async def task_confirm(task_id: str):
+    """确认任务卡 → 拉起 runner(轻门禁唯一入口)。"""
+    from . import exec_bridge
+    res = await asyncio.to_thread(exec_bridge.confirm_task, task_id)
+    if not res.get("ok"):
+        return err(400, str(res.get("error") or "confirm-failed"))
+    return ok({"task": res.get("task")})
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def task_cancel(task_id: str, request: Request):
+    """取消(待确认)/停止(执行中)任务; 保留 worktree/分支。"""
+    from . import exec_bridge
+    reason = ""
+    try:
+        body = await request.json()
+        reason = str((body or {}).get("reason") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    res = await asyncio.to_thread(exec_bridge.task_stop, task_id, reason)
+    if not res.get("ok"):
+        return err(400, str(res.get("error") or "stop-failed"))
+    return ok({"task": res.get("task")})
+
+
+@router.post("/tasks/{task_id}/input")
+async def task_input(task_id: str, request: Request):
+    """向任务转达用户回复(waiting_input 立即; running 排队续跑)。"""
+    from . import exec_bridge
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return err(400, "invalid-json")
+    text = str((body or {}).get("text") or "").strip()
+    if not text:
+        return err(400, "text 为空")
+    res = await asyncio.to_thread(exec_bridge.task_input, task_id, text)
+    if not res.get("ok"):
+        return err(400, str(res.get("error") or "input-failed"))
+    return ok({"queued": bool(res.get("queued"))})
+
+
+@router.get("/tasks")
+async def tasks_of(conv_id: str = fastapi.Query("", alias="convId")):
+    """会话任务清单(倒序)。?convId= 会话 id。"""
+    if not conv_id:
+        return err(400, "convId 必填")
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    return ok({"tasks": _tasks_of_conv(conv)})

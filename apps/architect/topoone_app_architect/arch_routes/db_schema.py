@@ -219,6 +219,30 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_conv_msgs_conv ON arch_conversation_messages(conversation_id);
 
+    -- v2 重构(统一会话): coding subagent 任务(替代 conv.meta.jobs 账本+规约执行门禁)。
+    -- 单流模型: 任务回执以消息(agent=executor_type)落统一流, 此表只管生命周期。
+    CREATE TABLE IF NOT EXISTS arch_tasks (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        project_id TEXT DEFAULT '',
+        req_id TEXT DEFAULT '',
+        title TEXT DEFAULT '',
+        instruction TEXT DEFAULT '',        -- 下发快照全文(含工作环境/允许范围)
+        status TEXT DEFAULT 'pending_confirm', -- pending_confirm|running|waiting_input|done|failed|cancelled
+        executor_type TEXT DEFAULT 'opencode', -- cline | opencode | codex
+        executor_id TEXT DEFAULT '',
+        runner_job_id TEXT DEFAULT '',      -- runner ImplementJob id
+        session_ref TEXT DEFAULT '',        -- 执行器原生会话引用(复活)
+        worktree TEXT DEFAULT '',
+        branch TEXT DEFAULT '',
+        progress TEXT,                      -- JSON: {toolCount, msgCount, at}
+        result_md TEXT DEFAULT '',          -- 终态产出摘要(done 时)
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0,
+        finished_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_tasks_conv ON arch_tasks(conversation_id, project_id);
+
     CREATE TABLE IF NOT EXISTS arch_blueprints (
         id TEXT PRIMARY KEY,
         req_ids TEXT, title TEXT, description TEXT,
@@ -685,6 +709,10 @@ def _project_migrations(db) -> None:
         ("review_state", "TEXT DEFAULT 'read'"),
         ("roles", "TEXT"),
         ("work_state", "TEXT DEFAULT 'architect'"),
+    ])
+    # v2 统一会话: 消息 agent 标注(''=architect 外循环; cline/opencode/codex=subagent)
+    _add_cols(db, "arch_conversation_messages", [
+        ("agent", "TEXT DEFAULT ''"),
     ])
     _migrate_lifecycle_v2(db)
     _add_cols(db, "arch_unit_tests", [
