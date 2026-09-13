@@ -269,6 +269,32 @@ async def add_manual_llm_model_route(request: Request):
     return ok(entry)
 
 
+@router.put("/llm/models/manual/{model_id}")
+async def update_manual_llm_model_route(model_id: str, request: Request):
+    """修改手动添加的模型条目。Body: { name?, provider?, model?, url? }——仅 manual
+    可改(导入项以主库为源, 重新导入会覆盖, 请在主后端模型库修改)。"""
+    body = await request.json() or {}
+    models = get_llm_models()
+    target = next((m for m in models if m.get("id") == model_id), None)
+    if not target:
+        return err(404, "模型条目不存在")
+    if target.get("source") != "manual":
+        return err(400, "KB 导入项不可在此修改(以主库为源)，请在主后端模型库调整后重新导入")
+    name = str(body.get("name") or target.get("name") or "").strip()
+    model_val = str(body.get("model") or target.get("model") or "").strip()
+    if not name or not model_val:
+        return err(400, "name 与 model 必填")
+    target.update({
+        "name": name,
+        "provider": str(body.get("provider") or target.get("provider") or "custom").strip() or "custom",
+        "model": model_val,
+        "url": str(body.get("url") or "").strip(),
+        "updatedAt": _ts(),
+    })
+    save_llm_models(models)
+    return ok(target)
+
+
 @router.delete("/llm/models/{model_id}")
 async def delete_llm_model_route(model_id: str):
     """删除手动模型条目(不影响 KB 导入项)。"""

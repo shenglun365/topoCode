@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
+import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon, PencilSquareIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchProjectStore } from '@/stores/project-store'
@@ -101,6 +101,26 @@ const importError = ref('')
 const showAddManual = ref(false)
 const manualForm = reactive({ name: '', provider: '', model: '', url: '' })
 const addingManual = ref(false)
+// 编辑手动模型条目(配置成功后允许修改): editingManualId 非空 = 表单为编辑态
+const editingManualId = ref('')
+function startEditManual(m: ArchLlmModel) {
+  editingManualId.value = m.id
+  showAddManual.value = true
+  manualForm.name = m.name
+  manualForm.provider = m.provider || ''
+  manualForm.model = m.model
+  manualForm.url = m.url || ''
+  nextTick(() => {
+    document.getElementById('llm-manual-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+function resetManualForm() {
+  editingManualId.value = ''
+  manualForm.name = ''
+  manualForm.provider = ''
+  manualForm.model = ''
+  manualForm.url = ''
+}
 
 async function loadLlm() {
   if (!(await backendUp())) return
@@ -143,6 +163,33 @@ async function addManual() {
   if (!manualForm.name.trim() || !manualForm.model.trim()) return
   addingManual.value = true
   try {
+    if (editingManualId.value) {
+      // 编辑态: 修改既有 manual 条目
+      if (await backendUp()) {
+        const row = await apiPut<ArchLlmModel>(`/llm/models/manual/${editingManualId.value}`, {
+          name: manualForm.name.trim(),
+          provider: manualForm.provider.trim() || 'custom',
+          model: manualForm.model.trim(),
+          url: manualForm.url.trim(),
+        })
+        const i = llmModels.value.findIndex((x) => x.id === editingManualId.value)
+        if (i >= 0) llmModels.value[i] = row
+      } else {
+        const i = llmModels.value.findIndex((x) => x.id === editingManualId.value)
+        if (i >= 0) {
+          llmModels.value[i] = {
+            ...llmModels.value[i],
+            name: manualForm.name.trim(),
+            provider: manualForm.provider.trim() || 'custom',
+            model: manualForm.model.trim(),
+            url: manualForm.url.trim(),
+          }
+        }
+      }
+      resetManualForm()
+      showAddManual.value = false
+      return
+    }
     if (await backendUp()) {
       const row = await apiPost<ArchLlmModel>('/llm/models/manual', {
         name: manualForm.name.trim(),
@@ -161,10 +208,7 @@ async function addManual() {
         url: manualForm.url.trim(),
       })
     }
-    manualForm.name = ''
-    manualForm.provider = ''
-    manualForm.model = ''
-    manualForm.url = ''
+    resetManualForm()
     showAddManual.value = false
   } finally {
     addingManual.value = false
@@ -378,6 +422,9 @@ onMounted(() => { void loadCgStatus() })
           class="border border-ctp-surface0 rounded-lg p-2.5 space-y-2"
           @submit.prevent="addManual"
         >
+          <div v-if="editingManualId" class="text-[11px] text-ctp-blue">
+            {{ t('config.llm.editingManual') }}
+          </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <label class="flex flex-col gap-0.5">
               <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualName') }}</span>
@@ -400,7 +447,13 @@ onMounted(() => { void loadCgStatus() })
             type="submit"
             class="btn btn-primary !px-3 !py-1 !text-xs"
             :disabled="addingManual || !manualForm.name || !manualForm.model"
-          >{{ t('config.llm.addManual') }}</button>
+          >{{ editingManualId ? t('config.llm.saveManual') : t('config.llm.addManual') }}</button>
+          <button
+            v-if="editingManualId"
+            type="button"
+            class="btn btn-ghost !px-3 !py-1 !text-xs"
+            @click="resetManualForm(); showAddManual = false"
+          >{{ t('common.cancel') }}</button>
         </form>
 
         <div
@@ -468,6 +521,14 @@ onMounted(() => { void loadCgStatus() })
               class="btn !py-0 !px-2 !text-[10px]"
               @click="probeLlm(m)"
             >{{ t('config.executors.modelProbe') }}</button>
+            <button
+              v-if="m.source === 'manual'"
+              class="btn !py-0.5 !px-2 !text-[11px]"
+              :title="t('config.llm.editManual')"
+              @click="startEditManual(m)"
+            >
+              <PencilSquareIcon class="w-3 h-3" />{{ t('config.llm.editManualBtn') }}
+            </button>
             <button
               v-if="m.source === 'manual'"
               class="btn !py-0.5 !px-2 !text-[11px] text-ctp-red"

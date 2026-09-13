@@ -256,3 +256,39 @@ def test_spec_apply_clears_draft(tmp_path, monkeypatch):
     row = store.ConversationsStore.get(conv["id"])
     assert "specDraft" not in (row.get("meta") or {}), "落库后草稿应清除"
     assert "RQ-" in body
+
+
+# ── 手动模型条目编辑(P3 后续: 配置成功后允许修改) ─────────────────────
+
+def test_manual_model_update_route(tmp_path, monkeypatch):
+    """manual 条目可改(name/provider/model/url); imported 条目拒绝(主库为源)。"""
+    import asyncio
+    from fastapi import Request
+    from topoone_app_architect.arch_routes import mcp_collab as M
+
+    class FakeReq:
+        def __init__(self, body):
+            self._b = body
+        async def json(self):
+            return self._b
+
+    async def _run():
+        created = await M.add_manual_llm_model_route(FakeReq(
+            {"name": "旧名", "model": "old-model", "provider": "custom", "url": "http://a"}))
+        mid = created.body["data"]["id"] if hasattr(created, "body") else created["data"]["id"]
+        res = await M.update_manual_llm_model_route(mid, FakeReq(
+            {"name": "新名", "model": "new-model", "url": "http://b"}))
+        return mid, res
+    import topoone_app_architect.arch_routes.ctx as C
+    _setup(tmp_path, monkeypatch)
+    mid, res = asyncio.run(_run())
+    data = res.body["data"] if hasattr(res, "body") else res["data"]
+    assert data["name"] == "新名" and data["model"] == "new-model" and data["url"] == "http://b"
+    # 存储已更新
+    rows = [m for m in M.get_llm_models() if m.get("id") == mid]
+    assert rows and rows[0]["model"] == "new-model"
+    # imported 条目拒绝修改
+    M.save_llm_models([{"source": "imported", "id": "imp-1", "name": "n", "model": "m"}])
+    res2 = asyncio.run(M.update_manual_llm_model_route("imp-1", FakeReq({"name": "x"})))
+    body2 = res2.body.decode() if hasattr(res2, "body") else str(res2)
+    assert "不可在此修改" in body2 or "400" in body2
