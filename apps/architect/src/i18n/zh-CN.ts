@@ -264,7 +264,6 @@ export default {
   assetChat: {
     proposal: {
       title: '需求提案',
-      goto: '前往任务管理',
     },
     extractPlan: {
       button: '方案生成',

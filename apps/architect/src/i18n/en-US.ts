@@ -240,7 +240,6 @@ export default {
   assetChat: {
     proposal: {
       title: 'Proposal',
-      goto: 'Open tasks',
     },
     extractPlan: {
       button: 'Generate Plan',

@@ -73,7 +73,6 @@ const emit = defineEmits<{
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
   'goto-acceptance': []
-  'goto-requirements': [reqId: string]
   stop: []
 }>()
 
@@ -1304,12 +1303,6 @@ onUnmounted(() => {
                 @click="confirmProposal(m)"
               >
                 <CheckIcon class="w-3 h-3" />{{ confirmingProposalId === m.proposal.id ? t('assetChat.extractPlan.confirming') : t('assetChat.extractPlan.confirm') }}
-              </button>
-              <button
-                class="btn btn-xs btn-blue"
-                @click="emit('goto-requirements', m.proposal.id)"
-              >
-                <ArrowTopRightOnSquareIcon class="w-3 h-3" />{{ t('assetChat.proposal.goto') }}
               </button>
             </div>
             <div

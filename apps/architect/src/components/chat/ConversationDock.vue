@@ -224,12 +224,6 @@ function newChat() {
   conv.newConversation()
   void loadRecent()
 }
-function onGotoRequirements(reqId?: string) {
-  // 提案卡 → 会话中心定位(需求深链优先——按 reqId 匹配会话; 兜底当前会话)。
-  // 同页 query 变化由 SessionsPage watch 响应(选中并打开对话栏)。
-  const select = reqId || conv.activeId || undefined
-  router.push({ path: '/workbench/sessions', query: select ? { select } : undefined })
-}
 function onSent() { void loadRecent() }
 
 /** dock 内「刷新资产」卡事件 → 资产地图页监听的全局事件。 */
@@ -845,7 +839,6 @@ async function pollRunningState() {
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
         @toggle-diagram-skill="conv.toggleDiagramSkill"
-        @goto-requirements="onGotoRequirements"
         @convention-confirm="onConventionConfirm"
         @convention-ignore="onConventionIgnore"
         @refresh-asset="emitRefreshAsset"
