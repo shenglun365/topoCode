@@ -113,13 +113,20 @@ onMounted(() => {
   void loadRecent()
   // 会话集合变更(store 广播: 新建/回合完成/归档/改名) → dock 列表同步刷新
   window.addEventListener('arch:sessions-changed', onSessionsChanged)
+  // 会话被删除(左侧列表) → 当前对话区若是该会话则清空(左右联动)
+  window.addEventListener('arch:conversation-removed', onConversationRemoved)
   syncTimer = setInterval(() => void pollRunningState(), 5000)
 })
 onUnmounted(() => {
   if (syncTimer) clearInterval(syncTimer)
   window.removeEventListener('arch:sessions-changed', onSessionsChanged)
+  window.removeEventListener('arch:conversation-removed', onConversationRemoved)
 })
 function onSessionsChanged() { void loadRecent() }
+function onConversationRemoved(e: Event) {
+  const id = (e as CustomEvent).detail as string
+  if (id) conv.dropConversation(id)
+}
 
 function switchTo(meta: ConversationMeta) {
   listOpen.value = false

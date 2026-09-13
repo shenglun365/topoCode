@@ -202,6 +202,18 @@ export const useConversationStore = defineStore('archConversation', () => {
     setDockOpen(true)
   }
 
+  /**
+   * 会话已被删除(左侧列表等外部触发)：清各场景快照中该会话的痕迹；
+   * 若正是当前打开的会话 → 清空对话区回到新会话态(右侧不残留已删会话)。
+   */
+  function dropConversation(convId: string) {
+    if (!convId) return
+    for (const [k, snap] of scopeCache) {
+      if (snap.activeId === convId) scopeCache.delete(k)
+    }
+    if (activeId.value === convId) newConversation()
+  }
+
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子。 */
   async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; targetRole?: 'architect' | 'coding' }) {
     if ((busy.value && opts?.targetRole !== 'coding') || !text.trim()) return
@@ -314,7 +326,7 @@ export const useConversationStore = defineStore('archConversation', () => {
     diagramSkill, toggleDiagramSkill,
     busyLabel, toolTrail,
     registerChatHook,
-    openConversation, newConversation, applyConversation,
+    openConversation, newConversation, applyConversation, dropConversation,
     send, sendAnswers, deleteTurn, stop, refreshActiveMeta, pushLocalHint,
   }
 })

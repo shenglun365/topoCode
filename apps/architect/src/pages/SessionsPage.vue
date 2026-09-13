@@ -203,6 +203,8 @@ async function removeSession(c: ConversationMeta) {
   if (!(await dialog.confirm(t('session.actions.deleteConfirm', { title: c.title }), { danger: true }))) return
   await sessionService.remove(c.id)
   list.value = list.value.filter((x) => x.id !== c.id)
+  // 左右联动: 通知对话栏清除该会话(若正打开)——右侧不残留已删会话
+  window.dispatchEvent(new CustomEvent('arch:conversation-removed', { detail: c.id }))
 }
 async function newGroup() {
   const name = await dialog.prompt(t('session.actions.newGroupPrompt'))
