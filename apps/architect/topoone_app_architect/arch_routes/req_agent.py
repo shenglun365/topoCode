@@ -627,6 +627,10 @@ _INTENT_PATTERNS = [
     re.compile(r"(我|让我)先(检索|查看|读取|调用|确认)"),
     re.compile(r"即将(调用|执行|检索)"),
     re.compile(r"正在(调用|执行|检索)以下工具"),
+    # 提案/落库完成语宣布(cv-88~102 实证主病灶): 宣称已创建而未调工具 →
+    # 追问轮逼出真实 [TOOL_CALL](先于防编造守卫, 成功则无需卡片)
+    re.compile(r"已(创建|生成|落库|提交|新建)(需求)?(提案|规约|需求)"),
+    re.compile(r"需求(提案)?(已经)?(创建|生成|落库)(完成|成功)"),
 ]
 
 
@@ -1676,6 +1680,9 @@ def parse_scope_files(lines: list) -> set:
 @register_architect_tool(
     "req.propose",
     "形成/更新需求规约：讨论收敛为明确需求，或设计者要求 生成方案/提炼方案/完善需求 时调用。"
+    "用户要求 编写脚本/工具/程序/函数 时**必须先调用本工具**收敛需求"
+    "(designMd=技术选型与结构设计)，由 /执行 链路生成代码——"
+    "严禁在对话中直接输出成品代码替代需求收敛(代码属于执行产物，不落库无法走执行链路)。"
     "会话已绑定未完结的需求时默认**更新该需求**(追加新 draft 版本，不新建)；"
     "需要在本会话开启全新需求时传 newRequirement=true。"
     "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节；为空时用户将无法 /定稿——门禁要求方案非空)，"
@@ -2294,6 +2301,8 @@ _CAPABILITY_DOC = (
     "模型仅在用户明确要求时代调，把当前 draft 确认为 ready。reqId 勿传(系统自动取会话绑定需求)\n"
     "- req.propose：需求提案(新建或幂等更新)——对话产出完整需求/方案时调用，"
     "创建新需求或更新会话绑定需求的 draft 版本。"
+    "用户要求 编写脚本/工具/程序 时**必须先调本工具**(designMd=选型与结构)，由 /执行 链路产出代码——"
+    "**严禁直接输出成品代码**(python/bash 等)替代需求收敛。"
     "参数 {\"title\", \"requirementMd\"?, \"designMd\"?, \"allowedScopeMd\"?, "
     "\"forbiddenScopeMd\"?, \"acceptanceMd\"?, \"assessmentMd\"?, \"priority\"?, "
     "\"estMin\"?, \"newRequirement\"?: true 强制新建}\n"

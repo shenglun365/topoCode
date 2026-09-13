@@ -679,7 +679,19 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     claim, need = req_agent.fabricated_claim(final_content, tools_used)
     guard_meta = None
     if claim:
-        logger.warning("[kb-chat] 防编造守卫触发 conv=%s claim=%s need=%s", conv_id, claim, need)
+        # 成功路径的编号笔误更正: 本回合已真实 propose 落库, 但正文残留假编号
+        # (cv-98 实证: 真实 RQ-47 / 正文 RQ-001) → 轻量更正回执替代拦截卡
+        if claim.startswith("引用不存在的需求编号") and "req.propose" in tools_used:
+            _fresh = store.ConversationsStore.get(conv_id) or {}
+            real_rid = str(_fresh.get("reqId") or "")
+            if real_rid:
+                corr_note = (f"\n\n> ℹ️ 系统更正：正文中的需求编号为模型笔误，"
+                             f"本回合真实落库编号为 `{real_rid}`(以系统回执为准)。")
+                final_content += corr_note
+                await send_ev({"type": "chunk", "requestId": request_id, "delta": corr_note})
+                claim = ""    # 已真实落库, 不再出拦截卡
+        if claim:
+            logger.warning("[kb-chat] 防编造守卫触发 conv=%s claim=%s need=%s", conv_id, claim, need)
         primary_need = need.split("|")[0] if need else ""
         failed_try = bool(primary_need) and primary_need in tool_errors
         try:
