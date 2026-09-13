@@ -612,6 +612,7 @@ async def _summarize_for_coding(text: str) -> tuple:
     返回 (文本, 是否经摘要)。LLM 不可达/空产出 → 原文 + False。
     """
     import asyncio
+    from .adaptation import summarize_task
     sys_prompt = (
         "你是架构师到执行工程师的信息中继。把下面的分析内容压缩成给 coding agent "
         "的直接结论段：\n"
@@ -620,18 +621,12 @@ async def _summarize_for_coding(text: str) -> tuple:
         "- 保持原文的具体数值与技术术语, 不要泛化、不要新增推断\n"
         "- 输出纯文本(可含短列表), 不加标题不加解释, 200 字以内"
     )
-    try:
-        from .req_agent import llm_sync
-        res = await asyncio.to_thread(
-            llm_sync,
-            [{"role": "system", "content": sys_prompt},
-             {"role": "user", "content": text[:8000]}],
-            mode="chat", max_tokens=400)
-        content = ((res or {}).get("content") or "").strip() \
-            if isinstance(res, dict) else ""
-        return (content, True) if content else (text, False)
-    except Exception:  # noqa: BLE001
-        return (text, False)
+    out = await asyncio.to_thread(
+        summarize_task, task_id="coding_relay", system=sys_prompt,
+        material=text[:8000], max_tokens=400,
+        parse=lambda r: str(r.get("content") or "").strip() or None)
+    content = out["output"]
+    return (content, True) if content else (text, False)
 
 
 @router.post("/sessions/{conv_id}/feed")
@@ -835,21 +830,17 @@ async def doc_from_conversation(conv_id: str, request: Request):
     if not transcript:
         return err(400, "会话无消息, 无法提取")
     title, content = "", ""
-    from . import req_agent
-    res = req_agent.llm_sync(
-        messages=[
-            {"role": "system",
-             "content": "你是需求归档助手。把对话中的需求与方案讨论整理为一份备案文档"
-                        "(Markdown: ## 需求 / ## 方案 / ## 待办 三段), 忠实于对话内容, 不新增结论。"},
-            {"role": "user", "content": f"对话记录:\n{transcript[:24000]}"},
-        ],
-        mode="structured",
-        output_schema=_DOC_SCHEMA,
-        max_tokens=2048,
-    )
-    if res and isinstance(res.get("output"), dict):
-        title = str(res["output"].get("title") or "").strip()[:80]
-        content = str(res["output"].get("contentMd") or "").strip()
+    from .adaptation import summarize_task
+    out = summarize_task(
+        task_id="doc_from_conversation",
+        system="你是需求归档助手。把对话中的需求与方案讨论整理为一份备案文档"
+               "(Markdown: ## 需求 / ## 方案 / ## 待办 三段), 忠实于对话内容, 不新增结论。",
+        material=f"对话记录:\n{transcript[:24000]}",
+        mode="structured", output_schema=_DOC_SCHEMA, max_tokens=2048,
+        parse=lambda r: r.get("output") if isinstance(r.get("output"), dict) else None)
+    if out["ok"]:
+        title = str((out["output"] or {}).get("title") or "").strip()[:80]
+        content = str((out["output"] or {}).get("contentMd") or "").strip()
     if not content:
         title = title_hint or (conv.get("title") or "会话备案")
         content = f"# {title}\n\n(自动提取降级: 对话原文)\n\n{transcript[:12000]}"
@@ -954,6 +945,16 @@ async def session_spec_apply(conv_id: str, request: Request):
         req_id=str(conv.get("reqId") or ""),
         project=str(conv.get("projectId") or ""),
         root="")
+    # 落库成功 → 清除会话草稿卡暂存(草稿已兑现为真实需求)
+    if res.get("ok"):
+        try:
+            cm = conv.get("meta") if isinstance(conv.get("meta"), dict) else {}
+            if isinstance(cm, dict) and cm.get("specDraft"):
+                cm = dict(cm)
+                cm.pop("specDraft", None)
+                store.ConversationsStore.update(conv_id, {"meta": cm})
+        except Exception:  # noqa: BLE001
+            pass
     return ok(res)
 
 
@@ -1011,15 +1012,11 @@ async def session_guide(conv_id: str):
     def _fallback():
         return ok({"text": "", "fallback": True})
 
-    try:
-        from .req_agent import llm_sync
-        res = llm_sync(
-            [{"role": "system", "content": _GUIDE_SYSTEM},
-             {"role": "user", "content": json.dumps(state, ensure_ascii=False)}],
-            mode="chat", max_tokens=500)
-    except Exception:  # noqa: BLE001
-        return _fallback()
-    content = ((res or {}).get("content") or "").strip() if isinstance(res, dict) else ""
+    from .adaptation import summarize_task
+    out = summarize_task(
+        task_id="session_guide", system=_GUIDE_SYSTEM,
+        material=json.dumps(state, ensure_ascii=False), max_tokens=500)
+    content = out["output"]
     if not content:
         return _fallback()
     return ok({"text": content, "fallback": False})

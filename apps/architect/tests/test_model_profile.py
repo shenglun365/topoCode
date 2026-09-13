@@ -162,3 +162,97 @@ def test_strategy_matrix():
     assert ad.strategies_for_tier(4)["lenient_parse"] == "max"
     assert ad.strategies_for_tier(3)["postprocess"] is True
     assert ad.strategies_for_tier(1)["postprocess"] is False
+
+
+# ── P2: 草稿卡确定性收敛 + guard 代落库 ───────────────────────────────
+
+SPEC_FENCE = ('方案如下\n```json\n{"title": "Nginx 监控", "requirementMd": "查找 nginx 进程", '
+              '"designMd": "psutil 扫描+表格输出", "acceptanceMd": ["运行显示 PID"]}\n```')
+
+
+def _mk_conv_nobind(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
+    return store.ConversationsStore.get(conv["id"])
+
+
+def test_maybe_draft_card_extracts_and_stores(tmp_path, monkeypatch):
+    """cv-88/92 场景: 规约 JSON 在正文未调工具(且无绑定需求) → 草稿暂存+卡片。"""
+    from topoone_app_architect.arch_routes import websocket as ws
+    conv = _mk_conv_nobind(tmp_path, monkeypatch)
+    meta = ws._maybe_draft_card(conv, SPEC_FENCE, set(), "m-8b", conv["id"])
+    assert meta and meta["kind"] == "specDraft"
+    assert meta["payload"]["title"] == "Nginx 监控"
+    row = store.ConversationsStore.get(conv["id"])
+    assert (row.get("meta") or {}).get("specDraft", {}).get("title") == "Nginx 监控"
+
+
+def test_maybe_draft_card_skips_when_proposed_or_bound(tmp_path, monkeypatch):
+    """已调 req.propose / 会话已绑定需求 / 正文无载荷 → 不出草稿卡。"""
+    from topoone_app_architect.arch_routes import websocket as ws
+    conv = _mk_conv_nobind(tmp_path, monkeypatch)
+    assert ws._maybe_draft_card(conv, SPEC_FENCE, {"req.propose"}, "m-8b", conv["id"]) is None
+    store.ConversationsStore.update(conv["id"], {"reqId": "RQ-1"})
+    conv = store.ConversationsStore.get(conv["id"])
+    assert ws._maybe_draft_card(conv, SPEC_FENCE, set(), "m-8b", conv["id"]) is None
+    store.ConversationsStore.update(conv["id"], {"reqId": ""})
+    conv = store.ConversationsStore.get(conv["id"])
+    assert ws._maybe_draft_card(conv, "纯文本无围栏", set(), "m-8b", conv["id"]) is None
+
+
+def test_maybe_draft_card_tiered(tmp_path, monkeypatch):
+    """分级: t0/t1 模型不开草稿卡(t2+ 才启用兜底)。"""
+    from topoone_app_architect.arch_routes import websocket as ws
+    conv = _mk_conv_nobind(tmp_path, monkeypatch)
+    assert ws._maybe_draft_card(conv, SPEC_FENCE, set(), "model-x", conv["id"]) is None
+    from topoone_app_architect.arch_routes import model_profile as mp
+    mp.set_manual_tier("model-x", 2)
+    assert ws._maybe_draft_card(conv, SPEC_FENCE, set(), "model-x", conv["id"]) is not None
+
+
+async def _run_autoland(conv, content):
+    from topoone_app_architect.arch_routes import websocket as ws
+    return await ws._guard_autoland(conv, content)
+
+
+def test_guard_autoland_persists_real_req(tmp_path, monkeypatch):
+    """cv-89 场景: 编造「已创建 RQ-xxx」+ 正文含完整规约 → 系统代落库真实编号。"""
+    import asyncio
+    import topoone_app_architect.arch_routes.ctx as _ctx
+    conv = _mk_conv_nobind(tmp_path, monkeypatch)
+    _ctx.set_conv(conv["id"])
+    fixed = asyncio.run(_run_autoland(conv, SPEC_FENCE))
+    assert fixed and "代为落库" in fixed["notice"]
+    # 真实需求落库 + 会话绑定回写
+    row = store.ConversationsStore.get(conv["id"])
+    rid = str(row.get("reqId") or "")
+    assert rid.startswith("RQ-") and store.RequirementsStore.get(rid)
+    assert rid in fixed["summary"]
+
+
+def test_guard_autoland_no_payload_none(tmp_path, monkeypatch):
+    import asyncio
+    conv = _mk_conv_nobind(tmp_path, monkeypatch)
+    assert asyncio.run(_run_autoland(conv, "已创建 RQ-xxx(无载荷)")) is None
+
+
+def test_spec_apply_clears_draft(tmp_path, monkeypatch):
+    """「写入需求」落库成功 → conv.meta.specDraft 清除(草稿已兑现)。"""
+    import asyncio
+    import topoone_app_architect.arch_routes.ctx as _ctx
+    from fastapi import Request
+    from topoone_app_architect.arch_routes import sessions as S, websocket as ws
+    conv = _mk_conv_nobind(tmp_path, monkeypatch)
+    _ctx.set_conv(conv["id"])
+    assert ws._maybe_draft_card(conv, SPEC_FENCE, set(), "m-8b", conv["id"])
+
+    class FakeReq:
+        async def json(self):
+            return {"payload": (store.ConversationsStore.get(conv["id"])
+                                .get("meta") or {}).get("specDraft")}
+
+    res = asyncio.run(S.session_spec_apply(conv["id"], FakeReq()))
+    body = res.body.decode() if hasattr(res, "body") else str(res)
+    row = store.ConversationsStore.get(conv["id"])
+    assert "specDraft" not in (row.get("meta") or {}), "落库后草稿应清除"
+    assert "RQ-" in body

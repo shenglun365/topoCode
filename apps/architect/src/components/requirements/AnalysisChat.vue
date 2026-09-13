@@ -2,7 +2,7 @@
 import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { kindChipClass } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon } from '@heroicons/vue/24/outline'
+import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
@@ -130,6 +130,11 @@ function parseSpecPayload(content: string): Record<string, unknown> | null {
   return null
 }
 function specPayloadOf(index: number): Record<string, unknown> | null {
+  // 草稿卡(meta.specDraft, 系统确定性提取)优先于正文围栏识别
+  const meta = props.turns[index]?.meta as any
+  if (meta?.kind === 'specDraft' && meta?.payload && typeof meta.payload === 'object') {
+    return meta.payload
+  }
   return parseSpecPayload(props.turns[index]?.content || '')
 }
 const specBusyIdx = ref(-1)
@@ -854,15 +859,51 @@ onUnmounted(() => {
             <span class="text-[10px] text-ctp-overlay0">{{ t('session.actions.applySpecHint') }}</span>
           </div>
 
+          <!-- 规约草稿卡(分级适配): 模型把规约写进正文未调工具 → 系统提取暂存;
+               用户裁决: 写入需求(一键落库) / 继续对话调整(草稿自动注入下轮合并) -->
+          <div
+            v-else-if="m.meta?.kind === 'specDraft'"
+            class="mt-2 rounded-lg border border-ctp-mauve/30 bg-ctp-mauve/5 px-2.5 py-2"
+          >
+            <div class="flex items-start gap-1.5 text-[11px] leading-relaxed text-ctp-subtext1">
+              <DocumentTextIcon class="mt-0.5 h-3.5 w-3.5 shrink-0 text-ctp-mauve" />
+              <div class="min-w-0 flex-1">
+                <p>
+                  📝 系统从回复中提取了完整规约草稿<code class="rounded bg-ctp-surface0 px-1 text-ctp-text">「{{ (m.meta.payload?.title as string) || '未命名' }}」</code>（尚未落库）。
+                </p>
+                <p class="mt-1 text-[10px] text-ctp-overlay0">
+                  两选一：点「写入需求」确定性落库（零模型转写，编号由系统生成）；或继续对话补充调整——草稿会自动带入下一轮合并完善。
+                </p>
+              </div>
+            </div>
+            <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <button
+                class="btn btn-xs btn-primary"
+                :disabled="specBusyIdx === i"
+                title="按草稿确定性落库为需求(零模型转写)"
+                @click="onSpecApply(i)"
+              >{{ specBusyIdx === i ? '…' : t('session.actions.applySpec') }}</button>
+              <span class="text-[10px] text-ctp-overlay0">落库后可 /定稿 → /执行</span>
+            </div>
+          </div>
+
           <!-- 系统守卫卡: 可点击指令(点击 → guard-repair 独立外循环), 说明在文字区 -->
           <div
             v-else-if="m.meta?.kind === 'guard'"
-            class="mt-2 rounded-lg border border-ctp-yellow/30 bg-ctp-yellow/5 px-2.5 py-2"
+            :class="m.meta.resolved
+              ? 'mt-2 rounded-lg border border-ctp-green/30 bg-ctp-green/5 px-2.5 py-2'
+              : 'mt-2 rounded-lg border border-ctp-yellow/30 bg-ctp-yellow/5 px-2.5 py-2'"
           >
             <div class="flex items-start gap-1.5 text-[11px] leading-relaxed text-ctp-subtext1">
-              <ExclamationCircleIcon class="mt-0.5 h-3.5 w-3.5 shrink-0 text-ctp-yellow" />
+              <ExclamationCircleIcon
+                class="mt-0.5 h-3.5 w-3.5 shrink-0"
+                :class="m.meta.resolved ? 'text-ctp-green' : 'text-ctp-yellow'"
+              />
               <div class="min-w-0 flex-1">
-                <p>
+                <p v-if="m.meta.resolved">
+                  ✅ 守卫拦截：回复中「{{ m.meta.claim }}」未经实际工具调用——系统已从正文规约<strong>代为落库</strong>，以下方回执编号为准。
+                </p>
+                <p v-else>
                   守卫拦截：回复中「{{ m.meta.claim }}」未经实际工具调用（需要
                   <code class="rounded bg-ctp-surface0 px-1 text-ctp-text">{{ m.meta.need }}</code> 佐证），该表述不成立。
                 </p>

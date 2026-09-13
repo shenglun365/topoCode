@@ -313,9 +313,16 @@ def probe_model(model_id: str) -> Dict[str, Any]:
 
 
 def get_profile_or_lazy(model_id: str) -> Dict[str, Any]:
-    """WS 首轮用: 有档案直接返回; 无档案 → 返回启发式并后台探测一次(不阻塞)。"""
+    """WS 首轮用: 有档案直接返回; 无档案 → 返回启发式并后台探测一次(不阻塞)。
+
+    测试环境(PYTEST_CURRENT_TEST)不起后台线程——探测线程会并发消耗
+    测试 monkeypatch 的 llm_sync, 造成跨测试干扰。
+    """
     prof = get_profile(model_id)
     if prof.get("source") != _HEURISTIC_TAG:
+        return prof
+    import os as _os
+    if _os.environ.get("PYTEST_CURRENT_TEST"):
         return prof
     mid = model_id or ""
     with _lazy_lock:

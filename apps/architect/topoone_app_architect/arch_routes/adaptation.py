@@ -104,6 +104,56 @@ def json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
+# ── summarize_task 摘要/中继/提取统一原语 ─────────────────────────────
+
+def summarize_task(*, task_id: str, system: str, material: str,
+                   max_tokens: int, model_id: str = "",
+                   mode: str = "chat",
+                   output_schema: Optional[Dict[str, Any]] = None,
+                   parse: Optional[Callable[[Dict[str, Any]], Any]] = None,
+                   fallback: Optional[Callable[[], Any]] = None,
+                   dataset_kind: str = "summarize_task") -> Dict[str, Any]:
+    """摘要/中继/提取类统一原语(P2 收编 5 处同型异构实现):
+    材料 → 一次隔离 LLM(单 system+材料, 不带对话历史) → 解析校验 → 失败确定性降级。
+
+    parse: 原始 res → 产物(返回 None 视为失败); 缺省 = content 文本。
+    fallback: 失败时零 LLM 降级产物(不提供则 ok=False, 调用方自行处理)。
+    统一口径: 材料截断由调用方完成 / 降级永不抛出 / llm_dataset 观测。
+    返回 {ok, output, degraded}。
+    """
+    from .req_agent import llm_sync, _now_ms
+    t0 = _now_ms()
+    out: Any = None
+    ok = False
+    degraded = False
+    try:
+        res = llm_sync([{"role": "system", "content": system},
+                        {"role": "user", "content": material}],
+                       mode=mode, output_schema=output_schema,
+                       max_tokens=max_tokens, model_id=model_id or None)
+        if parse is not None:
+            out = parse(res or {}) if res else None
+        else:
+            out = str(((res or {}).get("content") or "")).strip() or None
+        ok = out is not None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[summarize-task] %s 异常: %s", task_id, e)
+    if not ok and fallback is not None:
+        try:
+            out = fallback()
+            ok = out is not None
+            degraded = True
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[summarize-task] %s 降级失败: %s", task_id, e)
+    try:
+        from . import llm_dataset
+        llm_dataset.record(dataset_kind, task=task_id, ok=ok, degraded=degraded,
+                           model=model_id or "", latencyMs=_now_ms() - t0)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": ok, "output": out, "degraded": degraded}
+
+
 def run_repair_loop(task: RepairTask) -> Dict[str, Any]:
     """执行一次修复外循环: 隔离调用 → 解析 → 校验执行 → 观测 → 锚定。
 

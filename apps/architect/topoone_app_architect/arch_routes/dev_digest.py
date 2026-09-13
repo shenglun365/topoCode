@@ -104,18 +104,17 @@ async def generate_digest(request: Request):
         return err(400, f"近 {since_days} 天无可用素材(会话摘要/落地执行/备案文档)")
 
     overview_md, entries_md, attention_md = "", "", ""
-    from . import req_agent
-    res = req_agent.llm_sync(
-        messages=[
-            {"role": "system",
-             "content": "你是项目开发简报助手。基于素材总结本期开发走向：概览 3-5 行；"
-                        "迭代条目按重要性排列并保留分支/提交信息；指出风险与待办。"
-                        "忠实素材，不虚构。"},
-            {"role": "user", "content": f"时间窗: 近 {since_days} 天\n\n素材:\n{material[:20000]}"},
-        ],
-        mode="structured", output_schema=_DIGEST_SCHEMA, max_tokens=2048)
-    if res and isinstance(res.get("output"), dict):
-        o = res["output"]
+    from .adaptation import summarize_task
+    out = summarize_task(
+        task_id="dev_digest",
+        system="你是项目开发简报助手。基于素材总结本期开发走向：概览 3-5 行；"
+               "迭代条目按重要性排列并保留分支/提交信息；指出风险与待办。"
+               "忠实素材，不虚构。",
+        material=f"时间窗: 近 {since_days} 天\n\n素材:\n{material[:20000]}",
+        mode="structured", output_schema=_DIGEST_SCHEMA, max_tokens=2048,
+        parse=lambda r: r.get("output") if isinstance(r.get("output"), dict) else None)
+    if out["ok"] and isinstance(out["output"], dict):
+        o = out["output"]
         overview_md = str(o.get("overviewMd") or "").strip()
         entries_md = str(o.get("entriesMd") or "").strip()
         attention_md = str(o.get("attentionMd") or "").strip()

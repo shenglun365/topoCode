@@ -445,6 +445,20 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                                 model_id=eff_model or model_id or "")
     if amend_contract:
         msgs.insert(1, {"role": "system", "content": amend_contract})
+    # ── 规约草稿延续: 会话有未落库草稿(上轮草稿卡提取) → 注入下轮上下文,
+    #    用户「继续调整」时模型基于草稿合并完善, 而非从零重写 ──
+    try:
+        _draft = ((conv.get("meta") or {}).get("specDraft")
+                  if isinstance(conv.get("meta"), dict) else None)
+        if isinstance(_draft, dict) and _draft and not str(conv.get("reqId") or ""):
+            import json as _json
+            msgs.insert(1, {"role": "system", "content": (
+                "系统从上轮对话提取了规约草稿(尚未落库):\n```json\n"
+                + _json.dumps(_draft, ensure_ascii=False)[:2000] + "\n```\n"
+                "用户补充/调整意见时，请**合并该草稿**产出完整规约并调用 req.propose 落库"
+                "(title/requirementMd/designMd/acceptanceMd)；不要丢弃草稿中已有的内容。")})
+    except Exception:  # noqa: BLE001
+        pass
 
     # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
     request_id = None
@@ -688,13 +702,29 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             # 指令符号建议(与需求态相关): 绑定需求 draft → /定稿; ready → /执行
             "cmds": _guard_cmd_hints(conv_id),
         }
+        if (guard_meta.get("hasSpecJson") and not failed_try
+                and "req.propose" in (need or "") and "req.propose" not in tools_used):
+            fixed = await _guard_autoland(conv, final_content)
+            if fixed:
+                tools_used.add("req.propose")
+                final_content += fixed["notice"]
+                await send_ev({"type": "chunk", "requestId": request_id,
+                               "delta": fixed["notice"]})
+                guard_meta["resolved"] = True
+                guard_meta["resolvedSummary"] = fixed["summary"][:200]
+                guard_meta["suggestions"] = []
+                conv = store.ConversationsStore.get(conv_id) or conv
+
+    draft_meta = _maybe_draft_card(conv, final_content, tools_used,
+                                   eff_model or model_id or "", conv_id)
 
     if final_content:
         assistant_msg_id = store.next_id("m")
         msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
                    "role": "assistant", "time": _ts(), "content": final_content}
-        if guard_meta:
-            msg_row["meta"] = guard_meta   # 守卫元数据: 落库可重建卡片, 不进 LLM 上下文
+        meta = guard_meta or draft_meta
+        if meta:
+            msg_row["meta"] = meta   # 守卫/草稿卡元数据: 落库可重建卡片, 不进 LLM 上下文
         store.ConversationsStore.append_message(msg_row)
         try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
@@ -702,8 +732,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             pass
         done_ev = {"type": "done", "conversationId": conv_id,
                    "content": final_content, "messageId": assistant_msg_id}
-        if guard_meta:
-            done_ev["meta"] = guard_meta
+        if guard_meta or draft_meta:
+            done_ev["meta"] = guard_meta or draft_meta
         await send_ev(done_ev)
         try:
             from . import llm_dataset as _lds
@@ -720,6 +750,62 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         except Exception:  # noqa: BLE001
             pass
         await send_ev({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
+
+
+async def _guard_autoland(conv: dict, final_content: str) -> Optional[dict]:
+    """guard 确定性纠错: 编造「已创建需求」+ 正文含可提取规约 → 系统代为落库。
+
+    落库成功返回 {notice, summary}(调用方补记佐证/更新卡片); 失败返回 None
+    (仍走卡片人工修复)。model 已被误导, 不宜再让用户多点一步。
+    """
+    from .req_agent import extract_spec_payload, apply_spec_payload
+    try:
+        payload = extract_spec_payload(final_content or "")
+        if not payload:
+            return None
+        res = await asyncio.to_thread(
+            apply_spec_payload, payload,
+            req_id=str((conv or {}).get("reqId") or ""),
+            project=str((conv or {}).get("projectId") or ""), root="")
+        if res.get("ok"):
+            summary = str(res.get("summary") or "")
+            notice = (f"\n\n{summary}（系统检测到上文声明了创建动作，"
+                      "已从正文规约代为落库——以本回执编号为准）")
+            return {"notice": notice, "summary": summary}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[kb-chat] guard 代落库失败 conv=%s: %s", (conv or {}).get("id"), e)
+    return None
+
+
+def _maybe_draft_card(conv: dict, final_content: str, tools_used: set,
+                      model_id: str, conv_id: str) -> Optional[dict]:
+    """草稿卡确定性收敛(分级适配 t2+): 规约 JSON 在正文而未调工具 → 暂存草稿卡。
+
+    条件全满足才提取: 策略开启 / 本回合无 req.propose / 会话无绑定需求 /
+    正文含规约围栏载荷。返回 draft_meta(payload 供前端卡片)或 None;
+    同时落 conv.meta.specDraft(「继续调整」时注入下轮上下文合并完善)。
+    """
+    try:
+        from .adaptation import strategies_for_model
+        from .req_agent import extract_spec_payload
+        if (strategies_for_model(model_id or "").get("draft_card")
+                and "req.propose" not in tools_used
+                and not str((conv or {}).get("reqId") or "")):
+            payload = extract_spec_payload(final_content or "")
+            if payload:
+                cm = conv.get("meta") if isinstance(conv.get("meta"), dict) else {}
+                cm = dict(cm or {})
+                cm["specDraft"] = payload
+                store.ConversationsStore.update(conv_id, {"meta": cm})
+                try:
+                    from . import llm_dataset as _lds
+                    _lds.record("draft_card", ok=True, convId=conv_id, model=model_id or "")
+                except Exception:  # noqa: BLE001
+                    pass
+                return {"kind": "specDraft", "payload": payload}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[kb-chat] 草稿卡提取失败 conv=%s: %s", conv_id, e)
+    return None
 
 
 async def _sync_with_tools(websocket, msgs, root, project, model_id, max_rounds: int = 4,
