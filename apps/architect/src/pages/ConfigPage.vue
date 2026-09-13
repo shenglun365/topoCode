@@ -520,6 +520,12 @@ onMounted(() => { void loadCgStatus() })
               :title="t('config.llm.capProbeTip')"
               @click="capabilityProbe(m)"
             >{{ t('config.llm.capProbe') }}</button>
+            <span
+              v-if="llmProbing[m.id]"
+              class="text-[10px] font-mono max-w-[260px] truncate"
+              :class="llmProbing[m.id].startsWith('✓') ? 'text-ctp-green' : 'text-ctp-red'"
+              :title="llmProbing[m.id]"
+            >{{ llmProbing[m.id] }}</span>
             <button
               class="btn !py-0 !px-2 !text-[10px]"
               @click="probeLlm(m)"
