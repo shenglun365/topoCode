@@ -1746,12 +1746,12 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
             try:
                 log_conv_event(conv_id,
                                f"📝 **规约已更新**：`{bound_rid}` → v{entry['ver']}"
-                               f"（draft；确认执行需用户发送「执行方案」）")
+                               f"（draft；`/定稿` 确认后 `/执行`）")
             except Exception:  # noqa: BLE001
                 pass
             return {"ok": True, "requirementId": bound_rid, "ver": entry["ver"],
                     "updated": True, "title": title,
-                    "hint": "已更新既有需求规约(新 draft 版本)；用户「执行方案」→ 预览确认后进入执行"}
+                    "hint": "已更新既有需求规约(新 draft 版本)；`/定稿` 后 `/执行` 启动作业"}
 
     req = {
         "id": _store.next_id("RQ"), "kind": "user-story",
@@ -1767,7 +1767,7 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     }
     _store.RequirementsStore.create(req)
     _sync_analysis_cache(req["id"], snapshot)
-    # 回写会话绑定(后端真相源): amend 契约/守卫修复/「执行方案」链路依赖 conv.reqId
+    # 回写会话绑定(后端真相源): amend 契约/守卫修复/执行链路依赖 conv.reqId
     if conv_id:
         try:
             _store.ConversationsStore.update(conv_id, {"reqId": req["id"]})
@@ -1776,7 +1776,7 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     # 方案缺失标注: designMd 空时在回执与事件流如实提示(定稿门禁会拦, 提前引导 /调整)
     no_design = not str(designMd or "").strip()
     receipt = (f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
-               "用户「执行方案」→ 预览确认后进入执行）")
+               "`/定稿` 后 `/执行` 启动作业）")
     if no_design:
         receipt = (f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
                    "**⚠️ 未包含实现方案(designMd 为空)**——`/定稿` 门禁会要求补全, "
@@ -1920,7 +1920,7 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "reqId": req_id, "ver": entry["ver"], "amended": changed,
-            "hint": "修订已追加新 draft 版本；「执行方案」预览确认后按新版本执行"}
+            "hint": "修订已追加新 draft 版本；`/定稿` 后 `/执行` 按新版本执行"}
 
 
 # ── 会话只读工具(PR-D: 归档会话可被 agent 读取/引用; 不在任何动作黑名单) ──
@@ -2348,7 +2348,7 @@ _CAPABILITY_DOC = (
     "2. RQ 编号/数据 ID 一律由系统管理：工具调用不传 reqId(系统自动取会话绑定)，"
     "回复中的编号只来自工具返回，严禁自造编号(会被系统守卫拦截)；\n"
     "3. 确认(draft→ready)由用户指令 `/定稿` 发起(系统直通)；修订(req.amend)时不要顺带调用 req.finalize。\n"
-    "会话指令符号(系统处理，与模型无关)：用户消息以 / 开头(/执行 /确认执行 /定稿 /继续 /diff /调整)时"
+    "会话指令符号(系统处理，与模型无关)：用户消息以 / 开头(/执行 /定稿 /继续 /diff /调整)时"
     "由系统直接执行确定性动作——模型不会收到这类消息，也不要在回复中代用户发出指令。\n"
     "各工具的参数：\n"
     '- kb.asset.search: {"text": "检索关键词", "preferred": ["资产ID(可选)"]}\n'

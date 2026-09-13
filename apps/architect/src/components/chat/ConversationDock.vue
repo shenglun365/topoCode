@@ -338,10 +338,10 @@ const isExecutionConv = computed(() =>
   !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
   && !isRunning.value)
 
-/** 指令符号表(与后端 SESSION_CMDS 对齐): 引导消息 chips 点击填入对话框 */
+/** 指令符号表(与后端 SESSION_CMDS 对齐): 引导消息 chips 点击填入对话框
+ *  (输入框 `/` 命令提示与此同源——改指令时两处同步) */
 const SESSION_CMDS: Array<{ cmd: string; desc: string }> = [
-  { cmd: '/执行', desc: '预览执行方案' },
-  { cmd: '/确认执行', desc: '启动执行作业' },
+  { cmd: '/执行', desc: '启动实施作业(一步到位)' },
   { cmd: '/定稿', desc: '确认规约版本(ready)' },
   { cmd: '/继续', desc: '转达补充给作业' },
   { cmd: '/diff', desc: '查看作业差异' },
@@ -355,7 +355,7 @@ function fillCmd(cmd: string) {
 const GUIDE_MD = [
   '⚡ **会话引导**（仅本地提示，不进入对话上下文）',
   '',
-  '- `/执行` 生成执行预览 → `/确认执行` 启动作业',
+  '- `/执行` 启动实施作业(一步到位, 定稿即确认)',
   '- `/调整` + 调整点 修订规约（生成新 draft 版本）',
   '- 作业提问时直接回复补充 → `/继续` 转达给 agent',
   '- `/diff` 查看作业产物；完成后可标记需求完成',

@@ -346,7 +346,7 @@ def _files_intersect(a: List[str], b: List[str]) -> List[str]:
 
 def start_implement(conv: dict, instruction: str, executor_hint: Optional[dict] = None,
                     branch_name: str = "", spec_ver: int = 0) -> Any:
-    """确认执行 → runner 建作业 + 账本登记 + 泵启动 + workState→running。"""
+    """`/执行` → runner 建作业 + 账本登记 + 泵启动 + workState→running。"""
     from .execution import conv_root_project
     conv_id = conv["id"]
     if is_running(conv_id):
@@ -443,14 +443,14 @@ def stop(conv_id: str, reason: str = "") -> str:
     _cancel_pumps(conv_id)
     _aggregate_work_state(conv_id)
     return (f"🛑 已停止 {len(jobs)} 个作业。分支与改动已保留，"
-            "可「查看差异」检视，或「执行方案」按当前规约重新执行。")
+            "可「查看差异」检视，或 `/执行` 按当前规约重新执行。")
 
 
 def diff_text(conv_id: str) -> str:
     """「查看差异」(自然语言/UI 按钮共用): 最近作业相对基线的 diff 摘要。"""
     jobs = jobs_of(conv_id)
     if not jobs:
-        return "暂无作业记录。发送「执行方案」启动。"
+        return "暂无作业记录。发送 `/执行` 启动。"
     j = jobs[-1]
     d = _runner(f"/api/implement/{j['jobId']}/diff", timeout=30.0)
     if not (d or {}).get("ok"):
@@ -481,7 +481,7 @@ def reconcile_lost(conv_id: str) -> None:
         _aggregate_work_state(conv_id)
         _append(conv_id, "assistant",
                 "⚠️ 作业状态对账完成(部分作业因服务重启丢失句柄→lost)。"
-                "「执行方案」重试将自动附带前情简报。")
+                "`/执行` 重试将自动附带前情简报。")
 
 
 # ── 泵(纯下行) ──

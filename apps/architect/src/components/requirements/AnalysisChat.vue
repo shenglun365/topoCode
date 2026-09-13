@@ -35,8 +35,6 @@ const props = defineProps<{
   contractSkill?: boolean
   /** 是否显示 🧾 开关(仅需求方案对话显示；资产管理/工作台不显示)。 */
   showContractSkill?: boolean
-  /** 作业执行锁(生命周期重构): 非空=running 输入锁定, 值为提示文案。 */
-  inputLocked?: string | null
   /** running 归属(S2): {role:'coding', executorId, status} 有活跃作业时非空。 */
   jobState?: { role: string; executorId?: string; status?: string } | null
   /** 已绑定执行器 id(S2/S3): 空=未绑定——Coding 切换钮首击触发分配(bind-coding)。 */
@@ -247,7 +245,6 @@ function onCodingClick() {
 }
 
 function send() {
-  if (props.inputLocked) return
   if (!input.value.trim()) return
   if (props.busy && targetRole.value !== 'coding') return   // architect 回合流式中仍可转达 coding
   emit('send', input.value.trim(), targetRole.value)
@@ -1525,10 +1522,9 @@ onUnmounted(() => {
         v-model="input"
         rows="2"
         class="input !py-2.5 text-xs resize-y min-h-0"
-        :disabled="props.readOnly || !!props.inputLocked"
-        :placeholder="props.inputLocked ? props.inputLocked
-          : (props.readOnly ? t('session.readOnlyHint')
-            : (targetRole === 'coding' ? t('session.target.codingPlaceholder') : t('requirement.chat.placeholder')))"
+        :disabled="props.readOnly"
+        :placeholder="props.readOnly ? t('session.readOnlyHint')
+          : (targetRole === 'coding' ? t('session.target.codingPlaceholder') : t('requirement.chat.placeholder'))"
         @input="autoResize"
         @keydown="onInputKeydown"
       />
@@ -1543,7 +1539,7 @@ onUnmounted(() => {
       <button
         v-else
         class="btn btn-primary !py-2.5 shrink-0 whitespace-nowrap"
-        :disabled="!input.trim() || props.readOnly || !!props.inputLocked"
+        :disabled="!input.trim() || props.readOnly"
         @click="send"
       >
         <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}

@@ -1067,9 +1067,6 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
     return None
 
 
-_EXEC_PENDING_TTL_MS = 30 * 60 * 1000   # (历史两段式遗留; 一步启动后仅作清理兼容)
-
-
 def _meta_get(conv: dict) -> dict:
     import json as _json
     meta = (conv or {}).get("meta")
@@ -1143,11 +1140,14 @@ async def _executor_implement(conv: dict, role: Optional[dict]) -> str:
                 "启动只会让执行工程师空转。\n请先 `/调整` 补充需求描述或实现方案，"
                 "定稿后再 `/执行`。")
 
-    # 清理历史两段式残留的预览态(如有)
-    meta = _meta_get(store.ConversationsStore.get((conv or {}).get("id") or "") or conv)
-    if meta.get("execPending"):
-        meta.pop("execPending", None)
-        _meta_set((conv or {}).get("id") or "", meta)
+    # 清理历史两段式残留的预览态(一次性迁移; 新数据不再产生 execPending)
+    try:
+        meta = _meta_get(store.ConversationsStore.get((conv or {}).get("id") or "") or conv)
+        if meta.get("execPending"):
+            meta.pop("execPending", None)
+            _meta_set((conv or {}).get("id") or "", meta)
+    except Exception:  # noqa: BLE001
+        pass
 
     instruction = _build_impl_instruction(rid, prior_brief=_prior_job_brief(conv))
     branch = f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
