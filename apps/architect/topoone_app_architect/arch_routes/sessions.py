@@ -1075,13 +1075,51 @@ async def session_guard_repair(conv_id: str, request: Request):
     from . import ctx as _ctx
     _ctx.set_conv(conv_id)
     _ctx.set_project(str(conv.get("projectId") or ""))
+    return await asyncio.to_thread(_guard_repair_core, conv_id, claim, need, content)
+
+
+def _guard_repair_core(conv_id: str, claim: str, need: str, content: str) -> dict:
+    """守卫修复核心(可测): 任务域优先确定性提取建卡; 其余走规约修复外循环。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return {"ok": False, "summary": "会话不存在"}
+    from . import ctx as _ctx
+    _ctx.set_conv(conv_id)
+    _ctx.set_project(str(conv.get("projectId") or ""))
+    # v2 任务域修复(优先): 编造任务创建/执行声明 -> 从原文确定性提取载荷,
+    # 代为创建真实任务卡(轻门禁——修复后用户确认执行)。
+    if "task.propose" in (need or "") or "任务" in claim:
+        from .req_agent import extract_task_fence
+        from . import exec_bridge as _eb
+        payload = extract_task_fence(content)
+        if not payload:
+            # 无 JSON 载荷: markdown 结构兜底(标题=首行标题/加粗, 正文即 instruction)
+            lines = [l for l in content.splitlines() if l.strip()]
+            body = "\n".join(lines).strip()
+            title = ""
+            for l in lines[:6]:
+                t = l.lstrip('#').replace('*', '').strip()
+                if 4 <= len(t) <= 60:
+                    title = t
+                    break
+            payload = {"title": title or "守卫修复任务",
+                       "instruction": body[:6000]} if len(body) > 40 else None
+        if payload:
+            task = _eb.propose_task(conv, payload["title"], payload["instruction"], {})
+            return {"ok": True, "action": "task_proposed",
+                    "taskId": task["id"], "status": task.get("status"),
+                    "summary": f"已从消息原文提取并创建任务卡「{task['title']}」"
+                               "(待确认)——确认后开始执行。"}
+        return {"ok": False, "action": "task_extract_failed",
+                "summary": "未能从消息中提取可执行的任务载荷——请让 architect "
+                           "重新整理方案后发起任务。"}
+    # 规约域(存量兼容): 编造规约声明 -> repair_fabricated_claim 外循环修复
     from .req_agent import repair_fabricated_claim
-    res = await asyncio.to_thread(
-        repair_fabricated_claim, claim, need, content,
+    return repair_fabricated_claim(
+        claim, need, content,
         req_id=str(conv.get("reqId") or ""),
         project=str(conv.get("projectId") or ""),
         root="")
-    return ok(res)
 
 
 @router.post("/sessions/{conv_id}/guide")
@@ -1120,13 +1158,40 @@ async def session_guide(conv_id: str):
 # ── v2 统一会话: coding subagent 任务 REST(轻门禁/投递/停止) ──
 
 @router.post("/tasks/{task_id}/confirm")
-async def task_confirm(task_id: str):
-    """确认任务卡 → 拉起 runner(轻门禁唯一入口)。"""
+async def task_confirm(task_id: str, request: Request):
+    """确认任务卡 → 拉起 runner(轻门禁唯一入口)。
+
+    body 可选 executorType: 覆盖任务执行器(确认时换引擎, 优先级低于专用端点)。"""
     from . import exec_bridge
+    etype = ""
+    try:
+        body = await request.json()
+        etype = str((body or {}).get("executorType") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    if etype:
+        await asyncio.to_thread(exec_bridge.task_set_executor, task_id, etype)
     res = await asyncio.to_thread(exec_bridge.confirm_task, task_id)
     if not res.get("ok"):
         return err(400, str(res.get("error") or "confirm-failed"))
     return ok({"task": res.get("task")})
+
+
+@router.post("/tasks/{task_id}/executor")
+async def task_set_executor(task_id: str, request: Request):
+    """设定任务执行器(待确认态切换; cline/opencode/codex)。"""
+    from . import exec_bridge
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return err(400, "invalid-json")
+    etype = str((body or {}).get("executorType") or "").strip()
+    if etype not in ("cline", "opencode", "codex"):
+        return err(400, "executorType 取值 cline/opencode/codex")
+    task = await asyncio.to_thread(exec_bridge.task_set_executor, task_id, etype)
+    if not task:
+        return err(404, "任务不存在或已不可切换")
+    return ok({"task": task})
 
 
 @router.post("/tasks/{task_id}/cancel")

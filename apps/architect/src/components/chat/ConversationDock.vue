@@ -129,6 +129,14 @@ onUnmounted(() => {
 function onSessionsChanged() { void loadRecent() }
 watch(() => conv.activeId, () => { if (conv.activeId) void maybeHintT4Model() })
 
+/** 任务执行器切换(待确认态): PATCH /tasks/{id}/executor。 */
+async function onTaskExecutor(p: { taskId: string; executorType: string }) {
+  try {
+    await apiPost(`/tasks/${p.taskId}/executor`, { executorType: p.executorType })
+    await conv.refreshTasks()
+  } catch { conv.pushLocalHint('执行器切换失败(稍后重试)') }
+}
+
 /** ── 会话事件流(SSE): job 消息实时刷新 + coding 子会话未读 badge ── */
 let evtSource: EventSource | null = null
 let evtReconnect: ReturnType<typeof setTimeout> | null = null
@@ -836,6 +844,7 @@ async function pollRunningState() {
         @set-agent="setSendAgent"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
         @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
+        @task-executor="(p: any) => void onTaskExecutor(p)"
         @local-cmd="onLocalCmd"
         @bind-coding="openRoles"
         @set-model="onSetModel"

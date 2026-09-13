@@ -183,6 +183,11 @@ _FABRIC_RULES = [
      ("req.propose",), "已生成/落库需求提案"),
     (re.compile(r"已定稿|定稿成功|已转入待执行|已存入待执行|已固化[^。\n]{0,10}待执行"),
      ("req.finalize",), "定稿入池(转入待执行)"),
+    # v2 任务域(cv-150 实证): 声称任务已创建/开始执行、输出假执行进度报告
+    (re.compile(r"(已创建|已生成|已发起|已启动)[^。\n]{0,16}(实施)?任务(卡)?|任务(卡)?已(正式)?(创建|生成|发起|启动|开始执行)"),
+     ("task.propose",), "已创建/启动任务"),
+    (re.compile(r"执行进度报告|Phase\s*1\s*[:：]|正在检查当前项目.+构建环境与"),
+     ("task.propose",), "编造任务执行进度"),
 ]
 
 
@@ -244,6 +249,8 @@ def guard_suggestions(claim: str, need: str, tool_failed: bool = False,
         sugs.append({"action": "repair_finalize", "label": "确认定稿"})
     if "req.propose" in tools:
         sugs.append({"action": "repair_propose", "label": "创建提案"})
+    if "task.propose" in tools:
+        sugs.append({"action": "repair_task", "label": "创建任务卡"})
     if tool_failed:
         sugs.append({"action": "repair_retry", "label": "修正参数重试"})
     if not sugs:
@@ -679,6 +686,74 @@ def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
         except Exception:  # noqa: BLE001
             pass
         return None
+
+
+def extract_task_fence(text: str) -> Optional[Dict[str, Any]]:
+    """提取任务载荷: ```task 围栏(显式协议) 或 ```json 围栏中的任务形态对象。
+
+    cv-150 实证: 模型(9b 级)宣称要调 task.propose 却直接把载荷写成 ```json
+    围栏 → 工具不执行/守卫拦截/流程死路。围栏协议化: 服务端解析代为落卡。
+    防误判: 图 IR(version+type+nodes/edges)与规约提案(title+方案字段但带
+    acceptanceMd 优先走提案域)不认领; 只认 title + 实质任务字段。
+    """
+    if not text or "```" not in text:
+        return None
+    explicit: List[Dict[str, Any]] = []
+    candidates: List[Dict[str, Any]] = []
+    m = re.search(r"```task\s*\n?(\{.*?\})\s*```", text, re.DOTALL)
+    if m:
+        try:
+            d = json.loads(m.group(1))
+            if isinstance(d, dict):
+                explicit.append(d)
+        except Exception:  # noqa: BLE001
+            pass
+    for fm in re.finditer(r"```(?:json)?\s*\n?(\{.*?\})\s*```", text, re.DOTALL):
+        try:
+            d = json.loads(fm.group(1))
+            if isinstance(d, dict):
+                candidates.append(d)
+        except Exception:  # noqa: BLE001
+            continue
+
+    def _norm(d: Dict[str, Any], explicit: bool = False) -> Optional[Dict[str, str]]:
+        # 图 IR 排除(diagram.build 产物形态)
+        t = str(d.get("type") or "").lower()
+        if d.get("nodes") and d.get("type") and t in ("component", "flow", "graph", "diagram"):
+            return None
+        if d.get("version") and d.get("nodes"):
+            return None
+        title = str(d.get("title") or d.get("name") or "").strip()
+        if not title:
+            return None
+        instr = str(d.get("instruction") or d.get("instructionMd") or "").strip()
+        _min_len = 0 if explicit else 10   # 显式 task 围栏=明确意图, 不卡长度
+        if not instr:
+            req_md = str(d.get("requirementMd") or d.get("requirement") or "").strip()
+            design = str(d.get("designMd") or d.get("implementationPath") or "").strip()
+            parts = []
+            if req_md:
+                parts.append("## 需求目标\n" + req_md)
+            if design:
+                parts.append("## 实现方案\n" + design)
+            acc = d.get("acceptance") or d.get("acceptanceMd")
+            if acc:
+                acc_lines = acc if isinstance(acc, str) else "\n".join(str(x) for x in acc)
+                parts.append("## 验收标准\n" + str(acc_lines))
+            instr = "\n\n".join(parts)
+        if len(instr) < _min_len:
+            return None
+        return {"title": title[:120], "instruction": instr[:8000]}
+
+    for d in explicit:
+        out = _norm(d, explicit=True)
+        if out:
+            return out
+    for d in candidates:
+        out = _norm(d)
+        if out:
+            return out
+    return None
 
 
 def extract_tool_calls(text: str) -> List[Dict[str, Any]]:
@@ -2585,7 +2660,9 @@ def tool_task_propose(title: str, instruction: str,
         return {"error": "会话已归档(只读)"}
     etype = (executorType or "").strip()
     if etype not in ("cline", "opencode", "codex"):
-        etype = "opencode"
+        # 会话绑定了执行器 → 用其注册表类型(用户既定选择); 否则 opencode
+        _bound = exec_bridge.executor_hint_by_id(str(conv.get("executorId") or ""), conv)
+        etype = ((_bound or {}).get("executorType") or "").strip() or "opencode"
     if not (instruction or "").strip():
         return {"error": "instruction 缺少实质内容(为空)——请写实质任务内容(目标/方案/验收)"}
     task = exec_bridge.propose_task(conv, title, instruction,

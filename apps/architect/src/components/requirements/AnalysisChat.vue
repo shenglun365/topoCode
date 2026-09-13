@@ -58,6 +58,7 @@ const emit = defineEmits<{
   'agent-filter': [v: 'all' | 'architect' | 'coding']
   'task-confirm': [taskId: string]
   'task-cancel': [taskId: string]
+  'task-executor': [p: { taskId: string; executorType: string }]
   'local-cmd': [name: string]
   'bind-coding': []
   'set-model': [model: string]
@@ -789,6 +790,7 @@ onUnmounted(() => {
             class="mb-2"
             @confirm="(id: string) => emit('task-confirm', id)"
             @cancel="(id: string) => emit('task-cancel', id)"
+            @set-executor="(id: string, ex: string) => emit('task-executor', { taskId: id, executorType: ex })"
           />
           <div class="flex items-center gap-1.5 mb-1">
             <svg

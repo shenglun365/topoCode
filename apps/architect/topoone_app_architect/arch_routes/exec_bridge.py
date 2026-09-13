@@ -790,10 +790,12 @@ def confirm_task(task_id: str) -> dict:
         v = hint.get(k)
         if v not in (None, ""):
             payload[k] = v
+    _etype = hint.get("executorType") or task.get("executorType") or "opencode"
     if hint.get("executorId"):
         payload["executorId"] = hint["executorId"]
-        payload["executorType"] = hint.get("executorType") or task.get("executorType") or "opencode"
         payload["executorConfig"] = hint.get("executorConfig") or {}
+    if _etype:
+        payload["executorType"] = _etype   # 引擎选择以 task 为准(无注册表也可指定)
     # 回合超时配置下发(执行器注册表 config → runner 看门狗参数)
     _cfg = hint.get("executorConfig") or {}
     for k in ("turnTimeout", "stallSec"):
@@ -826,6 +828,17 @@ def confirm_task(task_id: str) -> dict:
     t = store.TasksStore.get(task_id) or {}
     _publish_task(conv_id, t)
     return {"ok": True, "task": t}
+
+
+def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
+    """设定任务执行器(cline/opencode/codex)。仅 pending_confirm 可换——
+    运行中引擎已固化(换=新任务); 返回更新后任务行(不可换返回 None)。"""
+    task = store.TasksStore.get(task_id)
+    if not task or (task.get("status") or "") != "pending_confirm":
+        return None
+    if executor_type not in ("cline", "opencode", "codex"):
+        return None
+    return store.TasksStore.update(task_id, {"executor_type": executor_type})
 
 
 def task_input(task_id: str, text: str) -> Dict[str, Any]:

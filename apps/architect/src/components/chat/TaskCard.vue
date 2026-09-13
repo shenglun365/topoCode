@@ -13,6 +13,18 @@
         :title="`消息 ×${progress.msgCount ?? 0} · ${new Date(progress.at || 0).toLocaleTimeString()}`"
       >⚙ ×{{ progress.toolCount ?? 0 }}</span>
       <span class="flex-1" />
+      <!-- 执行器设定(待确认时可换): cline/opencode/codex -->
+      <span v-if="task.status === 'pending_confirm'" class="flex items-center gap-0.5">
+        <button
+          v-for="ex in ['opencode', 'cline', 'codex']"
+          :key="ex"
+          class="chip !text-[9px] font-mono transition-colors"
+          :class="(task.executorType || 'opencode') === ex
+            ? 'bg-ctp-sky/20 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
+          :title="`用 ${ex} 执行${ex === 'cline' ? '(嵌入式通用 agent)' : ex === 'opencode' ? '(serve 模式)' : '(app-server)'}`"
+          @click="$emit('set-executor', task.id, ex)"
+        >{{ ex }}</button>
+      </span>
       <!-- 轻门禁: 待确认 → 确认/取消 -->
       <template v-if="task.status === 'pending_confirm'">
         <button
@@ -45,7 +57,7 @@
 import { computed } from 'vue'
 
 const props = defineProps<{ task: Record<string, any> }>()
-defineEmits<{ (e: 'confirm' | 'cancel', taskId: string): void }>()
+defineEmits<{ (e: 'confirm' | 'cancel', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
 
 const STATUS_TEXT: Record<string, string> = {
   pending_confirm: '待确认',

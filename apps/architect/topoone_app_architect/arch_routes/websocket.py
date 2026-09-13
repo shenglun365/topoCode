@@ -16,6 +16,11 @@ router = APIRouter()
 
 _MAX_TOOL_ROUNDS = 4
 
+# v2 通用任务路由: 用户指令式通用执行意图(检测/统计/编译/运行/脚本/批量…)
+_GENERIC_EXEC_RE = re.compile(
+    r"(检测|检查|探测|统计|数一下|编译|构建|运行|执行|安装|部署|跑一下|跑个|"
+    r"写个脚本|写一个脚本|批量|文件数量|多少个文件|源码文件|环境是否|是否符合)")
+
 # 自由对话 LLM 调用 token 预算：思考型模型(reasoning_content)会先消耗大量 token 再输出正文，
 # 预算过小会在推理阶段耗尽(finish_reason=length、content 为空)。
 # 默认传 None 由主后端按 model_configs.max_tokens(设置中可配，如 32000)；也可经 KB 侧 `llm.maxTokens` 覆盖。
@@ -319,14 +324,21 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
                                 skill_scenarios=[str(s) for s in skill_scenarios],
                                 model_id=eff_model or model_id or "")
-    # v2 统一会话编排契约: coding subagent 以 task.propose 任务卡发起(轻门禁)
+    # v2 统一会话编排契约: 通用 agent 模式——能力分界 + 路由
     msgs.insert(1, {"role": "system", "content":
-        "【工作模式】你是 architect 外循环, coding subagent(cline/opencode/codex)是"
-        "可调度的实施执行器。方案成熟或用户要求实施时, 调用 task.propose 创建任务卡"
-        "(title + instruction 写实质内容: 目标/方案要点/边界/验收; 工作环境与 DoD 由"
-        "系统注入不必重复), 用户确认后开始执行。执行期间 subagent 的提问/进展/完成"
-        "会以消息进入本会话, 用户直接回复即转达。不要调用 req.propose/req.finalize/"
-        "req.amend(已退役)。"})
+        "【工作模式(通用 agent 路由)】你是 architect 外循环(编排者)。可调度资源: "
+        "A. 你自己(知识/分析面): KB 架构资产检索、需求澄清与方案设计、数据资产、"
+        "图/命名/契约/验收等结构化分析。 "
+        "B. coding subagent(cline/opencode/codex, 通用执行 agent): 完整的 shell/文件/"
+        "读写代码/编译运行能力——代码实现、环境检测、编译构建、文件统计/批量处理、"
+        "跑命令、写脚本、任何需要直接对源码或环境动手的通用任务, 一律交给他, "
+        "调用 task.propose 创建任务卡(title + instruction 写实质内容: 目标/方案要点/"
+        "边界/验收; 工作环境与 DoD 系统注入不必重复), 用户确认后执行。 "
+        "路由原则: 用户的问题不需要本项目知识库就能动手的(如「检测编译环境」"
+        "「统计文件数」「跑个脚本」)→ task.propose, 不要用 KB 检索话术推给用户; "
+        "需要项目上下文/架构语义的 → 你自己分析。 "
+        "执行期间 subagent 的提问/进展/完成会以消息进入本会话, 用户直接回复即转达。"
+        "不要调用 req.propose/req.finalize/req.amend(已退役)。"})
     if assign_contract:
         msgs.insert(1, {"role": "system", "content": assign_contract})
     # ── 规约草稿延续: 会话有未落库草稿(上轮草稿卡提取) → 注入下轮上下文,
@@ -523,6 +535,57 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 围栏代落库失败: %s", e)
+
+    # ── v2 任务载荷围栏代落: 模型把 task.propose 载荷写成 ```json 围栏(不发
+    #    工具块, cv-150 实证) → 服务端解析代为落卡(轻门禁, 用户确认后执行)。
+    #    与防编造守卫协同: 代落后 claim 的佐证工具成立 → 不出拦截卡。 ──
+    task_fence = req_agent.extract_task_fence(final_content)
+    if task_fence and "task.propose" not in tools_used:
+        logger.info("[kb-chat] 任务载荷围栏命中, 服务端代落卡 conv=%s", conv_id)
+        try:
+            res = await _run_tool_with_progress(
+                websocket, request_id, "task.propose", task_fence, root, project,
+                model_id=eff_model)
+            tools_used.add("task.propose")
+            ok = bool(res.get("ok"))
+            if not ok:
+                tool_errors["task.propose"] = str(res.get("text", ""))[:200]
+            notice = (f"\n\n📋 已从上文载荷自动创建**任务卡**（待确认）：{str(res.get('text', ''))[:160]}"
+                      if ok else
+                      f"\n\n⚠️ 任务卡自动创建失败：{str(res.get('text', ''))[:160]}")
+            final_content += notice
+            await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[kb-chat] 任务围栏代落失败: %s", e)
+
+    # ── v2 通用任务路由守卫: 用户指令是通用执行类 + architect 答复是「无法直接/
+    #    需检索」推诿话术且未发起任务 → 纠偏一轮(交 coding subagent) ──
+    try:
+        _generic_user = _GENERIC_EXEC_RE.search(question or "")
+        _deflect = bool(_generic_user) and not tools_used and (
+            re.search(r"无法直接|无法凭|不能直接|无法给出|需要先(调用|检索|查询)",
+                      final_content or ""))
+        if _deflect and "task.propose" not in tools_used:
+            logger.info("[kb-chat] 通用任务路由守卫触发 conv=%s q=%.60s", conv_id, question)
+            msgs.append({"role": "assistant", "content": (final_content or "")[:2000]})
+            msgs.append({"role": "user", "content": (
+                "[系统路由] 用户的问题是可直接执行的通用任务(如环境检测/文件统计/编译/"
+                "脚本), 不需要本项目知识库。你没有 shell 与文件能力, 但 coding subagent 有——"
+                "请立即输出 task.propose 工具调用块把该任务交给 subagent, "
+                '格式: [TOOL_CALL]{"tool":"task.propose","arguments":'
+                '{"title":"…","instruction":"…"}}[/TOOL_CALL]; '
+                "除工具块外只输出一句转述。不要再用「需要检索/无法直接」回答通用任务。")})
+            corr = await _sync_with_tools(websocket, msgs, root, project, eff_model,
+                                          max_rounds=3, tools_used=tools_used)
+            corr = req_agent.strip_tool_blocks(corr or "")
+            if corr:
+                for i in range(0, len(corr), 24):
+                    d = corr[i:i + 24]
+                    visible += d
+                    await send_ev({"type": "chunk", "requestId": request_id, "delta": d})
+                final_content = visible
+    except Exception as _ge:  # noqa: BLE001
+        logger.warning("[kb-chat] 通用路由守卫异常: %s", _ge)
 
     # ── 意图未执行守卫: 宣布要调工具却收尾悬置 → 追问一轮 ──
     # 零工具回合: 任意意图短语即追问; 有工具回合: 最终答案段(assistant_text,

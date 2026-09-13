@@ -475,3 +475,79 @@ def test_delete_session_cascades_tasks(tmp_path, monkeypatch):
     res = S._delete_session_cascade(conv["id"])
     assert res >= 1
     assert store.TasksStore.of_conv(conv["id"]) == []
+
+
+# ══════════════════════════════════════════════════════════════════
+# v2 P0 补丁: 任务围栏代落/通用路由/执行器设定(cv-147~150 实证)
+# ══════════════════════════════════════════════════════════════════
+
+def test_extract_task_fence_forms():
+    """任务载荷提取: ```task 围栏 / ```json 任务形态认领; 图 IR 排除(cv-147)。"""
+    from topoone_app_architect.arch_routes.req_agent import extract_task_fence
+    # 显式 task 围栏
+    t = extract_task_fence('前置说明\n```task\n{"title": "T", "instruction": "实现 X"}\n```')
+    assert t and t["title"] == "T" and "实现 X" in t["instruction"]
+    # ```json 规约形态(cv-150[3] 实证): title+requirementMd/designMd/acceptance → 拼装
+    t2 = extract_task_fence(
+        '我将调用 task.propose:\n```json\n{"title": "Lua Hello", "requirementMd": "访问 /hello",'
+        '"designMd": "content_by_lua_block", "acceptance": ["curl 返回 Hello World"]}\n```')
+    assert t2 and t2["title"] == "Lua Hello"
+    assert "访问 /hello" in t2["instruction"] and "content_by_lua_block" in t2["instruction"]
+    assert "curl 返回" in t2["instruction"]
+    # 图 IR 不认领(cv-147: version+type+nodes)
+    g = extract_task_fence('```json\n{"version": 1, "type": "component", "title": "图", '
+                           '"nodes": [{"id": "a"}]}\n```')
+    assert g is None
+    # 无 title / 无实质字段 → None
+    assert extract_task_fence('```json\n{"foo": 1}\n```') is None
+    assert extract_task_fence('正文无围栏') is None
+
+
+def test_fabricated_claim_task_domain():
+    """编造检测: 任务创建/执行进度声明无 task.propose 佐证 → 拦; 有佐证 → 放行。"""
+    from topoone_app_architect.arch_routes.req_agent import fabricated_claim
+    c1, n1 = fabricated_claim("任务已正式创建并开始执行。当前状态: 任务卡 [MVP]", set())
+    assert c1 and "任务" in c1 and "task.propose" in n1
+    c2, _ = fabricated_claim("#### Phase 1: 环境探测与依赖检查 正在检查构建环境", set())
+    assert c2
+    ok_c, ok_n = fabricated_claim("任务已创建", {"task.propose"})
+    assert not ok_c
+
+
+def test_task_set_executor_and_confirm_override(tmp_path, monkeypatch):
+    """执行器设定: 待确认可换(cline); 非待确认拒换。"""
+    conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
+    task = eb.propose_task(conv, "E", "e")
+    t = eb.task_set_executor(task["id"], "cline")
+    assert t and t["executorType"] == "cline"
+    assert eb.confirm_task(task["id"])["ok"]
+    # 执行器下发: task.executorType=cline 经 confirm 传 runner(空注册表无 executorId,
+    # payload 仍带 executorType; hint 路径由注册表测试覆盖)
+    _impl = [pl for p_, pl in calls["implement"] if p_ == "/api/implement"][0]
+    assert _impl.get("executorType") == "cline"
+    assert eb.task_set_executor(task["id"], "opencode") is None  # running 不可换
+
+
+def test_guard_repair_creates_task(tmp_path, monkeypatch):
+    """守卫修复(任务域): 正文无 JSON 也能从 markdown 兜底提取 → 创建真实任务卡。"""
+    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import sessions as S
+    from topoone_app_architect.arch_routes import ctx as _ctx
+    _ctx.set_conv(conv["id"])
+    content = ("收到, 任务已正式创建并开始执行。\n\n# MVP: Lua Hello World\n\n"
+               "## 需求\n访问 /hello 返回 Hello World\n\n## 方案\ncontent_by_lua_block\n\n"
+               "## 验收\ncurl 通过\n" + "细节" * 30)
+    res = S._guard_repair_core(conv["id"], "已创建/启动任务", "task.propose", content)
+    assert res.get("ok") and res.get("action") == "task_proposed"
+    ts = store.TasksStore.of_conv(conv["id"])
+    assert ts and ts[-1]["status"] == "pending_confirm"
+    assert "Hello World" in (ts[-1]["title"] + ts[-1]["instruction"])
+
+
+def test_generic_exec_routing_regex():
+    """通用任务路由正则: cv-148/149 实证指令命中; 知识型问题不误命中最小集。"""
+    from topoone_app_architect.arch_routes.websocket import _GENERIC_EXEC_RE
+    assert _GENERIC_EXEC_RE.search("检测当前源码环境 是否符合编译条件")
+    assert _GENERIC_EXEC_RE.search("当前项目的源码文件数量是多少")
+    assert _GENERIC_EXEC_RE.search("写个脚本统计代码行数")
+    assert not _GENERIC_EXEC_RE.search("这个项目的架构设计思路是什么")
