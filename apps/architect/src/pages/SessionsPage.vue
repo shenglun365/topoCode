@@ -4,7 +4,7 @@
  * 组织维度: 时间/模块/自定义分组(元数据)；流程视图=过滤器。
  * 详情: 摘要/备案文档/关联执行；对话本体在全局会话栏(ConversationDock)。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -103,6 +103,14 @@ onMounted(async () => {
   // 深链 ?select=<convId|reqId>（兼容旧需求深链）→ 直接在对话栏打开
   const sel = typeof route.query.select === 'string' ? route.query.select : ''
   if (sel) {
+    const meta = list.value.find((c) => c.id === sel || (sel.startsWith('RQ-') && c.reqId === sel))
+    if (meta) openInDock(meta)
+  }
+})
+
+// 同页深链变化(信息流卡片「前往任务管理」等) → 重新定位会话
+watch(() => route.query.select, (sel) => {
+  if (typeof sel === 'string' && sel) {
     const meta = list.value.find((c) => c.id === sel || (sel.startsWith('RQ-') && c.reqId === sel))
     if (meta) openInDock(meta)
   }

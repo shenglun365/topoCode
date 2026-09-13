@@ -230,6 +230,14 @@ def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = No
         store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
     except Exception:  # noqa: BLE001
         pass
+    # 实时推送: 主会话前端(dock/SSE)收到后刷新信息流——coding 子会话事件
+    # 双落到主会话的消息无需手动刷新即见。
+    try:
+        from . import ws_events
+        ws_events.publish({"type": "conv-message", "conversationId": conv_id,
+                           "msgId": payload["id"], "kind": (msg_meta or {}).get("kind", "")})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ── 边界/验收简报 ──

@@ -215,23 +215,30 @@ async def mark_requirement_done(req_id: str, request: Request):
 
 @router.post("/requirements/{req_id}/finalize")
 async def finalize_requirement(req_id: str):
-    """规约确认(REST 入口): active draft → confirmed/ready。门禁与 superseded 收口同工具路径。"""
-    res = store.RequirementsStore.spec_confirm(req_id)
+    """规约确认(REST 入口): 统一走 req.finalize 工具路径(结构门禁 + already 幂等)。
+
+    cv-140 教训: 直连 spec_confirm 会绕过 designMd 门禁, 空规约入 ready →
+    执行作业空转。REST/指令/自然语言三入口必须同一条门禁。
+    """
+    import asyncio as _aio
+    from .req_agent import tool_req_finalize
+    res = await _aio.to_thread(tool_req_finalize, req_id, None, None)
     if not res.get("ok"):
         return err(400, res.get("error") or "确认失败")
     row = store.RequirementsStore.get(req_id)
-    # 统一时间线: 按钮确认也回写来源会话
-    try:
-        origin_id = row.get("sourceConversationId") or ""
-        if origin_id and store.ConversationsStore.get(origin_id):
-            store.ConversationsStore.append_message({
-                "id": store.next_id("m"), "conversationId": origin_id,
-                "role": "assistant", "time": _ts(),
-                "content": f"✅ **`{req_id}` v{row.get('activeVer')} 规约已确认**（ready，会话内「执行方案」进入执行）",
-                "projectId": row.get("ownerConv") and "" or "",
-            })
-    except Exception:  # noqa: BLE001
-        pass
+    # 统一时间线: 按钮确认也回写来源会话(重复确认幂等, 不重复刷)
+    if not res.get("already"):
+        try:
+            origin_id = row.get("sourceConversationId") or ""
+            if origin_id and store.ConversationsStore.get(origin_id):
+                store.ConversationsStore.append_message({
+                    "id": store.next_id("m"), "conversationId": origin_id,
+                    "role": "assistant", "time": _ts(),
+                    "content": f"✅ **`{req_id}` v{row.get('activeVer')} 规约已确认**（ready，`/执行` 启动实施作业）",
+                    "projectId": row.get("ownerConv") and "" or "",
+                })
+        except Exception:  # noqa: BLE001
+            pass
     return ok(row)
 
 

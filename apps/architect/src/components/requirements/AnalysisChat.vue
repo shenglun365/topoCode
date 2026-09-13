@@ -421,8 +421,10 @@ async function confirmProposal(m: KbAnalysisTurn) {
     } else {
       showToast(t('assetChat.extractPlan.confirmFailed'))
     }
-  } catch {
-    showToast(t('assetChat.extractPlan.confirmFailed'))
+  } catch (e: any) {
+    // 透出门禁原因(如"方案为空, 请 /调整 补全")而非笼统失败
+    const msg = e?.response?.data?.message || e?.message || ''
+    showToast(msg ? `${t('assetChat.extractPlan.confirmFailed')}：${String(msg).slice(0, 120)}` : t('assetChat.extractPlan.confirmFailed'))
   } finally {
     confirmingProposalId.value = ''
   }

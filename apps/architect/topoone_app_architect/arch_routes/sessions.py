@@ -13,9 +13,11 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 
 from .common import _ts, ok, err
 from . import store
+from . import ws_events
 
 router = APIRouter()
 
@@ -69,6 +71,33 @@ def _user_groups() -> list:
     except (TypeError, ValueError):
         vals = []
     return [str(x) for x in vals if str(x).strip()] if isinstance(vals, list) else []
+
+
+@router.get("/events")
+async def sse_events(request: Request):
+    """会话事件流(SSE): job 消息等后端异步写入实时通知前端刷新信息流。
+
+    事件形如 {"type":"conv-message","conversationId":...}; 前端按会话过滤后
+    重拉消息(满队列/断线由重连+重拉兜底)。启动时首帧绑事件循环(线程安全发布)。
+    """
+    ws_events.bind_loop()
+    q = ws_events.subscribe()
+
+    async def gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            ws_events.unsubscribe(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.get("/sessions")

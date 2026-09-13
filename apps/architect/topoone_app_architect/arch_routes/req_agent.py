@@ -1773,14 +1773,23 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
             _store.ConversationsStore.update(conv_id, {"reqId": req["id"]})
         except Exception as e:  # noqa: BLE001
             logger.warning("[req.propose] conv.reqId 回写失败 conv=%s: %s", conv_id, e)
+    # 方案缺失标注: designMd 空时在回执与事件流如实提示(定稿门禁会拦, 提前引导 /调整)
+    no_design = not str(designMd or "").strip()
+    receipt = (f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
+               "用户「执行方案」→ 预览确认后进入执行）")
+    if no_design:
+        receipt = (f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
+                   "**⚠️ 未包含实现方案(designMd 为空)**——`/定稿` 门禁会要求补全, "
+                   "建议直接 `/调整` 描述方案要点)")
     try:
-        log_conv_event(conv_id,
-                       f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
-                       "用户「执行方案」→ 预览确认后进入执行）")
+        log_conv_event(conv_id, receipt)
     except Exception:  # noqa: BLE001
         pass
+    hint = "新需求规约已创建(draft v1)"
+    if no_design:
+        hint += "(⚠️ 方案缺失, 建议 /调整 补全后再 /定稿)"
     return {"ok": True, "requirementId": req["id"], "ver": 1, "updated": False,
-            "title": title, "hint": "新需求规约已创建(draft v1)"}
+            "title": title, "noDesign": no_design, "hint": hint}
 
 
 @register_architect_tool(
@@ -1806,8 +1815,17 @@ def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
     if not active:
         return {"ok": False, "error": "无生效规约版本"}
     if active.get("state") == "confirmed":
+        snap0 = active.get("snapshot") or {}
+        has_d = bool(str(snap0.get("designMd") or "").strip())
+        has_r = bool(str(snap0.get("desc") or row.get("desc") or "").strip())
+        if not has_d and not has_r:
+            return {"ok": False, "error": "规约确认门禁未过——当前已确认版本既无方案(designMd)"
+                    "也无需求正文, 执行作业只会空转。请 `/调整` 补充内容落新版本后重新 `/定稿`。"}
+        if not has_d:
+            return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "already": True,
+                    "hint": "当前版本已确认(ready，将按需求正文执行)；建议 `/调整` 细化方案后重启作业。可直接 `/执行`"}
         return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "already": True,
-                "hint": "当前版本已确认(ready)，可直接 `/执行`"}
+                "hint": "当前版本已确认(ready)，可直接 `/执行` 启动作业"}
     snap = active.get("snapshot") or {}
     # 结构门禁(放宽裁决): designMd 非空即可放行; 其余缺失只提示不拦截
     if not (snap.get("designMd") or "").strip():
@@ -1831,7 +1849,7 @@ def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
         pass
     return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "status": "ready",
             "boundaryFiles": sorted(scope_files), "warns": warns,
-            "hint": "规约已确认(ready)；发送 `/执行` 预览并 `/确认执行` 启动作业" + warn_note}
+            "hint": "规约已确认(ready)；发送 `/执行` 启动实施作业" + warn_note}
 
 
 @register_architect_tool(

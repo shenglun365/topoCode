@@ -75,46 +75,68 @@ def _patch_bridge(monkeypatch, tmp_path):
     return started
 
 
-# ── 两段式确认(specVer 锚定) ─────────────────────────────────────────
+# ── 一步启动(P3: 定稿即确认, specVer 锚定 active 版本) ───────────────
 
-def test_two_stage_confirm_binds_spec_ver(tmp_path, monkeypatch):
+def test_one_step_exec_binds_spec_ver(tmp_path, monkeypatch):
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import websocket as ws
     started = _patch_bridge(monkeypatch, tmp_path)
 
-    # ① 执行方案 → 预览(不建作业); pending 锚定 specVer
+    # ① /执行 → 直接建作业(指令含方案, 锚定 v1); 无预览无二次确认
     out1 = asyncio.run(ws._executor_implement(conv, None))
-    assert "执行预览" in out1 and "确认执行" in out1 and "v1" in out1
-    assert not started
-    pending = store.ConversationsStore.get(conv["id"])["meta"]["execPending"]
-    assert pending["specVer"] == 1
-
-    # ② 确认执行 → 建作业(带 specVer)
-    out2 = asyncio.run(ws._executor_implement(conv, None, confirmed=True))
     assert started and started["spec_ver"] == 1 and "方案甲" in started["instruction"]
-    assert "已启动" in out2
-    meta = store.ConversationsStore.get(conv["id"])["meta"]
-    assert not meta.get("execPending")
+    assert "已启动" in out1
 
-    # ②b 再生成一份 v1 预览(供 ④ 验证失效刷新)
-    asyncio.run(ws._executor_implement(conv, None))
-
-    # ③ 规约修订 → 新 draft 版本; 未重新确认前执行被门禁拦截
+    # ② 规约修订 → 新 draft; 未重新确认前执行被拦
+    started.clear()
     req_agent.run_arch_tool("req.amend", {"reqId": rid, "designMd": "方案乙",
                                           "reasoning": "验收意见"}, root=None, project=None)
-    blocked = asyncio.run(ws._executor_implement(conv, None))
-    assert "尚未确认" in blocked
-    # ④ 重新确认 → v2 ready; 旧预览(v1)确认 → 拒绝并按 v2 刷新; 再确认 → 按 v2 启动
+    blocked = asyncio.run(ws._executor_implement(
+        store.ConversationsStore.get(conv["id"]), None))
+    assert not started and "尚未确认" in blocked
+
+    # ③ 重新确认(v2) → /执行 → 按 v2 启动(方案乙)
     req_agent.run_arch_tool("req.finalize", {"reqId": rid}, root=None, project=None)
-    started.clear()
-    conv2 = store.ConversationsStore.get(conv["id"])
-    out3 = asyncio.run(ws._executor_implement(conv2, None, confirmed=True))
-    assert not started and "已按最新版本刷新" in out3      # v1 预览失效(specVer 不匹配)
-    asyncio.run(ws._executor_implement(conv2, None))        # 预览 v2
-    started.clear()
-    out4 = asyncio.run(ws._executor_implement(
-        store.ConversationsStore.get(conv["id"]), None, confirmed=True))
+    out3 = asyncio.run(ws._executor_implement(
+        store.ConversationsStore.get(conv["id"]), None))
     assert started and started["spec_ver"] == 2 and "方案乙" in started["instruction"]
+
+
+def test_empty_spec_blocks_execution(tmp_path, monkeypatch):
+    """空规约(无方案无需求正文)执行被拦——防空指令作业把 coding agent 打成
+    NEED_INPUT 空转(cv-140 教训)。模拟历史绕门禁数据(直接 spec_confirm)。"""
+    _setup(tmp_path, monkeypatch)
+    res = req_agent.run_arch_tool(
+        "req.propose", {"title": "T-空规约"}, root=None, project=None)
+    assert res.get("ok"), res
+    rid = res["requirementId"]
+    store.RequirementsStore.spec_confirm(rid)   # 模拟历史已 confirm 的空规约
+    from topoone_app_architect.arch_routes import websocket as ws
+    conv = store.ConversationsStore.create({"kind": "requirement", "title": "T", "reqId": rid})
+    started = _patch_bridge(monkeypatch, tmp_path)
+    out = asyncio.run(ws._executor_implement(
+        store.ConversationsStore.get(conv["id"]), None))
+    assert not started, "空规约不得启动作业"
+    assert "无实质内容" in out and "/调整" in out
+
+
+def test_resume_circuit_breaker(tmp_path, monkeypatch):
+    """NEED_INPUT 空转熔断: /继续 无实质补充连续 3 次 → 自动停止作业。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import websocket as ws, exec_bridge as eb
+    stops = []
+    monkeypatch.setattr(eb, "stop",
+                        lambda cid, reason="": stops.append(cid) or "stopped")
+    eb._job_upsert(conv["id"], {"jobId": "impl-x", "status": "waiting_input",
+                                "lastAgentTs": 9 ** 12})   # cut 在未来 → 恒无增量
+    row = lambda: store.ConversationsStore.get(conv["id"])  # noqa: E731
+    out1 = asyncio.run(ws._exec_resume_turn(row()))
+    assert "1/3" in out1 and not stops
+    out2 = asyncio.run(ws._exec_resume_turn(row()))
+    assert "2/3" in out2 and not stops
+    out3 = asyncio.run(ws._exec_resume_turn(row()))
+    assert stops == [conv["id"]], "第 3 次空转应自动停止作业"
+    assert "已自动停止" in out3
 
 
 def test_draft_spec_blocks_execution(tmp_path, monkeypatch):
@@ -513,10 +535,10 @@ def test_start_implement_injects_history_when_no_sessionref(tmp_path, monkeypatc
 
     async def _run():
         return await ws._executor_implement(
-            store.ConversationsStore.get(conv["id"]), None, confirmed=True)
+            store.ConversationsStore.get(conv["id"]), None)
 
     # ① 无 sessionRef → 代持注入
-    asyncio.run(_executor_preview_reset(conv))
+    _clear_exec_pending(conv)
     out = asyncio.run(_run())
     assert "作业已启动" in out
     assert "会话历史简报" in captured["payload"]["instruction"]
@@ -527,19 +549,19 @@ def test_start_implement_injects_history_when_no_sessionref(tmp_path, monkeypatc
     exec_bridge._job_upsert(conv["id"], {"jobId": "impl-h", "status": "done",
                                           "endedAt": 1})
     store.ConversationsStore.update(sub["id"], {"sessionRef": "ses-old"})
-    asyncio.run(_executor_preview_reset(conv))
+    _clear_exec_pending(conv)
     out2 = asyncio.run(_run())
     assert captured["payload"].get("sessionRef") == "ses-old"
     assert "会话历史简报" not in captured["payload"]["instruction"]
 
 
-async def _executor_preview_reset(conv):
-    """清旧预览并重新生成(confirmed 需要有效 pending 才真正建作业)。"""
-    from topoone_app_architect.arch_routes import exec_bridge, websocket as _ws
+def _clear_exec_pending(conv):
+    """清历史两段式残留的 execPending(一步启动后仅作兼容清理)。"""
+    from topoone_app_architect.arch_routes import exec_bridge
     meta = exec_bridge._meta_dict_of(store.ConversationsStore.get(conv["id"]))
-    meta.pop("execPending", None)
-    store.ConversationsStore.update(conv["id"], {"meta": meta})
-    await _ws._executor_implement(store.ConversationsStore.get(conv["id"]), None)
+    if meta.get("execPending"):
+        meta.pop("execPending", None)
+        store.ConversationsStore.update(conv["id"], {"meta": meta})
 
 
 def test_start_implement_passes_turn_timeouts(tmp_path, monkeypatch):
@@ -564,9 +586,9 @@ def test_start_implement_passes_turn_timeouts(tmp_path, monkeypatch):
     monkeypatch.setattr(ws, "_executor_hint", lambda c: hint)
 
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
-    asyncio.run(_executor_preview_reset(conv))
+    _clear_exec_pending(conv)
     out = asyncio.run(ws._executor_implement(
-        store.ConversationsStore.get(conv["id"]), None, confirmed=True))
+        store.ConversationsStore.get(conv["id"]), None))
     assert "作业已启动" in out
     assert captured["payload"]["turnTimeout"] == 1200.0
     assert captured["payload"]["stallSec"] == 240.0
@@ -703,9 +725,9 @@ def test_running_job_model_frozen(tmp_path, monkeypatch):
     monkeypatch.setattr("topoone_app_architect.arch_routes.execution.conv_root_project",
                         lambda conv: (str(tmp_path), "proj-t"))
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
-    asyncio.run(_executor_preview_reset(conv))
+    _clear_exec_pending(conv)
     asyncio.run(ws._executor_implement(
-        store.ConversationsStore.get(conv["id"]), None, confirmed=True))
+        store.ConversationsStore.get(conv["id"]), None))
     assert captured["payload"]["model"] == "m-a"
     # 会话切模型后, 既有作业 payload 不变(payload 已提交固化); 仅下次执行变化
     monkeypatch.setattr(ws, "_executor_hint",

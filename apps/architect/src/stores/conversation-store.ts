@@ -174,7 +174,9 @@ export const useConversationStore = defineStore('archConversation', () => {
         const proposal = {
           id: r.id, title: r.title, desc: r.desc || '', priority: r.priority || 'P1',
           analysis: r.analysis || {},
-          confirmed: (r.location ?? 'proposal') === 'pool' && r.status === 'analyzed',
+          // 确认态: 新生命周期 ready/done 即已存入; 兼容旧 analyzed(池化)
+          confirmed: ['ready', 'done'].includes(r.status)
+            || ((r.location ?? 'proposal') === 'pool' && r.status === 'analyzed'),
         }
         // 挂到内容中提到该 RQ 编号的最后一条助手消息; 没提到则兜底最后一条空位助手消息
         let target = -1
@@ -318,6 +320,20 @@ export const useConversationStore = defineStore('archConversation', () => {
     } catch { /* 列表刷新失败不影响对话 */ }
   }
 
+  /**
+   * 重拉当前会话消息(SSE conv-message 事件触发——coding 子会话事件双落到
+   * 主会话的消息无需手动刷新即见)。流式回合进行中(busy)不刷, 避免打断渲染。
+   */
+  async function refreshActiveMessages() {
+    if (!activeId.value || busy.value) return
+    try {
+      const detail = await sessionService.messages(activeId.value)
+      if (activeId.value && !busy.value) {
+        applyConversation({ ...detail, reqId: activeReqId.value, title: activeTitle.value } as any)
+      }
+    } catch { /* 重拉失败保持现状 */ }
+  }
+
   return {
     dockOpen, setDockOpen, toggleDock,
     scope, setScope,
@@ -327,6 +343,6 @@ export const useConversationStore = defineStore('archConversation', () => {
     busyLabel, toolTrail,
     registerChatHook,
     openConversation, newConversation, applyConversation, dropConversation,
-    send, sendAnswers, deleteTurn, stop, refreshActiveMeta, pushLocalHint,
+    send, sendAnswers, deleteTurn, stop, refreshActiveMeta, refreshActiveMessages, pushLocalHint,
   }
 })

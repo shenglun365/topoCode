@@ -16,7 +16,7 @@ import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { namingService } from '@/services/naming-service'
-import { apiGet, apiPost } from '@/services/api-client'
+import { apiBaseUrl, apiGet, apiPost } from '@/services/api-client'
 
 const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
@@ -116,13 +116,47 @@ onMounted(() => {
   // 会话被删除(左侧列表) → 当前对话区若是该会话则清空(左右联动)
   window.addEventListener('arch:conversation-removed', onConversationRemoved)
   syncTimer = setInterval(() => void pollRunningState(), 5000)
+  connectConvEvents()
 })
 onUnmounted(() => {
   if (syncTimer) clearInterval(syncTimer)
   window.removeEventListener('arch:sessions-changed', onSessionsChanged)
   window.removeEventListener('arch:conversation-removed', onConversationRemoved)
+  disconnectConvEvents()
 })
 function onSessionsChanged() { void loadRecent() }
+
+/** ── 会话事件流(SSE): coding 作业消息(job_input/进度/完成)双落主会话 → 实时刷新信息流 ── */
+let evtSource: EventSource | null = null
+let evtReconnect: ReturnType<typeof setTimeout> | null = null
+let refreshPending: ReturnType<typeof setTimeout> | null = null
+function connectConvEvents() {
+  try {
+    evtSource = new EventSource(`${apiBaseUrl()}/events`)
+    evtSource.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data)
+        if (d?.type === 'conv-message' && d.conversationId && d.conversationId === conv.activeId) {
+          // 防抖: 短时多条事件(如双落消息)合并一次重拉
+          if (refreshPending) clearTimeout(refreshPending)
+          refreshPending = setTimeout(() => {
+            refreshPending = null
+            void conv.refreshActiveMessages()
+          }, 400)
+        }
+      } catch { /* 非事件帧忽略 */ }
+    }
+    evtSource.onerror = () => {
+      disconnectConvEvents()
+      evtReconnect = setTimeout(connectConvEvents, 5000)
+    }
+  } catch { /* SSE 不可用(离线) → 退化为手动刷新 */ }
+}
+function disconnectConvEvents() {
+  evtSource?.close()
+  evtSource = null
+  if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
+}
 function onConversationRemoved(e: Event) {
   const id = (e as CustomEvent).detail as string
   if (id) conv.dropConversation(id)
@@ -138,9 +172,11 @@ function newChat() {
   conv.newConversation()
   void loadRecent()
 }
-function onGotoRequirements() {
-  // 提案卡 → 会话中心定位该会话(备案文档/执行详情)
-  router.push({ path: '/workbench/sessions', query: { select: conv.activeId || undefined } })
+function onGotoRequirements(reqId?: string) {
+  // 提案卡 → 会话中心定位(需求深链优先——按 reqId 匹配会话; 兜底当前会话)。
+  // 同页 query 变化由 SessionsPage watch 响应(选中并打开对话栏)。
+  const select = reqId || conv.activeId || undefined
+  router.push({ path: '/workbench/sessions', query: select ? { select } : undefined })
 }
 function onSent() { void loadRecent() }
 

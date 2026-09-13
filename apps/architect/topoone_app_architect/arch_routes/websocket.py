@@ -15,8 +15,7 @@ from . import exec_bridge
 # 触达=确切符号「/指令」(杜绝语义模糊); 引导=消息流指令 chip 点击填入对话框。
 # 模型不代发指令、不响应指令语义; 每个符号绑定一个确定性后端动作。
 SESSION_CMDS: Dict[str, str] = {
-    "执行": "预览执行方案(按当前规约版本)",
-    "确认执行": "按预览启动执行作业",
+    "执行": "启动执行作业(一步到位, 按当前定稿规约)",
     "定稿": "确认当前规约版本(结构门禁校验后 ready)",
     "继续": "把补充信息转达给等待中的作业",
     "diff": "查看最近作业改动差异",
@@ -60,7 +59,7 @@ async def _deliver_coding_turn(conv: dict, text: str) -> str:
                 "回合期间可继续以 architect 身份讨论，或等待 agent 下一次提问。")
     err = str(res.get("error") or "")
     if err == "no-active-job":
-        return ("没有活跃的 coding 作业。发送 `/执行` 预览并 `/确认执行` 启动作业后，"
+        return ("没有活跃的 coding 作业。发送 `/执行` 启动作业后，"
                 "再把补充内容发给 coding 角色。")
     return f"❌ 转达失败：{err or 'runner 不可达'}。可稍后重试。"
 
@@ -98,7 +97,7 @@ async def _cmd_finalize_turn(conv: dict) -> str:
         if res.get("already"):   # 重复定稿(当前版本已 confirmed)
             return f"✅ {res.get('hint')}"
         return (f"✅ **规约已确认**：`{res.get('reqId')}` v{res.get('ver')}"
-                f"（ready，可执行）\n下一步：发送 `/执行` 预览执行方案。")
+                f"（ready，可执行）\n下一步：发送 `/执行` 启动实施作业。")
     err = str(res.get("error") or "未知原因")
     if "designMd" in err or "结构不完整" in err:
         # 确定性补救: 最近 assistant 消息里的规约载荷 → amend 后重试定稿
@@ -119,7 +118,7 @@ async def _cmd_finalize_turn(conv: dict) -> str:
                         if res2.get("ok"):
                             return (f"✅ **规约已确认**：`{res2.get('reqId')}` "
                                     f"v{res2.get('ver')}`（已从消息中的规约载荷补全并确认，"
-                                    "ready，可执行）\n下一步：发送 `/执行` 预览执行方案。")
+                                    "ready，可执行）\n下一步：发送 `/执行` 启动实施作业。")
                     break
         except Exception:  # noqa: BLE001
             pass
@@ -366,7 +365,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     # 其余(含缺省) → architect 自由对话。running 不再锁定输入。
     target_role = str(data.get("targetRole") or "").strip()
     # ---- 会话指令符号分发(确定性, 无语义判断) ----
-    #   /执行 → 执行预览; /确认执行 → 建作业; /定稿 → 规约确认(系统直通)
+    #   /执行 → 一步启动作业(定稿即确认, 质量由定稿门禁保证); /定稿 → 规约确认(系统直通)
     #   /继续 → 增量回合; /diff → 作业差异; /调整 → req.amend 契约 + 主流程
     #   停止作业: 仅 UI 按钮(REST 确定操作), 无对话通道
     question = (user_msgs[-1].get("content", "") if user_msgs else "").strip()
@@ -378,7 +377,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         final_b = ("当前是 coding 子会话（由主会话的作业管理）。\n"
                    "- 补充执行工程师的提问：直接发送（coding 收件人）或 `/继续`\n"
                    "- 启动/重开作业：请到主会话操作 `/执行`")
-    elif cmd == "确认执行":
+    elif cmd in ("执行", "确认执行"):
         from . import exec_bridge as _eb
         _wj = _eb.waiting_job(conv_id)
         if _wj:
@@ -387,9 +386,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                        "- 转达补充：回复内容后发 `/继续`\n"
                        "- 或从会话信息面板**停止**该作业后再启动新作业")
         else:
-            final_b = await _executor_implement(conv, None, confirmed=True)
-    elif cmd == "执行":
-        final_b = await _executor_implement(conv, None, confirmed=False)
+            final_b = await _executor_implement(conv, None)
     elif cmd == "定稿":
         final_b = await _cmd_finalize_turn(conv)
     elif cmd == "继续":
@@ -956,6 +953,17 @@ def _build_impl_instruction(rid: str, prior_brief: str = "") -> str:
     parts = [f"# 实施任务：{r.get('title') or rid}（{rid} · 规约 v{active.get('ver') or '?'}）"]
     if prior_brief:
         parts.append("## 前情简报(上次作业)\n" + prior_brief)
+    # 方案兜底: designMd 未细化时用需求正文(requirementMd/desc)——agent 永远拿到实质任务,
+    # 不允许"只有标题+DoD"的空指令把作业打成 NEED_INPUT 空转(cv-140 教训)。
+    desc_text = str(a.get("desc") or r.get("desc") or "").strip()
+    if not (a.get("designMd") or a.get("implementationPath")):
+        if desc_text:
+            parts.append(
+                "> ⚠️ 本规约未细化实现方案(仅需求正文)。请基于以下需求描述自行设计并实施,"
+                "不确定处一次性集中提问, 不要每步暂停。\n\n## 需求描述\n" + desc_text)
+        else:
+            parts.append("> ⚠️ 本规约既无实现方案也无需求正文——若你无法从任务上下文推断目标, "
+                         "请立即 [[NEED_INPUT]] 报告\"规约为空\", 不要猜测实施。")
     if a.get("functionalScope"):
         parts.append("## 需求目标\n" + "\n".join(f"- {x}" for x in a["functionalScope"]))
     if a.get("designMd") or a.get("implementationPath"):
@@ -1031,7 +1039,7 @@ def _executor_hint(conv: Optional[dict]) -> Optional[dict]:
     return None
 
 
-_EXEC_PENDING_TTL_MS = 30 * 60 * 1000   # 执行预览有效期(超时重建)
+_EXEC_PENDING_TTL_MS = 30 * 60 * 1000   # (历史两段式遗留; 一步启动后仅作清理兼容)
 
 
 def _meta_get(conv: dict) -> dict:
@@ -1054,33 +1062,6 @@ def _spec_updated_at(rid: str) -> int:
     return int((store.RequirementsStore.get(rid) or {}).get("updatedAt") or 0)
 
 
-def _executor_preview_card(conv: dict, instruction: str, pending: dict) -> str:
-    """执行预览卡: 即将按哪个规约版本执行(方案摘要/边界/验收/分支), 待确认。"""
-    rid = (conv or {}).get("reqId") or ""
-    r = store.RequirementsStore.get(rid) or {}
-    active = store.RequirementsStore.spec_active(rid) or {}
-    snap = active.get("snapshot") or {}
-    import datetime as _dt
-    parts = [
-        "📋 **执行预览**（回复 `/确认执行` 启动作业；`/调整` 可先修订规约）",
-        f"- 需求：{r.get('title') or rid}（{rid}）",
-        f"- 规约版本：v{active.get('ver') or pending.get('specVer') or '?'}"
-        + ("（预览后规约已修订，本卡已按最新版本刷新）" if pending.get("stale") else "（最新）"),
-        f"- 分支：`{pending.get('branchName') or ''}`",
-        f"- 允许改动 {len(snap.get('allowedScope') or [])} 项 / "
-        f"禁止改动 {len(snap.get('forbiddenScope') or [])} 项 / "
-        f"验收标准 {len(snap.get('acceptance') or [])} 条",
-        "- 交付：开发 + 单元测试 + 整体编译验收；对话不锁定(收件人可切换 architect/coding)，"
-        "agent 提问/完成/报错时自动恢复对话",
-    ]
-    design = str(snap.get("designMd") or "")[:400]
-    if design:
-        parts.append(f"\n**方案摘要**：{design}…")
-    jobs = _meta_get(conv).get("jobs") or []
-    if jobs:
-        parts.append(f"\n> ℹ️ 本会话已有 {len(jobs)} 次作业记录(账本可追溯)；本次为独立新作业。")
-    return "\n".join(parts)
-
 
 def _prior_job_brief(conv: dict) -> str:
     """前情简报: 最近一条非完成作业的失败原因/实际改动/结论(重试上下文延续)。"""
@@ -1101,15 +1082,13 @@ def _prior_job_brief(conv: dict) -> str:
     return ""
 
 
-async def _executor_implement(conv: dict, role: Optional[dict], confirmed: bool = False) -> str:
-    """执行指令 → 两段式: `/执行`=预览(不建作业); `/确认执行` → 真正建作业。
+async def _executor_implement(conv: dict, role: Optional[dict]) -> str:
+    """执行指令 → 一步启动作业(P3 精简: 定稿即确认, 原「预览→/确认执行」两段式移除)。
 
-    版本绑定: 预览/确认均锚定 active 规约版本(specVer); 预览后规约修订
-    (版本号变化) → 旧预览自动失效, 确认时按最新版本刷新预览。
+    质量保障前移到定稿门禁; 此处再做指令完整性校验(需求正文+实现方案至少其一,
+    防空指令作业把 coding agent 打成 NEED_INPUT 空转——cv-140 教训)。
     """
-    import time as _time
     from . import exec_bridge
-    conv_id = (conv or {}).get("id") or ""
     rid = (conv or {}).get("reqId") or ""
     if not rid:
         return ("本会话未绑定需求规约，无法执行。请先在对话中形成需求"
@@ -1127,44 +1106,30 @@ async def _executor_implement(conv: dict, role: Optional[dict], confirmed: bool 
         return ("当前规约版本 v%s 尚未确认(draft)。请先说「确认方案」或经需求登记确认"
                 "（`/定稿` 指令经结构门禁校验后进入 ready），再 `/执行`。"
                 % active.get("ver"))
-    meta = _meta_get(store.ConversationsStore.get(conv_id) or conv)   # 现读 DB(传入行可能滞后)
-    pending = meta.get("execPending") or {}
-    spec_ver_now = int(active.get("ver") or 0)
 
-    if confirmed and not pending:
-        confirmed = False   # 无预览的「/确认执行」→ 按预览流程处理(生成预览)
-    if confirmed:
-        if _time.time() * 1000 - (pending.get("createdAt") or 0) > _EXEC_PENDING_TTL_MS:
-            pending = {}
-        if pending and pending.get("specVer") != spec_ver_now:
-            pending = {}   # 预览后规约修订 → 需重新预览
-        if not pending:
-            instruction = _build_impl_instruction(rid, prior_brief=_prior_job_brief(conv))
-            branch = f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
-            pending = {"instruction": instruction, "branchName": branch,
-                       "specVer": spec_ver_now, "createdAt": int(_time.time() * 1000)}
-            meta["execPending"] = pending
-            _meta_set(conv_id, meta)
-            return _executor_preview_card(conv, instruction, pending) + \
-                "\n\n(上一份预览已因规约修订/超时失效，已按最新版本刷新)"
+    snap = active.get("snapshot") or {}
+    has_design = bool(str(snap.get("designMd") or snap.get("implementationPath") or "").strip())
+    has_desc = bool(str(snap.get("desc") or row.get("desc") or "").strip())
+    if not has_design and not has_desc:
+        return (f"❌ **规约 v{active.get('ver')} 无实质内容**(既无实现方案也无需求正文)，"
+                "启动只会让执行工程师空转。\n请先 `/调整` 补充需求描述或实现方案，"
+                "定稿后再 `/执行`。")
+
+    # 清理历史两段式残留的预览态(如有)
+    meta = _meta_get(store.ConversationsStore.get((conv or {}).get("id") or "") or conv)
+    if meta.get("execPending"):
         meta.pop("execPending", None)
-        _meta_set(conv_id, meta)
-        return exec_bridge.start_implement(
-            conv, pending["instruction"], executor_hint=_executor_hint(conv),
-            branch_name=pending.get("branchName") or "",
-            spec_ver=spec_ver_now)
+        _meta_set((conv or {}).get("id") or "", meta)
 
-    # /执行 → 生成/刷新预览
     instruction = _build_impl_instruction(rid, prior_brief=_prior_job_brief(conv))
-    stale = bool(pending) and pending.get("specVer") != spec_ver_now
-    branch = (pending.get("branchName") if pending and not stale else "") or \
-        f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
-    pending = {"instruction": instruction, "branchName": branch,
-               "specVer": spec_ver_now, "createdAt": int(_time.time() * 1000),
-               "stale": stale}
-    meta["execPending"] = pending
-    _meta_set(conv_id, meta)
-    return _executor_preview_card(conv, instruction, pending)
+    branch = f"exec/{rid.replace('RQ-', 'rq').lower()}-{_ts() % 100000}"
+    started = exec_bridge.start_implement(
+        conv, instruction, executor_hint=_executor_hint(conv),
+        branch_name=branch, spec_ver=int(active.get("ver") or 0))
+    if not has_design:
+        started += ("\n\n> ⚠️ 本规约未细化实现方案，已按需求正文启动(执行工程师将自行设计)。"
+                    "如需先补方案：停止本作业 → `/调整` → `/定稿` → `/执行`。")
+    return started
 
 
 async def _exec_resume_turn(conv: dict) -> str:
@@ -1198,7 +1163,19 @@ async def _exec_resume_turn(conv: dict) -> str:
            if m.get("role") == "user" and (m.get("time") or 0) > cut_ts
            and (m.get("content") or "").strip()]
     if not inc:
-        return ("没有新补充的信息。请先回复执行工程师的问题，再发送 `/继续`。")
+        # 熔断(cv-140 教训): /继续 无实质补充连续 3 次 → 自动停止作业, 防 ping-pong 空转
+        strikes = int(job.get("noInputStrikes") or 0) + 1
+        if strikes >= 3:
+            await asyncio.to_thread(exec_bridge.stop, ledger_conv, "no-input")
+            return ("⛔ 连续 3 次 `/继续` 都没有实质补充——作业已自动停止(防空转)。\n"
+                    "准备好具体内容(回答执行工程师的问题/补充要求)后 `/执行` 重启作业"
+                    "(自动附前情简报)；或 `/调整` 修订规约后再执行。")
+        exec_bridge._job_upsert(ledger_conv, {"jobId": job.get("jobId", ""),
+                                              "noInputStrikes": strikes})
+        return (f"没有新补充的信息（{strikes}/3）。请先回复执行工程师的问题"
+                "（实质内容），再发送 `/继续`；连续 3 次空转将自动停止作业。")
+    exec_bridge._job_upsert(ledger_conv, {"jobId": job.get("jobId", ""),
+                                          "noInputStrikes": 0})
     payload = ("用户补充/回复(/继续)：\n\n" + "\n\n---\n\n".join(inc[:10]))
     res = await asyncio.to_thread(
         exec_bridge.job_input,
