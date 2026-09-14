@@ -15,13 +15,18 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
-_COMMAND_RE = re.compile(r"^/(定稿|执行)\s*$")
+_COMMAND_RE = re.compile(r"^(?:@(?P<executor>\S+)\s+)?/(?P<cmd>定稿|执行)\s*$")
 
 
-def match_command(question: str) -> Optional[str]:
-    """整条消息恰为指令符号时返回指令名(定稿/执行)；其余按普通消息。"""
+def match_command(question: str) -> Optional[Dict[str, str]]:
+    """整条消息恰为指令(可带 @执行器 前缀)时返回 {cmd, executor}；其余 None。
+
+    @cline /执行 → {"cmd": "执行", "executor": "cline"}(显式执行器直通建卡);
+    /定稿 → {"cmd": "定稿", "executor": ""}。"""
     m = _COMMAND_RE.match((question or "").strip())
-    return m.group(1) if m else None
+    if not m:
+        return None
+    return {"cmd": m.group("cmd"), "executor": (m.group("executor") or "").strip()}
 
 
 def run_finalize(conv: Dict[str, Any]) -> Dict[str, Any]:
@@ -31,9 +36,19 @@ def run_finalize(conv: Dict[str, Any]) -> Dict[str, Any]:
     return req_agent.tool_req_finalize((conv.get("reqId") or "").strip(), notify=False)
 
 
-def run_execute(conv: Dict[str, Any]) -> Dict[str, Any]:
-    """直通 /执行：绑定 ready 规约 → 服务端建任务卡(待用户卡片确认)。"""
+def run_execute(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
+    """直通 /执行：绑定 ready 规约 → 服务端建任务卡(待用户卡片确认)。
+
+    executor_id(@cline 前缀)显式指定执行器——查注册表, 查不到显式失败不降级。"""
     from ...arch_routes import exec_bridge, store
+    executor_id = (executor_id or "").strip()
+    hint = None
+    if executor_id:
+        hint = exec_bridge.executor_hint_by_id(executor_id, conv)
+        if not hint:
+            return {"ok": False, "receipt":
+                    f"执行器 `{executor_id}` 不在注册表中——请检查「执行器配置」"
+                    "(支持: " + ", ".join(_registered_ids()) + ")。"}
     req_id = (conv.get("reqId") or "").strip()
     if not req_id:
         return {"ok": False, "receipt":
@@ -51,8 +66,19 @@ def run_execute(conv: Dict[str, Any]) -> Dict[str, Any]:
     instruction = _instruction_from_snapshot(snap)
     if not instruction.strip():
         return {"ok": False, "receipt": "规约内容为空，无法建卡。请 `/调整` 完善后重试。"}
-    task = exec_bridge.propose_task(conv, title, instruction)
+    task = exec_bridge.propose_task(conv, title, instruction, executor_hint=hint)
+    if not task.get("id"):
+        # 无可用执行器等建卡失败: 原文显式返回(不降级不吞错)
+        return {"ok": False, "receipt": str(task.get("error") or "建卡失败")}
     return {"ok": True, "task": task}
+
+
+def _registered_ids() -> list:
+    try:
+        from ...arch_routes.agent_executors import load_executors
+        return [str(e.get("id") or "") for e in load_executors() if e.get("enabled", True)]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _instruction_from_snapshot(snap: Dict[str, Any]) -> str:

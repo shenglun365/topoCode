@@ -91,8 +91,9 @@ def _chat(ws, conv_id, content, **extra):
 # ── 指令识别 ─────────────────────────────────────────────────────────
 
 def test_match_command_strict_shape():
-    assert match_command("/定稿") == "定稿"
-    assert match_command(" /执行 ") == "执行"
+    assert match_command("/定稿") == {"cmd": "定稿", "executor": ""}
+    assert match_command(" /执行 ") == {"cmd": "执行", "executor": ""}
+    assert match_command("@cline /执行") == {"cmd": "执行", "executor": "cline"}
     assert match_command("/定稿 帮我看看") is None       # 带正文 → 普通消息
     assert match_command("/调整") is None                 # 保留经 LLM
     assert match_command("/继续") is None

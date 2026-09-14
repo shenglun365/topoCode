@@ -496,7 +496,7 @@ def test_task_tool_propose_and_retired_req(tmp_path, monkeypatch):
                                 root=None, project=None)
     assert r["ok"] and r["status"] == "pending_confirm"
     t = store.TasksStore.get(r["taskId"])
-    assert t["executorType"] == "cline"
+    assert t["executorType"] == "cline-sdk"  # 别名归一(P5)
     # 模型面 req.* 拦截(快捷挡语义引导文案)
     r2 = req_agent.run_arch_tool("req.propose", {"title": "x"}, root=None, project=None)
     assert "快捷挡" in str(r2.get("error")) and "task.propose" in str(r2.get("error"))
@@ -560,12 +560,12 @@ def test_task_set_executor_and_confirm_override(tmp_path, monkeypatch):
     conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
     task = eb.propose_task(conv, "E", "e")
     t = eb.task_set_executor(task["id"], "cline")
-    assert t and t["executorType"] == "cline"
+    assert t and t["executorType"] == "cline-sdk"  # 别名归一(P5)
     assert eb.confirm_task(task["id"])["ok"]
     # 执行器下发: task.executorType=cline 经 confirm 传 runner(空注册表无 executorId,
     # payload 仍带 executorType; hint 路径由注册表测试覆盖)
     _impl = [pl for p_, pl in calls["implement"] if p_ == "/api/implement"][0]
-    assert _impl.get("executorType") == "cline"
+    assert _impl.get("executorType") == "cline-sdk"  # 归一后下发
     assert eb.task_set_executor(task["id"], "opencode") is None  # running 不可换
 
 

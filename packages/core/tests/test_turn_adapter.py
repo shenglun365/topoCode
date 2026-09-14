@@ -19,12 +19,18 @@ from topoone.plugins.runner.turn_adapter import (  # noqa: E402
 
 # ── 工厂 ──
 
-def test_build_adapter_defaults_to_opencode():
-    a = build_adapter("", "", {})
-    assert a.executor_type == "opencode"
+def test_build_adapter_rejects_empty_type():
+    """无静默降级(cv-153): 空/未知类型显式失败, 不再回退 opencode。"""
+    with pytest.raises(RuntimeError, match="支持"):
+        build_adapter("", "", {})
+    with pytest.raises(RuntimeError, match="未知执行器类型: mock"):
+        build_adapter("mock", "m", {})
 
 
 def test_build_adapter_by_type():
+    # 别名归一: cline→cline-sdk / codex→codex-server(与 architect 单源一致)
+    assert build_adapter("cline", "cline", {}).executor_type == "cline-sdk"
+    assert build_adapter("codex", "codex", {"codex_bin": "codex"}).executor_type == "codex-server"
     assert build_adapter("cline-sdk", "cline", {}).executor_type == "cline-sdk"
     assert build_adapter("codex-server", "codex",
                          {"codex_bin": "codex"}).executor_type == "codex-server"

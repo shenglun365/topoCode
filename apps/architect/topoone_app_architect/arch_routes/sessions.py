@@ -1171,6 +1171,9 @@ def _guard_repair_core(conv_id: str, claim: str, need: str, content: str) -> dic
                        "instruction": body[:6000]} if len(body) > 40 else None
         if payload:
             task = _eb.propose_task(conv, payload["title"], payload["instruction"], {})
+            if not task.get("id"):
+                return {"ok": False, "action": "task_propose_failed",
+                        "summary": str(task.get("error") or "任务卡创建失败")}
             return {"ok": True, "action": "task_proposed",
                     "taskId": task["id"], "status": task.get("status"),
                     "summary": f"已从消息原文提取并创建任务卡「{task['title']}」"

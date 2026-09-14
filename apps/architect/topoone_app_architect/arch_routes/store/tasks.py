@@ -40,7 +40,9 @@ class TasksStore:
             "title": data.get("title") or "",
             "instruction": data.get("instruction") or "",
             "status": data.get("status") or "pending_confirm",
-            "executor_type": data.get("executorType") or "opencode",
+            # 执行器选定单源(P5): 落库不兜底——空=未选定, 由 confirm_task 按注册表默认
+            # 解析并显式失败; 此处的字面 "opencode" 曾导致 cv-153 静默降级链路
+            "executor_type": data.get("executorType") or "",
             "executor_id": data.get("executorId") or "",
             "spec_ver": int(data.get("specVer") or 0),
             "runner_job_id": data.get("runnerJobId") or "",

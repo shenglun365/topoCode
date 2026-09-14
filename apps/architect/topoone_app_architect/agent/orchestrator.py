@@ -130,9 +130,10 @@ def _register_session_tools() -> None:
 
 
 async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
-                              user_msg_id: str) -> None:
+                              user_msg_id: str, executor: str = "") -> None:
     """会话指令直通(v2): /定稿 → finalize(门禁+幂等); /执行 → ready 规约建任务卡。
-    回执落库+done 事件与常规回合同形; specReady meta 供前端渲染[一键建卡]动作。"""
+    @执行器 前缀显式指定执行器; 回执落库+done 事件与常规回合同形;
+    specReady meta 供前端渲染[一键建卡]动作。"""
     from .perception import commands as _cmds
     from ..arch_routes.common import _ts
     conv_id = conv["id"]
@@ -147,12 +148,13 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
             meta = {"kind": "specReady", "requirementId": res.get("reqId"),
                     "ver": res.get("ver")}
     elif cmd == "执行":
-        res = _cmds.run_execute(conv)
+        res = _cmds.run_execute(conv, executor_id=executor)
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or '建卡失败'}"
         else:
             t = res.get("task") or {}
-            content = (f"📋 已从规约创建任务卡：**{t.get('title')}**（待确认）——"
+            etag = f"（执行器 `{t.get('executorType')}`{('·' + executor) if executor else ''}）"
+            content = (f"📋 已从规约创建任务卡：**{t.get('title')}**{etag}（待确认）——"
                        "在卡片上确认后 coding subagent 开始执行。")
             # 任务卡本体已由 propose_task 落流(带确认按钮); 此处仅回执指针(不落库)
             msg_id = store.next_id("m")
@@ -280,9 +282,10 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     #    转达/指派消息里的 /文本 是发给 subagent 的内容, 不拦。 ──
     if decision.action == "chat":
         from .perception.commands import match_command as _cmd_match
-        _cmd_name = _cmd_match(question)
-        if _cmd_name:
-            await _run_direct_command(_cmd_name, conv, send, store, last_user_msg_id)
+        _cmd = _cmd_match(question)
+        if _cmd:
+            await _run_direct_command(_cmd["cmd"], conv, send, store, last_user_msg_id,
+                                      executor=_cmd.get("executor") or "")
             return
 
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，

@@ -39,14 +39,14 @@ def decide(conv_id: str, question: str, attach_to: str, agent_pick: str,
         task = exec_bridge.active_task_of(conv_id)
         if task and (task.get("status") or "") == "pending_confirm":
             task = None   # 待确认任务不吸收输入——引导用户确认/取消
-    if task and (attach_to or (task.get("executorType") or "opencode") == agent_pick
+    if task and (attach_to or (task.get("executorType") or "") == agent_pick
                  or not agent_pick):
         payload_text = question + (
             f"\n\n[附] 会话历史摘要(供参考):\n{digest}" if digest else "")
         res = exec_bridge.task_input(task["id"], payload_text)
         if res.get("ok"):
             queued = bool(res.get("queued"))
-            ex = task.get("executorType") or "opencode"
+            ex = task.get("executorType") or ""
             tail = f"（含历史摘要 {len(digest)} 字）" if digest else ""
             reply = (f"📥 已排队转达 `{ex}`{tail}（当前回合执行中，回合结束自动续跑）。"
                      if queued else

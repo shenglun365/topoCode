@@ -88,6 +88,35 @@ def load_executors() -> list[dict]:
         return []
 
 
+# ── 执行器选定单源(v2): 别名归一 + 注册表默认 ────────────────────────
+# 教训(cv-153): 任务链三处字面 "opencode" 兜底 + "cline"/"cline-sdk" 类型名
+# 不一致 → 用户注册表 default=cline 被无视/runner 静默降级。全部收口到本节。
+
+_TYPE_ALIASES = {"cline": "cline-sdk", "codex": "codex-server"}
+
+
+def normalize_executor_type(etype: str) -> str:
+    """执行器类型别名归一: cline→cline-sdk / codex→codex-server(单点)。"""
+    return _TYPE_ALIASES.get((etype or "").strip(), (etype or "").strip())
+
+
+def default_executor() -> Optional[dict]:
+    """注册表默认执行器(default=true 且 enabled)——任务链缺省选定唯一来源。
+
+    无显式指定时的兜底真相源; 找不到返回 None(调用方必须显式失败, 不得
+    再回落特定执行器)。"""
+    try:
+        for e in load_executors():
+            if e.get("default") and e.get("enabled", True):
+                return e
+        for e in load_executors():   # 无显式 default → 首个启用项(确定性)
+            if e.get("enabled", True):
+                return e
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def save_executors(entries: list[dict]) -> None:
     store.CollabConfigStore.set(CONFIG_KEY, json.dumps(entries, ensure_ascii=False))
 

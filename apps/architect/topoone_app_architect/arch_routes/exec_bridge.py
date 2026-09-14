@@ -206,7 +206,15 @@ def propose_task(conv: dict, title: str, instruction: str,
     后 confirm_task 真正拉起 runner。"""
     conv_id = conv["id"]
     _pid = (conv or {}).get("projectId") or (conv or {}).get("project_id") or ""
-    etype = (executor_hint or {}).get("executorType") or "opencode"
+    # 执行器选定单源(显式 hint > 注册表默认); 不再字面回落 opencode(cv-153 教训)
+    from .agent_executors import normalize_executor_type, default_executor
+    etype = normalize_executor_type((executor_hint or {}).get("executorType") or "")
+    if not etype:
+        etype = normalize_executor_type((default_executor() or {}).get("type") or "")
+    if not etype:
+        return {"ok": False,
+                "error": "无可用执行器：注册表无启用项且未指定执行器类型——"
+                         "请在「执行器配置」启用至少一个执行器后在对话中指定(如 @cline)。"}
     _rid = (conv or {}).get("reqId") or ""
     _spec_ver = 0
     if _rid:
@@ -251,6 +259,21 @@ def confirm_task(task_id: str) -> dict:
     if other:
         return {"ok": False,
                 "error": f"另一任务执行中({other['title']}), 停止或等待其结束"}
+    # 执行器选定单源(hint > 任务卡 > 注册表默认); 不再字面回落 opencode——
+    # 解析不到 → 任务显式 failed(用户要求: 指定失败必须明确返回, 禁止降级)。
+    # 先于项目根解析: 缺执行器是更前置的错误, 优先显式暴露。
+    from .agent_executors import normalize_executor_type, default_executor
+    hint = executor_hint_by_id(task.get("executorId") or "", conv) or {}
+    _etype = normalize_executor_type(hint.get("executorType")
+                                     or task.get("executorType") or "")
+    if not _etype:
+        _etype = normalize_executor_type((default_executor() or {}).get("type") or "")
+    if not _etype:
+        err = ("无可用执行器：任务未绑定执行器且注册表无默认项——"
+               "请在任务卡上选择执行器或在「执行器配置」设置默认。")
+        store.TasksStore.finish(task_id, "failed", err)
+        _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+        return {"ok": False, "error": err}
     root, project = conv_root_project(conv)
     if not root:
         store.TasksStore.update(task_id, {"status": "failed",
@@ -272,7 +295,6 @@ def confirm_task(task_id: str) -> dict:
         v = hint.get(k)
         if v not in (None, ""):
             payload[k] = v
-    _etype = hint.get("executorType") or task.get("executorType") or "opencode"
     if hint.get("executorId"):
         payload["executorId"] = hint["executorId"]
         payload["executorConfig"] = hint.get("executorConfig") or {}
@@ -305,7 +327,7 @@ def confirm_task(task_id: str) -> dict:
         store.ConversationsStore.set_work_state(conv_id, "running")
     except Exception:  # noqa: BLE001
         pass
-    agent = task.get("executorType") or "opencode"
+    agent = task.get("executorType") or _etype
     pid = (conv or {}).get("projectId") or ""
     _append(conv_id, "user",
             f"🚀 **{task['title']}** 启动（`{res['jobId']}` 分支 `{branch}`）",
@@ -317,14 +339,16 @@ def confirm_task(task_id: str) -> dict:
 
 
 def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
-    """设定任务执行器(cline/opencode/codex)。仅 pending_confirm 可换——
+    """设定任务执行器(别名归一: cline→cline-sdk)。仅 pending_confirm 可换——
     运行中引擎已固化(换=新任务); 返回更新后任务行(不可换返回 None)。"""
+    from .agent_executors import normalize_executor_type
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") != "pending_confirm":
         return None
-    if executor_type not in ("cline", "opencode", "codex"):
+    etype = normalize_executor_type(executor_type)
+    if etype not in ("cline-sdk", "opencode", "codex-server"):
         return None
-    return store.TasksStore.update(task_id, {"executor_type": executor_type})
+    return store.TasksStore.update(task_id, {"executor_type": etype})
 
 
 def task_input(task_id: str, text: str) -> Dict[str, Any]:

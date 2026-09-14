@@ -15,7 +15,7 @@
 
 配置来源：architect 侧 load_executors()(arch_collab_config["agent.executors"],
 系统管理 UI 可编辑) → POST /api/implement 透传 executorId/executorType/executorConfig
-→ create_implement 经 build_adapter() 构造。缺省回退 opencode(现网兼容)。
+→ create_implement 经 build_adapter() 构造。缺省/未知类型显式报错(无静默降级)。
 """
 from __future__ import annotations
 
@@ -1433,11 +1433,22 @@ async def shutdown_executors() -> None:
     _CODEX_SERVERS.clear()
 
 
+# 执行器类型别名归一(与 architect 侧 agent_executors 单源语义一致)
+_TYPE_ALIASES = {"cline": "cline-sdk", "codex": "codex-server"}
+_SUPPORTED_LOCAL = ("opencode", "cline-sdk", "codex-server")
+
+
 def build_adapter(executor_type: str = "", executor_id: str = "",
                   config: Optional[Dict[str, Any]] = None) -> TurnAdapter:
-    """executorType + 配置 → TurnAdapter; 未知/缺省回退 opencode(现网兼容)。"""
+    """executorType + 配置 → TurnAdapter。
+
+    无静默降级(cv-153 教训: 指定 cline 被静默换成 opencode 跑):
+    - 别名归一: cline→cline-sdk / codex→codex-server;
+    - 未知/空类型 → RuntimeError 显式失败(含支持清单), 由 /api/implement
+      以 400 返回 → architect 任务 failed 原文回执。"""
     cfg = dict(config or {})
-    etype = (executor_type or "").strip()
+    etype = _TYPE_ALIASES.get((executor_type or "").strip(),
+                              (executor_type or "").strip())
     eid = (executor_id or "").strip()
     if etype == "cline-sdk":
         return ClineTurnAdapter(cfg, executor_id=eid or "cline")
@@ -1447,6 +1458,11 @@ def build_adapter(executor_type: str = "", executor_id: str = "",
         raise RuntimeError(
             "remote-agent(远端分支协作模式)暂不支持交互式实施作业——该模式无本地 "
             "worktree 语义, 请使用本地执行器(opencode/cline/codex)。")
+    if etype != "opencode":
+        raise RuntimeError(
+            f"未知执行器类型: {executor_type or '(空)'}——支持: "
+            f"{'/'.join(_SUPPORTED_LOCAL)}。请在「执行器配置」修正类型后重试, "
+            "系统不做静默降级。")
     cfg.setdefault("base_port", cfg.get("basePort") or 3478)
     return OpenCodeTurnAdapter(
         base_port=int(cfg.get("base_port") or 3478),

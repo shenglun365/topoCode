@@ -103,16 +103,25 @@ def propose_task_tool(title: str, instruction: str,
         return {"error": "conversation-not-found"}
     if (conv.get("status") or "active") == "archived":
         return {"error": "会话已归档(只读)"}
-    etype = (executorType or "").strip()
-    if etype not in ("cline", "opencode", "codex"):
-        # 会话绑定了执行器 → 用其注册表类型(用户既定选择); 否则 opencode
+    # 执行器选定单源: 模型显式指定(别名归一) > 会话绑定 > 注册表默认;
+    # 不再字面回落 opencode(cv-153: 注册表 default=cline 被无视/类型名不一致静默降级)
+    from ...arch_routes.agent_executors import normalize_executor_type, default_executor
+    etype = normalize_executor_type(executorType or "")
+    if not etype:
         _bound = exec_bridge.executor_hint_by_id(str(conv.get("executorId") or ""), conv)
-        etype = ((_bound or {}).get("executorType") or "").strip() or "opencode"
+        etype = normalize_executor_type((_bound or {}).get("executorType") or "")
+    if not etype:
+        etype = normalize_executor_type((default_executor() or {}).get("type") or "")
+    if not etype:
+        return {"error": "无可用执行器：注册表无启用项且未指定执行器——"
+                         "请在「执行器配置」启用执行器, 或在消息中显式指定(如 @cline)。"}
     if not (instruction or "").strip():
         return {"error": "instruction 缺少实质内容(为空)——请写实质任务内容(目标/方案/验收)"}
     task = exec_bridge.propose_task(conv, title, instruction,
                                     executor_hint={"executorType": etype,
                                                    "executorId": conv.get("executorId") or ""})
+    if not task.get("id"):
+        return {"error": str(task.get("error") or "任务卡创建失败")}
     return {"ok": True, "taskId": task["id"], "status": task.get("status"),
             "hint": "任务卡已生成, 等待用户确认后执行; 请告知用户可确认/取消/调整。"}
 
