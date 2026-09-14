@@ -88,24 +88,6 @@ _BUILTIN_CONTRACT = """## 期望固化规约（contract 场景，🧾 开启时�
 """
 
 
-_BUILTIN_CODING = """## coding agent 委派规约（coding 场景）
-
-### 三条委派通道（按意图选择，不混用）
-- probe.run 方案草图：在代码快照上产出改动思路与伪 diff，供设计者预览确认——
-  「先看看大概怎么改」用这个，只读、不落工作区；
-- 方案装配（只读）：装配任务上下文(会话结论+需求+规约+资产影响面)交
-  coding agent 隔离分析，产出结构化方案(文件→行区间→意图+置信度)——「给需求拿方案」用；
-- coding.task.execute 正式执行：主工作区+分支协议，「按方案执行/拿结果」用——
-  **前提**：会话已 req.finalize 定稿绑定需求；未定稿先引导定稿，不要绕过。
-
-### 纪律
-- 委派前如实告知设计者将调用哪个通道、哪个 executor，重大动作(正式执行)先征得同意；
-- coding agent 的返回是它的真实产出：如实转述结论与不确定点，不代其许诺、不代判验收；
-- 失败/超时不隐瞒，报告错误原文并给出下一步建议(重试/换 executor/改走任务执行页)；
-- 正式执行的后续判定走 capability.evaluate(execution) 与人工验收，不在对话里口头宣布"完成"。
-"""
-
-
 _BUILTIN_CAPABILITY = """## 能力评估与提炼规约（capability 场景）
 
 ### capability.evaluate 图文评估
@@ -159,8 +141,10 @@ _BUILTIN_PLAN = """## 方案生成规约（plan 场景）
   等确认意图 → 调 req.finalize 定稿入池；**必须带 reqId 参数**（取 req.propose
   返回的 requirementId——若本会话刚产出提案，结果就在上文工具结果里；返回
   「未绑定需求」错误时，从历史工具结果里找到 RQ 编号显式传入重试，不要放弃）；
-- 定稿后需求转「待执行」，由设计者在任务执行页对接 coding agent；
-  你不代为定稿、不代建执行任务、不替设计者做通过判定。
+- 定稿(ready)后进入执行准备：用户发送 `/执行`（系统直通建任务卡），或你调
+  task.propose 建卡（严格挡须先定稿）；用户在任务卡上确认后由 coding subagent
+  在隔离分支执行，进展/提问以消息回到本会话，用户直接回复即转达；
+- 你不代判验收、不在对话里口头宣布『完成』。
 """
 
 
@@ -192,7 +176,8 @@ def _builtin_for(scenario: str) -> str:
         "contract": _BUILTIN_CONTRACT,
         "linenote": _BUILTIN_LINENOTE,
         "plan": _BUILTIN_PLAN,
-        "coding": _BUILTIN_CODING,
+        # coding 场景 v1 委派规约已移除: v2 契约(挡位指引+capability 单源)覆盖,
+        # 场景标签保留兼容前端注入(变 no-op, 防上下文污染)。
         "capability": _BUILTIN_CAPABILITY,
     }.get(scenario, "")
 

@@ -129,6 +129,59 @@ def _register_session_tools() -> None:
     _cap_mining.register_mining_tools()
 
 
+async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
+                              user_msg_id: str) -> None:
+    """会话指令直通(v2): /定稿 → finalize(门禁+幂等); /执行 → ready 规约建任务卡。
+    回执落库+done 事件与常规回合同形; specReady meta 供前端渲染[一键建卡]动作。"""
+    from .perception import commands as _cmds
+    from ..arch_routes.common import _ts
+    conv_id = conv["id"]
+    meta = None
+    if cmd == "定稿":
+        res = _cmds.run_finalize(conv)
+        if not res.get("ok"):
+            content = f"⚠️ {res.get('error') or '定稿失败'}"
+        else:
+            content = (f"✅ **规约已确认**：`{res['reqId']}` v{res.get('ver')}（ready，可执行）"
+                       "——发送 `/执行` 建任务卡。")
+            meta = {"kind": "specReady", "requirementId": res.get("reqId"),
+                    "ver": res.get("ver")}
+    elif cmd == "执行":
+        res = _cmds.run_execute(conv)
+        if not res.get("ok"):
+            content = f"⚠️ {res.get('receipt') or '建卡失败'}"
+        else:
+            t = res.get("task") or {}
+            content = (f"📋 已从规约创建任务卡：**{t.get('title')}**（待确认）——"
+                       "在卡片上确认后 coding subagent 开始执行。")
+            # 任务卡本体已由 propose_task 落流(带确认按钮); 此处仅回执指针(不落库)
+            msg_id = store.next_id("m")
+            await send({"type": "chat_start", "conversationId": conv_id,
+                        "requestId": "", "userMessageId": user_msg_id})
+            await send({"type": "done", "conversationId": conv_id,
+                        "content": content, "messageId": msg_id})
+            return
+    else:
+        return
+    msg_id = store.next_id("m")
+    row = {"id": msg_id, "conversationId": conv_id, "role": "assistant",
+           "time": _ts(), "content": content}
+    if meta:
+        row["meta"] = json.dumps(meta, ensure_ascii=False)
+    store.ConversationsStore.append_message(row)
+    try:
+        store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+    except Exception:  # noqa: BLE001
+        pass
+    await send({"type": "chat_start", "conversationId": conv_id,
+                "requestId": "", "userMessageId": user_msg_id})
+    done_ev = {"type": "done", "conversationId": conv_id,
+               "content": content, "messageId": msg_id}
+    if meta:
+        done_ev["meta"] = meta
+    await send(done_ev)
+
+
 async def handle_chat(data: dict, send: SendFn) -> None:
     """自由对话回合：持久化历史 → 发起 llm.chat 流式 → 逐字转发。"""
     from ..arch_routes import req_agent
@@ -221,6 +274,16 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         await send({"type": "done", "conversationId": conv_id,
                                    "content": final_b, "messageId": assistant_msg_id_b})
         return
+
+    # ── 会话指令直通(v2): /定稿 /执行 确定性执行不经 LLM(cv-152 教训: 指令落回
+    #    模型会引用 v1 旧契约(coding.task.execute)死胡同)。仅 chat 路由生效——
+    #    转达/指派消息里的 /文本 是发给 subagent 的内容, 不拦。 ──
+    if decision.action == "chat":
+        from .perception.commands import match_command as _cmd_match
+        _cmd_name = _cmd_match(question)
+        if _cmd_name:
+            await _run_direct_command(_cmd_name, conv, send, store, last_user_msg_id)
+            return
 
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，
     # 无角色命中时 eff_model=None → 回退全局偏好(既有链不变)。护栏 R3：per-call 参数。

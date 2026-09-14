@@ -103,7 +103,9 @@ def test_quick_mode_spec_tools_retired(tmp_env):
     _set_conv(tmp_env, mode="quick")
     for tool in ("req.propose", "req.finalize", "req.amend"):
         r = req_agent.run_arch_tool(tool, {"title": "x"}, root=None, project=None)
-        assert "已退役" in str(r.get("error")), f"{tool} 快捷挡应退役: {r}"
+        # v2 文案: 快捷挡引导直出任务卡(不再是「已退役」字样)
+        assert "快捷挡" in str(r.get("error")) and "task.propose" in str(r.get("error")), \
+            f"{tool} 快捷挡应拦截并引导建卡: {r}"
 
 
 def test_strict_mode_enables_spec_tools(tmp_env, monkeypatch):

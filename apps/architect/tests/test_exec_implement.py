@@ -497,9 +497,9 @@ def test_task_tool_propose_and_retired_req(tmp_path, monkeypatch):
     assert r["ok"] and r["status"] == "pending_confirm"
     t = store.TasksStore.get(r["taskId"])
     assert t["executorType"] == "cline"
-    # 模型面 req.* 拦截
+    # 模型面 req.* 拦截(快捷挡语义引导文案)
     r2 = req_agent.run_arch_tool("req.propose", {"title": "x"}, root=None, project=None)
-    assert "已退役" in str(r2.get("error"))
+    assert "快捷挡" in str(r2.get("error")) and "task.propose" in str(r2.get("error"))
     # internal 放行
     r3 = req_agent.run_arch_tool("req.propose", {"title": "ok", "designMd": "d"},
                                  root=None, project=None, internal=True)

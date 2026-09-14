@@ -1120,7 +1120,9 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
             try:
                 log_conv_event(conv_id,
                                f"📝 **规约已更新**：`{bound_rid}` → v{entry['ver']}"
-                               f"（draft；`/定稿` 确认后 `/执行`）")
+                               f"（draft；`/定稿` 确认后 `/执行`）",
+                               meta={"kind": "specCreated", "requirementId": bound_rid,
+                                     "ver": entry["ver"], "updated": True})
             except Exception:  # noqa: BLE001
                 pass
             return {"ok": True, "requirementId": bound_rid, "ver": entry["ver"],
@@ -1156,7 +1158,9 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
                    "**⚠️ 未包含实现方案(designMd 为空)**——`/定稿` 门禁会要求补全, "
                    "建议直接 `/调整` 描述方案要点)")
     try:
-        log_conv_event(conv_id, receipt)
+        log_conv_event(conv_id, receipt,
+                       meta={"kind": "specCreated", "requirementId": req["id"],
+                             "ver": 1, "noDesign": no_design})
     except Exception:  # noqa: BLE001
         pass
     hint = "新需求规约已创建(draft v1)"
@@ -1175,7 +1179,10 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     "参数 reqId 勿传(系统自动取会话绑定需求)。",
 )
 def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
-                      project: Optional[str] = None) -> Dict[str, Any]:
+                      project: Optional[str] = None,
+                      notify: bool = True) -> Dict[str, Any]:
+    """规约定稿(REST/指令/模型三入口同路)。notify=False 供 /定稿 直通: 编排层
+    统一落回执(meta specReady), 此处不再 log_conv_event 防双回执。"""
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
@@ -1225,9 +1232,12 @@ def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
     if not res.get("ok"):
         return res
     try:
-        log_conv_event(ctx.get_conv(),
-                       f"✅ **规约已确认**：`{req_id}` v{active.get('ver')}（ready，可执行）"
-                       + warn_note)
+        if notify:
+            log_conv_event(ctx.get_conv(),
+                           f"✅ **规约已确认**：`{req_id}` v{active.get('ver')}（ready，可执行）"
+                           + warn_note,
+                           meta={"kind": "specReady", "requirementId": req_id,
+                                 "ver": active.get("ver")})
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "status": "ready",
@@ -1364,20 +1374,25 @@ from ..agent.cognition.llm import (  # noqa: F401,E402
 )
 
 
-def log_conv_event(conv_id: str, text: str) -> None:
+def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None:
     """统一时间线: 中间资产事件(提案/定稿/指派)以消息沉淀进来源会话。
 
+    meta: 卡片化回执(前端动作按钮: specCreated→[去定稿] / specReady→[一键建卡])。
     失败静默——事件回写不阻断工具主流程。
     """
     if not conv_id:
         return
     try:
+        import json as _json
         from .common import _ts
-        store.ConversationsStore.append_message({
+        row = {
             "id": store.next_id("m"), "conversationId": conv_id,
             "role": "assistant", "time": _ts(),
             "content": text,
-        })
+        }
+        if meta:
+            row["meta"] = _json.dumps(meta, ensure_ascii=False)
+        store.ConversationsStore.append_message(row)
     except Exception:  # noqa: BLE001
         pass
 
@@ -1535,8 +1550,10 @@ _CAPABILITY_DOC = (
     "2. RQ 编号/数据 ID 一律由系统管理：工具调用不传 reqId(系统自动取会话绑定)，"
     "回复中的编号只来自工具返回，严禁自造编号(会被系统守卫拦截)；\n"
     "3. 确认(draft→ready)由用户指令 `/定稿` 发起(系统直通)；修订(req.amend)时不要顺带调用 req.finalize。\n"
-    "会话指令符号(系统处理，与模型无关)：用户消息以 / 开头(/执行 /定稿 /继续 /diff /调整)时"
-    "由系统直接执行确定性动作——模型不会收到这类消息，也不要在回复中代用户发出指令。\n"
+    "会话指令符号(系统直通，与模型无关)：用户消息恰为 /定稿 或 /执行 时由系统确定性执行"
+    "(定稿=确认规约→ready; 执行=ready 规约建任务卡, 用户卡片确认后 subagent 启动)——"
+    "模型不会收到这两类消息，也不要在回复中代用户发出指令；"
+    "/调整 会作为普通消息进入对话(由你整理修订内容)。\n"
     "各工具的参数：\n"
     '- kb.asset.search: {"text": "检索关键词", "preferred": ["资产ID(可选)"]}\n'
     '- kb.code_mappings: {"asset_ids": ["资产ID"]}\n'

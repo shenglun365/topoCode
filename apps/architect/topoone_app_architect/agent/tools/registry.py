@@ -55,10 +55,11 @@ _ARCHIVED_DENY_TOOLS = {
     "req.propose", "req.finalize", "contract.propose", "task.propose",
 }
 
-# v2 统一会话: 规约状态机工具退役(命令路径已删)——模型误调时给出引导而非
-# 静默失败(P2 物理删除注册)。
+# v2 统一会话: 规约状态机工具在快捷挡退役(严格挡恢复可用, run_arch_tool 按挡放行)
+# ——快捷挡模型误调时给出引导而非静默失败(P2 物理删除注册)。
+# 文案必须是快捷挡语义(此映射只在 quick 挡触达模型; strict 挡放行不会看到)。
 _RETIRED_TOOLS = {
-    "req.propose": "需求规约状态机已退役。请在对话中整理需求与方案, 方案成熟时调用 task.propose 创建实施任务卡。",
-    "req.finalize": "规约定稿已退役。任务经 task.propose 创建后由用户确认即可执行。",
-    "req.amend": "规约修订已退役。直接在对话中调整方案, 并以 task.propose 重新发起。",
+    "req.propose": "快捷挡不做规约(不调 req.propose)。请直接整理目标/方案要点/边界/验收, 调用 task.propose 创建任务卡。",
+    "req.finalize": "快捷挡无规约可定稿(不调 req.finalize)。直接调用 task.propose 建卡即可。",
+    "req.amend": "快捷挡无规约可修订(不调 req.amend)。直接按新方案调用 task.propose 重新建卡。",
 }
