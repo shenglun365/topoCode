@@ -253,9 +253,17 @@ def confirm_task(task_id: str) -> dict:
         return {"ok": False, "error": "conv-not-found"}
     from .execution import conv_root_project
     conv_id = conv["id"]
-    # 同会话活跃任务互斥(一次一个 subagent 回合)
+    # 同会话活跃任务互斥(一次一个 subagent 回合); 命中先惰性自愈——
+    # 服务重启可能留下僵尸 running(泵丢失), 核对 runner 实际态后再裁决
     other = next((t for t in store.TasksStore.of_conv(conv_id)
                   if t["id"] != task_id and t.get("status") in ("running", "waiting_input")), None)
+    if other:
+        try:
+            recover_conv_tasks(conv_id)
+        except Exception:  # noqa: BLE001
+            pass
+        other = next((t for t in store.TasksStore.of_conv(conv_id)
+                      if t["id"] != task_id and t.get("status") in ("running", "waiting_input")), None)
     if other:
         return {"ok": False,
                 "error": f"另一任务执行中({other['title']}), 停止或等待其结束"}
@@ -453,6 +461,14 @@ def _task_reaggregate_work_state(conv_id: str) -> None:
 # ── 任务泵: 事件 → 统一流(agent 标注) ──
 
 _TASK_PUMPS: Dict[str, dict] = {}   # conv_id -> {job_id: asyncio.Task}
+_MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_main_loop(loop) -> None:
+    """服务启动时捕获主事件循环: REST to_thread 工作线程内启动泵须调度回这里
+    (工作线程无循环, create_task 必炸——cv-153 泵从未启动的真根因)。"""
+    global _MAIN_LOOP
+    _MAIN_LOOP = loop
 
 
 def _start_task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
@@ -461,8 +477,65 @@ def _start_task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
     old = jobs.get(job_id)
     if old and not old.done():
         return
-    jobs[job_id] = asyncio.create_task(
-        _task_pump(conv_id, task_id, job_id, rid, agent))
+    coro = _task_pump(conv_id, task_id, job_id, rid, agent)
+    try:
+        loop = asyncio.get_running_loop()
+        jobs[job_id] = loop.create_task(coro)
+    except RuntimeError:
+        # 工作线程(REST to_thread 等): 调度回主事件循环
+        if _MAIN_LOOP is not None and _MAIN_LOOP.is_running():
+            jobs[job_id] = asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP)
+        else:
+            coro.close()   # 无循环可挂(测试/关停): 丢弃并告警, 不让协程泄漏
+            logger.warning("[exec-bridge] 无事件循环可挂任务泵 conv=%s job=%s",
+                           conv_id, job_id)
+
+
+def recover_conv_tasks(conv_id: str) -> dict:
+    """P1 泵恢复(惰性): 会话交互前核对 running/waiting_input 任务与 runner 实际态。
+
+    服务重启会丢内存泵(_TASK_PUMPS)与 runner 作业(_JOBS 同为内存态)——runner
+    侧已终态的任务被卡 running(互斥锁死会话、无结果回执; cv-153 实证)。
+    - runner 终态(done/failed) → 重放终态事件(回执+result_md+work_state 聚合)
+    - 仍在执行 → 返回 repump 清单(调用方须在事件循环内 _start_task_pump;
+      本函数可能跑在工作线程, 不能 create_task)
+    - runner 报作业不存在 → 显式 failed(不臆测不悬置)
+    - runner 不可达 → 跳过(可能在重启, 下次交互再试)
+    返回 {"finished": 收尾数, "repump": [(task_id, job_id, rid, agent), ...]}。
+    """
+    out = {"finished": 0, "repump": []}
+    for t in store.TasksStore.of_conv(conv_id):
+        if (t.get("status") or "") not in ("running", "waiting_input"):
+            continue
+        job_id = t.get("runnerJobId") or ""
+        if not job_id:
+            continue
+        res = _runner(f"/api/implement/{job_id}", timeout=8.0)
+        if not res or not res.get("ok"):
+            if res and "作业不存在" in str(res.get("error") or ""):
+                err = "runner 作业已丢失(执行器服务重启)——无法续跑, 请重新发起任务。"
+                _handle_task_event({"kind": "failed", "text": err},
+                                   _task_ctx(conv_id, t["id"], job_id,
+                                             t.get("reqId") or "",
+                                             t.get("executorType") or ""))
+                out["finished"] += 1
+            continue
+        evs = res.get("events") or []
+        last_term = None
+        for ev in evs:
+            if (ev.get("kind") or "") in ("done", "failed", "input_required"):
+                last_term = ev
+        if last_term and (last_term.get("kind") in ("done", "failed")):
+            _handle_task_event(last_term,
+                               _task_ctx(conv_id, t["id"], job_id,
+                                         t.get("reqId") or "",
+                                         t.get("executorType") or ""))
+            out["finished"] += 1
+        else:
+            # 仍在执行或等待输入: 交还调用方在事件循环内重挂泵
+            out["repump"].append((t["id"], job_id, t.get("reqId") or "",
+                                  t.get("executorType") or ""))
+    return out
 
 
 def _task_ctx(conv_id: str, task_id: str, job_id: str, rid: str, agent: str) -> dict:

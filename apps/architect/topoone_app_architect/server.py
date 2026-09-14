@@ -110,6 +110,13 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
 
     @asynccontextmanager
     async def _lifespan(_app):
+        # 任务泵主循环捕获: REST to_thread 工作线程无事件循环, 泵须调度回主循环
+        try:
+            import asyncio as _aio
+            from .arch_routes.exec_bridge import set_main_loop
+            set_main_loop(_aio.get_running_loop())
+        except Exception:
+            pass
         # 会话 agent 工具面注册(ctx.*/评估/提炼, 幂等)——P4 起实现延迟到
         # agent.orchestrator, 此处恢复"服务启动即注册"语义(MCP 面首调可用)
         try:

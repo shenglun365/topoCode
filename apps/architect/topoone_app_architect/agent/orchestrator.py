@@ -224,6 +224,16 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         return
     conv_id = binding.conv_id
     conv = binding.conv
+    # P1 泵恢复(惰性): 服务重启丢内存泵/runner 作业 → 打开会话时核对收尾,
+    # 终态任务补回执落库(否则互斥锁死会话且无结果; cv-153 实证)
+    try:
+        if any((t.get("status") or "") in ("running", "waiting_input")
+               for t in store.TasksStore.of_conv(conv_id)):
+            _rec = await asyncio.to_thread(_eb.recover_conv_tasks, conv_id)
+            for _tid, _jid, _rid2, _ag in (_rec or {}).get("repump", []):
+                _eb._start_task_pump(conv_id, _tid, _jid, _rid2, _ag)
+    except Exception as _rec_err:  # noqa: BLE001
+        logger.warning("[kb-chat] 任务泵恢复失败 conv=%s: %s", conv_id, _rec_err)
     user_msgs = [m for m in history if m.get("role") == "user" and (m.get("content") or "").strip()]
     # v2 统一会话: 所有 user 消息落单流(agent=''); subagent 回复由泵以
     # agent=executor_type 标注落库。无信息流分离, 无命令符号。
