@@ -224,10 +224,19 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     except Exception:  # noqa: BLE001
         pass
 
+    # ── 分析挡位(会话级 analysisMode): strict=需求分析→规约→任务 | quick=轻整理直出任务卡 ──
+    try:
+        _mode = str((conv or {}).get("analysisMode") or "strict").strip() or "strict"
+    except Exception:  # noqa: BLE001
+        _mode = "strict"
     msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
                                 skill_scenarios=[str(s) for s in skill_scenarios],
                                 model_id=eff_model or model_id or "")
     # v2 统一会话编排契约: 通用 agent 模式——能力分界 + 路由
+    _spec_note = (
+        "不要调用 req.propose/req.finalize/req.amend(快捷挡已退役)。"
+        if _mode == "quick" else
+        "严格挡: 先 req.propose 产规约并 /定稿, 再 task.propose 建卡(req.* 规约工具本挡可用)。")
     msgs.insert(1, {"role": "system", "content":
         "【工作模式(通用 agent 路由)】你是 architect 外循环(编排者)。可调度资源: "
         "A. 你自己(知识/分析面): KB 架构资产检索、需求澄清与方案设计、数据资产、"
@@ -241,9 +250,15 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         "「统计文件数」「跑个脚本」)→ task.propose, 不要用 KB 检索话术推给用户; "
         "需要项目上下文/架构语义的 → 你自己分析。 "
         "执行期间 subagent 的提问/进展/完成会以消息进入本会话, 用户直接回复即转达。"
-        "不要调用 req.propose/req.finalize/req.amend(已退役)。"})
+        + _spec_note})
     if assign_contract:
         msgs.insert(1, {"role": "system", "content": assign_contract})
+    # 挡位指引注入独立 system 消息(最后插入 → 恒在 msgs[1]; 不进块注册表, 等价模式不变)
+    try:
+        from .cognition.prompt import gear_guidance
+        msgs.insert(1, {"role": "system", "content": gear_guidance(_mode)})
+    except Exception:  # noqa: BLE001
+        pass
     # ── 规约草稿延续: 会话有未落库草稿(上轮草稿卡提取) → 注入下轮上下文,
     #    用户「继续调整」时模型基于草稿合并完善, 而非从零重写 ──
     try:

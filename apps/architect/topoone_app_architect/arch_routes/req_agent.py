@@ -235,6 +235,51 @@ def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# ── 分析挡位工具门禁(会话级 analysisMode: strict/quick) ─────────────
+# strict: task.propose 前置要求会话绑定已 /定稿(confirmed) 的规约
+# quick:  需求分析/规约工具拦截(轻整理直出任务卡) + KB 域工具不可用
+_QUICK_DENY_TOOLS = {
+    "req.propose", "req.clarify", "req.collect", "req.assess", "req.spec", "req.plan",
+}
+_QUICK_KB_PREFIXES = ("kb.", "map.", "asset.")
+# 规约状态机工具: v2 默认退役(模型面不可见)——strict 挡恢复启用, quick 挡保持退役
+_SPEC_TOOLS = {"req.propose", "req.finalize", "req.amend"}
+
+
+def gear_gate_error(name: str) -> str:
+    """挡位门禁判定: 命中返回引导文本(工具不执行), 通过返回 ''。
+
+    经 _ctx.get_conv() 取当前会话挡位; 无会话上下文/异常一律放行(不破坏既有路径)。
+    """
+    try:
+        from . import ctx as _ctx
+        conv_id = _ctx.get_conv()
+        if not conv_id:
+            return ""
+        from . import store as _store
+        conv = _store.ConversationsStore.get(conv_id)
+        mode = ((conv or {}).get("analysisMode") or "strict").strip() or "strict"
+        if mode == "quick":
+            if name in _QUICK_DENY_TOOLS:
+                return ("当前为快捷挡(直出任务卡)：不做需求分析/规约。请直接整理实质任务"
+                        "(目标/方案要点/边界/验收)调用 task.propose 创建任务卡;"
+                        "请求过于模糊时先集中提问。")
+            if name.startswith(_QUICK_KB_PREFIXES):
+                return ("当前挡位(快捷)下 KB 检索不可用。请基于会话上下文直接作答,"
+                        "或整理任务调用 task.propose 交由 coding subagent 执行。")
+        elif name == "task.propose":
+            rid = (conv or {}).get("reqId") or ""
+            active = _store.RequirementsStore.spec_active(rid) if rid else None
+            if not (active and (active.get("state") or "") == "confirmed"):
+                return ("当前为严格挡(需求分析→设计方案→任务)：创建任务卡前必须有已 /定稿 "
+                        "(confirmed) 的需求规约。请先完成需求分析——调用 req.propose 产出规约"
+                        "(requirementMd/designMd/acceptanceMd, designMd 必填),"
+                        "待用户 /定稿 后再调用 task.propose 建卡。")
+    except Exception:  # noqa: BLE001
+        return ""
+    return ""
+
+
 def run_arch_tool(name: str, arguments: Dict[str, Any],
                   root: Optional[str], project: Optional[str],
                   internal: bool = False) -> Dict[str, Any]:
@@ -249,9 +294,26 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
             return {"error": _RETIRED_TOOLS[name]}
         return {"error": f"未知工具: {name}"}
     # v2: 退役工具只拦模型面调用; internal=True 为系统确定性路径(spec-apply/
-    # 守卫代落)——放行(P2 随规约域物理删除)。
+    # 守卫代落)——放行(P2 随规约域物理删除)。退役范围随分析挡位: 规约工具(req.*spec)
+    # 在 strict 挡恢复启用(需求分析→设计方案→任务), quick 挡保持退役(直出任务卡)。
     if name in _RETIRED_TOOLS and not internal:
-        return {"error": _RETIRED_TOOLS[name]}
+        if name in _SPEC_TOOLS:
+            try:
+                from . import ctx as _ctx
+                conv_id = _ctx.get_conv()
+                if conv_id:
+                    from . import store as _store
+                    conv = _store.ConversationsStore.get(conv_id)
+                    if conv and ((conv.get("analysisMode") or "strict").strip() or "strict") == "strict":
+                        pass  # strict 挡: 规约工具不退役
+                    else:
+                        return {"error": _RETIRED_TOOLS[name]}
+                else:
+                    return {"error": _RETIRED_TOOLS[name]}
+            except Exception:  # noqa: BLE001
+                return {"error": _RETIRED_TOOLS[name]}
+        else:
+            return {"error": _RETIRED_TOOLS[name]}
     # PR1 归档只读: 归档会话上拒绝动作类工具(落库/定稿/指派); 检索/读取/提炼放行
     if name in _ARCHIVED_DENY_TOOLS:
         try:
@@ -264,6 +326,11 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
                     return {"error": f"会话已归档(只读)：{name} 不可执行。可读取/复制/提炼。"}
         except Exception:  # noqa: BLE001
             pass
+    # 分析挡位门禁(仅模型面调用; internal 系统确定性路径不受挡位约束)
+    if not internal:
+        gate_err = gear_gate_error(name)
+        if gate_err:
+            return {"error": gate_err}
     fn = entry["handler"]
     kwargs = _coerce_args(fn, dict(arguments or {}))
     params = inspect.signature(fn).parameters
@@ -1112,6 +1179,15 @@ def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
+        # 回退读会话绑定: req.propose 与 finalize 同轮调用时 ctx.req 尚未回写(下一轮生效)
+        try:
+            cid = ctx.get_conv()
+            if cid:
+                c = store.ConversationsStore.get(cid) or {}
+                req_id = (c.get("reqId") or "").strip()
+        except Exception:  # noqa: BLE001
+            pass
+    if not req_id:
         return {"ok": False, "error": "当前会话未绑定需求，无法确认。请先在对话中形成需求(req.propose)"}
     row = store.RequirementsStore.get(req_id)
     if not row:
@@ -1178,6 +1254,15 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                    project: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
+    if not req_id:
+        # 回退读会话绑定: req.propose 与 amend 同轮调用时 ctx.req 尚未回写(下一轮生效)
+        try:
+            cid = ctx.get_conv()
+            if cid:
+                c = store.ConversationsStore.get(cid) or {}
+                req_id = (c.get("reqId") or "").strip()
+        except Exception:  # noqa: BLE001
+            pass
     if not req_id:
         return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法修订"}
     row = store.RequirementsStore.get(req_id)

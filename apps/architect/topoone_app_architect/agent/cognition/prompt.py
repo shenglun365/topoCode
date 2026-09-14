@@ -246,3 +246,31 @@ _SCOPE_DOC = (
 
 def set_overrides(data: Dict[str, Any]) -> None:
     _store().CollabConfigStore.set(_OVERRIDES_KEY, json.dumps(data, ensure_ascii=False))
+
+
+# ── 分析挡位指引(会话级 analysisMode: strict/quick) ───────────────────
+# 不进块注册表(等价模式须与 legacy 逐字节一致), 由 orchestrator 按会话挡位注入
+# 独立 system 消息; 工具面门禁在 req_agent.gear_gate_error(挡位与路由联动)。
+_GEAR_GUIDANCE = {
+    "strict": (
+        "## 分析挡位(严格): 需求分析 → 设计方案 → 任务\n"
+        "创建任务卡前**必须先完成需求分析**：调用 req.propose 产出需求规约"
+        "(requirementMd/designMd/acceptanceMd, **designMd 必填**)，用户 /定稿 后才可调用 "
+        "task.propose 建卡(系统强制门禁：无已定稿规约的 task.propose 调用会被拒绝)。"
+        "内联 @执行器 前缀(如 @cline)在严格挡不跳过分析——先完成规约定稿，"
+        "再按用户指定执行器建卡。"
+    ),
+    "quick": (
+        "## 分析挡位(快捷): 直出任务卡\n"
+        "本挡位**不做需求分析/规约**(不要调用 req.propose 与需求分析类工具；KB 检索亦不可用)。"
+        "依据用户请求直接整理实质任务(目标/方案要点/边界/验收)调用 task.propose 创建任务卡"
+        "供用户确认执行；请求过于模糊时先集中提问。"
+        "内联 @执行器 前缀(如 @cline)直接按指定执行器建卡。"
+    ),
+}
+
+
+def gear_guidance(analysis_mode: str) -> str:
+    """按会话分析挡位返回行为指引(注入独立 system 消息, 不进块注册表)。"""
+    mode = str(analysis_mode or "strict").strip() or "strict"
+    return _GEAR_GUIDANCE.get(mode) or _GEAR_GUIDANCE["strict"]

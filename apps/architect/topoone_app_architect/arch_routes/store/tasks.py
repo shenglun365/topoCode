@@ -42,6 +42,7 @@ class TasksStore:
             "status": data.get("status") or "pending_confirm",
             "executor_type": data.get("executorType") or "opencode",
             "executor_id": data.get("executorId") or "",
+            "spec_ver": int(data.get("specVer") or 0),
             "runner_job_id": data.get("runnerJobId") or "",
             "session_ref": data.get("sessionRef") or "",
             "worktree": data.get("worktree") or "",

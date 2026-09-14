@@ -234,6 +234,7 @@ ARCH_PROJECT_TABLES_SQL = """
         executor_id TEXT DEFAULT '',
         runner_job_id TEXT DEFAULT '',      -- runner ImplementJob id
         session_ref TEXT DEFAULT '',        -- 执行器原生会话引用(复活)
+        spec_ver INTEGER DEFAULT 0,         -- 绑定的规约版本(建卡时固化; 0=无规约)
         worktree TEXT DEFAULT '',
         branch TEXT DEFAULT '',
         progress TEXT,                      -- JSON: {toolCount, msgCount, at}
@@ -715,6 +716,9 @@ def _project_migrations(db) -> None:
     # v2 统一会话: 消息 agent 标注(''=architect 外循环; cline/opencode/codex=subagent)
     _add_cols(db, "arch_conversation_messages", [
         ("agent", "TEXT DEFAULT ''"),
+    ])
+    _add_cols(db, "arch_tasks", [
+        ("spec_ver", "INTEGER DEFAULT 0"),
     ])
     _migrate_lifecycle_v2(db)
     _add_cols(db, "arch_unit_tests", [

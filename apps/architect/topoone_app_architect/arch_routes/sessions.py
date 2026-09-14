@@ -123,6 +123,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "title": title,
             "status": c.get("status") or "active",
             "workState": c.get("workState") or "architect",
+            "analysisMode": c.get("analysisMode") or "strict",
             "reviewState": c.get("reviewState") or "read",
             "roles": _roles_of(c),
             "executorId": c.get("executorId") or "",

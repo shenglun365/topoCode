@@ -207,15 +207,21 @@ def propose_task(conv: dict, title: str, instruction: str,
     conv_id = conv["id"]
     _pid = (conv or {}).get("projectId") or (conv or {}).get("project_id") or ""
     etype = (executor_hint or {}).get("executorType") or "opencode"
+    _rid = (conv or {}).get("reqId") or ""
+    _spec_ver = 0
+    if _rid:
+        _active = store.RequirementsStore.spec_active(_rid) or {}
+        _spec_ver = int(_active.get("ver") or 0)
     task = store.TasksStore.create({
         "conversationId": conv_id,
         "projectId": _pid,
-        "reqId": (conv or {}).get("reqId") or "",
+        "reqId": _rid,
         "title": (title or "").strip()[:120] or "实施任务",
         "instruction": instruction,
         "status": "pending_confirm",
         "executorType": etype,
         "executorId": (executor_hint or {}).get("executorId") or "",
+        "specVer": _spec_ver,
     })
     _append(conv_id, "assistant",
             f"📋 **任务待确认**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
