@@ -160,6 +160,8 @@ def test_repair_channel_in_run_tools_loop(tmp_path, monkeypatch):
     from topoone_app_architect.arch_routes import store
     conv = store.ConversationsStore.create({"projectId": "proj-test", "title": "修复通道"})
     _ctx.set_conv(conv["id"])
+    # 快捷挡: task.propose 直出(本用例测修复通道, 不受严格挡规约门禁约束)
+    store.ConversationsStore.update(conv["id"], {"analysisMode": "quick"})
     calls = {"n": 0}
 
     def _fake_llm_sync(messages, **kw):

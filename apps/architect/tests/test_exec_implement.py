@@ -445,10 +445,12 @@ def test_active_task_of_priority(tmp_path, monkeypatch):
 
 
 def test_task_tool_propose_and_retired_req(tmp_path, monkeypatch):
-    """LLM 工具面: task.propose 建卡; req.propose 被退役拦截(引导文案)。"""
+    """LLM 工具面(快捷挡): task.propose 建卡; req.propose 被退役拦截(引导文案)。"""
     conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import ctx as _ctx
     _ctx.set_conv(conv["id"])
+    # 快捷挡: 直出任务卡 + req.* 规约工具退役(本用例测的是 v2 退役语义)
+    store.ConversationsStore.update(conv["id"], {"analysisMode": "quick"})
     r = req_agent.run_arch_tool("task.propose",
                                 {"title": "工具建卡", "instruction": "实现 Q",
                                  "executorType": "cline"},
