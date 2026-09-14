@@ -175,6 +175,13 @@ def main():
     install_heartbeat_filter()
     from . import implement
     implement.register(app)
+
+    @app.on_event("shutdown")
+    async def _shutdown_executors():
+        # P4: 退出时终止共享 cline sidecar / codex app-server（防孤儿进程）
+        from .turn_adapter import shutdown_executors
+        await shutdown_executors()
+
     logger.info("[runner] starting on port %s (execution plane: TurnAdapter)", PORT)
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")

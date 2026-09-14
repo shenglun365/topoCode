@@ -13,7 +13,16 @@ kind 语义(回合级粒度):
   progress        执行进展(toolCount/msgCount 计数, 不落会话消息)
   aborted         回合中止(用户/看门狗)
   finished        作业收尾(finish, 保 worktree)
-  text            流式 token 片段(预留: TurnAdapter 逐段 emit, 泵原生承载)
+  text            流式 token 片段(TurnAdapter 逐段 emit, 泵原生承载)
+
+流式 kind(cline sidecar v2 接线):
+  tool            工具调用开始/结束(text="▶ name"/"✓ name", 携 toolName)
+  usage           token/成本增量(携 inputTokens/outputTokens/cost)
+  notice          SDK 通知(mistake_limit/压缩等, 携 reason)
+  turn_outcome    协议工具结局(携 status: done|need_input)
+  approval_request 工具审批请求(携 requestId/toolName/toolInput, 越界确认桥)
+  team            团队协作进度(cline teams, 携 teamName/lifecycle)
+  mcp             MCP 注入结果(携 server/ok/tools/message)
 """
 from __future__ import annotations
 
@@ -25,6 +34,8 @@ _TEXT_LIMIT = 20000          # 单事件文本截断(与既有 emit 行为一致
 _KINDS = (
     "session_ready", "user_input", "input_required", "done", "failed",
     "progress", "aborted", "finished", "text",
+    "tool", "usage", "notice", "turn_outcome", "approval_request",
+    "team", "mcp",
 )
 
 
@@ -39,6 +50,13 @@ class EventKind:
     ABORTED = "aborted"
     FINISHED = "finished"
     TEXT = "text"
+    TOOL = "tool"
+    USAGE = "usage"
+    NOTICE = "notice"
+    TURN_OUTCOME = "turn_outcome"
+    APPROVAL_REQUEST = "approval_request"
+    TEAM = "team"
+    MCP = "mcp"
 
     @classmethod
     def all(cls) -> tuple:

@@ -36,14 +36,19 @@ RUNNER_BASE_URL = os.environ.get("RUNNER_BASE_URL", "http://127.0.0.1:3458")
 
 DEFAULT_EXECUTORS = [
     {
-        "id": "opencode", "type": "opencode", "enabled": True, "default": True,
-        "config": {"auto_start": True, "base_port": 3478, "permission": "auto",
-                   "timeout": 1800, "model": ""},
+        # cline 为默认核心执行器（ClineCore 会话宿主, 自主持有）
+        "id": "cline", "type": "cline-sdk", "enabled": True, "default": True,
+        "config": {"node_bin": "node", "sidecar_script": "",
+                   "provider_id": "", "model_id": "", "api_key": "",
+                   "max_iterations": 40,
+                   "system_prompt": "", "tool_policies": {}, "models": [],
+                   "mcp_servers": [],
+                   "teams": {"enabled": False, "teamName": "", "agents": []}},
     },
     {
-        "id": "cline", "type": "cline-sdk", "enabled": True, "default": False,
-        "config": {"node_bin": "node", "sidecar_script": "", "provider_id": "",
-                   "model_id": "", "api_key": "", "max_iterations": 40},
+        "id": "opencode", "type": "opencode", "enabled": True, "default": False,
+        "config": {"auto_start": True, "base_port": 3478, "permission": "auto",
+                   "timeout": 1800, "model": "", "rulesMd": "", "mcp_servers": {}},
     },
 ]
 
@@ -235,8 +240,25 @@ async def probe_executor(request: Request):
         if etype == "cline-sdk":
             script = cfg.get("sidecar_script") or _default_sidecar_path()
             exists = os.path.isfile(script)
-            return ok({"status": "ok" if exists else "fail",
-                       "detail": f"sidecar: {script} {'存在' if exists else '缺失（需 npm run build -w packages/agent-sidecar）'}"})
+            detail = f"sidecar: {script} {'存在' if exists else '缺失（需 npm run build -w packages/agent-sidecar）'}"
+            # node 版本门槛（@cline/core 硬性要求 >=22）
+            node_ver = ""
+            try:
+                out = subprocess.run(["node", "--version"], capture_output=True,
+                                     text=True, timeout=10)
+                node_ver = (out.stdout or "").strip()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                major = int(node_ver.lstrip("v").split(".")[0]) if node_ver else 0
+            except ValueError:  # noqa: BLE001
+                major = 0
+            if node_ver and 0 < major < 22:
+                return ok({"status": "fail",
+                           "detail": f"{detail}；node {node_ver} 过低（@cline/core 要求 >=22）"})
+            if node_ver:
+                detail += f"；node {node_ver}"
+            return ok({"status": "ok" if exists else "fail", "detail": detail})
         if etype == "cli":
             import shutil
             cmd = (cfg.get("command") or "").split()
@@ -506,7 +528,9 @@ async def detect_executor_models(request: Request):
 
 
 def _probe_llm_model(url: str, model: str, api_key: str = "") -> dict:
-    """模型连通性测试: OpenAI 兼容。先 GET /models(廉价), 失败再 1-token 对话。
+    """模型连通性测试: OpenAI 兼容。三级探测——
+    ① GET /models(廉价) ② 流式 1-token 对话(Cline 网关强制 stream:true, 关键兼容面)
+    ③ 非流式对话兜底。返回 detail 标注流式兼容性。
 
     模型拣择匹配(llama-server 等 OpenAI 兼容服务 /models 返回裸 id,
     白名单存 opencode 的 provider/model 全名): 全名 → 裸名 → 段后缀 三级匹配。
@@ -537,6 +561,24 @@ def _probe_llm_model(url: str, model: str, api_key: str = "") -> dict:
                 return mid
         return ""
 
+    def _stream_probe() -> tuple[bool, str]:
+        """流式兼容探测: stream:true + max_tokens=1。"""
+        try:
+            payload = json.dumps({"model": model.rsplit("/", 1)[-1],
+                                  "messages": [{"role": "user", "content": "ping"}],
+                                  "max_tokens": 1, "stream": True}).encode()
+            req = urllib.request.Request(
+                f"{base}/chat/completions", data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=20) as r:
+                ctype = (r.headers or {}).get("Content-Type", "")
+                head = r.read(512).decode("utf-8", "replace")
+                if "text/event-stream" in ctype or head.startswith("data:"):
+                    return True, f"{base} 流式 HTTP {r.status}"
+                # 200 但非 SSE: 网关不支持流式（Cline 路径会失败）
+                return False, f"{base} HTTP {r.status} 但非 SSE 流(不支持 stream:true?)"
+        except Exception as e:  # noqa: BLE001
+            return False, f"流式失败: {str(e)[:150]}"
+
     try:
         req = urllib.request.Request(f"{base}/models", headers=headers)
         with urllib.request.urlopen(req, timeout=6) as r:
@@ -557,7 +599,13 @@ def _probe_llm_model(url: str, model: str, api_key: str = "") -> dict:
                 suffix = f"(命中 {matched})" if matched else f"(列表未见 {model}, 仍可达)"
             else:
                 suffix = "" if (model in body or model.rsplit("/", 1)[-1] in body) else f"(列表未见 {model}, 仍可达)"
-            return {"status": "ok", "detail": f"{base}/models HTTP {r.status}{suffix}"}
+            stream_ok, stream_detail = _stream_probe()
+            detail = f"{base}/models HTTP {r.status}{suffix} | {stream_detail}"
+            if not stream_ok:
+                return {"status": "fail",
+                        "detail": detail,
+                        "note": "Cline 网关强制流式(stream:true)；可改用 Ollama 原生 provider 提升兼容性"}
+            return {"status": "ok", "detail": detail}
     except Exception as e1:  # noqa: BLE001
         try:
             payload = json.dumps({"model": model.rsplit("/", 1)[-1], "messages": [

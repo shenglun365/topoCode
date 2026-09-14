@@ -287,6 +287,10 @@ def confirm_task(task_id: str) -> dict:
     # 复活执行器原生会话(跨回合连续性): task 行持 sessionRef
     if task.get("sessionRef"):
         payload["sessionRef"] = task["sessionRef"]
+    # P5: 规约/规则/agent 配置落盘 worktree（per-executor 路径映射）
+    workspace_files = _build_workspace_files(_etype or "", _cfg, task)
+    if workspace_files:
+        payload["workspaceFiles"] = workspace_files
 
     res = _runner("/api/implement", payload, timeout=20.0)
     if not res or not res.get("ok"):
@@ -324,12 +328,43 @@ def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
 
 
 def task_input(task_id: str, text: str) -> Dict[str, Any]:
-    """用户回复 → 转达 subagent(waiting_input 立即; running 排队续跑)。"""
+    """用户回复 → 转达 subagent(waiting_input 立即; running 排队续跑)。
+
+    审批指令: `/approve {requestId}` | `/deny {requestId} [理由]` →
+    转发 runner approval 端点(越界确认桥), 不作为回合输入。
+    """
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") not in ("waiting_input", "running"):
         return {"ok": False, "error": "task-not-active"}
+    stripped = (text or "").strip()
+    approve = stripped.startswith("/approve ")
+    deny = stripped.startswith("/deny ")
+    if approve or deny:
+        parts = stripped.split(None, 2)
+        request_id = parts[1].strip() if len(parts) > 1 else ""
+        if not request_id:
+            return {"ok": False, "error": "缺少 requestId（用法: /approve {id} 或 /deny {id} [理由]）"}
+        reason = parts[2].strip() if len(parts) > 2 else ""
+        job_id = str(task.get("runnerJobId") or "")
+        res = _runner(f"/api/implement/{job_id}/approval",
+                      {"requestId": request_id,
+                       "approved": approve,
+                       "reason": reason or ("approved" if approve else "rejected by user")},
+                      15.0)
+        if res and res.get("ok"):
+            conv_id = task.get("conversationId") or ""
+            _append(conv_id, "assistant",
+                    f"{'✅ 已批准' if approve else '🚫 已拒绝'} 工具调用 `{request_id}`。",
+                    msg_meta={"kind": "task_approval_done", "taskId": task_id},
+                    project_id=(store.ConversationsStore.get(conv_id) or {}).get("projectId") or "")
+            return {"ok": True, "approval": True}
+        return {"ok": False, "error": (res or {}).get("error") or "审批转发失败"}
     res = _runner(f"/api/implement/{task.get('runnerJobId')}/input",
-                  {"text": text[:12000]}, 15.0)
+                  {"text": stripped[:12000],
+                   # P4: running 态优先 steer 直达（cline pending 优先投递）；
+                   # runner 侧不支持的执行器自动回退排队
+                   **({"steer": True} if (task.get("status") or "") == "running" else {})},
+                  15.0)
     if res and res.get("ok"):
         if (task.get("status") or "") == "waiting_input":
             store.TasksStore.update(task_id, {"status": "running"})
@@ -412,6 +447,47 @@ def _task_ctx(conv_id: str, task_id: str, job_id: str, rid: str, agent: str) -> 
             "pid": conv.get("projectId") or "", "agent": agent}
 
 
+def _publish_progress(conv_id: str, task_id: str, prog: dict) -> None:
+    """任务进度实时推送（WS/SSE 单一出口）。"""
+    try:
+        from . import ws_events
+        ws_events.publish({"type": "progress", "conversationId": conv_id,
+                           "taskId": task_id, "at": _ts(), **prog})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _build_workspace_files(executor_type: str, executor_cfg: dict, task: dict) -> list:
+    """P5: 执行器约定文件组装（cline→.cline/rules|agents, opencode/codex→AGENTS.md）。
+
+    数据源（后续接 KB 语义资产的扩展点）:
+    - task.rulesMd        任务级规约文本
+    - cfg.rulesMd         执行器级规约文本
+    - cfg.teams.agents    cline teams 成员配置([{name, content}])
+    """
+    files: list = []
+    rules_parts = []
+    for src in (task.get("rulesMd"), (executor_cfg or {}).get("rulesMd")):
+        if isinstance(src, str) and src.strip():
+            rules_parts.append(src.strip())
+    if rules_parts:
+        content = "\n\n".join(rules_parts)
+        if executor_type == "cline-sdk":
+            files.append({"path": ".cline/rules/000-guide.md", "content": content})
+        else:
+            files.append({"path": "AGENTS.md", "content": content})
+    if executor_type == "cline-sdk":
+        teams = (executor_cfg or {}).get("teams") or {}
+        for a in (teams.get("agents") if isinstance(teams, dict) else []) or []:
+            if isinstance(a, dict) and str(a.get("name") or "").strip() \
+                    and isinstance(a.get("content"), str):
+                name = "".join(c for c in str(a["name"]) if c.isalnum() or c in "-_")
+                if name:
+                    files.append({"path": f".cline/agents/{name}.md",
+                                  "content": str(a["content"])})
+    return files
+
+
 def _handle_task_event(ev: dict, ctx: dict) -> None:
     """v2: runner 事件 → 任务生命周期 + 统一流消息(agent=executor)。
 
@@ -465,12 +541,50 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         prog = {"toolCount": int(ev.get("toolCount") or 0),
                 "msgCount": int(ev.get("msgCount") or 0), "at": _ts()}
         store.TasksStore.set_progress(task_id, prog)
-        try:
-            from . import ws_events
-            ws_events.publish({"type": "progress", "conversationId": conv_id,
-                               "taskId": task_id, **prog})
-        except Exception:  # noqa: BLE001
-            pass
+        _publish_progress(conv_id, task_id, prog)
+    elif kind == "text":
+        # cline v2 流式片段: 仅作执行预览(进度面), 不落会话消息(防刷屏)
+        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        prog = {**prev, "lastText": text[:200], "at": _ts()}
+        store.TasksStore.set_progress(task_id, prog)
+        _publish_progress(conv_id, task_id, {"lastText": text[:200]})
+    elif kind == "tool":
+        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        prog = {**prev, "lastTool": str(ev.get("toolName") or text or ""), "at": _ts()}
+        store.TasksStore.set_progress(task_id, prog)
+        _publish_progress(conv_id, task_id, {"lastTool": prog["lastTool"]})
+    elif kind == "usage":
+        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        prog = {**prev,
+                "inputTokens": int(ev.get("inputTokens") or 0),
+                "outputTokens": int(ev.get("outputTokens") or 0), "at": _ts()}
+        store.TasksStore.set_progress(task_id, prog)
+    elif kind == "approval_request":
+        # 越界审批桥: 落可操作消息(meta 携 jobId/requestId), 前端渲染批准/拒绝
+        tool_name = str(ev.get("toolName") or "工具")
+        req_id = str(ev.get("requestId") or "")
+        _append(conv_id, "assistant",
+                f"🔐 **{agent} 请求确认**（任务「{title}」）\n\n"
+                f"工具 `{tool_name}` 请求执行，等待你的批准。\n\n"
+                f"批准：回复 /approve {req_id}；拒绝：回复 /deny {req_id}。",
+                msg_meta={"kind": "task_approval", "taskId": task_id,
+                          "approvalJobId": job_id, "approvalRequestId": req_id},
+                project_id=pid, agent=agent)
+    elif kind == "team":
+        # P5: 团队进度 → 进度预览（不落消息，防刷屏）
+        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        prog = {**prev, "lastTeam": text[:120], "at": _ts()}
+        store.TasksStore.set_progress(task_id, prog)
+        _publish_progress(conv_id, task_id, {"lastTeam": text[:120]})
+    elif kind == "mcp":
+        # P5: MCP 注入结果 → 进度（失败轻提示落进度，不阻断）
+        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        prog = {**prev, "lastMcp": f"{ev.get('server')}:{'ok' if ev.get('ok') else 'failed'}",
+                "at": _ts()}
+        store.TasksStore.set_progress(task_id, prog)
+    elif kind in ("notice", "turn_outcome"):
+        # notice: 进展噪声(mistake_limit 由 failed 收口); turn_outcome: 标记已承载
+        return
     elif kind in ("aborted", "finished"):
         _append(conv_id, "assistant", f"ℹ️ {text}", project_id=pid, agent=agent)
     elif text:

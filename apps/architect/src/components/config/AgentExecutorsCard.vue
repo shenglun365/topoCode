@@ -159,7 +159,7 @@ function onTypeChange(e: ExecEntry) {
     opencode: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800, models: [] },
     'remote-agent': { agent_url: '', api_key: '', git_remote: 'auto', timeout: 3600, models: [] },
     'codex-server': { codex_bin: 'codex', approval_policy: 'never', sandbox_mode: 'workspace-write', timeout: 3600, models: [] },
-    'cline-sdk': { node_bin: 'node', sidecar_script: '', provider_id: 'openai-compatible', model_id: '', base_url: '', api_key: '', max_iterations: 40, models: [] },
+    'cline-sdk': { node_bin: 'node', sidecar_script: '', provider_id: 'openai-compatible', model_id: '', base_url: '', api_key: '', max_iterations: 40, system_prompt: '', tool_policies: {}, models: [] },
     cli: { command: '', timeout: 600 },
     'serve-generic': { base_url: '', api_key: '' },
     mock: {},
@@ -336,13 +336,15 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'timeout', label: '超时(秒)', kind: 'num' },
   ],
   'cline-sdk': [
-    { key: 'provider_id', label: 'Provider' },
+    { key: 'provider_id', label: 'Provider(openai-compatible/ollama/deepseek…)' },
     { key: 'model_id', label: '默认模型', kind: 'model-select' },
     { key: 'base_url', label: '端点(本地必填, /v1)' },
     { key: 'api_key', label: 'API Key' },
     { key: 'max_iterations', label: '最大迭代', kind: 'num' },
-    { key: 'node_bin', label: 'node 路径' },
+    { key: 'system_prompt', label: '系统提示(空=默认协议)' },
+    { key: 'node_bin', label: 'node 路径(需≥22)' },
     { key: 'sidecar_script', label: 'sidecar 路径' },
+    // tool_policies / mcp_servers / teams 为对象/数组配置——经 API 编辑(PUT agent/executors)，表单不展开
   ],
   cli: [
     { key: 'command', label: '命令模板 ({prompt})' },

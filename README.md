@@ -115,6 +115,18 @@ topoOne-ui/
 
 > 核心框架（`packages/core`）提供网关、RPC、DB、Agent、LLM、插件与进程治理；子项目经 manifest 驱动注册，独立进程运行，由 `topo serve` 统一拉起（10 进程：核心 kb/gateway/llm/agent + 生态 mcp/runner + docs/chat/architect/agent-bus）。
 
+### Coding Agent 执行器（runner :3458）
+
+architect 实施作业经 runner 执行，支持三类执行器（`agent/executors` 注册表可配，**cline 为默认**）：
+
+| 执行器 | 机制 | 会话/多回合 | 审批 | 检查点 | 备注 |
+|---|---|---|---|---|---|
+| **cline**（默认） | `@cline/core` ClineCore 会话宿主（Node ≥22 sidecar） | ✓ 常驻多回合（sessionRef 复活） | ✓ toolPolicies 白名单 + 越界审批桥（`/approve` `/deny` 或 UI 按钮） | ✓ git 快照 restore/compare | 自定义协议工具 `report_turn_outcome`（done/need_input 结构化收口）、MCP server 注入（单失败降级）、Teams、steer 直达、会话内换模；存储隔离 `~/.topocode/cline/` |
+| **opencode** | `opencode serve` HTTP + SSE | ✓（serve 重启自动重建会话） | 权限一律 allow 白名单（无头防挂起），readOnly 靠协议约束+验收把关 | ✗ | 权限/经 `OPENCODE_CONFIG_CONTENT` 内联注入；实例空闲自动回收 |
+| **codex** | `codex app-server` stdio JSON-RPC | ✓ thread 续 | approvalPolicy=never + sandbox（readOnly→read-only 沙箱） | ✗ | 完成信号为文本标记契约（无自定义工具）；错误退避 2s/4s |
+
+runner 作业面：`POST /api/implement`（worktree+分支，支持 `workspaceFiles` 规约/规则/agent 配置落盘）；作业内省 `GET /api/implement/{id}/messages|usage|pending`、`/checkpoints?runCount=N`、`POST /{id}/restore|model|approval|proceed|steer(input)`。执行器能力差异由 runner 能力分派自动降级（不支持时明确报"不支持"）。
+
 ---
 
 ## 安装与运行

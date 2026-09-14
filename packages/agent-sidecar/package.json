@@ -6,10 +6,11 @@
   "private": true,
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@cline/sdk": "^0.0.82"
+    "@cline/sdk": "0.0.82"
   },
   "devDependencies": {
     "typescript": "^5.6.0"

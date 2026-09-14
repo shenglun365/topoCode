@@ -11,6 +11,7 @@ from . import sessions
 from . import dev_digest
 from . import asset_framework
 from . import agent_executors
+from . import exec_cline
 from . import agent_roles
 from . import contracts
 from . import acceptance
@@ -38,6 +39,7 @@ router.include_router(dirs.router)
 router.include_router(docs.router)
 router.include_router(semantic_assets.router)
 router.include_router(agent_executors.router)
+router.include_router(exec_cline.router)
 router.include_router(asset_framework.router)
 router.include_router(agent_roles.router)
 router.include_router(contracts.router)

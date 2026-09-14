@@ -257,6 +257,619 @@ def test_codex_abort_sends_interrupt(monkeypatch):
     assert "turn/interrupt" in fake.calls
 
 
+# ── OpenCode P1: 无头权限显式化 + 会话复活容错 ──────────────────────────────
+
+def test_opencode_headless_config_shape():
+    """内联配置: 权限全 allow 白名单 + mcp timeout 强制 >=60s。"""
+    cfg = ta._opencode_headless_config("auto", {
+        "fs": {"type": "local", "command": ["mcp-fs"], "timeout": 5000},
+        "web": {"type": "remote", "url": "http://x"},
+    })
+    import json as _json
+    data = _json.loads(cfg)
+    assert data["permission"]["*"] == "allow"
+    assert data["permission"]["doom_loop"] == "allow"
+    assert data["permission"]["external_directory"] == "allow"
+    assert data["mcp"]["fs"]["timeout"] == 60000      # 冷启动坑: 强制抬升
+    assert data["mcp"]["web"]["timeout"] == 60000     # 缺省补齐
+
+
+def test_opencode_spawn_injects_config_env(monkeypatch):
+    """spawn serve: OPENCODE_CONFIG_CONTENT 环境变量注入（不落 worktree）。"""
+    captured = {}
+
+    class _Proc:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            pass
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs.get("env") or {}
+        return _Proc()
+
+    monkeypatch.setattr(ta.subprocess, "Popen", fake_popen)
+
+    async def fake_healthy(url):
+        return True
+
+    mgr = ta.OpenCodeServeManager(permission="auto",
+                                  mcp_servers={"fs": {"timeout": 100}})
+    monkeypatch.setattr(mgr, "_healthy", fake_healthy)
+
+    async def _flow():
+        return await mgr._spawn("/r", 3500, "http://127.0.0.1:3500")
+    sp = asyncio.run(_flow())
+    assert sp.proc is not None
+    content = captured["env"].get("OPENCODE_CONFIG_CONTENT") or ""
+    assert '"allow"' in content
+    assert "doom_loop" in content
+    assert "60000" in content
+    # 空闲实例回收 env（InstanceStore 泄漏对策; SDK 最低 1h）
+    assert captured["env"].get("OPENCODE_EXPERIMENTAL_INSTANCE_IDLE_TIMEOUT_MS") == "3600000"
+
+
+def test_opencode_run_turn_recreates_on_404(monkeypatch):
+    """serve 重启后会话丢失(404) → 自动重建 session 并重发当前指令。"""
+    posts = []
+
+    class _Resp:
+        def __init__(self, code, data=None):
+            self.status_code = code
+            self._d = data or {}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                import httpx as _hx
+                raise _hx.HTTPStatusError("err", request=None, response=None)
+
+        def json(self):
+            return self._d
+
+    class _AC:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            posts.append(url)
+            if url.endswith("/session/old-ses/message"):
+                return _Resp(404)
+            if url.endswith("/session"):
+                return _Resp(200, {"id": "new-ses"})
+            if url.endswith("/session/new-ses/message"):
+                return _Resp(200, {"parts": [{"type": "text", "text": "重建后完成"}]})
+            return _Resp(500)
+
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _AC)
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    a._start_sse = lambda job: None   # SSE 订阅打桩
+
+    class _J:
+        id = "j404"
+        session_id = "old-ses"
+        serve_url = "http://x"
+        wt = "/tmp/x-wt"
+        model = ""
+        turn_timeout = 10.0
+        last_activity_ts = 0.0
+        last_error = ""
+
+        def emit(self, *a, **k):
+            pass
+
+    j = _J()
+    out = asyncio.run(a.run_turn(j, "做任务"))
+    assert j.session_id == "new-ses"            # 会话已重建
+    assert out.output == "重建后完成"            # 指令已重发并拿到结果
+    assert posts[0].endswith("/session/old-ses/message")
+    assert posts[1].endswith("/session")        # 重建调用
+    assert posts[2].endswith("/session/new-ses/message")
+
+
+def test_opencode_run_turn_model_body(monkeypatch):
+    """models[] 换模: provider/model → body.model(providerID/modelID)。"""
+    bodies = []
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"parts": [{"type": "text", "text": "ok"}]}
+
+    class _AC:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            bodies.append(json)
+            return _Resp()
+
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _AC)
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    a._start_sse = lambda job: None
+
+    class _J:
+        id = "jm"
+        session_id = "s1"
+        serve_url = "http://x"
+        wt = "/tmp/x-wt"
+        model = "openai-compatible/qwen3"
+        turn_timeout = 10.0
+        last_activity_ts = 0.0
+
+        def emit(self, *a, **k):
+            pass
+
+    out = asyncio.run(a.run_turn(_J(), "hi"))
+    assert out.output == "ok"
+    assert bodies[0]["model"] == {"providerID": "openai-compatible",
+                                  "modelID": "qwen3"}
+
+
+# ── P2: opencode/codex 流式事件 + codex sandbox 映射 ────────────────────────
+
+def _stream_job(jid="js"):
+    class _J:
+        id = jid
+        session_id = "s1"
+        serve_url = "http://x"
+        wt = "/tmp/x-wt"
+        model = ""
+        turn_timeout = 10.0
+        boundaries = {}
+        last_activity_ts = 0.0
+        last_error = ""
+        emitted: list = []
+
+        def emit(self, kind, text="", **extra):
+            self.emitted.append({"kind": kind, "text": text, **extra})
+    return _J()
+
+
+def test_opencode_sse_parts_stream_deltas():
+    """text part 全量重放 → 只发新增片段; tool part 首见 → emit("tool")。"""
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    j = _stream_job()
+    msg_tools: dict = {}
+
+    def msg_event(text, parts_extra=None):
+        parts = [{"type": "text", "text": text}] + (parts_extra or [])
+        return {"type": "message.updated",
+                "properties": {"sessionID": "s1",
+                               "message": {"id": "m1", "parts": parts}}}
+
+    # 第一次: 部分 text + 工具
+    a._on_message_parts(j, "m1", [
+        {"type": "text", "text": "正在分析"},
+        {"type": "tool", "tool": "editor"},
+    ], msg_tools)
+    kinds = [(e["kind"], e["text"]) for e in j.emitted]
+    assert ("text", "正在分析") in kinds
+    assert any(e["kind"] == "tool" and e.get("toolName") == "editor"
+               for e in j.emitted)
+    assert msg_tools.get("m1") == 2             # 工具计数峰值保持
+
+    # 第二次: 同 part 增长 → 只发增量
+    j.emitted.clear()
+    a._on_message_parts(j, "m1", [
+        {"type": "text", "text": "正在分析代码结构"},
+        {"type": "tool", "tool": "editor"},
+    ], msg_tools)
+    assert [(e["kind"], e["text"]) for e in j.emitted if e["kind"] == "text"] == \
+        [("text", "代码结构")]
+    # 工具不再重复上报（首见去重）
+    assert not [e for e in j.emitted if e["kind"] == "tool"]
+
+
+def test_codex_stream_items_delta_and_tools():
+    """agent item 增长 → 增量 emit("text"); command item 首见 → emit("tool")。"""
+    a = ta.CodexTurnAdapter({"codex_bin": "codex"})
+    a._stream_cursor = {}
+    a._stream_tools = set()
+    j = _stream_job("jcx")
+
+    a._stream_codex_item(j, {"method": "item/updated", "params": {"item": {
+        "id": "it1", "type": "agentMessage",
+        "content": [{"type": "text", "text": "第一步"}]}}})
+    a._stream_codex_item(j, {"method": "item/updated", "params": {"item": {
+        "id": "it1", "type": "agentMessage",
+        "content": [{"type": "text", "text": "第一步完成"}]}}})
+    a._stream_codex_item(j, {"method": "item/updated", "params": {"item": {
+        "id": "it2", "type": "commandExecution", "command": "pytest -q"}}})
+    texts = [e["text"] for e in j.emitted if e["kind"] == "text"]
+    assert texts == ["第一步", "完成"]           # 增量: 第二次只发"完成"
+    tools = [e for e in j.emitted if e["kind"] == "tool"]
+    assert len(tools) == 1 and tools[0]["toolName"] == "pytest -q"
+    # 工具重放去重
+    a._stream_codex_item(j, {"method": "item/updated", "params": {"item": {
+        "id": "it2", "type": "commandExecution", "command": "pytest -q"}}})
+    assert len([e for e in j.emitted if e["kind"] == "tool"]) == 1
+
+
+def test_codex_turn_sandbox_readonly(monkeypatch):
+    """boundaries.readOnly → turn/start sandbox read-only（原生沙箱级只读）。"""
+    fake = _FakeCodexProc()
+    calls = {}
+    orig_call = fake.call
+
+    async def spy_call(method, params=None, timeout=None):
+        if method == "turn/start":
+            calls["params"] = params
+        return await orig_call(method, params, timeout)
+
+    fake.call = spy_call
+    proxy = type("P", (), {"proc": fake, "dead": False, "dead_reason": ""})()
+    monkeypatch.setitem(ta._CODEX_SERVERS, "codex:", proxy)
+    a = ta.CodexTurnAdapter({"codex_bin": "codex"})
+
+    async def _flow():
+        class _J:
+            id = "jro"
+            session_id = ""
+            serve_url = ""
+            wt = "/tmp/x-wt"
+            model = ""
+            turn_timeout = 10.0
+            boundaries = {"readOnly": True}
+            last_activity_ts = 0.0
+            last_error = ""
+
+            def emit(self, *a, **k):
+                pass
+        j = _J()
+        await a.start_session(j)
+        await a.run_turn(j, "只读任务")
+        return j
+    asyncio.run(_flow())
+    assert calls["params"]["sandbox"] == {"mode": "read-only"}
+    assert calls["params"]["approvalPolicy"] == "never"
+
+
+# ── P3: 内省补齐（opencode messages/usage/model + codex usage/messages/退避）──
+
+def test_opencode_read_messages_dual_shape(monkeypatch):
+    """opencode 消息双形状兼容: {role,parts} 与 {info:{role},parts}。"""
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [
+                {"role": "user", "parts": [{"type": "text", "text": "问题"}]},
+                {"info": {"role": "assistant"},
+                 "parts": [{"type": "text", "text": "回答"},
+                           {"type": "tool", "tool": "read"}]},
+            ]
+
+    class _AC:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            return _Resp()
+
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _AC)
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+
+    class _J:
+        session_id = "s1"
+        serve_url = "http://x"
+        model = ""
+
+    msgs = asyncio.run(a.read_messages(_J()))
+    assert msgs[0] == {"role": "user", "content": "问题"}
+    assert msgs[1]["role"] == "assistant"
+    assert msgs[1]["content"] == "回答"          # tool part 不混入文本
+
+
+def test_opencode_usage_and_model(monkeypatch):
+    """tokens 聚合（含 info 嵌套）; 换模记 job.model。"""
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [
+                {"role": "user", "tokens": {"input": 10, "output": 5}},
+                {"info": {"role": "assistant", "tokens": {"input": 100, "output": 50}}},
+            ]
+
+    class _AC:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            return _Resp()
+
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _AC)
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+
+    class _J:
+        session_id = "s1"
+        serve_url = "http://x"
+        model = ""
+
+    j = _J()
+    usage = asyncio.run(a.get_usage(j))
+    assert usage == {"usage": {"inputTokens": 110, "outputTokens": 55}}
+    assert asyncio.run(a.update_model(j, "qwen3")) is True
+    assert j.model == "qwen3"
+
+
+def test_codex_usage_and_transcript(monkeypatch):
+    """turn/completed usage 采集 + events ring 转写。"""
+    fake = _FakeCodexProc()
+    orig_call = fake.call
+
+    async def richer_call(method, params=None, timeout=None):
+        if method == "turn/start":
+            fake.events.append({"method": "item/updated",
+                                "params": {"item": {"id": "it1",
+                                                    "type": "agentMessage",
+                                                    "content": [{"text": "分析完毕"}]}}})
+            fake.events.append({"method": "turn/completed",
+                                "params": {"turn": {"status": "completed",
+                                                    "usage": {"inputTokens": 200,
+                                                              "outputTokens": 80}}}})
+            return {"turn": {"id": "t1"}}
+        return await orig_call(method, params, timeout)
+
+    fake.call = richer_call
+    proxy = type("P", (), {"proc": fake, "dead": False, "dead_reason": ""})()
+    monkeypatch.setitem(ta._CODEX_SERVERS, "codex:", proxy)
+    a = ta.CodexTurnAdapter({"codex_bin": "codex"})
+
+    async def _flow():
+        class _J:
+            id = "ju"
+            session_id = ""
+            serve_url = ""
+            wt = "/tmp/x-wt"
+            model = ""
+            turn_timeout = 10.0
+            boundaries = {}
+            last_activity_ts = 0.0
+            last_error = ""
+
+            def emit(self, *a, **k):
+                pass
+        j = _J()
+        await a.start_session(j)
+        await a.run_turn(j, "x")
+        usage = await a.get_usage(j)
+        msgs = await a.read_messages(j)
+        return usage, msgs
+    usage, msgs = asyncio.run(_flow())
+    assert usage["usage"]["inputTokens"] == 200
+    assert usage["usage"]["outputTokens"] == 80
+    assert any("分析完毕" in m["content"] for m in msgs)
+
+
+def test_codex_error_backoff_then_fail(monkeypatch):
+    """willRetry=True × 2 → 退避(2s/4s); 第 3 次 willRetry=False → 失败。"""
+    fake = _FakeCodexProc()
+    orig_call = fake.call
+    sleeps = []
+
+    async def err_call(method, params=None, timeout=None):
+        if method == "thread/start":
+            return {"thread": {"id": "th1"}}
+        if method == "turn/start":
+            fake.events.extend([
+                {"method": "error", "params": {"error": {"message": "rate limited"},
+                                               "willRetry": True}},
+                {"method": "error", "params": {"error": {"message": "rate limited"},
+                                               "willRetry": True}},
+                {"method": "error", "params": {"error": {"message": "quota exceeded"},
+                                               "willRetry": False}},
+            ])
+            return {"turn": {"id": "t1"}}
+        return await orig_call(method, params, timeout)
+
+    fake.call = err_call
+
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(delay, *a, **k):
+        sleeps.append(delay)
+        await real_sleep(0)
+
+    proxy = type("P", (), {"proc": fake, "dead": False, "dead_reason": ""})()
+    monkeypatch.setitem(ta._CODEX_SERVERS, "codex:", proxy)
+    a = ta.CodexTurnAdapter({"codex_bin": "codex"})
+
+    async def _flow():
+        class _J:
+            id = "jb"
+            session_id = ""
+            serve_url = ""
+            wt = "/tmp/x-wt"
+            model = ""
+            turn_timeout = 10.0
+            boundaries = {}
+            last_activity_ts = 0.0
+            last_error = ""
+
+            def emit(self, *a, **k):
+                pass
+        j = _J()
+        await a.start_session(j)
+        await a.run_turn(j, "x")
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    with pytest.raises(RuntimeError, match="quota exceeded"):
+        asyncio.run(_flow())
+    assert 2.0 in sleeps and 4.0 in sleeps     # 指数退避发生
+
+
+# ── P4: cline steer 直达 + shutdown 清理 ────────────────────────────────────
+
+def test_cline_v2_steer_dispatch(monkeypatch):
+    """cline.steer → sidecar turn/steer（成功/失败两路）。"""
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter()
+    j = _fake_job()
+    j.session_id = "jc1"
+    assert asyncio.run(a.steer(j, "改用方案 B")) is True
+    method, params = [c for c in fake.calls if c[0] == "turn/steer"][0]
+    assert params == {"sessionId": "jc1", "prompt": "改用方案 B"}
+    # 失败路：sidecar 返回 ok=False
+    fake2 = _FakeSidecar()
+    fake2.results["turn/steer"] = {"ok": False, "steered": False}
+    _patch_sidecar(monkeypatch, fake2)
+    assert asyncio.run(a.steer(j, "x")) is False
+
+
+def test_implement_steer_direct_when_busy(monkeypatch):
+    """busy + steer → adapter.steer 直达（不排队）; 不支持 → 回退排队。"""
+    j = impl.ImplementJob(
+        "impl-st", "/tmp/x", "/tmp/x-wt", "HEAD", "b", "i",
+        adapter=_WatchFakeAdapter(lambda: None))
+    j._busy = True
+    j.status = "running"
+
+    async def fake_steer(text):
+        return True
+
+    j.adapter.steer = lambda job, text: fake_steer(text)
+    res = asyncio.run(j.user_input("转向", steer=True))
+    assert res == {"ok": True, "steered": True}
+    assert j.pending_inputs == []            # 未排队
+
+    # busy + steer 但 adapter 不支持 → 排队
+    j2 = impl.ImplementJob(
+        "impl-st2", "/tmp/x", "/tmp/x-wt", "HEAD", "b", "i",
+        adapter=_WatchFakeAdapter(lambda: None))
+    j2._busy = True
+    res2 = asyncio.run(j2.user_input("继续", steer=True))
+    assert res2 == {"ok": True, "queued": True}
+    assert j2.pending_inputs == ["继续"]
+
+    # busy + 无 steer → 排队（原行为）
+    res3 = asyncio.run(j2.user_input("普通补充"))
+    assert res3 == {"ok": True, "queued": True}
+
+
+def test_implement_steer_terminal_rejected():
+    j = impl.ImplementJob(
+        "impl-st3", "/tmp/x", "/tmp/x-wt", "HEAD", "b", "i",
+        adapter=_WatchFakeAdapter(lambda: None))
+    j.status = "done"
+    res = asyncio.run(j.user_input("x", steer=True))
+    assert res["ok"] is False
+
+
+def test_shutdown_executors_kills_shared(monkeypatch):
+    """runner 退出钩子: 共享 sidecar/app-server 全部 kill。"""
+    killed = []
+
+    class _SC:
+        async def kill(self):
+            killed.append("cline")
+
+    class _Proc:
+        async def kill(self):
+            killed.append("codex")
+
+    monkeypatch.setitem(ta._CLINE_SIDECARS, "node:x.js", _SC())
+    proxy = type("P", (), {"proc": type("Q", (), {"kill": lambda s: killed.append("codex") or asyncio.sleep(0)})()})()
+    monkeypatch.setitem(ta._CODEX_SERVERS, "codex:", proxy)
+    asyncio.run(ta.shutdown_executors())
+    assert "cline" in killed
+    assert ta._CLINE_SIDECARS == {} and ta._CODEX_SERVERS == {}
+
+
+# ── P5: Teams/MCP/Rules 透传 ────────────────────────────────────────────────
+
+def test_cline_v2_teams_mcp_passthrough(monkeypatch):
+    """executorConfig teams/mcp_servers → session/start 参数。"""
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter(
+        mcp_servers=[{"name": "arch", "transport": "streamableHttp",
+                      "url": "http://127.0.0.1:3460/v1"}],
+        teams={"enabled": True, "teamName": "impl-team"})
+    j = _fake_job()
+
+    async def _flow():
+        await a.start_session(j)
+    asyncio.run(_flow())
+    _, params = fake.calls[0]
+    assert params.get("mcpServers") == [{"name": "arch",
+                                         "transport": "streamableHttp",
+                                         "url": "http://127.0.0.1:3460/v1"}]
+    assert params.get("teams") == {"enabled": True, "teamName": "impl-team"}
+    # 未配置时不传
+    fake2 = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake2)
+    a2 = _adapter()
+    async def _f2():
+        await a2.start_session(j)
+    asyncio.run(_f2())
+    _, params2 = fake2.calls[0]
+    assert "mcpServers" not in params2 and "teams" not in params2
+
+
+def test_cline_v2_team_and_mcp_events(monkeypatch):
+    """team/mcp_ready/mcp_failed sidecar 事件 → job.emit(team/mcp)。"""
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter()
+    j = _fake_job()
+    j.session_id = "jc1"
+
+    async def _flow():
+        await a.start_session(j)
+        handler = fake.handlers["jc1"]
+        handler({"type": "team", "sessionId": "jc1",
+                 "payload": {"teamName": "t1", "summary": "teammate spawned"}})
+        handler({"type": "mcp_ready", "sessionId": "jc1", "server": "arch",
+                 "tools": 3})
+        handler({"type": "mcp_failed", "sessionId": "jc1", "server": "bad",
+                 "message": "connect timeout"})
+    asyncio.run(_flow())
+    kinds = [e["kind"] for e in j.emitted]
+    assert "team" in kinds and "mcp" in kinds
+    mcp_events = [e for e in j.emitted if e["kind"] == "mcp"]
+    assert any(e.get("ok") is True and e.get("server") == "arch" for e in mcp_events)
+    assert any(e.get("ok") is False and e.get("server") == "bad" for e in mcp_events)
+
+
 # ── S3 子会话复活: sessionRef 预置 → adapter 复用执行器原生会话 ────────
 
 def test_implement_sessionref_preset():
@@ -310,3 +923,196 @@ def test_cline_sidecar_script_default_fallback(tmp_path):
     assert os.path.isfile(a._script), "默认 sidecar 脚本应存在(需 npm run build -w packages/agent-sidecar)"
     b = ClineTurnAdapter({"sidecar_script": str(tmp_path / "x.js")})
     assert b._script == str(tmp_path / "x.js"), "显式配置不覆盖"
+
+
+# ── ClineTurnAdapter v2（ClineCore 会话宿主; fake sidecar 不起真进程）────────
+
+class _FakeSidecar:
+    """v2 sidecar 假件: call 记录方法并可编程回包; 会话事件可注入。"""
+
+    def __init__(self):
+        self.calls: list = []
+        self.handlers: dict = {}
+        self.alive = True
+        self.results: dict = {}      # method → 返回值
+        self.scripts: dict = {}      # method → callable(params) → result
+
+    def set_session_handler(self, sid, handler):
+        self.handlers[sid] = handler
+
+    def clear_session_handler(self, sid):
+        self.handlers.pop(sid, None)
+
+    async def call(self, method, params=None, timeout=None):
+        self.calls.append((method, params))
+        if method in self.scripts:
+            return self.scripts[method](params or {})
+        return self.results.get(method, {"ok": True})
+
+    async def ensure(self):
+        pass
+
+
+def _fake_job(jid="jc1", boundaries=None, model=""):
+    import time as _t
+
+    _b = boundaries or {}
+    _m = model
+
+    class _Job:
+        id = jid
+        session_id = ""
+        serve_url = ""
+        wt = "/tmp/x-wt"
+        model = _m
+        turn_timeout = 10.0
+        boundaries = _b
+        project_id = "p1"
+        last_activity_ts = 0.0
+        last_error = ""
+        emitted: list = []
+
+        def emit(self, kind, text="", **extra):
+            self.emitted.append({"kind": kind, "text": text, **extra})
+    return _Job()
+
+
+def _patch_sidecar(monkeypatch, fake):
+    monkeypatch.setitem(ta._CLINE_SIDECARS, "node:test.js", fake)
+
+
+def _adapter(**cfg):
+    base = {"node_bin": "node", "sidecar_script": "test.js"}
+    base.update(cfg)
+    return ta.ClineTurnAdapter(base)
+
+
+def test_cline_v2_start_session_params_and_models(monkeypatch):
+    """models[] 消费: 作业模型名命中条目 → url/apiKey 下发 session/start。"""
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter(models=[{
+        "id": "m1", "name": "deepseek", "model": "openai-compatible/deepseek-chat",
+        "url": "https://api.deepseek.com", "apiKey": "sk-test",
+    }])
+    j = _fake_job(model="deepseek")
+
+    async def _flow():
+        await a.start_session(j)
+    asyncio.run(_flow())
+    method, params = fake.calls[0]
+    assert method == "session/start"
+    assert params["sessionId"] == "jc1"
+    assert params["cwd"] == j.wt
+    assert params["model"]["providerId"] == "openai-compatible"
+    assert params["model"]["modelId"] == "deepseek-chat"
+    assert params["model"]["apiKey"] == "sk-test"
+    assert params["model"]["baseUrl"] == "https://api.deepseek.com"
+    assert params["protocolTools"] is True
+    assert j.session_id == "jc1"
+
+
+def test_cline_v2_readonly_boundaries_block_write_tools(monkeypatch):
+    """boundaries.readOnly → 写类工具 enabled:false 硬阻断（不依赖 Plan 模式语义）。"""
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter()
+    j = _fake_job(boundaries={"readOnly": True, "files": ["src/"]})
+
+    async def _flow():
+        await a.start_session(j)
+    asyncio.run(_flow())
+    _, params = fake.calls[0]
+    tp = params["toolPolicies"]
+    for t in ("editor", "apply_patch", "run_commands"):
+        assert tp[t]["enabled"] is False
+
+
+def test_cline_v2_run_turn_streams_events_and_markers(monkeypatch):
+    """turn/send 事件流 → job.emit; 协议工具结局 → [[IMPLEMENT_DONE]] 标记。"""
+    fake = _FakeSidecar()
+
+    def _turn_send(params):
+        handler = fake.handlers.get(params["sessionId"])
+        handler({"type": "text", "sessionId": params["sessionId"], "text": "正在修改…"})
+        handler({"type": "tool_start", "sessionId": params["sessionId"],
+                 "toolName": "editor"})
+        handler({"type": "turn_outcome", "sessionId": params["sessionId"],
+                 "status": "done", "summary": "开发+单测+编译完成"})
+        # 与 sidecar v2 真实返回形状一致（outputText/turnOutcome）
+        return {"ok": True, "status": "completed", "outputText": "完成",
+                "turnOutcome": {"status": "done", "summary": "开发+单测+编译完成"}}
+
+    fake.scripts["turn/send"] = _turn_send
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter()
+    j = _fake_job()
+    j.session_id = "jc1"
+
+    async def _flow():
+        await a.start_session(j)   # 注册 adapter 事件 handler
+        return await a.run_turn(j, "做任务")
+    out = asyncio.run(_flow())
+    kinds = [e["kind"] for e in j.emitted]
+    assert "text" in kinds and "tool" in kinds
+    assert any(e.get("toolName") == "editor" for e in j.emitted)
+    assert "[[IMPLEMENT_DONE]]" in out.output
+    assert "开发+单测+编译完成" in out.output
+
+
+def test_cline_v2_need_input_marker(monkeypatch):
+    fake = _FakeSidecar()
+    fake.scripts["turn/send"] = lambda p: {
+        "ok": True, "status": "completed", "outputText": "请问?",
+        "turnOutcome": {"status": "need_input", "summary": "需要提供 API key"}}
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter()
+    j = _fake_job()
+    j.session_id = "jc1"
+    out = asyncio.run(asyncio.wait_for(a.run_turn(j, "x"), 5))
+    assert "[[NEED_INPUT]]" in out.output
+
+
+def test_cline_v2_probe_and_abort(monkeypatch):
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter()
+    j = _fake_job()
+    j.session_id = "jc1"
+
+    async def _flow():
+        p_idle = await a.probe(j)
+        fake.alive = False
+        p_dead = await a.probe(j)
+        ok = await a.abort(j)
+        return p_idle, p_dead, ok
+    p_idle, p_dead, ok = asyncio.run(_flow())
+    assert p_idle.status == "idle"
+    assert p_dead.status == "error"
+    assert ok is True
+    assert any(m == "session/abort" for m, _ in fake.calls)
+
+
+def test_cline_v2_respond_approval(monkeypatch):
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter()
+    j = _fake_job()
+    j.session_id = "jc1"
+
+    async def _flow():
+        return await a.respond_approval(j, "apr-3", False, "out of boundary")
+    assert asyncio.run(_flow()) is True
+    method, params = [c for c in fake.calls if c[0] == "approval/respond"][0]
+    assert params["requestId"] == "apr-3"
+    assert params["approved"] is False
+    assert params["reason"] == "out of boundary"
+
+
+def test_cline_v2_events_new_kinds_accepted():
+    """events schema: cline v2 流式 kind 合法（只增兼容）。"""
+    from topoone.plugins.runner.events import EventKind, make_event
+    for kind in (EventKind.TOOL, EventKind.USAGE, EventKind.NOTICE,
+                 EventKind.TURN_OUTCOME, EventKind.APPROVAL_REQUEST):
+        ev = make_event(1, kind, "x", toolName="editor")
+        assert ev["kind"] == kind

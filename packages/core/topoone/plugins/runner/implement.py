@@ -176,9 +176,20 @@ class ImplementJob:
         self.turn_task = asyncio.create_task(self._run_turn(text))
         self.watch_task = asyncio.create_task(self._watch_turn(self.turn_task))
 
-    async def user_input(self, text: str) -> Dict[str, Any]:
+    async def user_input(self, text: str, steer: bool = False) -> Dict[str, Any]:
+        """用户输入：不 busy 触发新回合；busy 时 steer=true 且执行器支持 →
+        直达注入（cline pending 优先投递），否则排队缓冲。"""
         if self.status in ("done", "failed", "stopped"):
             return {"ok": False, "error": f"作业已终态({self.status})，不可追加输入"}
+        if self._busy and steer:
+            steer_fn = getattr(self.adapter, "steer", None)
+            if steer_fn is not None:
+                try:
+                    if await steer_fn(self, text):
+                        self.emit("user_input", text, steered=True)
+                        return {"ok": True, "steered": True}
+                except Exception:  # noqa: BLE001
+                    pass
         self.emit("user_input", text)
         if self._busy:
             self.pending_inputs.append(text)
@@ -318,6 +329,34 @@ def _wt_root_dir() -> str:
     return p
 
 
+def _write_workspace_files(wt: str, files) -> list:
+    """P5: 规约/规则/agent 配置落盘 worktree（cline .cline/* 或 AGENTS.md）。
+
+    安全校验: path 必须相对且解析后仍在 wt 内（防路径穿越）。
+    """
+    written = []
+    wt_abs = os.path.abspath(wt)
+    for f in (files if isinstance(files, list) else []):
+        if not isinstance(f, dict):
+            continue
+        rel = str(f.get("path") or "").strip().lstrip("/")
+        content = str(f.get("content") or "")
+        if not rel:
+            continue
+        dst = os.path.abspath(os.path.join(wt_abs, rel))
+        if not dst.startswith(wt_abs + os.sep):
+            logger.warning("[implement] workspaceFiles 路径越界拒绝: %r", rel)
+            continue
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            written.append(rel)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[implement] workspaceFiles 写入失败 %r: %s", rel, e)
+    return written
+
+
 def register(app: FastAPI) -> None:
     """把实施作业端点挂到 runner FastAPI。"""
 
@@ -368,10 +407,13 @@ def register(app: FastAPI) -> None:
         _JOBS[job_id] = job
         # 子会话复活: 预置执行器原生会话 id(空=新建会话)
         job.session_id = str(body.get("sessionRef") or "")
+        # P5: 规约/规则/agent 配置落盘 worktree（cline .cline/rules|agents、AGENTS.md）
+        written = _write_workspace_files(wt, body.get("workspaceFiles"))
         job.turn_task = asyncio.create_task(job.start())
-        logger.info("[implement] job %s created root=%s branch=%s", job_id, root, branch)
+        logger.info("[implement] job %s created root=%s branch=%s files=%s",
+                    job_id, root, branch, written)
         return {"ok": True, "jobId": job_id, "branch": branch, "worktree": wt,
-                "status": job.status}
+                "status": job.status, "workspaceFiles": written}
 
     @app.get("/api/implement/running")
     async def implement_running():
@@ -397,7 +439,7 @@ def register(app: FastAPI) -> None:
         text = (body.get("text") or "").strip()
         if not text:
             return {"ok": False, "error": "text 为空"}
-        return await job.user_input(text)
+        return await job.user_input(text, steer=bool(body.get("steer")))
 
     @app.post("/api/implement/{job_id}/abort")
     async def implement_abort(job_id: str):
@@ -423,6 +465,132 @@ def register(app: FastAPI) -> None:
         if not job:
             return {"ok": False, "error": "作业不存在"}
         return {"ok": True, **job.diff()}
+
+    # ── cline v2 内省面（经 adapter 能力分派; 非对应执行器明确报错）──
+
+    def _cap(job_id: str, name: str):
+        """作业 adapter 能力获取(不存在/不支持返回 (None, err))。"""
+        job = _JOBS.get(job_id)
+        if not job:
+            return None, "作业不存在"
+        fn = getattr(job.adapter, name, None)
+        if fn is None:
+            return None, f"当前执行器({job.adapter.executor_id})不支持 {name}"
+        return (job, fn), None
+
+    @app.get("/api/implement/{job_id}/messages")
+    async def implement_messages(job_id: str, display: bool = True):
+        cap, err = _cap(job_id, "read_messages")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        try:
+            return {"ok": True, "messages": await fn(job, display=display)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    @app.get("/api/implement/{job_id}/usage")
+    async def implement_usage(job_id: str):
+        cap, err = _cap(job_id, "get_usage")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        try:
+            return {"ok": True, "usage": await fn(job)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    @app.get("/api/implement/{job_id}/checkpoints")
+    async def implement_checkpoints(job_id: str, runCount: int = 1):
+        cap, err = _cap(job_id, "compare_checkpoint")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        try:
+            return {"ok": True,
+                    "compare": await fn(job, int(runCount))}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    @app.post("/api/implement/{job_id}/restore")
+    async def implement_restore(job_id: str, request: Request):
+        cap, err = _cap(job_id, "restore_checkpoint")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        try:
+            return {"ok": True, "restore": await fn(
+                job, int(body.get("runCount") or 0),
+                body.get("options") or None)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    @app.post("/api/implement/{job_id}/model")
+    async def implement_model(job_id: str, request: Request):
+        cap, err = _cap(job_id, "update_model")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        body = await request.json()
+        model_id = str(body.get("modelId") or "").strip()
+        if not model_id:
+            return {"ok": False, "error": "modelId 为空"}
+        try:
+            ok = await fn(job, model_id)
+            return {"ok": bool(ok), "error": "" if ok else "换模失败"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    @app.post("/api/implement/{job_id}/approval")
+    async def implement_approval(job_id: str, request: Request):
+        """越界审批桥：用户批准/拒绝 sidecar 工具调用。"""
+        cap, err = _cap(job_id, "respond_approval")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        body = await request.json()
+        request_id = str(body.get("requestId") or "").strip()
+        if not request_id:
+            return {"ok": False, "error": "requestId 为空"}
+        try:
+            ok = await fn(job, request_id, body.get("approved") is True,
+                          str(body.get("reason") or ""))
+            return {"ok": bool(ok)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    @app.get("/api/implement/{job_id}/pending")
+    async def implement_pending(job_id: str):
+        """挂起提示清单（queue/steer 排队面）。"""
+        cap, err = _cap(job_id, "list_pending_prompts")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        try:
+            return {"ok": True, "prompts": await fn(job)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
+
+    @app.post("/api/implement/{job_id}/proceed")
+    async def implement_proceed(job_id: str, request: Request):
+        """长命令放行（社区坑: dev server/watch 阻塞——后台继续并采集输出）。"""
+        cap, err = _cap(job_id, "proceed_while_running")
+        if err:
+            return {"ok": False, "error": err}
+        job, fn = cap
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        try:
+            exit_code = await fn(job, body.get("toolCallId") or None)
+            return {"ok": exit_code is not None, "exitCode": exit_code}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:300]}
 
     @app.websocket("/api/implement/{job_id}/events")
     async def implement_events(websocket: WebSocket, job_id: str):

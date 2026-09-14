@@ -113,6 +113,52 @@ class RunnerClient:
     def diff(self, job_id: str, timeout: float = 30.0) -> Dict[str, Any]:
         return self._transport(f"/api/implement/{job_id}/diff", None, timeout) or {}
 
+    # ── cline v2 内省面（透传 runner；非 cline 执行器由 runner 报不支持）──
+
+    def messages(self, job_id: str, display: bool = True,
+                 timeout: float = 30.0) -> Dict[str, Any]:
+        return self._transport(
+            f"/api/implement/{job_id}/messages?display={'true' if display else 'false'}",
+            None, timeout) or {}
+
+    def usage(self, job_id: str, timeout: float = 15.0) -> Dict[str, Any]:
+        return self._transport(f"/api/implement/{job_id}/usage", None, timeout) or {}
+
+    def checkpoints(self, job_id: str, run_count: int = 1,
+                    timeout: float = 60.0) -> Dict[str, Any]:
+        return self._transport(
+            f"/api/implement/{job_id}/checkpoints?runCount={int(run_count)}",
+            None, timeout) or {}
+
+    def restore(self, job_id: str, run_count: int, options: Optional[Dict[str, Any]] = None,
+                timeout: float = 120.0) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"runCount": int(run_count)}
+        if options:
+            payload["options"] = options
+        return self._transport(f"/api/implement/{job_id}/restore", payload, timeout) or {}
+
+    def update_model(self, job_id: str, model_id: str,
+                     timeout: float = 15.0) -> Dict[str, Any]:
+        return self._transport(f"/api/implement/{job_id}/model",
+                               {"modelId": model_id}, timeout) or {}
+
+    def approval(self, job_id: str, request_id: str, approved: bool,
+                 reason: str = "", timeout: float = 15.0) -> Dict[str, Any]:
+        return self._transport(f"/api/implement/{job_id}/approval",
+                               {"requestId": request_id, "approved": approved,
+                                "reason": reason}, timeout) or {}
+
+    def pending(self, job_id: str, timeout: float = 15.0) -> Dict[str, Any]:
+        return self._transport(f"/api/implement/{job_id}/pending", None, timeout) or {}
+
+    def proceed(self, job_id: str, tool_call_id: str = "",
+                timeout: float = 30.0) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        if tool_call_id:
+            payload["toolCallId"] = tool_call_id
+        return self._transport(f"/api/implement/{job_id}/proceed",
+                               payload or None, timeout) or {}
+
     def events_ws_url(self, base: str, job_id: str, since: int) -> str:
         url = base.replace("https://", "wss://").replace("http://", "ws://")
         return f"{url}/api/implement/{job_id}/events?since={since}"
