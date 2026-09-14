@@ -82,7 +82,10 @@ def test_call_connection_refused_still_unreachable(monkeypatch, caplog):
 
 
 def test_req_agent_llm_sync_uses_long_timeout(monkeypatch):
-    """llm_sync 应给 llm.sync 传长超时(默认 300s)，避免本地模型慢响应被误杀。"""
+    """llm_sync 应给 llm.sync 传长超时(默认 300s)，避免本地模型慢响应被误杀。
+
+    P1: llm_sync 实现迁至 agent.cognition.llm —— gateway 访问器 patch 到新属主。
+    """
     captured = {}
     def fake_gateway():
         class _G:
@@ -91,7 +94,8 @@ def test_req_agent_llm_sync_uses_long_timeout(monkeypatch):
                 captured["timeout"] = kw.pop("timeout", None)
                 return {"content": "ok", "output": {"assets": []}}
         return _G()
-    monkeypatch.setattr(RA, "_kb_gateway", fake_gateway)
+    import topoone_app_architect.agent.cognition.llm as _cllm
+    monkeypatch.setattr(_cllm, "_kb_gateway", fake_gateway)
     res = RA.llm_sync([{"role": "user", "content": "hi"}], mode="chat")
     assert res is not None
     assert captured["method"] == "llm.sync"

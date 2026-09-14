@@ -361,12 +361,27 @@ async function maybeHintT4Model() {
   } catch { /* profiles 不可得 → 不提示 */ }
 }
 
-/** v2 发送方向选择: architect(缺省, 外循环) / cline(显式指派 subagent)。 */
+/** v2 发送方向选择: architect(缺省, 外循环) / 执行器注册表派生(去重映射后端白名单)。 */
 const sendAgent = ref('')
-const AGENT_CHOICES: Array<{ id: string; label: string; desc: string }> = [
-  { id: '', label: '@architect', desc: '外循环对话(缺省)' },
-  { id: 'cline', label: '@cline', desc: '指派 coding subagent(无活跃任务时由 architect 整理任务卡)' },
-]
+// 后端 task_set_executor 白名单(cline/opencode/codex) ← 注册表 type 别名映射
+const SUBAGENT_TYPE_ALIAS: Record<string, string> = {
+  opencode: 'opencode', cline: 'cline', 'cline-sdk': 'cline',
+  codex: 'codex', 'codex-server': 'codex',
+}
+const agentChoices = computed<Array<{ id: string; label: string; desc: string }>>(() => {
+  const out: Array<{ id: string; label: string; desc: string }> = [
+    { id: '', label: '@architect', desc: '外循环对话(缺省)' },
+  ]
+  const seen = new Set<string>()
+  for (const e of executorList.value) {
+    const t = SUBAGENT_TYPE_ALIAS[e.type] || ''
+    if (!t || seen.has(t)) continue
+    seen.add(t)
+    out.push({ id: t, label: `@${t}`,
+               desc: `指派 ${t} coding subagent(无活跃任务时由 architect 整理任务卡)` })
+  }
+  return out
+})
 function setSendAgent(id: string) { sendAgent.value = id }
 
 /** 引导消息: 仅渲染进对话流(本地), 不发后端/不进上下文, 切换会话自然消失。 */
@@ -838,6 +853,7 @@ async function pollRunningState() {
         :executor-models="boundModelNames"
         :executor-model="currentExecutorModel"
         :send-agent="sendAgent"
+        :agent-choices="agentChoices"
         :agent-filter="conv.agentFilter"
         :tasks="conv.tasks"
         @agent-filter="(v: any) => { conv.agentFilter = v }"

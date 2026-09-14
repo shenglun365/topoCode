@@ -365,7 +365,7 @@ def _roles_of(conv: dict) -> list:
 def _running_role_of(conv: dict) -> dict:
     """running 归属推导(纯提示): v2 活跃任务(running|waiting_input) → coding+执行器。
 
-    任务账本(arch_tasks)驱动; 旧 jobs 账本兜底(存量会话只读兼容)。"""
+    P6 单读: 仅 arch_tasks 驱动(旧 meta.jobs 账本写路径已清退, 不再双读)。"""
     try:
         from . import exec_bridge as _eb
         t = _eb.active_task_of(conv["id"]) if conv.get("id") else None
@@ -379,21 +379,6 @@ def _running_role_of(conv: dict) -> dict:
             return out
     except Exception:  # noqa: BLE001
         pass
-    meta = conv.get("meta")
-    if isinstance(meta, str):
-        try:
-            meta = json.loads(meta)
-        except (TypeError, ValueError):
-            meta = {}
-    jobs = (meta or {}).get("jobs") or []
-    for j in reversed(jobs):
-        if (j.get("status") or "") in ("waiting_input", "running"):
-            out = {"role": "coding",
-                   "executorId": j.get("executorId") or "opencode",
-                   "status": j.get("status") or ""}
-            if isinstance(j.get("progress"), dict):
-                out["progress"] = j["progress"]
-            return out
     return {"role": "architect", "executorId": "", "status": ""}
 
 
@@ -507,6 +492,25 @@ async def set_session_model(conv_id: str, request: Request):
                                   else "；下次执行生效")})
 
 
+@router.post("/sessions/{conv_id}/analysis-mode")
+async def set_analysis_mode(conv_id: str, request: Request):
+    """切换会话分析挡位(strict/quick, 即时生效于本会话后续回合)。
+
+    body: {mode} strict=需求分析→规约(designMd)→/定稿→任务卡 | quick=轻整理直出任务卡(关 KB 检索)。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    data = await request.json()
+    mode = str(data.get("mode") or "").strip()
+    if mode not in ("strict", "quick"):
+        return err(400, "mode 须为 strict 或 quick")
+    store.ConversationsStore.update(conv_id, {"analysisMode": mode})
+    note = ("严格挡：需求分析 → 规约(designMd) → /定稿 → 任务卡"
+            if mode == "strict" else "快捷挡：轻整理直出任务卡(关 KB 检索)")
+    return ok({"conversationId": conv_id, "analysisMode": mode, "summary": note})
+
+
 @router.post("/sessions/{conv_id}/clone")
 async def clone_session(conv_id: str, request: Request):
     """克隆会话绑定其他执行器(种子: 摘要(LLM best-effort) + 尾部 N 条消息 + 作业前情简报)。
@@ -590,7 +594,7 @@ def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str,
         })
     # 作业前情简报(源会话有作业史时)
     try:
-        from .websocket import _prior_job_brief
+        from .exec_bridge import _prior_job_brief
         brief = (_prior_job_brief(conv) or "").strip()
         if brief:
             store.ConversationsStore.append_message({
@@ -611,25 +615,18 @@ async def list_coding_sessions(conv_id: str):
     if not conv:
         return err(404, "会话不存在")
     subs = store.ConversationsStore.by_parent(conv_id)
-    meta = _meta_of(conv)
-    active = (meta.get("activeCodingSession") or "")
-    # 作业状态从主会话账本按 subSessionId 推导(账本唯一真相源)
-    job_by_sub = {j.get("subSessionId"): j for j in (meta.get("jobs") or [])}
+    active = (_meta_of(conv).get("activeCodingSession") or "")
+    # P6: 旧 jobs 账本写路径已清退——作业状态不再从 meta.jobs 推导(键保留, 值空)。
     out = []
     for s in subs:
-        j = job_by_sub.get(s["id"]) or {}
-        st = (j.get("status") or "")
-        rr = ({"role": "coding", "executorId": j.get("executorId") or "opencode",
-               "status": st} if st in ("waiting_input", "running")
-              else {"role": "architect", "executorId": "", "status": ""})
         out.append({"id": s["id"], "title": s.get("title") or "coding 子会话",
                     "executorId": s.get("executorId") or "",
                     "sessionRef": (s.get("sessionRef") or "")[:120],
                     "hasSessionRef": bool(s.get("sessionRef")),
                     "active": s["id"] == active,
-                    "runningRole": rr,
-                    "jobId": j.get("jobId") or "",
-                    "jobStatus": st,
+                    "runningRole": {"role": "architect", "executorId": "", "status": ""},
+                    "jobId": "",
+                    "jobStatus": "",
                     "status": s.get("status") or "active",
                     "msgCount": s.get("msgCount") or 0,
                     "updatedAt": s.get("updatedAt")})
@@ -758,11 +755,16 @@ async def feed_to_coding(conv_id: str, request: Request):
     meta = _meta_of(conv)
     active_sub = meta.get("activeCodingSession") or ""
     delivered, queued, feed_note = False, False, ""
-    res = exec_bridge.deliver_to_coding(conv_id, text)
-    if res.get("ok"):
-        delivered, queued = True, bool(res.get("queued"))
-    elif res.get("error") != "no-active-job":
-        return err(400, f"投递失败: {res.get('error')}")
+    # P3: 投喂目标 = 活跃 v2 任务(running/waiting_input → task_input 转达/排队)
+    task = exec_bridge.active_task_of(conv_id)
+    if task and (task.get("status") or "") in ("running", "waiting_input"):
+        res = await asyncio.to_thread(exec_bridge.task_input, task["id"], text)
+        if res.get("ok"):
+            delivered, queued = True, bool(res.get("queued"))
+        else:
+            e = str(res.get("error") or "")
+            if e not in ("task-not-active", "runner 不可达"):
+                return err(400, f"投递失败: {e}")
 
     # 落子会话消息流(审计: 哪些主会话信息进入了 coding 上下文)
     if active_sub:
@@ -992,16 +994,12 @@ def _guide_req_state(req_id: str) -> Optional[dict]:
 
 
 def _guide_jobs_state(conv_id: str) -> list:
+    """v2 任务状态(P3: 旧 jobs 账本只读兜底)——guide 提示材料。"""
     try:
-        from .exec_bridge import jobs_of, waiting_job
-        jobs = jobs_of(conv_id)[-3:]
-        w = waiting_job(conv_id)
-        out = [{
-            "jobId": j.get("jobId"), "status": j.get("status"),
-            "branch": j.get("branch") or "",
-        } for j in jobs]
-        if w and w.get("jobId") and w.get("jobId") not in {j["jobId"] for j in out}:
-            out.append({"jobId": w.get("jobId"), "status": "waiting_input", "branch": w.get("branch") or ""})
+        from .store import TasksStore
+        out = [{"taskId": t.get("id"), "title": (t.get("title") or "")[:60],
+                "status": t.get("status"), "branch": t.get("branch") or ""}
+               for t in TasksStore.of_conv(conv_id)[-3:]]
         return out
     except Exception:  # noqa: BLE001
         return []
@@ -1009,14 +1007,27 @@ def _guide_jobs_state(conv_id: str) -> list:
 
 @router.post("/sessions/{conv_id}/stop-exec")
 async def stop_exec_session(conv_id: str):
-    """UI 停止按钮(REST, 裁决#5): 结束会话全部运行中作业(保留 worktree/分支)。
+    """UI 停止按钮(REST, 裁决#5): 停止会话全部活跃任务(v2)+存量作业(兼容)。
 
-    作业句柄已不在 runner(重启清空)时 _runner 调用静默失败, 账本仍终态化。
+    P3: v2 arch_tasks 为主——逐个 task_stop(runner finish 保留 worktree/分支);
+    meta.jobs 存量行(历史会话)仍经 exec_bridge.stop 兜底终态化。
     """
     from . import exec_bridge
     if not store.ConversationsStore.get(conv_id):
         return err(404, "会话不存在")
-    return ok({"message": exec_bridge.stop(conv_id, reason="user")})
+    stopped = []
+    from .store import TasksStore
+    for t in TasksStore.of_conv(conv_id):
+        if (t.get("status") or "") in ("running", "waiting_input", "pending_confirm"):
+            res = await asyncio.to_thread(exec_bridge.task_stop, t["id"], "user")
+            if res.get("ok"):
+                stopped.append(t["id"])
+    legacy_msg = await asyncio.to_thread(exec_bridge.stop, conv_id, "user")
+    if stopped:
+        message = f"🛑 已停止 {len(stopped)} 个任务。分支与改动已保留，可重新发起任务。"
+    else:
+        message = str(legacy_msg)
+    return ok({"message": message, "stoppedTasks": stopped})
 
 
 @router.post("/sessions/{conv_id}/spec-apply")

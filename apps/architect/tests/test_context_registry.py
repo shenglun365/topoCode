@@ -35,14 +35,21 @@ class TestContextRegistry(unittest.TestCase):
         self.assertEqual(sum(1 for u in units if u["type"] == "artifact"), 1)
 
     def test_summarize_creates_session_summary_unit(self):
-        """LLM 不可达 → 标题兜底 + session_summary 单元。"""
+        """LLM 不可达 → 标题兜底 + session_summary 单元。
+
+        固化说明: 本机可能运行真实 KB 栈(:3459 可达时 summarize_task 会拿到
+        真 LLM 标题, 如「订单流程…」)——本测试验证的是降级路径, 显式断开 LLM。
+        """
+        from unittest.mock import patch
         from topoone_app_architect.arch_routes import context_registry as cr
+        import topoone_app_architect.arch_routes.req_agent as _ra
         conv = self._conv(kind="design", title="")
         store.ConversationsStore.append_message({
             "id": store.next_id("m"), "conversationId": conv["id"],
             "role": "user", "time": 1, "content": "讨论下单流程重构方案",
         })
-        updated = cr.summarize_conversation(conv["id"])
+        with patch.object(_ra, "llm_sync", lambda *a, **k: None):
+            updated = cr.summarize_conversation(conv["id"])
         self.assertIn("下单流程", updated["title"])
         units = store.ContextUnitsStore.all(conversation_id=conv["id"],
                                             type_="session_summary")

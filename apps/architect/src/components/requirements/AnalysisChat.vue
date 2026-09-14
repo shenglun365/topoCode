@@ -44,8 +44,10 @@ const props = defineProps<{
   executorModels?: string[]
   /** 当前会话模型(空=默认)。 */
   executorModel?: string
-  /** v2 发送方向: ''=architect(缺省) | 'cline'(显式指派 subagent)。 */
+  /** v2 发送方向: ''=architect(缺省) | 执行器类型(cline/opencode/codex, 显式指派 subagent)。 */
   sendAgent?: string
+  /** 发送方向候选(宿主按执行器注册表派生; 空=兜底 @architect/@cline 两项)。 */
+  agentChoices?: Array<{ id: string; label: string; desc: string }>
   /** v2 agent 过滤器(all/architect/coding)。 */
   agentFilter?: 'all' | 'architect' | 'coding'
   /** v2 coding subagent 任务清单(arch_tasks, 倒序; TaskCard 渲染用)。 */
@@ -228,12 +230,13 @@ const AGENT_TABS: Array<{ id: 'all' | 'architect' | 'coding'; label: string }> =
 function setAgentTab(v: 'all' | 'architect' | 'coding') {
   emit('agent-filter', v)
 }
-/** v2 发送方向选择(@architect/@cline): 菜单本地, 值上抛宿主。 */
+/** v2 发送方向选择(@architect/@执行器): 菜单本地, 值上抛宿主; 列表由宿主按注册表派生。 */
 const agentMenuOpen = ref(false)
-const AGENT_PICKS: Array<{ id: string; label: string; desc: string }> = [
+const FALLBACK_PICKS: Array<{ id: string; label: string; desc: string }> = [
   { id: '', label: '@architect', desc: '外循环对话(缺省)' },
   { id: 'cline', label: '@cline', desc: '指派 coding subagent(无活跃任务时由 architect 出任务卡)' },
 ]
+const agentPickList = computed(() => (props.agentChoices?.length ? props.agentChoices : FALLBACK_PICKS))
 function pickSendAgent(id: string) {
   agentMenuOpen.value = false
   emit('set-agent', id)
@@ -1561,7 +1564,7 @@ onUnmounted(() => {
           @mouseleave="agentMenuOpen = false"
         >
           <button
-            v-for="a in AGENT_PICKS"
+            v-for="a in agentPickList"
             :key="a.id || 'arch'"
             class="rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
             @click="pickSendAgent(a.id)"

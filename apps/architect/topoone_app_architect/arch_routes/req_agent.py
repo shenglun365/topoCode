@@ -25,763 +25,67 @@ from . import store
 
 logger = logging.getLogger(__name__)
 
-# ── Skills 注册表(architect 专属) ──────────────────────────────────────
+from ..agent.planning.req_spec import (  # noqa: F401,E402
+    _SPEC_FIELD_ALIASES,
+    _norm_scope_list,
+    _repair_json_like,
+    _spec_snapshot,
+    _sync_analysis_cache,
+    apply_spec_payload,
+    extract_proposal_fence,
+    extract_spec_payload,
+    is_spec_payload,
+    parse_scope_files,
+    repair_spec_payload_format,
+)
+from ..agent.planning.task_plan import extract_task_fence  # noqa: F401,E402
+
+from ..agent.reflection.guards import (  # noqa: F401,E402
+    _FABRIC_RULES,
+    _INTENT_PATTERNS,
+    announced_tool_intent,
+    fabricated_claim,
+    guard_notice,
+    guard_suggestions,
+)
+from ..agent.reflection.repair import (  # noqa: F401,E402
+    _GUARD_REPAIR_TOOLS,
+    _REPAIRABLE_ERR,
+    _is_repairable_error,
+    _repair_param_table,
+    repair_fabricated_claim,
+    repair_tool_args,
+)
+
+from ..agent.tools.protocol import (  # noqa: F401,E402
+    _FENCE,
+    _TOOL_CALL_BLOCK,
+    _TOOL_CALL_CLOSE,
+    _TOOL_CALL_OPEN,
+    _clean_block,
+    _json_object_spans,
+    _parse_tool_payload,
+    _tool_call_regions,
+    extract_tool_calls,
+    strip_tool_blocks,
+)
+from ..agent.tools.registry import (  # noqa: F401,E402
+    _ARCHIVED_DENY_TOOLS,
+    _ARCH_SKILLS,
+    _ARCH_TOOLS,
+    _RETIRED_TOOLS,
+    architect_skills,
+    architect_tools,
+    register_architect_skill,
+    register_architect_tool,
+)
+
+# ── Skills/Tools 注册表与工具协议: 实现迁至 agent.tools(P1) ──
 
-_ARCH_SKILLS: List[Dict[str, Any]] = []
 
 
-def register_architect_skill(name: str, description: str = "",
-                             steps: int = 1, category: str = "requirement-analysis") -> Callable:
-    """类/函数装饰器：注册 architect 专属技能元数据(与主后端 skill_registry 同形)。"""
-    def decorator(fn):
-        _ARCH_SKILLS.append({
-            "name": name, "description": description, "steps": steps, "category": category,
-        })
-        return fn
-    return decorator
 
 
-def architect_skills() -> List[Dict[str, Any]]:
-    seen: set = set()
-    out = []
-    for s in _ARCH_SKILLS:
-        if s["name"] not in seen:
-            seen.add(s["name"])
-            out.append(s)
-    return out
-
-
-# ── Tools 注册表(architect 专属: 知识库检索 / 项目上下文) ──────────────
-
-_ARCH_TOOLS: Dict[str, Dict[str, Any]] = {}
-
-
-def register_architect_tool(name: str, description: str = "") -> Callable:
-    def decorator(fn):
-        _ARCH_TOOLS[name] = {"name": name, "description": description, "handler": fn}
-        return fn
-    return decorator
-
-
-def architect_tools() -> List[Dict[str, str]]:
-    return [{"name": t["name"], "description": t["description"]} for t in _ARCH_TOOLS.values()]
-
-
-# ── 自由对话工具协议: 模型文本工具块 → 解析/执行 ──────────────────────
-# 标准形: [TOOL_CALL]{"tool":"x","arguments":{...}}[/TOOL_CALL]
-# 模型变体(均容忍)：```json 围栏、丢前导 '['、闭合标签写成 [/TOOL_CALL> 等。
-# ⚠️ 未闭合块(部分模型省略 [/TOOL_CALL]，裸开标签后直接跟 JSON)：必须支持——
-# 否则整轮 0 解析、[TOOL_CALL] 裸文本透传到对话且工具不执行(生产实测回归)。
-# 策略：闭合标签存在时以其定界；缺失时按「下一开标签/文末」切段 + 花括号
-# 配对(字符串/转义感知)抽取 JSON，保证连续多个未闭合块逐块解析。
-# ⚠️ lookbehind (?<![/\w])：排除闭合标签 [/TOOL_CALL] 内部的 "TOOL_CALL]" 子串被
-# 二次认作开标签(曾导致 seg_end 被切短、闭合定界失效、strip 残留闭合标签)。
-_TOOL_CALL_OPEN = re.compile(r'(?:```(?:json)?\s*)?\[?\s*(?<![/\w])TOOL_CALL\]',
-                             re.DOTALL)
-_TOOL_CALL_CLOSE = re.compile(r'\[/TOOL_CALL[>\]]+\]?\s*(?:```)?')
-_TOOL_CALL_BLOCK = re.compile(
-    r'(?:```(?:json)?\s*)?\[?\s*TOOL_CALL\](.*?)\[/TOOL_CALL[>\]]+\]?\s*(?:```)?',
-    re.DOTALL)
-_FENCE = re.compile(r'^\s*```(?:json)?\s*|\s*```\s*$')
-
-
-def _clean_block(raw: str) -> str:
-    raw = _FENCE.sub("", raw or "").strip()
-    if raw.startswith("{"):
-        return raw
-    first = raw.find("{")
-    last = raw.rfind("}")
-    return raw[first:last + 1] if first >= 0 and last > first else raw
-
-
-def _json_object_spans(text: str) -> List[tuple]:
-    """花括号配对(字符串/转义感知)返回顶层 {…} 的 (start, end_exclusive) 段列表。"""
-    spans: List[tuple] = []
-    depth = 0
-    start = -1
-    in_str = False
-    esc = False
-    for i, ch in enumerate(text or ""):
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == '\\':
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == '{':
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == '}':
-            if depth > 0:
-                depth -= 1
-                if depth == 0 and start >= 0:
-                    spans.append((start, i + 1))
-                    start = -1
-    return spans
-
-
-def _parse_tool_payload(raw: str) -> Optional[Dict[str, Any]]:
-    """块内容 → {tool, arguments}；非法 JSON/缺 tool 字段返回 None。
-
-    先整体直解(_clean_block 快路径)；失败再按花括号配对逐段兜底
-    (块内含前后杂文/多对象时仍可解析)。
-    """
-    data: Any = None
-    try:
-        data = json.loads(_clean_block(raw))
-    except Exception:
-        data = None
-    if not (isinstance(data, dict) and isinstance(data.get("tool"), str)):
-        for s, e in _json_object_spans(raw or ""):
-            try:
-                cand = json.loads(raw[s:e])
-            except Exception:
-                continue
-            if isinstance(cand, dict) and isinstance(cand.get("tool"), str):
-                data = cand
-                break
-    if not isinstance(data, dict) or not isinstance(data.get("tool"), str):
-        return None
-    args = data.get("arguments")
-    if not isinstance(args, dict):
-        args = {}
-    return {"tool": data["tool"], "arguments": args}
-
-
-def _tool_call_regions(text: str) -> List[tuple]:
-    """定位全部工具块区域 [(start, end_exclusive, content)]。
-
-    闭合块 = 开标签..闭合标签尾；未闭合块 = 开标签..首个配对 JSON 尾。
-    无合法 JSON 的裸 "TOOL_CALL]" 提及不当块处理(避免误删正文)。
-    """
-    regions: List[tuple] = []
-    opens = list(_TOOL_CALL_OPEN.finditer(text or ""))
-    for idx, m in enumerate(opens):
-        seg_end = opens[idx + 1].start() if idx + 1 < len(opens) else len(text)
-        close = _TOOL_CALL_CLOSE.search(text, m.end(), seg_end)
-        if close:
-            regions.append((m.start(), close.end(), text[m.end():close.start()]))
-            continue
-        spans = _json_object_spans(text[m.end():seg_end])
-        if spans:
-            s, e = spans[0]
-            regions.append((m.start(), m.end() + e, text[m.end():m.end() + e]))
-    return regions
-
-
-# ── 防编造守卫: 声称的落库/执行动作必须有本回合真实工具调用佐证 ──────────
-
-_FABRIC_RULES = [
-    # (完成语正则, 佐证工具集, 描述)。提案类规则遇「提及已存在的 RQ 编号」视为
-    # 历史回顾不触发(真实回顾必然引用既有编号)；自造编号由下方 ID 存在性检查兜住。
-    (re.compile(r"(已生成|已创建|已产出|已形成|已落库|已保存)[^。\n]{0,24}提案|提案已(生成|创建|落库|保存)"),
-     ("req.propose",), "已生成/落库需求提案"),
-    (re.compile(r"已定稿|定稿成功|已转入待执行|已存入待执行|已固化[^。\n]{0,10}待执行"),
-     ("req.finalize",), "定稿入池(转入待执行)"),
-    # v2 任务域(cv-150 实证): 声称任务已创建/开始执行、输出假执行进度报告
-    (re.compile(r"(已创建|已生成|已发起|已启动)[^。\n]{0,16}(实施)?任务(卡)?|任务(卡)?已(正式)?(创建|生成|发起|启动|开始执行)"),
-     ("task.propose",), "已创建/启动任务"),
-    (re.compile(r"执行进度报告|Phase\s*1\s*[:：]|正在检查当前项目.+构建环境与"),
-     ("task.propose",), "编造任务执行进度"),
-]
-
-
-def fabricated_claim(text: str, tools_used) -> tuple:
-    """判定文本是否编造了未执行的动作。
-
-    返回 (动作描述, 佐证工具名串) 或 (None, None)。
-    - 动作完成语 + 佐证工具不在本回合调用集合 → 编造(提案类带既有 RQ 编号=回顾, 放行)
-    - 引用的 RQ- 编号在需求库不存在 → 编造(自造编号, 如 RQ-WS-REDIS-001)
-    """
-    if not text:
-        return None, None
-    used = tools_used or set()
-    mentioned = set(re.findall(r"\bRQ-[A-Za-z0-9][A-Za-z0-9_-]*", text))
-    existing = {rid for rid in mentioned if store.RequirementsStore.get(rid)}
-    for rx, tools, label in _FABRIC_RULES:
-        if not rx.search(text) or any(t in used for t in tools):
-            continue
-        if "提案" in label and (mentioned & existing):
-            continue  # 引用既有提案编号 → 历史回顾而非本轮产出声称
-        return label, "|".join(tools)
-    for rid in mentioned - existing:
-        return f"引用不存在的需求编号 {rid}", "req.propose"
-    return None, None
-
-
-def guard_notice(claim: str, need: str, tools_used=None,
-                 tool_errors: Optional[Dict[str, str]] = None) -> str:
-    """守卫通知文案(纯函数，供 WS 层与单测共用)。
-
-    - 所需工具已真实调用但执行失败 → 「执行失败(非编造)」+ 失败摘要：
-      模型可能没错(参数形状/存储故障)，编造指控会误导用户与模型
-    - 未调用 → 原编造文案
-    """
-    primary = (need or "").split("|")[0]
-    errs = tool_errors or {}
-    if primary and primary in set(tools_used or ()) and errs.get(primary):
-        return (f"\n\n> ⚠️ 系统守卫：「{claim}」的动作已尝试执行但失败——非编造。"
-                f"失败原因：{errs[primary][:180]} 请修正参数后重试，"
-                "或改用界面操作（方案生成按钮）。")
-    return (f"\n\n> ⚠️ 系统守卫：上述回复中「{claim}」的表述未经实际工具调用，"
-            "不成立。请重试，或改用界面操作（方案生成按钮/任务执行页）。")
-
-
-def guard_suggestions(claim: str, need: str, tool_failed: bool = False,
-                      has_spec_json: bool = False) -> list:
-    """守卫卡片可点击指令(suggestions)——简洁 label, action 供 guard-repair 路由。
-
-    冗长说明由前端非点击文字区承载; 这里只产 指令集。
-    has_spec_json: 消息含规约形状 JSON → 「按原文落库」排最前(确定性路径优先)。
-    """
-    sugs = []
-    if has_spec_json:
-        sugs.append({"action": "apply_json", "label": "按原文落库"})
-    tools = (need or "").split("|")
-    if "req.amend" in tools:
-        sugs.append({"action": "repair_amend", "label": "修正落库"})
-    if "req.finalize" in tools and "req.amend" not in tools:
-        sugs.append({"action": "repair_finalize", "label": "确认定稿"})
-    if "req.propose" in tools:
-        sugs.append({"action": "repair_propose", "label": "创建提案"})
-    if "task.propose" in tools:
-        sugs.append({"action": "repair_task", "label": "创建任务卡"})
-    if tool_failed:
-        sugs.append({"action": "repair_retry", "label": "修正参数重试"})
-    if not sugs:
-        sugs.append({"action": "repair_amend", "label": "修正落库"})
-    sugs.append({"action": "correct", "label": "更正声明"})
-    return sugs
-
-
-_GUARD_REPAIR_TOOLS = ("req.amend", "req.finalize", "req.propose")
-
-
-# ── 规约载荷确定性提取(消息流「写入需求」按钮 / 守卫前置提取共用) ──
-
-# 规约签名字段(识别+归一): 命中 ≥3 视为需求规约载荷
-_SPEC_FIELD_ALIASES: Dict[str, tuple] = {
-    "title": ("title", "name"),
-    "requirementMd": ("requirementMd", "requirement", "requirement_md", "description"),
-    "designMd": ("designMd", "design", "design_md"),
-    "allowedScope": ("allowedScope", "allowedScopeMd", "allowed_scope", "allow", "scope"),
-    "forbiddenScope": ("forbiddenScope", "forbiddenScopeMd", "forbidden_scope", "forbid", "antiGoals", "anti_goals"),
-    "acceptance": ("acceptance", "acceptanceMd", "acceptance_md", "acceptanceCriteria"),
-    "assessmentSummary": ("assessmentMd", "assessment", "assessment_md", "assessmentSummary"),
-    "estMin": ("estMin", "est_min", "estimateMinutes"),
-    "priority": ("priority",),
-}
-
-
-def is_spec_payload(obj: Any) -> bool:
-    """字段签名识别: dict 且规约字段(别名归一后)命中 ≥3。"""
-    if not isinstance(obj, dict):
-        return False
-    hit = 0
-    for aliases in _SPEC_FIELD_ALIASES.values():
-        if any(a in obj for a in aliases):
-            hit += 1
-    return hit >= 3
-
-
-def _repair_json_like(raw: str) -> str:
-    """LLM 伪 JSON 确定性自愈(零 LLM, 零误伤原则):
-
-    - `\"\"\"...\"\"\"`(含 `\"\"\"\"` 多引号闭合)字符串(JSON 不支持, LLM 高频习惯)
-      → 合法转义字符串;
-    - 尾逗号 ` ,} ` / ` ,] ` → 删除。
-    其余语法错误交给 L2(repair_spec_payload_format)。
-    """
-    def _tq(m: "re.Match") -> str:
-        return json.dumps(m.group(1))
-    raw = re.sub(r'"{3,}\s*(.*?)\s*"{3,}', _tq, raw, flags=re.DOTALL)
-    raw = re.sub(r",(\s*[}\]])", r"\1", raw)
-    return raw
-
-
-def extract_spec_payload(text: str) -> Optional[Dict[str, Any]]:
-    """从消息文本提取规约载荷(```json 围栏优先)。非规约形状 → None。
-
-    - 嵌套围栏免疫: 值内可含 ```diagram 等子围栏(其 ``` 会截断非贪婪
-      匹配)——对每个 ```json 起点逐个闭合候选(从近到远)尝试, 第一个
-      loads 成功且规约形状胜出;
-    - loads 失败先过 L0 伪 JSON 自愈(三引号/尾逗号)再判;
-      is_spec_payload 字段签名校验兜底防误吸。
-    """
-    text = text or ""
-    for jm in re.finditer(r"```json\s*", text):
-        rest = text[jm.end():]
-        for cm in re.finditer(r"```", rest):
-            cand = rest[:cm.start()].strip()
-            if not cand.startswith("{"):
-                continue
-            for raw in (cand, cand.rstrip().rstrip("`").rstrip()):
-                try:
-                    obj = json.loads(raw)
-                except Exception:  # noqa: BLE001
-                    try:
-                        obj = json.loads(_repair_json_like(raw))
-                    except Exception:  # noqa: BLE001
-                        continue
-                if is_spec_payload(obj):
-                    return obj
-    return None
-
-
-def _norm_scope_list(v: Any) -> List[str]:
-    """边界/验收字段: 数组或 markdown 字符串 → 行数组(级别 0 归一)。"""
-    if isinstance(v, list):
-        return [str(x).strip() for x in v if str(x or "").strip()]
-    if isinstance(v, str):
-        return [ln.strip().lstrip("-•* ").strip() for ln in v.splitlines() if ln.strip()]
-    return []
-
-
-def apply_spec_payload(payload: Dict[str, Any], req_id: str = "",
-                       project: str = "", root: str = "") -> Dict[str, Any]:
-    """规约载荷 → 确定性落库(零 LLM)。三级降级:
-
-    L0 归一化自愈(别名/类型/围栏/兜底合并) → L1 字段降级(可选缺失忽略,
-    ignored 报告) → L2 LLM 格式修复(repair_spec_payload_format, 产物再过本
-    函数 L0/L1 + reqId 校验) → L3 如实失败。落库目标: 绑定需求未完结 →
-    req.amend; 无绑定 → req.propose 新建(成功后工具内部回写会话绑定)。
-    载荷内 reqId 字段一律丢弃(防编造编号混入)。
-    """
-    ignored: List[str] = []
-    errors: List[str] = []
-    repaired = False
-    aliased: List[str] = []
-    known = {a for aliases in _SPEC_FIELD_ALIASES.values() for a in aliases}
-    obj = {k: v for k, v in (payload or {}).items() if isinstance(k, str)}
-    for k in list(obj.keys()):
-        if k not in known:
-            ignored.append(k)
-            obj.pop(k)
-    # L0: 别名归一
-    norm: Dict[str, Any] = {}
-    for canonical, aliases in _SPEC_FIELD_ALIASES.items():
-        for a in aliases:
-            if a in obj and obj[a] not in (None, ""):
-                norm[canonical] = obj[a]
-                if a != canonical:
-                    aliased.append(f"{a}→{canonical}")
-                break
-    title = str(norm.get("title") or "").strip()
-    design = str(norm.get("designMd") or "").strip()
-    reqmd = str(norm.get("requirementMd") or "").strip()
-    if not title and reqmd:
-        title = reqmd.splitlines()[0][:60]
-        aliased.append("requirementMd[0]→title")
-    # L1: 字段降级(缺/空可选字段直接不传)
-    assessment = norm.get("assessmentSummary")
-    summary_txt = ""
-    est_min = 0
-    if isinstance(assessment, dict):
-        parts = [f"{k}:{v}" for k, v in assessment.items() if k != "estMin" and v]
-        summary_txt = "; ".join(str(x) for x in parts)
-        try:
-            est_min = int(assessment.get("estMin") or 0)
-        except (TypeError, ValueError):
-            pass
-    elif assessment:
-        summary_txt = str(assessment)
-    if norm.get("estMin") and not est_min:
-        try:
-            est_min = int(norm.get("estMin"))
-        except (TypeError, ValueError):
-            errors.append("estMin 非整数, 已忽略")
-    priority = str(norm.get("priority") or "").strip()
-    allowed = _norm_scope_list(norm.get("allowedScope"))
-    forbidden = _norm_scope_list(norm.get("forbiddenScope"))
-    acceptance = _norm_scope_list(norm.get("acceptance"))
-    # 落库目标判定
-    rid = (req_id or "").strip()
-    row = store.RequirementsStore.get(rid) if rid else None
-    can_amend = bool(row and (row.get("doneMark") or 0) != 1)
-    if not title:
-        # L2: 格式/信息破损 → LLM 修复后重过确定性映射(一次); repaired 标记传播
-        fixed = repair_spec_payload_format(
-            json.dumps(payload, ensure_ascii=False)[:6000], req_id=rid)
-        if isinstance(fixed, dict):
-            r = apply_spec_payload(fixed, req_id=rid, project=project, root=root)
-            r["repaired"] = True
-            if r.get("ok"):
-                r["summary"] += "；格式已由修复通道修正"
-            return r
-        return {"ok": False, "action": "failed",
-                "summary": "载荷缺少需求标题(title)，且格式修复通道未能产出有效规约",
-                "errors": errors + ["signature-miss"], "ignored": ignored}
-    args: Dict[str, Any] = {"title": title}
-    if reqmd:
-        args["requirementMd"] = reqmd
-    if design:
-        extra = ""
-        impl_path = payload.get("implementationPath") if isinstance(payload, dict) else None
-        if isinstance(impl_path, list) and impl_path:
-            extra = ("\n\n## 实施路径\n"
-                     + "\n".join(f"{i + 1}. {x}" for i, x in enumerate(impl_path)))
-        asset_scope = payload.get("assetScope") if isinstance(payload, dict) else None
-        if isinstance(asset_scope, list) and asset_scope:
-            rows = [f"- {a.get('assetId')}({a.get('assetType')}/{a.get('role', '')})"
-                    for a in asset_scope if isinstance(a, dict) and a.get("assetId")]
-            extra += "\n\n## 资产范围\n" + "\n".join(rows)
-        args["designMd"] = design + extra
-    if allowed:
-        args["allowedScopeMd"] = "\n".join(f"- {x}" for x in allowed)
-    if forbidden:
-        args["forbiddenScopeMd"] = "\n".join(f"- {x}" for x in forbidden)
-    if acceptance:
-        args["acceptanceMd"] = "\n".join(f"- {x}" for x in acceptance)
-    if summary_txt:
-        args["assessmentMd"] = summary_txt
-    if est_min:
-        args["estMin"] = est_min
-    if priority in ("P0", "P1", "P2"):
-        args["priority"] = priority
-    if can_amend:
-        args["reqId"] = rid
-        # req.amend 签名是数组形态且不支持更名/评估分值——按目标分叉参数形状
-        args.pop("title", None)
-        args.pop("priority", None)
-        args.pop("estMin", None)
-        if title != rid and title:
-            ignored.append("title(amend 不更名)")
-        if "priority" in obj:
-            ignored.append("priority(amend 不支持)")
-        if est_min:
-            ignored.append("estMin(amend 不支持)")
-        if allowed:
-            args["allowedScope"] = allowed
-            args.pop("allowedScopeMd", None)
-        if forbidden:
-            args["forbiddenScope"] = forbidden
-            args.pop("forbiddenScopeMd", None)
-        if acceptance:
-            args["acceptance"] = acceptance
-            args.pop("acceptanceMd", None)
-        if summary_txt:
-            args["assessmentSummary"] = summary_txt
-            args.pop("assessmentMd", None)
-        args.setdefault("reasoning", "消息流「写入需求」确定性落库")
-    else:
-        args["newRequirement"] = True
-    # v2: 系统确定性落库路径(写入需求按钮/守卫代落)——internal 放行退役拦截。
-    result = run_arch_tool("req.amend" if can_amend else "req.propose",
-                           args, root=root, project=project, internal=True)
-    if isinstance(result, dict) and result.get("error"):
-        return {"ok": False, "action": "failed",
-                "summary": f"落库执行失败: {str(result.get('error'))[:200]}",
-                "errors": errors, "ignored": ignored, "repaired": repaired}
-    out_rid = (result or {}).get("requirementId") or (result or {}).get("reqId") or rid
-    out_ver = (result or {}).get("ver") or ""
-    action = "amended" if can_amend else "proposed"
-    notes = []
-    if repaired:
-        notes.append("格式已由修复通道修正")
-    if aliased:
-        notes.append("字段归一: " + ", ".join(aliased[:6]))
-    if ignored:
-        notes.append(f"忽略未知字段: {', '.join(ignored[:8])}")
-    summary = (f"✅ 已按原文落库：`{out_rid}`"
-               + (f" v{out_ver}" if out_ver else "")
-               + f"（{'更新' if can_amend else '新建'}，经确定性映射，零模型转写）"
-               + ("；" + "；".join(notes) if notes else ""))
-    return {"ok": True, "action": action, "reqId": out_rid, "ver": out_ver,
-            "summary": summary, "ignored": ignored, "repaired": repaired,
-            "toolResult": result}
-
-
-def repair_spec_payload_format(text: str, req_id: str = "") -> Optional[Dict[str, Any]]:
-    """级别 2: 破损规约载荷的 LLM 格式修复(只修结构, 不发明内容)。
-
-    产物需调用方再过 apply_spec_payload 的确定性校验; 一次尝试失败返回 None。
-    """
-    sys_prompt = (
-        "你是需求规约载荷修复器。给定文本疑似一份需求规约的 JSON(可能语法破损/"
-        "字段名不规范/被截断)。请只修复 JSON 结构与字段命名以匹配工具签名，"
-        "不要新增不存在的信息，不要改动原本正确的字段值；无法恢复的字段留空或省略。\n"
-        "目标字段: " + ", ".join(f"{c}({','.join(a[:3])})"
-                                 for c, a in _SPEC_FIELD_ALIASES.items()) + "\n"
-        + (f"会话绑定需求编号: {req_id}(载荷内其它 reqId 编号一律丢弃)\n" if req_id else "")
-        + "只输出一个 ```json 围栏，内容为规约对象本身，不要任何其他文字。")
-    from .adaptation import RepairTask, run_repair_loop
-
-    def _parse(raw: str):
-        m = re.search(r"```json\s*(\{.*?})\s*```", raw, re.DOTALL)
-        if not m:
-            return None
-        try:
-            obj = json.loads(m.group(1))
-            return obj if isinstance(obj, dict) else None
-        except Exception:  # noqa: BLE001
-            return None
-
-    out = run_repair_loop(RepairTask(
-        task_id="spec_format", system=sys_prompt, user=text[:6000],
-        parse=_parse, max_tokens=1200, dataset_kind="repair_spec_format"))
-    return out.get("parsed") if isinstance(out.get("parsed"), dict) else None
-
-
-def repair_fabricated_claim(claim: str, need: str, content: str, *,
-                            req_id: str = "", project: str = "",
-                            root: str = "", model_id: Optional[str] = None,
-                            tool_error: str = "") -> Dict[str, Any]:
-    """守卫独立外循环修复器(不经对话流): 从编造文本提取真实落库意图并执行。
-
-    与全量补救轮(_sync_with_tools)的区别: 极简上下文(守卫判定+编造文本+
-    佐证工具签名表+会话绑定 reqId)单独请求一次 LLM, 只产 [TOOL_CALL] JSON
-    或更正声明; 工具执行由本函数确定性完成(run_arch_tool), 杜绝补救轮再编造。
-
-    返回 {action: amended|finalized|proposed|corrected|failed, summary,
-          toolResult?, correction?}
-
-    前置确定性提取: content 含规约形状 JSON → 直接 apply_spec_payload 落库
-    (三级降级内建), 不经 LLM; 提取失败才走下方 LLM 外循环。
-    """
-    payload = extract_spec_payload(content or "")
-    if payload:
-        r = apply_spec_payload(payload, req_id=req_id, project=project, root=root)
-        if r.get("ok"):
-            r.setdefault("summary", "")
-            return r
-        # 确定性提取失败(含 L2 修复后仍失败) → 记录后回落 LLM 外循环
-    sys_prompt = (
-        "你是需求落库修复器。用户看到的助手回复声称了未实际执行的动作(守卫拦截)，"
-        "但回复里可能包含可用于真实落库的完整规约内容(常见为 ```json 围栏载荷)。\n"
-        "任务二选一：\n"
-        "① 载荷信息足以落库 → 输出一个工具调用块：\n"
-        '   [TOOL_CALL]{"tool":"<工具名>","arguments":{…}}[/TOOL_CALL]\n'
-        "   可用工具与签名：\n"
-        + "".join(f"  - {n}: {_repair_param_table(_ARCH_TOOLS[n]['handler'])}\n"
-                  for n in _GUARD_REPAIR_TOOLS if n in _ARCH_TOOLS)
-        + ("   会话绑定需求(优先使用该 reqId): " + (req_id or "(无)") + "\n")
-        + (f"   上次执行失败原因(修正参数规避): {tool_error[:300]}\n" if tool_error else "")
-        + "② 载荷不可信/关键信息缺失 → 输出一行以【更正】开头的声明文本，"
-        "说明该动作尚未发生(不编造任何编号/状态)。\n"
-        "只输出 ①或② 之一，不要输出其它内容。")
-    user_content = (f"守卫判定: {claim}（需要佐证工具: {need}）\n\n"
-                    f"助手原文:\n{content[:6000]}")
-    from .adaptation import RepairTask, run_repair_loop
-
-    def _parse(raw: str):
-        """产物结构统一: {calls: [...], correction: ""}；raw 空才无效。"""
-        if not (raw or "").strip():
-            return None
-        corr = ""
-        m = re.search(r"【更正】\s*(.+)", raw, re.DOTALL)
-        if m:
-            corr = m.group(1).strip()[:600]
-        return {"calls": extract_tool_calls(raw) or [], "correction": corr}
-
-    def _execute(parsed: Dict[str, Any]) -> Dict[str, Any]:
-        for c in parsed.get("calls") or []:
-            name, args = c.get("tool"), c.get("arguments")
-            if name not in _GUARD_REPAIR_TOOLS or not isinstance(args, dict):
-                continue
-            # 确定性校验: reqId 必须真实存在(防修复器再次编造编号)
-            rid = str(args.get("reqId") or "").strip()
-            if rid and not store.RequirementsStore.get(rid):
-                continue
-            if not rid and req_id:
-                args["reqId"] = req_id          # 缺省绑定会话需求
-            if name == "req.propose" and not args.get("newRequirement") and req_id:
-                args["reqId"] = args.get("reqId") or req_id
-            result = run_arch_tool(name, args, root=root, project=project)
-            ok = not (isinstance(result, dict) and result.get("error"))
-            if ok:
-                rid_out = (result or {}).get("reqId") or (result or {}).get("requirementId") or req_id
-                ver = (result or {}).get("ver") or ""
-                action = {"req.amend": "amended", "req.finalize": "finalized",
-                          "req.propose": "proposed"}.get(name, name)
-                summary = (f"✅ 守卫修复完成：`{rid_out}`"
-                           + (f" v{ver}" if ver else "")
-                           + f"（{name} 真实落库）")
-                return {"ok": True, "action": action, "summary": summary,
-                        "toolResult": result}
-            return {"ok": False, "action": "failed",
-                    "summary": f"修复执行失败({name})：{str((result or {}).get('error'))[:200]}",
-                    "toolResult": result}
-        # ② 更正声明分支——复查只查自造编号(否定语境的声明天然含「已定稿」等字样,
-        #    套用完成语规则会自查自纠死锁); 编号真实性仍必须保证
-        text = str(parsed.get("correction") or "")
-        if text:
-            mentioned = set(re.findall(r"\bRQ-[A-Za-z0-9][A-Za-z0-9_-]*", text))
-            fake_ids = [r for r in mentioned if not store.RequirementsStore.get(r)]
-            if not fake_ids:
-                return {"ok": True, "action": "corrected", "summary": text,
-                        "correction": text}
-        return {"ok": False, "action": "failed",
-                "summary": "修复器未能产出有效工具调用或更正声明"}
-
-    out = run_repair_loop(RepairTask(
-        task_id="guard_repair", system=sys_prompt, user=user_content,
-        parse=_parse, execute=_execute, max_tokens=900,
-        model_id=model_id or "", dataset_kind="guard_repair",
-        meta={"claim": str(claim)[:200], "need": str(need)[:80]}))
-    res2 = out.get("result") or {}
-    res2.pop("ok", None)
-    return res2 if res2.get("action") else {"action": "failed",
-                                            "summary": out.get("summary") or "修复外循环失败"}
-
-
-_INTENT_PATTERNS = [
-    re.compile(r"请等待我完成"),
-    re.compile(r"我将(立即)?(执行|检索|调用|读取|开始|编写|创建)"),
-    re.compile(r"(我|让我)先(检索|查看|读取|调用|确认)"),
-    re.compile(r"即将(调用|执行|检索)"),
-    re.compile(r"正在(调用|执行|检索)以下工具"),
-    # 提案/落库完成语宣布(cv-88~102 实证主病灶): 宣称已创建而未调工具 →
-    # 追问轮逼出真实 [TOOL_CALL](先于防编造守卫, 成功则无需卡片)
-    re.compile(r"已(创建|生成|落库|提交|新建)(需求)?(提案|规约|需求)"),
-    re.compile(r"需求(提案)?(已经)?(创建|生成|落库)(完成|成功)"),
-]
-
-
-def announced_tool_intent(text: str) -> str:
-    """检测『宣布要调工具却没有 [TOOL_CALL] 就结束回合』的空承诺文本。
-
-    命中返回意图短语(供守卫纠正提示引用)，否则 None。供 WS 层在
-    本回合零工具调用时判定是否追问一轮。
-    """
-    if not text:
-        return ""
-    for rx in _INTENT_PATTERNS:
-        m = rx.search(text)
-        if m:
-            return m.group(0)
-    return ""
-
-
-def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
-    """提取 ```proposal JSON 围栏(方案生成的确定性落库通道)。
-
-    生成类动作(产出提案)对部分模型而言"不需要工具"——它们更愿意直接把提案写成
-    JSON 输出而非发 [TOOL_CALL]。围栏协议把这一行为变成可靠路径：模型写围栏，
-    服务端解析后代为执行 req.propose 落库(WS 层发 tool_result 事件 → 前端方案卡)。
-    """
-    if not text or "```proposal" not in text:
-        return None
-    m = re.search(r"```proposal\s*\n?(\{.*?\})\s*```", text, re.DOTALL)
-    if not m:
-        try:
-            from . import llm_dataset as _lds
-            _lds.record("fence_parse", reason="未闭合/无JSON体",
-                        tail=text[text.index("```proposal"):][:600])
-        except Exception:  # noqa: BLE001
-            pass
-        return None
-    try:
-        data = json.loads(m.group(1))
-        return data if isinstance(data, dict) else None
-    except Exception:  # noqa: BLE001
-        try:
-            from . import llm_dataset as _lds
-            _lds.record("fence_parse", reason="JSON解析失败",
-                        tail=m.group(1)[:600])
-        except Exception:  # noqa: BLE001
-            pass
-        return None
-
-
-def extract_task_fence(text: str) -> Optional[Dict[str, Any]]:
-    """提取任务载荷: ```task 围栏(显式协议) 或 ```json 围栏中的任务形态对象。
-
-    cv-150 实证: 模型(9b 级)宣称要调 task.propose 却直接把载荷写成 ```json
-    围栏 → 工具不执行/守卫拦截/流程死路。围栏协议化: 服务端解析代为落卡。
-    防误判: 图 IR(version+type+nodes/edges)与规约提案(title+方案字段但带
-    acceptanceMd 优先走提案域)不认领; 只认 title + 实质任务字段。
-    """
-    if not text or "```" not in text:
-        return None
-    explicit: List[Dict[str, Any]] = []
-    candidates: List[Dict[str, Any]] = []
-    m = re.search(r"```task\s*\n?(\{.*?\})\s*```", text, re.DOTALL)
-    if m:
-        try:
-            d = json.loads(m.group(1))
-            if isinstance(d, dict):
-                explicit.append(d)
-        except Exception:  # noqa: BLE001
-            pass
-    for fm in re.finditer(r"```(?:json)?\s*\n?(\{.*?\})\s*```", text, re.DOTALL):
-        try:
-            d = json.loads(fm.group(1))
-            if isinstance(d, dict):
-                candidates.append(d)
-        except Exception:  # noqa: BLE001
-            continue
-
-    def _norm(d: Dict[str, Any], explicit: bool = False) -> Optional[Dict[str, str]]:
-        # 图 IR 排除(diagram.build 产物形态)
-        t = str(d.get("type") or "").lower()
-        if d.get("nodes") and d.get("type") and t in ("component", "flow", "graph", "diagram"):
-            return None
-        if d.get("version") and d.get("nodes"):
-            return None
-        title = str(d.get("title") or d.get("name") or "").strip()
-        if not title:
-            return None
-        instr = str(d.get("instruction") or d.get("instructionMd") or "").strip()
-        _min_len = 0 if explicit else 10   # 显式 task 围栏=明确意图, 不卡长度
-        if not instr:
-            req_md = str(d.get("requirementMd") or d.get("requirement") or "").strip()
-            design = str(d.get("designMd") or d.get("implementationPath") or "").strip()
-            parts = []
-            if req_md:
-                parts.append("## 需求目标\n" + req_md)
-            if design:
-                parts.append("## 实现方案\n" + design)
-            acc = d.get("acceptance") or d.get("acceptanceMd")
-            if acc:
-                acc_lines = acc if isinstance(acc, str) else "\n".join(str(x) for x in acc)
-                parts.append("## 验收标准\n" + str(acc_lines))
-            instr = "\n\n".join(parts)
-        if len(instr) < _min_len:
-            return None
-        return {"title": title[:120], "instruction": instr[:8000]}
-
-    for d in explicit:
-        out = _norm(d, explicit=True)
-        if out:
-            return out
-    for d in candidates:
-        out = _norm(d)
-        if out:
-            return out
-    return None
-
-
-def extract_tool_calls(text: str) -> List[Dict[str, Any]]:
-    """从模型输出中解析工具调用块(闭合/未闭合均支持)。返回 [{tool, arguments}]；异常/缺失字段自动跳过。"""
-    calls: List[Dict[str, Any]] = []
-    if not text:
-        return calls
-    for _s, _e, content in _tool_call_regions(text):
-        payload = _parse_tool_payload(content)
-        if payload:
-            calls.append(payload)
-    return calls
-
-
-def strip_tool_blocks(text: str) -> str:
-    """移除全部工具调用块(含未闭合块)，返回纯文本。"""
-    if not text:
-        return ""
-    regions = _tool_call_regions(text)
-    if not regions:
-        return text.strip()
-    out: List[str] = []
-    pos = 0
-    for start, end, _content in regions:
-        out.append(text[pos:start])
-        pos = end
-    out.append(text[pos:])
-    return "".join(out).strip()
 
 
 # ── 工具审计结构预留(WS6-E): 完整 record schema 定义, 存储/UI 不在本期 ──
@@ -830,20 +134,6 @@ def _digest(v: Any, limit: int = 120) -> str:
 def _now_ms() -> int:
     import time as _t
     return int(_t.time() * 1000)
-
-
-# 归档会话上禁止的动作类工具(生成/落库/定稿/指派); 检索与读取类不在此列
-_ARCHIVED_DENY_TOOLS = {
-    "req.propose", "req.finalize", "contract.propose", "task.propose",
-}
-
-# v2 统一会话: 规约状态机工具退役(命令路径已删)——模型误调时给出引导而非
-# 静默失败(P2 物理删除注册)。
-_RETIRED_TOOLS = {
-    "req.propose": "需求规约状态机已退役。请在对话中整理需求与方案, 方案成熟时调用 task.propose 创建实施任务卡。",
-    "req.finalize": "规约定稿已退役。任务经 task.propose 创建后由用户确认即可执行。",
-    "req.amend": "规约修订已退役。直接在对话中调整方案, 并以 task.propose 重新发起。",
-}
 
 
 def _unwrap_hint(hint):
@@ -1020,18 +310,6 @@ def tool_result_text(name: str, result: Any, limit: int = 3000) -> str:
         return md if len(md) <= limit else md[:limit] + "...(truncated)"
     s = json.dumps(result, ensure_ascii=False, default=str)
     return s if len(s) <= limit else s[:limit] + "...(truncated)"
-
-
-def _kb_gateway():
-    try:
-        from . import ctx
-        g = ctx.kb()
-        if g is not None:
-            return g
-    except Exception:
-        pass
-    from .kb_gateway import get_gateway
-    return get_gateway()
 
 
 def _model(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
@@ -1706,68 +984,6 @@ def _md_lines(text) -> List[str]:
 
 # ── 规约快照/边界解析(生命周期重构: 版本链语义) ──────────────────────
 
-def _spec_snapshot(title: str, desc_md: str, design_md: str, allowed: list,
-                   forbidden: list, acceptance: list, functional: list,
-                   assessment: str, est_min: int) -> Dict[str, Any]:
-    """规约版本快照(真相源结构)。"""
-    return {
-        "title": (title or "").strip(),
-        "desc": desc_md or "",
-        "designMd": design_md or "",
-        "allowedScope": [str(x) for x in (allowed or [])][:40],
-        "forbiddenScope": [str(x) for x in (forbidden or [])][:40],
-        "acceptance": [str(x) for x in (acceptance or [])][:40],
-        "functionalScope": [str(x) for x in (functional or [])][:40],
-        "assessmentSummary": str(assessment or "")[:500],
-        "estMin": int(est_min or 0),
-    }
-
-
-def _sync_analysis_cache(req_id: str, snapshot: Dict[str, Any]) -> None:
-    """active 版本快照 → analysis 派生缓存(design/tagent_se/engine/ws 消费面零改动)。"""
-    store.RequirementsStore.update(req_id, {
-        "analysis": {
-            "functionalScope": snapshot.get("functionalScope") or [],
-            "entityBoundary": [],
-            "assessmentSummary": snapshot.get("assessmentSummary") or "",
-            "assetScope": [],
-            "estMin": snapshot.get("estMin") or 0,
-            "implementationPath": str(snapshot.get("designMd") or "")[:500],
-            "changes": [], "steps": [],
-            "designMd": snapshot.get("designMd") or "",
-            "allowedScope": snapshot.get("allowedScope") or [],
-            "forbiddenScope": snapshot.get("forbiddenScope") or [],
-            "acceptance": snapshot.get("acceptance") or [],
-        },
-        "desc": snapshot.get("desc") or "",
-    })
-
-
-def parse_scope_files(lines: list) -> set:
-    """边界声明行 → 文件/目录集合(互斥引擎的文件级口径)。
-
-    识别: 目录(以 / 结尾) · 文件路径(含 / 且带扩展名) · 顶层路径段(如 src/)。
-    剥除括号补充说明——`modules/xxx/(更新目录结构及逻辑)` → `modules/xxx/`
-    (全角/半角括号, 说明文字混入会稀释互斥前缀匹配精度)。
-    组件引用(comp:xxx)与自然语言不参与文件级互斥(组件级经 KB 口径单独解析)。
-    """
-    import re as _re
-    out: set = set()
-    for ln in lines or []:
-        t = str(ln or "").strip()
-        if not t or t.startswith("comp:"):
-            continue
-        # 剥括号补充说明(全角/半角, 非嵌套)与常见前缀修饰
-        t = _re.sub(r"[（(][^（）()]*[)）]", "", t).strip()
-        for prefix in ("./", "/"):
-            if t.startswith(prefix):
-                t = t[len(prefix):]
-        if not t or "/" not in t:
-            continue
-        out.add(t.rstrip("/"))
-    return out
-
-
 @register_architect_tool(
     "req.propose",
     "形成/更新需求规约：讨论收敛为明确需求，或设计者要求 生成方案/提炼方案/完善需求 时调用。"
@@ -2047,14 +1263,20 @@ def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
 
 # ── 澄清提问工具(plan agent → 用户，经 broker 总线，「需要你输入」可见) ──
 
-# ── LLM 通道: 复用主后端 ai chat ─────────────────────────────────────
+# ── LLM 通道: 实现迁至 agent.cognition.llm(P1), 此处 re-export 兼容存量引用 ──
 
-_MODEL_KEY = "llm.modelId"
-_MAX_TOKENS_KEY = "llm.maxTokens"
-
-# LLM 同步调用超时(秒)：本地大模型结构化提取/工具循环耗时可能远超 KB 默认 10s，
-# 与 model_configs.timeout 对齐(默认 300s)，可用 LLM_SYNC_TIMEOUT 覆盖。
-_LLM_CALL_TIMEOUT = float(os.environ.get("LLM_SYNC_TIMEOUT", "300"))
+from ..agent.cognition.llm import (  # noqa: F401,E402
+    _LLM_CALL_TIMEOUT,
+    _MAX_TOKENS_KEY,
+    _MODEL_KEY,
+    _kb_gateway,
+    get_max_tokens_preference,
+    get_model_preference,
+    llm_chat_start,
+    llm_sync,
+    set_max_tokens_preference,
+    set_model_preference,
+)
 
 
 def log_conv_event(conv_id: str, text: str) -> None:
@@ -2075,217 +1297,6 @@ def log_conv_event(conv_id: str, text: str) -> None:
         pass
 
 
-def get_model_preference() -> str:
-    """architect 侧模型偏好(空 = 由主后端默认 is_default 兜底)。"""
-    from . import store
-    return store.CollabConfigStore.get(_MODEL_KEY, "")
-
-
-def set_model_preference(model_id: str) -> None:
-    from . import store
-    store.CollabConfigStore.set(_MODEL_KEY, model_id)
-
-
-def get_max_tokens_preference() -> Optional[int]:
-    """architect 侧 max_tokens 偏好(空 = 主后端按 model_configs.max_tokens)。"""
-    from . import store
-    raw = store.CollabConfigStore.get(_MAX_TOKENS_KEY, "")
-    try:
-        val = int(raw)
-    except (TypeError, ValueError):
-        return None
-    return val if val > 0 else None
-
-
-def set_max_tokens_preference(value: Optional[int]) -> None:
-    """设置 max_tokens 偏好；None/<=0 视为清除(回退主后端模型配置)。"""
-    from . import store
-    store.CollabConfigStore.set(
-        _MAX_TOKENS_KEY,
-        str(int(value)) if value and int(value) > 0 else "",
-    )
-
-
-def llm_sync(messages: List[Dict[str, str]],
-             mode: str = "chat",
-             tools: Optional[List[str]] = None,
-             output_schema: Optional[Dict[str, Any]] = None,
-             max_tokens: Optional[int] = None,
-             model_id: Optional[str] = None,
-             on_error: Optional[Callable[[str], None]] = None) -> Optional[Dict[str, Any]]:
-    """经 KbGateway 调主后端 llm.sync。不可达/异常返回 None(调用方降级)。
-
-    model_id: 本次对话的模型偏好(对话侧单独选择)，优先于全局 `llm.modelId`；
-    空串则回退全局偏好，再由主后端 is_default 兜底。
-    on_error: 可选回调，捕获失败原因文本(KbError 详情/异常信息)，供调用方
-    识别上下文超限等可重试错误(如逐行解读的二分降级)；不改变 None 返回语义。
-    """
-    gateway = _kb_gateway()
-    _t0 = _now_ms()
-    try:
-        body: Dict[str, Any] = {
-            "modelId": model_id if model_id is not None else get_model_preference(),
-            "mode": mode,
-            "messages": messages,
-            "maxTokens": max_tokens,
-        }
-        if tools:
-            body["tools"] = tools
-        if output_schema:
-            body["outputSchema"] = output_schema
-        res = gateway.call("llm.sync", timeout=_LLM_CALL_TIMEOUT, **body)
-        try:
-            from . import llm_dataset as _lds
-            _ok = isinstance(res, dict)
-            _lds.record("llm_call", verb="sync", mode=mode, ok=_ok,
-                        model=body.get("modelId") or "",
-                        msgsChars=sum(len(m.get("content") or "") for m in messages),
-                        maxTokens=max_tokens or "",
-                        latencyMs=_now_ms() - _t0,
-                        error="" if _ok else f"非dict:{type(res).__name__}")
-        except Exception:  # noqa: BLE001
-            pass
-        if not isinstance(res, dict):
-            logger.warning("[req_agent] llm.sync 返回非 dict(%s): %r",
-                           type(res).__name__,
-                           str(res)[:200] if res is not None else None)
-            if on_error:
-                try:
-                    on_error(f"llm.sync 返回非 dict: {type(res).__name__}")
-                except Exception:
-                    pass
-            return None
-        if mode == "structured" and output_schema and res.get("output") is None:
-            logger.warning("[req_agent] llm.sync structured 输出为空: "
-                           "content_len=%d structuredError=%r",
-                           len(res.get("content") or ""),
-                           str(res.get("structuredError"))[:200])
-        return res
-    except Exception as e:
-        logger.warning("[req_agent] llm.sync failed: %s", e, exc_info=True)
-        try:
-            from . import llm_dataset as _lds
-            _lds.record("llm_call", verb="sync", mode=mode, ok=False,
-                        model=body.get("modelId") or "",
-                        msgsChars=sum(len(m.get("content") or "") for m in messages),
-                        maxTokens=max_tokens or "",
-                        latencyMs=_now_ms() - _t0, error=str(e)[:300])
-        except Exception:  # noqa: BLE001
-            pass
-        if on_error:
-            try:
-                on_error(str(e))
-            except Exception:
-                pass
-        return None
-
-
-# ── 聚焦修复外循环(小模型参数形状不稳的 LLM 兜底) ────────────────────
-# _coerce_args 是确定性第一层; 本层处理 coerce 救不了的形状/结构错误
-# (缺必填参数/发明字段名/嵌套错位)。与主对话完全隔离的极简上下文单独
-# 请求一次(带工具签名+错误+原始args)，产出修正 JSON 后重执行一次。
-# 每次触发即一条微调样本(llm_dataset.arg_repair: 错误args→正确args)。
-
-_REPAIRABLE_ERR = re.compile(
-    r"TypeError|KeyError|AttributeError|unhashable|unhashable type|"
-    r"missing \d+ required (positional )?argument|unexpected keyword|"
-    r"invalid literal for int|执行失败|缺少|无效|无法解析", re.I)
-
-
-def _is_repairable_error(err: str) -> bool:
-    """格式/参数类错误才触发外循环；业务/策略错误(需求不存在、白名单拒绝等)不修。"""
-    if not err:
-        return False
-    if "不存在" in err or "已归档" in err or "不在本任务允许列表" in err or "未知工具" in err:
-        return False
-    return bool(_REPAIRABLE_ERR.search(err))
-
-
-def _repair_param_table(fn: Callable) -> str:
-    """handler 签名 → 参数表文本(名: 类型)，供修复请求的极简 schema 说明。"""
-    try:
-        hints = typing.get_type_hints(fn)
-    except Exception:  # noqa: BLE001
-        hints = {}
-
-    def _hint_name(h) -> str:
-        h = _unwrap_hint(h) if h is not None else None
-        if h is None:
-            return "any"
-        origin = typing.get_origin(h)
-        if origin is None:
-            return getattr(h, "__name__", str(h))
-        args = typing.get_args(h)
-        inner = ",".join(getattr(a, "__name__", str(a)) for a in args[:2])
-        return f"{getattr(origin, '__name__', str(origin))}[{inner}]"
-
-    names = [p for p in inspect.signature(fn).parameters if p not in ("root", "project")]
-    return ", ".join(f"{p}: {_hint_name(hints.get(p))}" for p in names) or "(无参数)"
-
-
-def repair_tool_args(name: str, args: Dict[str, Any], error: str, *,
-                     model_id: Optional[str] = None,
-                     context_hint: str = "") -> Optional[Dict[str, Any]]:
-    """聚焦修复外循环(经 adaptation.repair_loop 统一执行)：极简上下文单独请求
-    一次 LLM，仅修复 arguments JSON。
-
-    与全量重试的区别：不带对话历史/工具权限/能力文档——只有 工具说明+参数表+
-    原始 args+错误(+一句会话语义提示)，小模型在无干扰上下文下做纯 JSON 变换
-    成功率远高于全量重试。仅一次尝试，失败返回 None(回落既有守卫路径)。
-    context_hint: 可选的最小语义补充(如会话最近一条用户消息前 400 字)——
-    仅当错误涉及标题/描述类字段时由调用方提供。
-    """
-    entry = _ARCH_TOOLS.get(name)
-    if not entry:
-        return None
-    fn = entry["handler"]
-    sys_prompt = (
-        "你是 API 参数修复器。给定的工具调用参数 JSON 触发了错误，"
-        "请只修复参数的结构/命名/类型以匹配工具签名，"
-        "不要新增不存在的信息，不要改动原本正确的字段值；"
-        "若必需信息确实缺失，将该字段留空字符串。"
-        f"工具: {name}\n说明: {entry.get('description', '')[:600]}\n"
-        f"参数签名: {_repair_param_table(fn)}\n"
-        "只输出一个 ```json 围栏，内容为 {\"tool\": \""
-        + name + "\", \"arguments\": {...}}，不要任何其他文字。")
-    user_parts = [f"原始参数: {json.dumps(args, ensure_ascii=False)[:1800]}",
-                  f"错误: {str(error)[:400]}"]
-    if context_hint:
-        user_parts.append(f"会话语义提示(仅供参考): {context_hint[:400]}")
-    from .adaptation import RepairTask, run_repair_loop
-
-    def _parse(raw: str):
-        repaired = None
-        m = re.search(r"```json\s*(\{.*?})\s*```", raw, re.DOTALL)
-        if m:
-            try:
-                data = json.loads(m.group(1))
-                if isinstance(data, dict) and isinstance(data.get("arguments"), dict):
-                    call_name = data.get("tool") or name
-                    if call_name == name:
-                        repaired = data["arguments"]
-            except Exception:  # noqa: BLE001
-                repaired = None
-        if not repaired:
-            fallback = extract_tool_calls(raw)
-            for c in fallback:
-                if c.get("tool") == name and isinstance(c.get("arguments"), dict):
-                    repaired = c["arguments"]
-                    break
-        # 修复结果仍过一遍确定性收敛，并带 root/project 空位由 run_arch_tool 注入
-        if isinstance(repaired, dict):
-            repaired = _coerce_args(fn, repaired)
-        return repaired
-
-    out = run_repair_loop(RepairTask(
-        task_id="arg_repair", system=sys_prompt, user="\n".join(user_parts),
-        parse=_parse, max_tokens=700, model_id=model_id or "",
-        dataset_kind="arg_repair",
-        meta={"tool": name, "argsBefore": args, "error": str(error)[:400]}))
-    repaired = out.get("parsed")
-    logger.info("[arg-repair] %s ok=%s latency=%sms err=%s",
-                name, bool(repaired), out.get("latencyMs"), str(error)[:120])
-    return repaired if isinstance(repaired, dict) else None
 
 
 def run_tools_loop(msgs: List[Dict[str, str]], *,
@@ -2587,53 +1598,6 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
     )
 
 
-def llm_chat_start(messages: List[Dict[str, str]],
-                   model_id: Optional[str] = None,
-                   session_id: str = "arch-req-chat",
-                   max_tokens: Optional[int] = None) -> Optional[str]:
-    """发起流式对话(llm.chat)。成功返回 requestId；不可达/未配置/异常返回 None(调用方降级)。
-
-    与 llm_sync 同通道(经 KbGateway 转发主后端)，但返回 requestId 而非完整内容：
-    调用方随后经 ZMQ SUB 订阅 `llm.*`(按 requestId 过滤) 消费逐字 chunk。
-    """
-    gateway = _kb_gateway()
-    try:
-        body: Dict[str, Any] = {
-            "sessionId": session_id,
-            "modelId": model_id if model_id is not None else get_model_preference(),
-            "mode": "chat",
-            "messages": messages,
-            "max_tokens": max_tokens,
-        }
-        res = gateway.call("llm.chat", timeout=_LLM_CALL_TIMEOUT, **body)
-        _chat_ok = isinstance(res, dict) and bool(res.get("requestId"))
-        try:
-            from . import llm_dataset as _lds
-            _lds.record("llm_call", verb="chat", mode="chat", ok=_chat_ok,
-                        model=body.get("modelId") or "",
-                        msgsChars=sum(len(m.get("content") or "") for m in messages),
-                        maxTokens=max_tokens or "", latencyMs=0,
-                        sessionId=session_id or "",
-                        error="" if _chat_ok else "无 requestId")
-        except Exception:  # noqa: BLE001
-            pass
-        if not _chat_ok:
-            return None
-        return res.get("requestId")
-    except Exception as e:
-        logger.warning("[req_agent] llm.chat failed: %s", e)
-        try:
-            from . import llm_dataset as _lds
-            _lds.record("llm_call", verb="chat", mode="chat", ok=False,
-                        model=model_id if model_id is not None else get_model_preference(),
-                        msgsChars=sum(len(m.get("content") or "") for m in messages),
-                        maxTokens=max_tokens or "", latencyMs=0,
-                        sessionId=session_id or "", error=str(e)[:300])
-        except Exception:  # noqa: BLE001
-            pass
-        return None
-
-
 # ── Skills 定义 ────────────────────────────────────────────────────────
 
 @register_architect_tool(
@@ -2643,33 +1607,10 @@ def llm_chat_start(messages: List[Dict[str, str]],
 def tool_task_propose(title: str, instruction: str,
                       executorType: Optional[str] = None,
                       root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
-    """v2 混合触发: architect 整理任务(目标/方案要点/边界/验收) → 用户确认。
-
-    instruction 写实质内容(需求目标/实现方案/允许范围/验收标准)——工作环境/
-    DoD 系统段由 confirm 时确定性注入, 不要重复。
-    """
-    from . import ctx as _ctx
-    from . import exec_bridge
-    conv_id = _ctx.get_conv() or ""
-    if not conv_id:
-        return {"error": "no-conversation"}
-    conv = store.ConversationsStore.get(conv_id)
-    if not conv:
-        return {"error": "conversation-not-found"}
-    if (conv.get("status") or "active") == "archived":
-        return {"error": "会话已归档(只读)"}
-    etype = (executorType or "").strip()
-    if etype not in ("cline", "opencode", "codex"):
-        # 会话绑定了执行器 → 用其注册表类型(用户既定选择); 否则 opencode
-        _bound = exec_bridge.executor_hint_by_id(str(conv.get("executorId") or ""), conv)
-        etype = ((_bound or {}).get("executorType") or "").strip() or "opencode"
-    if not (instruction or "").strip():
-        return {"error": "instruction 缺少实质内容(为空)——请写实质任务内容(目标/方案/验收)"}
-    task = exec_bridge.propose_task(conv, title, instruction,
-                                    executor_hint={"executorType": etype,
-                                                   "executorId": conv.get("executorId") or ""})
-    return {"ok": True, "taskId": task["id"], "status": task.get("status"),
-            "hint": "任务卡已生成, 等待用户确认后执行; 请告知用户可确认/取消/调整。"}
+    """v2 混合触发: architect 整理任务(目标/方案要点/边界/验收) → 用户确认(P4 委托 planning.task_plan)。"""
+    from ..agent.planning.task_plan import propose_task_tool
+    return propose_task_tool(title, instruction, executorType=executorType,
+                             root=root, project=project)
 
 
 @register_architect_skill("req.clarify", "需求澄清：依据需求+KB 命中生成需用户确认的澄清问题清单", steps=2)

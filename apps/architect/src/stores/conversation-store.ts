@@ -111,8 +111,7 @@ export const useConversationStore = defineStore('archConversation', () => {
     busyLabel.value = ''
   }
 
-  /** ── v2 统一会话: 单流(消息带 agent 标注) + agent 过滤器(纯 UI) + 任务清单 ── */
-  const agentFilter = ref<'all' | 'architect' | 'coding'>('all')
+  /** ── v2 统一会话: 单流(消息带 agent 标注, 读侧视觉归因) + 任务清单 ── */
   /** coding subagent 任务清单(arch_tasks, 倒序; SSE task 事件/操作后刷新)。 */
   const tasks = ref<any[]>([])
 
@@ -122,13 +121,6 @@ export const useConversationStore = defineStore('archConversation', () => {
       .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: m.meta, agent: (m as any).agent || '' }))
       .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content && (all[i - 1].agent || '') === (m.agent || '')))
   }
-
-  /** 展示用回合(过滤器: all=全量; architect=外循环; coding=subagent 产出)。 */
-  const displayTurns = computed(() => {
-    if (agentFilter.value === 'all') return turns.value
-    if (agentFilter.value === 'architect') return turns.value.filter((t) => !(t as any).agent || t.role === 'user')
-    return turns.value.filter((t) => !!(t as any).agent || (t.meta?.kind || '').startsWith('task_'))
-  })
 
   /** 任务刷新(会话打开/操作后/SSE task 事件)。 */
   async function refreshTasks() {
@@ -177,7 +169,6 @@ export const useConversationStore = defineStore('archConversation', () => {
   /** 打开已有会话(dock 或会话中心触发): 载入持久化历史。 */
   async function openConversation(meta: Pick<ConversationMeta, 'id' | 'reqId' | 'title'>) {
     resetChat()
-    agentFilter.value = 'all'
     activeId.value = meta.id
     activeReqId.value = meta.reqId || ''
     activeTitle.value = meta.title || ''
@@ -243,7 +234,6 @@ export const useConversationStore = defineStore('archConversation', () => {
   /** 新会话(无类别——仅标题/摘要；阶段由消息级工具推导)。 */
   function newConversation(title = '') {
     resetChat()
-    agentFilter.value = 'all'
     tasks.value = []
     activeId.value = ''
     activeReqId.value = ''
@@ -392,7 +382,7 @@ export const useConversationStore = defineStore('archConversation', () => {
     turns, busy, insertDraft, pushDraft,
     diagramSkill, toggleDiagramSkill,
     busyLabel, toolTrail,
-    agentFilter, displayTurns, tasks, refreshTasks, taskAction,
+    tasks, refreshTasks, taskAction,
     registerChatHook,
     openConversation, newConversation, applyConversation, dropConversation,
     send, sendAnswers, deleteTurn, stop, refreshActiveMeta, refreshActiveMessages, pushLocalHint,

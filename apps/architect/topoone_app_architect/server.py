@@ -110,6 +110,13 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
 
     @asynccontextmanager
     async def _lifespan(_app):
+        # 会话 agent 工具面注册(ctx.*/评估/提炼, 幂等)——P4 起实现延迟到
+        # agent.orchestrator, 此处恢复"服务启动即注册"语义(MCP 面首调可用)
+        try:
+            from .agent.orchestrator import _register_session_tools
+            _register_session_tools()
+        except Exception:
+            pass
         # P5: 定时批量提炼后台循环(异常自吞, 不影响主服务)
         try:
             from .arch_routes.capability_mining import start_periodic_mine

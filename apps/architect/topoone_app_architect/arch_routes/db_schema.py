@@ -168,6 +168,7 @@ ARCH_PROJECT_TABLES_SQL = """
         executor_id TEXT DEFAULT '',          -- coding 执行器绑定(一次绑定不可换; 换=克隆)
         session_ref TEXT DEFAULT '',          -- 执行器原生会话引用(opencode session id 等; 子会话复活用)
         review_state TEXT DEFAULT 'read',   -- 查看状态: read | unread | awaiting_reply | error
+        analysis_mode TEXT DEFAULT 'strict', -- 分析挡位: strict(需求分析→规约→任务) | quick(直出任务卡)
         roles TEXT,                         -- JSON: 角色集 [architect(恒), ...外调角色id]
         tags TEXT,                          -- JSON: {modules:[], groups:[]} 会话分类(会话中心)
         summary TEXT DEFAULT '',            -- 会话摘要
@@ -709,6 +710,7 @@ def _project_migrations(db) -> None:
         ("review_state", "TEXT DEFAULT 'read'"),
         ("roles", "TEXT"),
         ("work_state", "TEXT DEFAULT 'architect'"),
+        ("analysis_mode", "TEXT DEFAULT 'strict'"),
     ])
     # v2 统一会话: 消息 agent 标注(''=architect 外循环; cline/opencode/codex=subagent)
     _add_cols(db, "arch_conversation_messages", [

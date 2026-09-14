@@ -42,7 +42,6 @@ from .turn_adapter import TurnAdapter, build_adapter
 
 logger = logging.getLogger(__name__)
 
-_MAX_EVENTS = 800
 _TURN_TIMEOUT = 3600.0
 _WATCH_INTERVAL = 30.0
 _WATCH_ABORT_GRACE = 10.0
@@ -94,8 +93,9 @@ class ImplementJob:
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.status = "starting"      # starting/running/waiting_input/done/failed/stopped
         self.error = ""
-        self.seq = 0
-        self.events: List[Dict[str, Any]] = []
+        # 事件环 + 实时扇出(P3 schema 化: 形状单源 events.EventBus)
+        from .events import EventBus
+        self.bus = EventBus()
         self.session_id = ""
         self.serve_url = ""
         self.created_at = time.time()
@@ -115,45 +115,31 @@ class ImplementJob:
         self.last_activity_ts = self.created_at
         self.last_error = ""
         self.sse_stop: Optional[asyncio.Event] = None
-        self._subscribers: list = []   # WS 实时订阅队列(architect 泵)
 
-    # ── 事件缓冲 + 实时扇出 ──
+    # ── 事件缓冲 + 实时扇出(P3 委托 events.EventBus, 形状单源) ──
     # 事件粒度: 回合级(done/input_required/failed/aborted/finished/user_input/
     # session_ready)——非流式 token。流式扩展预留: adapter 在实时订阅回调
     # (opencode _sse_loop / codex notifications / cline sidecar events)中
     # 逐段 job.emit("text", 片段) 即可——事件环+WS 订阅面与 architect 泵
-    # (推送优先/轮询兜底, _handle_pump_event 对带 text 的事件落 job_progress
-    # 消息)原生承载, 无需改架构。
+    # (推送优先/轮询兜底)原生承载, 无需改架构。
+
+    @property
+    def seq(self) -> int:
+        return self.bus.seq
+
+    @property
+    def events(self) -> List[Dict[str, Any]]:
+        return self.bus.events
 
     def emit(self, kind: str, text: str = "", **extra: Any) -> int:
-        self.seq += 1
-        ev = {"seq": self.seq, "ts": int(time.time() * 1000),
-              "kind": kind, "text": (text or "")[:20000]}
-        ev.update(extra)
-        self.events.append(ev)
-        if len(self.events) > _MAX_EVENTS:
-            self.events = self.events[-_MAX_EVENTS:]
         self.updated_at = time.time()
-        # 实时扇出(非阻塞; 满队列丢最旧——订阅端有 snapshot 兜底校准)
-        for q in list(self._subscribers):
-            try:
-                if q.full():
-                    q.get_nowait()
-                q.put_nowait(ev)
-            except Exception:  # noqa: BLE001
-                pass
-        return ev["seq"]
+        return self.bus.emit(kind, text, **extra)
 
     def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=256)
-        self._subscribers.append(q)
-        return q
+        return self.bus.subscribe()
 
     def unsubscribe(self, q) -> None:
-        try:
-            self._subscribers.remove(q)
-        except ValueError:
-            pass
+        self.bus.unsubscribe(q)
 
     def snapshot(self, since: int = 0) -> Dict[str, Any]:
         return {"jobId": self.id, "status": self.status, "error": self.error,
@@ -162,7 +148,7 @@ class ImplementJob:
                 "sessionId": self.session_id,
                 "executorId": self.adapter.executor_id,
                 "lastActivityTs": self.last_activity_ts,
-                "events": [e for e in self.events if e["seq"] > since]}
+                "events": self.bus.since(since)}
 
     # ── 生命周期 ──
 
