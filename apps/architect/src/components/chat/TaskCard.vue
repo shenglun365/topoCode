@@ -6,6 +6,11 @@
     <div class="flex items-center gap-2 flex-wrap">
       <span class="font-semibold">{{ task.title || '任务' }}</span>
       <span class="chip !text-[10px] bg-ctp-surface1 text-ctp-subtext0 font-mono">{{ task.executorType || 'opencode' }}</span>
+      <span
+        v-if="task.specVer > 0"
+        class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve font-mono"
+        title="本任务绑定需求规约(建卡时固化), 执行指令含方案/边界/验收"
+      >规约 v{{ task.specVer }}</span>
       <span class="chip !text-[10px]" :class="statusChip">{{ statusText }}</span>
       <span
         v-if="progress && task.status === 'running'"

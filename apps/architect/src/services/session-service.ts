@@ -21,6 +21,8 @@ export interface ConversationMeta {
   /** 执行角色(默认 architect) */
   /** 工作相位: architect(常态) | running(外调作业执行中) */
   workState?: 'architect' | 'running'
+  /** 分析挡位: strict(需求分析→规约→任务) | quick(轻整理直出任务卡)。缺省 strict。 */
+  analysisMode?: 'strict' | 'quick'
   /** 角色集(能力声明; architect 恒在) */
   roles?: string[]
   tags: SessionTags

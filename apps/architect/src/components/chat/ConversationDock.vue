@@ -192,9 +192,14 @@ function disconnectConvEvents() {
   if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
 }
 
-/** 发送入口: v2 agent=显式指派 subagent(无活跃任务时后端注入指派契约)。 */
-async function onSendChat(text: string) {
-  conv.send(text, { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}), ...(props.defaultKind ? { kind: props.defaultKind } : {}), ...(sendAgent.value ? { agent: sendAgent.value } : {}) })
+/** 发送入口(语境路由): attachTo=转达任务卡, agent=一次性指派 subagent(后端注入指派契约)。 */
+async function onSendChat(p: { text: string; attachTo?: string; agent?: string }) {
+  conv.send(p.text, {
+    ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}),
+    ...(props.defaultKind ? { kind: props.defaultKind } : {}),
+    ...(p.attachTo ? { attachTo: p.attachTo } : {}),
+    ...(p.agent ? { agent: p.agent } : {}),
+  })
   onSent()
 }
 
@@ -361,28 +366,20 @@ async function maybeHintT4Model() {
   } catch { /* profiles 不可得 → 不提示 */ }
 }
 
-/** v2 发送方向选择: architect(缺省, 外循环) / 执行器注册表派生(去重映射后端白名单)。 */
-const sendAgent = ref('')
-// 后端 task_set_executor 白名单(cline/opencode/codex) ← 注册表 type 别名映射
-const SUBAGENT_TYPE_ALIAS: Record<string, string> = {
-  opencode: 'opencode', cline: 'cline', 'cline-sdk': 'cline',
-  codex: 'codex', 'codex-server': 'codex',
-}
-const agentChoices = computed<Array<{ id: string; label: string; desc: string }>>(() => {
-  const out: Array<{ id: string; label: string; desc: string }> = [
-    { id: '', label: '@architect', desc: '外循环对话(缺省)' },
-  ]
-  const seen = new Set<string>()
-  for (const e of executorList.value) {
-    const t = SUBAGENT_TYPE_ALIAS[e.type] || ''
-    if (!t || seen.has(t)) continue
-    seen.add(t)
-    out.push({ id: t, label: `@${t}`,
-               desc: `指派 ${t} coding subagent(无活跃任务时由 architect 整理任务卡)` })
-  }
-  return out
+/** 分析挡位(会话级 strict/quick): 本地镜像(即时反馈) + 切换会话时从 activeMeta 同步; 变更上抛 REST 即时生效。 */
+const analysisMode = ref<'strict' | 'quick'>('strict')
+watch(() => conv.activeId, () => {
+  analysisMode.value = ((conv.activeMeta as any)?.analysisMode as 'strict' | 'quick') || 'strict'
 })
-function setSendAgent(id: string) { sendAgent.value = id }
+async function onSetAnalysisMode(mode: 'strict' | 'quick') {
+  if (!conv.activeId) return
+  analysisMode.value = mode // 本地即时反馈(不等 REST)
+  try {
+    const r = await apiPost<{ analysisMode?: 'strict' | 'quick' }>(`/sessions/${conv.activeId}/analysis-mode`, { mode })
+    if (r?.analysisMode) analysisMode.value = r.analysisMode
+    if (conv.activeMeta) (conv.activeMeta as any).analysisMode = analysisMode.value
+  } catch { /* REST 失败保留本地值(下轮打开会话时从后端真相源校正) */ }
+}
 
 /** 引导消息: 仅渲染进对话流(本地), 不发后端/不进上下文, 切换会话自然消失。 */
 const GUIDE_MD = [
@@ -836,7 +833,7 @@ async function pollRunningState() {
 
       <AnalysisChat
         class="h-full"
-        :turns="conv.displayTurns"
+        :turns="conv.turns"
         :busy="conv.busy"
         :busy-label="conv.busyLabel"
         :tool-trail="conv.toolTrail"
@@ -852,12 +849,9 @@ async function pollRunningState() {
         :bound-executor-id="boundExecutorId"
         :executor-models="boundModelNames"
         :executor-model="currentExecutorModel"
-        :send-agent="sendAgent"
-        :agent-choices="agentChoices"
-        :agent-filter="conv.agentFilter"
+        :analysis-mode="analysisMode"
         :tasks="conv.tasks"
-        @agent-filter="(v: any) => { conv.agentFilter = v }"
-        @set-agent="setSendAgent"
+        @set-analysis-mode="onSetAnalysisMode"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
         @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
         @task-executor="(p: any) => void onTaskExecutor(p)"

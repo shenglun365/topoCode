@@ -44,20 +44,17 @@ const props = defineProps<{
   executorModels?: string[]
   /** 当前会话模型(空=默认)。 */
   executorModel?: string
-  /** v2 发送方向: ''=architect(缺省) | 执行器类型(cline/opencode/codex, 显式指派 subagent)。 */
-  sendAgent?: string
-  /** 发送方向候选(宿主按执行器注册表派生; 空=兜底 @architect/@cline 两项)。 */
-  agentChoices?: Array<{ id: string; label: string; desc: string }>
-  /** v2 agent 过滤器(all/architect/coding)。 */
-  agentFilter?: 'all' | 'architect' | 'coding'
-  /** v2 coding subagent 任务清单(arch_tasks, 倒序; TaskCard 渲染用)。 */
+  /** v2 分析挡位(strict/quick): 路由 chip 菜单展示并可切换(上抛宿主 → REST 即时生效)。 */
+  analysisMode?: 'strict' | 'quick'
+  /** v2 coding subagent 任务清单(arch_tasks, 倒序; TaskCard 渲染 + 语境路由用)。 */
   tasks?: Array<Record<string, any>>
 }>()
 
 const emit = defineEmits<{
-  send: [text: string]
-  'set-agent': [id: string]
-  'agent-filter': [v: 'all' | 'architect' | 'coding']
+  /** 发送(语境路由): text 已剥离内联 @前缀; attachTo=转达任务卡, agent=一次性指派执行器。 */
+  send: [p: { text: string; attachTo?: string; agent?: string }]
+  /** 分析挡位切换(strict/quick) → 宿主上抛 REST。 */
+  'set-analysis-mode': [mode: 'strict' | 'quick']
   'task-confirm': [taskId: string]
   'task-cancel': [taskId: string]
   'task-executor': [p: { taskId: string; executorType: string }]
@@ -221,26 +218,91 @@ watch(
   { deep: true },
 )
 
-// ── v2 统一会话: agent 过滤 tab(纯 UI 过滤, 不切数据源) ──
-const AGENT_TABS: Array<{ id: 'all' | 'architect' | 'coding'; label: string }> = [
-  { id: 'all', label: '全部' },
-  { id: 'architect', label: 'architect' },
-  { id: 'coding', label: 'coding' },
-]
-function setAgentTab(v: 'all' | 'architect' | 'coding') {
-  emit('agent-filter', v)
+// ── v2 语境路由(发起者感知): 回复永远面向「当前持球方」——单输入框, 零模式切换 ──
+// 规则: ① 存在 waiting_input 任务 → 转达该任务(attachTo)
+//       ② 存在活跃任务 且 最后 assistant 消息为 coding subagent 产出 → 转达(排队)
+//       ③ 其余 → architect 外循环
+// 覆盖: 内联 @执行器 前缀(一次性指派, 发送时剥离) > 菜单单次翻转(发送后复位)
+type RouteTarget =
+  | { kind: 'architect' }
+  | { kind: 'task'; taskId: string }
+  | { kind: 'assign'; agent: string }
+const routeMenuOpen = ref(false)
+const routeOverride = ref<RouteTarget | null>(null)
+/** 活跃任务: waiting_input 优先, 否则最新 pending_confirm/running。 */
+const activeTask = computed(() => {
+  const ts = props.tasks || []
+  return ts.find((t) => t.status === 'waiting_input')
+    || ts.find((t) => t.status === 'pending_confirm' || t.status === 'running')
+    || null
+})
+/** 最后一条 assistant 消息的 agent 标注(architect 消息无 agent; subagent 消息 agent=cline/opencode/codex)。 */
+const lastAssistantAgent = computed(() => {
+  for (let i = props.turns.length - 1; i >= 0; i--) {
+    const m = props.turns[i]
+    if (m.role === 'assistant') return (m as any).agent || ''
+  }
+  return ''
+})
+/** 内联 @执行器 前缀(一次性指派; 命中返回执行器类型, 发送时剥离前缀)。 */
+const INLINE_AGENTS = ['cline', 'opencode', 'codex']
+const inlineAgent = computed(() => {
+  const v = (input.value || '').trimStart()
+  for (const a of INLINE_AGENTS) {
+    if (v === `@${a}` || v.startsWith(`@${a} `)) return a
+  }
+  return null
+})
+/** 有效路由: 单次翻转 > 内联 @ > 发起者感知。 */
+const effectiveRoute = computed<RouteTarget>(() => {
+  if (routeOverride.value) return routeOverride.value
+  if (inlineAgent.value) return { kind: 'assign', agent: inlineAgent.value }
+  const waiting = (props.tasks || []).find((t) => t.status === 'waiting_input')
+  if (waiting) return { kind: 'task', taskId: waiting.id }
+  const act = activeTask.value
+  if (act && lastAssistantAgent.value && lastAssistantAgent.value !== 'architect') {
+    return { kind: 'task', taskId: act.id }
+  }
+  return { kind: 'architect' }
+})
+function taskTitleOf(id?: string): string {
+  const t = (props.tasks || []).find((x) => x.id === id)
+  return (t?.title as string) || ''
 }
-/** v2 发送方向选择(@architect/@执行器): 菜单本地, 值上抛宿主; 列表由宿主按注册表派生。 */
-const agentMenuOpen = ref(false)
-const FALLBACK_PICKS: Array<{ id: string; label: string; desc: string }> = [
-  { id: '', label: '@architect', desc: '外循环对话(缺省)' },
-  { id: 'cline', label: '@cline', desc: '指派 coding subagent(无活跃任务时由 architect 出任务卡)' },
-]
-const agentPickList = computed(() => (props.agentChoices?.length ? props.agentChoices : FALLBACK_PICKS))
-function pickSendAgent(id: string) {
-  agentMenuOpen.value = false
-  emit('set-agent', id)
+function routeLabel(r: RouteTarget): string {
+  if (r.kind === 'assign') return `@${r.agent}`
+  if (r.kind === 'task') {
+    const title = taskTitleOf(r.taskId)
+    return title ? `→ ${title.slice(0, 14)}` : '→ 任务'
+  }
+  return '@architect'
 }
+function routeDetail(r: RouteTarget): string {
+  if (r.kind === 'assign') return `一次性指派 ${r.agent} coding subagent(发送后复位)`
+  if (r.kind === 'task') {
+    const t = (props.tasks || []).find((x) => x.id === r.taskId)
+    return `转达任务「${taskTitleOf(r.taskId) || r.taskId}」${t?.executorType ? `(${t.executorType})` : ''}`
+  }
+  return 'architect 外循环(分析/设计/编排)'
+}
+/** 菜单单次翻转: 仅作用于下一次发送(发送后自动复位)。 */
+function pickRoute(r: RouteTarget) {
+  routeMenuOpen.value = false
+  routeOverride.value = r
+}
+/** 分析挡位切换: 上抛宿主 → REST 即时生效; 点击后关闭菜单。 */
+function onGearClick(mode: 'strict' | 'quick') {
+  routeMenuOpen.value = false
+  if ((props.analysisMode || 'strict') !== mode) emit('set-analysis-mode', mode)
+}
+/** 占位文案随语境联动(转达任务/指派执行器时给出方向提示)。 */
+const inputPlaceholder = computed(() => {
+  if (props.readOnly) return t('session.readOnlyHint')
+  const r = effectiveRoute.value
+  if (r.kind === 'task') return `回复当前任务「${taskTitleOf(r.taskId).slice(0, 16) || '…'}」…`
+  if (r.kind === 'assign') return `@${r.agent} `
+  return t('requirement.chat.placeholder')
+})
 
 /** 任务卡定位: meta.taskId → 最新任务行(状态实时)。 */
 function taskById(id?: string) {
@@ -270,7 +332,17 @@ function send() {
     resetInputHeight()
     return
   }
-  emit('send', input.value.trim())
+  // 语境路由: 组装 attachTo(转达任务卡)/agent(一次性指派), 剥离内联 @执行器 前缀
+  const r = effectiveRoute.value
+  let text = input.value.trim()
+  const ia = inlineAgent.value
+  if (ia) text = text.replace(new RegExp(`^@${ia}[\\s\\u00A0]*`), '').trim()
+  emit('send', {
+    text,
+    attachTo: r.kind === 'task' ? r.taskId : undefined,
+    agent: r.kind === 'assign' ? r.agent : undefined,
+  })
+  routeOverride.value = null // 单次翻转复位(避免持久模式陷阱)
   input.value = ''
   cmdMenuOpen.value = false
   resetInputHeight()
@@ -720,18 +792,9 @@ onUnmounted(() => {
         <!-- 状态类(reqId/运行中/停止): 跟随标题向右增长, 不影响收件人组 -->
         <slot name="header-extra" />
       </span>
-      <!-- v2 agent 过滤 tab(纯 UI 过滤, 不切数据源) + 模型 chip -->
+      <!-- 模型 chip(语境路由 chip 移至输入区) -->
       <span class="ml-auto flex shrink-0 items-center gap-1">
         <slot name="header-inline" />
-        <span
-          v-for="tab in AGENT_TABS"
-          :key="tab.id"
-          class="chip cursor-pointer select-none !text-[10px] transition-colors"
-          :class="(props.agentFilter || 'all') === tab.id
-            ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
-          :title="tab.id === 'coding' ? '只看 coding subagent 产出(任务回执/进展)' : tab.id === 'architect' ? '只看 architect 外循环对话' : '全部消息'"
-          @click="setAgentTab(tab.id)"
-        >{{ tab.label }}</span>
         <span
           v-if="props.boundExecutorId && (props.executorModels?.length ?? 0) >= 2"
           class="chip cursor-pointer select-none !text-[10px] font-mono transition-colors"
@@ -1545,33 +1608,73 @@ onUnmounted(() => {
         rows="2"
         class="input !py-2.5 text-xs resize-y min-h-0"
         :disabled="props.readOnly"
-        :placeholder="props.readOnly ? t('session.readOnlyHint')
-          : t('requirement.chat.placeholder')"
+        :placeholder="inputPlaceholder"
         @input="autoResize"
         @keydown="onInputKeydown"
       />
-      <!-- v2 发送方向选择(@architect/@cline) -->
+      <!-- v2 语境路由 chip(发起者感知自动变 + 菜单单次翻转 + 分析挡位) -->
       <div class="relative shrink-0">
         <button
           class="chip !text-[10px] font-mono transition-colors"
-          :class="props.sendAgent ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
-          :title="props.sendAgent ? `指派 ${props.sendAgent}(点击切回 architect)` : '对话方向: architect 外循环(缺省)'"
-          @click="agentMenuOpen = !agentMenuOpen"
-        >{{ props.sendAgent ? `@${props.sendAgent}` : '@architect' }}<ChevronDownIcon class="w-2.5 h-2.5 inline ml-0.5" /></button>
+          :class="effectiveRoute.kind === 'architect'
+            ? 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'
+            : effectiveRoute.kind === 'assign' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-sky/15 text-ctp-sky'"
+          :title="routeDetail(effectiveRoute) + '（点击切换/挡位）'"
+          @click="routeMenuOpen = !routeMenuOpen"
+        >{{ routeLabel(effectiveRoute) }}<ChevronDownIcon class="w-2.5 h-2.5 inline ml-0.5" /></button>
         <div
-          v-if="agentMenuOpen"
-          class="absolute bottom-full right-0 z-50 mb-1 w-64 flex-col gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-lg flex"
-          @mouseleave="agentMenuOpen = false"
+          v-if="routeMenuOpen"
+          class="absolute bottom-full right-0 z-50 mb-1 w-72 flex-col gap-1 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1.5 shadow-lg flex"
+          @mouseleave="routeMenuOpen = false"
         >
+          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">回复对象（单次, 发送后复位）</div>
           <button
-            v-for="a in agentPickList"
-            :key="a.id || 'arch'"
-            class="rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-            @click="pickSendAgent(a.id)"
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+            :class="effectiveRoute.kind === 'architect' && !routeOverride ? 'bg-ctp-blue/10' : ''"
+            @click="pickRoute({ kind: 'architect' })"
           >
-            <span class="font-mono" :class="a.id ? 'text-ctp-peach' : 'text-ctp-sky'">{{ a.label }}</span>
-            <span class="ml-1.5 text-ctp-subtext0">{{ a.desc }}</span>
+            <span class="font-mono text-ctp-sky">@architect</span>
+            <span class="ml-1.5 text-ctp-subtext0">外循环(分析/设计/编排)</span>
           </button>
+          <button
+            v-if="activeTask"
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+            :class="effectiveRoute.kind === 'task' && effectiveRoute.taskId === activeTask.id && !routeOverride ? 'bg-ctp-blue/10' : ''"
+            @click="pickRoute({ kind: 'task', taskId: activeTask.id })"
+          >
+            <span class="font-mono text-ctp-sky truncate">→ {{ taskTitleOf(activeTask.id) || '活跃任务' }}</span>
+            <span class="ml-1.5 text-ctp-subtext0">转达（{{ activeTask.status === 'waiting_input' ? '等待回复' : '排队' }}）</span>
+          </button>
+          <button
+            v-for="a in INLINE_AGENTS"
+            :key="a"
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+            :class="effectiveRoute.kind === 'assign' && effectiveRoute.agent === a ? 'bg-ctp-peach/10' : ''"
+            @click="pickRoute({ kind: 'assign', agent: a })"
+          >
+            <span class="font-mono text-ctp-peach">@{{ a }}</span>
+            <span class="ml-1.5 text-ctp-subtext0">一次性指派 coding subagent</span>
+          </button>
+          <!-- 分析挡位段 -->
+          <div class="mt-0.5 border-t border-ctp-surface0 pt-1">
+            <div class="px-1.5 pb-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">分析挡位</div>
+            <button
+              class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+              :class="(props.analysisMode || 'strict') === 'strict' ? 'bg-ctp-blue/10' : ''"
+              @click="onGearClick('strict')"
+            >
+              <span class="font-medium text-ctp-subtext1">严格</span>
+              <span class="ml-1.5 text-ctp-overlay0">需求分析→规约→任务</span>
+            </button>
+            <button
+              class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+              :class="props.analysisMode === 'quick' ? 'bg-ctp-blue/10' : ''"
+              @click="onGearClick('quick')"
+            >
+              <span class="font-medium text-ctp-subtext1">快捷</span>
+              <span class="ml-1.5 text-ctp-overlay0">直出任务卡（关 KB）</span>
+            </button>
+          </div>
         </div>
       </div>
       <button
