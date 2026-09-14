@@ -121,7 +121,7 @@ def assemble_task_instruction(task: dict, prior_brief: str = "") -> str:
     """任务指令组装: task.instruction(architect 整理) 为正文 + 绑定需求规约
     补充(边界/验收) + 工作环境/DoD 系统段(确定性注入, 不依赖 LLM)。
 
-    prior_brief: 前情简报(重试时注入)。
+    prior_brief: 前情链简报(同会话近期终态任务摘要, confirm 时自动注入)。
     """
     rid = task.get("reqId") or ""
     r = _store().RequirementsStore.get(rid) or {} if rid else {}
@@ -133,7 +133,8 @@ def assemble_task_instruction(task: dict, prior_brief: str = "") -> str:
              + (f"（{rid} · 规约 v{active.get('ver') or '?'}）" if rid else "")]
     body = str(task.get("instruction") or "").strip()
     if prior_brief:
-        parts.append("## 前情简报(上次作业)\n" + prior_brief)
+        parts.append("## 前情简报(同会话近期任务)\n" + prior_brief
+                     + "\n请避免重复前情中已完成的改动, 基于前情继续。")
     # 方案兜底: designMd 未细化时用需求正文(requirementMd/desc)——agent 永远拿到实质任务,
     # 不允许"只有标题+DoD"的空指令把作业打成 NEED_INPUT 空转(cv-140 教训)。
     if body:

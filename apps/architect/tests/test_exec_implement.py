@@ -432,6 +432,45 @@ def test_task_instruction_injects_spec_and_env(tmp_path, monkeypatch):
     assert "方案Z" in txt                                     # designMd
 
 
+def test_task_chain_brief_injection(tmp_path, monkeypatch):
+    """前情链: confirm 时同会话最近终态任务摘要自动注入新任务指令
+    (当前任务排除 / 最近在前 / pending 不算前情)。"""
+    conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
+    t1 = eb.propose_task(conv, "任务一", "x")
+    store.TasksStore.finish(t1["id"], "done", "完成: 改了 src/a.py, 结论可复用")
+    t2 = eb.propose_task(conv, "任务二", "y")
+    store.TasksStore.finish(t2["id"], "failed", "失败: 依赖缺失")
+    t3 = eb.propose_task(conv, "任务三", "z")                 # 当前任务(pending_confirm)
+    brief = eb._task_chain_brief(conv["id"], t3["id"])
+    assert "任务一" in brief and "完成: 改了 src/a.py" in brief
+    assert "任务二" in brief and "失败: 依赖缺失" in brief
+    assert "任务三" not in brief                              # 当前任务排除
+    assert brief.index("任务二") < brief.index("任务一")       # 最近在前
+    res = eb.confirm_task(t3["id"])
+    assert res["ok"]
+    pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
+    assert "前情简报(同会话近期任务)" in pl["instruction"]
+    assert "任务一" in pl["instruction"]
+    assert "避免重复前情中已完成的改动" in pl["instruction"]
+
+
+def test_task_chain_brief_empty_and_truncate(tmp_path, monkeypatch):
+    """无终态历史 → 空串; 空结果任务跳过; 超长 result_md 截断(总长 ≤1000)。"""
+    conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
+    t1 = eb.propose_task(conv, "首任务", "x")
+    assert eb._task_chain_brief(conv["id"], t1["id"]) == ""   # 无终态历史
+    store.TasksStore.finish(t1["id"], "done", "很" * 2000)     # 超长结果
+    t2 = eb.propose_task(conv, "空结果任务", "z")
+    store.TasksStore.finish(t2["id"], "cancelled", "")         # 空结果 → 跳过
+    t3 = eb.propose_task(conv, "新任务", "y")
+    brief = eb._task_chain_brief(conv["id"], t3["id"])
+    assert len(brief) <= 1000 and "…" in brief                 # 截断生效
+    assert "首任务" in brief and "空结果任务" not in brief
+    assert eb.confirm_task(t3["id"])["ok"]
+    pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
+    assert "前情简报(同会话近期任务)" in pl["instruction"]
+
+
 def test_active_task_of_priority(tmp_path, monkeypatch):
     """active_task_of: running/waiting_input 优先于 pending_confirm。"""
     conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)

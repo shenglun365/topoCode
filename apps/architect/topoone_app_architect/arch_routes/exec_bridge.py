@@ -263,7 +263,7 @@ def confirm_task(task_id: str) -> dict:
     if conflict:
         store.TasksStore.finish(task_id, "failed", f"边界冲突: {conflict}")
         return {"ok": False, "error": conflict}
-    payload = {"root": root, "instruction": _task_instruction(task),
+    payload = {"root": root, "instruction": _task_instruction(task, _task_chain_brief(conv_id, task_id)),
                "branchName": branch, "projectId": project,
                "boundaries": {"files": boundary_files, "components": [],
                               "readOnly": False}}
@@ -549,23 +549,30 @@ def _spec_updated_at(rid: str) -> int:
 
 
 
-def _prior_job_brief(conv: dict) -> str:
-    """前情简报: 最近一条非完成作业的失败原因/实际改动/结论(重试上下文延续)。"""
-    jobs = _meta_get(conv).get("jobs") or []
-    for j in reversed(jobs):
-        if (j.get("status") or "") not in ("done",):
-            lines = []
-            if j.get("failReason"):
-                lines.append(f"- 上次结果: {str(j['failReason'])[:200]}")
-            if j.get("changedFiles"):
-                lines.append("- 已改动文件: " + ", ".join(j["changedFiles"][:12]))
-            if j.get("lastAgentNote"):
-                lines.append(f"- agent 结论: {str(j['lastAgentNote'])[:300]}")
-            if lines:
-                lines.append("- 请基于以上前情继续/修正，避免重复已完成的工作")
-                return "\n".join(lines)
-        break
-    return ""
+def _task_chain_brief(conv_id: str, current_task_id: str) -> str:
+    """前情链: 同会话最近 ≤3 条终态任务的结果摘要(自动注入新任务指令)。
+
+    任务链上下文延续——执行器不重走已完成的探索/改动; 纯确定性组装,
+    不调 LLM、不弹 UI、不依赖 architect 自觉。"""
+    rows = [t for t in store.TasksStore.of_conv(conv_id)
+            if t.get("id") != current_task_id
+            and (t.get("status") or "") in ("done", "failed", "cancelled")]
+    if not rows:
+        return ""
+    lines = []
+    for t in rows[::-1][:3]:               # 最近在前
+        status = t.get("status") or ""
+        result = str(t.get("resultMd") or t.get("result_md")
+                     or "").strip().replace("\n", " ")
+        if len(result) > 240:
+            result = result[:240].rstrip() + "…"
+        if not result:
+            continue
+        icon = "✅" if status == "done" else "⚠️"
+        lines.append(f"- {icon}「{(t.get('title') or '')[:40]}」({status}): {result}")
+    if not lines:
+        return ""
+    return "\n".join(lines)[:1000]
 
 
 
