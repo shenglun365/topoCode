@@ -254,12 +254,13 @@ export const useConversationStore = defineStore('archConversation', () => {
     if (activeId.value === convId) newConversation()
   }
 
-  /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子。 */
-  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string }) {
-    if (busy.value || !text.trim()) return
+  /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子; digest=语境摘要(转达下发, text 可空)。 */
+  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string; digest?: string }) {
+    if (busy.value || (!text.trim() && !opts?.digest)) return
     // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里
     const arr = turns.value
-    arr.push({ role: 'user', content: text, agent: opts?.agent || '' })
+    const userTurn: any = { role: 'user', content: text || '📎 语境摘要转达', agent: opts?.agent || '' }
+    arr.push(userTurn)
     const idx = arr.push({ role: 'assistant', content: '' }) - 1
     busy.value = true
     beginProgress()
@@ -267,8 +268,11 @@ export const useConversationStore = defineStore('archConversation', () => {
     const hadNoConv = !activeId.value
     let convNotified = false
     try {
-      // 本地引导消息(meta.kind='hint')纯前端提示, 不进入模型上下文
-      const msgs = arr.slice(0, -1).filter((m) => m.meta?.kind !== 'hint').map((m) => ({ role: m.role, content: m.content }))
+      // 本地引导消息(meta.kind='hint')纯前端提示, 不进入模型上下文;
+      // digest-only 发送时占位 userTurn 不发给后端(后端拼 digest, 避免占位文案进转达)
+      const msgs = arr.slice(0, -1)
+        .filter((m) => m.meta?.kind !== 'hint' && !(opts?.digest && !text && m === userTurn))
+        .map((m) => ({ role: m.role, content: m.content }))
       await chatStream(msgs, {
         conversationId: activeId.value || undefined,
         kind: opts?.kind ?? (activeMeta.value as any)?.kind ?? undefined,
@@ -279,6 +283,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         skillScenarios: opts?.skillScenarios,
         agent: opts?.agent,
         attachTo: opts?.attachTo,
+        digest: opts?.digest,
         signal: ac.signal,
       }, (ev) => {
         if (ev.conversationId) {

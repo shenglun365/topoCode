@@ -24,8 +24,10 @@ class RouteDecision:
 
 
 def decide(conv_id: str, question: str, attach_to: str, agent_pick: str,
-           store, exec_bridge) -> RouteDecision:
-    """路由决策(纯输入→决策, IO 仅 task_input 转达)。"""
+           store, exec_bridge, digest: str = "") -> RouteDecision:
+    """路由决策(纯输入→决策, IO 仅 task_input 转达)。
+
+    digest: 语境摘要(用户选史生成)——仅 transfer 时随文本下发给执行器。"""
     if not (attach_to or (agent_pick and agent_pick not in ("architect", ""))):
         return RouteDecision(action="chat")
     task = None
@@ -39,13 +41,16 @@ def decide(conv_id: str, question: str, attach_to: str, agent_pick: str,
             task = None   # 待确认任务不吸收输入——引导用户确认/取消
     if task and (attach_to or (task.get("executorType") or "opencode") == agent_pick
                  or not agent_pick):
-        res = exec_bridge.task_input(task["id"], question)
+        payload_text = question + (
+            f"\n\n[附] 会话历史摘要(供参考):\n{digest}" if digest else "")
+        res = exec_bridge.task_input(task["id"], payload_text)
         if res.get("ok"):
             queued = bool(res.get("queued"))
             ex = task.get("executorType") or "opencode"
-            reply = (f"📥 已排队转达 `{ex}`（当前回合执行中，回合结束自动续跑）。"
+            tail = f"（含历史摘要 {len(digest)} 字）" if digest else ""
+            reply = (f"📥 已排队转达 `{ex}`{tail}（当前回合执行中，回合结束自动续跑）。"
                      if queued else
-                     f"➡️ 已转达 `{ex}`（任务「{task.get('title', '')}」继续）。")
+                     f"➡️ 已转达 `{ex}`{tail}（任务「{task.get('title', '')}」继续）。")
             return RouteDecision(action="transfer", reply=reply, task=task)
         err = str(res.get("error") or "")
         reply = (f"❌ 转达失败：{err or 'runner 不可达'}。可稍后重试。"

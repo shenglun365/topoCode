@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { kindChipClass } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
-import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon } from '@heroicons/vue/24/outline'
+import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
@@ -44,15 +44,19 @@ const props = defineProps<{
   executorModels?: string[]
   /** 当前会话模型(空=默认)。 */
   executorModel?: string
-  /** v2 分析挡位(strict/quick): 路由 chip 菜单展示并可切换(上抛宿主 → REST 即时生效)。 */
+  /** v2 分析挡位(strict/quick): 快捷挡直切钮展示并可切换(上抛宿主 → REST 即时生效)。 */
   analysisMode?: 'strict' | 'quick'
+  /** 会话是否已存在: false=空白对话(记录未创建)——挡位是会话级字段无处可写, 直切钮禁用+提示。 */
+  hasSession?: boolean
+  /** 会话 id(语境摘要 REST 用); 空=无会话。 */
+  convId?: string
   /** v2 coding subagent 任务清单(arch_tasks, 倒序; TaskCard 渲染 + 语境路由用)。 */
   tasks?: Array<Record<string, any>>
 }>()
 
 const emit = defineEmits<{
-  /** 发送(语境路由): text 已剥离内联 @前缀; attachTo=转达任务卡, agent=一次性指派执行器。 */
-  send: [p: { text: string; attachTo?: string; agent?: string }]
+  /** 发送(语境路由): text 已剥离内联 @前缀; attachTo=转达任务卡, agent=一次性指派执行器, digest=语境摘要。 */
+  send: [p: { text: string; attachTo?: string; agent?: string; digest?: string }]
   /** 分析挡位切换(strict/quick) → 宿主上抛 REST。 */
   'set-analysis-mode': [mode: 'strict' | 'quick']
   'task-confirm': [taskId: string]
@@ -269,14 +273,12 @@ function taskTitleOf(id?: string): string {
   const t = (props.tasks || []).find((x) => x.id === id)
   return (t?.title as string) || ''
 }
-function routeLabel(r: RouteTarget): string {
-  if (r.kind === 'assign') return `@${r.agent}`
-  if (r.kind === 'task') {
-    const title = taskTitleOf(r.taskId)
-    return title ? `→ ${title.slice(0, 14)}` : '→ 任务'
-  }
-  return '@architect'
-}
+/** 工具条路由按钮配色: 中性(architect) / sky(转达任务) / peach(一次性指派)——一眼可辨路由态。 */
+const routeBtnClass = computed(() => {
+  if (effectiveRoute.value.kind === 'assign') return 'bg-ctp-peach/15 text-ctp-peach hover:bg-ctp-peach/25'
+  if (effectiveRoute.value.kind === 'task') return 'bg-ctp-sky/15 text-ctp-sky hover:bg-ctp-sky/25'
+  return 'btn-ghost'
+})
 function routeDetail(r: RouteTarget): string {
   if (r.kind === 'assign') return `一次性指派 ${r.agent} coding subagent(发送后复位)`
   if (r.kind === 'task') {
@@ -290,11 +292,90 @@ function pickRoute(r: RouteTarget) {
   routeMenuOpen.value = false
   routeOverride.value = r
 }
-/** 分析挡位切换: 上抛宿主 → REST 即时生效; 点击后关闭菜单。 */
-function onGearClick(mode: 'strict' | 'quick') {
-  routeMenuOpen.value = false
-  if ((props.analysisMode || 'strict') !== mode) emit('set-analysis-mode', mode)
+/** 快捷挡直切开关(闪电 icon): 严格=关(暗) / 快捷=开(高亮), 点击取反, 上抛宿主 REST 即时生效。 */
+const quickOn = computed(() => (props.analysisMode || 'strict') === 'quick')
+/** 空白对话(会话未创建)锁定: 挡位是会话级字段, 无 conv_id 可写。 */
+const quickLocked = computed(() => props.hasSession === false)
+const quickTitle = computed(() => {
+  if (quickLocked.value) return '快捷挡需在已有会话中切换 — 发送首条消息创建会话后可用'
+  return quickOn.value
+    ? '快捷挡已开启 — 直出任务卡(关 KB)（点击关闭）'
+    : '快捷挡 — 直出任务卡(关 KB)（点击开启）'
+})
+function toggleQuickMode() {
+  if (quickLocked.value) return
+  emit('set-analysis-mode', quickOn.value ? 'strict' : 'quick')
 }
+
+// ── 语境摘要(转达下发): 摘要模式选史 → REST 生成 → 可编辑草稿卡 → 发送/自动通过 ──
+const DIGEST_AUTO_KEY = 'arch.digestAutoSend'
+const digestMode = ref(false)
+const selIds = ref<Set<string>>(new Set())
+const digestBusy = ref(false)
+const digestDraft = ref<string | null>(null)   // 非空=草稿卡(可编辑)
+const digestSentOpen = reactive<Record<number, boolean>>({})
+const digestAutoSend = ref(localStorage.getItem(DIGEST_AUTO_KEY) === '1')
+/** 摘要入口仅转达语境(路由=任务)显示; architect 路由本就全史可见无需摘要。 */
+const canDigest = computed(() => effectiveRoute.value.kind === 'task')
+function toggleDigestMode() {
+  if (!canDigest.value) return
+  digestMode.value = !digestMode.value
+  if (!digestMode.value) exitDigest()
+}
+function exitDigest() {
+  digestMode.value = false
+  selIds.value = new Set()
+  digestDraft.value = null
+}
+function toggleSel(m: any) {
+  if (!digestMode.value || !m?.id) return   // 本地乐观回合无 id, 不可选
+  const s = new Set(selIds.value)
+  if (s.has(m.id)) s.delete(m.id)
+  else s.add(m.id)
+  selIds.value = s
+}
+/** 生成摘要: REST → 自动通过(跳卡直发) 或 草稿卡人工审核。 */
+async function generateDigest() {
+  if (!selIds.value.size || digestBusy.value || !props.convId) return
+  digestBusy.value = true
+  try {
+    const r = await apiPost<{ digest: string; chars: number; summarized: boolean }>(
+      `/sessions/${props.convId}/msg-digest`, { msgIds: [...selIds.value] })
+    const digest = (r as any)?.digest || (r as any)?.data?.digest || ''
+    if (!digest) return
+    if (digestAutoSend.value) {
+      await sendDigest(digest)          // 自动通过: 不落审核卡
+      exitDigest()
+    } else {
+      digestDraft.value = digest
+    }
+  } catch { /* 生成失败: 保留选择可重试 */ } finally {
+    digestBusy.value = false
+  }
+}
+async function sendDigest(digest: string) {
+  const r = effectiveRoute.value
+  if (r.kind !== 'task' || props.busy) return
+  emit('send', { text: '', attachTo: r.taskId, digest })
+}
+function confirmDigest() {
+  if (digestDraft.value?.trim()) void sendDigest(digestDraft.value)
+  exitDigest()
+}
+function onAutoSendToggle(e: Event) {
+  digestAutoSend.value = (e.target as HTMLInputElement).checked
+  localStorage.setItem(DIGEST_AUTO_KEY, digestAutoSend.value ? '1' : '0')
+}
+watch(canDigest, (ok) => { if (!ok && digestMode.value) exitDigest() })
+/** 转达摘要回执折叠卡展开态。 */
+function toggleDigestSent(i: number) {
+  digestSentOpen[i] = !digestSentOpen[i]
+}
+/** 草稿卡标题: 当前转达目标任务。 */
+const digestTargetTitle = computed(() => {
+  const r = effectiveRoute.value
+  return r.kind === 'task' ? (taskTitleOf(r.taskId).slice(0, 20) || '当前任务') : '当前任务'
+})
 /** 占位文案随语境联动(转达任务/指派执行器时给出方向提示)。 */
 const inputPlaceholder = computed(() => {
   if (props.readOnly) return t('session.readOnlyHint')
@@ -357,6 +438,7 @@ const LOCAL_CMD_LIST = [
   { name: '提炼', desc: '提炼会话为数据资产' },
   { name: '归档', desc: '结束会话(有可提炼内容时提示)' },
   { name: '引导', desc: '显示会话使用引导(本地提示)' },
+  { name: '选摘', desc: '选取历史生成摘要转达执行器' },
 ]
 const cmdMenuOpen = ref(false)
 const cmdFilter = computed(() => {
@@ -387,12 +469,14 @@ function onCmdMenuKeydown(e: KeyboardEvent) {
     e.preventDefault()
   }
 }
-/** 本地命令分发: 绘图/方案在组件内执行; 摘要/提炼/归档上抛宿主(与工具条同动作)。 */
+/** 本地命令分发: 绘图/方案/选摘在组件内执行; 摘要/提炼/归档上抛宿主(与工具条同动作)。 */
 function runLocalCmd(name: string) {
   if (name === '绘图') {
     emit('toggle-diagram-skill', !props.diagramSkill)
   } else if (name === '方案') {
     fillExtractPlan()
+  } else if (name === '选摘') {
+    toggleDigestMode()
   } else {
     emit('local-cmd', name)
   }
@@ -840,11 +924,31 @@ onUnmounted(() => {
       ref="scrollRef"
       class="flex-1 min-h-[320px] overflow-auto p-3 space-y-2.5"
     >
+      <!-- 摘要模式操作栏: 点选消息 → 生成摘要(草稿卡/自动通过) -->
+      <div
+        v-if="digestMode"
+        class="flex items-center gap-2 rounded-md border border-ctp-teal/30 bg-ctp-teal/10 px-2.5 py-1.5 text-[11px] text-ctp-teal"
+      >
+        <ClipboardDocumentIcon class="w-3.5 h-3.5 shrink-0" />
+        <span>摘要模式: 点击消息选取/取消（已选 {{ selIds.size }} 条）</span>
+        <span class="flex-1" />
+        <button
+          class="btn btn-xs btn-primary"
+          :disabled="!selIds.size || digestBusy"
+          @click="generateDigest"
+        >{{ digestBusy ? '生成中…' : '生成摘要' }}</button>
+        <button
+          class="btn btn-xs btn-ghost"
+          @click="toggleDigestMode"
+        >取消</button>
+      </div>
         <div
           v-for="(m, i) in turns"
           :key="i"
-          class="animate-fade-up flex items-start gap-2"
+          class="animate-fade-up flex items-start gap-2 rounded-lg"
+          :class="selIds.has((m as any).id) ? 'ring-1 ring-ctp-blue' : (digestMode ? 'cursor-pointer hover:ring-1 hover:ring-ctp-blue/40' : '')"
           @copy="onMsgCopy"
+          @click="toggleSel(m)"
         >
         <div
           class="flex-1 min-w-0 rounded-lg rounded-tl-none px-3 py-2 text-xs bg-ctp-surface0/80"
@@ -970,7 +1074,28 @@ onUnmounted(() => {
             </div>
             {{ m.reasoning }}
           </div>
-          <ChatMessageBlocks :content="m.content" />
+          <!-- 转达摘要回执: 折叠卡(留"给执行器发过什么"的感知, 点开看全文) -->
+          <div
+            v-if="m.meta?.kind === 'digest_sent'"
+            class="rounded-md border border-ctp-teal/25 bg-ctp-teal/5 px-2.5 py-1.5"
+          >
+            <button
+              class="flex items-center gap-1.5 text-[10px] text-ctp-teal"
+              @click="toggleDigestSent(i)"
+            >
+              <ClipboardDocumentIcon class="w-3 h-3" />
+              转达摘要 · {{ m.meta.chars ?? m.content.length }} 字
+              <span>{{ digestSentOpen[i] ? '▲ 收起' : '▼ 展开' }}</span>
+            </button>
+            <div
+              v-if="digestSentOpen[i]"
+              class="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-ctp-subtext1"
+            >{{ m.content }}</div>
+          </div>
+          <ChatMessageBlocks
+            v-else
+            :content="m.content"
+          />
 
           <!-- 指令符号 chips: 消息中出现的 /指令 → 点击填入对话框(所有助手消息,
                含系统回执「发送 /执行 …」等引导) -->
@@ -1506,6 +1631,50 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- 语境摘要草稿卡: 可编辑 → 发送给执行器 / 重新生成 / 取消; 可勾选以后自动通过 -->
+      <div
+        v-if="digestDraft !== null"
+        class="rounded-lg border border-ctp-teal/30 bg-ctp-teal/5 px-3 py-2.5"
+      >
+        <div class="flex items-center gap-1.5 text-[11px] font-medium text-ctp-teal">
+          <ClipboardDocumentIcon class="w-3.5 h-3.5" />
+          <span>转达摘要（可编辑）— 将发给执行器「{{ digestTargetTitle }}」</span>
+        </div>
+        <textarea
+          v-model="digestDraft"
+          rows="5"
+          class="input mt-2 text-xs"
+        />
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            class="btn btn-xs btn-primary"
+            :disabled="busy || !digestDraft.trim()"
+            title="把摘要随转达发给执行器"
+            @click="confirmDigest"
+          >发送给执行器</button>
+          <button
+            class="btn btn-xs btn-ghost"
+            :disabled="digestBusy"
+            @click="generateDigest"
+          >{{ digestBusy ? '生成中…' : '重新生成' }}</button>
+          <button
+            class="btn btn-xs btn-ghost"
+            @click="exitDigest"
+          >取消</button>
+          <span class="flex-1" />
+          <label
+            class="flex cursor-pointer items-center gap-1 text-[10px] text-ctp-overlay0"
+            title="勾选后: 生成摘要不再人工审核, 直接发给执行器"
+          >
+            <input
+              type="checkbox"
+              :checked="digestAutoSend"
+              @change="onAutoSendToggle"
+            >以后自动通过
+          </label>
+        </div>
+      </div>
+
       <div
         v-if="busy"
         class="flex items-center gap-2 text-xs text-ctp-blue animate-pulse"
@@ -1538,6 +1707,71 @@ onUnmounted(() => {
     </transition>
 
     <div class="flex items-center gap-1 border-t border-ctp-surface0 px-2.5 py-1.5 shrink-0">
+      <!-- v2 语境路由(发起者感知自动变 + 菜单单次翻转): 纯 icon, 配色随路由态 -->
+      <div class="relative shrink-0">
+        <button
+          class="btn btn-xs !px-1.5"
+          :class="routeBtnClass"
+          :title="routeDetail(effectiveRoute) + '（点击切换）'"
+          @click="routeMenuOpen = !routeMenuOpen"
+        >
+          <AtSymbolIcon class="w-3.5 h-3.5" />
+        </button>
+        <div
+          v-if="routeMenuOpen"
+          class="absolute bottom-full left-0 z-50 mb-1 w-72 flex-col gap-1 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1.5 shadow-lg flex"
+          @mouseleave="routeMenuOpen = false"
+        >
+          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">回复对象（单次, 发送后复位）</div>
+          <button
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+            :class="effectiveRoute.kind === 'architect' && !routeOverride ? 'bg-ctp-blue/10' : ''"
+            @click="pickRoute({ kind: 'architect' })"
+          >
+            <span class="font-mono text-ctp-sky">@architect</span>
+            <span class="ml-1.5 text-ctp-subtext0">外循环(分析/设计/编排)</span>
+          </button>
+          <button
+            v-if="activeTask"
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+            :class="effectiveRoute.kind === 'task' && effectiveRoute.taskId === activeTask.id && !routeOverride ? 'bg-ctp-blue/10' : ''"
+            @click="pickRoute({ kind: 'task', taskId: activeTask.id })"
+          >
+            <span class="font-mono text-ctp-sky truncate">→ {{ taskTitleOf(activeTask.id) || '活跃任务' }}</span>
+            <span class="ml-1.5 text-ctp-subtext0">转达（{{ activeTask.status === 'waiting_input' ? '等待回复' : '排队' }}）</span>
+          </button>
+          <button
+            v-for="a in INLINE_AGENTS"
+            :key="a"
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
+            :class="effectiveRoute.kind === 'assign' && effectiveRoute.agent === a ? 'bg-ctp-peach/10' : ''"
+            @click="pickRoute({ kind: 'assign', agent: a })"
+          >
+            <span class="font-mono text-ctp-peach">@{{ a }}</span>
+            <span class="ml-1.5 text-ctp-subtext0">一次性指派 coding subagent</span>
+          </button>
+        </div>
+      </div>
+      <!-- 快捷挡直切(闪电): 选中=蓝色填充 / 未选中=置灰半透明(悬停恢复); 空白对话禁用(title 说明原因) -->
+      <button
+        class="btn btn-xs !px-1.5"
+        :class="quickOn ? 'btn-blue' : 'btn-ghost opacity-50 hover:opacity-100'"
+        :disabled="quickLocked"
+        :title="quickTitle"
+        @click="toggleQuickMode"
+      >
+        <BoltIcon class="w-3.5 h-3.5" />
+      </button>
+      <!-- 语境摘要(仅转达语境): 选史 → 生成摘要 → 随转达下发执行器 -->
+      <button
+        v-if="canDigest"
+        class="btn btn-xs !px-1.5"
+        :class="digestMode ? 'btn-teal' : 'btn-ghost'"
+        title="语境摘要(/选摘) — 选取会话历史生成摘要, 随转达发给执行器"
+        @click="toggleDigestMode"
+      >
+        <ClipboardDocumentIcon class="w-3.5 h-3.5" />
+      </button>
       <!-- 工具条: 纯 icon(悬停 title 提示); 动作均可用 /命令 触达(见命令浮层) -->
       <button
         class="btn btn-xs !px-1.5"
@@ -1612,71 +1846,6 @@ onUnmounted(() => {
         @input="autoResize"
         @keydown="onInputKeydown"
       />
-      <!-- v2 语境路由 chip(发起者感知自动变 + 菜单单次翻转 + 分析挡位) -->
-      <div class="relative shrink-0">
-        <button
-          class="chip !text-[10px] font-mono transition-colors"
-          :class="effectiveRoute.kind === 'architect'
-            ? 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'
-            : effectiveRoute.kind === 'assign' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-sky/15 text-ctp-sky'"
-          :title="routeDetail(effectiveRoute) + '（点击切换/挡位）'"
-          @click="routeMenuOpen = !routeMenuOpen"
-        >{{ routeLabel(effectiveRoute) }}<ChevronDownIcon class="w-2.5 h-2.5 inline ml-0.5" /></button>
-        <div
-          v-if="routeMenuOpen"
-          class="absolute bottom-full right-0 z-50 mb-1 w-72 flex-col gap-1 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1.5 shadow-lg flex"
-          @mouseleave="routeMenuOpen = false"
-        >
-          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">回复对象（单次, 发送后复位）</div>
-          <button
-            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-            :class="effectiveRoute.kind === 'architect' && !routeOverride ? 'bg-ctp-blue/10' : ''"
-            @click="pickRoute({ kind: 'architect' })"
-          >
-            <span class="font-mono text-ctp-sky">@architect</span>
-            <span class="ml-1.5 text-ctp-subtext0">外循环(分析/设计/编排)</span>
-          </button>
-          <button
-            v-if="activeTask"
-            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-            :class="effectiveRoute.kind === 'task' && effectiveRoute.taskId === activeTask.id && !routeOverride ? 'bg-ctp-blue/10' : ''"
-            @click="pickRoute({ kind: 'task', taskId: activeTask.id })"
-          >
-            <span class="font-mono text-ctp-sky truncate">→ {{ taskTitleOf(activeTask.id) || '活跃任务' }}</span>
-            <span class="ml-1.5 text-ctp-subtext0">转达（{{ activeTask.status === 'waiting_input' ? '等待回复' : '排队' }}）</span>
-          </button>
-          <button
-            v-for="a in INLINE_AGENTS"
-            :key="a"
-            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-            :class="effectiveRoute.kind === 'assign' && effectiveRoute.agent === a ? 'bg-ctp-peach/10' : ''"
-            @click="pickRoute({ kind: 'assign', agent: a })"
-          >
-            <span class="font-mono text-ctp-peach">@{{ a }}</span>
-            <span class="ml-1.5 text-ctp-subtext0">一次性指派 coding subagent</span>
-          </button>
-          <!-- 分析挡位段 -->
-          <div class="mt-0.5 border-t border-ctp-surface0 pt-1">
-            <div class="px-1.5 pb-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">分析挡位</div>
-            <button
-              class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-              :class="(props.analysisMode || 'strict') === 'strict' ? 'bg-ctp-blue/10' : ''"
-              @click="onGearClick('strict')"
-            >
-              <span class="font-medium text-ctp-subtext1">严格</span>
-              <span class="ml-1.5 text-ctp-overlay0">需求分析→规约→任务</span>
-            </button>
-            <button
-              class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-              :class="props.analysisMode === 'quick' ? 'bg-ctp-blue/10' : ''"
-              @click="onGearClick('quick')"
-            >
-              <span class="font-medium text-ctp-subtext1">快捷</span>
-              <span class="ml-1.5 text-ctp-overlay0">直出任务卡（关 KB）</span>
-            </button>
-          </div>
-        </div>
-      </div>
       <button
         v-if="busy"
         class="btn btn-red !py-2.5 shrink-0 whitespace-nowrap"

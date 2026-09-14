@@ -10,6 +10,7 @@ websocket.py 仅保留 WS 适配器(事件形状契约冻结, CONV-04)。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from typing import Any, Callable, Awaitable, Dict, List, Optional
@@ -188,7 +189,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     from ..arch_routes import exec_bridge as _eb
     attach_to = str(data.get("attachTo") or "").strip()
     agent_pick = str(data.get("agent") or "").strip()
-    decision = _route_decide(conv_id, question, attach_to, agent_pick, store, _eb)
+    digest = str(data.get("digest") or "").strip()[:2000]   # 语境摘要(用户选史生成)
+    decision = _route_decide(conv_id, question, attach_to, agent_pick, store, _eb,
+                             digest=digest)
     final_b = decision.reply or None
     assign_contract = decision.contract or None
     if final_b is not None:
@@ -197,6 +200,14 @@ async def handle_chat(data: dict, send: SendFn) -> None:
             "id": assistant_msg_id_b, "conversationId": conv_id,
             "role": "assistant", "time": _ts(), "content": final_b,
         })
+        # 语境摘要审计回执: 折叠卡(meta.kind=digest_sent), 留"给执行器发过什么"的感知
+        if decision.action == "transfer" and digest:
+            store.ConversationsStore.append_message({
+                "id": store.next_id("m"), "conversationId": conv_id,
+                "role": "assistant", "time": _ts(), "content": digest,
+                "meta": json.dumps({"kind": "digest_sent", "chars": len(digest)},
+                                    ensure_ascii=False),
+            })
         try:
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
         except Exception:  # noqa: BLE001

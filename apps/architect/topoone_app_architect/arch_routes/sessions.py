@@ -512,6 +512,59 @@ async def set_analysis_mode(conv_id: str, request: Request):
     return ok({"conversationId": conv_id, "analysisMode": mode, "summary": note})
 
 
+@router.post("/sessions/{conv_id}/msg-digest")
+async def msg_digest(conv_id: str, request: Request):
+    """语境摘要(转达下发): 统一流中用户选中的消息 → LLM 压缩为给 coding 的转达摘要。
+
+    body: {msgIds: [...], hint?: 关注点}。上限 50 条/条内 1500 字/素材 6000 字。
+    LLM 不可达/空产出 → 确定性降级原文截断(summarized=false), 永不 5xx。
+    返回 {digest, chars, summarized}。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    data = await request.json()
+    ids = data.get("msgIds") or []
+    if not isinstance(ids, list) or not ids:
+        return err(400, "msgIds 须为非空数组")
+    idset = {str(x) for x in ids[:50]}
+    msgs = [m for m in store.ConversationsStore.messages(conv_id, limit=200)
+            if m.get("id") in idset]
+    if not msgs:
+        return err(404, "选中消息不存在")
+    lines = []
+    for m in msgs:
+        if m.get("role") == "user":
+            role = "用户"
+        elif (m.get("agent") or "") not in ("", "architect"):
+            role = f"执行器 {m['agent']}"
+        else:
+            role = "assistant"
+        c = (m.get("content") or "").strip()[:1500]
+        if c:
+            lines.append(f"[{role}] {c}")
+    if not lines:
+        return err(400, "选中消息无正文")
+    material = "\n".join(lines)[:6000]
+    hint = str(data.get("hint") or "").strip()
+    sys_prompt = (
+        "你把一段项目会话记录压缩成给 coding agent 的转达摘要。要求:\n"
+        "- 保留: 与当前任务相关的结论/决定/约束/参数/文件名/接口/验收要点\n"
+        "- 剥离: 寒暄/重复/与实现无关的讨论\n"
+        "- 保持具体数值与技术术语, 不泛化、不新增推断\n"
+        "- 输出纯文本可含短列表, 不加标题不加解释, 500 字以内"
+        + (f"\n用户特别关注: {hint[:200]}" if hint else ""))
+    from .adaptation import summarize_task
+    out = await asyncio.to_thread(
+        summarize_task, task_id="msg_digest", system=sys_prompt,
+        material=material, max_tokens=800,
+        parse=lambda r: str(r.get("content") or "").strip() or None,
+        fallback=lambda: material[:2000])
+    digest = str(out.get("output") or "")
+    return ok({"digest": digest, "chars": len(digest),
+               "summarized": not out.get("degraded")})
+
+
 @router.post("/sessions/{conv_id}/clone")
 async def clone_session(conv_id: str, request: Request):
     """克隆会话绑定其他执行器(种子: 摘要(LLM best-effort) + 尾部 N 条消息 + 作业前情简报)。

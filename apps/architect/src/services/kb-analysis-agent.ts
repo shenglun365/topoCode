@@ -136,6 +136,8 @@ export interface ChatStreamOptions {
   agent?: string
   /** v2: 显式指定转达目标任务 id(缺省=最新活跃任务)。 */
   attachTo?: string
+  /** 语境摘要(用户选史生成): 仅 transfer 时随文本下发给执行器。 */
+  digest?: string
   /** 是否有流式通道可用(后端不可达/未启用时回退一次性回复)。 */
   signal?: AbortSignal
 }
@@ -232,6 +234,7 @@ export async function chatStream(
       skillScenarios: opts.skillScenarios,
       agent: opts.agent,
       attachTo: opts.attachTo,
+      digest: opts.digest,
     })
 
     return await doneP

@@ -192,13 +192,14 @@ function disconnectConvEvents() {
   if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
 }
 
-/** 发送入口(语境路由): attachTo=转达任务卡, agent=一次性指派 subagent(后端注入指派契约)。 */
-async function onSendChat(p: { text: string; attachTo?: string; agent?: string }) {
+/** 发送入口(语境路由): attachTo=转达任务卡, agent=一次性指派 subagent(后端注入指派契约), digest=语境摘要。 */
+async function onSendChat(p: { text: string; attachTo?: string; agent?: string; digest?: string }) {
   conv.send(p.text, {
     ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}),
     ...(props.defaultKind ? { kind: props.defaultKind } : {}),
     ...(p.attachTo ? { attachTo: p.attachTo } : {}),
     ...(p.agent ? { agent: p.agent } : {}),
+    ...(p.digest ? { digest: p.digest } : {}),
   })
   onSent()
 }
@@ -850,6 +851,8 @@ async function pollRunningState() {
         :executor-models="boundModelNames"
         :executor-model="currentExecutorModel"
         :analysis-mode="analysisMode"
+        :has-session="!!conv.activeId"
+        :conv-id="conv.activeId || undefined"
         :tasks="conv.tasks"
         @set-analysis-mode="onSetAnalysisMode"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
