@@ -115,12 +115,6 @@ function onGuardAction(index: number, s: { action: string; label: string }) {
 // ── S3 投喂门: 消息级「转达 coding」(dock 执行 POST /feed, 结果本地消息) ──
 const feedBusyIdx = ref(-1)
 
-// ── 指令符号 chips: 本地提示/守卫/系统消息中出现的 /指令 渲染为标签, 点击填入对话框 ──
-const CMD_TOKENS = ['/执行', '/确认执行', '/定稿', '/继续', '/diff', '/调整']
-function cmdChipsOf(text: string): string[] {
-  return CMD_TOKENS.filter((c) => (text || '').includes(c))
-}
-
 // ── 规约 JSON 识别(字段签名): 「写入需求」按钮的显示条件与载荷提取 ──
 const SPEC_FIELDS = [
   'title', 'requirementMd', 'designMd', 'allowedScope', 'allowedScopeMd',
@@ -314,6 +308,21 @@ const selIds = ref<Set<string>>(new Set())
 const digestBusy = ref(false)
 const digestDraft = ref<string | null>(null)   // 非空=草稿卡(可编辑)
 const digestSentOpen = reactive<Record<number, boolean>>({})
+
+// ── 工具审批操作条(task_approval 消息) ──
+const approvalDone = reactive<Record<string, 'approved' | 'rejected'>>({})
+async function respondApproval(m: any, approved: boolean) {
+  const jobId = m?.meta?.approvalJobId
+  const requestId = m?.meta?.approvalRequestId
+  if (!jobId || !requestId || approvalDone[m.id]) return
+  try {
+    await apiPost(`/exec/${jobId}/approval`, {
+      requestId, approved,
+      reason: approved ? 'approved' : 'rejected by user',
+    })
+    approvalDone[m.id] = approved ? 'approved' : 'rejected'
+  } catch { /* 失败保持可重试 */ }
+}
 const digestAutoSend = ref(localStorage.getItem(DIGEST_AUTO_KEY) === '1')
 /** 摘要入口仅转达语境(路由=任务)显示; architect 路由本就全史可见无需摘要。 */
 const canDigest = computed(() => effectiveRoute.value.kind === 'task')
@@ -962,6 +971,25 @@ onUnmounted(() => {
             @cancel="(id: string) => emit('task-cancel', id)"
             @set-executor="(id: string, ex: string) => emit('task-executor', { taskId: id, executorType: ex })"
           />
+          <div
+            v-if="m.meta?.kind === 'task_approval'"
+            class="mb-2 flex items-center gap-2 rounded-md border border-ctp-yellow/30 bg-ctp-yellow/10 px-2.5 py-1.5"
+          >
+            <ExclamationCircleIcon class="w-4 h-4 shrink-0 text-ctp-yellow" />
+            <span class="text-[11px] text-ctp-yellow flex-1 min-w-0 truncate">
+              {{ approvalDone[m.id] === 'approved' ? '✓ 已批准' : approvalDone[m.id] === 'rejected' ? '✗ 已拒绝' : `工具 ${m.meta.approvalRequestId || ''} 请求执行，等待确认` }}
+            </span>
+            <template v-if="!approvalDone[m.id]">
+              <button
+                class="btn btn-primary !py-0.5 !px-2 !text-[10px] shrink-0"
+                @click="respondApproval(m, true)"
+              >批准</button>
+              <button
+                class="btn !py-0.5 !px-2 !text-[10px] shrink-0"
+                @click="respondApproval(m, false)"
+              >拒绝</button>
+            </template>
+          </div>
           <div class="flex items-center gap-1.5 mb-1">
             <svg
               v-if="m.role === 'user'"
@@ -1097,8 +1125,6 @@ onUnmounted(() => {
             :content="m.content"
           />
 
-          <!-- 指令符号 chips: 消息中出现的 /指令 → 点击填入对话框(所有助手消息,
-               含系统回执「发送 /执行 …」等引导) -->
           <!-- 作业事件卡操作(生命周期重构): done→验收 / waiting_input→继续执行快捷 -->
           <div
             v-if="m.meta?.kind === 'job_done'"
@@ -1119,6 +1145,33 @@ onUnmounted(() => {
               @click="emit('job-resume')"
             >{{ t('session.job.resume') }}</button>
             <span class="text-[10px] text-ctp-overlay0">{{ t('session.job.resumeHint') }}</span>
+          </div>
+
+          <!-- 规约回执动作卡(v2 指令直通): specCreated→[去定稿] / specReady→[一键建卡执行]
+               点击发送 /指令 → 后端确定性执行(零 LLM), 用户消息与回执进会话流 -->
+          <div
+            v-if="m.meta?.kind === 'specCreated'"
+            class="mt-2 flex items-center gap-2"
+          >
+            <button
+              class="btn btn-xs btn-primary"
+              :disabled="busy"
+              title="确认规约(draft→ready)——系统直通"
+              @click="emit('send', { text: '/定稿' })"
+            >去定稿</button>
+            <span class="text-[10px] text-ctp-overlay0">定稿后 /执行 建任务卡</span>
+          </div>
+          <div
+            v-else-if="m.meta?.kind === 'specReady'"
+            class="mt-2 flex items-center gap-2"
+          >
+            <button
+              class="btn btn-xs btn-primary"
+              :disabled="busy"
+              title="从已定稿规约生成待确认任务卡"
+              @click="emit('send', { text: '/执行' })"
+            >一键建卡执行</button>
+            <span class="text-[10px] text-ctp-overlay0">卡上确认后 coding subagent 启动</span>
           </div>
 
           <!-- 规约 JSON 落库按钮(字段签名识别, 任何含载荷的助手消息) -->
@@ -1531,7 +1584,7 @@ onUnmounted(() => {
               <template v-if="diffSummary(m.acceptance).top.length">
                 <div class="text-[10px] uppercase tracking-wide text-ctp-sky">{{ t('requirement.chat.topDiffs') }}</div>
                 <div
-                  v-for="(f, fi) in diffSummary(m.acceptance).top"
+                  v-for="f in diffSummary(m.acceptance).top"
                   :key="f.id"
                   class="flex items-start gap-1.5"
                 >
