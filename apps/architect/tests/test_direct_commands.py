@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 import topoone_app_architect.arch_routes.ctx as C
 import topoone_app_architect.arch_routes.req_agent as req_agent
 import topoone_app_architect.arch_routes.store as store
-from topoone_app_architect.agent.perception.commands import match_command
+from topoone_app_architect.agent.perception.commands import match_command, match_confirm
 from topoone_app_architect.agent.perception import commands as cmds
 from topoone_app_architect.arch_routes.asset_skill import _builtin_for, skill_docs
 from topoone_app_architect.server import build_app
@@ -99,6 +99,57 @@ def test_match_command_strict_shape():
     assert match_command("/继续") is None
     assert match_command("/diff") is None
     assert match_command("普通话") is None
+
+
+def test_match_confirm_strict_shape():
+    assert match_confirm("确认") == {"executor": ""}
+    assert match_confirm("确认执行") == {"executor": ""}
+    assert match_confirm("@cline 确认") == {"executor": "cline"}
+    assert match_confirm("好的。") == {"executor": ""}
+    assert match_confirm("确认一下这个方案") is None     # 带正文 → 普通对话
+    assert match_confirm("不确认") is None
+
+
+def test_slash_text_confirm_starts_task(tmp_path, monkeypatch):
+    """cv-153 实证回归: 打「确认」文字 = 卡片确认按钮(直通 confirm_task, 零 LLM)。"""
+    client, captured = _client(tmp_path, monkeypatch)
+    conv = _mk_conv()
+    task = store.TasksStore.create({
+        "conversationId": conv["id"], "title": "T卡", "instruction": "x",
+        "status": "pending_confirm", "executorType": "opencode"})
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    root = tmp_path / "proj"
+    root.mkdir(exist_ok=True)
+    (root / "README.md").write_text("# P\n")
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-c"))
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_runner",
+                        lambda path, payload=None, timeout=20.0: (
+                            {"ok": True, "jobId": "impl-t1", "worktree": "/tmp/w",
+                             "branch": "task/t1", "sessionId": "s"}
+                            if path == "/api/implement" else None))
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            _chat(ws, conv["id"], "确认")
+            ev, _ = _recv_until(ws, "done")
+    assert captured["calls"] == 0                        # 零 LLM
+    assert "已确认任务" in ev["content"]
+    assert store.TasksStore.get(task["id"])["status"] == "running"
+
+
+def test_text_confirm_without_pending_falls_to_llm(tmp_path, monkeypatch):
+    """无待确认卡时「确认」是普通对话 → 不拦, 走 LLM。"""
+    client, captured = _client(tmp_path, monkeypatch)
+    conv = _mk_conv()
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            _chat(ws, conv["id"], "确认")
+            ev, _ = _recv_until(ws, "done")
+    assert captured["calls"] == 1                        # 进了 LLM 回合
+    assert ev["content"] == "ok-reply"
 
 
 # ── /定稿 直通 ───────────────────────────────────────────────────────

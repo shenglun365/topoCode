@@ -20,6 +20,7 @@ sys.path.insert(0, _repo)
 import topoone_app_architect.arch_routes.ctx as C
 import topoone_app_architect.arch_routes.store as store
 from topoone_app_architect.arch_routes import exec_bridge as eb
+from topoone_app_architect.arch_routes.sessions import _task_payload_from_markdown
 
 
 def _env(tmp_path, monkeypatch):
@@ -161,3 +162,29 @@ def test_confirm_mutex_self_heals_via_recovery(tmp_path, monkeypatch):
     assert r.get("ok") is True, r
     assert store.TasksStore.get(ghost["id"])["status"] == "done"
     assert store.TasksStore.get(real["id"])["status"] == "running"
+
+
+# ── P3: guard-repair 拒绝状态话术载荷(cv-153 幽灵卡回归) ─────────────
+
+def test_markdown_payload_rejects_status_talk():
+    """模型谎报的一句回执文案 → 拒绝建卡(不能当任务载荷)。"""
+    r = _task_payload_from_markdown(
+        "任务已启动，执行器 `opencode` 正在处理中。完成后将在本会话同步进展与结果。")
+    assert r is None
+
+
+def test_markdown_payload_accepts_substantive():
+    """含实质内容(文件/动作)的方案文本 → 正常提取建卡。"""
+    content = ("## 实施方案\n\n"
+               "修改 `src/app.py` 的启动逻辑：在 main 入口增加健康检查端点，\n"
+               "返回 `{'status': 'up'}`；同时补充 test_smoke.py 用例覆盖该端点。")
+    r = _task_payload_from_markdown(content)
+    assert r and r["title"] == "实施方案"
+    assert "src/app.py" in r["instruction"]
+
+
+def test_markdown_payload_status_talk_not_title():
+    """状态话术行不充当标题; 剔除后无实质内容 → 拒绝。"""
+    content = ("任务已启动，执行器正在处理中。\n"
+               "完成后将同步进展。")
+    assert _task_payload_from_markdown(content) is None

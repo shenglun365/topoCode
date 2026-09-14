@@ -129,6 +129,29 @@ def _register_session_tools() -> None:
     _cap_mining.register_mining_tools()
 
 
+async def _run_direct_confirm(conv: dict, send: SendFn, store,
+                              user_msg_id: str, executor: str = "") -> None:
+    """文字确认直通(P2): 确认语 → confirm_task(零 LLM), 与卡片按钮同门禁链。"""
+    from .perception import commands as _cmds
+    from ..arch_routes.common import _ts
+    conv_id = conv["id"]
+    res = await asyncio.to_thread(_cmds.run_confirm, conv, executor)
+    if res.get("noPending"):
+        # 无待确认卡: 回落普通对话(此处不该发生——调用方已查过, 竞态兜底)
+        return
+    if res.get("ok"):
+        t = res.get("task") or {}
+        content = (f"🚀 已确认任务「{t.get('title')}」（执行器 `{t.get('executorType')}`）"
+                   "——开始执行，进展将在本会话同步。")
+    else:
+        content = f"⚠️ {res.get('receipt') or '确认失败'}"
+    msg_id = store.next_id("m")
+    await send({"type": "chat_start", "conversationId": conv_id,
+                "requestId": "", "userMessageId": user_msg_id})
+    await send({"type": "done", "conversationId": conv_id,
+                "content": content, "messageId": msg_id})
+
+
 async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
                               user_msg_id: str, executor: str = "") -> None:
     """会话指令直通(v2): /定稿 → finalize(门禁+幂等); /执行 → ready 规约建任务卡。
@@ -296,6 +319,14 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         if _cmd:
             await _run_direct_command(_cmd["cmd"], conv, send, store, last_user_msg_id,
                                       executor=_cmd.get("executor") or "")
+            return
+        # 文字确认(卡片确认同义路径): 有待确认卡才拦——否则「确认」是普通对话
+        from .perception.commands import match_confirm as _confirm_match, \
+            has_pending_task as _cmds_has_pending
+        _conf = _confirm_match(question)
+        if _conf and _cmds_has_pending(conv_id):
+            await _run_direct_confirm(conv, send, store, last_user_msg_id,
+                                      executor=_conf.get("executor") or "")
             return
 
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，

@@ -16,6 +16,8 @@ import re
 from typing import Any, Dict, Optional
 
 _COMMAND_RE = re.compile(r"^(?:@(?P<executor>\S+)\s+)?/(?P<cmd>定稿|执行)\s*$")
+_CONFIRM_RE = re.compile(
+    r"^(?:@(?P<executor>\S+)\s+)?(?:确认执行|确认任务|确认|同意|开始执行|开始吧|开始|ok|OK|好的?)[。.!！]?\s*$")
 
 
 def match_command(question: str) -> Optional[Dict[str, str]]:
@@ -27,6 +29,48 @@ def match_command(question: str) -> Optional[Dict[str, str]]:
     if not m:
         return None
     return {"cmd": m.group("cmd"), "executor": (m.group("executor") or "").strip()}
+
+
+def match_confirm(question: str) -> Optional[Dict[str, str]]:
+    """文字确认(任务卡确认按钮的同义路径): 整条消息恰为确认语 → {executor}。
+
+    cv-153 教训: 用户打「确认」被当普通消息进 LLM → 模型谎报已启动。"""
+    m = _CONFIRM_RE.match((question or "").strip())
+    if not m:
+        return None
+    return {"executor": (m.group("executor") or "").strip()}
+
+
+def has_pending_task(conv_id: str) -> bool:
+    from ...arch_routes import store
+    return any((t.get("status") or "") == "pending_confirm"
+               for t in store.TasksStore.of_conv(conv_id))
+
+
+def run_confirm(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
+    """直通文字确认: 恰有一张待确认任务卡 → confirm_task(@执行器 可换引擎)。
+
+    无待确认卡返回 {noPending: True}(调用方回落普通对话, 不拦)。"""
+    from ...arch_routes import exec_bridge, store
+    pending = [t for t in store.TasksStore.of_conv(conv["id"])
+               if (t.get("status") or "") == "pending_confirm"]
+    if not pending:
+        return {"ok": False, "noPending": True}
+    if len(pending) > 1:
+        names = "、".join(f"「{(t.get('title') or '')[:24]}」" for t in pending[:5])
+        return {"ok": False, "receipt":
+                f"有 {len(pending)} 张待确认任务卡（{names}）——请在具体卡片上点确认，"
+                "或先取消多余任务。"}
+    executor_id = (executor_id or "").strip()
+    if executor_id:
+        t2 = exec_bridge.task_set_executor(pending[0]["id"], executor_id)
+        if not t2:
+            return {"ok": False, "receipt":
+                    f"执行器 `{executor_id}` 不可用（不在注册表或类型不支持）。"}
+    res = exec_bridge.confirm_task(pending[0]["id"])
+    if not res.get("ok"):
+        return {"ok": False, "receipt": str(res.get("error") or "确认失败")}
+    return {"ok": True, "task": res.get("task") or {}}
 
 
 def run_finalize(conv: Dict[str, Any]) -> Dict[str, Any]:

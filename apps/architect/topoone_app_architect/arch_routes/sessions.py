@@ -10,6 +10,7 @@
 """
 import asyncio
 import json
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Request
@@ -1143,6 +1144,40 @@ async def session_guard_repair(conv_id: str, request: Request):
     return await asyncio.to_thread(_guard_repair_core, conv_id, claim, need, content)
 
 
+# P3 状态话术识别: 模型谎报回执(已启动/处理中/完成后将…)不能当任务载荷
+# (cv-153 实证: 一句「任务已启动…」被整句建成幽灵任务卡并执行)
+_STATUS_TALK_RE = re.compile(
+    r"已启动|正在处理|正在执行|处理中|完成后将|同步进展|稍后|进行中")
+
+
+def _task_payload_from_markdown(content: str) -> Optional[dict]:
+    """无 JSON 载荷时的 markdown 结构兜底(守卫修复专用, 带实质内容守门)。
+
+    - 标题=首个标题/加粗行(状态话术行跳过); 正文=全文;
+    - 正文剔除状态话术后必须仍有实质内容(文件路径/代码标记/足够长度),
+      否则拒绝建卡——宁可让 architect 重新整理, 不建幽灵任务。"""
+    import re as _re
+    lines = [l for l in (content or "").splitlines() if l.strip()]
+    body = "\n".join(lines).strip()
+    if len(body) <= 40:
+        return None
+    title = ""
+    for l in lines[:6]:
+        t = l.lstrip('#').replace('*', '').strip()
+        if 4 <= len(t) <= 60 and not _STATUS_TALK_RE.search(t):
+            title = t
+            break
+    substantive = [s for s in _re.split(r"[。;；\n]", body)
+                   if s.strip() and not _STATUS_TALK_RE.search(s)]
+    joined = " ".join(substantive).strip()
+    if not joined:
+        return None
+    has_files = bool(_re.search(r"[`\w/\-]+\.\w{1,5}", joined))
+    if not (has_files or "```" in content or len(joined) >= 80):
+        return None
+    return {"title": title or "实施任务", "instruction": body[:6000]}
+
+
 def _guard_repair_core(conv_id: str, claim: str, need: str, content: str) -> dict:
     """守卫修复核心(可测): 任务域优先确定性提取建卡; 其余走规约修复外循环。"""
     conv = store.ConversationsStore.get(conv_id)
@@ -1158,17 +1193,7 @@ def _guard_repair_core(conv_id: str, claim: str, need: str, content: str) -> dic
         from . import exec_bridge as _eb
         payload = extract_task_fence(content)
         if not payload:
-            # 无 JSON 载荷: markdown 结构兜底(标题=首行标题/加粗, 正文即 instruction)
-            lines = [l for l in content.splitlines() if l.strip()]
-            body = "\n".join(lines).strip()
-            title = ""
-            for l in lines[:6]:
-                t = l.lstrip('#').replace('*', '').strip()
-                if 4 <= len(t) <= 60:
-                    title = t
-                    break
-            payload = {"title": title or "守卫修复任务",
-                       "instruction": body[:6000]} if len(body) > 40 else None
+            payload = _task_payload_from_markdown(content)
         if payload:
             task = _eb.propose_task(conv, payload["title"], payload["instruction"], {})
             if not task.get("id"):
