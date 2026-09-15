@@ -86,3 +86,23 @@ def test_empty_llm_return_surfaces_detail(tmp_path, monkeypatch):
     msgs = store.ConversationsStore.messages(conv["id"], limit=20)
     assert any((m.get("meta") or {}).get("kind") == "turnError" for m in msgs)
     assert any("❌" in m["content"] for m in msgs)
+
+
+def test_req_chat_stream_restored(tmp_path, monkeypatch):
+    """流式入口回归(cv-156): _req_chat_stream 必须真实调用 llm.chat 并透传
+    requestId——函数体曾丢失导致流式通道静默停用两天。"""
+    import topoone_app_architect.agent.orchestrator as orch
+
+    captured = {}
+
+    def _fake_start(messages, model_id=None, session_id="", max_tokens=None):
+        captured["model"] = model_id
+        captured["session"] = session_id
+        captured["max_tokens"] = max_tokens
+        return "rid-stream-1"
+
+    monkeypatch.setattr(req_agent, "llm_chat_start", _fake_start)
+    rid = orch._req_chat_stream([{"role": "user", "content": "hi"}], "model-x")
+    assert rid == "rid-stream-1"
+    assert captured["model"] == "model-x"
+    assert captured["session"] == "arch-req-chat"

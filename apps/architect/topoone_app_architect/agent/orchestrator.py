@@ -922,5 +922,11 @@ async def _iter_llm_events(request_id: str, idle_timeout: Optional[float] = None
 
 
 def _req_chat_stream(msgs, model_id):
-    """发起流式 llm.chat; 返回 requestId 或 None(降级)。"""
+    """发起流式 llm.chat; 返回 requestId 或 None(降级)。
+
+    cv-156 实证: 函数体在早前重构中丢失(隐式 return None)——流式通道自
+    9-13 起从未发起, 所有回合静默走同步降级(大提示词下小模型易空返回)。"""
     from ..arch_routes.req_agent import llm_chat_start
+    return llm_chat_start(msgs, model_id=model_id or None,
+                          session_id="arch-req-chat",
+                          max_tokens=_chat_max_tokens())
