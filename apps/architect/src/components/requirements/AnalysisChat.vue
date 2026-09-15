@@ -8,7 +8,7 @@ import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/ser
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
-import { apiPost } from '@/services/api-client'
+import { apiPost, apiGet } from '@/services/api-client'
 import type { SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
 import { copyText } from '@/utils/clipboard'
@@ -676,9 +676,36 @@ function fillExtractPlan() {
 
 // ── 提案卡确认存入：finalize 入池(待执行)；按钮自带 reqId, 多提案各自独立确认 ──
 const confirmingProposalId = ref('')
+// 提案卡状态核验(防重复存入): p.confirmed 是本地态, 刷新即失——以后端为准
+const proposalState = reactive<Record<string, string>>({})   // reqId -> draft/ready/done
+const proposalChecked = reactive<Record<string, boolean>>({})
+async function ensureProposalState(m: KbAnalysisTurn) {
+  const p = m.proposal
+  if (!p || p.confirmed || proposalChecked[p.id]) return
+  proposalChecked[p.id] = true
+  try {
+    const r = await apiGet<Record<string, any>>(`/requirements/${p.id}`)
+    const st = String(r?.status || '')
+    if (st) proposalState[p.id] = st
+    if (st === 'ready' || st === 'done') p.confirmed = true   // 已存入: 抑制存入按钮
+  } catch { /* 状态获取失败不阻塞卡片展示 */ }
+}
+watch(() => props.turns.length, () => {
+  for (const m of props.turns) if (m.proposal) void ensureProposalState(m)
+}, { immediate: true })
+/** 已存入(ready): 本地确认态或后端状态任一即可; done=已完成(不可再跑)。 */
+function proposalStored(m: KbAnalysisTurn): boolean {
+  const p = m.proposal
+  if (!p) return false
+  return p.confirmed || proposalState[p.id] === 'ready'
+}
+function proposalDone(m: KbAnalysisTurn): boolean {
+  const p = m.proposal
+  return !!p && proposalState[p.id] === 'done'
+}
 async function confirmProposal(m: KbAnalysisTurn) {
   const p = m.proposal
-  if (!p || p.confirmed || confirmingProposalId.value) return
+  if (!p || proposalStored(m) || confirmingProposalId.value) return   // 防重复存入
   confirmingProposalId.value = p.id
   try {
     const analysis = {
@@ -688,6 +715,7 @@ async function confirmProposal(m: KbAnalysisTurn) {
     const row = await apiPost<Record<string, unknown>>(`/requirements/${p.id}/finalize`, { analysis })
     if (row && (row as any).id) {
       p.confirmed = true
+      proposalState[p.id] = String((row as any).status || 'ready')
       showToast(t('assetChat.extractPlan.confirmed'))
     } else {
       showToast(t('assetChat.extractPlan.confirmFailed'))
@@ -699,6 +727,10 @@ async function confirmProposal(m: KbAnalysisTurn) {
   } finally {
     confirmingProposalId.value = ''
   }
+}
+/** 提案卡运行: /执行 直通——按会话绑定执行器建任务卡(确认卡后 subagent 启动)。 */
+function runProposal() {
+  emit('send', { text: '/执行' })
 }
 
 // ---- 推理内容(thinking)折叠展示 ----
@@ -1552,11 +1584,24 @@ onUnmounted(() => {
               >{{ m.proposal.priority }}</span>
               <span class="flex-1" />
               <span
-                v-if="m.proposal.confirmed"
-                class="chip !px-1.5 !text-[9px] bg-ctp-green/15 text-ctp-green shrink-0"
-              >
-                <CheckIcon class="w-3 h-3" />{{ t('assetChat.extractPlan.confirmedChip') }}
-              </span>
+                v-if="proposalDone(m)"
+                class="chip !px-1.5 !text-[9px] bg-ctp-surface0 text-ctp-overlay0 shrink-0"
+              >已完成</span>
+              <template v-else-if="proposalStored(m)">
+                <span
+                  class="chip !px-1.5 !text-[9px] bg-ctp-green/15 text-ctp-green shrink-0"
+                >
+                  <CheckIcon class="w-3 h-3" />{{ t('assetChat.extractPlan.confirmedChip') }}
+                </span>
+                <button
+                  class="btn btn-xs btn-blue"
+                  :disabled="busy"
+                  title="按会话绑定执行器建实施任务卡——任务卡上确认后 coding subagent 启动"
+                  @click="runProposal"
+                >
+                  <BoltIcon class="w-3 h-3" />运行
+                </button>
+              </template>
               <button
                 v-else
                 class="btn btn-xs btn-green"
