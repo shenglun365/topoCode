@@ -1887,16 +1887,6 @@ onUnmounted(() => {
             <span class="font-mono text-ctp-sky truncate">→ {{ taskTitleOf(activeTask.id) || '活跃任务' }}</span>
             <span class="ml-1.5 text-ctp-subtext0">转达（{{ activeTask.status === 'waiting_input' ? '等待回复' : '排队' }}）</span>
           </button>
-          <button
-            v-for="a in INLINE_AGENTS"
-            :key="a"
-            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0"
-            :class="effectiveRoute.kind === 'assign' && effectiveRoute.agent === a ? 'bg-ctp-peach/10' : ''"
-            @click="pickRoute({ kind: 'assign', agent: a })"
-          >
-            <span class="font-mono text-ctp-peach">@{{ a }}</span>
-            <span class="ml-1.5 text-ctp-subtext0">一次性指派 coding subagent</span>
-          </button>
           <!-- 会话执行器: 绑定后新任务卡默认使用(与 /执行 直通、模型建卡同链) -->
           <div class="mx-1 my-0.5 border-t border-ctp-surface0" />
           <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话执行器（新任务卡默认）</div>
@@ -1923,6 +1913,9 @@ onUnmounted(() => {
             v-if="!(props.executors || []).length"
             class="px-2 py-1.5 text-[10px] text-ctp-overlay0"
           >注册表无启用执行器</div>
+          <div class="px-1.5 pt-0.5 text-[10px] text-ctp-overlay0">
+            ℹ 临时单次换引擎：输入框以 <span class="font-mono">@cline</span> 开头发送
+          </div>
         </div>
       </div>
     </div>
