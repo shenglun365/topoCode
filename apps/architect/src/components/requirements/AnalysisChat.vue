@@ -1020,6 +1020,15 @@ onUnmounted(() => {
           class="flex-1 min-w-0 rounded-lg rounded-tl-none px-3 py-2 text-xs bg-ctp-surface0/80"
           :class="m.role === 'user' ? 'ring-1 ring-ctp-sky/20' : ''"
         >
+          <!-- 产出者标注(读侧归因): architect 外循环 / 具体执行器(泵以 agent=executor_type 落库) -->
+          <div
+            v-if="m.role === 'assistant'"
+            class="mb-1 flex items-center gap-1 text-[9px]"
+            :class="(m as any).agent ? 'text-ctp-teal' : 'text-ctp-overlay0'"
+          >
+            <CpuChipIcon class="w-3 h-3 shrink-0" />
+            <span class="font-mono">{{ (m as any).agent || 'architect' }}</span>
+          </div>
           <TaskCard
             v-if="m.meta?.kind === 'task_card' && taskById(m.meta.taskId)"
             :task="taskById(m.meta.taskId)!"
