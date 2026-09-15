@@ -568,6 +568,10 @@ async function syncRunningState(force = false) {
       const prev = workState.value
       conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
                           workState: (meta as any).workState } as ConversationMeta
+      if ((meta as any).workState === 'running') {
+        // 执行中轮询兜底: SSE progress 丢帧/断连时, 过程面板仍按库中 progress(0.5s 节流落库)刷新
+        void conv.refreshTasks()
+      }
       if (prev === 'running' && (meta as any).workState !== 'running') {
         // 相位回落(回合结束/终态) → 全量拉一次消息(泵期间的增量可见)
         const detail = await sessionService.messages(conv.activeId)
