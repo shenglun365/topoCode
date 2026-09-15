@@ -142,6 +142,6 @@ def test_no_phantom_names_in_refactor_hotspots(tmp_path, monkeypatch):
     sig = inspect.signature(evaluator.run_evaluate)
     assert "target" in sig.parameters, "run_evaluate 丢失 target 参数(幻影引用)"
     src = inspect.getsource(repair)
-    assert "import run_arch_tool" in src or "run_arch_tool," in src
+    assert "def repair_fabricated_claim" not in src   # 守卫修复外循环已拆除(cv-175)
     assert "_srow_to_api" not in inspect.getsource(mining)
     assert hasattr(dossier, "logger")

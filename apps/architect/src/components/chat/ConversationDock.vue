@@ -412,26 +412,6 @@ async function showGuide() {
   }
 }
 
-// ── 守卫卡片指令: guard-repair 独立外循环修复, 结果本地消息(不落库/不进上下文) ──
-const guardRepairBusy = ref(false)
-async function onGuardRepair(p: { index: number; meta: Record<string, any>; action: string }) {
-  if (guardRepairBusy.value || !conv.activeId) return
-  guardRepairBusy.value = true
-  try {
-    const m = conv.turns[p.index]
-    const r = await apiPost<Record<string, any>>(`/sessions/${conv.activeId}/guard-repair`, {
-      messageId: m?.id || '', claim: p.meta?.claim || '',
-      need: p.meta?.need || '', content: m?.content || '', action: p.action,
-    })
-    conv.pushLocalHint(
-      String(r?.summary || (r?.action === 'corrected' ? (r as any)?.correction : '') || '修复未产出结果'))
-  } catch (e) {
-    conv.pushLocalHint(`⚠️ 守卫修复失败：${e instanceof Error ? e.message : String(e)}`)
-  } finally {
-    guardRepairBusy.value = false
-  }
-}
-
 // ── 「写入需求」按钮: 规约 JSON 确定性落库(零 LLM), 结果本地消息 ──
 const specApplyBusy = ref(false)
 async function onSpecApply(p: { index: number; payload: Record<string, unknown> }) {
@@ -900,7 +880,6 @@ async function pollRunningState() {
         @send="onSendChat"
         @job-accept="openAccept"
         @job-resume="resumeJob"
-        @guard-repair="onGuardRepair"
         @feed-turn="onFeedTurn"
         @spec-apply="onSpecApply"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"

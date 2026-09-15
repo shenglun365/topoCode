@@ -1,21 +1,17 @@
-"""会话指令直通(感知层)：/定稿 /执行 确定性执行，不经 LLM。
+"""会话指令直通(感知层)：/提取需求 /执行 确定性执行，不经 LLM。
 
-v2 流程(严格挡)：req.propose(draft) → /定稿(ready) → /执行(建任务卡) →
-卡片确认 → coding subagent。历史教训(cv-152 实证)：指令落回 LLM 会引用
-v1 旧文档(coding.task.execute 已无工具)而死胡同；prompt 曾宣称「系统直通」
-但无实现——本模块使其成为事实。
-
-- /定稿：复用 req.finalize 工具路径(结构门禁+幂等)，回执落 meta specReady；
-- /执行：绑定 ready 规约 → exec_bridge.propose_task 建任务卡(pending_confirm)，
-  用户点卡确认后 subagent 才启动(轻门禁保留)；
-- /调整 需内容整理，保持经模型；/确认执行 /继续 /diff 已废弃(前端同步移除)。
+v2 流程(无草稿态)：需求卡按需出现——开发类需求由模型/围栏 req.propose
+直接落 ready 卡；系统未识别时用户点工具栏「提取需求」(或发 /提取需求)
+从对话历史确定性提取。/执行 → exec_bridge.propose_task 建任务卡
+(pending_confirm) → 卡片确认 → coding subagent。
+非开发类需求(分析型问答等)不产需求卡, 纯对话回答。
 """
 from __future__ import annotations
 
 import re
 from typing import Any, Dict, Optional
 
-_COMMAND_RE = re.compile(r"^(?:@(?P<executor>\S+)\s+)?/(?P<cmd>定稿|执行)\s*$")
+_COMMAND_RE = re.compile(r"^(?:@(?P<executor>\S+)\s+)?/(?P<cmd>提取需求|执行)\s*$")
 _CONFIRM_RE = re.compile(
     r"^(?:@(?P<executor>\S+)\s+)?(?:确认执行|确认任务|确认|同意|开始执行|开始吧|开始|ok|OK|好的?)[。.!！]?\s*$")
 
@@ -73,11 +69,59 @@ def run_confirm(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
     return {"ok": True, "task": res.get("task") or {}}
 
 
-def run_finalize(conv: Dict[str, Any]) -> Dict[str, Any]:
-    """直通 /定稿：req.finalize 同一路径(designMd 门禁/幂等)，notify=False
-    由编排层统一落回执(meta specReady)，避免双回执。"""
-    from ...arch_routes import req_agent
-    return req_agent.tool_req_finalize((conv.get("reqId") or "").strip(), notify=False)
+def run_extract_req(conv: Dict[str, Any]) -> Dict[str, Any]:
+    """直通 /提取需求：从对话历史 LLM 结构化提取需求 → 确定性落库(需求卡 ready)。
+
+    系统未自动识别需求类型时的用户主动通道; 已绑定需求 → 走 amend 更新(新 ver)。"""
+    from ...arch_routes import req_agent, store
+    msgs = store.ConversationsStore.messages(conv["id"], limit=40) or []
+    # 指令消息本身不进材料(否则 "/提取需求" 一条也算内容)
+    _CMD_ONLY = re.compile(r"^(?:@\S+\s+)?/(?:提取需求|执行|定稿)\s*$")
+    transcript = "\n".join(
+        f"[{'用户' if m.get('role') == 'user' else '助手'}] {(m.get('content') or '').strip()[:500]}"
+        for m in msgs
+        if (m.get("content") or "").strip() and not _CMD_ONLY.match((m.get("content") or "").strip()))
+    if not transcript.strip():
+        return {"ok": False, "receipt": "会话还没有内容，无法提取需求。"}
+    schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "requirementMd": {"type": "string"},
+            "designMd": {"type": "string"},
+            "allowedScopeMd": {"type": "string"},
+            "forbiddenScopeMd": {"type": "string"},
+            "acceptanceMd": {"type": "string"},
+        },
+        "required": ["title", "requirementMd"],
+    }
+    res = req_agent.llm_sync(
+        [{"role": "system",
+          "content": "你是需求分析师。从对话记录提取开发类需求规约：title 简短；"
+                     "requirementMd=需求目标；designMd=技术方案要点(可从讨论归纳)；"
+                     "allowedScopeMd/forbiddenScopeMd=允许/禁止改动范围(逐条行)；"
+                     "acceptanceMd=验收标准(逐条行)。只输出结构化结果，不要发明讨论中没有的约束。"},
+         {"role": "user", "content": f"对话记录:\n{transcript[:12000]}"}],
+        mode="structured", output_schema=schema, max_tokens=2048)
+    payload = (res or {}).get("output")
+    if not isinstance(payload, dict) or not (payload.get("title") or "").strip():
+        return {"ok": False, "receipt":
+                "未能从对话中提取出有效需求——请补充说明目标/范围后重试,"
+                "或直接描述任务让我建卡(/执行)。"}
+    from ..planning.req_spec import apply_spec_payload
+    land = apply_spec_payload(payload, project=str(conv.get("projectId") or ""))
+    if not land.get("ok"):
+        return {"ok": False, "receipt": str(land.get("error") or "需求落库失败")}
+    rid = str(land.get("requirementId") or land.get("reqId") or "")
+    try:
+        from ...arch_routes.req_agent import log_conv_event
+        log_conv_event(conv["id"],
+                       f"📝 **需求卡已提取**：`{rid}` {payload.get('title', '')}"
+                       "（ready，可直接 `/执行`）",
+                       meta={"kind": "specReady", "requirementId": rid, "ver": 1})
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "receipt": f"需求卡 {rid} 已提取(ready)，可 `/执行`。"}
 
 
 def run_execute(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
@@ -96,16 +140,19 @@ def run_execute(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
     req_id = (conv.get("reqId") or "").strip()
     if not req_id:
         return {"ok": False, "receipt":
-                "当前会话未绑定需求：严格挡请先在对话中形成规约(req.propose)，"
-                "快捷挡可直接描述任务让我建卡。"}
+                "当前会话未绑定需求：开发类需求请先描述目标(系统会生成需求卡)，"
+                "或直接描述任务让我建卡；也可点工具栏「提取需求」。"}
     row = store.RequirementsStore.get(req_id)
     if not row:
         return {"ok": False, "receipt": f"需求 {req_id} 不存在。"}
     active = store.RequirementsStore.spec_active(req_id) or {}
     snap = active.get("snapshot") or {}
     if (active.get("state") or "") != "confirmed":
-        return {"ok": False, "receipt":
-                f"规约 `{req_id}` 尚未定稿(draft)。先发送 `/定稿` 确认，再 `/执行` 建卡。"}
+        # 历史 draft 需求(旧流程产物) → 就地确认, 不再要求 /定稿
+        c = store.RequirementsStore.spec_confirm(req_id)
+        if not c.get("ok"):
+            return {"ok": False, "receipt": str(c.get("error") or "规约确认失败")}
+        snap = ((store.RequirementsStore.spec_active(req_id) or {}).get("snapshot")) or snap
     title = (snap.get("title") or row.get("title") or "实施任务").strip()[:120]
     instruction = _instruction_from_snapshot(snap)
     if not instruction.strip():

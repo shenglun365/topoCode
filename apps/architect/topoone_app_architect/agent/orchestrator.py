@@ -17,7 +17,6 @@ import re
 from typing import Any, Callable, Awaitable, Dict, List, Optional
 
 from .perception.gate import bind_session
-from .perception.intent import GENERIC_EXEC_RE as _GENERIC_EXEC_RE
 from .perception.router import decide as _route_decide
 
 logger = logging.getLogger(__name__)
@@ -181,22 +180,19 @@ def _model_health_hint(model_id: str) -> str:
 
 async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
                               user_msg_id: str, executor: str = "") -> None:
-    """会话指令直通(v2): /定稿 → finalize(门禁+幂等); /执行 → ready 规约建任务卡。
+    """会话指令直通(v2): /提取需求 → 历史提取需求卡; /执行 → ready 规约建任务卡。
     @执行器 前缀显式指定执行器; 回执落库+done 事件与常规回合同形;
     specReady meta 供前端渲染[一键建卡]动作。"""
     from .perception import commands as _cmds
     from ..arch_routes.common import _ts
     conv_id = conv["id"]
     meta = None
-    if cmd == "定稿":
-        res = _cmds.run_finalize(conv)
+    if cmd == "提取需求":
+        res = _cmds.run_extract_req(conv)
         if not res.get("ok"):
-            content = f"⚠️ {res.get('error') or '定稿失败'}"
+            content = f"⚠️ {res.get('receipt') or res.get('error') or '提取失败'}"
         else:
-            content = (f"✅ **规约已确认**：`{res['reqId']}` v{res.get('ver')}（ready，可执行）"
-                       "——发送 `/执行` 建任务卡。")
-            meta = {"kind": "specReady", "requirementId": res.get("reqId"),
-                    "ver": res.get("ver")}
+            content = res.get("receipt") or "需求卡已提取。"
     elif cmd == "执行":
         res = _cmds.run_execute(conv, executor_id=executor)
         if not res.get("ok"):
@@ -418,9 +414,10 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                                 model_id=eff_model or model_id or "")
     # v2 统一会话编排契约: 通用 agent 模式——能力分界 + 路由
     _spec_note = (
-        "不要调用 req.propose/req.finalize/req.amend(快捷挡已退役)。"
+        "快捷挡: 不做需求分析, 不调用 req.propose(直接 task.propose 建卡)。"
         if _mode == "quick" else
-        "严格挡: 先 req.propose 产规约并 /定稿, 再 task.propose 建卡(req.* 规约工具本挡可用)。")
+        "严格挡: 开发类需求先 req.propose 产需求卡(创建即 ready), 再 task.propose 建卡;"
+        "分析/问答类请求直接回答不产卡。")
     msgs.insert(1, {"role": "system", "content":
         "【工作模式(通用 agent 路由)】你是 architect 外循环(编排者)。可调度资源: "
         "A. 你自己(知识/分析面): KB 架构资产检索、需求澄清与方案设计、数据资产、"
@@ -443,21 +440,6 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         msgs.insert(1, {"role": "system", "content": gear_guidance(_mode)})
     except Exception:  # noqa: BLE001
         pass
-    # ── 规约草稿延续: 会话有未落库草稿(上轮草稿卡提取) → 注入下轮上下文,
-    #    用户「继续调整」时模型基于草稿合并完善, 而非从零重写 ──
-    try:
-        _draft = ((conv.get("meta") or {}).get("specDraft")
-                  if isinstance(conv.get("meta"), dict) else None)
-        if isinstance(_draft, dict) and _draft and not str(conv.get("reqId") or ""):
-            import json as _json
-            msgs.insert(1, {"role": "system", "content": (
-                "系统从上轮对话提取了规约草稿(尚未落库):\n```json\n"
-                + _json.dumps(_draft, ensure_ascii=False)[:2000] + "\n```\n"
-                "用户补充/调整意见时，请**合并该草稿**产出完整规约并调用 req.propose 落库"
-                "(title/requirementMd/designMd/acceptanceMd)；不要丢弃草稿中已有的内容。")})
-    except Exception:  # noqa: BLE001
-        pass
-
     # ---- 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
     io = _TurnIO(send, conv_id, last_user_msg_id)
     tools_used: set = set()
@@ -471,22 +453,15 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     loop_fell_back = loop["loop_fell_back"]
     final_content = visible or assistant_text
 
-    # ---- 回合后守卫(A 管线: 抽至 _post_turn_guards) ----
-    final_content, guard_meta, conv, tools_used, tool_errors = await _post_turn_guards(
-        io, conv_id, msgs, root, project, eff_model, model_id, conv, question,
-        tools_used, tool_errors, final_content, request_id,
-        assistant_text=assistant_text)
-
-    draft_meta = _maybe_draft_card(conv, final_content, tools_used,
-                                   eff_model or model_id or "", conv_id)
+    # ---- 回合后落库通道(仅确定性围栏, 缓解守卫已按用户裁决拆除 cv-175) ----
+    final_content, conv, tools_used, tool_errors = await _post_turn_land(
+        io, conv_id, msgs, root, project, eff_model, model_id, conv,
+        tools_used, tool_errors, final_content, request_id)
 
     if final_content:
         assistant_msg_id = store.next_id("m")
         msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
                    "role": "assistant", "time": _ts(), "content": final_content}
-        meta = guard_meta or draft_meta
-        if meta:
-            msg_row["meta"] = meta   # 守卫/草稿卡元数据: 落库可重建卡片, 不进 LLM 上下文
         store.ConversationsStore.append_message(msg_row)
         try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
@@ -494,8 +469,6 @@ async def handle_chat(data: dict, send: SendFn) -> None:
             pass
         done_ev = {"type": "done", "conversationId": conv_id,
                    "content": final_content, "messageId": assistant_msg_id}
-        if guard_meta or draft_meta:
-            done_ev["meta"] = guard_meta or draft_meta
         await io.send_ev(done_ev)
         try:
             from ..arch_routes import llm_dataset as _lds
@@ -686,19 +659,19 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             "loop_fell_back": loop_fell_back}
 
 
-async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
-                            root: str, project: str, eff_model: Optional[str],
-                            model_id: str, conv: dict, question: str,
-                            tools_used: set, tool_errors: dict,
-                            final_content: str, request_id: Optional[str],
-                            assistant_text: str = ""):
-    """管线阶段⑤ 回合后守卫: 提案/任务围栏代落 + 通用路由/意图/防编造守卫。
+async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
+                          root: str, project: str, eff_model: Optional[str],
+                          model_id: str, conv: dict,
+                          tools_used: set, tool_errors: dict,
+                          final_content: str, request_id: Optional[str]):
+    """管线阶段⑤ 回合后确定性落库通道(仅围栏, 缓解守卫已拆除 cv-175)。
 
-    返回 (final_content, guard_meta, conv, tools_used, tool_errors)。"""
-    from ..arch_routes import req_agent, store
-    # ── proposal 围栏自动落库: 模型直接输出 ```proposal JSON → 服务端代执行 ──
+    模型愿发工具块则工具直落; 直接写 JSON 围栏也接受——服务端代执行,
+    产物即需求卡/任务卡。不做任何"纠正模型"的启发式判断。
+    返回 (final_content, conv, tools_used, tool_errors)。"""
+    from ..arch_routes import req_agent
+    # ── proposal 围栏 → req.propose 代落(需求卡) ──
     fence_args = req_agent.extract_proposal_fence(final_content)
-    proposal_landed = False
     if fence_args and "req.propose" not in tools_used:
         logger.info("[kb-chat] proposal 围栏命中, 服务端代落库 conv=%s", conv_id)
         try:
@@ -706,24 +679,19 @@ async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
                 io.send, request_id, "req.propose", fence_args, root, project,
                 model_id=eff_model)
             tools_used.add("req.propose")
-            ok = bool(res.get("ok"))
-            proposal_landed = ok
-            if ok:
-                # 落库成功 → 正文中的围栏 JSON 是复述垃圾, 折叠(cv-174)
+            if res.get("ok"):
                 final_content = req_agent.strip_proposal_fence(final_content)
             else:
                 tool_errors["req.propose"] = str(res.get("text", ""))[:200]
-            notice = (f"\n\n✅ 已从提案草稿围栏自动落库：{str(res.get('text', ''))[:140]}"
-                      if ok else
+            notice = (f"\n\n✅ 已从提案围栏自动落库：{str(res.get('text', ''))[:140]}"
+                      if res.get("ok") else
                       f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}")
             final_content += notice
             await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 围栏代落库失败: %s", e)
 
-    # ── v2 任务载荷围栏代落: 模型把 task.propose 载荷写成 ```json 围栏(不发
-    #    工具块, cv-150 实证) → 服务端解析代为落卡(轻门禁, 用户确认后执行)。
-    #    与防编造守卫协同: 代落后 claim 的佐证工具成立 → 不出拦截卡。 ──
+    # ── 任务载荷围栏 → task.propose 代落(执行卡) ──
     task_fence = req_agent.extract_task_fence(final_content)
     if task_fence and "task.propose" not in tools_used:
         logger.info("[kb-chat] 任务载荷围栏命中, 服务端代落卡 conv=%s", conv_id)
@@ -732,209 +700,17 @@ async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
                 io.send, request_id, "task.propose", task_fence, root, project,
                 model_id=eff_model)
             tools_used.add("task.propose")
-            ok = bool(res.get("ok"))
-            if not ok:
+            if not res.get("ok"):
                 tool_errors["task.propose"] = str(res.get("text", ""))[:200]
             notice = (f"\n\n📋 已从上文载荷自动创建**任务卡**（待确认）：{str(res.get('text', ''))[:160]}"
-                      if ok else
+                      if res.get("ok") else
                       f"\n\n⚠️ 任务卡自动创建失败：{str(res.get('text', ''))[:160]}")
             final_content += notice
             await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 任务围栏代落失败: %s", e)
 
-    # ── v2 通用任务路由守卫: 用户指令是通用执行类 + architect 答复是「无法直接/
-    #    需检索」推诿话术且未发起任务 → 纠偏一轮(交 coding subagent) ──
-    try:
-        # 管线拆分作用域修复: visible/corr 此前遗留自拆分前的 handle_chat
-        # 局部作用域, 未初始化即读 → UnboundLocalError(cv-172 实证)
-        visible = final_content
-        corr = ""
-        _generic_user = _GENERIC_EXEC_RE.search(question or "")
-        _deflect = bool(_generic_user) and not tools_used and (
-            re.search(r"无法直接|无法凭|不能直接|无法给出|需要先(调用|检索|查询)",
-                      final_content or ""))
-        if _deflect and "task.propose" not in tools_used:
-            logger.info("[kb-chat] 通用任务路由守卫触发 conv=%s q=%.60s", conv_id, question)
-            msgs.append({"role": "assistant", "content": (final_content or "")[:2000]})
-            msgs.append({"role": "user", "content": (
-                "[系统路由] 用户的问题是可直接执行的通用任务(如环境检测/文件统计/编译/"
-                "脚本), 不需要本项目知识库。你没有 shell 与文件能力, 但 coding subagent 有——"
-                "请立即输出 task.propose 工具调用块把该任务交给 subagent, "
-                '格式: [TOOL_CALL]{"tool":"task.propose","arguments":'
-                '{"title":"…","instruction":"…"}}[/TOOL_CALL]; '
-                "除工具块外只输出一句转述。不要再用「需要检索/无法直接」回答通用任务。")})
-            if io.budget_left() > 0:
-                corr = await _sync_with_tools(io.send, msgs, root, project, eff_model,
-                                              max_rounds=3, tools_used=tools_used)
-            corr = req_agent.strip_tool_blocks(corr or "")
-            if corr:
-                for i in range(0, len(corr), 24):
-                    d = corr[i:i + 24]
-                    visible += d
-                    await io.send_ev({"type": "chunk", "requestId": request_id, "delta": d})
-                final_content = visible
-    except Exception as _ge:  # noqa: BLE001
-        logger.warning("[kb-chat] 通用路由守卫异常: %s", _ge)
-
-    # ── 意图未执行守卫: 宣布要调工具却收尾悬置 → 追问一轮 ──
-    # 零工具回合: 任意意图短语即追问; 有工具回合: 最终答案段(assistant_text,
-    # 即结束循环的无工具轮)宣布工具而未执行也追问——此前轮次的宣布已被
-    # 真实工具调用兑现, 查全文会误报, 故只查末段
-    visible = final_content   # 同 cv-172: 守卫续写基于 final_content 累积
-    corr = ""
-    # cv-174: 围栏代落库已满足"我将创建"意图 → 不再纠偏(否则模型再提一次,
-    # 同回合产生重复需求 RQ-92/RQ-93)。会话已绑定需求同理跳过。
-    _req_bound = bool((store.ConversationsStore.get(conv_id) or {}).get("reqId"))
-    pending_wait = "请等待" in final_content and not (_req_bound or proposal_landed)
-    intent = ""
-    if pending_wait:
-        intent = "请等待"
-    elif not (_req_bound or proposal_landed):
-        if not tools_used:
-            intent = req_agent.announced_tool_intent(final_content)
-        elif assistant_text:
-            intent = req_agent.announced_tool_intent(assistant_text)
-    if intent:
-            logger.warning("[kb-chat] 意图未执行守卫触发 conv=%s intent=%s", conv_id, intent)
-            msgs.append({"role": "assistant", "content": final_content})
-            msgs.append({"role": "user", "content": (
-                "[系统守卫] 你宣布要调用工具，但本回合没有输出任何 [TOOL_CALL] 块就结束了回合"
-                "——不会有任何\"等待\"发生，动作也没有发生。二选一："
-                "① 立即输出你要执行的第一批工具调用块，"
-                '格式: [TOOL_CALL]{"tool":"工具名","arguments":{…}}[/TOOL_CALL]，'
-                "一次一个；除工具块外不要输出任何说明文字。"
-                "② 若该动作确实不能现在执行（需要用户确认/信息不足），用一句话明确说明缺什么，"
-                "不要宣布将要执行。")})
-            if io.budget_left() > 0:
-                corr = await _sync_with_tools(io.send, msgs, root, project, eff_model,
-                                              max_rounds=3, tools_used=tools_used)
-            corr = req_agent.strip_tool_blocks(corr or "")
-            if corr:
-                for i in range(0, len(corr), 24):
-                    d = corr[i:i + 24]
-                    visible += d
-                    await io.send_ev({"type": "chunk", "requestId": request_id, "delta": d})
-                final_content = visible
-
-    # ── 防编造守卫(⑦ 反思组件, 策略矩阵驱动): 声称的落库/执行动作必须有本回合真实工具调用佐证 ──
-    # 范式(守卫卡片化): 检出 → 消息 meta.guard 落库(不进 LLM 上下文) → 前端卡片
-    # 给出可点击修复指令与 /指令 chips; 点击 → guard-repair REST 外循环/填入对话框。
-    # 策略开关 guard 当前全档启用(t0-t4), 接线预留降级通道; intent_followup
-    # 分档接线留 P6(现网默认路径行为锁定)。
-    from .cognition.strategy import strategies_for_model
-    _guard_on = strategies_for_model(eff_model or model_id or "").get("guard", True)
-    claim, need = (req_agent.fabricated_claim(final_content, tools_used)
-                   if _guard_on else (None, None))
-    guard_meta = None
-    if claim:
-        # 成功路径的编号笔误更正: 本回合已真实 propose 落库, 但正文残留假编号
-        # (cv-98 实证: 真实 RQ-47 / 正文 RQ-001) → 轻量更正回执替代拦截卡
-        if claim.startswith("引用不存在的需求编号") and "req.propose" in tools_used:
-            _fresh = store.ConversationsStore.get(conv_id) or {}
-            real_rid = str(_fresh.get("reqId") or "")
-            if real_rid:
-                corr_note = (f"\n\n> ℹ️ 系统更正：正文中的需求编号为模型笔误，"
-                             f"本回合真实落库编号为 `{real_rid}`(以系统回执为准)。")
-                final_content += corr_note
-                await io.send_ev({"type": "chunk", "requestId": request_id, "delta": corr_note})
-                claim = ""    # 已真实落库, 不再出拦截卡
-        if claim:
-            logger.warning("[kb-chat] 防编造守卫触发 conv=%s claim=%s need=%s", conv_id, claim, need)
-        primary_need = need.split("|")[0] if need else ""
-        failed_try = bool(primary_need) and primary_need in tool_errors
-        try:
-            from ..arch_routes import llm_dataset as _lds
-            _lds.record("guard_hit", kind="fabricated", claim=claim, need=need,
-                        toolFailed=failed_try,
-                        toolError=tool_errors.get(primary_need, ""))
-        except Exception:  # noqa: BLE001
-            pass
-        guard_meta = {
-            "kind": "guard",
-            "claim": claim,
-            "need": need or "",
-            "failedTry": failed_try,
-            "toolError": tool_errors.get(primary_need, "")[:200],
-            "hasSpecJson": req_agent.extract_spec_payload(final_content) is not None,
-            "suggestions": req_agent.guard_suggestions(
-                claim, need, failed_try,
-                has_spec_json=req_agent.extract_spec_payload(final_content) is not None),
-            # 指令符号建议(与需求态相关): 绑定需求 draft → /定稿; ready → /执行
-            "cmds": [],
-        }
-        if (guard_meta.get("hasSpecJson") and not failed_try
-                and "req.propose" in (need or "") and "req.propose" not in tools_used):
-            fixed = await _guard_autoland(conv, final_content)
-            if fixed:
-                tools_used.add("req.propose")
-                final_content += fixed["notice"]
-                await io.send_ev({"type": "chunk", "requestId": request_id,
-                               "delta": fixed["notice"]})
-                guard_meta["resolved"] = True
-                guard_meta["resolvedSummary"] = fixed["summary"][:200]
-                guard_meta["suggestions"] = []
-                conv = store.ConversationsStore.get(conv_id) or conv
-
-    return final_content, guard_meta, conv, tools_used, tool_errors
-
-
-async def _guard_autoland(conv: dict, final_content: str) -> Optional[dict]:
-    """guard 确定性纠错: 编造「已创建需求」+ 正文含可提取规约 → 系统代为落库。
-
-    落库成功返回 {notice, summary}(调用方补记佐证/更新卡片); 失败返回 None
-    (仍走卡片人工修复)。model 已被误导, 不宜再让用户多点一步。
-    """
-    from ..arch_routes.req_agent import extract_spec_payload, apply_spec_payload
-    try:
-        payload = extract_spec_payload(final_content or "")
-        if not payload:
-            return None
-        res = await asyncio.to_thread(
-            apply_spec_payload, payload,
-            req_id=str((conv or {}).get("reqId") or ""),
-            project=str((conv or {}).get("projectId") or ""), root="")
-        if res.get("ok"):
-            summary = str(res.get("summary") or "")
-            notice = (f"\n\n{summary}（系统检测到上文声明了创建动作，"
-                      "已从正文规约代为落库——以本回执编号为准）")
-            return {"notice": notice, "summary": summary}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[kb-chat] guard 代落库失败 conv=%s: %s", (conv or {}).get("id"), e)
-    return None
-
-
-def _maybe_draft_card(conv: dict, final_content: str, tools_used: set,
-                      model_id: str, conv_id: str) -> Optional[dict]:
-    """草稿卡确定性收敛(分级适配 t2+): 规约 JSON 在正文而未调工具 → 暂存草稿卡。
-
-    条件全满足才提取: 策略开启 / 本回合无 req.propose / 会话无绑定需求 /
-    正文含规约围栏载荷。返回 draft_meta(payload 供前端卡片)或 None;
-    同时落 conv.meta.specDraft(「继续调整」时注入下轮上下文合并完善)。
-    """
-    from ..arch_routes import store
-    try:
-        from ..arch_routes.adaptation import strategies_for_model
-        from ..arch_routes.req_agent import extract_spec_payload
-        if (strategies_for_model(model_id or "").get("draft_card")
-                and "req.propose" not in tools_used
-                and not str((conv or {}).get("reqId") or "")):
-            payload = extract_spec_payload(final_content or "")
-            if payload:
-                cm = conv.get("meta") if isinstance(conv.get("meta"), dict) else {}
-                cm = dict(cm or {})
-                cm["specDraft"] = payload
-                store.ConversationsStore.update(conv_id, {"meta": cm})
-                try:
-                    from ..arch_routes import llm_dataset as _lds
-                    _lds.record("draft_card", ok=True, convId=conv_id, model=model_id or "")
-                except Exception:  # noqa: BLE001
-                    pass
-                return {"kind": "specDraft", "payload": payload}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[kb-chat] 草稿卡提取失败 conv=%s: %s", conv_id, e)
-    return None
-
+    return final_content, conv, tools_used, tool_errors
 
 async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_rounds: int = 4,
                            tools_used: Optional[set] = None) -> str:

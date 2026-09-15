@@ -83,7 +83,6 @@ const emit = defineEmits<{
   'contract-edit-save': [id: string, patch: Record<string, unknown>]
   'job-accept': [meta: Record<string, any>]
   'job-resume': []
-  'guard-repair': [p: { index: number; meta: Record<string, any>; action: string }]
   'spec-apply': [p: { index: number; payload: Record<string, unknown> }]
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
@@ -98,22 +97,6 @@ const titleDraft = ref('')
 /** 资产引用点击 → 联动资产地图(图谱节点/资产卡)。宿主页面监听 arch:open-asset。 */
 function openAssetRef(id: string) {
   window.dispatchEvent(new CustomEvent('arch:open-asset', { detail: id }))
-}
-
-// ── 系统守卫卡: 指令点击上抛(修复执行/本地渲染由宿主 dock 完成) ──
-const guardBusyIdx = ref(-1)
-function onGuardAction(index: number, s: { action: string; label: string }) {
-  if (guardBusyIdx.value >= 0) return
-  guardBusyIdx.value = index
-  try {
-    emit('guard-repair', {
-      index,
-      meta: props.turns[index]?.meta || {},
-      action: s.action,
-    })
-  } finally {
-    setTimeout(() => { guardBusyIdx.value = -1 }, 800)
-  }
 }
 
 // ── S3 投喂门: 消息级「转达 coding」(dock 执行 POST /feed, 结果本地消息) ──
@@ -140,11 +123,6 @@ function parseSpecPayload(content: string): Record<string, unknown> | null {
   return null
 }
 function specPayloadOf(index: number): Record<string, unknown> | null {
-  // 草稿卡(meta.specDraft, 系统确定性提取)优先于正文围栏识别
-  const meta = props.turns[index]?.meta as any
-  if (meta?.kind === 'specDraft' && meta?.payload && typeof meta.payload === 'object') {
-    return meta.payload
-  }
   return parseSpecPayload(props.turns[index]?.content || '')
 }
 const specBusyIdx = ref(-1)
@@ -467,7 +445,7 @@ function send() {
 /** 本地命令(前端拦截, 不发后端): 会话操作/状态切换——与工具条按钮同动作。 */
 const LOCAL_CMD_LIST = [
   { name: '绘图', desc: '切换绘图增强(IR→代码)' },
-  { name: '方案', desc: '预填方案生成指令' },
+  { name: '提取需求', desc: '从对话历史提取需求卡(ready)，系统未自动识别时用' },
   { name: '摘要', desc: '生成会话标题与摘要' },
   { name: '提炼', desc: '提炼会话为数据资产' },
   { name: '归档', desc: '结束会话(有可提炼内容时提示)' },
@@ -507,8 +485,9 @@ function onCmdMenuKeydown(e: KeyboardEvent) {
 function runLocalCmd(name: string) {
   if (name === '绘图') {
     emit('toggle-diagram-skill', !props.diagramSkill)
-  } else if (name === '方案') {
-    fillExtractPlan()
+  } else if (name === '提取需求') {
+    emit('send', { text: '/提取需求' })
+    return
   } else if (name === '选摘') {
     toggleDigestMode()
   } else {
@@ -663,15 +642,9 @@ function showToast(text: string) {
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2000)
 }
 
-// ── 方案生成：预填指令进输入框(用户可补充后自行发送；与对话指令同路径) ──
-const extractPlanPrompt = t('assetChat.extractPlan.prompt')
-function fillExtractPlan() {
-  input.value = input.value ? `${input.value} ${extractPlanPrompt}` : extractPlanPrompt
-  void nextTick(() => {
-    inputRef.value?.focus()
-    const el = inputRef.value
-    if (el) el.selectionStart = el.selectionEnd = el.value.length
-  })
+/** 工具栏「提取需求」: 发 /提取需求 直通(系统确定性提取, 同对话指令路径)。 */
+function sendExtractReq() {
+  emit('send', { text: '/提取需求' })
 }
 
 // ── 提案卡确认存入：finalize 入池(待执行)；按钮自带 reqId, 多提案各自独立确认 ──
@@ -1213,22 +1186,9 @@ onUnmounted(() => {
             <span class="text-[10px] text-ctp-overlay0">{{ t('session.job.resumeHint') }}</span>
           </div>
 
-          <!-- 规约回执动作卡(v2 指令直通): specCreated→[去定稿] / specReady→[一键建卡执行]
-               点击发送 /指令 → 后端确定性执行(零 LLM), 用户消息与回执进会话流 -->
+          <!-- 需求卡动作(创建即 ready): [一键建卡执行]——点击发 /指令 后端直通 -->
           <div
-            v-if="m.meta?.kind === 'specCreated'"
-            class="mt-2 flex items-center gap-2"
-          >
-            <button
-              class="btn btn-xs btn-primary"
-              :disabled="busy"
-              title="确认规约(draft→ready)——系统直通"
-              @click="emit('send', { text: '/定稿' })"
-            >去定稿</button>
-            <span class="text-[10px] text-ctp-overlay0">定稿后 /执行 建任务卡</span>
-          </div>
-          <div
-            v-else-if="m.meta?.kind === 'specReady'"
+            v-if="m.meta?.kind === 'specCreated' || m.meta?.kind === 'specReady'"
             class="mt-2 flex items-center gap-2"
           >
             <button
@@ -1252,83 +1212,6 @@ onUnmounted(() => {
               @click="onSpecApply(i)"
             >{{ specBusyIdx === i ? '…' : t('session.actions.applySpec') }}</button>
             <span class="text-[10px] text-ctp-overlay0">{{ t('session.actions.applySpecHint') }}</span>
-          </div>
-
-          <!-- 规约草稿卡(分级适配): 模型把规约写进正文未调工具 → 系统提取暂存;
-               用户裁决: 写入需求(一键落库) / 继续对话调整(草稿自动注入下轮合并) -->
-          <div
-            v-else-if="m.meta?.kind === 'specDraft'"
-            class="mt-2 rounded-lg border border-ctp-mauve/30 bg-ctp-mauve/5 px-2.5 py-2"
-          >
-            <div class="flex items-start gap-1.5 text-[11px] leading-relaxed text-ctp-subtext1">
-              <DocumentTextIcon class="mt-0.5 h-3.5 w-3.5 shrink-0 text-ctp-mauve" />
-              <div class="min-w-0 flex-1">
-                <p>
-                  📝 系统从回复中提取了完整规约草稿<code class="rounded bg-ctp-surface0 px-1 text-ctp-text">「{{ (m.meta.payload?.title as string) || '未命名' }}」</code>（尚未落库）。
-                </p>
-                <p class="mt-1 text-[10px] text-ctp-overlay0">
-                  两选一：点「写入需求」确定性落库（零模型转写，编号由系统生成）；或继续对话补充调整——草稿会自动带入下一轮合并完善。
-                </p>
-              </div>
-            </div>
-            <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <button
-                class="btn btn-xs btn-primary"
-                :disabled="specBusyIdx === i"
-                title="按草稿确定性落库为需求(零模型转写)"
-                @click="onSpecApply(i)"
-              >{{ specBusyIdx === i ? '…' : t('session.actions.applySpec') }}</button>
-              <span class="text-[10px] text-ctp-overlay0">落库后可 /定稿 → /执行</span>
-            </div>
-          </div>
-
-          <!-- 系统守卫卡: 可点击指令(点击 → guard-repair 独立外循环), 说明在文字区 -->
-          <div
-            v-else-if="m.meta?.kind === 'guard'"
-            :class="m.meta.resolved
-              ? 'mt-2 rounded-lg border border-ctp-green/30 bg-ctp-green/5 px-2.5 py-2'
-              : 'mt-2 rounded-lg border border-ctp-yellow/30 bg-ctp-yellow/5 px-2.5 py-2'"
-          >
-            <div class="flex items-start gap-1.5 text-[11px] leading-relaxed text-ctp-subtext1">
-              <ExclamationCircleIcon
-                class="mt-0.5 h-3.5 w-3.5 shrink-0"
-                :class="m.meta.resolved ? 'text-ctp-green' : 'text-ctp-yellow'"
-              />
-              <div class="min-w-0 flex-1">
-                <p v-if="m.meta.resolved">
-                  ✅ 守卫拦截：回复中「{{ m.meta.claim }}」未经实际工具调用——系统已从正文规约<strong>代为落库</strong>，以下方回执编号为准。
-                </p>
-                <p v-else>
-                  守卫拦截：回复中「{{ m.meta.claim }}」未经实际工具调用（需要
-                  <code class="rounded bg-ctp-surface0 px-1 text-ctp-text">{{ m.meta.need }}</code> 佐证），该表述不成立。
-                </p>
-                <p v-if="m.meta.failedTry" class="mt-1 text-ctp-yellow/90">
-                  该工具本回合已尝试但执行失败：{{ m.meta.toolError }}
-                </p>
-                <p class="mt-1 text-[10px] text-ctp-overlay0">
-                  点击指令将走独立修复通道从原文提取真实内容落库；过程与结果仅本地展示，不进入对话上下文。
-                </p>
-                <p
-                  v-if="m.meta.hasSpecJson || specPayloadOf(i)"
-                  class="mt-1 text-[11px] text-ctp-blue/90"
-                >
-                  💡 检测到本条回复包含结构化的规约 JSON。若其内容符合你的预期，可直接点「{{
-                    (m.meta.suggestions || []).find((x: any) => x.action === 'apply_json')?.label || '按原文落库'
-                  }}」将其写入需求约束（确定性代码路径，不经模型转写）；若内容有偏差，请先在对话中指出修正点。
-                </p>
-              </div>
-            </div>
-            <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <button
-                v-for="s in (m.meta.suggestions || [])"
-                :key="s.action"
-                class="btn btn-xs"
-                :class="s.action === 'correct' ? 'btn-ghost' : 'btn-primary'"
-                :disabled="guardBusyIdx === i"
-                :title="`点击执行：${s.label}`"
-                @click="onGuardAction(i, s)"
-              >{{ guardBusyIdx === i ? '…' : s.label }}</button>
-            </div>
           </div>
 
           <div
@@ -1880,8 +1763,8 @@ onUnmounted(() => {
       <button
         class="btn btn-xs btn-ghost !px-1.5"
         :disabled="busy"
-        :title="`${t('assetChat.extractPlan.button')} — /方案`"
-        @click="fillExtractPlan"
+        title="提取需求 — /提取需求(从对话历史提取需求卡)"
+        @click="sendExtractReq"
       >
         <SparklesIcon class="w-3.5 h-3.5" />
       </button>

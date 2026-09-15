@@ -165,18 +165,6 @@ def test_confirm_mutex_self_heals_via_recovery(tmp_path, monkeypatch):
 
 # ── T6: guard-repair 任务域简化——不再自动建卡, 引导重新发起 ──────────
 
-def test_guard_repair_task_domain_guides_redo(tmp_path, monkeypatch):
-    """编造任务声明 → 不再自动提取建卡(cv-153 幽灵卡), 返回引导文案。"""
-    from topoone_app_architect.arch_routes.sessions import _guard_repair_core
-    _env(tmp_path, monkeypatch)
-    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
-    r = _guard_repair_core(conv["id"], "已创建/启动任务", "task.propose",
-                           "任务已启动，执行器 opencode 正在处理中。完成后将同步进展。")
-    assert r["ok"] is False and r["action"] == "manual_redo"
-    assert "/执行" in r["summary"]
-    assert store.TasksStore.of_conv(conv["id"]) == []
-
-
 def test_recover_sweep_converges_stale_tasks(tmp_path, monkeypatch):
     """C 定时对账: 目录扫描发现默认库+项目库的假 running 任务并收尾。"""
     from topoone_app_architect.arch_routes.exec_bridge import recover_sweep

@@ -510,7 +510,7 @@ async def set_session_model(conv_id: str, request: Request):
 async def set_analysis_mode(conv_id: str, request: Request):
     """切换会话分析挡位(strict/quick, 即时生效于本会话后续回合)。
 
-    body: {mode} strict=需求分析→规约(designMd)→/定稿→任务卡 | quick=轻整理直出任务卡(关 KB 检索)。
+    body: {mode} strict=开发类需求先需求分析出卡(卡即 ready) | quick=轻整理直出任务卡。
     """
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
@@ -520,8 +520,8 @@ async def set_analysis_mode(conv_id: str, request: Request):
     if mode not in ("strict", "quick"):
         return err(400, "mode 须为 strict 或 quick")
     store.ConversationsStore.update(conv_id, {"analysisMode": mode})
-    note = ("严格挡：需求分析 → 规约(designMd) → /定稿 → 任务卡"
-            if mode == "strict" else "快捷挡：轻整理直出任务卡(关 KB 检索)")
+    note = ("严格挡：开发类需求先需求分析产出需求卡(即 ready)，再建任务卡"
+            if mode == "strict" else "快捷挡：轻整理直出任务卡")
     return ok({"conversationId": conv_id, "analysisMode": mode, "summary": note})
 
 
@@ -1030,7 +1030,7 @@ _GUIDE_SYSTEM = (
     "1. 每条建议必须引用会话中的具体内容（如需求标题、方案要点、作业分支、agent 提出的问题、"
     "待确认的版本），让建议与当前进展强相关；禁止泛泛而谈。\n"
     "2. 动作类建议必须引用**会话指令符号**（用户发送 /指令 即确定性执行）："
-    "/定稿 确认规约(→ready)、/执行 建实施任务卡(卡片确认后 subagent 启动)、"
+    "/执行 按需求卡建实施任务卡(卡片确认后 subagent 启动)、"
     "/调整 修订需求(进入对话整理)。语义匹配时才引用，无匹配时给自然语言建议。\n"
     "3. 输出 markdown 无序列表，每条一句话；只输出列表本身，不要标题、不要解释、不要代码围栏。"
 )
@@ -1129,55 +1129,6 @@ async def session_spec_apply(conv_id: str, request: Request):
         except Exception:  # noqa: BLE001
             pass
     return ok(res)
-
-
-@router.post("/sessions/{conv_id}/guard-repair")
-async def session_guard_repair(conv_id: str, request: Request):
-    """守卫卡片指令(点击触发): 独立外循环修复编造声明并真实落库。
-
-    修复过程/结果不进会话消息(前端本地渲染), 只落登记簿等真实数据面。
-    body: {messageId, claim, need, content}
-    """
-    body = await request.json()
-    claim = str(body.get("claim") or "").strip()
-    need = str(body.get("need") or "").strip()
-    content = str(body.get("content") or "")
-    if not claim or not content:
-        return err(400, "缺少 claim 或 content")
-    conv = store.ConversationsStore.get(conv_id)
-    if not conv:
-        return err(404, "会话不存在")
-    # 请求级会话上下文: req.propose 落库后回写 conv.reqId 绑定/ownerConv 证据链
-    # (与 WS 路径 websocket.set_conv/set_project 对齐; 缺失则新建需求与会话脱钩、
-    # 且落库进主库默认桶而非项目库)
-    from . import ctx as _ctx
-    _ctx.set_conv(conv_id)
-    _ctx.set_project(str(conv.get("projectId") or ""))
-    return await asyncio.to_thread(_guard_repair_core, conv_id, claim, need, content)
-
-
-def _guard_repair_core(conv_id: str, claim: str, need: str, content: str) -> dict:
-    """守卫修复核心(可测): 任务域优先确定性提取建卡; 其余走规约修复外循环。"""
-    conv = store.ConversationsStore.get(conv_id)
-    if not conv:
-        return {"ok": False, "summary": "会话不存在"}
-    from . import ctx as _ctx
-    _ctx.set_conv(conv_id)
-    _ctx.set_project(str(conv.get("projectId") or ""))
-    # T6 简化: 任务域不再自动从原文提取建卡(cv-153 幽灵卡教训——模型话术
-    # 偶可被提取成劣质载荷)。守卫触发 → 引导重新整理后走直通链(/执行)。
-    if "task.propose" in (need or "") or "任务" in claim:
-        return {"ok": False, "action": "manual_redo",
-                "summary": "该回复未产生有效任务。请让 architect 重新整理任务"
-                           "(目标/方案要点/边界), 发送 /执行 建任务卡, "
-                           "或直接在任务卡上确认执行。"}
-    # 规约域(存量兼容): 编造规约声明 -> repair_fabricated_claim 外循环修复
-    from .req_agent import repair_fabricated_claim
-    return repair_fabricated_claim(
-        claim, need, content,
-        req_id=str(conv.get("reqId") or ""),
-        project=str(conv.get("projectId") or ""),
-        root="")
 
 
 @router.post("/sessions/{conv_id}/guide")

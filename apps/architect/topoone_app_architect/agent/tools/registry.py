@@ -50,16 +50,14 @@ def architect_tools() -> List[Dict[str, str]]:
     return [{"name": t["name"], "description": t["description"]} for t in _ARCH_TOOLS.values()]
 
 
-# 归档会话上禁止的动作类工具(生成/落库/定稿/指派); 检索与读取类不在此列
+# 归档会话上禁止的动作类工具(生成/落库/指派); 检索与读取类不在此列
 _ARCHIVED_DENY_TOOLS = {
-    "req.propose", "req.finalize", "contract.propose", "task.propose",
+    "req.propose", "contract.propose", "task.propose",
 }
 
 # v2 统一会话: 规约状态机工具在快捷挡退役(严格挡恢复可用, run_arch_tool 按挡放行)
 # ——快捷挡模型误调时给出引导而非静默失败(P2 物理删除注册)。
 # 文案必须是快捷挡语义(此映射只在 quick 挡触达模型; strict 挡放行不会看到)。
 _RETIRED_TOOLS = {
-    "req.propose": "快捷挡不做规约(不调 req.propose)。请直接整理目标/方案要点/边界/验收, 调用 task.propose 创建任务卡。",
-    "req.finalize": "快捷挡无规约可定稿(不调 req.finalize)。直接调用 task.propose 建卡即可。",
-    "req.amend": "快捷挡无规约可修订(不调 req.amend)。直接按新方案调用 task.propose 重新建卡。",
+    "req.finalize": "req.finalize 已退役——需求卡创建即 ready, 无需确认步骤。",
 }

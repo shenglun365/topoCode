@@ -18,13 +18,6 @@ router = APIRouter()
 # 兼容 re-export(P0 特征测试引用): 通用执行意图正则已迁至 agent.perception.intent
 from ..agent.perception.intent import GENERIC_EXEC_RE as _GENERIC_EXEC_RE  # noqa: F401,E402
 
-# 兼容 re-export(P2): 回合管道辅助件已迁至 agent.orchestrator, 存量测试引用保持可用
-from ..agent.orchestrator import (  # noqa: F401,E402
-    _guard_autoland,
-    _maybe_draft_card,
-)
-
-
 @router.websocket("/ws/kb-analysis")
 async def kb_analysis_ws(websocket: WebSocket):
     """需求分析 <=> KB agent 会话流(事件形状契约见 docs/architect/api-unit-test.md 同级约定)。

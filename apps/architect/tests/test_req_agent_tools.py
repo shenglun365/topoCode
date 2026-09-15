@@ -44,81 +44,6 @@ class _FakeGW:
         return self._tools_ret
 
 
-class TestReqFinalize:
-    """规约确认(交托门禁)——生命周期重构 v2 语义。"""
-
-    def _mk_req(self, rid, **snap_extra):
-        import json as _json
-        snap = {"title": "旧标题", "desc": "", "designMd": "", "allowedScope": [],
-                "forbiddenScope": [], "acceptance": [], "functionalScope": [],
-                "assessmentSummary": "", "estMin": 0}
-        snap.update(snap_extra)
-        store.RequirementsStore.create({
-            "id": rid, "title": snap["title"], "status": "draft", "priority": "P1",
-            "kind": "user-story", "activeVer": 1,
-            "specVersions": [{"ver": 1, "state": "draft", "snapshot": snap,
-                              "source": {"convId": "", "actor": "t"},
-                              "reason": "", "createdAt": 1}],
-            "updatedAt": 1, "createdAt": 1,
-        })
-
-    def test_finalize_gate_and_ready(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        tok_p = C.set_project("proj-f1")
-        try:
-            # 门禁: 缺方案+验收 → 拒绝
-            self._mk_req("RQ-1")
-            tok_r = C.set_req("RQ-1")
-            try:
-                res = req_agent.tool_req_finalize()
-                assert res["ok"] is False and "门禁" in res["error"]
-                # 补齐后确认 → ready
-                req_agent.tool_req_amend(designMd="方案A", acceptance=["编译通过"],
-                                         allowedScope=["modules/x/"])
-                res2 = req_agent.tool_req_finalize()
-            finally:
-                C.reset_req(tok_r)
-            assert res2["ok"] is True, res2
-            row = store.RequirementsStore.get("RQ-1")
-            assert row["status"] == "ready"
-            assert row["activeVer"] == 2                       # amend 追加了 v2
-            active = store.RequirementsStore.spec_active("RQ-1")
-            assert active["state"] == "confirmed" and active["snapshot"]["designMd"] == "方案A"
-            assert res2["boundaryFiles"] == ["modules/x"]      # 边界可解析
-        finally:
-            C.reset_project(tok_p)
-
-    def test_finalize_supersedes_old_confirmed(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        self._mk_req("RQ-2", designMd="v1方案", acceptance=["a"])
-        store.RequirementsStore.spec_confirm("RQ-2")
-        # 修订新版本 → 确认 → 旧 confirmed 隐式废弃
-        req_agent.tool_req_amend(reqId="RQ-2", designMd="v2方案")
-        res = req_agent.tool_req_finalize(reqId="RQ-2")
-        assert res["ok"] is True
-        vs = store.RequirementsStore.spec_versions("RQ-2")
-        assert vs[0]["state"] == "superseded" and vs[1]["state"] == "confirmed"
-
-    def test_finalize_done_req_rejected(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        self._mk_req("RQ-3", designMd="d", acceptance=["a"])
-        store.RequirementsStore.mark_done("RQ-3")
-        res = req_agent.tool_req_finalize(reqId="RQ-3")
-        assert res["ok"] is False and "已完结" in res["error"]
-
-    def test_finalize_no_req_ctx(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        # ctx 可能被同进程其他测试的 set_req 残留(库已换, 指向不存在的需求)——
-        # 行为断言: 无有效绑定时必须 ok=False 且给出可操作 error
-        res = req_agent.tool_req_finalize()
-        assert res["ok"] is False and res.get("error")
-
-    def test_finalize_unknown_req(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        res = req_agent.tool_req_finalize(reqId="RQ-nope")
-        assert res["ok"] is False and "不存在" in res["error"]
-
-
 class TestMcpCall:
     def test_mcp_call_forwards(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
@@ -178,5 +103,5 @@ class TestCapabilityDoc:
         })
         prompt = req_agent.chat_system_prompt(None, "proj-x")
         assert "mcp.call" in prompt
-        assert "req.finalize" in prompt
+        assert "req.finalize" not in prompt   # 已退役(需求卡创建即 ready)
         assert "arch.read" in prompt

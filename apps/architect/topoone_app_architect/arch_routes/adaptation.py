@@ -10,7 +10,6 @@ from ..agent.cognition.strategy import (  # noqa: F401
 )
 from ..agent.reflection.repair import (  # noqa: F401
     RepairTask,
-    anchor_back,
     json_dumps,
     run_repair_loop,
     summarize_task,

@@ -46,10 +46,7 @@ def _mk_fixture(tmp_path, monkeypatch):
                         "acceptanceMd": "编译通过"},
         root=None, project=None, internal=True)
     assert res.get("ok"), res
-    rid = res["requirementId"]
-    r = req_agent.run_arch_tool("req.finalize", {"reqId": rid},
-                                root=None, project=None, internal=True)
-    assert r.get("ok"), r
+    rid = res["requirementId"]   # propose 即 ready(无草稿态)
     conv = store.ConversationsStore.create({"kind": "requirement", "title": "T", "reqId": rid})
     conv = store.ConversationsStore.get(conv["id"])
     return conv, rid
@@ -243,19 +240,20 @@ def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import sessions as S, exec_bridge
     monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
-    # draft 需求(source=本会话) → 应级联删除
-    r_draft = req_agent.run_arch_tool("req.propose", {"title": "T-孤儿", "requirementMd": "未定稿提案", "newRequirement": True},
-        root=None, project=None, internal=True)
-    rid_draft = r_draft["requirementId"]
-    row = store.RequirementsStore.get(rid_draft) or {}
-    assert (row.get("sourceConversationId") or "") == conv["id"] or True
-    store.RequirementsStore.update(rid_draft, {"sourceConversationId": conv["id"],
-                                               "ownerConv": conv["id"]})
+    # draft 需求(source=本会话) → 应级联删除(级联策略按 status 判定, 与创建路径无关)
+    rid_draft = store.next_id("RQ")
+    store.RequirementsStore.create({"id": rid_draft, "kind": "user-story",
+                                    "status": "draft", "title": "T-孤儿", "activeVer": 1,
+                                    "sourceConversationId": conv["id"],
+                                    "ownerConv": conv["id"]})
+    if False:
+        r_draft = req_agent.run_arch_tool("req.propose", {"title": "T-孤儿", "requirementMd": "未定稿提案", "newRequirement": True},
+            root=None, project=None, internal=True)
+    store.RequirementsStore.get(rid_draft) or {}
     # ready 需求(source=本会话) → 保留, ownerConv 清空
     r_ready = req_agent.run_arch_tool("req.propose", {"title": "T-保留", "designMd": "方案", "newRequirement": True},
         root=None, project=None, internal=True)
     rid_ready = r_ready["requirementId"]
-    req_agent.run_arch_tool("req.finalize", {"reqId": rid_ready}, root=None, project=None, internal=True)
     store.RequirementsStore.update(rid_ready, {"sourceConversationId": conv["id"],
                                                "ownerConv": conv["id"]})
     # coding 子会话 → 递归删除
@@ -427,7 +425,6 @@ def test_task_instruction_injects_spec_and_env(tmp_path, monkeypatch):
         {"title": "T-v2规约", "designMd": "方案Z", "requirementMd": "目标",
          "allowedScopeMd": "modules/x/", "acceptanceMd": "构建通过"},
         root=None, project=None, internal=True)["requirementId"]
-    req_agent.run_arch_tool("req.finalize", {"reqId": rid}, root=None, project=None, internal=True)
     task = store.TasksStore.create({
         "conversationId": conv["id"], "reqId": rid, "title": "T",
         "instruction": "目标: X\n方案: Y", "status": "pending_confirm"})
@@ -503,9 +500,9 @@ def test_task_tool_propose_and_retired_req(tmp_path, monkeypatch):
     assert r["ok"] and r["status"] == "pending_confirm"
     t = store.TasksStore.get(r["taskId"])
     assert t["executorType"] == "cline-sdk"  # 别名归一(P5)
-    # 模型面 req.* 拦截(快捷挡语义引导文案)
+    # 模型面 req.propose 无挡位拦截(需求卡按需出现, cv-175)
     r2 = req_agent.run_arch_tool("req.propose", {"title": "x"}, root=None, project=None)
-    assert "快捷挡" in str(r2.get("error")) and "task.propose" in str(r2.get("error"))
+    assert r2.get("ok") and r2.get("requirementId")
     # internal 放行
     r3 = req_agent.run_arch_tool("req.propose", {"title": "ok", "designMd": "d"},
                                  root=None, project=None, internal=True)
@@ -550,17 +547,6 @@ def test_extract_task_fence_forms():
     assert extract_task_fence('正文无围栏') is None
 
 
-def test_fabricated_claim_task_domain():
-    """编造检测: 任务创建/执行进度声明无 task.propose 佐证 → 拦; 有佐证 → 放行。"""
-    from topoone_app_architect.arch_routes.req_agent import fabricated_claim
-    c1, n1 = fabricated_claim("任务已正式创建并开始执行。当前状态: 任务卡 [MVP]", set())
-    assert c1 and "任务" in c1 and "task.propose" in n1
-    c2, _ = fabricated_claim("#### Phase 1: 环境探测与依赖检查 正在检查构建环境", set())
-    assert c2
-    ok_c, ok_n = fabricated_claim("任务已创建", {"task.propose"})
-    assert not ok_c
-
-
 def test_task_set_executor_and_confirm_override(tmp_path, monkeypatch):
     """执行器设定: 待确认可换(cline); 非待确认拒换。"""
     conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
@@ -573,22 +559,6 @@ def test_task_set_executor_and_confirm_override(tmp_path, monkeypatch):
     _impl = [pl for p_, pl in calls["implement"] if p_ == "/api/implement"][0]
     assert _impl.get("executorType") == "cline-sdk"  # 归一后下发
     assert eb.task_set_executor(task["id"], "opencode") is None  # running 不可换
-
-
-def test_guard_repair_task_domain_guides_redo(tmp_path, monkeypatch):
-    """守卫修复(任务域, T6 简化): 不再自动提取建卡(cv-153 幽灵卡)——
-    无论正文质量, 统一引导重新整理 + /执行 直通链。"""
-    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import sessions as S
-    from topoone_app_architect.arch_routes import ctx as _ctx
-    _ctx.set_conv(conv["id"])
-    content = ("收到, 任务已正式创建并开始执行。\n\n# MVP: Lua Hello World\n\n"
-               "## 需求\n访问 /hello 返回 Hello World\n\n## 方案\ncontent_by_lua_block\n\n"
-               "## 验收\ncurl 通过\n" + "细节" * 30)
-    res = S._guard_repair_core(conv["id"], "已创建/启动任务", "task.propose", content)
-    assert res.get("ok") is False and res.get("action") == "manual_redo"
-    assert "/执行" in res.get("summary", "")
-    assert store.TasksStore.of_conv(conv["id"]) == []
 
 
 def test_generic_exec_routing_regex():

@@ -29,10 +29,10 @@ class TestReqPropose(unittest.TestCase):
         req = store.RequirementsStore.get(r["requirementId"])
         self.assertEqual(req["sourceType"], "asset-chat")
         self.assertEqual(req["sourceConversationId"], "conv-test-1")
-        self.assertEqual(req["status"], "draft")                      # 生命周期重构: draft|ready|done
+        self.assertEqual(req["status"], "ready")                      # 无草稿态: 创建即 ready
         self.assertEqual(req["activeVer"], 1)
         vs = req["specVersions"]
-        self.assertTrue(vs and vs[0]["state"] == "draft" and vs[0]["snapshot"]["estMin"] == 120)
+        self.assertTrue(vs and vs[0]["state"] == "confirmed" and vs[0]["snapshot"]["estMin"] == 120)
         self.assertIn("## 需求", req["desc"])
         self.assertIn("## 方案", req["desc"])
         self.assertIn("## 评估", req["desc"])

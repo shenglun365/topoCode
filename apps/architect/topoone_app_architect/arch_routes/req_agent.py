@@ -41,23 +41,6 @@ from ..agent.planning.req_spec import (  # noqa: F401,E402
 )
 from ..agent.planning.task_plan import extract_task_fence  # noqa: F401,E402
 
-from ..agent.reflection.guards import (  # noqa: F401,E402
-    _FABRIC_RULES,
-    _INTENT_PATTERNS,
-    announced_tool_intent,
-    fabricated_claim,
-    guard_notice,
-    guard_suggestions,
-)
-from ..agent.reflection.repair import (  # noqa: F401,E402
-    _GUARD_REPAIR_TOOLS,
-    _REPAIRABLE_ERR,
-    _is_repairable_error,
-    _repair_param_table,
-    repair_fabricated_claim,
-    repair_tool_args,
-)
-
 from ..agent.tools.protocol import (  # noqa: F401,E402
     _FENCE,
     _TOOL_CALL_BLOCK,
@@ -237,48 +220,13 @@ def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ── 分析挡位工具门禁(会话级 analysisMode: strict/quick) ─────────────
-# strict: task.propose 前置要求会话绑定已 /定稿(confirmed) 的规约
 # quick:  需求分析/规约工具拦截(轻整理直出任务卡) + KB 域工具不可用
 _QUICK_DENY_TOOLS = {
     "req.propose", "req.clarify", "req.collect", "req.assess", "req.spec", "req.plan",
 }
 _QUICK_KB_PREFIXES = ("kb.", "map.", "asset.")
 # 规约状态机工具: v2 默认退役(模型面不可见)——strict 挡恢复启用, quick 挡保持退役
-_SPEC_TOOLS = {"req.propose", "req.finalize", "req.amend"}
-
-
-def gear_gate_error(name: str) -> str:
-    """挡位门禁判定: 命中返回引导文本(工具不执行), 通过返回 ''。
-
-    经 _ctx.get_conv() 取当前会话挡位; 无会话上下文/异常一律放行(不破坏既有路径)。
-    """
-    try:
-        from . import ctx as _ctx
-        conv_id = _ctx.get_conv()
-        if not conv_id:
-            return ""
-        from . import store as _store
-        conv = _store.ConversationsStore.get(conv_id)
-        mode = ((conv or {}).get("analysisMode") or "strict").strip() or "strict"
-        if mode == "quick":
-            if name in _QUICK_DENY_TOOLS:
-                return ("当前为快捷挡(直出任务卡)：不做需求分析/规约。请直接整理实质任务"
-                        "(目标/方案要点/边界/验收)调用 task.propose 创建任务卡;"
-                        "请求过于模糊时先集中提问。")
-            if name.startswith(_QUICK_KB_PREFIXES):
-                return ("当前挡位(快捷)下 KB 检索不可用。请基于会话上下文直接作答,"
-                        "或整理任务调用 task.propose 交由 coding subagent 执行。")
-        elif name == "task.propose":
-            rid = (conv or {}).get("reqId") or ""
-            active = _store.RequirementsStore.spec_active(rid) if rid else None
-            if not (active and (active.get("state") or "") == "confirmed"):
-                return ("当前为严格挡(需求分析→设计方案→任务)：创建任务卡前必须有已 /定稿 "
-                        "(confirmed) 的需求规约。请先完成需求分析——调用 req.propose 产出规约"
-                        "(requirementMd/designMd/acceptanceMd, designMd 必填),"
-                        "待用户 /定稿 后再调用 task.propose 建卡。")
-    except Exception:  # noqa: BLE001
-        return ""
-    return ""
+_SPEC_TOOLS = {"req.propose", "req.amend"}
 
 
 def run_arch_tool(name: str, arguments: Dict[str, Any],
@@ -294,26 +242,10 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
         if name in _RETIRED_TOOLS:
             return {"error": _RETIRED_TOOLS[name]}
         return {"error": f"未知工具: {name}"}
-    # v2: 退役工具只拦模型面调用; internal=True 为系统确定性路径(spec-apply/
-    # 守卫代落)——放行(P2 随规约域物理删除)。退役范围随分析挡位: 规约工具(req.*spec)
-    # 在 strict 挡恢复启用(需求分析→设计方案→任务), quick 挡保持退役(直出任务卡)。
+    # 退役工具只拦模型面调用; internal=True 为系统确定性路径放行。
+    # 规约工具(req.propose/req.amend)不退役——需求卡按需出现, 挡位门禁已拆(cv-175)。
     if name in _RETIRED_TOOLS and not internal:
-        if name in _SPEC_TOOLS:
-            try:
-                from . import ctx as _ctx
-                conv_id = _ctx.get_conv()
-                if conv_id:
-                    from . import store as _store
-                    conv = _store.ConversationsStore.get(conv_id)
-                    if conv and ((conv.get("analysisMode") or "strict").strip() or "strict") == "strict":
-                        pass  # strict 挡: 规约工具不退役
-                    else:
-                        return {"error": _RETIRED_TOOLS[name]}
-                else:
-                    return {"error": _RETIRED_TOOLS[name]}
-            except Exception:  # noqa: BLE001
-                return {"error": _RETIRED_TOOLS[name]}
-        else:
+        if name not in _SPEC_TOOLS:
             return {"error": _RETIRED_TOOLS[name]}
     # PR1 归档只读: 归档会话上拒绝动作类工具(落库/定稿/指派); 检索/读取/提炼放行
     if name in _ARCHIVED_DENY_TOOLS:
@@ -327,11 +259,6 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
                     return {"error": f"会话已归档(只读)：{name} 不可执行。可读取/复制/提炼。"}
         except Exception:  # noqa: BLE001
             pass
-    # 分析挡位门禁(仅模型面调用; internal 系统确定性路径不受挡位约束)
-    if not internal:
-        gate_err = gear_gate_error(name)
-        if gate_err:
-            return {"error": gate_err}
     fn = entry["handler"]
     kwargs = _coerce_args(fn, dict(arguments or {}))
     params = inspect.signature(fn).parameters
@@ -1027,7 +954,7 @@ def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[st
     return result
 
 
-# ── 需求定稿工具(plan 结论 → 结构化分析 + 转入待执行) ────────────────
+# ── 需求分析工具(plan 结论 → 结构化分析) ────────────────
 
 def _md_lines(text) -> List[str]:
     """Markdown 行/JSON 数组 → 数组(剥列表符/序号，去空行)。
@@ -1060,7 +987,7 @@ def _md_lines(text) -> List[str]:
     "严禁在对话中直接输出成品代码替代需求收敛(代码属于执行产物，不落库无法走执行链路)。"
     "会话已绑定未完结的需求时默认**更新该需求**(追加新 draft 版本，不新建)；"
     "需要在本会话开启全新需求时传 newRequirement=true。"
-    "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节；为空时用户将无法 /定稿——门禁要求方案非空)，"
+    "产出规约见 plan 场景技能文档：designMd 为核心(逻辑与实现细节；为空时执行缺方案依据)，"
     "约束四项(目标/允许范围/禁止改动/验收标准)可按对话留空，不编造。"
     "产出通道二选一：① 输出 [TOOL_CALL] 调用本工具；②(推荐，更可靠) 在回复末尾输出"
     " ```proposal 围栏，内容为本工具参数的 JSON——系统会自动解析落库并发方案卡。"
@@ -1117,25 +1044,26 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
             entry = _store.RequirementsStore.spec_append(
                 bound_rid, snapshot, actor="architect", conv_id=conv_id,
                 reason="对话完善规约")
+            _store.RequirementsStore.spec_confirm(bound_rid)   # 无草稿态: 更新即就绪
             _sync_analysis_cache(bound_rid, snapshot)
             try:
                 log_conv_event(conv_id,
-                               f"📝 **规约已更新**：`{bound_rid}` → v{entry['ver']}"
-                               f"（draft；`/定稿` 确认后 `/执行`）",
-                               meta={"kind": "specCreated", "requirementId": bound_rid,
+                               f"📝 **需求卡已更新**：`{bound_rid}` → v{entry['ver']}"
+                               f"（ready，可直接 `/执行`）",
+                               meta={"kind": "specReady", "requirementId": bound_rid,
                                      "ver": entry["ver"], "updated": True})
             except Exception:  # noqa: BLE001
                 pass
             return {"ok": True, "requirementId": bound_rid, "ver": entry["ver"],
                     "updated": True, "title": title,
-                    "hint": "已更新既有需求规约(新 draft 版本)；`/定稿` 后 `/执行` 启动作业"}
+                    "hint": "需求卡已更新(ready)；`/执行` 启动作业"}
 
     req = {
         "id": _store.next_id("RQ"), "kind": "user-story",
-        "status": "draft", "title": title,
+        "status": "ready", "title": title,
         "priority": priority if priority in ("P0", "P1", "P2") else "P1",
         "activeVer": 1,
-        "specVersions": [{"ver": 1, "state": "draft", "snapshot": snapshot,
+        "specVersions": [{"ver": 1, "state": "confirmed", "snapshot": snapshot,
                           "source": {"convId": conv_id, "actor": "architect"},
                           "reason": "初始提案", "createdAt": _ts()}],
         "ownerConv": conv_id, "sourceType": "asset-chat",
@@ -1150,100 +1078,23 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
             _store.ConversationsStore.update(conv_id, {"reqId": req["id"]})
         except Exception as e:  # noqa: BLE001
             logger.warning("[req.propose] conv.reqId 回写失败 conv=%s: %s", conv_id, e)
-    # 方案缺失标注: designMd 空时在回执与事件流如实提示(定稿门禁会拦, 提前引导 /调整)
+    # 方案缺失如实提示(不再门禁拦截——执行器自行判断, 信息进任务指令)
     no_design = not str(designMd or "").strip()
-    receipt = (f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
-               "`/定稿` 后 `/执行` 启动作业）")
+    receipt = (f"📝 **需求卡已创建**：`{req['id']}` {title}（ready，`/执行` 启动作业）")
     if no_design:
-        receipt = (f"📝 **需求规约已创建**：`{req['id']}` {title}（draft v1；"
-                   "**⚠️ 未包含实现方案(designMd 为空)**——`/定稿` 门禁会要求补全, "
-                   "建议直接 `/调整` 描述方案要点)")
+        receipt = (f"📝 **需求卡已创建**：`{req['id']}` {title}（ready；"
+                   "⚠️ 未包含实现方案——建议 `/调整` 补充后执行)")
     try:
         log_conv_event(conv_id, receipt,
-                       meta={"kind": "specCreated", "requirementId": req["id"],
+                       meta={"kind": "specReady", "requirementId": req["id"],
                              "ver": 1, "noDesign": no_design})
     except Exception:  # noqa: BLE001
         pass
-    hint = "新需求规约已创建(draft v1)"
+    hint = "需求卡已创建(ready)；`/执行` 启动作业"
     if no_design:
-        hint += "(⚠️ 方案缺失, 建议 /调整 补全后再 /定稿)"
+        hint += "(⚠️ 方案缺失, 建议 /调整 补全)"
     return {"ok": True, "requirementId": req["id"], "ver": 1, "updated": False,
             "title": title, "noDesign": no_design, "hint": hint}
-
-
-@register_architect_tool(
-    "req.finalize",
-    "规约确认(交托门禁)：把当前 draft 版本确认为可执行(confirmed/ready)。"
-    "通常由用户指令 `/定稿` 触发(系统直通, 模型仅在用户明确要求时代调)。"
-    "门禁(结构完整性, 不评判语义)：designMd 非空; acceptance 若提供必须为数组且语法有效。"
-    "缺失项不拦截, 仅在结果中如实提示。确认后旧 confirmed 版本自动废弃(superseded)。"
-    "参数 reqId 勿传(系统自动取会话绑定需求)。",
-)
-def tool_req_finalize(reqId: str = "", root: Optional[str] = None,
-                      project: Optional[str] = None,
-                      notify: bool = True) -> Dict[str, Any]:
-    """规约定稿(REST/指令/模型三入口同路)。notify=False 供 /定稿 直通: 编排层
-    统一落回执(meta specReady), 此处不再 log_conv_event 防双回执。"""
-    from . import ctx
-    req_id = (reqId or "").strip() or ctx.get_req()
-    if not req_id:
-        # 回退读会话绑定: req.propose 与 finalize 同轮调用时 ctx.req 尚未回写(下一轮生效)
-        try:
-            cid = ctx.get_conv()
-            if cid:
-                c = store.ConversationsStore.get(cid) or {}
-                req_id = (c.get("reqId") or "").strip()
-        except Exception:  # noqa: BLE001
-            pass
-    if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求，无法确认。请先在对话中形成需求(req.propose)"}
-    row = store.RequirementsStore.get(req_id)
-    if not row:
-        return {"ok": False, "error": f"需求 {req_id} 不存在"}
-    if (row.get("doneMark") or 0) == 1:
-        return {"ok": False, "error": f"{req_id} 已完结(用户判定已完成)；继续执行请新建需求"}
-    active = store.RequirementsStore.spec_active(req_id)
-    if not active:
-        return {"ok": False, "error": "无生效规约版本"}
-    if active.get("state") == "confirmed":
-        snap0 = active.get("snapshot") or {}
-        has_d = bool(str(snap0.get("designMd") or "").strip())
-        has_r = bool(str(snap0.get("desc") or row.get("desc") or "").strip())
-        if not has_d and not has_r:
-            return {"ok": False, "error": "规约确认门禁未过——当前已确认版本既无方案(designMd)"
-                    "也无需求正文, 执行作业只会空转。请 `/调整` 补充内容落新版本后重新 `/定稿`。"}
-        if not has_d:
-            return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "already": True,
-                    "hint": "当前版本已确认(ready，将按需求正文执行)；建议 `/调整` 细化方案后重启作业。可直接 `/执行`"}
-        return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "already": True,
-                "hint": "当前版本已确认(ready)，可直接 `/执行` 启动作业"}
-    snap = active.get("snapshot") or {}
-    # 结构门禁(放宽裁决): designMd 非空即可放行; 其余缺失只提示不拦截
-    if not (snap.get("designMd") or "").strip():
-        return {"ok": False, "error": "规约确认门禁未过——方案(designMd)为空(结构不完整)。"
-                "请先完善方案(req.propose / req.amend)再 `/定稿`。"}
-    warns = []
-    if not (snap.get("acceptance") or []):
-        warns.append("验收标准(acceptance)未定义")
-    scope_files = parse_scope_files(snap.get("allowedScope") or [])
-    if not scope_files:
-        warns.append("允许改动范围未解析出文件/目录(并行互斥无法保护本需求)")
-    warn_note = ("；⚠️ " + "；".join(warns)) if warns else ""
-    res = store.RequirementsStore.spec_confirm(req_id)
-    if not res.get("ok"):
-        return res
-    try:
-        if notify:
-            log_conv_event(ctx.get_conv(),
-                           f"✅ **规约已确认**：`{req_id}` v{active.get('ver')}（ready，可执行）"
-                           + warn_note,
-                           meta={"kind": "specReady", "requirementId": req_id,
-                                 "ver": active.get("ver")})
-    except Exception:  # noqa: BLE001
-        pass
-    return {"ok": True, "reqId": req_id, "ver": active.get("ver"), "status": "ready",
-            "boundaryFiles": sorted(scope_files), "warns": warns,
-            "hint": "规约已确认(ready)；发送 `/执行` 启动实施作业" + warn_note}
 
 
 @register_architect_tool(
@@ -1318,12 +1169,12 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     _sync_analysis_cache(req_id, snap)
     try:
         log_conv_event(conv_id,
-                       f"✏️ **规约已修订**（{req_id} → v{entry['ver']} draft）：{'、'.join(changed)}"
+                       f"✏️ **需求卡已修订**（{req_id} → v{entry['ver']} ready）：{'、'.join(changed)}"
                        + (f" —— {str(reasoning)[:120]}" if reasoning else ""))
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "reqId": req_id, "ver": entry["ver"], "amended": changed,
-            "hint": "修订已追加新 draft 版本；`/定稿` 后 `/执行` 按新版本执行"}
+            "hint": "修订已就绪(ready)；`/执行` 按新版本执行"}
 
 
 # ── 会话只读工具(PR-D: 归档会话可被 agent 读取/引用; 不在任何动作黑名单) ──
@@ -1376,9 +1227,9 @@ from ..agent.cognition.llm import (  # noqa: F401,E402
 
 
 def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None:
-    """统一时间线: 中间资产事件(提案/定稿/指派)以消息沉淀进来源会话。
+    """统一时间线: 中间资产事件(需求卡/指派)以消息沉淀进来源会话。
 
-    meta: 卡片化回执(前端动作按钮: specCreated→[去定稿] / specReady→[一键建卡])。
+    meta: 卡片化回执(specReady→[一键建卡执行]; 历史 specCreated 兼容渲染)。
     失败静默——事件回写不阻断工具主流程。
     """
     if not conv_id:
@@ -1474,16 +1325,6 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                                         "请改用允许的工具，或直接基于已有信息作答。"})
                 continue
             result = run_arch_tool(name, args, root, project)
-            if isinstance(result, dict) and result.get("error") \
-                    and _is_repairable_error(str(result.get("error"))):
-                _fixed = repair_tool_args(name, args, str(result.get("error")),
-                                          model_id=model_id)
-                if isinstance(_fixed, dict):
-                    result = run_arch_tool(name, _fixed, root, project)
-                    if not (isinstance(result, dict) and result.get("error")):
-                        results.append({"name": name,
-                                        "text": f"(参数已自动修复) {tool_result_text(name, result)}"})
-                        continue
             results.append({"name": name, "text": tool_result_text(name, result)})
         if not results:
             return {"content": strip_tool_blocks(content), "output": None}
@@ -1525,11 +1366,9 @@ _CAPABILITY_DOC = (
     "- convention.propose：把观察到的命名重复模式固化为命名规约提案(pending，待设计者确认/忽略)\n"
     "- contract.propose：把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)\n"
     "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
-    "- req.finalize：规约确认(交托门禁)——通常由用户指令 `/定稿` 系统直通，"
-    "模型仅在用户明确要求时代调，把当前 draft 确认为 ready。reqId 勿传(系统自动取会话绑定需求)\n"
-    "- req.propose：需求提案(新建或幂等更新)——对话产出完整需求/方案时调用，"
-    "创建新需求或更新会话绑定需求的 draft 版本。"
-    "用户要求 编写脚本/工具/程序 时**必须先调本工具**(designMd=选型与结构)，由 /执行 链路产出代码——"
+    "- req.propose：需求提案(新建或幂等更新)——**开发类需求**(要写代码/改代码/交付组件)时调用，"
+    "创建需求卡即 ready(designMd=选型与结构)；分析/问答类请求不要产卡。"
+    "用户要求 编写脚本/工具/程序 时**必须先调本工具**，由 /执行 链路产出代码——"
     "**严禁直接输出成品代码**(python/bash 等)替代需求收敛。"
     "参数 {\"title\", \"requirementMd\"?, \"designMd\"?, \"allowedScopeMd\"?, "
     "\"forbiddenScopeMd\"?, \"acceptanceMd\"?, \"assessmentMd\"?, \"priority\"?, "
@@ -1549,7 +1388,7 @@ _CAPABILITY_DOC = (
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<工具名>","arguments":{参数}}[/TOOL_CALL]\n'
-    "硬性规则(防编造)：凡是会改数据或有真实执行结果的指令(提取/刷新/保存/定稿/委派执行等)，"
+    "硬性规则(防编造)：凡是会改数据或有真实执行结果的指令(提取/刷新/保存/委派执行等)，"
     "必须实际调用对应工具拿到同步返回的结果，再如实转述；"
     "严禁不调用工具就输出『已启动/报告/条数/检查结果』等编造结论。\n"
     "需求落库纪律(必须遵守)：\n"
@@ -1557,9 +1396,10 @@ _CAPABILITY_DOC = (
     "req.amend，严禁重新 req.propose 或输出裸 JSON 围栏当作工具调用；\n"
     "2. RQ 编号/数据 ID 一律由系统管理：工具调用不传 reqId(系统自动取会话绑定)，"
     "回复中的编号只来自工具返回，严禁自造编号(会被系统守卫拦截)；\n"
-    "3. 确认(draft→ready)由用户指令 `/定稿` 发起(系统直通)；修订(req.amend)时不要顺带调用 req.finalize。\n"
-    "会话指令符号(系统直通，与模型无关)：用户消息恰为 /定稿 或 /执行 时由系统确定性执行"
-    "(定稿=确认规约→ready; 执行=ready 规约建任务卡, 用户卡片确认后 subagent 启动)——"
+    "3. 需求卡按需出现——只有开发类需求(要写代码/改代码/交付组件)才 req.propose(创建即 ready)；"
+    "分析/问答/检索类请求直接回答，不要产卡。\n"
+    "会话指令符号(系统直通，与模型无关)：用户消息恰为 /提取需求 或 /执行 时由系统确定性执行"
+    "(提取需求=从历史提取需求卡; 执行=需求卡建任务卡, 用户卡片确认后 subagent 启动)——"
     "模型不会收到这两类消息，也不要在回复中代用户发出指令；"
     "/调整 会作为普通消息进入对话(由你整理修订内容)。\n"
     "各工具的参数：\n"
@@ -1588,7 +1428,6 @@ _CAPABILITY_DOC = (
     '- convention.propose: {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}\n'
     '- contract.propose: {"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)\n'
     '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
-    '- req.finalize: {}——reqId 勿传(系统自动取会话绑定需求)；门禁=结构完整(designMd 非空)\n'
     '- req.propose / req.amend: 参数形状见上方能力清单(reqId 同样勿传)\n'
     '- capability.evaluate: {"target": "plan|execution", "execId"?: "ex-…(execution 时必填)}\n'
     '- capability.mine: {"conversation"?: "cv-…(缺省当前会话)}\n'
@@ -1701,7 +1540,7 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
         "## 职责边界(重要)\n"
         "用户明确表达的需求**一律受理**，不拒做、不引导用户另找工具——包括与当前项目"
         "关联较弱的通用编程/运维任务(脚本、工具、配置等)：照常收敛为需求规约"
-        "(req.propose 带 title/requirementMd/**designMd**/acceptanceMd)，后续同样可 /定稿 + /执行。"
+        "(req.propose 带 title/requirementMd/**designMd**/acceptanceMd)，需求卡就绪后可 /执行。"
         "关联较弱时仅在方案中说明「独立于项目核心资产」并收敛 scope，**不得以此为由拒绝或推诿**。"
         "已创建需求(RQ 编号以系统回执为准)后继续跟进完善，不得再声明该任务不属于职责范围。\n\n"
         f"{_CAPABILITY_DOC}{ir_doc}{extra}{mcp_extra}{skill_extra}"

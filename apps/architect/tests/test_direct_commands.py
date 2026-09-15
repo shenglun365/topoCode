@@ -91,10 +91,10 @@ def _chat(ws, conv_id, content, **extra):
 # ── 指令识别 ─────────────────────────────────────────────────────────
 
 def test_match_command_strict_shape():
-    assert match_command("/定稿") == {"cmd": "定稿", "executor": ""}
+    assert match_command("/提取需求") == {"cmd": "提取需求", "executor": ""}
     assert match_command(" /执行 ") == {"cmd": "执行", "executor": ""}
     assert match_command("@cline /执行") == {"cmd": "执行", "executor": "cline"}
-    assert match_command("/定稿 帮我看看") is None       # 带正文 → 普通消息
+    assert match_command("/提取需求 帮我看看") is None   # 带正文 → 普通消息
     assert match_command("/调整") is None                 # 保留经 LLM
     assert match_command("/继续") is None
     assert match_command("/diff") is None
@@ -154,70 +154,63 @@ def test_text_confirm_without_pending_falls_to_llm(tmp_path, monkeypatch):
 
 # ── /定稿 直通 ───────────────────────────────────────────────────────
 
-def test_slash_finalize_direct(tmp_path, monkeypatch):
+def test_slash_extract_req_direct(tmp_path, monkeypatch):
+    """/提取需求: LLM 结构化提取 → apply_spec_payload 落需求卡(ready)。"""
     client, captured = _client(tmp_path, monkeypatch)
     conv = _mk_conv()
-    rid = _mk_req(conv["id"], design=True, confirmed=False)
-    with client:   # MCP 会话管理器每实例仅可 run 一次: 两轮共用一个连接
+    store.ConversationsStore.append_message({
+        "id": store.next_id("m"), "conversationId": conv["id"],
+        "role": "user", "time": 1, "content": "给项目写一个连通性探测脚本"})
+    from topoone_app_architect.arch_routes import req_agent as _ra
+    monkeypatch.setattr(_ra, "llm_sync",
+                        lambda *a, **k: {"output": {"title": "连通性探测脚本",
+                                                    "requirementMd": "实现探测"}, "content": ""})
+    with client:
         with client.websocket_connect(WS_PATH) as ws:
-            _chat(ws, conv["id"], "/定稿")
+            _chat(ws, conv["id"], "/提取需求")
             ev, _ = _recv_until(ws, "done")
-            assert captured["calls"] == 0                      # 零 LLM
-            assert ev["meta"]["kind"] == "specReady"
-            assert ev["meta"]["requirementId"] == rid
-            active = store.RequirementsStore.spec_active(rid)
-            assert active["state"] == "confirmed"
-            # 幂等: 再发一次 /定稿 仍 ok(already)
-            _chat(ws, conv["id"], "/定稿")
-            ev2, _ = _recv_until(ws, "done")
-    assert ev2["meta"]["kind"] == "specReady"
+    assert captured["calls"] == 0                        # 零额外 LLM(llm_sync 已 mock)
+    assert "已提取" in ev["content"]
+    assert (store.ConversationsStore.get(conv["id"]) or {}).get("reqId")
 
 
-def test_slash_finalize_without_req_guides(tmp_path, monkeypatch):
+def test_slash_extract_req_without_content_guides(tmp_path, monkeypatch):
+    """空会话 → 明确引导, 不调 LLM。"""
     client, captured = _client(tmp_path, monkeypatch)
     conv = _mk_conv()
     with client:
         with client.websocket_connect(WS_PATH) as ws:
-            _chat(ws, conv["id"], "/定稿")
+            _chat(ws, conv["id"], "/提取需求")
             ev, _ = _recv_until(ws, "done")
-    assert captured["calls"] == 0
-    assert "未绑定需求" in ev["content"]
-    assert "meta" not in ev
+    assert "还没有内容" in ev["content"]
 
 
-# ── /执行 直通(建卡待确认) ───────────────────────────────────────────
-
-def test_slash_execute_creates_task_card(tmp_path, monkeypatch):
-    client, captured = _client(tmp_path, monkeypatch)
-    conv = _mk_conv()
-    rid = _mk_req(conv["id"], confirmed=True)
-    with client:
-        with client.websocket_connect(WS_PATH) as ws:
-            _chat(ws, conv["id"], "/执行")
-            ev, _ = _recv_until(ws, "done")
-    assert captured["calls"] == 0
-    tasks = store.TasksStore.of_conv(conv["id"])
-    assert len(tasks) == 1 and tasks[0]["status"] == "pending_confirm"
-    assert tasks[0]["title"] == "演示任务"
-    # instruction 由快照组装(目标/方案/边界/验收)
-    ins = tasks[0]["instruction"]
-    assert "需求目标" in ins and "方案" in ins and "src/a.py" in ins and "编译通过" in ins
-    # 任务卡消息已落流(meta task_card, 前端确认按钮数据源)
-    msgs = store.ConversationsStore.messages(conv["id"], limit=50)
-    assert any((m.get("meta") or {}).get("kind") == "task_card" for m in msgs)
-
-
-def test_slash_execute_rejects_draft(tmp_path, monkeypatch):
+def test_slash_execute_autoconfirms_legacy_draft(tmp_path, monkeypatch):
+    """历史 draft 需求(旧流程产物) → /执行 就地确认后建卡, 不再要求 /定稿。"""
     client, captured = _client(tmp_path, monkeypatch)
     conv = _mk_conv()
     _mk_req(conv["id"], confirmed=False)
+    import topoone_app_architect.arch_routes.execution as ex
+    root = tmp_path / "proj-ex"
+    root.mkdir(exist_ok=True)
+    (root / "README.md").write_text("# P\n")
+    monkeypatch.setattr(ex, "conv_root_project", lambda c: (str(root), "proj-x"))
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_runner",
+                        lambda path, payload=None, timeout=20.0: (
+                            {"ok": True, "jobId": "impl-d1", "worktree": "/w",
+                             "branch": "task/x", "sessionId": "s"}
+                            if path == "/api/implement" else None))
     with client:
         with client.websocket_connect(WS_PATH) as ws:
             _chat(ws, conv["id"], "/执行")
             ev, _ = _recv_until(ws, "done")
     assert captured["calls"] == 0
-    assert "尚未定稿" in ev["content"] and "/定稿" in ev["content"]
-    assert store.TasksStore.of_conv(conv["id"]) == []
+    assert "任务卡" in ev["content"]
+    assert any((t.get("status") or "") == "pending_confirm"
+               for t in store.TasksStore.of_conv(conv["id"]))
 
 
 def test_slash_execute_without_req_guides(tmp_path, monkeypatch):
