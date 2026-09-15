@@ -139,7 +139,7 @@ def test_confirm_task_fetches_config_for_type_only_task(tmp_path, monkeypatch):
     r = eb.confirm_task(t["id"])
     assert r.get("ok") is True, r
     assert captured.get("executorId") == "cline"
-    assert captured.get("model") == "M1"                       # hint.model = models[0].name
+    assert captured.get("model") == "Qwen3.6-35B"              # hint.model = 顶层默认 model_id(对齐 _resolve_model 序)
     assert (captured.get("executorConfig") or {}).get("models")
 
 
