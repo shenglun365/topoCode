@@ -787,7 +787,7 @@ class AgentRuntime:
 
                     # 执行本轮工具调用
                     tool_results: list[dict] = []
-                    for tc in response.tool_calls[:3]:
+                    for comp_idx, tc in enumerate(response.tool_calls[:3]):
                         tool = self._tools.get(tc.name)
                         if tool:
                             tool.cancel_event = self._cancel_event

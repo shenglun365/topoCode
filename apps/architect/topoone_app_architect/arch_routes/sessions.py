@@ -329,6 +329,17 @@ async def session_messages(conv_id: str):
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
+    # T3 恢复扩面: 打开会话(只读查看)即惰性核对 running/waiting_input 任务——
+    # 不再要求用户必须发消息才自愈(cv-161: 服务重启后泵丢失, 任务假 running)
+    try:
+        from . import exec_bridge as _eb
+        if any((t.get("status") or "") in ("running", "waiting_input")
+               for t in store.TasksStore.of_conv(conv_id)):
+            rec = await asyncio.to_thread(_eb.recover_conv_tasks, conv_id)
+            for tid, jid, rid, ag in (rec or {}).get("repump", []):
+                _eb._start_task_pump(conv_id, tid, jid, rid, ag)
+    except Exception:  # noqa: BLE001
+        pass
     return ok({"id": conv_id, "messages": store.ConversationsStore.messages(conv_id, limit=1000)})
 
 

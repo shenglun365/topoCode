@@ -188,3 +188,24 @@ def test_markdown_payload_status_talk_not_title():
     content = ("任务已启动，执行器正在处理中。\n"
                "完成后将同步进展。")
     assert _task_payload_from_markdown(content) is None
+
+
+def test_messages_rest_triggers_recovery(tmp_path, monkeypatch):
+    """T3 恢复扩面: 只打开会话(GET messages, 不发消息)也自愈假 running 任务。"""
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    _env(tmp_path, monkeypatch)
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+    t = _mk_running_task(conv["id"])
+    done_ev = {"seq": 2, "kind": "done", "text": "[[IMPLEMENT_DONE]] ok",
+               "changedFiles": []}
+    monkeypatch.setattr(eb, "_runner",
+                        lambda path, **kw: _snapshot("done", [done_ev])
+                        if path.endswith("/impl-x") else None)
+    monkeypatch.setattr(eb, "_acceptance_brief", lambda *a, **k: "(简报)")
+    client = TestClient(build_app(data_dir=str(tmp_path / "arch")))
+    r = client.get(f"/api/architect/sessions/{conv['id']}/messages")
+    assert r.status_code == 200
+    assert store.TasksStore.get(t["id"])["status"] == "done"
+    msgs = store.ConversationsStore.messages(conv["id"], limit=20)
+    assert any((m.get("meta") or {}).get("kind") == "task_done" for m in msgs)
