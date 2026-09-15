@@ -736,6 +736,10 @@ async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
     # ── v2 通用任务路由守卫: 用户指令是通用执行类 + architect 答复是「无法直接/
     #    需检索」推诿话术且未发起任务 → 纠偏一轮(交 coding subagent) ──
     try:
+        # 管线拆分作用域修复: visible/corr 此前遗留自拆分前的 handle_chat
+        # 局部作用域, 未初始化即读 → UnboundLocalError(cv-172 实证)
+        visible = final_content
+        corr = ""
         _generic_user = _GENERIC_EXEC_RE.search(question or "")
         _deflect = bool(_generic_user) and not tools_used and (
             re.search(r"无法直接|无法凭|不能直接|无法给出|需要先(调用|检索|查询)",
@@ -767,6 +771,8 @@ async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
     # 零工具回合: 任意意图短语即追问; 有工具回合: 最终答案段(assistant_text,
     # 即结束循环的无工具轮)宣布工具而未执行也追问——此前轮次的宣布已被
     # 真实工具调用兑现, 查全文会误报, 故只查末段
+    visible = final_content   # 同 cv-172: 守卫续写基于 final_content 累积
+    corr = ""
     pending_wait = "请等待" in final_content
     intent = ""
     if pending_wait:

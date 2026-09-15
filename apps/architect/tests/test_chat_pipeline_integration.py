@@ -231,3 +231,32 @@ def test_resolve_call_model_raises_when_unconfigured(monkeypatch):
         llm.resolve_call_model("")
     with _pt.raises(llm.ModelNotConfigured):
         llm.resolve_call_model(None)
+
+
+def test_post_turn_guards_scope_fix_visible_corr(monkeypatch):
+    """cv-172 回归: _post_turn_guards 拆分遗留作用域断链——
+    visible/corr 未初始化即读 → UnboundLocalError。守卫块须在
+    预算耗尽(corr 不赋值)场景下正常返回不炸。"""
+    import asyncio
+    import time as _t
+    from topoone_app_architect.agent import orchestrator as orc
+
+    async def fake_send(payload):
+        pass
+
+    async def fake_sync(*a, **k):
+        return "已转交 subagent 执行。"
+
+    monkeypatch.setattr(orc, "_sync_with_tools", fake_sync)
+
+    async def _flow():
+        io = orc._TurnIO(fake_send, "cv-t", "m-1")
+        io.t0 = _t.time() - 10_000   # 预算耗尽 → corr 不赋值路径
+        return await orc._post_turn_guards(
+            io, "cv-t", [], "", "", None, "", {"id": "cv-t"},
+            "帮我统计下当前目录文件数", set(), {},
+            "这个我无法直接给出，需要先调用检索。", None,
+            assistant_text="")
+
+    fc, meta, conv, tu, te = asyncio.run(_flow())
+    assert "无法直接" in fc   # 原样返回, 无 UnboundLocalError 即通过
