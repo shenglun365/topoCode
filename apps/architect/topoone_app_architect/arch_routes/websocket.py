@@ -57,7 +57,35 @@ async def kb_analysis_ws(websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
 
             elif msg_type == "chat":
-                await orchestrator.handle_chat(data, _send)
+                try:
+                    await orchestrator.handle_chat(data, _send)
+                except Exception as e:  # noqa: BLE001
+                    # 回合级异常兜底: 完整错误落库(turnError)+回传——
+                    # 不再静默吞掉(cv-154 实证: 异常后 UI 零反馈且刷新即失)
+                    logger.exception("[kb-chat] 回合异常 conv=%s",
+                                     (data or {}).get("conversationId"))
+                    detail = f"{type(e).__name__}: {e}"
+                    conv_id = str((data or {}).get("conversationId") or "")
+                    if conv_id:
+                        try:
+                            import json as _json
+                            from ..arch_routes import store as _store
+                            from ..arch_routes.common import _ts
+                            _store.ConversationsStore.append_message({
+                                "id": _store.next_id("m"),
+                                "conversationId": conv_id,
+                                "role": "assistant", "time": _ts(),
+                                "content": f"❌ 回合失败：{detail}",
+                                "meta": _json.dumps({"kind": "turnError"},
+                                                    ensure_ascii=False)})
+                            _store.ConversationsStore.update(
+                                conv_id, {"reviewState": "unread"})
+                        except Exception:  # noqa: BLE001
+                            logger.exception("[kb-chat] turnError 落库失败 conv=%s",
+                                             conv_id)
+                    await _send({"type": "error",
+                                 "requestId": str((data or {}).get("requestId") or ""),
+                                 "message": f"回合失败：{detail}"})
 
     except WebSocketDisconnect:
         logger.info("KB analysis WebSocket disconnected")

@@ -745,11 +745,25 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         except Exception:  # noqa: BLE001
             pass
     else:
+        # 空返回: 带上失败上下文落库(turnError)+回传——错误必须完整可见且可刷新
+        detail = "LLM 未返回内容"
+        if tool_errors:
+            detail += "；工具失败: " + "; ".join(
+                f"{k}: {str(v)[:160]}" for k, v in list(tool_errors.items())[:3])
+        if loop_fell_back:
+            detail += "（流式通道中断，已走同步降级通道仍未产出）"
+        try:
+            store.ConversationsStore.append_message({
+                "id": store.next_id("m"), "conversationId": conv_id,
+                "role": "assistant", "time": _ts(), "content": f"❌ {detail}",
+                "meta": json.dumps({"kind": "turnError"}, ensure_ascii=False)})
+        except Exception:  # noqa: BLE001
+            logger.warning("[kb-chat] turnError 落库失败 conv=%s", conv_id)
         try:
             store.ConversationsStore.update(conv_id, {"reviewState": "error"})
         except Exception:  # noqa: BLE001
             pass
-        await send_ev({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
+        await send_ev({"type": "error", "requestId": request_id, "message": detail})
 
 
 async def _guard_autoland(conv: dict, final_content: str) -> Optional[dict]:
