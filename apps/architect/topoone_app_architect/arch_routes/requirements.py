@@ -215,31 +215,25 @@ async def mark_requirement_done(req_id: str, request: Request):
 
 @router.post("/requirements/{req_id}/finalize")
 async def finalize_requirement(req_id: str):
-    """规约确认(REST 入口): 统一走 req.finalize 工具路径(结构门禁 + already 幂等)。
+    """需求卡就绪确认(REST 入口, 兼容前端存入按钮)。
 
-    cv-140 教训: 直连 spec_confirm 会绕过 designMd 门禁, 空规约入 ready →
-    执行作业空转。REST/指令/自然语言三入口必须同一条门禁。
+    cv-175: 无草稿态——req.propose 创建即 ready; 本端点退化为幂等就位:
+    历史 draft(旧流程产物)就地 spec_confirm, 已 ready 直接返回行。
     """
-    import asyncio as _aio
-    from .req_agent import tool_req_finalize
-    res = await _aio.to_thread(tool_req_finalize, req_id, None, None)
-    if not res.get("ok"):
-        return err(400, res.get("error") or "确认失败")
     row = store.RequirementsStore.get(req_id)
-    # 统一时间线: 按钮确认也回写来源会话(重复确认幂等, 不重复刷)
-    if not res.get("already"):
-        try:
-            origin_id = row.get("sourceConversationId") or ""
-            if origin_id and store.ConversationsStore.get(origin_id):
-                store.ConversationsStore.append_message({
-                    "id": store.next_id("m"), "conversationId": origin_id,
-                    "role": "assistant", "time": _ts(),
-                    "content": f"✅ **`{req_id}` v{row.get('activeVer')} 规约已确认**（ready，`/执行` 启动实施作业）",
-                    "projectId": row.get("ownerConv") and "" or "",
-                })
-        except Exception:  # noqa: BLE001
-            pass
-    return ok(row)
+    if not row:
+        return err(404, "Not found")
+    active = store.RequirementsStore.spec_active(req_id) or {}
+    if active:
+        if (active.get("state") or "") != "confirmed":
+            c = store.RequirementsStore.spec_confirm(req_id)
+            if not c.get("ok"):
+                return err(400, str(c.get("error") or "确认失败"))
+            row = store.RequirementsStore.get(req_id)
+    elif (row.get("status") or "") != "ready":
+        # 无版本行(历史遗留形态) → 行级状态就位
+        row = store.RequirementsStore.update(req_id, {"status": "ready"}) or row
+    return ok(row)   # 已 ready(无草稿态): 原样返回
 
 
 

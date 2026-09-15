@@ -257,3 +257,28 @@ def test_v1_contract_removed_from_skill_docs(tmp_path, monkeypatch):
     # v2 口径在场: plan/capability 指向建卡链
     assert "task.propose" in docs
     assert "`/执行`" in docs
+
+
+def test_finalize_route_idempotent_ready(tmp_path, monkeypatch):
+    """cv-175 回归: /requirements/{id}/finalize 退化为幂等就位——
+    ready 直接返回行(不再走已退役的 tool_req_finalize), 历史 draft 就地确认。"""
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    data = tmp_path / "arch-fin"
+    monkeypatch.setenv("ARCH_DATA_DIR", str(data))
+    C._db = None; C._kb = None; C._data_dir = None; C._project_dbs.clear()
+    C.setup(data_dir=str(data))
+    client = TestClient(build_app(data_dir=str(data)))
+    rid = store.next_id("RQ")
+    store.RequirementsStore.create({"id": rid, "kind": "user-story",
+                                    "status": "ready", "title": "T", "activeVer": 1})
+    r = client.post(f"/api/architect/requirements/{rid}/finalize")
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "ready"
+    # 历史 draft → 就地确认
+    rid2 = store.next_id("RQ")
+    store.RequirementsStore.create({"id": rid2, "kind": "user-story",
+                                    "status": "draft", "title": "T2", "activeVer": 1})
+    r2 = client.post(f"/api/architect/requirements/{rid2}/finalize")
+    assert r2.status_code == 200
+    assert r2.json()["data"]["status"] == "ready"
