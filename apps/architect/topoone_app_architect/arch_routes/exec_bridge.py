@@ -621,8 +621,20 @@ def _task_ctx(conv_id: str, task_id: str, job_id: str, rid: str, agent: str) -> 
             "pid": conv.get("projectId") or "", "agent": agent}
 
 
-def _publish_progress(conv_id: str, task_id: str, prog: dict) -> None:
-    """任务进度实时推送（WS/SSE 单一出口）。"""
+_PROGRESS_SSE_LAST: dict = {}   # task_id → 上次 SSE progress 发送时刻(文本节流)
+
+
+def _publish_progress(conv_id: str, task_id: str, prog: dict,
+                      throttle: float = 0.0) -> None:
+    """任务进度实时推送（WS/SSE 单一出口）。
+
+    throttle>0 时按 task 节流(准流式: 文本片段高频, 0.5s 一拍足够"内容在动";
+    工具/终态事件不节流保证不丢关键帧)。"""
+    if throttle > 0:
+        now = time.time()
+        if now - _PROGRESS_SSE_LAST.get(task_id, 0.0) < throttle:
+            return
+        _PROGRESS_SSE_LAST[task_id] = now
     try:
         from ..agent.collab.sse import emit
         emit("progress", conv_id, taskId=task_id, **{"at": _ts(), **prog})
@@ -711,21 +723,28 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         _task_reaggregate_work_state(conv_id)
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
     elif kind == "progress":
-        prog = {"toolCount": int(ev.get("toolCount") or 0),
+        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        prog = {**prev,
+                "toolCount": int(ev.get("toolCount") or 0),
                 "msgCount": int(ev.get("msgCount") or 0), "at": _ts()}
         store.TasksStore.set_progress(task_id, prog)
         _publish_progress(conv_id, task_id, prog)
     elif kind == "text":
-        # cline v2 流式片段: 仅作执行预览(进度面), 不落会话消息(防刷屏)
+        # 准流式执行预览: 滚动文本尾(600 字符)+节流 SSE(0.5s), 不落消息(防刷屏)。
+        # UI 过程面板随 progress 事件实时变化, 终态回执仍走 done/failed。
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
-        prog = {**prev, "lastText": text[:200], "at": _ts()}
+        prog = {**prev,
+                "lastText": ((prev.get("lastText") or "") + text)[-600:], "at": _ts()}
         store.TasksStore.set_progress(task_id, prog)
-        _publish_progress(conv_id, task_id, {"lastText": text[:200]})
+        _publish_progress(conv_id, task_id, prog, throttle=0.5)
     elif kind == "tool":
+        # 工具轨迹: process 环形尾(30 条)随 SSE 全量下发, TaskCard 渲染过程流
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
-        prog = {**prev, "lastTool": str(ev.get("toolName") or text or ""), "at": _ts()}
+        name = str(ev.get("toolName") or text or "")
+        trail = [*(((prev.get("process") or []))), {"at": _ts(), "s": f"▸ {name}"}][-30:]
+        prog = {**prev, "lastTool": name, "process": trail, "at": _ts()}
         store.TasksStore.set_progress(task_id, prog)
-        _publish_progress(conv_id, task_id, {"lastTool": prog["lastTool"]})
+        _publish_progress(conv_id, task_id, prog)
     elif kind == "usage":
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
         prog = {**prev,

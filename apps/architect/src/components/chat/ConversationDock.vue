@@ -152,11 +152,16 @@ function _debounceRefresh() {
 function onConvEvent(d: any) {
   if (d?.conversationId && d.conversationId !== conv.activeId) return
   if (d?.type === 'progress') {
-    // v2 执行进展(工具计数): 任务行 progress → TaskCard ⚙ 计数响应
+    // v2 执行进展(准流式): 全量 progress 合并(滚动文本尾+工具轨迹) → TaskCard 过程面板
+    const patch = {
+      toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now(),
+      lastText: d.lastText ?? '', lastTool: d.lastTool ?? '',
+      process: d.process ?? [], inputTokens: d.inputTokens ?? 0, outputTokens: d.outputTokens ?? 0,
+    }
     const t = (conv.tasks || []).find((x: any) => x.id === d.taskId)
-    if (t) t.progress = { toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now() }
+    if (t) t.progress = { ...(t.progress || {}), ...patch }
     const rr = (conv.activeMeta as any)?.runningRole
-    if (rr) rr.progress = { toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now() }
+    if (rr) rr.progress = { ...(rr.progress || {}), ...patch }
     return
   }
   if (d?.type === 'task') {

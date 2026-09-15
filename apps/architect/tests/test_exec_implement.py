@@ -592,3 +592,36 @@ def test_generic_exec_routing_regex():
     assert _GENERIC_EXEC_RE.search("当前项目的源码文件数量是多少")
     assert _GENERIC_EXEC_RE.search("写个脚本统计代码行数")
     assert not _GENERIC_EXEC_RE.search("这个项目的架构设计思路是什么")
+
+
+def test_task_text_quasi_streaming_and_tool_trail(tmp_path, monkeypatch):
+    """准流式过程回传: text 滚动尾(600 字)+SSE 节流, tool 轨迹环(30 条)全量下发。
+    UI 过程面板据此实时显示内容变化(cv-163 用户诉求)。"""
+    import time as _t
+    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    task = eb.propose_task(conv, "P", "x")
+    assert eb.confirm_task(task["id"])["ok"]
+    from topoone_app_architect.agent.collab import sse
+    broadcast = []
+    monkeypatch.setattr(sse, "publish", lambda ev: broadcast.append(ev))
+    ctx = eb._task_ctx(conv["id"], task["id"], "job-v2-2", "", "cline-sdk")
+    # 工具轨迹: 两条, SSE 全量携带 process
+    eb._handle_task_event({"kind": "tool", "toolName": "run_commands"}, ctx)
+    eb._handle_task_event({"kind": "tool", "toolName": "editor"}, ctx)
+    prog = store.TasksStore.get(task["id"])["progress"]
+    assert [p["s"] for p in prog["process"]] == ["▸ run_commands", "▸ editor"]
+    assert prog["lastTool"] == "editor"
+    tool_ev = [e for e in broadcast if e.get("type") == "progress"][-1]
+    assert tool_ev["process"] == prog["process"] and tool_ev.get("lastText", "") == ""
+    # 文本滚动尾: 累积拼接(非覆盖)
+    eb._handle_task_event({"kind": "text", "text": "第一段"}, ctx)
+    eb._handle_task_event({"kind": "text", "text": "第二段"}, ctx)
+    prog = store.TasksStore.get(task["id"])["progress"]
+    assert prog["lastText"] == "第一段第二段"
+    # 节流: 0.5s 内第二条不发 SSE(但有工具事件后的窗口差异, 直接校验节流字典)
+    assert eb._PROGRESS_SSE_LAST[task["id"]] > 0
+    # 环形截断
+    for i in range(35):
+        eb._handle_task_event({"kind": "tool", "toolName": f"t{i}"}, ctx)
+    assert len(store.TasksStore.get(task["id"])["progress"]["process"]) == 30
+    assert store.TasksStore.get(task["id"])["progress"]["process"][-1]["s"] == "▸ t34"
