@@ -234,6 +234,45 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
     await send(done_ev)
 
 
+class _TurnIO:
+    """回合 IO/预算原语(A 管线拆分): 各阶段共享的安全发送/chat_start 幂等/预算。
+
+    取代原 handle_chat 内的 send_ev/_ensure_chat_start/_budget_left 闭包——
+    阶段函数经 io 参数使用, 行为与原闭包逐字节等价。"""
+
+    def __init__(self, send: SendFn, conv_id: str, last_user_msg_id: str,
+                 budget_s: float = _TURN_BUDGET_S):
+        self.send = send
+        self.conv_id = conv_id
+        self.last_user_msg_id = last_user_msg_id
+        self.budget_s = budget_s
+        self.t0 = __import__("time").time()
+        self.client_gone = False
+        self.chat_start_sent = False
+
+    def budget_left(self) -> float:
+        return self.budget_s - (__import__("time").time() - self.t0)
+
+    async def send_ev(self, payload: dict) -> None:
+        """安全发送: 客户端断连后吞掉发送异常, 服务端继续消费流/守卫/落库。"""
+        if self.client_gone:
+            return
+        try:
+            await self.send(payload)
+        except Exception:  # noqa: BLE001
+            self.client_gone = True
+
+    async def ensure_chat_start(self, request_id: str = "") -> None:
+        """chat_start 幂等补发: 降级路径(llm.sync)原样不发会让前端整段等待
+        拿不到 conversationId/userMessageId——补发保证会话早绑定。"""
+        if self.chat_start_sent:
+            return
+        await self.send({"type": "chat_start", "conversationId": self.conv_id,
+                         "requestId": request_id or "",
+                         "userMessageId": self.last_user_msg_id})
+        self.chat_start_sent = True
+
+
 async def handle_chat(data: dict, send: SendFn) -> None:
     """自由对话回合：持久化历史 → 发起 llm.chat 流式 → 逐字转发。"""
     from ..arch_routes import req_agent
@@ -419,60 +458,111 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     except Exception:  # noqa: BLE001
         pass
 
-    # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
+    # ---- 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
+    io = _TurnIO(send, conv_id, last_user_msg_id)
+    tools_used: set = set()
+    tool_errors: dict = {}
+    loop = await _run_llm_tool_loop(io, conv_id, msgs, root, project,
+                                    eff_model, model_id, tools_used, tool_errors)
+    request_id = loop["request_id"]
+    assistant_text = loop["assistant_text"]
+    visible = loop["visible"]
+    tool_round = loop["tool_round"]
+    loop_fell_back = loop["loop_fell_back"]
+    final_content = visible or assistant_text
+
+    # ---- 回合后守卫(A 管线: 抽至 _post_turn_guards) ----
+    final_content, guard_meta, conv, tools_used, tool_errors = await _post_turn_guards(
+        io, conv_id, msgs, root, project, eff_model, model_id, conv, question,
+        tools_used, tool_errors, final_content, request_id,
+        assistant_text=assistant_text)
+
+    draft_meta = _maybe_draft_card(conv, final_content, tools_used,
+                                   eff_model or model_id or "", conv_id)
+
+    if final_content:
+        assistant_msg_id = store.next_id("m")
+        msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
+                   "role": "assistant", "time": _ts(), "content": final_content}
+        meta = guard_meta or draft_meta
+        if meta:
+            msg_row["meta"] = meta   # 守卫/草稿卡元数据: 落库可重建卡片, 不进 LLM 上下文
+        store.ConversationsStore.append_message(msg_row)
+        try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
+            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+        except Exception:  # noqa: BLE001
+            pass
+        done_ev = {"type": "done", "conversationId": conv_id,
+                   "content": final_content, "messageId": assistant_msg_id}
+        if guard_meta or draft_meta:
+            done_ev["meta"] = guard_meta or draft_meta
+        await io.send_ev(done_ev)
+        try:
+            from ..arch_routes import llm_dataset as _lds
+            _lds.record("llm_stream_done", ok=True,
+                        chars=len(final_content),
+                        latencyMs=int((__import__("time").time() - io.t0) * 1000),
+                        toolRounds=tool_round, model=eff_model or "",
+                        degraded=loop_fell_back)
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        # 空返回: 带上失败上下文落库(turnError)+回传——错误必须完整可见且可刷新
+        detail = "LLM 未返回内容"
+        if tool_errors:
+            detail += "；工具失败: " + "; ".join(
+                f"{k}: {str(v)[:160]}" for k, v in list(tool_errors.items())[:3])
+        if loop_fell_back:
+            detail += "（流式通道中断，已走同步降级通道仍未产出）"
+        elapsed = int(__import__("time").time() - io.t0)
+        detail += f"；回合耗时 {elapsed}s（总预算 {int(_TURN_BUDGET_S)}s）"
+        hint = _model_health_hint(eff_model or req_agent.get_model_preference())
+        if hint:
+            detail += "。" + hint
+        try:
+            store.ConversationsStore.append_message({
+                "id": store.next_id("m"), "conversationId": conv_id,
+                "role": "assistant", "time": _ts(), "content": f"❌ {detail}",
+                "meta": json.dumps({"kind": "turnError"}, ensure_ascii=False)})
+        except Exception:  # noqa: BLE001
+            logger.warning("[kb-chat] turnError 落库失败 conv=%s", conv_id)
+        try:
+            store.ConversationsStore.update(conv_id, {"reviewState": "error"})
+        except Exception:  # noqa: BLE001
+            pass
+        await io.send_ev({"type": "error", "requestId": request_id, "message": detail})
+
+
+async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
+                             root: str, project: str, eff_model: Optional[str],
+                             model_id: str, tools_used: set, tool_errors: dict) -> dict:
+    """管线阶段④ LLM 工具循环: 流式/降级/工具轮/预算门禁(行为等价抽取)。
+
+    返回 {request_id, assistant_text, visible, tool_round, loop_fell_back};
+    msgs/tools_used/tool_errors 原地变更(守卫与遥测依赖)。"""
+    from ..arch_routes import req_agent
     request_id = None
     assistant_text = ""
-    _turn_t0 = __import__("time").time()  # 回合时延采集(llm_stream_done)
-
-    def _budget_left() -> float:
-        return _TURN_BUDGET_S - (__import__("time").time() - _turn_t0)
-    visible = ""            # 本次回合实际发出的 chunk 总量(实时转发+补发；done/落库以此为准)
+    visible = ""
     tool_round = 0
     loop_fell_back = False
-    chat_start_sent = False
-
-    async def _ensure_chat_start() -> None:
-        """chat_start 幂等补发：流式路径正常发；降级路径(llm.sync)原样不发会让
-        前端整段等待拿不到 conversationId/userMessageId——补发保证会话早绑定。"""
-        nonlocal chat_start_sent
-        if chat_start_sent:
-            return
-        await send({"type": "chat_start", "conversationId": conv_id,
-                                   "requestId": request_id or "", "userMessageId": last_user_msg_id})
-        chat_start_sent = True
-
-    tools_used: set = set()  # 本回合实际执行的工具(防编造守卫佐证)
-    tool_errors: dict = {}  # 工具名 → 失败摘要(守卫区分「编造」与「执行失败」)
-    # 安全发送: 客户端断连后吞掉发送异常, 服务端继续消费流/守卫/落库——
-    # 避免回合中断且历史整段丢失(实测断连即丢整回合)
-    client_gone = False
-
-    async def send_ev(payload: dict) -> None:
-        nonlocal client_gone
-        if client_gone:
-            return
-        try:
-            await send(payload)
-        except Exception:  # noqa: BLE001
-            client_gone = True
-
     while tool_round <= _MAX_TOOL_ROUNDS:
         # 回合总预算: 超时终止(不再续流式轮/降级/nudge), 详因落 turnError
-        if _budget_left() <= 0:
+        if io.budget_left() <= 0:
             logger.warning("[kb-chat] 回合总预算耗尽 conv=%s elapsed=%.0fs",
-                           conv_id, __import__("time").time() - _turn_t0)
+                           conv_id, __import__("time").time() - io.t0)
             break
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
             loop_fell_back = True
-            await _ensure_chat_start()
-            assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
+            await io.ensure_chat_start()
+            assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
             break
         request_id = rid
-        await send_ev({"type": "chat_start", "conversationId": conv_id,
-                                   "requestId": rid, "userMessageId": last_user_msg_id})
-        chat_start_sent = True
+        await io.send_ev({"type": "chat_start", "conversationId": conv_id,
+                                   "requestId": rid, "userMessageId": io.last_user_msg_id})
+        io.chat_start_sent = True
         round_text = ""
         round_ok = True
         live = _LiveForward()   # 本轮实时转发状态(工具块抑制)
@@ -484,19 +574,19 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 out = live.feed(text)
                 if out:
                     visible += out
-                    await send_ev({"type": "chunk", "requestId": rid, "delta": out})
+                    await io.send_ev({"type": "chunk", "requestId": rid, "delta": out})
             elif event_type == "reasoning":
                 # 推理内容单独转发(不混入正文)；前端可折叠展示思考过程
                 text = payload.get("text") or ""
                 if text:
-                    await send_ev({"type": "reasoning", "conversationId": conv_id,
+                    await io.send_ev({"type": "reasoning", "conversationId": conv_id,
                                                "delta": text})
             elif event_type == "done":
                 round_text = payload.get("content") or round_text
                 break
             elif event_type == "error":
                 round_ok = False
-                await send_ev({"type": "error", "requestId": rid,
+                await io.send_ev({"type": "error", "requestId": rid,
                                            "message": payload.get("message", "")})
                 break
         else:
@@ -509,13 +599,13 @@ async def handle_chat(data: dict, send: SendFn) -> None:
             rem = live.flush(req_agent.strip_tool_blocks(round_text))
             if rem:
                 visible += rem
-                await send_ev({"type": "chunk", "requestId": rid, "delta": rem})
+                await io.send_ev({"type": "chunk", "requestId": rid, "delta": rem})
         if not round_ok:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
-            if _budget_left() > 0:
-                await _ensure_chat_start()
-                assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
+            if io.budget_left() > 0:
+                await io.ensure_chat_start()
+                assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
             break
 
         # 本轮工具调用解析并在 architect 侧执行
@@ -528,7 +618,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                     name = c.get("tool", "")
                     args = c.get("arguments", {})
                     tr = await _run_tool_with_progress(
-                        send, rid, name, args, root, project, model_id=eff_model)
+                        io.send, rid, name, args, root, project, model_id=eff_model)
                     results.append(tr)
                     if not tr.get("ok"):
                         tool_errors[name] = tr.get("text", "")[:200]
@@ -537,9 +627,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                     msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                     msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
                 loop_fell_back = True
-                if _budget_left() > 0:
-                    await _ensure_chat_start()
-                    assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
+                if io.budget_left() > 0:
+                    await io.ensure_chat_start()
+                    assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
                 break
             tool_round += 1
             results: List[Dict[str, str]] = []
@@ -551,7 +641,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 logger.info("[req_agent] kb chat tool round=%s call=%s",
                             tool_round, name)
                 tr = await _run_tool_with_progress(
-                    send, rid, name, args, root, project, model_id=eff_model)
+                    io.send, rid, name, args, root, project, model_id=eff_model)
                 results.append(tr)
                 if not tr.get("ok"):
                     tool_errors[name] = tr.get("text", "")[:200]
@@ -560,7 +650,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                 msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
             # 工具结果回喂后的再生成无任何信号会让前端进度条「卡死」观感——显式报相
-            await send_ev({"type": "status", "phase": "llm_round",
+            await io.send_ev({"type": "status", "phase": "llm_round",
                                        "round": tool_round + 1})
             continue
 
@@ -571,9 +661,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
     # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
     if (not loop_fell_back and not assistant_text and not visible
-            and _budget_left() > 0):
-        await _ensure_chat_start()
-        assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
+            and io.budget_left() > 0):
+        await io.ensure_chat_start()
+        assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
 
     # 降级通道(llm.sync / 断流收尾)无逐字流 → 假流式补发；实时转发路径
     # visible 已含全部内容，跳过避免重复。断流后收尾的极端场景 partial
@@ -583,20 +673,31 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         for i in range(0, len(assistant_text), CHUNK_SIZE):
             d = assistant_text[i:i + CHUNK_SIZE]
             visible += d
-            await send_ev({"type": "chunk", "requestId": request_id,
+            await io.send_ev({"type": "chunk", "requestId": request_id,
                                        "delta": d})
 
-    # done/落库以「本次回合实际可见文本」为准(含工具轮前的说明文字，
-    # 与前端逐字累积的内容严格一致，避免 done 覆盖造成跳变)。
-    final_content = visible or assistant_text
+    return {"request_id": request_id, "assistant_text": assistant_text,
+            "visible": visible, "tool_round": tool_round,
+            "loop_fell_back": loop_fell_back}
 
+
+async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
+                            root: str, project: str, eff_model: Optional[str],
+                            model_id: str, conv: dict, question: str,
+                            tools_used: set, tool_errors: dict,
+                            final_content: str, request_id: Optional[str],
+                            assistant_text: str = ""):
+    """管线阶段⑤ 回合后守卫: 提案/任务围栏代落 + 通用路由/意图/防编造守卫。
+
+    返回 (final_content, guard_meta, conv, tools_used, tool_errors)。"""
+    from ..arch_routes import req_agent, store
     # ── proposal 围栏自动落库: 模型直接输出 ```proposal JSON → 服务端代执行 ──
     fence_args = req_agent.extract_proposal_fence(final_content)
     if fence_args and "req.propose" not in tools_used:
         logger.info("[kb-chat] proposal 围栏命中, 服务端代落库 conv=%s", conv_id)
         try:
             res = await _run_tool_with_progress(
-                send, request_id, "req.propose", fence_args, root, project,
+                io.send, request_id, "req.propose", fence_args, root, project,
                 model_id=eff_model)
             tools_used.add("req.propose")
             ok = bool(res.get("ok"))
@@ -606,7 +707,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                       if ok else
                       f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}")
             final_content += notice
-            await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
+            await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 围栏代落库失败: %s", e)
 
@@ -618,7 +719,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         logger.info("[kb-chat] 任务载荷围栏命中, 服务端代落卡 conv=%s", conv_id)
         try:
             res = await _run_tool_with_progress(
-                send, request_id, "task.propose", task_fence, root, project,
+                io.send, request_id, "task.propose", task_fence, root, project,
                 model_id=eff_model)
             tools_used.add("task.propose")
             ok = bool(res.get("ok"))
@@ -628,7 +729,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                       if ok else
                       f"\n\n⚠️ 任务卡自动创建失败：{str(res.get('text', ''))[:160]}")
             final_content += notice
-            await send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
+            await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 任务围栏代落失败: %s", e)
 
@@ -649,15 +750,15 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 '格式: [TOOL_CALL]{"tool":"task.propose","arguments":'
                 '{"title":"…","instruction":"…"}}[/TOOL_CALL]; '
                 "除工具块外只输出一句转述。不要再用「需要检索/无法直接」回答通用任务。")})
-            if _budget_left() > 0:
-                corr = await _sync_with_tools(send, msgs, root, project, eff_model,
+            if io.budget_left() > 0:
+                corr = await _sync_with_tools(io.send, msgs, root, project, eff_model,
                                               max_rounds=3, tools_used=tools_used)
             corr = req_agent.strip_tool_blocks(corr or "")
             if corr:
                 for i in range(0, len(corr), 24):
                     d = corr[i:i + 24]
                     visible += d
-                    await send_ev({"type": "chunk", "requestId": request_id, "delta": d})
+                    await io.send_ev({"type": "chunk", "requestId": request_id, "delta": d})
                 final_content = visible
     except Exception as _ge:  # noqa: BLE001
         logger.warning("[kb-chat] 通用路由守卫异常: %s", _ge)
@@ -685,15 +786,15 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 "一次一个；除工具块外不要输出任何说明文字。"
                 "② 若该动作确实不能现在执行（需要用户确认/信息不足），用一句话明确说明缺什么，"
                 "不要宣布将要执行。")})
-            if _budget_left() > 0:
-                corr = await _sync_with_tools(send, msgs, root, project, eff_model,
+            if io.budget_left() > 0:
+                corr = await _sync_with_tools(io.send, msgs, root, project, eff_model,
                                               max_rounds=3, tools_used=tools_used)
             corr = req_agent.strip_tool_blocks(corr or "")
             if corr:
                 for i in range(0, len(corr), 24):
                     d = corr[i:i + 24]
                     visible += d
-                    await send_ev({"type": "chunk", "requestId": request_id, "delta": d})
+                    await io.send_ev({"type": "chunk", "requestId": request_id, "delta": d})
                 final_content = visible
 
     # ── 防编造守卫(⑦ 反思组件, 策略矩阵驱动): 声称的落库/执行动作必须有本回合真实工具调用佐证 ──
@@ -716,7 +817,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 corr_note = (f"\n\n> ℹ️ 系统更正：正文中的需求编号为模型笔误，"
                              f"本回合真实落库编号为 `{real_rid}`(以系统回执为准)。")
                 final_content += corr_note
-                await send_ev({"type": "chunk", "requestId": request_id, "delta": corr_note})
+                await io.send_ev({"type": "chunk", "requestId": request_id, "delta": corr_note})
                 claim = ""    # 已真实落库, 不再出拦截卡
         if claim:
             logger.warning("[kb-chat] 防编造守卫触发 conv=%s claim=%s need=%s", conv_id, claim, need)
@@ -748,67 +849,14 @@ async def handle_chat(data: dict, send: SendFn) -> None:
             if fixed:
                 tools_used.add("req.propose")
                 final_content += fixed["notice"]
-                await send_ev({"type": "chunk", "requestId": request_id,
+                await io.send_ev({"type": "chunk", "requestId": request_id,
                                "delta": fixed["notice"]})
                 guard_meta["resolved"] = True
                 guard_meta["resolvedSummary"] = fixed["summary"][:200]
                 guard_meta["suggestions"] = []
                 conv = store.ConversationsStore.get(conv_id) or conv
 
-    draft_meta = _maybe_draft_card(conv, final_content, tools_used,
-                                   eff_model or model_id or "", conv_id)
-
-    if final_content:
-        assistant_msg_id = store.next_id("m")
-        msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
-                   "role": "assistant", "time": _ts(), "content": final_content}
-        meta = guard_meta or draft_meta
-        if meta:
-            msg_row["meta"] = meta   # 守卫/草稿卡元数据: 落库可重建卡片, 不进 LLM 上下文
-        store.ConversationsStore.append_message(msg_row)
-        try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
-            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
-        except Exception:  # noqa: BLE001
-            pass
-        done_ev = {"type": "done", "conversationId": conv_id,
-                   "content": final_content, "messageId": assistant_msg_id}
-        if guard_meta or draft_meta:
-            done_ev["meta"] = guard_meta or draft_meta
-        await send_ev(done_ev)
-        try:
-            from ..arch_routes import llm_dataset as _lds
-            _lds.record("llm_stream_done", ok=True,
-                        chars=len(final_content),
-                        latencyMs=int((__import__("time").time() - _turn_t0) * 1000),
-                        toolRounds=tool_round, model=eff_model or "",
-                        degraded=loop_fell_back)
-        except Exception:  # noqa: BLE001
-            pass
-    else:
-        # 空返回: 带上失败上下文落库(turnError)+回传——错误必须完整可见且可刷新
-        detail = "LLM 未返回内容"
-        if tool_errors:
-            detail += "；工具失败: " + "; ".join(
-                f"{k}: {str(v)[:160]}" for k, v in list(tool_errors.items())[:3])
-        if loop_fell_back:
-            detail += "（流式通道中断，已走同步降级通道仍未产出）"
-        elapsed = int(__import__("time").time() - _turn_t0)
-        detail += f"；回合耗时 {elapsed}s（总预算 {int(_TURN_BUDGET_S)}s）"
-        hint = _model_health_hint(eff_model or req_agent.get_model_preference())
-        if hint:
-            detail += "。" + hint
-        try:
-            store.ConversationsStore.append_message({
-                "id": store.next_id("m"), "conversationId": conv_id,
-                "role": "assistant", "time": _ts(), "content": f"❌ {detail}",
-                "meta": json.dumps({"kind": "turnError"}, ensure_ascii=False)})
-        except Exception:  # noqa: BLE001
-            logger.warning("[kb-chat] turnError 落库失败 conv=%s", conv_id)
-        try:
-            store.ConversationsStore.update(conv_id, {"reviewState": "error"})
-        except Exception:  # noqa: BLE001
-            pass
-        await send_ev({"type": "error", "requestId": request_id, "message": detail})
+    return final_content, guard_meta, conv, tools_used, tool_errors
 
 
 async def _guard_autoland(conv: dict, final_content: str) -> Optional[dict]:
