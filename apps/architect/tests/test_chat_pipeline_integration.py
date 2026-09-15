@@ -213,3 +213,16 @@ def test_event_bus_emit_typed_and_audited(monkeypatch):
     assert captured and captured[-1]["type"] == "conv-message"
     assert sse.recent_events(1)[0]["conversationId"] == "cv-x"
     assert sse.EV_TASK == "task" and sse.EV_PROGRESS == "progress"
+
+
+def test_resolve_call_model_single_source(monkeypatch):
+    """模型解析单源(cv-168): 显式 > architect 偏好(llm.modelId) > None。
+    KB 默认(is_default)只允许作为最后兜底且必须留告警——不得静默跨应用接管。"""
+    from topoone_app_architect.agent.cognition import llm
+    monkeypatch.setattr(llm, "get_model_preference", lambda: "model-arch-pref")
+    assert llm.resolve_call_model("model-explicit") == "model-explicit"
+    assert llm.resolve_call_model("") == "model-arch-pref"
+    assert llm.resolve_call_model(None) == "model-arch-pref"
+    monkeypatch.setattr(llm, "get_model_preference", lambda: "")
+    assert llm.resolve_call_model("") is None   # 兜底交 KB, 但已留告警
+    assert llm.resolve_call_model(" ") is None

@@ -46,6 +46,19 @@ def get_model_preference() -> str:
     return store.CollabConfigStore.get(_MODEL_KEY, "")
 
 
+def resolve_call_model(explicit: Optional[str]) -> Optional[str]:
+    """architect 单源模型解析(显式 > architect 偏好 > None)。
+
+    None = 请求不带 modelId, 由主后端(KB)按其 is_default 兜底——这是
+    跨应用隐式耦合, 只允许发生时留下可见告警, 不得静默(cv-168 教训:
+    KB 默认 9B 曾静默接管 architect 内部调用, 排障时误判来源)。"""
+    m = (explicit or "").strip() or get_model_preference()
+    if not m:
+        logger.warning("[cognition.llm] 无显式模型且 architect 偏好(llm.modelId)未设"
+                       " → 本次调用由主后端 KB 默认模型兜底(建议设置 llm.modelId)")
+    return m or None
+
+
 def set_model_preference(model_id: str) -> None:
     from ...arch_routes import store
     store.CollabConfigStore.set(_MODEL_KEY, model_id)
@@ -90,7 +103,7 @@ def llm_sync(messages: List[Dict[str, str]],
     body: Dict[str, Any] = {}
     try:
         body = {
-            "modelId": model_id if model_id is not None else get_model_preference(),
+            "modelId": resolve_call_model(model_id),
             "mode": mode,
             "messages": messages,
             "maxTokens": max_tokens,
@@ -159,7 +172,7 @@ def llm_chat_start(messages: List[Dict[str, str]],
     try:
         body: Dict[str, Any] = {
             "sessionId": session_id,
-            "modelId": model_id if model_id is not None else get_model_preference(),
+            "modelId": resolve_call_model(model_id),
             "mode": "chat",
             "messages": messages,
             "max_tokens": max_tokens,
@@ -184,7 +197,7 @@ def llm_chat_start(messages: List[Dict[str, str]],
         try:
             from ..reflection import dataset as _lds
             _lds.record("llm_call", verb="chat", mode="chat", ok=False,
-                        model=model_id if model_id is not None else get_model_preference(),
+                        model=resolve_call_model(model_id) or "",
                         msgsChars=sum(len(m.get("content") or "") for m in messages),
                         maxTokens=max_tokens or "", latencyMs=0,
                         sessionId=session_id or "", error=str(e)[:300])
