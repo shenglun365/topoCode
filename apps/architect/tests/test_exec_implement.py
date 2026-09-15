@@ -383,9 +383,9 @@ def test_task_progress_sse_no_message(tmp_path, monkeypatch):
     conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
     task = eb.propose_task(conv, "P", "x")
     assert eb.confirm_task(task["id"])["ok"]
-    from topoone_app_architect.arch_routes import ws_events
+    from topoone_app_architect.agent.collab import sse
     broadcast = []
-    monkeypatch.setattr(ws_events, "publish", lambda ev: broadcast.append(ev))
+    monkeypatch.setattr(sse, "publish", lambda ev: broadcast.append(ev))
     ctx = eb._task_ctx(conv["id"], task["id"], "job-v2-1", "", "opencode")
     eb._handle_task_event({"kind": "progress", "toolCount": 7, "msgCount": 2}, ctx)
     t = store.TasksStore.get(task["id"])

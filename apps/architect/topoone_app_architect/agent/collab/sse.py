@@ -5,6 +5,7 @@ EventSource 收到后刷新当前会话信息流(主会话实时显示 coding �
 无需手动刷新)。线程安全: publish 可从任意线程调用(call_soon_threadsafe)。
 """
 import asyncio
+import collections
 import logging
 from typing import Set
 
@@ -46,3 +47,31 @@ def publish(event: dict) -> None:
         _loop.call_soon_threadsafe(_fan)
     except RuntimeError:  # loop 已关(停机)
         pass
+
+
+# ── B: 统一事件出口(类型化 emit + 审计环) ─────────────────────────────
+# 事件类型常量(单点 schema): conv-message/task/progress 三类对外事件。
+EV_CONV_MESSAGE = "conv-message"
+EV_TASK = "task"
+EV_PROGRESS = "progress"
+
+_recent: "collections.deque[dict]" = collections.deque(maxlen=200)
+
+
+def emit(ev_type: str, conversation_id: str, **payload) -> dict:
+    """统一事件出口: 形状单点 {type, conversationId, **payload} + 最近 200 条留痕。
+
+    新事件一律走 emit; 禁止再散布裸 publish(dict)——审计/测试/订阅方
+    依赖稳定形状。线程安全同 publish。
+    ev_type ∈ EV_CONV_MESSAGE/EV_TASK/EV_PROGRESS(payload 键名可与 ev_type 重名)。"""
+    event = {"type": ev_type, "conversationId": conversation_id, **payload}
+    _recent.append(event)
+    publish(event)
+    return event
+
+
+def recent_events(limit: int = 50) -> list:
+    """最近事件(审计/调试); 新→旧。"""
+    out = list(_recent)[-limit:]
+    out.reverse()
+    return out

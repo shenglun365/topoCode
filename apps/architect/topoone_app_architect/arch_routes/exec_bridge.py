@@ -122,10 +122,9 @@ def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = No
         pass
     # 实时推送: 前端(SSE)收到后按会话刷新。
     try:
-        from . import ws_events
-        ws_events.publish({"type": "conv-message", "conversationId": conv_id,
-                           "msgId": payload["id"], "agent": agent or "",
-                           "kind": (msg_meta or {}).get("kind", "")})
+        from ..agent.collab.sse import emit
+        emit("conv-message", conv_id, msgId=payload["id"], agent=agent or "",
+             kind=(msg_meta or {}).get("kind", ""))
     except Exception:  # noqa: BLE001
         pass
 # ── 边界/验收简报 ──
@@ -457,9 +456,8 @@ def active_task_of(conv_id: str) -> Optional[dict]:
 def _publish_task(conv_id: str, task: dict) -> None:
     """任务状态变更 → SSE 单通道广播(前端 TaskCard/过滤器响应)。"""
     try:
-        from . import ws_events
-        ws_events.publish({"type": "task", "conversationId": conv_id,
-                           "task": task})
+        from ..agent.collab.sse import emit
+        emit("task", conv_id, task=task)
     except Exception:  # noqa: BLE001
         pass
 
@@ -504,6 +502,70 @@ def _start_task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
             coro.close()   # 无循环可挂(测试/关停): 丢弃并告警, 不让协程泄漏
             logger.warning("[exec-bridge] 无事件循环可挂任务泵 conv=%s job=%s",
                            conv_id, job_id)
+
+
+_SWEEP_TASK: Optional[asyncio.Task] = None
+
+
+def start_recover_sweep(interval: float = 45.0) -> None:
+    """C 定时对账: 主循环周期任务——扫描默认库+全部项目库的假 running 任务。
+
+    恢复触发不再依赖用户交互(GET messages/handle_chat); 服务重启后
+    由本循环自动收敛。重复调用幂等(任务存活即跳过)。"""
+    global _SWEEP_TASK
+    if _SWEEP_TASK and not _SWEEP_TASK.done():
+        return
+
+    async def _loop() -> None:
+        while True:
+            try:
+                n = await asyncio.to_thread(recover_sweep)
+                if n:
+                    logger.info("[exec-bridge] sweep 收尾任务数=%s", n)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[exec-bridge] sweep 异常: %s", e)
+            await asyncio.sleep(interval)
+
+    _SWEEP_TASK = asyncio.create_task(_loop())
+
+
+def recover_sweep() -> int:
+    """扫默认库+全部项目库(目录发现 {data}/architect/{pid}/arch.db)中
+    存在 running/waiting_input 任务的会话 → recover_conv_tasks。
+    返回收尾任务数(重挂泵不计)。"""
+    import sqlite3
+    from ..arch_routes import ctx as _ctx
+    data_dir = _ctx.data_dir()
+    db_paths = [os.path.join(data_dir, "architect.db")]
+    proj_root = os.path.join(data_dir, "architect")
+    if os.path.isdir(proj_root):
+        for pid in sorted(os.listdir(proj_root)):
+            dbp = os.path.join(proj_root, pid, "arch.db")
+            if os.path.isfile(dbp):
+                db_paths.append(dbp)
+    conv_ids: list = []
+    for dbp in db_paths:
+        if not os.path.isfile(dbp):
+            continue
+        try:
+            con = sqlite3.connect(f"file:{dbp}?mode=ro", uri=True)
+            try:
+                rows = con.execute(
+                    "SELECT DISTINCT conversation_id FROM arch_tasks "
+                    "WHERE status IN ('running','waiting_input')").fetchall()
+                conv_ids += [r[0] for r in rows if r[0]]
+            finally:
+                con.close()
+        except Exception:  # noqa: BLE001
+            continue
+    total = 0
+    for conv_id in dict.fromkeys(conv_ids):
+        try:
+            rec = recover_conv_tasks(conv_id)
+            total += int((rec or {}).get("finished") or 0)
+        except Exception:  # noqa: BLE001
+            logger.warning("[exec-bridge] sweep 恢复失败 conv=%s", conv_id)
+    return total
 
 
 def recover_conv_tasks(conv_id: str) -> dict:
@@ -562,9 +624,8 @@ def _task_ctx(conv_id: str, task_id: str, job_id: str, rid: str, agent: str) -> 
 def _publish_progress(conv_id: str, task_id: str, prog: dict) -> None:
     """任务进度实时推送（WS/SSE 单一出口）。"""
     try:
-        from . import ws_events
-        ws_events.publish({"type": "progress", "conversationId": conv_id,
-                           "taskId": task_id, "at": _ts(), **prog})
+        from ..agent.collab.sse import emit
+        emit("progress", conv_id, taskId=task_id, **{"at": _ts(), **prog})
     except Exception:  # noqa: BLE001
         pass
 

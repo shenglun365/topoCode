@@ -199,3 +199,17 @@ def test_turn_budget_exhaustion_terminates_hang(pipeline, monkeypatch):
     assert "预算" in ev["message"]
     msgs = store.ConversationsStore.messages(conv_id, limit=5)
     assert any((m.get("meta") or {}).get("kind") == "turnError" for m in msgs)
+
+
+def test_event_bus_emit_typed_and_audited(monkeypatch):
+    """B 统一事件出口: 形状单点({type, conversationId, **payload})+审计环+publish 接线。"""
+    from topoone_app_architect.agent.collab import sse
+
+    captured = []
+    monkeypatch.setattr(sse, "publish", lambda ev: captured.append(ev))
+    ev = sse.emit("conv-message", "cv-x", msgId="m1", agent="cline-sdk", kind="task_card")
+    assert ev == {"type": "conv-message", "conversationId": "cv-x",
+                  "msgId": "m1", "agent": "cline-sdk", "kind": "task_card"}
+    assert captured and captured[-1]["type"] == "conv-message"
+    assert sse.recent_events(1)[0]["conversationId"] == "cv-x"
+    assert sse.EV_TASK == "task" and sse.EV_PROGRESS == "progress"

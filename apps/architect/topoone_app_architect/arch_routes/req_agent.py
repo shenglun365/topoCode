@@ -1395,10 +1395,9 @@ def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None
         store.ConversationsStore.append_message(row)
         # 实时推送: 前端(SSE conv-message)按会话刷新 → meta 动作卡即时渲染
         try:
-            from . import ws_events
-            ws_events.publish({"type": "conv-message", "conversationId": conv_id,
-                               "msgId": row["id"], "agent": "",
-                               "kind": (meta or {}).get("kind", "")})
+            from ..agent.collab.sse import emit
+            emit("conv-message", conv_id, msgId=row["id"], agent="",
+                 kind=(meta or {}).get("kind", ""))
         except Exception:  # noqa: BLE001
             pass
     except Exception:  # noqa: BLE001

@@ -175,3 +175,26 @@ def test_guard_repair_task_domain_guides_redo(tmp_path, monkeypatch):
     assert r["ok"] is False and r["action"] == "manual_redo"
     assert "/执行" in r["summary"]
     assert store.TasksStore.of_conv(conv["id"]) == []
+
+
+def test_recover_sweep_converges_stale_tasks(tmp_path, monkeypatch):
+    """C 定时对账: 目录扫描发现默认库+项目库的假 running 任务并收尾。"""
+    from topoone_app_architect.arch_routes.exec_bridge import recover_sweep
+    _env(tmp_path, monkeypatch)
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+    t = _mk_running_task(conv["id"])
+    done_ev = {"seq": 2, "kind": "done", "text": "[[IMPLEMENT_DONE]] ok",
+               "changedFiles": []}
+    monkeypatch.setattr(eb, "_runner",
+                        lambda path, **kw: _snapshot("done", [done_ev])
+                        if path.endswith("/impl-x") else None)
+    monkeypatch.setattr(eb, "_acceptance_brief", lambda *a, **k: "(简报)")
+    n = eb.recover_sweep()
+    assert n == 1
+    assert store.TasksStore.get(t["id"])["status"] == "done"
+
+
+def test_recover_sweep_noop_when_idle(tmp_path, monkeypatch):
+    _env(tmp_path, monkeypatch)
+    monkeypatch.setattr(eb, "_runner", lambda path, **kw: None)
+    assert eb.recover_sweep() == 0
