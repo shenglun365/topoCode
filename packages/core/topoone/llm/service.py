@@ -1278,6 +1278,8 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         outputSchema: Optional[Dict[str, Any]] = None,
         max_tokens: Optional[int] = None,
         maxTokens: Optional[int] = None,
+        context_budget: Optional[int] = None,
+        contextBudget: Optional[int] = None,
     ):
         """同步(非流式) LLM 调用 —— 供 architect 等独立进程经 /zmq/llm.sync 复用 ai chat 能力。
 
@@ -1291,6 +1293,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         template_id = template_id or templateId
         output_schema = output_schema or outputSchema
         max_tokens = max_tokens or maxTokens
+        context_budget = context_budget or contextBudget
 
         if template_id:
             rendered = pm.render(template_id, variables or {})
@@ -1308,6 +1311,8 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
             _msgs = list(messages or [])
         if not _msgs:
             raise ValueError("Either 'messages' or 'templateId' + 'variables' is required")
+        if context_budget is not None:
+            messages = _trim_messages_to_budget(messages, context_budget)
 
         # 模型默认值: 主后端 model_configs 的 is_default(与 ai chat 的默认模型一致)
         if not model_id:

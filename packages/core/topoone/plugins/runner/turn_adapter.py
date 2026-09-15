@@ -936,11 +936,15 @@ class ClineTurnAdapter(TurnAdapter):
             raise RuntimeError(
                 f"执行器 {self.executor_id} 未配置模型：作业未指定且注册表 "
                 "config.model_id/models 均为空——请在「执行器配置」中设置模型。")
+        # 生成容量(每回合 max_tokens): 注册表模型条目 maxTokens(0/缺省=不限制,
+        # opencode/codex 按其自身内部设置, 不在此链)
+        mt = int((entry or {}).get("maxTokens") or 0)
         return {
             "providerId": provider or str((entry or {}).get("provider") or "openai-compatible"),
             "modelId": model,
             "apiKey": str((entry or {}).get("apiKey") or self._api_key or ""),
             "baseUrl": _ensure_v1(str((entry or {}).get("url") or self._base_url or "")),
+            **({"maxTokensPerTurn": mt} if mt > 0 else {}),
         }
 
     # ── boundaries → toolPolicies（只读作业硬阻断写类工具）──
@@ -1032,6 +1036,8 @@ class ClineTurnAdapter(TurnAdapter):
             model_cfg["apiKey"] = model["apiKey"]
         if model["baseUrl"]:
             model_cfg["baseUrl"] = model["baseUrl"]
+        if model.get("maxTokensPerTurn"):
+            model_cfg["maxTokensPerTurn"] = model["maxTokensPerTurn"]
         params: Dict[str, Any] = {
             "sessionId": job.session_id or job.id,
             "cwd": job.wt,

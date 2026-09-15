@@ -81,11 +81,11 @@ function onFontSize(v: number) {
       </div>
     </template>
     <template #tools>
+      <!-- 上下文容量由后端探测模型服务端真实 n_ctx 控制(cv-173 裁决), 前端选项已拆除 -->
       <ModelSettingsDropdown
         app-key="architect"
         :provider="modelProvider"
-        :context-options="[2048, 4096, 8192, 16384, 32768]"
-        :context-label="t('app.contextLimit')"
+        :context-options="[]"
       />
     </template>
   </AppToolbar>

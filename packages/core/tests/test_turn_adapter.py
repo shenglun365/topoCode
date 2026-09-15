@@ -1204,3 +1204,16 @@ def test_resolve_model_raises_when_unconfigured():
     a = _adapter(model_id="", models=[])
     with _pt.raises(RuntimeError, match="未配置模型"):
         a._resolve_model(type("J", (), {"model": ""})())
+
+
+def test_resolve_model_carries_max_tokens_per_turn():
+    """生成容量接入请求链: 模型条目 maxTokens>0 → session/start 携 maxTokensPerTurn
+    (cline 适用; 0/缺省不传——opencode/codex 按其自身内部设置)。"""
+    a = _adapter(models=[{"id": "m1", "name": "m", "model": "q", "url": "http://h",
+                          "maxTokens": 16384}])
+    r = a._resolve_model(type("J", (), {"model": "m"})())
+    assert r["maxTokensPerTurn"] == 16384
+    a2 = _adapter(models=[{"id": "m1", "name": "m", "model": "q", "url": "http://h",
+                           "maxTokens": 0}])
+    r2 = a2._resolve_model(type("J", (), {"model": "m"})())
+    assert "maxTokensPerTurn" not in r2

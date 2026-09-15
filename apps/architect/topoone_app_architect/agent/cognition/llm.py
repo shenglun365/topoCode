@@ -9,6 +9,7 @@ P1 自 req_agent.py 迁入:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
@@ -17,6 +18,10 @@ logger = logging.getLogger("arch.cognition.llm")
 
 _MODEL_KEY = "llm.modelId"
 _MAX_TOKENS_KEY = "llm.maxTokens"
+_CONTEXT_BUDGET_KEY = "llm.contextBudget"
+
+_CTX_CACHE: Dict[str, tuple] = {}   # url → (monotonic_ts, n_ctx)，缓存 10 分钟
+_CTX_CACHE_TTL = 600.0
 
 
 class ModelNotConfigured(RuntimeError):
@@ -92,13 +97,103 @@ def set_max_tokens_preference(value: Optional[int]) -> None:
     )
 
 
+def get_context_budget_preference() -> int:
+    """architect 侧上下文预算偏好(0 = 未设置 → 显式/探测兜底)。"""
+    from ...arch_routes import store
+    try:
+        return int(store.CollabConfigStore.get(_CONTEXT_BUDGET_KEY, "") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_context_budget_preference(value: Optional[int]) -> None:
+    """设置上下文预算偏好；None/<=0 视为清除(回退探测容量)。"""
+    from ...arch_routes import store
+    store.CollabConfigStore.set(
+        _CONTEXT_BUDGET_KEY,
+        str(int(value)) if value and int(value) > 0 else "",
+    )
+
+
+def probe_context_window(url: str, model_hint: str = "") -> Optional[int]:
+    """探测模型服务端真实上下文容量(尽力而为, 失败返回 None 不猜)。
+
+    - llama.cpp server: GET /props → default_generation_settings.n_ctx
+    - LM Studio: GET /api/v0/models → data[].max_context_length(按 model_hint 匹配)
+    - 其余(纯 OpenAI 兼容): 无标准端点 → None
+    结果按 url 缓存 10 分钟; 2 秒超时不阻塞调用链。"""
+    import json as _json
+    import time as _t
+    import urllib.request
+    base = (url or "").strip().rstrip("/")
+    if not base:
+        return None
+    cached = _CTX_CACHE.get(base)
+    now = _t.monotonic()
+    if cached and now - cached[0] < _CTX_CACHE_TTL:
+        return cached[1]
+
+    def _fetch(path: str):
+        req = urllib.request.Request(base + path, method="GET")
+        with urllib.request.urlopen(req, timeout=2.0) as r:
+            return _json.loads(r.read().decode("utf-8", "replace"))
+
+    n_ctx: Optional[int] = None
+    try:
+        d = _fetch("/props")   # llama.cpp
+        n_ctx = int(((d.get("default_generation_settings") or {}).get("n_ctx")) or 0) or None
+    except Exception:  # noqa: BLE001
+        try:
+            d = _fetch("/api/v0/models")   # LM Studio
+            rows = [r for r in (d.get("data") or []) if isinstance(r, dict)]
+            hit = next((r for r in rows
+                        if model_hint and model_hint.lower() in str(r.get("id", "")).lower()), None)
+            n_ctx = int((hit or (rows[0] if rows else {})).get("max_context_length") or 0) or None
+        except Exception:  # noqa: BLE001
+            n_ctx = None
+    if n_ctx:
+        _CTX_CACHE[base] = (now, n_ctx)
+    return n_ctx
+
+
+def _catalog_entry(model_id: str) -> Dict[str, Any]:
+    """llm.models 目录条目(取 url/model 供探测)。"""
+    from ...arch_routes import store
+    try:
+        raw = store.CollabConfigStore.get("llm.models", "")
+        for r in json.loads(raw) if raw else []:
+            if isinstance(r, dict) and r.get("id") == model_id:
+                return r
+    except Exception:  # noqa: BLE001
+        pass
+    return {}
+
+
+def resolve_context_budget(explicit: Optional[int], model_id: str) -> Optional[int]:
+    """上下文预算解析: 显式 > llm.contextBudget 偏好 > 探测容量−生成预留−余量
+    (用户要求: architect 尝试读取模型 API 的上下文容量设置以做容量控制)。
+
+    全部不可得 → None(不裁剪, 不猜测)。"""
+    b = int(explicit or 0) or get_context_budget_preference()
+    if b > 0:
+        return b
+    entry = _catalog_entry(model_id or "")
+    win = probe_context_window(str(entry.get("url") or ""),
+                               str(entry.get("model") or entry.get("name") or ""))
+    if not win:
+        return None
+    reserve = get_max_tokens_preference() or 8192
+    return max(4096, int(win) - int(reserve) - 2048)
+
+
 def llm_sync(messages: List[Dict[str, str]],
              mode: str = "chat",
              tools: Optional[List[str]] = None,
              output_schema: Optional[Dict[str, Any]] = None,
              max_tokens: Optional[int] = None,
              model_id: Optional[str] = None,
-             on_error: Optional[Callable[[str], None]] = None) -> Optional[Dict[str, Any]]:
+             on_error: Optional[Callable[[str], None]] = None,
+             context_budget: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """经 KbGateway 调主后端 llm.sync。不可达/异常返回 None(调用方降级)。
 
     model_id: 本次对话的模型偏好(对话侧单独选择)，优先于全局 `llm.modelId`；
@@ -116,6 +211,7 @@ def llm_sync(messages: List[Dict[str, str]],
             "mode": mode,
             "messages": messages,
             "maxTokens": max_tokens,
+            "contextBudget": resolve_context_budget(context_budget, model_id),
         }
         if tools:
             body["tools"] = tools
@@ -171,7 +267,8 @@ def llm_sync(messages: List[Dict[str, str]],
 def llm_chat_start(messages: List[Dict[str, str]],
                    model_id: Optional[str] = None,
                    session_id: str = "arch-req-chat",
-                   max_tokens: Optional[int] = None) -> Optional[str]:
+                   max_tokens: Optional[int] = None,
+                   context_budget: Optional[int] = None) -> Optional[str]:
     """发起流式对话(llm.chat)。成功返回 requestId；不可达/未配置/异常返回 None(调用方降级)。
 
     与 llm_sync 同通道(经 KbGateway 转发主后端)，但返回 requestId 而非完整内容：
@@ -186,6 +283,7 @@ def llm_chat_start(messages: List[Dict[str, str]],
             "mode": "chat",
             "messages": messages,
             "max_tokens": max_tokens,
+            "contextBudget": resolve_context_budget(context_budget, model_id),
         }
         res = gateway.call("llm.chat", timeout=_LLM_CALL_TIMEOUT, **body)
         _chat_ok = isinstance(res, dict) and bool(res.get("requestId"))

@@ -124,7 +124,7 @@ async function onContextChange(e: Event) {
           <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
         </select>
       </div>
-      <div class="popover-row">
+      <div v-if="contextOptions.length" class="popover-row">
         <label>{{ contextLabel || tShell('context') }}</label>
         <select class="toolbar-select" :value="currentContext" @change="onContextChange">
           <option v-for="c in contextOptions" :key="c" :value="c">{{ c / 1000 }}K</option>

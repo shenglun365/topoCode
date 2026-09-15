@@ -260,3 +260,47 @@ def test_post_turn_guards_scope_fix_visible_corr(monkeypatch):
 
     fc, meta, conv, tu, te = asyncio.run(_flow())
     assert "无法直接" in fc   # 原样返回, 无 UnboundLocalError 即通过
+
+
+def test_probe_context_window_parsers(monkeypatch):
+    """探测解析: llama.cpp /props n_ctx 与 LM Studio v0 max_context_length 两种形态。"""
+    from topoone_app_architect.agent.cognition import llm
+
+    class _R:
+        def __init__(self, body): self._b = json.dumps(body).encode()
+        def read(self): return self._b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    # llama.cpp /props
+    monkeypatch.setattr(llm, "_CTX_CACHE", {})
+    monkeypatch.setattr("urllib.request.urlopen",
+                        lambda req, timeout=0: _R({"default_generation_settings": {"n_ctx": 262144}}))
+    assert llm.probe_context_window("http://h:8082") == 262144
+    # LM Studio v0(/props 404 → 回退)
+    monkeypatch.setattr(llm, "_CTX_CACHE", {})
+    calls = []
+    def _fake_urlopen(req, timeout=0):
+        calls.append(req.full_url)
+        if "/props" in req.full_url:
+            raise OSError("404")
+        return _R({"data": [{"id": "other", "max_context_length": 4096},
+                            {"id": "qwen3.5-9b-mtp", "max_context_length": 262144}]})
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    assert llm.probe_context_window("http://h:1234", "qwen3.5-9b-mtp") == 262144
+    assert any("/api/v0/models" in u for u in calls)
+
+
+def test_resolve_context_budget_priority(monkeypatch):
+    """上下文预算: 显式 > llm.contextBudget 偏好 > 探测容量−生成预留−余量; 全空 → None。"""
+    from topoone_app_architect.agent.cognition import llm
+    monkeypatch.setattr(llm, "get_context_budget_preference", lambda: 0)
+    monkeypatch.setattr(llm, "get_max_tokens_preference", lambda: None)
+    monkeypatch.setattr(llm, "_catalog_entry", lambda mid: {"url": "http://h:8082", "model": "q"})
+    monkeypatch.setattr(llm, "probe_context_window", lambda url, hint="": 262144)
+    assert llm.resolve_context_budget(8192, "m") == 8192
+    assert llm.resolve_context_budget(None, "m") == 262144 - 8192 - 2048   # 261904
+    monkeypatch.setattr(llm, "probe_context_window", lambda url, hint="": None)
+    assert llm.resolve_context_budget(None, "m") is None
+    monkeypatch.setattr(llm, "get_context_budget_preference", lambda: 16384)
+    assert llm.resolve_context_budget(None, "m") == 16384
