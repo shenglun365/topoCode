@@ -40,7 +40,7 @@ DEFAULT_EXECUTORS = [
         "id": "cline", "type": "cline-sdk", "enabled": True, "default": True,
         "config": {"node_bin": "node", "sidecar_script": "",
                    "provider_id": "", "model_id": "", "api_key": "",
-                   "max_iterations": 40,
+                   "max_iterations": 120,   # C 模块编译-修-测周期 2-4 次调用/圈, 60 会在真推进时被掐断(cv-173)
                    "system_prompt": "", "tool_policies": {}, "models": [],
                    "mcp_servers": [],
                    "teams": {"enabled": False, "teamName": "", "agents": []}},
