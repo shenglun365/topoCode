@@ -198,3 +198,24 @@ def test_recover_sweep_noop_when_idle(tmp_path, monkeypatch):
     _env(tmp_path, monkeypatch)
     monkeypatch.setattr(eb, "_runner", lambda path, **kw: None)
     assert eb.recover_sweep() == 0
+
+
+def test_task_pump_import_and_wiring(tmp_path, monkeypatch):
+    """金丝雀: _task_pump 的相对导入必须解析成功(cv-163: .agent→不存在,
+    泵起即崩被静默丢弃, 实时进度/回执全无)。mock 泵主循环, 断言接线完整。"""
+    import asyncio
+    from topoone_app_architect.agent.execution import pumps as real_pumps
+    _env(tmp_path, monkeypatch)
+    calls = {}
+
+    async def fake_run_event_pump(**kw):
+        calls.update(kw)
+
+    monkeypatch.setattr(real_pumps, "run_event_pump", fake_run_event_pump)
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+    t = _mk_running_task(conv["id"])
+    asyncio.run(eb._task_pump(conv["id"], t["id"], "impl-x", "RQ-1", "cline-sdk"))
+    assert calls.get("job_id") == "impl-x"
+    assert calls.get("on_event") and calls.get("on_snapshot") and calls.get("on_lost")
+    calls["on_event"]({"kind": "progress", "toolCount": 3})
+    assert store.TasksStore.get(t["id"])["progress"]["toolCount"] == 3

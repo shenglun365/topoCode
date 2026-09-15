@@ -1013,7 +1013,7 @@ def test_cline_v2_start_session_params_and_models(monkeypatch):
     assert params["model"]["providerId"] == "openai-compatible"
     assert params["model"]["modelId"] == "deepseek-chat"
     assert params["model"]["apiKey"] == "sk-test"
-    assert params["model"]["baseUrl"] == "https://api.deepseek.com"
+    assert params["model"]["baseUrl"] == "https://api.deepseek.com/v1"
     assert params["protocolTools"] is True
     assert j.session_id == "jc1"
 
@@ -1154,3 +1154,17 @@ def test_cline_run_turn_surfaces_error_detail(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="invalid api key"):
         asyncio.run(adapter.run_turn(job, "写个测试"))
     assert captured["method"] == "turn/send"
+
+
+def test_resolve_model_base_url_ensures_v1():
+    """cv-163: 模型条目 url 缺 /v1 → LM Studio 200+JSON 错误体(非 SSE) →
+    "stream ended without a finish reason"。_resolve_model 必须兜底补 /v1。"""
+    from topoone.plugins.runner.turn_adapter import ClineTurnAdapter, _ensure_v1
+    a = ClineTurnAdapter(config={
+        "provider_id": "openai-compatible",
+        "models": [{"name": "m", "model": "q", "url": "http://10.0.0.75:1234"}],
+    })
+    r = a._resolve_model(type("J", (), {"model": "m"})())
+    assert r["baseUrl"] == "http://10.0.0.75:1234/v1"
+    assert _ensure_v1("http://h:8082/v1/") == "http://h:8082/v1"
+    assert _ensure_v1("") == ""

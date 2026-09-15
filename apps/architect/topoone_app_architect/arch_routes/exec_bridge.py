@@ -769,7 +769,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
 async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
                      agent: str) -> None:
     """任务泵: 骨架委托 agent.execution.pumps(唯一实现), 事件走 task 路径。"""
-    from .agent.execution import pumps as _pumps
+    from ..agent.execution import pumps as _pumps
     logger.info("[exec-bridge] task-pump start conv=%s task=%s job=%s",
                 conv_id, task_id, job_id)
 

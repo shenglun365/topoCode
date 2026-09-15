@@ -271,6 +271,18 @@ def _default_token() -> str:
     return ""
 
 
+def _ensure_v1(url: str) -> str:
+    """openai-compatible baseURL 兜底: 非 /v1 结尾则补(LM Studio/vLLM 惯例)。
+
+    教训(cv-163): 配置 url 缺 /v1 → SDK 请求打 {host}/chat/completions →
+    LM Studio 回 200+JSON 错误体(非 SSE) → "stream ended without a
+    finish reason"。单一兜底点, 修配置与修代码双保险。"""
+    u = (url or "").strip().rstrip("/")
+    if u and not u.endswith("/v1"):
+        u = f"{u}/v1"
+    return u
+
+
 def _default_sidecar_script() -> str:
     """sidecar 脚本默认路径: turn_adapter → runner → plugins → topoone → core
     → packages → 仓库根/packages/agent-sidecar/dist/index.js。
@@ -913,7 +925,7 @@ class ClineTurnAdapter(TurnAdapter):
             "providerId": provider or str((entry or {}).get("provider") or "openai-compatible"),
             "modelId": model,
             "apiKey": str((entry or {}).get("apiKey") or self._api_key or ""),
-            "baseUrl": str((entry or {}).get("url") or self._base_url or ""),
+            "baseUrl": _ensure_v1(str((entry or {}).get("url") or self._base_url or "")),
         }
 
     # ── boundaries → toolPolicies（只读作业硬阻断写类工具）──

@@ -58,7 +58,10 @@ _HOSTS = {"local", "remote"}
 
 
 def _norm_models(raw) -> list:
-    """实例内模型列表归一化: [{id, name, model, url, apiKey?, maxTokens?}]。"""
+    """实例内模型列表归一化: [{id, name, model, url, apiKey?, maxTokens?}]。
+
+    url 归一到 /v1 结尾(openai-compatible 惯例; cv-163: 缺 /v1 →
+    LM Studio 200+JSON 错误体非 SSE → "stream ended without finish reason")。"""
     out = []
     for i, m in enumerate(raw if isinstance(raw, list) else []):
         if not isinstance(m, dict):
@@ -67,10 +70,13 @@ def _norm_models(raw) -> list:
         model = str(m.get("model") or "").strip()
         if not name or not model:
             continue
+        url = str(m.get("url") or "").strip().rstrip("/")
+        if url and not url.endswith("/v1"):
+            url = f"{url}/v1"
         out.append({
             "id": m.get("id") or f"m{i + 1}",
             "name": name, "model": model,
-            "url": str(m.get("url") or "").strip(),
+            "url": url,
             "apiKey": str(m.get("apiKey") or "").strip(),
             "maxTokens": int(m.get("maxTokens") or 0),
         })
