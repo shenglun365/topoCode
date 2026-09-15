@@ -1785,6 +1785,71 @@ onUnmounted(() => {
     </transition>
 
     <div class="flex items-center gap-1 border-t border-ctp-surface0 px-2.5 py-1.5 shrink-0">
+      <!-- 快捷挡直切(闪电): 选中=蓝色填充 / 未选中=置灰半透明(悬停恢复); 空白对话禁用(title 说明原因) -->
+      <button
+        class="btn btn-xs !px-1.5"
+        :class="quickOn ? 'btn-blue' : 'btn-ghost opacity-50 hover:opacity-100'"
+        :disabled="quickLocked"
+        :title="quickTitle"
+        @click="toggleQuickMode"
+      >
+        <BoltIcon class="w-3.5 h-3.5" />
+      </button>
+      <!-- 语境摘要(仅转达语境): 选史 → 生成摘要 → 随转达下发执行器 -->
+      <button
+        v-if="canDigest"
+        class="btn btn-xs !px-1.5"
+        :class="digestMode ? 'btn-teal' : 'btn-ghost'"
+        title="语境摘要(/选摘) — 选取会话历史生成摘要, 随转达发给执行器"
+        @click="toggleDigestMode"
+      >
+        <ClipboardDocumentIcon class="w-3.5 h-3.5" />
+      </button>
+      <!-- 工具条: 纯 icon(悬停 title 提示); 动作均可用 /命令 触达(见命令浮层) -->
+      <button
+        class="btn btn-xs !px-1.5"
+        :class="props.diagramSkill ? 'btn-blue' : 'btn-ghost'"
+        :disabled="busy"
+        :title="`${t('requirement.chat.diagramSkill')} — /绘图`"
+        @click="emit('toggle-diagram-skill', !props.diagramSkill)"
+      >
+        <svg
+          class="w-3.5 h-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
+      </button>
+      <button
+        class="btn btn-xs btn-ghost !px-1.5"
+        :disabled="busy"
+        :title="`${t('assetChat.extractPlan.button')} — /方案`"
+        @click="fillExtractPlan"
+      >
+        <SparklesIcon class="w-3.5 h-3.5" />
+      </button>
+      <slot name="toolbar-extra" />
+      <button
+        v-if="props.showContractSkill"
+        class="btn btn-xs !px-1.5"
+        :class="props.contractSkill ? 'btn-green' : 'btn-ghost'"
+        :disabled="busy"
+        :title="t('requirement.chat.contractSkillHint')"
+        @click="emit('toggle-contract-skill', !props.contractSkill)"
+      >
+        <svg
+          class="w-3.5 h-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><path d="M9 12h6" /><path d="M9 16h6" /><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+      </button>
       <!-- v2 语境路由(发起者感知自动变 + 菜单单次翻转): 靠右加宽, 同钮显示当前执行器完整名称 -->
       <div class="relative shrink-0 ml-auto">
         <button
@@ -1860,71 +1925,6 @@ onUnmounted(() => {
           >注册表无启用执行器</div>
         </div>
       </div>
-      <!-- 快捷挡直切(闪电): 选中=蓝色填充 / 未选中=置灰半透明(悬停恢复); 空白对话禁用(title 说明原因) -->
-      <button
-        class="btn btn-xs !px-1.5"
-        :class="quickOn ? 'btn-blue' : 'btn-ghost opacity-50 hover:opacity-100'"
-        :disabled="quickLocked"
-        :title="quickTitle"
-        @click="toggleQuickMode"
-      >
-        <BoltIcon class="w-3.5 h-3.5" />
-      </button>
-      <!-- 语境摘要(仅转达语境): 选史 → 生成摘要 → 随转达下发执行器 -->
-      <button
-        v-if="canDigest"
-        class="btn btn-xs !px-1.5"
-        :class="digestMode ? 'btn-teal' : 'btn-ghost'"
-        title="语境摘要(/选摘) — 选取会话历史生成摘要, 随转达发给执行器"
-        @click="toggleDigestMode"
-      >
-        <ClipboardDocumentIcon class="w-3.5 h-3.5" />
-      </button>
-      <!-- 工具条: 纯 icon(悬停 title 提示); 动作均可用 /命令 触达(见命令浮层) -->
-      <button
-        class="btn btn-xs !px-1.5"
-        :class="props.diagramSkill ? 'btn-blue' : 'btn-ghost'"
-        :disabled="busy"
-        :title="`${t('requirement.chat.diagramSkill')} — /绘图`"
-        @click="emit('toggle-diagram-skill', !props.diagramSkill)"
-      >
-        <svg
-          class="w-3.5 h-3.5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
-      </button>
-      <button
-        class="btn btn-xs btn-ghost !px-1.5"
-        :disabled="busy"
-        :title="`${t('assetChat.extractPlan.button')} — /方案`"
-        @click="fillExtractPlan"
-      >
-        <SparklesIcon class="w-3.5 h-3.5" />
-      </button>
-      <slot name="toolbar-extra" />
-      <button
-        v-if="props.showContractSkill"
-        class="btn btn-xs !px-1.5"
-        :class="props.contractSkill ? 'btn-green' : 'btn-ghost'"
-        :disabled="busy"
-        :title="t('requirement.chat.contractSkillHint')"
-        @click="emit('toggle-contract-skill', !props.contractSkill)"
-      >
-        <svg
-          class="w-3.5 h-3.5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        ><path d="M9 12h6" /><path d="M9 16h6" /><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-      </button>
     </div>
 
     <div class="relative flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
