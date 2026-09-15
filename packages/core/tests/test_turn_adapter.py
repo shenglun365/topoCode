@@ -1168,3 +1168,30 @@ def test_resolve_model_base_url_ensures_v1():
     assert r["baseUrl"] == "http://10.0.0.75:1234/v1"
     assert _ensure_v1("http://h:8082/v1/") == "http://h:8082/v1"
     assert _ensure_v1("") == ""
+
+
+def test_resolve_model_top_level_model_id_wins_over_models0(monkeypatch):
+    """cv-163: 作业未指定模型时, 顶层 model_id 命中条目优先于 models[0]——
+    否则实际执行的模型与 UI 展示的默认模型不一致。"""
+    fake = _FakeSidecar()
+    _patch_sidecar(monkeypatch, fake)
+    a = _adapter(
+        model_id="LMS-Qwen3.6-35B",
+        models=[
+            {"id": "m1", "name": "LMS-9b", "model": "qwen3.5-9b-mtp", "url": "http://h:1234"},
+            {"id": "m2", "name": "LMS-Qwen3.6-35B", "model": "qwen3.6-35b", "url": "http://h:8082"},
+        ])
+    j = _fake_job(model="")
+    asyncio.run(a.start_session(j))
+    _, params = fake.calls[0]
+    assert params["model"]["modelId"] == "qwen3.6-35b"
+    assert params["model"]["baseUrl"] == "http://h:8082/v1"
+
+
+def test_resolve_model_fallback_models0_when_model_id_misses(monkeypatch):
+    """顶层 model_id 无命中(改名/删除) → 兜底 models[0], 不空转。"""
+    a = _adapter(
+        model_id="gone-model",
+        models=[{"id": "m1", "name": "9b", "model": "qwen3.5-9b-mtp", "url": "http://h:1234"}])
+    r = a._resolve_model(type("J", (), {"model": ""})())
+    assert r["modelId"] == "qwen3.5-9b-mtp"

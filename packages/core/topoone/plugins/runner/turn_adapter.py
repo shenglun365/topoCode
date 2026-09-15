@@ -916,7 +916,16 @@ class ClineTurnAdapter(TurnAdapter):
                     entry = m
                     break
         elif models:
-            entry = models[0]
+            # 作业未指定模型: 顶层 model_id(UI 所示"默认模型")优先命中条目,
+            # 兜底 models[0]。教训(cv-163): 直接落 models[0] → 实际执行的模型
+            # 与 UI 展示的默认不一致, 用户在对的模型上看不到调用以为没跑。
+            if self._model_id:
+                for m in models:
+                    if self._model_id in (m.get("model"), m.get("name"), m.get("id")):
+                        entry = m
+                        break
+            if not entry:
+                entry = models[0]
         model = str((entry or {}).get("model") or self._model_id or "")
         provider = self._provider_id
         if "/" in model:
