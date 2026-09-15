@@ -95,6 +95,54 @@ def test_propose_task_prefers_conv_binding_over_default(tmp_path, monkeypatch):
     assert t["executorId"] == "cline"
 
 
+def test_propose_task_default_carries_executor_id(tmp_path, monkeypatch):
+    """cv-158 实证回归: 默认执行器只写 type 不写 id → confirm 无配置可查,
+    sidecar 收到空 model 被拒。id 必须与 type 同源取自同一注册项。"""
+    _env(tmp_path, monkeypatch)
+    conv = _mk_conv()
+    t = eb.propose_task(conv, "标题", "指令内容")
+    assert t["executorType"] == "cline-sdk"
+    assert t["executorId"] == "cline"          # 非空——confirm 才有配置可查
+
+
+def test_confirm_task_fetches_config_for_type_only_task(tmp_path, monkeypatch):
+    """存量卡(type 有/id 空) confirm 时补注册表默认项配置(model/models 同源)。"""
+    _env(tmp_path, monkeypatch)
+    _set_registry([{
+        "id": "cline", "type": "cline-sdk", "enabled": True, "default": True,
+        "config": {"provider_id": "openai-compatible", "model_id": "Qwen3.6-35B",
+                   "models": [{"name": "M1", "model": "m-1", "url": "http://x/v1"}]},
+    }])
+    root = tmp_path / "proj"
+    root.mkdir(exist_ok=True)
+    (root / "README.md").write_text("# P\n")
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-x"))
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_acceptance_brief", lambda *a, **k: "(简报)")
+    conv = _mk_conv()
+    t = store.TasksStore.create({"conversationId": conv["id"], "title": "T",
+                                 "instruction": "x", "status": "pending_confirm",
+                                 "executorType": "cline-sdk"})   # 无 executorId
+    captured = {}
+
+    def _fake_runner(path, payload=None, timeout=20.0):
+        if path == "/api/implement":
+            captured.update(payload or {})
+            return {"ok": True, "jobId": "impl-x2", "worktree": "/tmp/w",
+                    "branch": "task/x2", "sessionId": "s"}
+        return None
+
+    monkeypatch.setattr(eb, "_runner", _fake_runner)
+    r = eb.confirm_task(t["id"])
+    assert r.get("ok") is True, r
+    assert captured.get("executorId") == "cline"
+    assert captured.get("model") == "M1"                       # hint.model = models[0].name
+    assert (captured.get("executorConfig") or {}).get("models")
+
+
 def test_propose_task_explicit_hint_normalized(tmp_path, monkeypatch):
     _env(tmp_path, monkeypatch)
     conv = _mk_conv()

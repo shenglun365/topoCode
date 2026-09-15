@@ -220,6 +220,11 @@ def propose_task(conv: dict, title: str, instruction: str,
                          "请在「执行器配置」启用至少一个执行器后在对话中指定(如 @cline)。"}
     _eid = ((executor_hint or {}).get("executorId") or ""
             or (conv or {}).get("executorId") or "")
+    if not _eid:
+        # 类型/配置须同源(cv-158 实证: 默认执行器只给了 type 没带 id → confirm 时
+        # 无 executorConfig 可查, sidecar 收到空 model 被拒)——eid 取同一注册项
+        _def = default_executor() or {}
+        _eid = str(_def.get("id") or "")
     _rid = (conv or {}).get("reqId") or ""
     _spec_ver = 0
     if _rid:
@@ -281,6 +286,11 @@ def confirm_task(task_id: str) -> dict:
                                      or task.get("executorType") or "")
     if not _etype:
         _etype = normalize_executor_type((default_executor() or {}).get("type") or "")
+    if not hint and not (task.get("executorId") or ""):
+        # 配置同源兜底(cv-158): 任务只有类型没有 id(默认执行器早期版本只写 type)
+        # → 取注册表默认项的完整配置(/models/provider/key), 否则 sidecar 收到空 model
+        hint = executor_hint_by_id(str((default_executor() or {}).get("id") or ""), conv) or {}
+        _etype = _etype or normalize_executor_type(hint.get("executorType") or "")
     if not _etype:
         err = ("无可用执行器：任务未绑定执行器且注册表无默认项——"
                "请在任务卡上选择执行器或在「执行器配置」设置默认。")
@@ -303,7 +313,7 @@ def confirm_task(task_id: str) -> dict:
                "branchName": branch, "projectId": project,
                "boundaries": {"files": boundary_files, "components": [],
                               "readOnly": False}}
-    hint = executor_hint_by_id(task.get("executorId") or "", conv) or {}
+    # hint 已含注册表默认兜底(上方选定单源)——此处不得按空 executorId 重查覆盖
     for k in ("model", "basePort", "autoStart", "baseUrl"):
         v = hint.get(k)
         if v not in (None, ""):
@@ -836,6 +846,12 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                             "sandbox_mode": cfg.get("sandbox_mode") or "",
                             "turnTimeout": cfg.get("turnTimeout"),
                             "stallSec": cfg.get("stallSec"),
+                            # cv-158 修复: models/permission/mcp_servers 曾被丢弃——
+                            # cline 按作业换模(_resolve_model)与 opencode MCP 全依赖它们
+                            "models": cfg.get("models") or [],
+                            "permission": cfg.get("permission") or "",
+                            "rulesMd": cfg.get("rulesMd") or "",
+                            "mcp_servers": cfg.get("mcp_servers") or {},
                         },
                         "model": model,
                         "basePort": cfg.get("base_port"),
