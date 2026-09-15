@@ -233,6 +233,56 @@ def test_resolve_call_model_raises_when_unconfigured(monkeypatch):
         llm.resolve_call_model(None)
 
 
+def test_post_turn_guards_fence_landed_skips_intent_guard(tmp_path, monkeypatch):
+    """cv-174 回归: 围栏代落库(RQ-92)后, 意图未执行守卫不得再纠偏——
+    否则模型再提一次 → 同回合重复需求(RQ-93 draft 孤儿)。同时正文围栏折叠。"""
+    import asyncio
+    import time as _t
+    from topoone_app_architect.agent import orchestrator as orc
+    data = str(tmp_path / "arch-fence")
+    monkeypatch.setenv("ARCH_DATA_DIR", data)
+    C._db = None
+    C._kb = None
+    C._data_dir = None
+    C._project_dbs.clear()
+    C.setup(data_dir=data)
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+
+    async def fake_send(payload):
+        pass
+
+    landed = {}
+
+    async def fake_tool(send, rid, name, args, root, project, model_id=None):
+        landed["called"] = True
+        rid2 = store.RequirementsStore.create({"title": args.get("title") or "T",
+                                               "desc": "# x"})
+        store.ConversationsStore.update(conv["id"], {"reqId": rid2})
+        return {"ok": True, "text": f"新需求规约已创建(draft v1) {rid2}"}
+
+    monkeypatch.setattr(orc, "_run_tool_with_progress", fake_tool)
+
+    async def _fail_sync(*a, **k):
+        raise AssertionError("意图守卫不应在围栏已落库时触发纠偏")
+
+    monkeypatch.setattr(orc, "_sync_with_tools", _fail_sync)
+
+    content = ("我将创建。\n```proposal\n{\"title\": \"T\"}\n```")
+
+    async def _flow():
+        io = orc._TurnIO(fake_send, conv["id"], "m-1")
+        io.t0 = _t.time()
+        return await orc._post_turn_guards(
+            io, conv["id"], [], "", "", None, "", conv,
+            "编写测试程序", set(), {}, content, None, assistant_text="")
+
+    fc, meta, c2, tu, te = asyncio.run(_flow())
+    assert landed.get("called"), "围栏应已代落库"
+    assert "```proposal" not in fc, "正文围栏应被折叠"
+    # 会话已绑定需求 → intent 检查被跳过(不触发 _sync_with_tools 断言)
+    assert (store.ConversationsStore.get(conv["id"]) or {}).get("reqId")
+
+
 def test_post_turn_guards_scope_fix_visible_corr(monkeypatch):
     """cv-172 回归: _post_turn_guards 拆分遗留作用域断链——
     visible/corr 未初始化即读 → UnboundLocalError。守卫块须在

@@ -37,6 +37,7 @@ from ..agent.planning.req_spec import (  # noqa: F401,E402
     is_spec_payload,
     parse_scope_files,
     repair_spec_payload_format,
+    strip_proposal_fence,
 )
 from ..agent.planning.task_plan import extract_task_fence  # noqa: F401,E402
 

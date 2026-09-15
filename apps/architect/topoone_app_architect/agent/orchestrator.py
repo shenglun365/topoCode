@@ -636,6 +636,11 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             for c in calls:
                 name = c.get("tool", "")
                 args = c.get("arguments", {})
+                if name == "req.propose" and "req.propose" in tools_used:
+                    # cv-174: 同回合重复提案 → 不再落库, 防止一回合多个需求
+                    results.append({"name": name,
+                                    "text": "重复的 req.propose 已忽略——本回合已创建规约(以首个为准)；如需修改请用 req.amend"})
+                    continue
                 if name:
                     tools_used.add(name)
                 logger.info("[req_agent] kb chat tool round=%s call=%s",
@@ -693,6 +698,7 @@ async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
     from ..arch_routes import req_agent, store
     # ── proposal 围栏自动落库: 模型直接输出 ```proposal JSON → 服务端代执行 ──
     fence_args = req_agent.extract_proposal_fence(final_content)
+    proposal_landed = False
     if fence_args and "req.propose" not in tools_used:
         logger.info("[kb-chat] proposal 围栏命中, 服务端代落库 conv=%s", conv_id)
         try:
@@ -701,7 +707,11 @@ async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
                 model_id=eff_model)
             tools_used.add("req.propose")
             ok = bool(res.get("ok"))
-            if not ok:
+            proposal_landed = ok
+            if ok:
+                # 落库成功 → 正文中的围栏 JSON 是复述垃圾, 折叠(cv-174)
+                final_content = req_agent.strip_proposal_fence(final_content)
+            else:
                 tool_errors["req.propose"] = str(res.get("text", ""))[:200]
             notice = (f"\n\n✅ 已从提案草稿围栏自动落库：{str(res.get('text', ''))[:140]}"
                       if ok else
@@ -773,14 +783,18 @@ async def _post_turn_guards(io: "_TurnIO", conv_id: str, msgs: list,
     # 真实工具调用兑现, 查全文会误报, 故只查末段
     visible = final_content   # 同 cv-172: 守卫续写基于 final_content 累积
     corr = ""
-    pending_wait = "请等待" in final_content
+    # cv-174: 围栏代落库已满足"我将创建"意图 → 不再纠偏(否则模型再提一次,
+    # 同回合产生重复需求 RQ-92/RQ-93)。会话已绑定需求同理跳过。
+    _req_bound = bool((store.ConversationsStore.get(conv_id) or {}).get("reqId"))
+    pending_wait = "请等待" in final_content and not (_req_bound or proposal_landed)
     intent = ""
     if pending_wait:
         intent = "请等待"
-    elif not tools_used:
-        intent = req_agent.announced_tool_intent(final_content)
-    elif assistant_text:
-        intent = req_agent.announced_tool_intent(assistant_text)
+    elif not (_req_bound or proposal_landed):
+        if not tools_used:
+            intent = req_agent.announced_tool_intent(final_content)
+        elif assistant_text:
+            intent = req_agent.announced_tool_intent(assistant_text)
     if intent:
             logger.warning("[kb-chat] 意图未执行守卫触发 conv=%s intent=%s", conv_id, intent)
             msgs.append({"role": "assistant", "content": final_content})

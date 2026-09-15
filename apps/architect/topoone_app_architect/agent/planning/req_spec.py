@@ -295,6 +295,13 @@ def repair_spec_payload_format(text: str, req_id: str = "") -> Optional[Dict[str
     return out.get("parsed") if isinstance(out.get("parsed"), dict) else None
 
 
+def strip_proposal_fence(text: str) -> str:
+    """移除 ```proposal 围栏整体(服务端已代落库时, 正文复述 JSON 属垃圾——cv-174)。"""
+    if not text or "```proposal" not in text:
+        return text or ""
+    return re.sub(r"```proposal\s*\n?\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
+
+
 def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
     """提取 ```proposal JSON 围栏(方案生成的确定性落库通道)。
 
