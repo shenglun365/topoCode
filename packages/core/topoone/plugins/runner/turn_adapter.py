@@ -984,7 +984,9 @@ class ClineTurnAdapter(TurnAdapter):
                      message=params.get("message") or "")
         elif t == "error":
             msg = str(params.get("message") or "")[:400]
-            if msg and not params.get("recoverable", True):
+            # cv-161 实证: 错误详情曾被丢弃(recoverable 才记)——run_turn 失败时
+            # 只能回 generic 文案。一律记录, 供 run_turn 异常透出真实原因。
+            if msg:
                 self._last_error[job.id] = msg
 
     # ── TurnAdapter 协议 ──
@@ -1044,6 +1046,7 @@ class ClineTurnAdapter(TurnAdapter):
             job.last_activity_ts = time.time()
             if not result.get("ok"):
                 raise RuntimeError(str(result.get("error")
+                                       or self._last_error.get(job.id)
                                        or f"cline 回合失败(status={result.get('status')})"))
             # sidecar v2 字段: outputText（兼容 output 旧键）
             output = str(result.get("outputText") or result.get("output") or "")

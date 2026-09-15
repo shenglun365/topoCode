@@ -1122,3 +1122,35 @@ def test_cline_v2_events_new_kinds_accepted():
                  EventKind.TURN_OUTCOME, EventKind.APPROVAL_REQUEST):
         ev = make_event(1, kind, "x", toolName="editor")
         assert ev["kind"] == kind
+
+
+# ── cv-161 回归: cline 回合错误详情必须透出(error 事件→run_turn 异常) ──
+
+def test_cline_run_turn_surfaces_error_detail(tmp_path, monkeypatch):
+    """sidecar error 事件的 message 必须进入 run_turn 的失败原因——
+    曾被丢弃(recoverable 才记), 失败只剩 generic「cline 回合失败(status=error)」。"""
+    import asyncio
+    import time
+    from types import SimpleNamespace
+    from topoone.plugins.runner.turn_adapter import ClineTurnAdapter
+
+    adapter = ClineTurnAdapter({"provider_id": "openai-compatible",
+                                "model_id": "m-1"}, executor_id="cline")
+    job = SimpleNamespace(id="j-err", session_id="s-err", turn_timeout=30.0,
+                          wt=str(tmp_path), model="", last_activity_ts=time.time())
+    captured = {}
+
+    class _FakeSc:
+        async def call(self, method, params=None, timeout=None):
+            captured["method"] = method
+            # 模拟 sidecar: finishReason=error 且返回体不带 error 字段
+            return {"ok": False, "status": "error"}
+
+    monkeypatch.setattr(adapter, "_sidecar", lambda: _FakeSc())
+
+    # 先来一条 error 事件(recoverable=True 也必须记)
+    adapter._on_event(job, {"type": "error", "sessionId": "s-err",
+                            "message": "API 401: invalid api key", "recoverable": True})
+    with pytest.raises(RuntimeError, match="invalid api key"):
+        asyncio.run(adapter.run_turn(job, "写个测试"))
+    assert captured["method"] == "turn/send"
