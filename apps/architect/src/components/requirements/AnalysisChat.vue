@@ -305,8 +305,7 @@ function toggleQuickMode() {
   emit('set-analysis-mode', quickOn.value ? 'strict' : 'quick')
 }
 
-// ── 执行器选择(工具栏左侧): 完整名称显示 + 清单选择; 绑定/克隆语义在宿主 ──
-const executorMenuOpen = ref(false)
+// ── 执行器选择(路由钮内, 靠右): 完整名称显示 + 清单选择; 绑定/克隆语义在宿主 ──
 const defaultExecutor = computed(() =>
   (props.executors || []).find((e) => e.default) || null)
 /** 按钮完整名称: 已绑定=「id · type」; 未绑定=「默认 {id}」; 无注册表=「执行器」。 */
@@ -322,7 +321,7 @@ function executorFull(e: { id: string; type?: string }): string {
   return e.type && e.type !== e.id ? `${e.id} · ${e.type}` : e.id
 }
 function pickExecutor(id: string) {
-  executorMenuOpen.value = false
+  routeMenuOpen.value = false
   if (id === props.boundExecutorId) return
   emit('bind-executor', id)
 }
@@ -1786,61 +1785,23 @@ onUnmounted(() => {
     </transition>
 
     <div class="flex items-center gap-1 border-t border-ctp-surface0 px-2.5 py-1.5 shrink-0">
-      <!-- 执行器选择(工具栏左侧): 完整名称显示; 选择 → 宿主绑定(未绑=bind, 已绑切换=克隆) -->
-      <div class="relative shrink-0">
+      <!-- v2 语境路由(发起者感知自动变 + 菜单单次翻转): 靠右加宽, 同钮显示当前执行器完整名称 -->
+      <div class="relative shrink-0 ml-auto">
         <button
-          class="btn btn-xs gap-1 !px-2 max-w-[160px]"
-          :class="props.boundExecutorId ? 'btn-ghost text-ctp-teal' : 'btn-ghost opacity-70 hover:opacity-100'"
-          title="会话执行器——新任务卡默认使用; 未绑定时选择即绑定, 已绑定会话切换=克隆新会话"
-          @click="executorMenuOpen = !executorMenuOpen"
-        >
-          <CpuChipIcon class="w-3.5 h-3.5 shrink-0" />
-          <span class="truncate text-[10px] font-mono">{{ executorLabel }}</span>
-        </button>
-        <div
-          v-if="executorMenuOpen"
-          class="absolute bottom-full left-0 z-50 mb-1 w-64 flex-col gap-1 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1.5 shadow-lg flex"
-          @mouseleave="executorMenuOpen = false"
-        >
-          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话执行器（新任务卡默认）</div>
-          <button
-            v-for="e in (props.executors || [])"
-            :key="e.id"
-            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0 flex items-center gap-1.5"
-            :class="e.id === props.boundExecutorId ? 'bg-ctp-teal/10' : ''"
-            @click="pickExecutor(e.id)"
-          >
-            <CpuChipIcon class="w-3 h-3 shrink-0 text-ctp-teal" />
-            <span class="font-mono truncate">{{ executorFull(e) }}</span>
-            <span class="flex-1" />
-            <span
-              v-if="e.id === props.boundExecutorId"
-              class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0"
-            >已绑定</span>
-            <span
-              v-else-if="e.default"
-              class="chip !text-[9px] bg-ctp-surface0/60 text-ctp-overlay0 shrink-0"
-            >默认</span>
-          </button>
-          <div
-            v-if="!(props.executors || []).length"
-            class="px-2 py-1.5 text-[10px] text-ctp-overlay0"
-          >注册表无启用执行器</div>
-        </div>
-      </div>
-      <!-- v2 语境路由(发起者感知自动变 + 菜单单次翻转): 纯 icon, 配色随路由态 -->
-      <div class="relative shrink-0">
-        <button
-          class="btn btn-xs !px-1.5"
+          class="btn btn-xs gap-1 !px-2 max-w-[200px]"
           :class="routeBtnClass"
-          :title="routeDetail(effectiveRoute) + '（点击切换）'"
+          :title="routeDetail(effectiveRoute) + '（点击切换）；执行器选择见菜单底部'"
           @click="routeMenuOpen = !routeMenuOpen"
         >
-          <AtSymbolIcon class="w-3.5 h-3.5" />
+          <AtSymbolIcon class="w-3.5 h-3.5 shrink-0" />
+          <span
+            class="truncate text-[10px] font-mono"
+            :class="props.boundExecutorId ? 'text-ctp-teal' : 'opacity-70'"
+          >{{ executorLabel }}</span>
         </button>
         <div
           v-if="routeMenuOpen"
-          class="absolute bottom-full left-0 z-50 mb-1 w-72 flex-col gap-1 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1.5 shadow-lg flex"
+          class="absolute bottom-full right-0 z-50 mb-1 w-72 flex-col gap-1 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1.5 shadow-lg flex"
           @mouseleave="routeMenuOpen = false"
         >
           <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">回复对象（单次, 发送后复位）</div>
@@ -1871,6 +1832,32 @@ onUnmounted(() => {
             <span class="font-mono text-ctp-peach">@{{ a }}</span>
             <span class="ml-1.5 text-ctp-subtext0">一次性指派 coding subagent</span>
           </button>
+          <!-- 会话执行器: 绑定后新任务卡默认使用(与 /执行 直通、模型建卡同链) -->
+          <div class="mx-1 my-0.5 border-t border-ctp-surface0" />
+          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话执行器（新任务卡默认）</div>
+          <button
+            v-for="e in (props.executors || [])"
+            :key="e.id"
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0 flex items-center gap-1.5"
+            :class="e.id === props.boundExecutorId ? 'bg-ctp-teal/10' : ''"
+            @click="pickExecutor(e.id)"
+          >
+            <CpuChipIcon class="w-3 h-3 shrink-0 text-ctp-teal" />
+            <span class="font-mono truncate">{{ executorFull(e) }}</span>
+            <span class="flex-1" />
+            <span
+              v-if="e.id === props.boundExecutorId"
+              class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0"
+            >已绑定</span>
+            <span
+              v-else-if="e.default"
+              class="chip !text-[9px] bg-ctp-surface0/60 text-ctp-overlay0 shrink-0"
+            >默认</span>
+          </button>
+          <div
+            v-if="!(props.executors || []).length"
+            class="px-2 py-1.5 text-[10px] text-ctp-overlay0"
+          >注册表无启用执行器</div>
         </div>
       </div>
       <!-- 快捷挡直切(闪电): 选中=蓝色填充 / 未选中=置灰半透明(悬停恢复); 空白对话禁用(title 说明原因) -->
