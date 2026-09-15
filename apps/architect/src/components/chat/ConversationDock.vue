@@ -510,6 +510,31 @@ async function saveRoles() {
   }
 }
 
+/** 工具栏执行器选择(与 saveRoles 同链): 未绑=bind; 已绑切换=克隆新会话(显式确认)。 */
+async function onBindExecutor(executorId: string) {
+  if (!conv.activeId || !executorId || executorId === boundExecutorId.value) return
+  if (boundExecutorId.value) {
+    const okGo = window.confirm(
+      `会话已绑定「${boundExecutorId.value}」。\n切换到「${executorId}」将克隆一个新会话（绑定不可换），继续？`)
+    if (!okGo) return
+  }
+  try {
+    if (!boundExecutorId.value) {
+      const updated = await apiPost(`/sessions/${conv.activeId}/bind`,
+                                    { executorId })
+      conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
+                          executorId: (updated as any)?.executorId ?? executorId } as ConversationMeta
+    } else {
+      const created = await apiPost(`/sessions/${conv.activeId}/clone`,
+                                    { executorId })
+      const newId = (created as any)?.id
+      if (newId) await conv.openConversation({ id: newId } as ConversationMeta)
+    }
+  } catch (e: any) {
+    window.alert(e?.message || String(e))
+  }
+}
+
 // 作业控制: 停止(仅 UI, 裁决#5) / 继续执行(增量回合)
 const stopBusy = ref(false)
 async function stopExec() {
@@ -849,6 +874,7 @@ async function pollRunningState() {
         :job-state="jobState"
         :bound-executor-id="boundExecutorId"
         :executor-models="boundModelNames"
+        :executors="executorList"
         :executor-model="currentExecutorModel"
         :analysis-mode="analysisMode"
         :has-session="!!conv.activeId"
@@ -860,6 +886,7 @@ async function pollRunningState() {
         @task-executor="(p: any) => void onTaskExecutor(p)"
         @local-cmd="onLocalCmd"
         @bind-coding="openRoles"
+        @bind-executor="onBindExecutor"
         @set-model="onSetModel"
         @send="onSendChat"
         @job-accept="openAccept"

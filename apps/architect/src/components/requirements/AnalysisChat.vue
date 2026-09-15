@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { kindChipClass } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
-import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon } from '@heroicons/vue/24/outline'
+import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon, CpuChipIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
@@ -40,6 +40,8 @@ const props = defineProps<{
   jobState?: { role: string; executorId?: string; status?: string; progress?: { toolCount?: number; msgCount?: number; at?: number } } | null
   /** 已绑定执行器 id(S2/S3): 空=未绑定——Coding 切换钮首击触发分配(bind-coding)。 */
   boundExecutorId?: string
+  /** 执行器注册表(启用项): 工具栏选择钮清单与完整名称显示。 */
+  executors?: Array<{ id: string; type?: string; default?: boolean }>
   /** 执行器白名单模型名列表(≥2 时显示模型 chip)。 */
   executorModels?: string[]
   /** 当前会话模型(空=默认)。 */
@@ -59,6 +61,8 @@ const emit = defineEmits<{
   send: [p: { text: string; attachTo?: string; agent?: string; digest?: string }]
   /** 分析挡位切换(strict/quick) → 宿主上抛 REST。 */
   'set-analysis-mode': [mode: 'strict' | 'quick']
+  /** 工具栏执行器选择: 上抛宿主执行绑定(未绑=bind; 已绑切换=克隆新会话)。 */
+  'bind-executor': [executorId: string]
   'task-confirm': [taskId: string]
   'task-cancel': [taskId: string]
   'task-executor': [p: { taskId: string; executorType: string }]
@@ -299,6 +303,28 @@ const quickTitle = computed(() => {
 function toggleQuickMode() {
   if (quickLocked.value) return
   emit('set-analysis-mode', quickOn.value ? 'strict' : 'quick')
+}
+
+// ── 执行器选择(工具栏左侧): 完整名称显示 + 清单选择; 绑定/克隆语义在宿主 ──
+const executorMenuOpen = ref(false)
+const defaultExecutor = computed(() =>
+  (props.executors || []).find((e) => e.default) || null)
+/** 按钮完整名称: 已绑定=「id · type」; 未绑定=「默认 {id}」; 无注册表=「执行器」。 */
+const executorLabel = computed(() => {
+  const b = props.boundExecutorId
+  if (b) {
+    const t = (props.executors || []).find((e) => e.id === b)?.type
+    return t && t !== b ? `${b} · ${t}` : b
+  }
+  return defaultExecutor.value ? `默认 ${defaultExecutor.value.id}` : '执行器'
+})
+function executorFull(e: { id: string; type?: string }): string {
+  return e.type && e.type !== e.id ? `${e.id} · ${e.type}` : e.id
+}
+function pickExecutor(id: string) {
+  executorMenuOpen.value = false
+  if (id === props.boundExecutorId) return
+  emit('bind-executor', id)
 }
 
 // ── 语境摘要(转达下发): 摘要模式选史 → REST 生成 → 可编辑草稿卡 → 发送/自动通过 ──
@@ -1760,6 +1786,48 @@ onUnmounted(() => {
     </transition>
 
     <div class="flex items-center gap-1 border-t border-ctp-surface0 px-2.5 py-1.5 shrink-0">
+      <!-- 执行器选择(工具栏左侧): 完整名称显示; 选择 → 宿主绑定(未绑=bind, 已绑切换=克隆) -->
+      <div class="relative shrink-0">
+        <button
+          class="btn btn-xs gap-1 !px-2 max-w-[160px]"
+          :class="props.boundExecutorId ? 'btn-ghost text-ctp-teal' : 'btn-ghost opacity-70 hover:opacity-100'"
+          title="会话执行器——新任务卡默认使用; 未绑定时选择即绑定, 已绑定会话切换=克隆新会话"
+          @click="executorMenuOpen = !executorMenuOpen"
+        >
+          <CpuChipIcon class="w-3.5 h-3.5 shrink-0" />
+          <span class="truncate text-[10px] font-mono">{{ executorLabel }}</span>
+        </button>
+        <div
+          v-if="executorMenuOpen"
+          class="absolute bottom-full left-0 z-50 mb-1 w-64 flex-col gap-1 rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1.5 shadow-lg flex"
+          @mouseleave="executorMenuOpen = false"
+        >
+          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话执行器（新任务卡默认）</div>
+          <button
+            v-for="e in (props.executors || [])"
+            :key="e.id"
+            class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0 flex items-center gap-1.5"
+            :class="e.id === props.boundExecutorId ? 'bg-ctp-teal/10' : ''"
+            @click="pickExecutor(e.id)"
+          >
+            <CpuChipIcon class="w-3 h-3 shrink-0 text-ctp-teal" />
+            <span class="font-mono truncate">{{ executorFull(e) }}</span>
+            <span class="flex-1" />
+            <span
+              v-if="e.id === props.boundExecutorId"
+              class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0"
+            >已绑定</span>
+            <span
+              v-else-if="e.default"
+              class="chip !text-[9px] bg-ctp-surface0/60 text-ctp-overlay0 shrink-0"
+            >默认</span>
+          </button>
+          <div
+            v-if="!(props.executors || []).length"
+            class="px-2 py-1.5 text-[10px] text-ctp-overlay0"
+          >注册表无启用执行器</div>
+        </div>
+      </div>
       <!-- v2 语境路由(发起者感知自动变 + 菜单单次翻转): 纯 icon, 配色随路由态 -->
       <div class="relative shrink-0">
         <button

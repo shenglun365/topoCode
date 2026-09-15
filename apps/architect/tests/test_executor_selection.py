@@ -80,6 +80,21 @@ def test_propose_task_uses_registry_default(tmp_path, monkeypatch):
     assert t["executorType"] == "cline-sdk"   # 注册表 default, 非 opencode
 
 
+def test_propose_task_prefers_conv_binding_over_default(tmp_path, monkeypatch):
+    """选定链: 显式 hint > 会话绑定 > 注册表默认(会话绑定层回归)。"""
+    _env(tmp_path, monkeypatch)
+    _set_registry([
+        {"id": "opencode", "type": "opencode", "enabled": True, "default": True},
+        {"id": "cline", "type": "cline-sdk", "enabled": True, "default": False},
+    ])
+    conv = _mk_conv()
+    store.ConversationsStore.update(conv["id"], {"executor_id": "cline"})
+    conv = store.ConversationsStore.get(conv["id"])
+    t = eb.propose_task(conv, "标题", "指令内容")
+    assert t["executorType"] == "cline-sdk"   # 会话绑定压过注册表默认 opencode
+    assert t["executorId"] == "cline"
+
+
 def test_propose_task_explicit_hint_normalized(tmp_path, monkeypatch):
     _env(tmp_path, monkeypatch)
     conv = _mk_conv()

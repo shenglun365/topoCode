@@ -206,15 +206,20 @@ def propose_task(conv: dict, title: str, instruction: str,
     后 confirm_task 真正拉起 runner。"""
     conv_id = conv["id"]
     _pid = (conv or {}).get("projectId") or (conv or {}).get("project_id") or ""
-    # 执行器选定单源(显式 hint > 注册表默认); 不再字面回落 opencode(cv-153 教训)
+    # 执行器选定单源(显式 hint > 会话绑定 > 注册表默认); 不再字面回落 opencode(cv-153 教训)
     from .agent_executors import normalize_executor_type, default_executor
     etype = normalize_executor_type((executor_hint or {}).get("executorType") or "")
+    if not etype:
+        _bound = executor_hint_by_id(str((conv or {}).get("executorId") or ""), conv) or {}
+        etype = normalize_executor_type(_bound.get("executorType") or "")
     if not etype:
         etype = normalize_executor_type((default_executor() or {}).get("type") or "")
     if not etype:
         return {"ok": False,
                 "error": "无可用执行器：注册表无启用项且未指定执行器类型——"
                          "请在「执行器配置」启用至少一个执行器后在对话中指定(如 @cline)。"}
+    _eid = ((executor_hint or {}).get("executorId") or ""
+            or (conv or {}).get("executorId") or "")
     _rid = (conv or {}).get("reqId") or ""
     _spec_ver = 0
     if _rid:
@@ -228,7 +233,7 @@ def propose_task(conv: dict, title: str, instruction: str,
         "instruction": instruction,
         "status": "pending_confirm",
         "executorType": etype,
-        "executorId": (executor_hint or {}).get("executorId") or "",
+        "executorId": _eid,
         "specVer": _spec_ver,
     })
     _append(conv_id, "assistant",
