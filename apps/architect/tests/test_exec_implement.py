@@ -569,8 +569,9 @@ def test_task_set_executor_and_confirm_override(tmp_path, monkeypatch):
     assert eb.task_set_executor(task["id"], "opencode") is None  # running 不可换
 
 
-def test_guard_repair_creates_task(tmp_path, monkeypatch):
-    """守卫修复(任务域): 正文无 JSON 也能从 markdown 兜底提取 → 创建真实任务卡。"""
+def test_guard_repair_task_domain_guides_redo(tmp_path, monkeypatch):
+    """守卫修复(任务域, T6 简化): 不再自动提取建卡(cv-153 幽灵卡)——
+    无论正文质量, 统一引导重新整理 + /执行 直通链。"""
     conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import sessions as S
     from topoone_app_architect.arch_routes import ctx as _ctx
@@ -579,10 +580,9 @@ def test_guard_repair_creates_task(tmp_path, monkeypatch):
                "## 需求\n访问 /hello 返回 Hello World\n\n## 方案\ncontent_by_lua_block\n\n"
                "## 验收\ncurl 通过\n" + "细节" * 30)
     res = S._guard_repair_core(conv["id"], "已创建/启动任务", "task.propose", content)
-    assert res.get("ok") and res.get("action") == "task_proposed"
-    ts = store.TasksStore.of_conv(conv["id"])
-    assert ts and ts[-1]["status"] == "pending_confirm"
-    assert "Hello World" in (ts[-1]["title"] + ts[-1]["instruction"])
+    assert res.get("ok") is False and res.get("action") == "manual_redo"
+    assert "/执行" in res.get("summary", "")
+    assert store.TasksStore.of_conv(conv["id"]) == []
 
 
 def test_generic_exec_routing_regex():

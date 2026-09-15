@@ -423,6 +423,42 @@ def register(app: FastAPI) -> None:
              "status": j.status, "boundaries": j.boundaries}
             for j in _JOBS.values() if j.status not in ("done", "failed", "stopped")]}
 
+    @app.get("/api/implement/list")
+    async def implement_list():
+        """全部作业台账(含终态)——architect 对账/清理数据源(cv-160: 重启丢作业无对账)。"""
+        return {"ok": True, "jobs": [
+            {"jobId": j.id, "status": j.status, "worktree": j.wt,
+             "branch": j.branch, "root": j.root, "sessionId": j.session_id,
+             "executorId": j.adapter.executor_id}
+            for j in _JOBS.values()]}
+
+    @app.post("/api/implement/gc")
+    async def implement_gc(request: Request):
+        """终态作业对账清理: 释放执行器资源 + 出台账; 分支保留在基仓库。
+
+        body: {keepWorktree?: bool=true}——默认保 worktree(改动未合并时勿删)。"""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        keep_wt = bool((body or {}).get("keepWorktree", True))
+        cleaned = []
+        for jid, j in list(_JOBS.items()):
+            if j.status not in ("done", "failed", "stopped"):
+                continue
+            try:
+                await j.adapter.dispose(j)
+            except Exception:  # noqa: BLE001
+                pass
+            if j.watch_task and not j.watch_task.done():
+                j.watch_task.cancel()
+            if not keep_wt and j.wt and os.path.isdir(j.wt):
+                import shutil as _shutil
+                _shutil.rmtree(j.wt, ignore_errors=True)
+            _JOBS.pop(jid, None)
+            cleaned.append(jid)
+        return {"ok": True, "cleaned": cleaned, "keptWorktree": keep_wt}
+
     @app.get("/api/implement/{job_id}")
     async def implement_snapshot(job_id: str, since: int = 0):
         job = _JOBS.get(job_id)

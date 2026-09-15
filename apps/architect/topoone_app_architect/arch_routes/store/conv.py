@@ -104,12 +104,13 @@ class ConversationsStore:
 
     @classmethod
     def create(cls, data: dict) -> dict:
-        """创建会话；缺省补 id/时间字段。roles(JSON 角色集)/work_state(相位)生命周期用。"""
+        """创建会话；缺省补 id/时间字段。work_state(相位)生命周期用。
+
+        roles 列已僵尸化(T4 清退): 会话身份由 executor_id 绑定 + running 推导
+        替代——停写(列保留防迁移), API 读侧恒回 ["architect"]。"""
         import json as _json
         now = int(__import__("time").time() * 1000)
-        roles = data.get("roles")
-        if not isinstance(roles, list) or not roles:
-            roles = ["architect"]
+        roles = ["architect"]
         payload = {
             "id": data.get("id") or next_id("cv"),
             "kind": data.get("kind", "generic"),
@@ -252,11 +253,6 @@ class ConversationsStore:
         if isinstance(r, list) and r:
             return r
         return ["architect"]
-
-    @classmethod
-    def set_roles(cls, conv_id: str, roles: list) -> None:
-        import json as _json
-        cls.update(conv_id, {"roles": _json.dumps(list(roles), ensure_ascii=False)})
 
     @classmethod
     def work_state(cls, conv_id: str) -> str:

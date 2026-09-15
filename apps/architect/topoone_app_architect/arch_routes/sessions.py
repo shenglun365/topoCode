@@ -371,8 +371,9 @@ async def session_context(conv_id: str):
 
 
 def _roles_of(conv: dict) -> list:
-    r = conv.get("roles")
-    return r if isinstance(r, list) and r else ["architect"]
+    """legacy(T4 清退): 会话角色字段已僵尸化——恒回默认值保持 API 兼容。
+    实际会话身份: executor_id 绑定(工具栏) + runningRole 推导(work_state)。"""
+    return ["architect"]
 
 
 def _running_role_of(conv: dict) -> dict:
@@ -1155,40 +1156,6 @@ async def session_guard_repair(conv_id: str, request: Request):
     return await asyncio.to_thread(_guard_repair_core, conv_id, claim, need, content)
 
 
-# P3 状态话术识别: 模型谎报回执(已启动/处理中/完成后将…)不能当任务载荷
-# (cv-153 实证: 一句「任务已启动…」被整句建成幽灵任务卡并执行)
-_STATUS_TALK_RE = re.compile(
-    r"已启动|正在处理|正在执行|处理中|完成后将|同步进展|稍后|进行中")
-
-
-def _task_payload_from_markdown(content: str) -> Optional[dict]:
-    """无 JSON 载荷时的 markdown 结构兜底(守卫修复专用, 带实质内容守门)。
-
-    - 标题=首个标题/加粗行(状态话术行跳过); 正文=全文;
-    - 正文剔除状态话术后必须仍有实质内容(文件路径/代码标记/足够长度),
-      否则拒绝建卡——宁可让 architect 重新整理, 不建幽灵任务。"""
-    import re as _re
-    lines = [l for l in (content or "").splitlines() if l.strip()]
-    body = "\n".join(lines).strip()
-    if len(body) <= 40:
-        return None
-    title = ""
-    for l in lines[:6]:
-        t = l.lstrip('#').replace('*', '').strip()
-        if 4 <= len(t) <= 60 and not _STATUS_TALK_RE.search(t):
-            title = t
-            break
-    substantive = [s for s in _re.split(r"[。;；\n]", body)
-                   if s.strip() and not _STATUS_TALK_RE.search(s)]
-    joined = " ".join(substantive).strip()
-    if not joined:
-        return None
-    has_files = bool(_re.search(r"[`\w/\-]+\.\w{1,5}", joined))
-    if not (has_files or "```" in content or len(joined) >= 80):
-        return None
-    return {"title": title or "实施任务", "instruction": body[:6000]}
-
-
 def _guard_repair_core(conv_id: str, claim: str, need: str, content: str) -> dict:
     """守卫修复核心(可测): 任务域优先确定性提取建卡; 其余走规约修复外循环。"""
     conv = store.ConversationsStore.get(conv_id)
@@ -1197,26 +1164,13 @@ def _guard_repair_core(conv_id: str, claim: str, need: str, content: str) -> dic
     from . import ctx as _ctx
     _ctx.set_conv(conv_id)
     _ctx.set_project(str(conv.get("projectId") or ""))
-    # v2 任务域修复(优先): 编造任务创建/执行声明 -> 从原文确定性提取载荷,
-    # 代为创建真实任务卡(轻门禁——修复后用户确认执行)。
+    # T6 简化: 任务域不再自动从原文提取建卡(cv-153 幽灵卡教训——模型话术
+    # 偶可被提取成劣质载荷)。守卫触发 → 引导重新整理后走直通链(/执行)。
     if "task.propose" in (need or "") or "任务" in claim:
-        from .req_agent import extract_task_fence
-        from . import exec_bridge as _eb
-        payload = extract_task_fence(content)
-        if not payload:
-            payload = _task_payload_from_markdown(content)
-        if payload:
-            task = _eb.propose_task(conv, payload["title"], payload["instruction"], {})
-            if not task.get("id"):
-                return {"ok": False, "action": "task_propose_failed",
-                        "summary": str(task.get("error") or "任务卡创建失败")}
-            return {"ok": True, "action": "task_proposed",
-                    "taskId": task["id"], "status": task.get("status"),
-                    "summary": f"已从消息原文提取并创建任务卡「{task['title']}」"
-                               "(待确认)——确认后开始执行。"}
-        return {"ok": False, "action": "task_extract_failed",
-                "summary": "未能从消息中提取可执行的任务载荷——请让 architect "
-                           "重新整理方案后发起任务。"}
+        return {"ok": False, "action": "manual_redo",
+                "summary": "该回复未产生有效任务。请让 architect 重新整理任务"
+                           "(目标/方案要点/边界), 发送 /执行 建任务卡, "
+                           "或直接在任务卡上确认执行。"}
     # 规约域(存量兼容): 编造规约声明 -> repair_fabricated_claim 外循环修复
     from .req_agent import repair_fabricated_claim
     return repair_fabricated_claim(
@@ -1260,6 +1214,31 @@ async def session_guide(conv_id: str):
 
 
 # ── v2 统一会话: coding subagent 任务 REST(轻门禁/投递/停止) ──
+
+@router.post("/tasks/{task_id}/cleanup")
+async def task_cleanup(task_id: str, request: Request):
+    """T5 终态任务对账清理: runner finish(释放执行器资源/可选删 worktree)。
+
+    body: {keepWorktree?: bool=true}; 幂等——runner 作业不存在也视为清毕。"""
+    from . import exec_bridge
+    keep = True
+    try:
+        body = await request.json()
+        keep = bool((body or {}).get("keepWorktree", True))
+    except Exception:  # noqa: BLE001
+        pass
+    task = await asyncio.to_thread(store.TasksStore.get, task_id)
+    if not task:
+        return err(404, "task-not-found")
+    if (task.get("status") or "") not in ("done", "failed", "cancelled"):
+        return err(400, "仅终态任务可清理(先停止)")
+    job_id = task.get("runnerJobId") or ""
+    if job_id:
+        await asyncio.to_thread(
+            exec_bridge._runner, f"/api/implement/{job_id}/finish",
+            {"keepWorktree": keep}, timeout=30.0)
+    return ok({"taskId": task_id, "cleaned": True, "keptWorktree": keep})
+
 
 @router.post("/tasks/{task_id}/confirm")
 async def task_confirm(task_id: str, request: Request):

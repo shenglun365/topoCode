@@ -93,8 +93,8 @@ def guard_suggestions(claim: str, need: str, tool_failed: bool = False,
         sugs.append({"action": "repair_finalize", "label": "确认定稿"})
     if "req.propose" in tools:
         sugs.append({"action": "repair_propose", "label": "创建提案"})
-    if "task.propose" in tools:
-        sugs.append({"action": "repair_task", "label": "创建任务卡"})
+    # T6: repair_task(创建任务卡)已撤——任务域自动建卡会产出幽灵卡(cv-153),
+    # 守卫触发后引导重新整理 + /执行 直通链。
     if tool_failed:
         sugs.append({"action": "repair_retry", "label": "修正参数重试"})
     if not sugs:
