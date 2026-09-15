@@ -859,8 +859,14 @@ class ClineTurnAdapter(TurnAdapter):
         "写码前可用 topocode_asset_map 工具查询架构资产地图（如可用），确保修改符合架构边界。"
         "禁止 git push / 改动 worktree 之外的路径。"
         "回合收尾时必须调用 report_turn_outcome 工具汇报结局："
-        "status=done 表示开发+单元测试+整体编译验收全部完成；"
+        "status=done 表示开发+编译构建验收全部完成；"
         "status=need_input 表示需要用户操作/确认/澄清/补充。"
+        # cv-176 裁决(编码内注释): 验证边界收窄, 单测剥离到独立流程
+        "验证边界(必须遵守)：①编译/构建通过(零错误, 警告如实报告)；"
+        "②运行层面冒烟验证——执行产物核对输入/输出成败(如 <tool> -t / 启动 / 命令行 I/O)；"
+        "③禁止编写独立单元测试或引入测试框架——单元测试由独立 subagent 流程负责，"
+        "不属于本任务完成定义；④禁止为迁就测试而改动源码结构"
+        "(头文件解耦/前向声明链/重构 include 等一律不做)。"
     )
 
     def __init__(self, config: Dict[str, Any], executor_id: str = "cline"):

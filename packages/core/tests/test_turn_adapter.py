@@ -1217,3 +1217,16 @@ def test_resolve_model_carries_max_tokens_per_turn():
                            "maxTokens": 0}])
     r2 = a2._resolve_model(type("J", (), {"model": "m"})())
     assert "maxTokensPerTurn" not in r2
+
+
+def test_cline_system_prompt_dod_discipline():
+    """cv-176 裁决: cline 验证边界=构建通过+运行冒烟, 禁独立单测(单测归独立流程);
+    仅 cline systemPrompt 注入——任务指令公共路径不含(负断言锁边界)。"""
+    a = _adapter()
+    prompt = a._DEFAULT_SYSTEM_PROMPT
+    assert "禁止编写独立单元测试" in prompt
+    assert "运行层面冒烟验证" in prompt
+    assert "由独立 subagent 流程负责" in prompt
+    # 任务指令公共路径(exec_bridge._task_instruction, architect 侧)不含该纪律
+    # ——此处锁 core 侧事实: 纪律只存在于 cline adapter
+    assert "验证边界" in prompt and "cv-176" not in prompt

@@ -96,7 +96,8 @@ class EventBus:
     - 订阅队列满 256, 满队列丢最旧(非阻塞扇出)
     """
 
-    MAX_EVENTS = 800
+    # cv-176: 800 只够看尾段——失败任务(120 迭代)前半程证据全丢, 排障瞎子摸象
+    MAX_EVENTS = 4000
     QUEUE_SIZE = 256
 
     def __init__(self):
