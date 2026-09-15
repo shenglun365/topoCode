@@ -220,8 +220,11 @@ def _deviation_md(dev: Dict[str, Any]) -> List[str]:
     return parts
 
 
-def run_evaluate(conv_id: str, root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
-    """评估入口: 方案评估(变更足迹×语义资产影响面)。返回 {markdown, assets}; 出错 {error}。"""
+def run_evaluate(conv_id: str, target: str = "plan",
+                 root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+    """评估入口: 方案评估(变更足迹×语义资产影响面)。返回 {markdown, assets}; 出错 {error}。
+
+    target: plan(默认)——重构曾丢失此参数致 NameError(cv-157 同类幻影引用)。"""
     from ...arch_routes import store
     from ...arch_routes.sem.engine import project_id_for
     pid = project_id_for(root, project)
@@ -277,13 +280,14 @@ def register_evaluator_tools() -> None:
         "报告内资产卡可点击联动资产地图。方案确认前调用",
     )
     def _capability_evaluate(project: Optional[str] = None,
-                             root: Optional[str] = None) -> dict:
+                             root: Optional[str] = None,
+                             target: str = "plan") -> dict:
         from ...arch_routes import ctx as _ctx
         conv_id = _ctx.get_conv() or ""
         if not conv_id:
             return {"error": "评估需在会话中执行(读取会话 plan 契约)"}
         try:
-            return run_evaluate(conv_id, root=root, project=project)
+            return run_evaluate(conv_id, target=target, root=root, project=project)
         except Exception as e:  # noqa: BLE001
             logger.exception("[evaluator] 评估失败")
             return {"error": f"评估失败: {e}"}

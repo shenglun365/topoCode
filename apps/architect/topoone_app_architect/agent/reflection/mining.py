@@ -534,7 +534,7 @@ async def api_global_layer(project: str = ""):
     for r in _db().fetchall(
             "SELECT * FROM arch_capability_proposals WHERE project_id = ? "
             "AND status = 'promoted' ORDER BY created_at DESC LIMIT 100", (GLOBAL_PID,)):
-        props.append(_srow_to_api(r))
+        props.append(_row_to_api(r))
     counts = {}
     for t in ("arch_naming_conventions", "arch_semantic_assets"):
         counts[t] = _db().fetchone(

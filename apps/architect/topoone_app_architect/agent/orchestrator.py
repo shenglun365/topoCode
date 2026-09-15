@@ -870,12 +870,12 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
     极简上下文单独请求一次修正 arguments，成功则带修复参数重执行一次。
     """
     from ..arch_routes import context_registry, req_agent
-    await _ws_send({"type": "tool_call", "requestId": request_id, "tool": name})
+    await send({"type": "tool_call", "requestId": request_id, "tool": name})
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
     summary = req_agent.tool_result_text(name, result)
     ok = not (isinstance(result, dict) and result.get("error"))
     if not ok and req_agent._is_repairable_error(str(result.get("error"))):
-        await _ws_send({"type": "status", "phase": "arg_repair", "tool": name})
+        await send({"type": "status", "phase": "arg_repair", "tool": name})
         fixed = await asyncio.to_thread(
             req_agent.repair_tool_args, name, args, str(result.get("error")),
             model_id=model_id)
@@ -894,7 +894,7 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
     # 资产卡透传(评估报告等带资产引用的工具): 前端渲染可联动资产地图的卡片
     if isinstance(result, dict) and isinstance(result.get("assets"), list) and result["assets"]:
         event["assets"] = result["assets"][:12]
-    await _ws_send(event)
+    await send(event)
     # P2 上下文注册表: 工具轨迹/产物 → 单元(会话级溯源)
     from ..arch_routes import ctx as _ctx
     try:

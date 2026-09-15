@@ -89,6 +89,7 @@ def repair_fabricated_claim(claim: str, need: str, content: str, *,
         return {"calls": _ra().extract_tool_calls(raw) or [], "correction": corr}
 
     def _execute(parsed: Dict[str, Any]) -> Dict[str, Any]:
+        from ...arch_routes.req_agent import run_arch_tool   # 幻影引用修复(cv-157 同类)
         for c in parsed.get("calls") or []:
             name, args = c.get("tool"), c.get("arguments")
             if name not in _GUARD_REPAIR_TOOLS or not isinstance(args, dict):

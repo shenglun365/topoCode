@@ -8,7 +8,10 @@ P4 自 context_registry.py(今 units.py)拆出。
 """
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _store():

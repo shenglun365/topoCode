@@ -106,3 +106,42 @@ def test_req_chat_stream_restored(tmp_path, monkeypatch):
     assert rid == "rid-stream-1"
     assert captured["model"] == "model-x"
     assert captured["session"] == "arch-req-chat"
+
+
+def test_run_tool_with_progress_uses_send_param(tmp_path, monkeypatch):
+    """cv-157 回归: 函数体曾引用已删除的模块级 _ws_send → NameError
+    (任务围栏代落等所有工具进度路径全炸)。"""
+    import asyncio
+    import topoone_app_architect.agent.orchestrator as orch
+
+    monkeypatch.setattr(req_agent, "run_arch_tool",
+                        lambda name, args, root, project: {"ok": True, "text": "done"})
+    monkeypatch.setattr(req_agent, "tool_result_text", lambda name, result: "done")
+    events = []
+
+    async def _fake_send(ev):
+        events.append(ev)
+
+    res = asyncio.run(orch._run_tool_with_progress(
+        _fake_send, "rid-1", "task.propose", {"title": "t"}, "", ""))
+    assert res["ok"] is True
+    assert [e["type"] for e in events] == ["tool_call", "tool_result"]
+
+
+def test_no_phantom_names_in_refactor_hotspots(tmp_path, monkeypatch):
+    """9-13 重构幻影引用清扫回归(_ws_send/_req_chat_stream 同类):
+    - evaluator.run_evaluate: target 参数曾丢失 → plan 分支 NameError
+    - repair._execute: run_arch_tool 未导入 → 守卫修复外循环 NameError
+    - mining.api_global_layer: _srow_to_api 不存在 → API 500
+    - dossier: error 路径引用未定义 logger
+    """
+    import inspect
+    from topoone_app_architect.agent.reflection import evaluator, mining, repair
+    from topoone_app_architect.agent.memory import dossier
+
+    sig = inspect.signature(evaluator.run_evaluate)
+    assert "target" in sig.parameters, "run_evaluate 丢失 target 参数(幻影引用)"
+    src = inspect.getsource(repair)
+    assert "import run_arch_tool" in src or "run_arch_tool," in src
+    assert "_srow_to_api" not in inspect.getsource(mining)
+    assert hasattr(dossier, "logger")
