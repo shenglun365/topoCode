@@ -57,21 +57,45 @@ def get_roles() -> List[Dict[str, Any]]:
     return out
 
 
+def _known_model_ids() -> List[str]:
+    """architect 模型目录(llm.models)的有效 id 集(现读, 写路径低频无性能压力)。
+
+    目录为空(未同步/新装)时返回空表 → 校验跳过, 不误伤。"""
+    try:
+        raw = CollabConfigStore.get("llm.models", "")
+        rows = json.loads(raw) if raw else []
+        return [str(r.get("id") or "") for r in rows
+                if isinstance(r, dict) and r.get("id")]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def set_roles(roles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """写入角色覆盖（仅接受已知 name；modelId 越界校验交由前端/调用方）。"""
+    """写入角色覆盖（仅接受已知 name；modelId 越界剥离并告警）。
+
+    教训(cv-168 一揽子对齐): modelId 越界曾静默透传 → 网关侧静默回退
+    KB 默认模型, 实际执行模型与角色路由配置不一致。目录为空时跳过校验。"""
     known = {d["name"] for d in DEFAULT_ROLES}
+    valid_ids = _known_model_ids()
     clean = []
     for r in roles or []:
         if not isinstance(r, dict) or r.get("name") not in known:
             continue
+        mid = (r.get("modelId") or "").strip()
+        if mid and valid_ids and mid not in valid_ids:
+            logger.warning("[roles] 角色 %s 配置的 modelId %r 不在模型目录, 已剥离"
+                           "(防止网关静默回退 KB 默认)", r.get("name"), mid)
+            mid = ""
         clean.append({"name": r["name"], "label": r.get("label") or "",
-                      "modelId": (r.get("modelId") or "").strip()})
+                      "modelId": mid})
     CollabConfigStore.set(_ROLES_KEY, json.dumps(clean, ensure_ascii=False))
     return get_roles()
 
 
 def role_model_id(role: str) -> str:
     """角色 → 配置的 modelId（空串 = 调用方回退全局偏好/会话选择）。
+
+    写入侧已在 set_roles 校验越界; 此处不再查目录(避免每调用 IO)。
 
     三级覆盖预留：项目级(project config) > 主 KB 下发 > 全局注册表。
     """

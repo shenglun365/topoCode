@@ -166,7 +166,13 @@ def test_executor_hint_model_priority(tmp_path, monkeypatch):
          "config": {"model": "cfg-m", "models": []}}])
     conv = {"executorId": "ex1", "executorModel": ""}
     assert eb.executor_hint_by_id(conv.get("executorId") or "", conv)["model"] == "cfg-m"
-    # 白名单存在 → 首个
+    # 顶层默认 model_id 优先于 models[0](不再被白名单首个旁路)
+    monkeypatch.setattr(ae, "load_executors", lambda: [
+        {"id": "ex1", "type": "cline-sdk", "enabled": True,
+         "config": {"model": "cfg-m", "model_id": "top-default",
+                    "models": [{"name": "wl-1"}, {"name": "wl-2"}]}}])
+    assert eb.executor_hint_by_id(conv.get("executorId") or "", conv)["model"] == "top-default"
+    # 无顶层默认 → 首个
     monkeypatch.setattr(ae, "load_executors", lambda: [
         {"id": "ex1", "type": "opencode", "enabled": True,
          "config": {"model": "cfg-m", "models": [{"name": "wl-1"}, {"name": "wl-2"}]}}])

@@ -2,6 +2,7 @@
 
 Run: cd <repo> && PYTHONPATH=apps/architect python -m pytest apps/architect/tests/test_agent_roles_skill.py -q
 """
+import json
 import os
 import sys
 
@@ -10,6 +11,7 @@ sys.path.insert(0, _repo)
 
 import topoone_app_architect.arch_routes.ctx as C
 from topoone_app_architect.arch_routes import agent_roles as R
+from topoone_app_architect.agent.cognition import roles as _cog_roles
 from topoone_app_architect.arch_routes import asset_skill as K
 from topoone_app_architect.arch_routes import semantic_assets as S
 from topoone_app_architect.arch_routes import req_agent
@@ -44,6 +46,26 @@ class TestAgentRoles:
         assert by["extract"]["modelId"] == "qwen-fast"
         assert by["verify"]["modelId"] == "deepseek-r1"
         assert by["pseudo"]["modelId"] == ""  # 未设置保持空
+
+    def test_set_roles_strips_dangling_model_id(self, tmp_path, monkeypatch):
+        """cv-168 一揽子对齐: modelId 不在 llm.models 目录 → 剥离+告警,
+        防止网关侧静默回退 KB 默认; 目录为空(未同步)时跳过校验不误伤。"""
+        _setup(tmp_path, monkeypatch)
+        orig_get = CollabConfigStore.get.__func__
+        monkeypatch.setattr(CollabConfigStore, "get", classmethod(
+            lambda cls, k, d="": json.dumps([
+                {"id": "model-ok"}, {"id": "model-2"}])
+            if k == "llm.models" else orig_get(cls, k, d)))
+        R.set_roles([{"name": "extract", "modelId": "model-ok"},
+                     {"name": "verify", "modelId": "model-gone"}])
+        by = {r["name"]: r for r in R.get_roles()}
+        assert by["extract"]["modelId"] == "model-ok"
+        assert by["verify"]["modelId"] == ""       # 越界剥离
+        # 目录为空 → 校验跳过
+        monkeypatch.setattr(CollabConfigStore, "get", classmethod(
+            lambda cls, k, d="": "" if k == "llm.models" else orig_get(cls, k, d)))
+        R.set_roles([{"name": "induce", "modelId": "anything"}])
+        assert R.role_model_id("induce") == "anything"
 
     def test_role_model_id_resolution(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)

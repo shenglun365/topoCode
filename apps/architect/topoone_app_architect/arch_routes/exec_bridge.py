@@ -901,7 +901,11 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                 model_names = [str(m.get("name") or m.get("model") or "")
                                for m in (cfg.get("models") or [])
                                if (m.get("name") or m.get("model"))]
+                # 模型选择链对齐(turn_adapter._resolve_model 同序):
+                # 会话绑定 > 注册表顶层默认(model_id) > models[0] > cfg.model。
+                # 教训(cv-163/166): 各层各自兜底 → 实际执行模型与 UI 展示不一致。
                 model = (conv_model
+                         or (cfg.get("model_id") or "")
                          or (model_names[0] if model_names else "")
                          or cfg.get("model") or "")
                 return {"executorId": eid,
