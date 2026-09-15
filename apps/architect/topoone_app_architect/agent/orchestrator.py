@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from typing import Any, Callable, Awaitable, Dict, List, Optional
 
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 SendFn = Callable[[dict], Awaitable[None]]
 
 _MAX_TOOL_ROUNDS = 4
+
+# 回合总预算(秒): 流式空闲(60s)×多轮 + 降级 sync(可达 300s)曾串联卡死 6.5 分钟
+# (cv-156/162 实证, 模型 hang 时)——超预算立即终止回合落 turnError, 不再续轮。
+_TURN_BUDGET_S = float(os.environ.get("ARCH_TURN_BUDGET_S", "240"))
 
 
 # 默认传 None 由主后端按 model_configs.max_tokens(设置中可配，如 32000)；也可经 KB 侧 `llm.maxTokens` 覆盖。
@@ -150,6 +155,28 @@ async def _run_direct_confirm(conv: dict, send: SendFn, store,
                 "requestId": "", "userMessageId": user_msg_id})
     await send({"type": "done", "conversationId": conv_id,
                 "content": content, "messageId": msg_id})
+
+
+def _model_health_hint(model_id: str) -> str:
+    """模型探测档案 → 切换建议(cv-156/162 实证: 不及格模型大提示词空返回)。
+
+    数据源 CollabConfigStore `llm.modelProfiles`; 无档案/成绩尚可 → 空串。"""
+    try:
+        from ..arch_routes import store
+        raw = store.CollabConfigStore.get("llm.modelProfiles", "")
+        profiles = json.loads(raw) if raw else {}
+        row = profiles.get(model_id or "") or {}
+        caps = row.get("caps") or {}
+        score = float(caps.get("probeScore") or 0)
+        if score and score >= 0.5:
+            return ""
+        name = row.get("modelName") or model_id
+        return (f"⚠️ 当前模型「{name}」能力探测不及格"
+                f"(指令跟随 {int(float(caps.get('instructionScore') or 0) * 100)}%"
+                f"/工具协议 {int(float(caps.get('toolCallRate') or 0) * 100)}%)"
+                "——建议在会话头部切换模型后重试")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
@@ -396,6 +423,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     request_id = None
     assistant_text = ""
     _turn_t0 = __import__("time").time()  # 回合时延采集(llm_stream_done)
+
+    def _budget_left() -> float:
+        return _TURN_BUDGET_S - (__import__("time").time() - _turn_t0)
     visible = ""            # 本次回合实际发出的 chunk 总量(实时转发+补发；done/落库以此为准)
     tool_round = 0
     loop_fell_back = False
@@ -427,6 +457,11 @@ async def handle_chat(data: dict, send: SendFn) -> None:
             client_gone = True
 
     while tool_round <= _MAX_TOOL_ROUNDS:
+        # 回合总预算: 超时终止(不再续流式轮/降级/nudge), 详因落 turnError
+        if _budget_left() <= 0:
+            logger.warning("[kb-chat] 回合总预算耗尽 conv=%s elapsed=%.0fs",
+                           conv_id, __import__("time").time() - _turn_t0)
+            break
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
@@ -478,8 +513,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         if not round_ok:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
-            await _ensure_chat_start()
-            assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
+            if _budget_left() > 0:
+                await _ensure_chat_start()
+                assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
             break
 
         # 本轮工具调用解析并在 architect 侧执行
@@ -501,8 +537,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                     msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                     msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
                 loop_fell_back = True
-                await _ensure_chat_start()
-                assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
+                if _budget_left() > 0:
+                    await _ensure_chat_start()
+                    assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
                 break
             tool_round += 1
             results: List[Dict[str, str]] = []
@@ -533,7 +570,8 @@ async def handle_chat(data: dict, send: SendFn) -> None:
 
     # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
     # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
-    if not loop_fell_back and not assistant_text and not visible:
+    if (not loop_fell_back and not assistant_text and not visible
+            and _budget_left() > 0):
         await _ensure_chat_start()
         assistant_text = await _sync_with_tools(send, msgs, root, project, eff_model, tools_used=tools_used)
 
@@ -611,8 +649,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 '格式: [TOOL_CALL]{"tool":"task.propose","arguments":'
                 '{"title":"…","instruction":"…"}}[/TOOL_CALL]; '
                 "除工具块外只输出一句转述。不要再用「需要检索/无法直接」回答通用任务。")})
-            corr = await _sync_with_tools(send, msgs, root, project, eff_model,
-                                          max_rounds=3, tools_used=tools_used)
+            if _budget_left() > 0:
+                corr = await _sync_with_tools(send, msgs, root, project, eff_model,
+                                              max_rounds=3, tools_used=tools_used)
             corr = req_agent.strip_tool_blocks(corr or "")
             if corr:
                 for i in range(0, len(corr), 24):
@@ -646,8 +685,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 "一次一个；除工具块外不要输出任何说明文字。"
                 "② 若该动作确实不能现在执行（需要用户确认/信息不足），用一句话明确说明缺什么，"
                 "不要宣布将要执行。")})
-            corr = await _sync_with_tools(send, msgs, root, project, eff_model,
-                                          max_rounds=3, tools_used=tools_used)
+            if _budget_left() > 0:
+                corr = await _sync_with_tools(send, msgs, root, project, eff_model,
+                                              max_rounds=3, tools_used=tools_used)
             corr = req_agent.strip_tool_blocks(corr or "")
             if corr:
                 for i in range(0, len(corr), 24):
@@ -752,6 +792,11 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                 f"{k}: {str(v)[:160]}" for k, v in list(tool_errors.items())[:3])
         if loop_fell_back:
             detail += "（流式通道中断，已走同步降级通道仍未产出）"
+        elapsed = int(__import__("time").time() - _turn_t0)
+        detail += f"；回合耗时 {elapsed}s（总预算 {int(_TURN_BUDGET_S)}s）"
+        hint = _model_health_hint(eff_model or req_agent.get_model_preference())
+        if hint:
+            detail += "。" + hint
         try:
             store.ConversationsStore.append_message({
                 "id": store.next_id("m"), "conversationId": conv_id,

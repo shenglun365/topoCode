@@ -32,13 +32,16 @@ WS_PATH = "/api/architect/ws/kb-analysis"
 class _FakeGateway:
     """网络边界替身: 按 kb_method 发放脚本化响应; 全部调用留痕。"""
 
-    def __init__(self, sync_script):
+    def __init__(self, sync_script, chat_rid=None):
         self.sync_script = list(sync_script)   # 每次 llm.sync 弹出一个响应
+        self.chat_rid = chat_rid               # 非 None = 流式可用(返回 requestId)
         self.calls = []
 
     def call(self, kb_method: str, timeout=None, **params):
         self.calls.append(kb_method)
         if kb_method == "llm.chat":
+            if self.chat_rid:
+                return {"requestId": self.chat_rid}
             return None    # 流式不可用 → 走真实降级链(_req_chat_stream 返回 None)
         if kb_method == "llm.sync":
             return {"ok": True,
@@ -174,3 +177,25 @@ def test_full_pipeline_text_confirm_runs_task(pipeline, monkeypatch):
     assert impl_payload.get("executorId") == "cline"
     assert impl_payload.get("model") == "M1"
     assert (impl_payload.get("executorConfig") or {}).get("models")
+
+
+def test_turn_budget_exhaustion_terminates_hang(pipeline, monkeypatch):
+    """cv-162 回归: 模型 hang(流式无事件+同步空返回)时回合必须在总预算内
+    终止并落 turnError——不再串联 60s 空闲×N 轮 + 191s sync 卡 6.5 分钟。"""
+    import time as _t
+    import topoone_app_architect.agent.orchestrator as orch
+    monkeypatch.setattr(orch, "_STREAM_IDLE_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(orch, "_TURN_BUDGET_S", 1.5)
+    client, gw, _tmp = pipeline
+    gw.chat_rid = "rid-hang"    # 流式"可用"但 ZMQ 永远不来事件 → 每轮 idle
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            t0 = _t.time()
+            _chat(ws, "hi")
+            conv_id = _recv_until(ws, "chat_start").get("conversationId") or ""
+            ev = _recv_until(ws, "error")
+            wall = _t.time() - t0
+    assert wall < 30, f"回合未在预算内终止: {wall:.1f}s"
+    assert "预算" in ev["message"]
+    msgs = store.ConversationsStore.messages(conv_id, limit=5)
+    assert any((m.get("meta") or {}).get("kind") == "turnError" for m in msgs)
