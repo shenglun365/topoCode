@@ -93,6 +93,14 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
         allow_headers=["*"],
     )
     app.include_router(architect_router)
+
+    # 模型未配置 → 400 明确报错(用户裁决: 禁止静默兜底 KB 默认)
+    from .agent.cognition.llm import ModelNotConfigured
+    from .arch_routes.common import err as _api_err
+
+    @app.exception_handler(ModelNotConfigured)
+    async def _model_not_configured_handler(request, exc: ModelNotConfigured):
+        return _api_err(400, str(exc))
     # 内置 Git HTTP 托管：无前缀 /git/{project}.git（remote worker clone/push 面）
     from topoone_app_architect.arch_routes import git_host
     app.include_router(git_host.router)

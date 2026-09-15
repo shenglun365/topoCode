@@ -96,6 +96,7 @@ def test_req_agent_llm_sync_uses_long_timeout(monkeypatch):
         return _G()
     import topoone_app_architect.agent.cognition.llm as _cllm
     monkeypatch.setattr(_cllm, "_kb_gateway", fake_gateway)
+    monkeypatch.setattr(_cllm, "get_model_preference", lambda: "test-model")
     res = RA.llm_sync([{"role": "user", "content": "hi"}], mode="chat")
     assert res is not None
     assert captured["method"] == "llm.sync"

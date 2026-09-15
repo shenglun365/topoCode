@@ -930,6 +930,12 @@ class ClineTurnAdapter(TurnAdapter):
         provider = self._provider_id
         if "/" in model:
             provider, model = model.split("/", 1)
+        if not model:
+            # 用户裁决(cv-168 一揽子): 禁止静默兜底——sidecar 自带默认模型
+            # 是不可见决定, 产物必非用户预期。明确报错由任务 failed 呈现。
+            raise RuntimeError(
+                f"执行器 {self.executor_id} 未配置模型：作业未指定且注册表 "
+                "config.model_id/models 均为空——请在「执行器配置」中设置模型。")
         return {
             "providerId": provider or str((entry or {}).get("provider") or "openai-compatible"),
             "modelId": model,

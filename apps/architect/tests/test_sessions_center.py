@@ -54,8 +54,18 @@ class TestSessionsCenter(unittest.TestCase):
         self.assertEqual(r.json()["code"], 404)
 
     def test_session_summarize_fallback(self):
-        """LLM 不可达 → 标题兜底(首条用户消息截断)。"""
+        """LLM 不可达 → 标题兜底(首条用户消息截断)。
+
+        开发机上真实 KB 网关可达时 summarize 会真调 LLM(模型生成标题,
+        断言不可预测)——故显式钳死 summarize_task 失败, 锁定纯兜底路径。"""
+        from unittest import mock
         conv = self._mk(kind="design", title="")
+        import topoone_app_architect.arch_routes.adaptation as _adapt
+        _patcher = mock.patch.object(
+            _adapt, "summarize_task",
+            lambda **kw: {"ok": False, "output": None, "error": "test: llm down"})
+        _patcher.start()
+        self.addCleanup(_patcher.stop)
         store.ConversationsStore.append_message({
             "id": store.next_id("m"), "conversationId": conv["id"],
             "role": "user", "time": 1, "content": "帮我分析下单流程的改造方案",

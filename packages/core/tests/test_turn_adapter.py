@@ -988,7 +988,8 @@ def _patch_sidecar(monkeypatch, fake):
 
 
 def _adapter(**cfg):
-    base = {"node_bin": "node", "sidecar_script": "test.js"}
+    # model_id 缺省给测试模型(未配置模型 → _resolve_model 抛错, 由专测锁定)
+    base = {"node_bin": "node", "sidecar_script": "test.js", "model_id": "test-model"}
     base.update(cfg)
     return ta.ClineTurnAdapter(base)
 
@@ -1195,3 +1196,11 @@ def test_resolve_model_fallback_models0_when_model_id_misses(monkeypatch):
         models=[{"id": "m1", "name": "9b", "model": "qwen3.5-9b-mtp", "url": "http://h:1234"}])
     r = a._resolve_model(type("J", (), {"model": ""})())
     assert r["modelId"] == "qwen3.5-9b-mtp"
+
+
+def test_resolve_model_raises_when_unconfigured():
+    """cv-168 用户裁决: 模型全链路无配置 → 明确抛错(禁止 sidecar 自带默认兜底)。"""
+    import pytest as _pt
+    a = _adapter(model_id="", models=[])
+    with _pt.raises(RuntimeError, match="未配置模型"):
+        a._resolve_model(type("J", (), {"model": ""})())

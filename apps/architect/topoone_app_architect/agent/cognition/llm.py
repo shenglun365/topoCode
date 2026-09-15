@@ -18,6 +18,13 @@ logger = logging.getLogger("arch.cognition.llm")
 _MODEL_KEY = "llm.modelId"
 _MAX_TOKENS_KEY = "llm.maxTokens"
 
+
+class ModelNotConfigured(RuntimeError):
+    """模型未配置(请求未指定且 architect 偏好为空)。
+
+    用户裁决(cv-168): 静默兜底 KB 默认 = 替用户做一个他没选的决定,
+    产物必非预期——明确报错优于垃圾输出。禁止在此类场景降级。"""
+
 # LLM 同步调用超时(秒)：本地大模型结构化提取/工具循环耗时可能远超 KB 默认 10s，
 # 与 model_configs.timeout 对齐(默认 300s)，可用 LLM_SYNC_TIMEOUT 覆盖。
 _LLM_CALL_TIMEOUT = float(os.environ.get("LLM_SYNC_TIMEOUT", "300"))
@@ -46,17 +53,18 @@ def get_model_preference() -> str:
     return store.CollabConfigStore.get(_MODEL_KEY, "")
 
 
-def resolve_call_model(explicit: Optional[str]) -> Optional[str]:
-    """architect 单源模型解析(显式 > architect 偏好 > None)。
+def resolve_call_model(explicit: Optional[str]) -> str:
+    """architect 单源模型解析(显式 > architect 偏好 llm.modelId)。
 
-    None = 请求不带 modelId, 由主后端(KB)按其 is_default 兜底——这是
-    跨应用隐式耦合, 只允许发生时留下可见告警, 不得静默(cv-168 教训:
-    KB 默认 9B 曾静默接管 architect 内部调用, 排障时误判来源)。"""
+    均空 → 抛 ModelNotConfigured(明确报错, 不再静默回落 KB 默认——
+    cv-168 用户裁决: 兜底产物非用户所选, 属垃圾; KB 默认是 KB 的设置,
+    不得隐式接管 architect 调用)。"""
     m = (explicit or "").strip() or get_model_preference()
     if not m:
-        logger.warning("[cognition.llm] 无显式模型且 architect 偏好(llm.modelId)未设"
-                       " → 本次调用由主后端 KB 默认模型兜底(建议设置 llm.modelId)")
-    return m or None
+        raise ModelNotConfigured(
+            "未配置模型：请求未指定且 architect 偏好(llm.modelId)为空——"
+            "请在设置中选择模型（KB 默认不再静默接管 architect 调用）。")
+    return m
 
 
 def set_model_preference(model_id: str) -> None:
@@ -98,12 +106,13 @@ def llm_sync(messages: List[Dict[str, str]],
     on_error: 可选回调，捕获失败原因文本(KbError 详情/异常信息)，供调用方
     识别上下文超限等可重试错误(如逐行解读的二分降级)；不改变 None 返回语义。
     """
+    model_id = resolve_call_model(model_id)   # 未配置 → 明确抛错, 不降级
     gateway = _kb_gateway()
     _t0 = _now_ms()
     body: Dict[str, Any] = {}
     try:
         body = {
-            "modelId": resolve_call_model(model_id),
+            "modelId": model_id,
             "mode": mode,
             "messages": messages,
             "maxTokens": max_tokens,
@@ -168,11 +177,12 @@ def llm_chat_start(messages: List[Dict[str, str]],
     与 llm_sync 同通道(经 KbGateway 转发主后端)，但返回 requestId 而非完整内容：
     调用方随后经 ZMQ SUB 订阅 `llm.*`(按 requestId 过滤) 消费逐字 chunk。
     """
+    model_id = resolve_call_model(model_id)   # 未配置 → 明确抛错, 不降级
     gateway = _kb_gateway()
     try:
         body: Dict[str, Any] = {
             "sessionId": session_id,
-            "modelId": resolve_call_model(model_id),
+            "modelId": model_id,
             "mode": "chat",
             "messages": messages,
             "max_tokens": max_tokens,
@@ -197,7 +207,7 @@ def llm_chat_start(messages: List[Dict[str, str]],
         try:
             from ..reflection import dataset as _lds
             _lds.record("llm_call", verb="chat", mode="chat", ok=False,
-                        model=resolve_call_model(model_id) or "",
+                        model=model_id,
                         msgsChars=sum(len(m.get("content") or "") for m in messages),
                         maxTokens=max_tokens or "", latencyMs=0,
                         sessionId=session_id or "", error=str(e)[:300])

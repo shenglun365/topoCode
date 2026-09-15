@@ -16,6 +16,8 @@ import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
+from ..cognition.llm import ModelNotConfigured
+
 from ..reflection import dataset as llm_dataset
 
 logger = logging.getLogger("arch.reflection.repair")
@@ -328,6 +330,8 @@ def summarize_task(*, task_id: str, system: str, material: str,
         else:
             out = str(((res or {}).get("content") or "")).strip() or None
         ok = out is not None
+    except ModelNotConfigured:
+        raise   # 模型未配置 → 明确报错(用户裁决: 禁止降级出垃圾产物)
     except Exception as e:  # noqa: BLE001
         logger.warning("[summarize-task] %s 异常: %s", task_id, e)
     if not ok and fallback is not None:
