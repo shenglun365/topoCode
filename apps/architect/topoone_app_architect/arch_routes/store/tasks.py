@@ -55,6 +55,16 @@ class TasksStore:
             "updated_at": _now(),
             "finished_at": 0,
         }
+        # 任务与会话同库(规范化环节五衍生排查): 调用方漏传 projectId 时
+        # 从会话行推导——否则写主库/读项目库分裂, of_conv/互斥/恢复全部失明
+        # (cv-178 排查实证: 潜伏缺陷, 生产暂未触发但一触即失效)。
+        if not payload["project_id"]:
+            try:
+                from .conv import ConversationsStore
+                payload["project_id"] = ((ConversationsStore.get(
+                    payload["conversation_id"]) or {}).get("projectId") or "")
+            except Exception:  # noqa: BLE001
+                pass
         _insert(cls.TABLE, payload)
         return _row_to_api(payload)
 

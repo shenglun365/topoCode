@@ -614,3 +614,19 @@ def test_propose_task_resumes_failed_branch(tmp_path, monkeypatch):
     t = eb2.propose_task(conv, "新任务", "目标: 续跑")
     assert t["branch"] == "task/15"
     assert t["ok"] is True
+
+
+def test_task_create_same_db_as_conversation(tmp_path, monkeypatch):
+    """cv-178 排查回归: create 漏传 projectId → 从会话行推导, 任务与会话同库——
+    旧实现静默落主库 → of_conv/互斥/恢复对该任务全部失明。"""
+    from tests.conftest import isolate_arch
+    isolate_arch(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes.store.base import _db, _target_db
+    conv = store.ConversationsStore.create({"projectId": "proj-same", "title": "T",
+                                            "meta": {"root": "/tmp/x"}})
+    t = store.TasksStore.create({"conversationId": conv["id"],
+                                 "title": "T", "instruction": "x", "status": "failed"})
+    proj = _target_db("arch_tasks", project_id="proj-same")
+    assert proj.fetchall("SELECT id FROM arch_tasks WHERE id=?", (t["id"],))
+    assert not _db().fetchall("SELECT id FROM arch_tasks WHERE id=?", (t["id"],))
+    assert len(store.TasksStore.of_conv(conv["id"])) == 1
