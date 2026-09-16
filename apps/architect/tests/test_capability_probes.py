@@ -13,6 +13,17 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect.agent.execution import probes as P
 
+
+@pytest.fixture(autouse=True)
+def _cleanup_probe_sandboxes():
+    """探针沙箱清理(判分器测试直接调 _mk_sandbox, 不走引擎的 finally 清理)
+    ——防 /tmp/capprobe-* 泄漏。"""
+    import glob
+    import shutil
+    yield
+    for d in glob.glob("/tmp/capprobe-*"):
+        shutil.rmtree(d, ignore_errors=True)
+
 # ── 探针判分(真实 pytest 执行于夹具仓库) ─────────────────────────────
 
 def _spec(pid: str) -> P.ProbeSpec:
