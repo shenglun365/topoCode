@@ -18,6 +18,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 from . import store
+from .store import states as ST
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,7 @@ _WS_RETRY_GAP = 4          # 订阅失败后的重试间隔(轮询轮)
 # ══════════════════════════════════════════════════════════════════
 
 _TASK_TERMINAL = ("done", "failed", "cancelled")
-_TASK_ACTIVE = ("pending_confirm", "running", "waiting_input")
+_TASK_ACTIVE = (ST.TASK_PENDING_CONFIRM, "running", ST.TASK_WAITING_INPUT)
 
 
 def propose_task(conv: dict, title: str, instruction: str,
@@ -214,7 +215,7 @@ def propose_task(conv: dict, title: str, instruction: str,
         "reqId": _rid,
         "title": (title or "").strip()[:120] or "实施任务",
         "instruction": instruction,
-        "status": "pending_confirm",
+        "status": ST.TASK_PENDING_CONFIRM,
         "executorType": etype,
         "executorId": _eid,
         "specVer": _spec_ver,
@@ -237,7 +238,7 @@ def confirm_task(task_id: str) -> dict:
     task = store.TasksStore.get(task_id)
     if not task:
         return {"ok": False, "error": "task-not-found"}
-    if (task.get("status") or "") != "pending_confirm":
+    if (task.get("status") or "") != ST.TASK_PENDING_CONFIRM:
         return {"ok": False, "error": f"task-status={task.get('status')}"}
     conv = store.ConversationsStore.get(task["conversationId"])
     if not conv:
@@ -247,14 +248,14 @@ def confirm_task(task_id: str) -> dict:
     # 同会话活跃任务互斥(一次一个 subagent 回合); 命中先惰性自愈——
     # 服务重启可能留下僵尸 running(泵丢失), 核对 runner 实际态后再裁决
     other = next((t for t in store.TasksStore.of_conv(conv_id)
-                  if t["id"] != task_id and t.get("status") in ("running", "waiting_input")), None)
+                  if t["id"] != task_id and t.get("status") in ("running", ST.TASK_WAITING_INPUT)), None)
     if other:
         try:
             recover_conv_tasks(conv_id)
         except Exception:  # noqa: BLE001
             pass
         other = next((t for t in store.TasksStore.of_conv(conv_id)
-                      if t["id"] != task_id and t.get("status") in ("running", "waiting_input")), None)
+                      if t["id"] != task_id and t.get("status") in ("running", ST.TASK_WAITING_INPUT)), None)
     if other:
         return {"ok": False,
                 "error": f"另一任务执行中({other['title']}), 停止或等待其结束"}
@@ -347,7 +348,7 @@ def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
     运行中引擎已固化(换=新任务); 返回更新后任务行(不可换返回 None)。"""
     from .agent_executors import normalize_executor_type
     task = store.TasksStore.get(task_id)
-    if not task or (task.get("status") or "") != "pending_confirm":
+    if not task or (task.get("status") or "") != ST.TASK_PENDING_CONFIRM:
         return None
     etype = normalize_executor_type(executor_type)
     if etype not in ("cline-sdk", "opencode", "codex-server"):
@@ -362,7 +363,7 @@ def task_input(task_id: str, text: str) -> Dict[str, Any]:
     转发 runner approval 端点(越界确认桥), 不作为回合输入。
     """
     task = store.TasksStore.get(task_id)
-    if not task or (task.get("status") or "") not in ("waiting_input", "running"):
+    if not task or (task.get("status") or "") not in (ST.TASK_WAITING_INPUT, "running"):
         return {"ok": False, "error": "task-not-active"}
     stripped = (text or "").strip()
     approve = stripped.startswith("/approve ")
@@ -394,7 +395,7 @@ def task_input(task_id: str, text: str) -> Dict[str, Any]:
                    **({"steer": True} if (task.get("status") or "") == "running" else {})},
                   15.0)
     if res and res.get("ok"):
-        if (task.get("status") or "") == "waiting_input":
+        if (task.get("status") or "") == ST.TASK_WAITING_INPUT:
             store.TasksStore.update(task_id, {"status": "running"})
             t = store.TasksStore.get(task_id) or {}
             _publish_task(task["conversationId"], t)
@@ -407,7 +408,7 @@ def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") in _TASK_TERMINAL:
         return {"ok": False, "error": "task-not-active"}
-    if (task.get("status") or "") == "pending_confirm":
+    if (task.get("status") or "") == ST.TASK_PENDING_CONFIRM:
         store.TasksStore.finish(task_id, "cancelled", reason or "用户取消")
         t = store.TasksStore.get(task_id) or {}
         _publish_task(task["conversationId"], t)
@@ -427,10 +428,10 @@ def active_task_of(conv_id: str) -> Optional[dict]:
     """最新活跃任务(running/waiting_input 优先, 次 pending_confirm); 无则 None。"""
     ts = store.TasksStore.of_conv(conv_id)
     for t in reversed(ts):
-        if (t.get("status") or "") in ("running", "waiting_input"):
+        if (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT):
             return t
     for t in reversed(ts):
-        if (t.get("status") or "") == "pending_confirm":
+        if (t.get("status") or "") == ST.TASK_PENDING_CONFIRM:
             return t
     return None
 
@@ -564,7 +565,7 @@ def recover_conv_tasks(conv_id: str) -> dict:
     """
     out = {"finished": 0, "repump": []}
     for t in store.TasksStore.of_conv(conv_id):
-        if (t.get("status") or "") not in ("running", "waiting_input"):
+        if (t.get("status") or "") not in ("running", ST.TASK_WAITING_INPUT):
             continue
         job_id = t.get("runnerJobId") or ""
         if not job_id:
@@ -679,7 +680,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 "直接回复即转达; 也可 @architect 讨论。",
                 msg_meta={"kind": "task_input", "taskId": task_id},
                 project_id=pid, agent=agent)
-        store.TasksStore.update(task_id, {"status": "waiting_input"})
+        store.TasksStore.update(task_id, {"status": ST.TASK_WAITING_INPUT})
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
     elif kind == "done":
         clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()

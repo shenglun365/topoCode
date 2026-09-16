@@ -11,7 +11,7 @@ import time
 from .base import _all, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _update, next_id
 
 TERMINAL_STATES = ("done", "failed", "cancelled")
-ACTIVE_STATES = ("pending_confirm", "running", "waiting_input")
+from .states import ACTIVE_STATES, TASK_PENDING_CONFIRM  # 规范化环节五: 词汇表单源
 
 
 def _now() -> int:
@@ -39,7 +39,7 @@ class TasksStore:
             "req_id": data.get("reqId") or "",
             "title": data.get("title") or "",
             "instruction": data.get("instruction") or "",
-            "status": data.get("status") or "pending_confirm",
+            "status": data.get("status") or TASK_PENDING_CONFIRM,
             # 执行器选定单源(P5): 落库不兜底——空=未选定, 由 confirm_task 按注册表默认
             # 解析并显式失败; 此处的字面 "opencode" 曾导致 cv-153 静默降级链路
             "executor_type": data.get("executorType") or "",

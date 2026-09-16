@@ -1060,10 +1060,10 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
 
     req = {
         "id": _store.next_id("RQ"), "kind": "user-story",
-        "status": "ready", "title": title,
+        "status": ST.REQ_READY, "title": title,
         "priority": priority if priority in ("P0", "P1", "P2") else "P1",
         "activeVer": 1,
-        "specVersions": [{"ver": 1, "state": "confirmed", "snapshot": snapshot,
+        "specVersions": [{"ver": 1, "state": ST.SPEC_CONFIRMED, "snapshot": snapshot,
                           "source": {"convId": conv_id, "actor": "architect"},
                           "reason": "初始提案", "createdAt": _ts()}],
         "ownerConv": conv_id, "sourceType": "asset-chat",
@@ -1214,6 +1214,7 @@ def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
 
 # ── LLM 通道: 实现迁至 agent.cognition.llm(P1), 此处 re-export 兼容存量引用 ──
 
+from ..arch_routes.store import states as ST
 from ..agent.cognition import prompt as _disc  # noqa: F401,E402
 from ..agent.cognition.llm import (  # noqa: F401,E402
     _LLM_CALL_TIMEOUT,

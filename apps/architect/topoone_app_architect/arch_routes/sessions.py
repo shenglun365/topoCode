@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 
 from .common import _ts, ok, err
 from . import store
+from .store import states as ST
 from . import ws_events
 
 router = APIRouter()
@@ -302,7 +303,7 @@ def _delete_session_cascade(conv_id: str) -> int:
     try:
         from .store import TasksStore
         for t in TasksStore.of_conv(conv_id):
-            if (t.get("status") or "") in ("running", "waiting_input", "pending_confirm"):
+            if (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT, ST.TASK_PENDING_CONFIRM):
                 if t.get("runnerJobId"):
                     try:
                         exec_bridge._runner(f"/api/implement/{t['runnerJobId']}/finish",
@@ -333,7 +334,7 @@ async def session_messages(conv_id: str):
     # 不再要求用户必须发消息才自愈(cv-161: 服务重启后泵丢失, 任务假 running)
     try:
         from . import exec_bridge as _eb
-        if any((t.get("status") or "") in ("running", "waiting_input")
+        if any((t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT)
                for t in store.TasksStore.of_conv(conv_id)):
             rec = await asyncio.to_thread(_eb.recover_conv_tasks, conv_id)
             for tid, jid, rid, ag in (rec or {}).get("repump", []):
@@ -383,7 +384,7 @@ def _running_role_of(conv: dict) -> dict:
     try:
         from . import exec_bridge as _eb
         t = _eb.active_task_of(conv["id"]) if conv.get("id") else None
-        if t and (t.get("status") or "") in ("running", "waiting_input"):
+        if t and (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT):
             out = {"role": "coding",
                    "executorId": t.get("executorType") or "opencode",
                    "status": t.get("status") or "",
@@ -824,7 +825,7 @@ async def feed_to_coding(conv_id: str, request: Request):
     delivered, queued, feed_note = False, False, ""
     # P3: 投喂目标 = 活跃 v2 任务(running/waiting_input → task_input 转达/排队)
     task = exec_bridge.active_task_of(conv_id)
-    if task and (task.get("status") or "") in ("running", "waiting_input"):
+    if task and (task.get("status") or "") in ("running", ST.TASK_WAITING_INPUT):
         res = await asyncio.to_thread(exec_bridge.task_input, task["id"], text)
         if res.get("ok"):
             delivered, queued = True, bool(res.get("queued"))
@@ -1085,7 +1086,7 @@ async def stop_exec_session(conv_id: str):
     stopped = []
     from .store import TasksStore
     for t in TasksStore.of_conv(conv_id):
-        if (t.get("status") or "") in ("running", "waiting_input", "pending_confirm"):
+        if (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT, ST.TASK_PENDING_CONFIRM):
             res = await asyncio.to_thread(exec_bridge.task_stop, t["id"], "user")
             if res.get("ok"):
                 stopped.append(t["id"])

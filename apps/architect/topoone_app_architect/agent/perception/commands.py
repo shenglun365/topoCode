@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
+from ...arch_routes.store import states as ST
+
 _COMMAND_RE = re.compile(r"^(?:@(?P<executor>\S+)\s+)?/(?P<cmd>提取需求|执行)\s*$")
 _CONFIRM_RE = re.compile(
     r"^(?:@(?P<executor>\S+)\s+)?(?:确认执行|确认任务|确认|同意|开始执行|开始吧|开始|ok|OK|好的?)[。.!！]?\s*$")
@@ -39,7 +41,7 @@ def match_confirm(question: str) -> Optional[Dict[str, str]]:
 
 def has_pending_task(conv_id: str) -> bool:
     from ...arch_routes import store
-    return any((t.get("status") or "") == "pending_confirm"
+    return any((t.get("status") or "") == ST.TASK_PENDING_CONFIRM
                for t in store.TasksStore.of_conv(conv_id))
 
 
@@ -49,7 +51,7 @@ def run_confirm(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
     无待确认卡返回 {noPending: True}(调用方回落普通对话, 不拦)。"""
     from ...arch_routes import exec_bridge, store
     pending = [t for t in store.TasksStore.of_conv(conv["id"])
-               if (t.get("status") or "") == "pending_confirm"]
+               if (t.get("status") or "") == ST.TASK_PENDING_CONFIRM]
     if not pending:
         return {"ok": False, "noPending": True}
     if len(pending) > 1:

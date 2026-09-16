@@ -1,6 +1,7 @@
 """store 拆分模块（A1-T3：纯移动）。"""
 from __future__ import annotations
 
+from .states import REQ_DONE, REQ_READY
 from .base import _all, _db, _delete, _fetchall_routed, _get, _insert, _row_to_api, _update
 
 class ProjectsStore:
@@ -152,7 +153,7 @@ class RequirementsStore:
                 v["state"] = "superseded"      # 隐式废弃(裁决: append-only 不回退)
         if not hit:
             return {"ok": False, "error": "无生效版本"}
-        cls.update(req_id, {"specVersions": versions, "status": "ready",
+        cls.update(req_id, {"specVersions": versions, "status": REQ_READY,
                             "updatedAt": int(_t.time() * 1000)})
         return {"ok": True, "ver": av}
 
@@ -163,7 +164,7 @@ class RequirementsStore:
         row = cls.update(req_id, {
             "doneMark": 1 if done else 0,
             "doneAt": int(_t.time() * 1000) if done else 0,
-            "status": "done" if done else "ready",
+            "status": REQ_DONE if done else REQ_READY,
             "updatedAt": int(_t.time() * 1000)})
         return row
 
