@@ -1170,7 +1170,9 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     try:
         log_conv_event(conv_id,
                        f"✏️ **需求卡已修订**（{req_id} → v{entry['ver']} ready）：{'、'.join(changed)}"
-                       + (f" —— {str(reasoning)[:120]}" if reasoning else ""))
+                       + (f" —— {str(reasoning)[:120]}" if reasoning else ""),
+                       meta={"kind": "specReady", "requirementId": req_id,
+                             "ver": entry["ver"], "updated": True})
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "reqId": req_id, "ver": entry["ver"], "amended": changed,
@@ -1227,36 +1229,11 @@ from ..agent.cognition.llm import (  # noqa: F401,E402
 
 
 def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None:
-    """统一时间线: 中间资产事件(需求卡/指派)以消息沉淀进来源会话。
-
-    meta: 卡片化回执(specReady→[一键建卡执行]; 历史 specCreated 兼容渲染)。
-    失败静默——事件回写不阻断工具主流程。
-    """
-    if not conv_id:
-        return
-    try:
-        import json as _json
-        from .common import _ts
-        row = {
-            "id": store.next_id("m"), "conversationId": conv_id,
-            "role": "assistant", "time": _ts(),
-            "content": text,
-        }
-        if meta:
-            row["meta"] = _json.dumps(meta, ensure_ascii=False)
-        store.ConversationsStore.append_message(row)
-        # 实时推送: 前端(SSE conv-message)按会话刷新 → meta 动作卡即时渲染
-        try:
-            from ..agent.collab.sse import emit
-            emit("conv-message", conv_id, msgId=row["id"], agent="",
-                 kind=(meta or {}).get("kind", ""))
-        except Exception:  # noqa: BLE001
-            pass
-    except Exception:  # noqa: BLE001
-        pass
-
-
-
+    """委托 collab.cards.land(卡片落流唯一出口, cv-175 规范化)。"""
+    from ..agent.collab import cards as _cards
+    meta = dict(meta or {})
+    _cards.land(conv_id, text, kind=meta.pop("kind", None),
+                project_id="", **meta)
 
 def run_tools_loop(msgs: List[Dict[str, str]], *,
                    root: Optional[str] = None, project: Optional[str] = None,

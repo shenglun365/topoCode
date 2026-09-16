@@ -61,18 +61,9 @@ async def kb_analysis_ws(websocket: WebSocket):
                     conv_id = str((data or {}).get("conversationId") or "")
                     if conv_id:
                         try:
-                            import json as _json
-                            from ..arch_routes import store as _store
-                            from ..arch_routes.common import _ts
-                            _store.ConversationsStore.append_message({
-                                "id": _store.next_id("m"),
-                                "conversationId": conv_id,
-                                "role": "assistant", "time": _ts(),
-                                "content": f"❌ 回合失败：{detail}",
-                                "meta": _json.dumps({"kind": "turnError"},
-                                                    ensure_ascii=False)})
-                            _store.ConversationsStore.update(
-                                conv_id, {"reviewState": "unread"})
+                            from ..agent.collab import cards as _cards
+                            _cards.land(conv_id, f"❌ 回合失败：{detail}",
+                                        kind=_cards.KIND_TURN_ERROR)
                         except Exception:  # noqa: BLE001
                             logger.exception("[kb-chat] turnError 落库失败 conv=%s",
                                              conv_id)

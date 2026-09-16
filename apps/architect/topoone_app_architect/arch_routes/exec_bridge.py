@@ -102,32 +102,11 @@ def _meta_dict_of(conv: dict) -> dict:
 
 def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = None,
             project_id: str = "", agent: str = "") -> None:
-    # 库路由: 未显式给项目 → 从会话行取(消息必须与会话同库, 防主库孤儿)
-    if not project_id:
-        try:
-            project_id = (store.ConversationsStore.get(conv_id) or {}).get("projectId") or ""
-        except Exception:  # noqa: BLE001
-            pass
-    payload = {
-        "id": store.next_id("m"), "conversationId": conv_id, "role": role,
-        "time": _ts(), "content": content, "projectId": project_id,
-        "agent": agent or "",
-    }
-    if msg_meta:
-        payload["meta"] = json.dumps(msg_meta, ensure_ascii=False)
-    store.ConversationsStore.append_message(payload)
-    try:
-        store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
-    except Exception:  # noqa: BLE001
-        pass
-    # 实时推送: 前端(SSE)收到后按会话刷新。
-    try:
-        from ..agent.collab.sse import emit
-        emit("conv-message", conv_id, msgId=payload["id"], agent=agent or "",
-             kind=(msg_meta or {}).get("kind", ""))
-    except Exception:  # noqa: BLE001
-        pass
-# ── 边界/验收简报 ──
+    """委托 collab.cards.land(卡片落流唯一出口, cv-175 规范化)。"""
+    from ..agent.collab import cards as _cards
+    meta = dict(msg_meta or {})
+    _cards.land(conv_id, content, kind=meta.pop("kind", None), role=role,
+                project_id=project_id, agent=agent, **meta)
 
 def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
     """验收简报: 实际改动 vs 规约边界(越界检测) + 验收标准静态对照。

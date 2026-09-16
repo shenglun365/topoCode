@@ -493,16 +493,11 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         if hint:
             detail += "。" + hint
         try:
-            store.ConversationsStore.append_message({
-                "id": store.next_id("m"), "conversationId": conv_id,
-                "role": "assistant", "time": _ts(), "content": f"❌ {detail}",
-                "meta": json.dumps({"kind": "turnError"}, ensure_ascii=False)})
+            from .collab import cards as _cards
+            _cards.land(conv_id, f"❌ {detail}", kind=_cards.KIND_TURN_ERROR,
+                        review_state="error")
         except Exception:  # noqa: BLE001
             logger.warning("[kb-chat] turnError 落库失败 conv=%s", conv_id)
-        try:
-            store.ConversationsStore.update(conv_id, {"reviewState": "error"})
-        except Exception:  # noqa: BLE001
-            pass
         await io.send_ev({"type": "error", "requestId": request_id, "message": detail})
 
 
