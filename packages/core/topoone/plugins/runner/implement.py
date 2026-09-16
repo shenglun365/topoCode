@@ -134,8 +134,15 @@ class ImplementJob:
         self.turn_timeout = float(turn_timeout)
         self.stall_sec = float(stall_sec)
         self.project_id = project_id
-        # V1 程序化验收门禁: start payload.verify {build?, test?, timeoutMul?}
+        # V1 程序化验收门禁: start payload.verify {build?, test?, timeoutMul?,
+        # maxAttempts?, autoRepair?}; V4 修复回注计数 + V5 DONE 诚实化连击
         self.verify_config = verify_config if isinstance(verify_config, dict) else {}
+        self.verify_attempts = 0
+        self.verify_max_attempts = int((self.verify_config or {}).get("maxAttempts") or 3)
+        self.auto_repair = bool((self.verify_config or {}).get("autoRepair", True))
+        self.done_mismatch_streak = 0
+        self.baseline: Optional[Dict[str, Any]] = None
+        self._repair_queue: List[str] = []
         # 活动信号(adapter 刷新; 看门狗消费)
         self.last_activity_ts = self.created_at
         self.last_error = ""
@@ -211,6 +218,10 @@ class ImplementJob:
                       f"{self.adapter.executor_id} 会话就绪 serve={self.serve_url} "
                       f"session={self.session_id}")
             self.status = "running"
+            if isinstance(self.verify_config, dict) and \
+                    (self.verify_config.get("test") or ""):
+                # V3 回归基线: 异步预跑基点测试(不阻塞实施; 未完成仅延后对比)
+                asyncio.create_task(self._prepare_baseline())
             self._kick_turn(self.instruction)
         except Exception as e:  # noqa: BLE001
             self.status = "failed"
@@ -264,22 +275,95 @@ class ImplementJob:
         self._kick_turn(text)
         return {"ok": True, "queued": False}
 
-    async def _run_verify_gate(self, changed: List[str]) -> None:
-        """V1 程序化验收门禁: done 自述后实测验证, 矩阵落 verify 事件。
+    async def _prepare_baseline(self) -> None:
+        """V3: 基点临时 worktree 异步跑一次基线测试(缓存 key: root+base+cmd)。"""
+        try:
+            from . import verify as _verify
+            cmd = str(self.verify_config.get("test") or "").strip()
+            if not cmd:
+                plan = _verify.discover_verify(self.wt, self.verify_config)
+                cmd = (plan.get("test") or {}).get("cmd") or ""
+            if not cmd:
+                return
+            self.baseline = await asyncio.to_thread(
+                _verify.run_baseline, self.root, self.base, cmd,
+                self._verify_state_dir(),
+                float(self.verify_config.get("timeoutMul") or 1.0),
+                self._verify_state_dir())
+            logger.info("[implement] baseline ready job=%s tests=%s",
+                        self.id, len((self.baseline or {}).get("perTest") or []))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[implement] baseline failed job=%s: %s", self.id, e)
 
-        只观测不改终态——失败修复回注/L3 升级编排归 V4(RUNNER_VERIFY_DISABLE=1 可关)。
+    def _verify_state_dir(self) -> str:
+        """门禁状态目录(基线缓存/结构化报告)——job 级隔离。"""
+        base_dir = os.environ.get("TOPOCODE_DB_DIR") or os.path.join(
+            os.path.expanduser("~"), ".topocode")
+        p = os.path.join(base_dir, "runner", "verify-reports", self.id)
+        os.makedirs(p, exist_ok=True)
+        return p
+
+    async def _run_verify_gate(self, changed: List[str]) -> Optional[Dict[str, Any]]:
+        """V1/V2 验收门禁: done 自述后实测验证, 矩阵落 verify 事件并返回。
+
+        None = 门禁未启用/不可用(逃生开关/无有效 worktree/内部异常)。
         """
         if os.environ.get("RUNNER_VERIFY_DISABLE") == "1":
-            return
+            return None
         if not self.wt or not os.path.isdir(self.wt):
-            return                     # 无有效 worktree(测试桩/异常作业): 无从验证
+            return None                 # 无有效 worktree(测试桩/异常作业): 无从验证
         try:
             from . import verify as _verify
             matrix = await asyncio.to_thread(
-                _verify.verify_and_judge, self.wt, self.verify_config, changed)
+                _verify.verify_and_judge, self.wt, self.verify_config, changed,
+                self.baseline, self._verify_state_dir())
             self.emit("verify", _verify.matrix_summary(matrix), **matrix)
+            return matrix
         except Exception as e:  # noqa: BLE001
             logger.warning("[implement] verify gate failed job=%s: %s", self.id, e)
+            return None
+
+    async def _handle_verify_failure(self, matrix: Dict[str, Any],
+                                     changed: List[str], output: str) -> None:
+        """V4/V5: 验收未过 → L1/L2 自动修复回注(上限 verify_max_attempts);
+        L3/轮次尽/连续 2 轮 DONE 与实测不符 → waiting_input 退回并附确定性 bundle。"""
+        from . import verify as _verify
+        self.verify_attempts += 1
+        self.done_mismatch_streak += 1
+        bundle = _verify.classify_failure(matrix, attempt=self.verify_attempts,
+                                          max_attempts=self.verify_max_attempts)
+        repairable = (bundle["level"] in ("L1", "L2")
+                      and self.verify_attempts <= self.verify_max_attempts
+                      and self.auto_repair)
+        if not repairable:
+            if self.done_mismatch_streak >= 2:
+                hint = (f"连续 {self.done_mismatch_streak} 轮 DONE 声明与验证结果不符"
+                        "——已退回人工介入(提示: 当前模型可能不足以胜任该任务,"
+                        "建议降档 T3/T4 或人工预拆)。")
+            elif bundle["level"] == "L3":
+                hint = "失败超出可自动修复范畴(L3 症状≠根因/超时/大面积失败)。"
+            else:
+                hint = "自动修复轮次已用尽。"
+            self.status = "waiting_input"
+            self._commit_progress()
+            self.emit("input_required",
+                      f"[[NEED_INPUT]] DONE 声明与验证结果不符, 已退回。\n"
+                      f"{hint}\n失败分类: {bundle['level']} ({bundle['reason']}, "
+                      f"第 {bundle['attempt']}/{bundle['maxAttempts']} 轮)\n"
+                      f"证据(尾部):\n{bundle['logTail']}",
+                      changedFiles=changed)
+            return
+        self.status = "running"
+        self.emit("notice",
+                  f"⛔ 验收未过(第 {bundle['attempt']}/{bundle['maxAttempts']} 轮, "
+                  f"{bundle['level']}: {bundle['reason']})——自动修复回注。",
+                  reason="verify_repair")
+        self._repair_queue.append(
+            f"上一轮你报告 [[IMPLEMENT_DONE]], 但程序化验收未过"
+            f"({bundle['level']}: {bundle['reason']}, 第 {bundle['attempt']}/"
+            f"{bundle['maxAttempts']} 轮)。\n失败证据(尾部):\n{bundle['logTail']}\n"
+            "请**仅修复上述失败**, 不要改动测试断言或为迁就测试改源码结构; "
+            "修复完成后照常 [[IMPLEMENT_DONE]]。")
 
     async def _run_turn(self, text: str) -> None:
         # A6.3 TurnContext: 每轮快照(回合号/时点/模型——恢复与审计消费)
@@ -293,10 +377,16 @@ class ImplementJob:
             output = outcome.output or ""
             changed = self._diff_files() or outcome.changed_files
             if _MARK_DONE in output:
+                # V4/V5: 先实测验证再定终态——DONE 自述与实测不符时退回/修复回注
+                from . import verify as _verify
+                matrix = await self._run_verify_gate(changed)
+                if _verify.matrix_failed(matrix):
+                    await self._handle_verify_failure(matrix, changed, output)
+                    return
+                self.done_mismatch_streak = 0
                 self.status = "done"
                 self._commit_progress()
                 self.emit("done", output, changedFiles=changed)
-                await self._run_verify_gate(changed)
             elif _MARK_NEED in output or True:
                 # 兜底: 无标记的回合结束也归为等待输入(agent 提问/未守约)
                 self.status = "waiting_input"
@@ -318,7 +408,11 @@ class ImplementJob:
                 stop.set()
         finally:
             self._busy = False
-            if self.status in ("waiting_input",) and self.pending_inputs:
+            # V4: 验收失败修复回注轮(先于 waiting_input 队列——状态互斥不冲突)
+            if self._repair_queue and self.status == "running":
+                nxt = self._repair_queue.pop(0)
+                self._kick_turn(nxt)
+            elif self.status in ("waiting_input",) and self.pending_inputs:
                 nxt = self.pending_inputs.pop(0)
                 self._kick_turn(nxt)
 

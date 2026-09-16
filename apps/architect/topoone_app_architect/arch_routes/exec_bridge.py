@@ -497,6 +497,9 @@ def confirm_task(task_id: str) -> dict:
                                      "max_iterations": policy.max_iterations}
     if _etype:
         payload["executorType"] = _etype   # 引擎选择以 task 为准(无注册表也可指定)
+    # V1 验收门禁配置透传(P0 显式配置来源; 任务行 verifyConfig → runner 发现链)
+    if task.get("verifyConfig"):
+        payload["verify"] = task["verifyConfig"]
     # 回合超时配置下发(执行器注册表 config → runner 看门狗参数)
     _cfg = hint.get("executorConfig") or {}
     for k in ("turnTimeout", "stallSec"):
@@ -1233,6 +1236,27 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 msg_meta={"kind": "task_approval", "taskId": task_id,
                           "approvalJobId": job_id, "approvalRequestId": req_id},
                 project_id=pid, agent=agent)
+    elif kind == "verify":
+        # V5 反馈落流: 验证矩阵 → 进度留痕; FAIL 落简短消息(通过不落流防刷屏;
+        # 修复回注/退回的完整叙事由 notice/input_required 事件承载)
+        overall = str(ev.get("overall") or "?")
+        prog = {**((store.TasksStore.get(task_id) or {}).get("progress") or {}),
+                "verifyOverall": overall,
+                "verifyAt": _ts()}
+        for stage in ("build", "test"):
+            r = ev.get(stage)
+            if r:
+                prog[f"verify_{stage}"] = {"verdict": r.get("verdict"),
+                                           "reason": r.get("reason") or ""}
+        store.TasksStore.set_progress(task_id, prog)
+        _publish_progress(conv_id, task_id, {"verifyOverall": overall})
+        if overall in ("C", "D") or any(
+                (ev.get(s) or {}).get("verdict") == "FAIL"
+                for s in ("build", "test")):
+            _append(conv_id, "assistant",
+                    f"🧪 **程序化验收**（任务「{title}」）\n\n{(ev.get('text') or '')[:400]}",
+                    msg_meta={"kind": "task_verify", "taskId": task_id},
+                    project_id=pid, agent=agent)
     elif kind == "team":
         # P5: 团队进度 → 进度预览（不落消息，防刷屏）
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}

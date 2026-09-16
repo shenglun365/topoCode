@@ -140,5 +140,107 @@ def test_done_branch_emits_verify_event(tmp_path):
     verify_events = [e for e in j.events if e["kind"] == "verify"]
     assert verify_events, "done 后缺 verify 事件"
     ev = verify_events[-1]
-    assert ev["overall"] == "B" and ev["test"]["verdict"] == "PASS"
+    assert ev["overall"] == "A"                          # V2: junitxml 结构化 → A 档
+    assert ev["test"]["structured"] is True
+    assert ev["test"]["verdict"] == "PASS"
+    assert ev["test"]["summary"]["passed"] >= 1
     assert "PASS" in ev["text"]
+
+
+# ── V4 修复回注 + V5 DONE 诚实化 ────────────────────────────────────
+
+def test_done_but_verify_fail_repairs_then_escapes(tmp_path):
+    """DONE 但实测 FAIL: L2 → 自动修复回注(转 running+notice) → 修复通过 → done;
+    超限/连败 → waiting_input 退回(bundle 附确定性文案)。"""
+    repo = tmp_path / "repo2"
+    repo.mkdir()
+    _git("init", "-q", cwd=repo)
+    _git("config", "user.email", "t@t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "base.txt").write_text("base\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "base", cwd=repo)
+    _git("worktree", "add", "-b", "exec/t2", str(tmp_path / "wt2"), cwd=repo)
+    wt = str(tmp_path / "wt2")
+    _mkfile(wt, "test_flaky.py", "import os\n"
+            "def test_gate():\n"
+            "    assert os.path.exists(os.path.join(os.path.dirname(__file__), 'fixed.flag'))\n")
+    _git("add", "-A", cwd=wt)
+    _git("commit", "-qm", "feat", cwd=wt)
+
+    class _Adapter(TurnAdapter):
+        executor_id = "fake"
+
+        async def start_session(self, job):
+            job.session_id = "s1"
+
+        async def run_turn(self, job, text):
+            if "验收未过" in text:                      # 修复轮: 落修复标记
+                _mkfile(wt, "fixed.flag", "1")
+            return TurnOutcome(output=text + " [[IMPLEMENT_DONE]]", changed_files=[])
+
+        async def probe(self, job):
+            raise NotImplementedError
+
+    j = ImplementJob("j-v4", root=str(repo), wt=wt, base="HEAD", branch="exec/t2",
+                     instruction="do", adapter=_Adapter(),
+                     verify_config={"test": "python -m pytest -q test_flaky.py",
+                                    "timeoutMul": 0.05})
+    j.status = "running"
+
+    async def _flow():
+        await j._run_turn("完成 [[IMPLEMENT_DONE]]")   # 轮1 FAIL → 回注队列
+        await j.turn_task                              # 修复轮: 落 flag → PASS → done
+
+    asyncio.run(_flow())
+    kinds = [e["kind"] for e in j.events]
+    assert j.status == "done"
+    assert "verify_repair" in [e.get("reason") for e in j.events if e["kind"] == "notice"]
+    assert "done" in kinds and "verify" in kinds
+    assert j.verify_attempts == 1 and j.done_mismatch_streak == 0
+
+
+def test_done_verify_fail_twice_escalates(tmp_path):
+    """连续 2 轮 DONE 与实测不符 → waiting_input 退回 + 能力不足提示。"""
+    repo = tmp_path / "repo3"
+    repo.mkdir()
+    _git("init", "-q", cwd=repo)
+    _git("config", "user.email", "t@t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "base.txt").write_text("base\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "base", cwd=repo)
+    _git("worktree", "add", "-b", "exec/t3", str(tmp_path / "wt3"), cwd=repo)
+    wt = str(tmp_path / "wt3")
+    _mkfile(wt, "test_bad.py", "def test_gate():\n    assert False\n")
+    _git("add", "-A", cwd=wt)
+    _git("commit", "-qm", "feat", cwd=wt)
+
+    class _Adapter(TurnAdapter):
+        executor_id = "fake"
+
+        async def start_session(self, job):
+            job.session_id = "s1"
+
+        async def run_turn(self, job, text):
+            return TurnOutcome(output=text + " [[IMPLEMENT_DONE]]", changed_files=[])
+
+        async def probe(self, job):
+            raise NotImplementedError
+
+    j = ImplementJob("j-v5", root=str(repo), wt=wt, base="HEAD", branch="exec/t3",
+                     instruction="do", adapter=_Adapter(),
+                     verify_config={"test": "python -m pytest -q test_bad.py",
+                                    "timeoutMul": 0.05, "autoRepair": True, "maxAttempts": 1})
+    j.status = "running"
+
+    async def _flow():
+        await j._run_turn("完成 [[IMPLEMENT_DONE]]")   # 轮1 FAIL(attempts=1) → 回注
+        await j.turn_task                              # 轮2 FAIL(attempts=2>1) → 退回
+
+    asyncio.run(_flow())
+    assert j.status == "waiting_input", [e["kind"] for e in j.events][-4:]
+    last = j.events[-1]
+    assert last["kind"] == "input_required"
+    assert "不符" in last["text"] or "修复轮次已用尽" in last["text"]
+    assert j.verify_attempts == 2

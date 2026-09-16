@@ -111,3 +111,30 @@ def test_task_input_deny_with_reason(monkeypatch):
     assert r["ok"] is True
     assert calls["payload"]["approved"] is False
     assert calls["payload"]["reason"] == "越界文件"
+
+
+def test_verify_event_feedback(monkeypatch):
+    """V5: verify 事件 → 进度留痕; FAIL/C 落 task_verify 消息, PASS 不落流。"""
+    seen, appended = {}, []
+    monkeypatch.setattr(eb.store.TasksStore, "get", lambda tid: _task(progress=seen))
+    monkeypatch.setattr(eb.store.TasksStore, "set_progress",
+                        lambda tid, p: seen.update(p))
+    monkeypatch.setattr(eb, "_publish_progress", lambda c, t, p: seen.update(p))
+    def fake_append(conv_id, role, content, msg_meta=None, **kw):
+        appended.append(msg_meta or {})
+    monkeypatch.setattr(eb, "_append", fake_append)
+
+    eb._handle_task_event({"kind": "verify",
+                           "text": "验收: B——test ✅ PASS [config] 5ms",
+                           "overall": "B",
+                           "test": {"verdict": "PASS", "reason": ""}}, _ctx())
+    assert seen.get("verifyOverall") == "B"
+    assert seen.get("verify_test") == {"verdict": "PASS", "reason": ""}
+    assert appended == []                                    # PASS 不落流
+
+    eb._handle_task_event({"kind": "verify",
+                           "text": "验收: B——test ❌ FAIL [config]",
+                           "overall": "B",
+                           "test": {"verdict": "FAIL", "reason": "TEST_FAILED"}}, _ctx())
+    assert appended and appended[-1].get("kind") == "task_verify"
+    assert seen["verify_test"]["verdict"] == "FAIL"
