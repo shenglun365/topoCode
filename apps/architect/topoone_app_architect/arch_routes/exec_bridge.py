@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -357,7 +358,8 @@ def confirm_task(task_id: str) -> dict:
     store.TasksStore.update(task_id, {
         "status": "running", "runner_job_id": res["jobId"],
         "worktree": res.get("worktree") or "", "branch": res.get("branch") or branch,
-        "session_ref": res.get("sessionId") or ""})
+        "session_ref": res.get("sessionId") or "",
+        "baseCommit": res.get("baseCommit") or ""})
     try:
         store.ConversationsStore.set_work_state(conv_id, "running")
     except Exception:  # noqa: BLE001
@@ -686,6 +688,52 @@ def _build_workspace_files(executor_type: str, executor_cfg: dict, task: dict) -
     return files
 
 
+def _milestone_report_files(text: str) -> List[str]:
+    """里程碑报告固定行(`改动文件: a, b, c`)宽松解析——解析不到返回 []。"""
+    if not text:
+        return []
+    m = re.search(r"改动文件[:：]\s*([^\n]+)", text)
+    if not m:
+        return []
+    raw = re.split(r"[,，;；、\s]+", m.group(1).strip())
+    return [x for x in (p.strip().strip("`") for p in raw) if x]
+
+
+def _merge_req_scope(rid: str, files: List[str]) -> int:
+    """里程碑发现的文件并回需求边界(自我修正闭环: subagent 探索事实 →
+    范围先验增强)。优先写 active 规约版本快照, 无版本写 analysis。返回并入数。"""
+    if not rid or not files:
+        return 0
+    try:
+        r = store.RequirementsStore.get(rid)
+        if not r:
+            return 0
+        active = store.RequirementsStore.spec_active(rid)
+        if active and isinstance(active.get("snapshot"), dict):
+            snap = dict(active["snapshot"])
+            cur = [str(x) for x in (snap.get("allowedScope") or [])]
+            merged = cur + [f for f in files if f not in cur]
+            if merged == cur:
+                return 0
+            snap["allowedScope"] = merged
+            versions = store.RequirementsStore.spec_versions(rid)
+            for v in versions:
+                if v.get("ver") == active.get("ver"):
+                    v["snapshot"] = snap
+            store.RequirementsStore.update(rid, {"specVersions": versions})
+            return len(merged) - len(cur)
+        analysis = dict(r.get("analysis") or {})
+        cur = [str(x) for x in (analysis.get("allowedScope") or [])]
+        merged = cur + [f for f in files if f not in cur]
+        if merged == cur:
+            return 0
+        analysis["allowedScope"] = merged
+        store.RequirementsStore.update(rid, {"analysis": analysis})
+        return len(merged) - len(cur)
+    except Exception:  # noqa: BLE001 — 回写失败不阻断任务流
+        return 0
+
+
 def _handle_task_event(ev: dict, ctx: dict) -> None:
     """v2: runner 事件 → 任务生命周期 + 统一流消息(agent=executor)。
 
@@ -705,9 +753,18 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
     title = task.get("title") or "任务"
     if kind == "input_required":
         clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
+        # 里程碑报告识别(环节十一): 固定行解析 → 并回需求边界 + 回执标注
+        ms_files = _milestone_report_files(clean)
+        merged = _merge_req_scope(ctx.get("rid") or "", ms_files) if ms_files else 0
+        ms_note = ""
+        if ms_files:
+            shown = "\n".join(f"- `{f}`" for f in ms_files[:12])
+            ms_note = (f"\n\n**📋 里程碑报告**（改动文件已并入需求边界"
+                       f"{f'，新增 {merged} 项' if merged else ''}）\n{shown}")
         _append(conv_id, "assistant",
-                f"⏸ **{agent} 需要你的输入**（任务「{title}」）\n\n{clean}\n\n"
-                "直接回复即转达; 也可 @architect 讨论。",
+                f"⏸ **{agent} 需要你的输入**（任务「{title}」）\n\n{clean}"
+                + ms_note +
+                "\n\n直接回复即转达; 也可 @architect 讨论。",
                 msg_meta={"kind": "task_input", "taskId": task_id},
                 project_id=pid, agent=agent)
         store.TasksStore.update(task_id, {"status": ST.TASK_WAITING_INPUT})

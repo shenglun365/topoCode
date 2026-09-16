@@ -29,6 +29,7 @@ executorId/executorType/executorConfig(architect 侧执行器注册表下发)，
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import subprocess
@@ -38,6 +39,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 
+from .loopguard import LoopGuard
 from .turn_adapter import TurnAdapter, build_adapter
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,10 @@ _TURN_TIMEOUT = 3600.0
 _WATCH_INTERVAL = 30.0
 _WATCH_ABORT_GRACE = 10.0
 _DEFAULT_STALL_SEC = 180.0
+# 无进展看门狗: worktree 状态哈希连续 N 个探测周期不变(已动过文件的前提下)
+# → 判定循环空转(环节十一)。6×30s=3min——纯编译/命令重跑无文件变化即命中;
+# 正常编辑-编译循环每次编辑都会改变 porcelain → 计数归零。
+_PROGRESS_TICKS = 6
 
 _MARK_NEED = "[[NEED_INPUT]]"
 _MARK_DONE = "[[IMPLEMENT_DONE]]"
@@ -83,6 +89,13 @@ class ImplementJob:
         self.wt = wt
         self.base = base
         self.branch = branch
+        # 字面 HEAD 钉死为具体 SHA(自动 commit 进度后 diff HEAD 会恒空——
+        # 验收 diff/变更文件全丢; 钉 SHA 后 diff 永远对准任务基点)
+        if str(base).strip() in ("HEAD", "") and wt and os.path.isdir(wt):
+            try:
+                self.base = _git(["rev-parse", "HEAD"], wt).stdout.strip()
+            except Exception:  # noqa: BLE001
+                self.base = base
         self.instruction = instruction
         # 操作边界(互斥引擎口径): {files: [路径/目录前缀], components: [KB 组件 id],
         # readOnly: bool(只读作业豁免写互斥)}
@@ -115,6 +128,12 @@ class ImplementJob:
         self.last_activity_ts = self.created_at
         self.last_error = ""
         self.sse_stop: Optional[asyncio.Event] = None
+        # 循环护栏(环节十一): 事件面检测器(cline 流式喂入) + 无进展看门狗状态
+        self.loop_guard = LoopGuard()
+        self._loop_verdict = ""
+        self._progress_hash = ""
+        self._progress_stall = 0
+        self._progress_armed = False
 
     # ── 事件缓冲 + 实时扇出(P3 委托 events.EventBus, 形状单源) ──
     # 事件粒度: 回合级(done/input_required/failed/aborted/finished/user_input/
@@ -168,14 +187,30 @@ class ImplementJob:
             self._commit_progress()
             self.emit("failed", f"作业启动失败: {e}")
 
+    def _reset_turn_guard(self) -> None:
+        """循环护栏状态按回合复位(指纹/签名是回合内概念)。"""
+        self.loop_guard = LoopGuard()
+        self._loop_verdict = ""
+        self._progress_hash = ""
+        self._progress_stall = 0
+        self._progress_armed = False
+
     def _kick_turn(self, text: str) -> None:
         if self._busy:
             self.pending_inputs.append(text)
             return
         self._busy = True
         self.status = "running"
+        self._reset_turn_guard()
         self.turn_task = asyncio.create_task(self._run_turn(text))
         self.watch_task = asyncio.create_task(self._watch_turn(self.turn_task))
+
+    def observe(self, kind: str, text: str = "", tool_name: str = "") -> None:
+        """适配器事件喂入口(事件循环线程内同步调用): 循环检测, 置旗标由
+        _watch_turn 消费——解耦 sidecar 回调上下文与异步中止路径。"""
+        loop, reason = self.loop_guard.feed(kind, text=text, tool_name=tool_name)
+        if loop and not self._loop_verdict:
+            self._loop_verdict = reason
 
     async def user_input(self, text: str, steer: bool = False) -> Dict[str, Any]:
         """用户输入：不 busy 触发新回合；busy 时 steer=true 且执行器支持 →
@@ -234,12 +269,90 @@ class ImplementJob:
 
     # ── 回合看门狗(执行器无关; 只依赖 adapter.probe/abort) ──
 
+    async def _fail_turn(self, reason: str, turn_task: asyncio.Task) -> None:
+        """回合异常收口单源(看门狗/循环检测共用): 终态 → 进度 commit →
+        failed 事件 → abort 回合 → 宽限等待/强杀。"""
+        logger.warning("[implement] watchdog %s: %s", self.id, reason)
+        # 先终态(abort 后 run_turn 的终态检查/异常路径据此收口), 再中止回合
+        self.status = "failed"
+        self.error = reason
+        self._commit_progress()
+        self.emit("failed", f"⚠️ {reason}——已中止回合。")
+        try:
+            await self.adapter.abort(self)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[implement] watchdog abort %s: %s", self.id, e)
+        try:
+            await asyncio.wait_for(asyncio.shield(turn_task),
+                                   timeout=_WATCH_ABORT_GRACE)
+        except asyncio.TimeoutError:
+            turn_task.cancel()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _progress_check(self) -> str:
+        """worktree 无进展检测(每探测周期一次)。
+
+        进度信号 = 已跟踪修改文件的**内容哈希**(编辑会变) + untracked 文件的
+        (路径,大小)清单(编译产物逐个落盘会变) + porcelain 状态行。
+        纯命令重跑/编译空转(无编辑、无新产物) → 信号不变 → 连续
+        _PROGRESS_TICKS 周期后判循环。探索期(从未出现文件变更)不武装。
+        """
+        try:
+            st = _git(["status", "--porcelain"], self.wt, check=False).stdout
+        except Exception:  # noqa: BLE001
+            return ""
+        lines = [ln for ln in st.splitlines() if ln.strip()]
+        parts = [st]
+        sha = hashlib.sha1
+        for ln in lines:
+            xy = ln[:2]
+            path = ln[3:].strip().strip('"')
+            if "M" in xy and "->" not in ln:      # tracked 修改 → 内容参与
+                try:
+                    with open(os.path.join(self.wt, path), "rb") as f:
+                        parts.append(sha(f.read(262144)).hexdigest())
+                    continue
+                except Exception:  # noqa: BLE001
+                    pass
+            parts.append(f"{path}:{os.path.getsize(os.path.join(self.wt, path))}"
+                         if os.path.exists(os.path.join(self.wt, path)) else path)
+        h = sha("".join(parts).encode("utf-8", "replace")).hexdigest() \
+            if lines else ""
+        if h and not self._progress_armed:
+            # 首次出现文件变更 → 武装(纯探索期不判定, 防误伤只读阶段)
+            self._progress_armed = True
+            self._progress_hash = h
+            self._progress_stall = 0
+            return ""
+        if not self._progress_armed:
+            return ""
+        if h and h == self._progress_hash:
+            self._progress_stall += 1
+        else:
+            self._progress_stall = 0
+            self._progress_hash = h
+        if self._progress_stall >= _PROGRESS_TICKS:
+            return (f"worktree 已 {_PROGRESS_TICKS * int(_WATCH_INTERVAL)}s "
+                    "无文件进展且回合未结束(疑似改→跑→同错循环)")
+        return ""
+
     async def _watch_turn(self, turn_task: asyncio.Task) -> None:
-        """探测执行器: error/活动停滞 → abort 回合, 防会话无限锁定。"""
+        """探测执行器: error/活动停滞/循环护栏 → abort 回合, 防会话无限锁定。"""
         try:
             while not turn_task.done() and self.status not in ("done", "failed", "stopped"):
                 await asyncio.sleep(_WATCH_INTERVAL)
                 if turn_task.done() or not self._busy:
+                    return
+                # 循环护栏(事件面检测器置旗标; 无流式事件的执行器自然不触发)
+                if self._loop_verdict:
+                    await self._fail_turn(f"循环检测: {self._loop_verdict}",
+                                          turn_task)
+                    return
+                # worktree 无进展看门狗(所有执行器通用)
+                stall_reason = self._progress_check()
+                if stall_reason:
+                    await self._fail_turn(stall_reason, turn_task)
                     return
                 try:
                     p = await self.adapter.probe(self)
@@ -256,23 +369,7 @@ class ImplementJob:
                               "疑似 LLM 无响应/通道挂起)")
                 if not reason:
                     continue
-                logger.warning("[implement] watchdog %s: %s", self.id, reason)
-                # 先终态(abort 后 run_turn 的终态检查/异常路径据此收口), 再中止回合
-                self.status = "failed"
-                self.error = reason
-                self._commit_progress()
-                self.emit("failed", f"⚠️ {reason}——已中止回合。")
-                try:
-                    await self.adapter.abort(self)
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("[implement] watchdog abort %s: %s", self.id, e)
-                try:
-                    await asyncio.wait_for(asyncio.shield(turn_task),
-                                           timeout=_WATCH_ABORT_GRACE)
-                except asyncio.TimeoutError:
-                    turn_task.cancel()
-                except Exception:  # noqa: BLE001
-                    pass
+                await self._fail_turn(reason, turn_task)
                 return
         except asyncio.CancelledError:
             raise
@@ -316,10 +413,14 @@ class ImplementJob:
     # ── diff ──
 
     def _diff_files(self) -> List[str]:
+        """变更文件清单: 对任务基点(base SHA)的 name-only diff。
+
+        不用 status——自动 commit 进度后 worktree 恒干净, status 恒空;
+        对基点的 diff 在 commit 前后语义一致(改了什么 vs 任务起点)。"""
         try:
             _git(["add", "-A", "-N"], cwd=self.wt, check=False)
-            st = _git(["status", "--porcelain"], cwd=self.wt, check=False)
-            return [ln[3:].strip() for ln in st.stdout.splitlines() if ln.strip()]
+            d = _git(["diff", "--name-only", self.base], cwd=self.wt, check=False)
+            return [ln.strip() for ln in d.stdout.splitlines() if ln.strip()]
         except Exception:  # noqa: BLE001
             return []
 
@@ -463,8 +564,15 @@ def register(app: FastAPI) -> None:
                         job_id, branch)
         logger.info("[implement] job %s created root=%s branch=%s files=%s",
                     job_id, root, branch, written)
+        # 交接边界快照(环节十一): 任务分支基点 commit——里程碑比对/合并入口
+        # precheck(主目录是否前移)的数据源
+        try:
+            base_commit = _git(["rev-parse", "HEAD"], wt, check=False).stdout.strip()
+        except Exception:  # noqa: BLE001
+            base_commit = ""
         return {"ok": True, "jobId": job_id, "branch": branch, "worktree": wt,
-                "status": job.status, "workspaceFiles": written, "resumed": resumed}
+                "status": job.status, "workspaceFiles": written, "resumed": resumed,
+                "baseCommit": base_commit}
 
     @app.get("/api/implement/running")
     async def implement_running():

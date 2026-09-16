@@ -719,6 +719,9 @@ def _project_migrations(db) -> None:
     ])
     _add_cols(db, "arch_tasks", [
         ("spec_ver", "INTEGER DEFAULT 0"),
+        # 环节十一: 任务分支基点 commit(交接边界快照)——里程碑比对/合并入口
+        # precheck(主目录是否前移)的数据源
+        ("base_commit", "TEXT DEFAULT ''"),
     ])
     _migrate_lifecycle_v2(db)
     _add_cols(db, "arch_unit_tests", [

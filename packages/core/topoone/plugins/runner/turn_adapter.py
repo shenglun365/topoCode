@@ -973,12 +973,19 @@ class ClineTurnAdapter(TurnAdapter):
         t = str(params.get("type") or "")
         job.last_activity_ts = time.time()
         if t == "text":
-            job.emit("text", str(params.get("text") or ""))
+            text = str(params.get("text") or "")
+            job.emit("text", text)
+            observe = getattr(job, "observe", None)
+            if observe:
+                observe("text", text=text)
         elif t == "text_end":
             pass
         elif t == "tool_start":
-            job.emit("tool", f"▶ {params.get('toolName') or ''}".strip(),
-                     toolName=params.get("toolName"))
+            name = params.get('toolName') or ''
+            job.emit("tool", f"▶ {name}".strip(), toolName=name)
+            observe = getattr(job, "observe", None)
+            if observe:
+                observe("tool", tool_name=str(name or ""))
         elif t == "tool_end":
             job.emit("tool", f"✓ {params.get('toolName') or ''}".strip(),
                      toolName=params.get("toolName"))
@@ -986,6 +993,9 @@ class ClineTurnAdapter(TurnAdapter):
             job.emit("usage", "", inputTokens=params.get("inputTokens"),
                      outputTokens=params.get("outputTokens"),
                      cost=params.get("cost"))
+            observe = getattr(job, "observe", None)
+            if observe:
+                observe("usage")
         elif t == "notice":
             if params.get("reason") == "mistake_limit":
                 self._last_error[job.id] = str(params.get("message") or "")[:400]

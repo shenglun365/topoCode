@@ -40,7 +40,7 @@ DEFAULT_EXECUTORS = [
         "id": "cline", "type": "cline-sdk", "enabled": True, "default": True,
         "config": {"node_bin": "node", "sidecar_script": "",
                    "provider_id": "", "model_id": "", "api_key": "",
-                   "max_iterations": 120,   # C 模块编译-修-测周期 2-4 次调用/圈, 60 会在真推进时被掐断(cv-173)
+                   "max_iterations": 2000,  # 上限放大由循环护栏兜底(环节十一: 重复指纹/无进展/停滞看门狗), 正常消耗远低于此
                    "system_prompt": "", "tool_policies": {}, "models": [],
                    "mcp_servers": [],
                    "teams": {"enabled": False, "teamName": "", "agents": []}},
@@ -89,9 +89,25 @@ def load_executors() -> list[dict]:
         return json.loads(json.dumps(DEFAULT_EXECUTORS))
     try:
         entries = json.loads(raw)
-        return entries if isinstance(entries, list) else []
+        if isinstance(entries, list):
+            _norm_iterations(entries)
+            return entries
+        return []
     except Exception:  # noqa: BLE001
         return []
+
+
+# 环节十一: 轮次上限放大, 循环护栏(loopguard/无进展/停滞)兜底异常浪费。
+# 存量注册表归一只替换已知旧默认(60/120), 不覆盖用户显式调优值。
+_MAX_ITERATIONS_DEFAULT = 2000
+_OLD_ITERATION_DEFAULTS = (60, 120)
+
+
+def _norm_iterations(entries: list) -> None:
+    for e in entries:
+        cfg = (e or {}).get("config")
+        if isinstance(cfg, dict) and cfg.get("max_iterations") in _OLD_ITERATION_DEFAULTS:
+            cfg["max_iterations"] = _MAX_ITERATIONS_DEFAULT
 
 
 # ── 执行器选定单源(v2): 别名归一 + 注册表默认 ────────────────────────
