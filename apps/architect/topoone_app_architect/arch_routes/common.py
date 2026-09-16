@@ -16,7 +16,13 @@ def ok(data=None):
 
 
 def err(code: int, msg: str):
-    return JSONResponse(status_code=400, content={"code": code, "message": msg, "data": None})
+    """REST 错误响应(错误契约见 docs/architect/error-contract.md)。
+
+    HTTP 状态码与 body.code 一致(历史 bug: 恒 400, 404/500 语义丢失)——
+    前端 api-client 只解析 body.code, 状态码修正对前端透明。
+    """
+    return JSONResponse(status_code=code if 400 <= code < 600 else 400,
+                        content={"code": code, "message": msg, "data": None})
 
 
 _MODEL_KEYS = ("components", "erTables", "ormMappings", "entityClasses",

@@ -287,3 +287,23 @@ def test_finalize_route_idempotent_ready(tmp_path, monkeypatch):
     r2 = client.post(f"/api/architect/requirements/{rid2}/finalize")
     assert r2.status_code == 200
     assert r2.json()["data"]["status"] == "ready"
+
+
+def test_error_contract_shapes(tmp_path, monkeypatch):
+    """环节三: 主链错误形状契约——直通 {ok,receipt} / 执行器任务 dict 含 ok / REST err 状态码映射。"""
+    client, captured = _client(tmp_path, monkeypatch)
+    conv = _mk_conv()
+    # ① 直通失败形状: {ok: False, receipt}
+    from topoone_app_architect.agent.perception import commands as cmds
+    res = cmds.run_execute(conv)
+    assert res["ok"] is False and "receipt" in res and "error" not in res
+    # ② 执行器成功形状: 任务 dict 显式 ok=True
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    r = eb.propose_task(conv, "T-契约", "目标: x")
+    assert r.get("ok") is True and r.get("id")
+    # ③ REST err: HTTP 状态码与 body.code 一致(前端只解析 body.code, 修正透明)
+    resp = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
+                       json={"mode": "bogus"})
+    assert resp.status_code == 400 and resp.json()["code"] == 400
+    resp404 = client.get("/api/architect/sessions/cv-nope/messages")
+    assert resp404.status_code == 404 and resp404.json()["code"] == 404

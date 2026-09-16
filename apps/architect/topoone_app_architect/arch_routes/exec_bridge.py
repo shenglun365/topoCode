@@ -219,6 +219,9 @@ def propose_task(conv: dict, title: str, instruction: str,
         "executorId": _eid,
         "specVer": _spec_ver,
     })
+    # 错误契约(docs/architect/error-contract.md): 成功形状显式 ok=True
+    # (失败形状 {"ok": False, "error"}; store 行为规范列, ok 仅回执层)
+    task = {**task, "ok": True}
     _append(conv_id, "assistant",
             f"📋 **任务待确认**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
             + instruction[:2000]
