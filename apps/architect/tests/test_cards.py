@@ -107,3 +107,29 @@ def test_requirement_card_single_emit_per_extract_path(arch_env, monkeypatch):
     cards_rows = [m for m in store.ConversationsStore.messages(conv["id"])
                   if (m.get("meta") or {}).get("kind") == "specReady"]
     assert len(cards_rows) == 2   # 创建 1 + 修订 1, 各一次
+
+
+def test_run_tool_with_progress_no_arg_repair(arch_env, monkeypatch):
+    """cv-179 回归: 参数自动修复已拆除——工具失败必须如实返回,
+    不得再引用已删除的 req_agent._is_repairable_error(漂移副本漏网)。"""
+    import asyncio
+    from topoone_app_architect.agent import orchestrator as orc
+    sent = []
+
+    async def fake_send(p):
+        sent.append(p)
+
+    calls = {"n": 0}
+
+    def fake_run_arch_tool(name, args, root, project):
+        calls["n"] += 1
+        return {"error": "参数 missing_field 缺失(可修复形态)"}   # 旧逻辑会触发修复重试
+
+    from topoone_app_architect.arch_routes import req_agent as _ra
+    monkeypatch.setattr(_ra, "run_arch_tool", fake_run_arch_tool)
+    res = asyncio.run(orc._run_tool_with_progress(fake_send, "rid-x", "req.propose",
+                                                  {"title": "t"}, "", ""))
+    assert calls["n"] == 1                    # 仅执行一次, 无修复重试
+    assert res["ok"] is False and "缺失" in res["text"]
+    kinds = [p.get("type") for p in sent]
+    assert "arg_repair" not in kinds          # 修复状态帧不复存在

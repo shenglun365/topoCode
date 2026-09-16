@@ -11,7 +11,6 @@ from . import model_profile
 
 _DEFAULT_STRATEGIES: Dict[str, Any] = {
     "arg_coerce": True,            # 参数类型强转(所有档开启)
-    "arg_repair": True,            # LLM 参数修复外循环
     "guard": True,                 # 防编造守卫
     "guard_extract_first": True,   # guard 修复确定性提取前置
     "intent_followup": False,      # 意图追问(小模型开)

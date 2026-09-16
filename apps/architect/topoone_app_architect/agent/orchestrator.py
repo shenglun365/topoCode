@@ -750,26 +750,13 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
 
     工具轮次(可能跨多轮 LLM 重算)期间前端零反馈是「检索中…」久挂的主因；
     这里在工具执行前后各推一条状态，前端据此显示实时进度而非静态等待。
-    格式/参数类失败 → 聚焦修复外循环(req_agent.repair_tool_args)：
-    极简上下文单独请求一次修正 arguments，成功则带修复参数重执行一次。
+    参数自动修复已按 cv-175 裁决拆除——错误如实返回(明确报错优于静默纠偏)。
     """
     from ..arch_routes import context_registry, req_agent
     await send({"type": "tool_call", "requestId": request_id, "tool": name})
     result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
     summary = req_agent.tool_result_text(name, result)
     ok = not (isinstance(result, dict) and result.get("error"))
-    if not ok and req_agent._is_repairable_error(str(result.get("error"))):
-        await send({"type": "status", "phase": "arg_repair", "tool": name})
-        fixed = await asyncio.to_thread(
-            req_agent.repair_tool_args, name, args, str(result.get("error")),
-            model_id=model_id)
-        if isinstance(fixed, dict):
-            args = fixed
-            result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
-            summary = req_agent.tool_result_text(name, result)
-            ok = not (isinstance(result, dict) and result.get("error"))
-            if ok:
-                summary = f"(参数已自动修复) {summary}"
     event = {
         "type": "tool_result", "requestId": request_id, "tool": name,
         "ok": ok,
