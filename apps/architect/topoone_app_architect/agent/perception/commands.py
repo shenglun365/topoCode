@@ -13,7 +13,11 @@ from typing import Any, Dict, Optional
 
 from ...arch_routes.store import states as ST
 
-_COMMAND_RE = re.compile(r"^(?:@(?P<executor>\S+)\s+)?/(?P<cmd>提取需求|执行)\s*$")
+# 继续执行/继续/重试: 无斜杠别名(整条消息恰为该词)——确定性直通 /执行,
+# 不经 LLM(弱模型自由轮会输出"(调用xx工具)"占位文本而不真调, cv-181 实证)
+_COMMAND_RE = re.compile(
+    r"^(?:@(?P<executor>\S+)\s+)?(?:/(?P<slash>提取需求|执行)|"
+    r"(?P<plain>继续执行|继续|重试))[。.!！]?\s*$")
 _CONFIRM_RE = re.compile(
     r"^(?:@(?P<executor>\S+)\s+)?(?:确认执行|确认任务|确认|同意|开始执行|开始吧|开始|ok|OK|好的?)[。.!！]?\s*$")
 
@@ -26,7 +30,10 @@ def match_command(question: str) -> Optional[Dict[str, str]]:
     m = _COMMAND_RE.match((question or "").strip())
     if not m:
         return None
-    return {"cmd": m.group("cmd"), "executor": (m.group("executor") or "").strip()}
+    cmd = m.group("slash") or ("执行" if m.group("plain") else "")
+    if not cmd:
+        return None
+    return {"cmd": cmd, "executor": (m.group("executor") or "").strip()}
 
 
 def match_confirm(question: str) -> Optional[Dict[str, str]]:
@@ -180,8 +187,12 @@ def _registered_ids() -> list:
 def _instruction_from_snapshot(snap: Dict[str, Any]) -> str:
     """规约快照 → 任务卡 instruction(目标/方案/边界/验收，与 req.propose 分节对齐)。"""
     sections = []
-    if str(snap.get("desc") or "").strip():
-        sections.append(f"## 需求目标\n\n{snap['desc']}")
+    desc = str(snap.get("desc") or "").strip()
+    # 防御: 存量数据的 desc 可能已内嵌分节标题(源头已在 _spec_snapshot 剥离)
+    desc = re.sub(r"^(?:#{1,6}\s*)?(?:需求目标|目标|需求描述|需求)[:：]?\s*\n+",
+                  "", desc)
+    if desc:
+        sections.append(f"## 需求目标\n\n{desc}")
     if str(snap.get("designMd") or "").strip():
         sections.append(f"## 方案\n\n{snap['designMd']}")
     allowed = [str(x) for x in (snap.get("allowedScope") or []) if str(x).strip()]

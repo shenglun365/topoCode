@@ -337,9 +337,13 @@ def _spec_snapshot(title: str, desc_md: str, design_md: str, allowed: list,
                    forbidden: list, acceptance: list, functional: list,
                    assessment: str, est_min: int) -> Dict[str, Any]:
     """规约版本快照(真相源结构)。"""
+    # desc 是纯文本字段——剥离模型输出里混入的分节标题(否则
+    # _instruction_from_snapshot 再包一层 → "## 需求目标"×2, cv-181 实证)
+    desc = re.sub(r"^#{1,6}\s*(?:需求目标|目标|需求描述|需求)\s*\n+", "",
+                  (desc_md or "").strip())
     return {
         "title": (title or "").strip(),
-        "desc": desc_md or "",
+        "desc": desc,
         "designMd": design_md or "",
         "allowedScope": [str(x) for x in (allowed or [])][:40],
         "forbiddenScope": [str(x) for x in (forbidden or [])][:40],

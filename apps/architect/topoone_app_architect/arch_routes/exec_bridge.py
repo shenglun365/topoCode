@@ -110,6 +110,63 @@ def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = No
     _cards.land(conv_id, content, kind=meta.pop("kind", None), role=role,
                 project_id=project_id, agent=agent, **meta)
 
+def _copy_impl_flag(worktree: str, changed_files: List[str],
+                    turn_text: str = "") -> str:
+    """复制实现检测(本地 PR 语义·验证有效性, cv-181 实证): 测试/脚手架文件
+    自包含定义被测函数且未引用任何生产源码文件 → 14/14 PASS 测的是副本。
+
+    生产引用判定(语言无关, 双通道): #include/import 的目标路径在仓库内
+    存在 = 引用了生产代码。自包含 + 零生产引用 → 标注; 若交付摘要显式
+    声明"复制实现"(诚实通道, DoD 第 4 条) → 降级为备注而非警告。
+    """
+    if not worktree or not changed_files:
+        return ""
+    test_files = [f for f in changed_files
+                  if "test" in os.path.basename(f).lower()
+                  or f.lower().startswith(("tests/", "test/"))][:10]
+    if not test_files:
+        return ""
+    declared = "复制实现" in (turn_text or "")
+    flagged = []
+    for rel in test_files:
+        path = os.path.join(worktree, rel)
+        if not os.path.isfile(path):
+            continue
+        try:
+            content = open(path, encoding="utf-8", errors="replace").read()
+        except Exception:  # noqa: BLE001
+            continue
+        if len(content) < 100:      # 空壳文件跳过; 实质门槛是下方 defs>=3
+            continue
+        includes = re.findall(r'#include\s+[<"]([^">]+)[">]', content)
+        imports = re.findall(r'^\s*(?:from\s+([\w.]+)\s+import|import\s+[\w.]+)',
+                             content, re.M)
+        candidates = [x for x in includes + imports if x]
+        prod_linked = any(os.path.isfile(os.path.join(worktree, x.lstrip("./")))
+                          or os.path.isfile(os.path.join(
+                              worktree, x.lstrip("./") + ".py"))
+                          for x in candidates)
+        if prod_linked:
+            continue
+        # 函数定义数(C 风格 / Python def)——纯常量/宏文件不算
+        defs = len(re.findall(r'^\s*(?:[\w\*]+\s+)+\w+\s*\([^;{]*\)\s*\{',
+                              content, re.M)) \
+            + len(re.findall(r'^\s*def\s+\w+\s*\(', content, re.M))
+        if defs >= 3:
+            flagged.append(rel)
+    if not flagged:
+        return ""
+    files = "\n".join(f"- `{f}`" for f in flagged[:3])
+    if declared:
+        return ("\n\n**ℹ️ 复制实现声明已收到**(摘要中显式说明, 降级为备注)：\n"
+                + files + "\n以上测试文件未引用生产源码——按声明为有意镜像, "
+                "请知悉其验证范围限于镜像副本。")
+    return ("\n\n**⚠️ 疑似复制实现**(验证有效性提示)：\n" + files
+            + "\n以上测试文件自包含定义了被测函数且未引用任何生产源码——"
+            "14/14 PASS 类结果**只验证了副本**，未触及真实代码。"
+            "请核查测试对象；若属有意镜像，请在交付摘要中声明\"复制实现\"及原因。")
+
+
 def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
     """验收简报: 实际改动 vs 规约边界(越界检测) + 验收标准静态对照。
 
@@ -363,7 +420,11 @@ def confirm_task(task_id: str) -> dict:
                                           "result_md": "无法解析项目根(会话未绑定项目)"})
         return {"ok": False, "error": "no-project-root"}
     rid = task.get("reqId") or ""
-    branch = f"task/{task_id.replace('task-', '')}"
+    # 分支单源(续跑断裂修复, cv-181 实证): 分支由 propose 决定并落任务行
+    # (失败任务复用其分支), confirm 只消费——此前此处无条件重算 task/{own-id}
+    # 覆盖续跑分支, runner 侧续跑机制从未被触发过。
+    branch = str(task.get("branch") or "").strip() \
+        or f"task/{task_id.replace('task-', '')}"
     boundary_files = _resolve_boundary_files(rid, root, project)
     # 范围探针(环节十三): 规约边界为空 → grounding 补全(单次 LLM, 带来源引用),
     # 结果并回需求边界(里程碑回写同款闭环); 失败不阻断执行
@@ -1034,6 +1095,11 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()
         changed = ev.get("changedFiles") or []
         brief = _acceptance_brief(conv_id, ctx["rid"], changed)
+        # 复制实现检测(验证有效性): 测试对象须是真实生产代码
+        _wt = (store.TasksStore.get(task_id) or {}).get("worktree") or ""
+        copy_note = _copy_impl_flag(_wt, changed, clean)
+        if copy_note:
+            brief += copy_note
         files = ("\n".join(f"- `{f}`" for f in changed[:20])
                  if changed else "- (无变更文件)")
         branch = (store.TasksStore.get(task_id) or {}).get("branch") or ""

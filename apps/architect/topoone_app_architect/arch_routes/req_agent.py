@@ -1014,20 +1014,10 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     allowed = _md_lines(allowedScopeMd)
     forbidden = _md_lines(forbiddenScopeMd)
     acceptance = _md_lines(acceptanceMd)
-    sections = []
-    if requirementMd:
-        sections.append(f"## 需求目标\n\n{requirementMd}")
-    if allowedScopeMd:
-        sections.append(f"## 允许增删改范围\n\n{allowedScopeMd}")
-    if forbiddenScopeMd:
-        sections.append(f"## 禁止改动(一定不能动)\n\n{forbiddenScopeMd}")
-    if designMd:
-        sections.append(f"## 方案\n\n{designMd}")
-    if acceptanceMd:
-        sections.append(f"## 最终验收标准\n\n{acceptanceMd}")
-    if assessmentMd:
-        sections.append(f"## 评估\n\n{assessmentMd}")
-    snapshot = _spec_snapshot(title, "\n\n".join(sections), designMd, allowed,
+    # desc 单源契约: 只放需求目标纯文本——方案/边界/验收/评估各有结构化
+    # 字段, 指令组装时按节渲染; 此前把全部字段拼进 desc 文本 blob →
+    # 与组装层双渲染(双标题/重复分节, cv-181 实证)
+    snapshot = _spec_snapshot(title, requirementMd, designMd, allowed,
                               forbidden, acceptance, [], assessmentMd, estMin)
 
     bound_rid = ""
@@ -1133,7 +1123,7 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     snap = dict(active.get("snapshot") or {})
     changed = []
     if requirementMd:
-        snap["desc"] = f"## 需求目标\n\n{requirementMd}"
+        snap["desc"] = requirementMd
         changed.append("需求目标")
     if designMd:
         snap["designMd"] = designMd

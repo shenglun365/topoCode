@@ -33,9 +33,11 @@ class TestReqPropose(unittest.TestCase):
         self.assertEqual(req["activeVer"], 1)
         vs = req["specVersions"]
         self.assertTrue(vs and vs[0]["state"] == "confirmed" and vs[0]["snapshot"]["estMin"] == 120)
-        self.assertIn("## 需求", req["desc"])
-        self.assertIn("## 方案", req["desc"])
-        self.assertIn("## 评估", req["desc"])
+        # desc 单源契约: 纯文本需求目标(方案/评估走结构化字段, 指令组装按节渲染)
+        self.assertEqual(req["desc"], "背景：握手延迟高")
+        snap = vs[0]["snapshot"]
+        self.assertEqual(snap["designMd"], "改造 nginx-http-core 的握手分支")
+        self.assertEqual(snap["assessmentSummary"], "收益高/风险中")
         self.assertEqual(req["analysis"]["estMin"], 120)               # active 版本派生缓存
 
 
