@@ -112,15 +112,9 @@ def run_extract_req(conv: Dict[str, Any]) -> Dict[str, Any]:
     land = apply_spec_payload(payload, project=str(conv.get("projectId") or ""))
     if not land.get("ok"):
         return {"ok": False, "receipt": str(land.get("error") or "需求落库失败")}
+    # 需求卡(specReady)由 apply_spec_payload→propose/amend 路径统一落流;
+    # 此处不再重复发卡(cv-177 实证: 双卡片+文本回执三连发)
     rid = str(land.get("requirementId") or land.get("reqId") or "")
-    try:
-        from ...arch_routes.req_agent import log_conv_event
-        log_conv_event(conv["id"],
-                       f"📝 **需求卡已提取**：`{rid}` {payload.get('title', '')}"
-                       "（ready，可直接 `/执行`）",
-                       meta={"kind": "specReady", "requirementId": rid, "ver": 1})
-    except Exception:  # noqa: BLE001
-        pass
     return {"ok": True, "receipt": f"需求卡 {rid} 已提取(ready)，可 `/执行`。"}
 
 

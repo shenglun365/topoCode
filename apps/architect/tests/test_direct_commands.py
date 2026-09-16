@@ -172,6 +172,11 @@ def test_slash_extract_req_direct(tmp_path, monkeypatch):
     assert captured["calls"] == 0                        # 零额外 LLM(llm_sync 已 mock)
     assert "已提取" in ev["content"]
     assert (store.ConversationsStore.get(conv["id"]) or {}).get("reqId")
+    # cv-177 回归: 卡片(specReady)只由 apply 路径落一条 + 文本回执一条 = 共 2 条
+    tail = store.ConversationsStore.messages(conv["id"])[-4:]
+    ready_cards = [m for m in tail
+                   if (m.get("meta") or "") and "specReady" in str(m.get("meta"))]
+    assert len(ready_cards) == 1, f"specReady 卡应仅 1 条, got {len(ready_cards)}"
 
 
 def test_slash_extract_req_without_content_guides(tmp_path, monkeypatch):
