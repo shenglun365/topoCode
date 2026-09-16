@@ -49,6 +49,8 @@ class TasksStore:
             "session_ref": data.get("sessionRef") or "",
             "worktree": data.get("worktree") or "",
             "branch": data.get("branch") or "",
+            # 环节十一: 任务分支基点 commit(交接边界快照)
+            "base_commit": data.get("baseCommit") or "",
             "progress": json.dumps(data.get("progress") or {}, ensure_ascii=False),
             "result_md": data.get("resultMd") or "",
             "created_at": data.get("createdAt") or _now(),

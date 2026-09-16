@@ -563,6 +563,10 @@ def _main_migrations(db) -> None:
         ("remote_url", "TEXT DEFAULT ''"),
         ("default_branch", "TEXT DEFAULT 'main'"),
     ])
+    # 环节十一: arch_tasks 兼主库路由(无项目上下文写入主库)——基点快照列两库都补
+    _add_cols(db, "arch_tasks", [
+        ("base_commit", "TEXT DEFAULT ''"),
+    ])
 
 
 # 已退役表(重整裁决: 清除旧数据, 不做兼容)

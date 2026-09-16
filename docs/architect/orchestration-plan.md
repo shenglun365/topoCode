@@ -146,6 +146,13 @@ prompts.py 被分叉取代的单一 DoD 常量; 前端 quick/strict 旧文案。
 
 ### 环节十三: 范围探针(KB+资产 grounding) + 边界缺省保护
 
+> **状态: 已落地**。as-built: 探针仅在**边界为空时**触发(有边界不重复探,
+> 省 LLM 时间且避免噪声); 续跑过期提示挂在 propose 任务卡(非阻断),
+> 空边界警示挂卡片(确认=显式接受); 顺手修两处存量缺陷——
+> propose_task 收到的 conv 可能是 create() 返回值(缺 reqId 字段)→ 入口重取
+> 全量行; arch_tasks.base_commit 需主库+项目库双迁移 + TasksStore.create
+> 白名单补字段。
+
 **目标**: allowedScope 不再靠需求文本盲猜; 空边界不再等于无保护。
 
 **内容**:

@@ -178,16 +178,15 @@ _TASK_TERMINAL = ("done", "failed", "cancelled")
 _TASK_ACTIVE = (ST.TASK_PENDING_CONFIRM, "running", ST.TASK_WAITING_INPUT)
 
 
-def _last_failed_branch(conv_id: str) -> str:
-    """取会话最近一次失败任务的分支(跨主库+项目库扫描——任务库路由存在
-    读写分裂隐患, 与 recover_sweep 同法兜住; 路由统一另行排查)。"""
+def _last_failed_task(conv_id: str) -> dict:
+    """会话最近一次失败任务行(跨主库+项目库扫描, 与 recover_sweep 同法)。"""
     try:
         from .store.base import _db, _scan_dbs
         seen = []
         for db in [_db(), *_scan_dbs()]:
             try:
                 rows = db.fetchall(
-                    "SELECT id, branch, created_at FROM arch_tasks "
+                    "SELECT id, branch, base_commit, created_at FROM arch_tasks "
                     "WHERE conversation_id = ? AND status = 'failed' "
                     "AND branch LIKE 'task/%' ORDER BY created_at DESC",
                     (conv_id,))
@@ -196,10 +195,16 @@ def _last_failed_branch(conv_id: str) -> str:
                 continue
         seen.sort(key=lambda r: r.get("created_at") or 0, reverse=True)
         for r in seen:
-            return str(r.get("branch") or "")
+            return dict(r)
     except Exception:  # noqa: BLE001
         pass
-    return ""
+    return {}
+
+
+def _last_failed_branch(conv_id: str) -> str:
+    """取会话最近一次失败任务的分支(跨主库+项目库扫描——任务库路由存在
+    读写分裂隐患, 与 recover_sweep 同法兜住; 路由统一另行排查)。"""
+    return str(_last_failed_task(conv_id).get("branch") or "")
 
 
 def propose_task(conv: dict, title: str, instruction: str,
@@ -209,6 +214,7 @@ def propose_task(conv: dict, title: str, instruction: str,
     由 LLM 工具 task.propose / architect 编排调用; 用户确认(REST/卡片按钮)
     后 confirm_task 真正拉起 runner。"""
     conv_id = conv["id"]
+    conv = store.ConversationsStore.get(conv_id) or conv   # 取全量行(create 返回值可能缺 reqId 等字段)
     _pid = (conv or {}).get("projectId") or (conv or {}).get("project_id") or ""
     # 执行器选定单源(显式 hint > 会话绑定 > 注册表默认); 不再字面回落 opencode(cv-153 教训)
     from .agent_executors import normalize_executor_type, default_executor
@@ -237,6 +243,25 @@ def propose_task(conv: dict, title: str, instruction: str,
     if _rid:
         _active = store.RequirementsStore.spec_active(_rid) or {}
         _spec_ver = int(_active.get("ver") or 0)
+    # 交接过期提示(环节十三): 失败任务基点以来边界文件在主分支有推进 →
+    # 需求引用的文件状态已漂移, 盲目续跑有冲突风险——卡片显式提示
+    _stale_note = ""
+    if resume_branch:
+        _old = _last_failed_task(conv_id)
+        _old_base = str(_old.get("base_commit") or "")
+        if _old_base:
+            try:
+                from .execution import conv_root_project as _crp
+                from ..agent.governance.boundary import changed_since
+                _root, _proj = _crp(conv)
+                _bfiles = _resolve_boundary_files(_rid, _root, _proj) if _rid else []
+                _moved = changed_since(_root, _old_base, _bfiles)
+                if _moved:
+                    _stale_note = (
+                        f"\n> ⚠️ 交接过期：基点以来边界文件在主分支已有推进"
+                        f"({', '.join(_moved[:5])})——续跑基于旧基点, 合并前请先检视冲突。")
+            except Exception:  # noqa: BLE001
+                pass
     task = store.TasksStore.create({
         "conversationId": conv_id,
         "projectId": _pid,
@@ -253,11 +278,24 @@ def propose_task(conv: dict, title: str, instruction: str,
     # (失败形状 {"ok": False, "error"}; store 行为规范列, ok 仅回执层)
     task = {**task, "ok": True}
     _resume_note = (f"\n\n> 🔁 续跑：将承接上次失败任务的进度分支 `{resume_branch}`"
-                     "（进度已自动保全）" if resume_branch else "")
+                    "（进度已自动保全）" if resume_branch else "")
+    # 空边界保护(环节十三): 需求未声明边界 → 卡片显式标注(确认=显式接受;
+    # confirm 时范围探针会先尝试 grounding 补全)
+    _no_scope_note = ""
+    if _rid:
+        try:
+            _snap = (store.RequirementsStore.spec_active(_rid) or {}).get("snapshot") or {}
+            if not (_snap.get("allowedScope") or []):
+                _no_scope_note = ("\n\n> ⚠️ 该需求未声明修改边界(allowedScope 为空)——"
+                                  "确认执行时将自动运行范围探针补全；"
+                                  "补全失败则本次执行**无互斥保护**。")
+        except Exception:  # noqa: BLE001
+            pass
     _append(conv_id, "assistant",
             f"📋 **任务待确认**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
             + instruction[:2000]
-            + "\n\n---\n确认后开始执行; 可取消或要求 architect 调整。" + _resume_note,
+            + "\n\n---\n确认后开始执行; 可取消或要求 architect 调整。"
+            + _resume_note + _stale_note + _no_scope_note,
             msg_meta={"kind": "task_card", "taskId": task["id"]},
             project_id=_pid)
     _publish_task(conv_id, task)
@@ -318,6 +356,40 @@ def confirm_task(task_id: str) -> dict:
     rid = task.get("reqId") or ""
     branch = f"task/{task_id.replace('task-', '')}"
     boundary_files = _resolve_boundary_files(rid, root, project)
+    # 范围探针(环节十三): 规约边界为空 → grounding 补全(单次 LLM, 带来源引用),
+    # 结果并回需求边界(里程碑回写同款闭环); 失败不阻断执行
+    probe_note = ""
+    if rid and not boundary_files:
+        try:
+            from ..agent.planning.scope_probe import probe_scope
+            _r = store.RequirementsStore.get(rid) or {}
+            _a = _r.get("analysis") or {}
+            _req_text = "\n".join(str(x) for x in (
+                _r.get("title"), _r.get("desc"),
+                _a.get("requirementMd") or (store.RequirementsStore.spec_active(rid)
+                                            or {}).get("snapshot", {}).get("requirementMd"),
+                _a.get("designMd")) if x)
+            pr = probe_scope(root, project, _req_text, rid=rid)
+            if pr.get("ok") and pr.get("files"):
+                new = [f["path"] for f in pr["files"] if f["path"] not in boundary_files]
+                if new:
+                    boundary_files = sorted(set(boundary_files) | set(new))
+                    _merge_req_scope(rid, new)
+                    probe_note = (f"\n> 🔎 范围探针补全边界 {len(new)} 项"
+                                  f"({', '.join(new[:6])})——已并回需求边界。")
+        except Exception as e:  # noqa: BLE001 — 探针失败 → 无互斥保护继续(卡片已警示)
+            logger.info("[exec-bridge] 范围探针失败(不阻断): %s", e)
+            probe_note = "\n> ⚠️ 范围探针不可用，本次执行无互斥保护。"
+    # 存在性检查(环节十三): 不存在的边界文件 = 预期新建, 注入指令显式声明
+    missing_note = ""
+    try:
+        from ..agent.governance.boundary import files_exist
+        _existing, _missing = files_exist(root, boundary_files)
+        if _missing and _existing:
+            missing_note = (f"\n> 边界中不存在的文件(预期新建): "
+                            f"{', '.join(_missing[:8])}。")
+    except Exception:  # noqa: BLE001
+        pass
     conflict = _check_mutex(conv, root, boundary_files)
     if conflict:
         store.TasksStore.finish(task_id, "failed", f"边界冲突: {conflict}")
@@ -329,7 +401,8 @@ def confirm_task(task_id: str) -> dict:
     # 挡位策略(环节十二a): 指令按挡分叉 + 任务级轮次上限随挡下发
     policy = _task_gear(task, conv)
     payload["instruction"] = _task_instruction(task, _task_chain_brief(conv_id, task_id),
-                                               policy=policy)
+                                               policy=policy) \
+        + probe_note + missing_note
     # hint 已含注册表默认兜底(上方选定单源)——此处不得按空 executorId 重查覆盖
     for k in ("model", "basePort", "autoStart", "baseUrl"):
         v = hint.get(k)
