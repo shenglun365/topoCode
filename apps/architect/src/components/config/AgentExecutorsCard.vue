@@ -305,6 +305,38 @@ async function probe(e: ExecEntry) {
   }
 }
 
+/** 能力探测(十二b): 5 探针标定 → tierProbed; 运行中 4s 轮询直到完成。 */
+const capProbing = ref<Record<string, boolean>>({})
+const capRunning = ref<Record<string, boolean>>({})
+async function startCapProbe(e: ExecEntry) {
+  try {
+    await apiPost(`/agent/executors/${e.id}/capability-probe`, {})
+    capRunning.value[e.id] = true
+    capProbing.value[e.id] = true
+    const poll = setInterval(async () => {
+      try {
+        const d = await apiGet<{ running: boolean; tierProbed: string; probeDetail: string }>(
+          `/agent/executors/${e.id}/capability-probe`)
+        capRunning.value[e.id] = d.running
+        if (!d.running) {
+          clearInterval(poll)
+          capProbing.value[e.id] = false
+          await load()
+        }
+      } catch { clearInterval(poll); capProbing.value[e.id] = false }
+    }, 4000)
+  } catch (err: any) {
+    probing.value[e.id] = `✗ ${err?.message || err}`
+    capProbing.value[e.id] = false
+  }
+}
+function capLabel(e: ExecEntry): string {
+  const cfg: any = e.config || {}
+  if (capRunning.value[e.id]) return '探测中…'
+  if (!cfg.tierProbed) return '能力探测'
+  return `实测 ${cfg.tierProbed}（${cfg.probeDetail || ''}）`
+}
+
 /** 内嵌执行器(architect 自主模式): 不可删除、id 锁定。 */
 function isBuiltinExec(e: ExecEntry): boolean {
   return e.id === 'cline'
@@ -491,6 +523,14 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             >{{ t('config.executors.stopServe') }}</button>
             <button class="btn !py-0.5 !px-2 !text-[11px]" @click="probe(e)">
               {{ t('config.executors.probe') }}
+            </button>
+            <button
+              class="btn !py-0.5 !px-2 !text-[11px]"
+              :disabled="capProbing[e.id]"
+              :title="capLabel(e) + ' —— 5 探针标定套件(实测挡位写入 tierProbed, 解析链优先于 capability)'"
+              @click="startCapProbe(e)"
+            >
+              {{ capLabel(e) }}
             </button>
             <button
               v-if="!isBuiltinExec(e)"

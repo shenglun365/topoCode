@@ -112,6 +112,12 @@ prompts.py 被分叉取代的单一 DoD 常量; 前端 quick/strict 旧文案。
 
 ### 环节十二b: 能力探测(测试用例 + 评估算法)
 
+> **状态: 已落地**。as-built: 探针为 python 自包含夹具(pytest 判分, 仓库带
+> .gitignore 防 pycache 误判); REST 为 POST/GET
+> `/agent/executors/{id}/capability-probe`(异步后台+内存运行守卫, 结果落注册表
+> config); needsReprobe=探测后 model_id 已变更; 引擎轮询计数 tool 事件作迭代
+> 效率分母。
+
 **目标**: 执行器实测档位, 替代人工猜 `capability`。
 
 **探针套件**(5 个标定任务, 沙箱 git 仓库, 与项目代码无关, 走真实 turn_adapter

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import urllib.parse
 import subprocess
@@ -29,6 +30,15 @@ from .common import _ts, ok, err
 from . import store
 
 logger = logging.getLogger(__name__)
+
+# 能力探测进行中守卫(环节十二b; 内存态——重启丢进行中任务, 结果已落注册表)
+_CAP_PROBE_RUNNING: set = set()
+
+
+def _runner_transport(path: str, payload=None, timeout: float = 12.0):
+    """runner 访问端(probes.py transport 形; 惰性导入防环)。"""
+    from .exec_bridge import _runner
+    return _runner(path, payload, timeout)
 router = APIRouter()
 
 CONFIG_KEY = "agent.executors"
@@ -284,6 +294,66 @@ async def put_executors(request: Request, background: BackgroundTasks):
         return err(msg)
     save_executors(entries)
     return ok({"saved": len(entries), "updatedAt": _ts()})
+
+
+@router.post("/agent/executors/{eid}/capability-probe")
+async def start_capability_probe(eid: str):
+    """启动执行器能力探测(环节十二b): 5 探针标定套件, 异步后台执行。
+
+    重复启动 → 409; 结果写回注册表 config(tierProbed/probeScore/probeDetail/
+    probedAt/probedModel), GET 查询进度。"""
+    entries = load_executors()
+    entry = next((e for e in entries if e.get("id") == eid), None)
+    if not entry:
+        return err(404, f"执行器不存在: {eid}")
+    if eid in _CAP_PROBE_RUNNING:
+        return err(409, "该执行器探测进行中, 请等待完成")
+    _CAP_PROBE_RUNNING.add(eid)
+
+    def _persist(fields: dict) -> None:
+        try:
+            entries = load_executors()
+            for e in entries:
+                if e.get("id") == eid:
+                    e.setdefault("config", {}).update(fields)
+                    break
+            save_executors(entries)
+        except Exception:  # noqa: BLE001
+            logger.warning("[capability-probe] persist failed: %s", eid)
+
+    async def _task():
+        from ..agent.execution.probes import run_capability_probe
+        try:
+            await run_capability_probe(entry, _runner_transport, _persist)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[capability-probe] %s failed", eid)
+            _persist({"probeDetail": f"探测异常: {e}"})
+        finally:
+            _CAP_PROBE_RUNNING.discard(eid)
+
+    asyncio.create_task(_task())
+    return ok({"executorId": eid, "started": True,
+               "summary": "能力探测已启动(5 探针, 预计数~十几分钟), GET 同路径查进度"})
+
+
+@router.get("/agent/executors/{eid}/capability-probe")
+async def capability_probe_status(eid: str):
+    """探测结果/进度查询; needsReprobe = 探测后模型配置已变更。"""
+    entry = next((e for e in load_executors() if e.get("id") == eid), None)
+    if not entry:
+        return err(404, f"执行器不存在: {eid}")
+    cfg = entry.get("config") or {}
+    probed_model = str(cfg.get("probedModel") or "")
+    return ok({
+        "executorId": eid,
+        "running": eid in _CAP_PROBE_RUNNING,
+        "tierProbed": str(cfg.get("tierProbed") or ""),
+        "probeScore": cfg.get("probeScore"),
+        "probeDetail": str(cfg.get("probeDetail") or ""),
+        "probedAt": cfg.get("probedAt"),
+        "needsReprobe": bool(probed_model and
+                             probed_model != str(cfg.get("model_id") or "")),
+    })
 
 
 @router.post("/agent/executors/probe")
