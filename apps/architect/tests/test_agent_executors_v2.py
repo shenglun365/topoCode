@@ -121,3 +121,39 @@ def test_probe_llm_model_stream_detection(monkeypatch):
     r2 = ae._probe_llm_model("http://x:1234", "m1", "")
     assert r2["status"] == "fail"
     assert "Ollama" in (r2.get("note") or "")
+
+
+def test_validate_rejects_cline_without_models():
+    """环节四: cline-sdk 无任何模型配置 → 写入拒绝(cv-163 空模型教训前移到写侧)。"""
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    msg = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+                         "config": {"models": []}}])
+    assert msg and "需配置模型" in msg
+
+
+def test_validate_rejects_dangling_default_model_id():
+    """顶层默认 model_id 未命中 models 条目 → 拒绝(执行模型与 UI 展示一致性)。"""
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    msg = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+                         "config": {"model_id": "gone",
+                                    "models": [{"name": "m1", "model": "q", "url": "http://h:8082"}]}}])
+    assert msg and "未命中" in msg
+    ok = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+                        "config": {"model_id": "m1",
+                                   "models": [{"name": "m1", "model": "q", "url": "http://h:8082"}]}}])
+    assert ok is None
+
+
+def test_validate_url_rule_scoped_to_cline():
+    """url 强校验仅 cline-sdk; opencode models 条目 url 可选(自身服务器语义)。"""
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    ok = ae._validate([{"id": "oc", "type": "opencode", "enabled": True,
+                        "config": {"models": [{"name": "备模型", "model": "dup"}]}}])
+    assert ok is None
+
+
+def test_validate_rejects_bad_model_url():
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    msg = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+                         "config": {"models": [{"name": "m1", "model": "q", "url": "ftp://h"}]}}])
+    assert msg and "url 非法" in msg

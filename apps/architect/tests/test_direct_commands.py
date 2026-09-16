@@ -13,6 +13,7 @@ Run: cd <repo> && python -m pytest apps/architect/tests/test_direct_commands.py 
 """
 import os
 import sys
+import tempfile
 
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
@@ -307,3 +308,28 @@ def test_error_contract_shapes(tmp_path, monkeypatch):
     assert resp.status_code == 400 and resp.json()["code"] == 400
     resp404 = client.get("/api/architect/sessions/cv-nope/messages")
     assert resp404.status_code == 404 and resp404.json()["code"] == 404
+
+
+def test_llm_catalog_url_strips_v1_and_probes_context(monkeypatch):
+    """环节四: llm.models 目录 url 存根(剥 /v1, 探测友好); contextWindow 探测落库。"""
+    import asyncio
+    data = tempfile.mkdtemp(prefix="topo-cat-")
+    monkeypatch.setenv("ARCH_DATA_DIR", data)
+    C._db = None; C._kb = None; C._data_dir = None; C._project_dbs.clear()
+    C.setup(data_dir=data)
+    from topoone_app_architect.arch_routes import mcp_collab as mc
+    from topoone_app_architect.agent.cognition import llm as _cllm
+
+    monkeypatch.setattr(_cllm, "probe_context_window",
+                        lambda url, hint="": 262144 if url == "http://h:8082" else None)
+    catalog = [{"source": "imported", "id": "model-x", "name": "35B",
+                "provider": "custom-local", "model": "Qwen3.6-35B",
+                "url": "http://h:8082/v1", "type": "local"}]
+    monkeypatch.setattr("topoone_app_architect.arch_routes.kb_gateway.call_kb",
+                        lambda method, **kw: [{"id": "model-x", "name": "35B",
+                                               "provider": "custom-local", "model": "Qwen3.6-35B",
+                                               "url": "http://h:8082/v1", "type": "local"}])
+    asyncio.run(mc.import_llm_models_route())
+    saved = mc.get_llm_models()
+    assert saved and saved[0]["url"] == "http://h:8082"          # /v1 剥离(存根)
+    assert saved[0]["contextWindow"] == 262144                    # 探测落库

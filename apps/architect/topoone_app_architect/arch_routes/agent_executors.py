@@ -160,6 +160,23 @@ def _validate(entries: list[dict]) -> Optional[str]:
         names = [m["name"] for m in cfg["models"]]
         if len(names) != len(set(names)):
             return f"执行器 {eid} 模型名称重复"
+        # 模型配置写入校验(cline-sdk 专属, cv-163/166/168 教训: 空 model/悬空默认/
+        # 坏 url 均运行期才炸; opencode 等类型 models.url 为可选元数据不强制)
+        if e.get("type") == "cline-sdk":
+            if not (cfg.get("model_id") or cfg["models"]):
+                return (f"执行器 {eid}(cline-sdk) 需配置模型：顶层默认 model_id 或 models "
+                        "列表至少一项——空模型会被 runner 拒绝。")
+            mid = (cfg.get("model_id") or "").strip()
+            if mid:
+                hits = [m for m in cfg["models"]
+                        if mid in (m["model"], m["name"], m["id"])]
+                if cfg["models"] and not hits:
+                    return (f"执行器 {eid} 顶层默认 model_id={mid!r} 未命中任何 models 条目"
+                            "(model/name/id)——实际执行模型将与 UI 展示不一致")
+            for m in cfg["models"]:
+                if not str(m["url"]).startswith(("http://", "https://")):
+                    return (f"执行器 {eid} 模型 {m['name']} url 非法: {m['url']!r}"
+                            "(须 http/https)")
         if e.get("default"):
             defaults += 1
     if defaults > 1:

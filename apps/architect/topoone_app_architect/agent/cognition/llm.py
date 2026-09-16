@@ -126,6 +126,8 @@ def probe_context_window(url: str, model_hint: str = "") -> Optional[int]:
     import time as _t
     import urllib.request
     base = (url or "").strip().rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]   # 探测端点(/props, /api/v0)从服务根发起
     if not base:
         return None
     cached = _CTX_CACHE.get(base)

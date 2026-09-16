@@ -176,6 +176,15 @@ def _model_identity(m: dict) -> str:
     return f"{m.get('name', '')}|{m.get('provider', '')}|{m.get('model', '')}"
 
 
+def _catalog_url(url: str) -> str:
+    """模型目录 url 规范: 存服务根(剥 /v1)——上下文探测(/props, /api/v0)从根发起;
+    SDK 侧的 /v1 拼接由 runner._ensure_v1 兜底, 两处语义分离。"""
+    u = (url or "").strip().rstrip("/")
+    if u.endswith("/v1"):
+        u = u[:-3]
+    return u
+
+
 def _normalize_kb_model(row: dict) -> dict:
     """把主后端 settings.getModels 行归一化为 architect 模型配置。"""
     return {
@@ -184,10 +193,11 @@ def _normalize_kb_model(row: dict) -> dict:
         "name": row.get("name") or "",
         "provider": row.get("provider") or "",
         "model": row.get("model") or "",
-        "url": row.get("url") or "",
+        "url": _catalog_url(row.get("url") or ""),
         "type": row.get("type") or "local",
         "isDefault": bool(row.get("isDefault") or row.get("is_default")),
         "hasApiKey": bool(row.get("hasApiKey")),
+        "contextWindow": int(row.get("contextWindow") or row.get("context_window") or 0),
         "updatedAt": _ts(),
     }
 
@@ -232,7 +242,21 @@ async def import_llm_models_route():
         out_imported.append(model)
         added += 1
 
-    save_llm_models(list(manual.values()) + out_imported)
+    catalog = list(manual.values()) + out_imported
+    # 上下文容量探测落库(环节四): 缺 contextWindow 的条目逐个尽力探测(2s/个,
+    # 结果缓存), 失败留空不阻塞导入(cv-168 配套: architect 读取模型 API 真实容量)
+    import asyncio as _aio
+    from ..agent.cognition.llm import probe_context_window
+    for m in catalog:
+        if not m.get("contextWindow") and m.get("url"):
+            try:
+                n = await _aio.to_thread(probe_context_window,
+                                         str(m["url"]), str(m.get("model") or ""))
+                if n:
+                    m["contextWindow"] = int(n)
+            except Exception:  # noqa: BLE001
+                pass
+    save_llm_models(catalog)
     store.CollabConfigStore.set("llm.modelImportedAt", str(_ts()))
     # 当前选中模型若已不在重建后的列表中 → 清空偏好(回退主后端默认模型)
     model_id = store.CollabConfigStore.get("llm.modelId", "")
