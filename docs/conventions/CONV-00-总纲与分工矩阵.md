@@ -5,7 +5,7 @@
 
 ## 1. 工程形态
 
-Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个前端共享内核 + 4 个独立子项目**，运行时为 **10 个独立进程**（核心 kb/gateway/llm/agent + 生态 mcp/runner + manifest 服务 docs/chat/architect/agent-bus，C1 修正：以 `supervisor/cli.py` 实际拓扑为准），由 `topo serve`（supervisor）统一拉起，`gateway:3456` 是唯一对外入口。
+Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个前端共享内核 + 4 个独立子项目**，运行时为 **9 个独立进程**（核心 kb/gateway/llm/agent + 生态 mcp/runner + manifest 服务 docs/chat/architect；拓扑以 `supervisor/cli.py` 注册表为准——原 agent-bus broker 已随生命周期重构 v2 退役，消息面由会话单流 + 事件泵承载），由 `topo serve`（supervisor）统一拉起，`gateway:3456` 是唯一对外入口。
 
 ```
                     浏览器（唯一入口 :3456）
@@ -42,7 +42,7 @@ Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个�
 
 | 模块 | 源码范围（owner） | 冻结契约（不得破坏） | 修改方 | 必跑门禁 |
 |---|---|---|---|---|
-| 核心框架 | `packages/core/topoone/{engine,gateway,supervisor,rpc,db,messaging,llm,agent,plugins,manifest.py}` | RPC 218 方法基线、10 进程拓扑与端口表、URL 布局、`~/.topocode` 数据布局 | 核心组 | G2+G3+G6（+G7/G8 若动 gateway） |
+| 核心框架 | `packages/core/topoone/{engine,gateway,supervisor,rpc,db,messaging,llm,agent,plugins,manifest.py}` | RPC 218 方法基线、9 进程拓扑与端口表、URL 布局、`~/.topocode` 数据布局 | 核心组 | G2+G3+G6（+G7/G8 若动 gateway） |
 | 前端共享内核 | `packages/web-core/src/` + `dist-portal/`（构建产物） | 导出 API（index.ts）、token 客户端行为、门户 URL（/ · /home） | 前端基础组 | G4+G5+G7（type-check/build/5 SPA） |
 | workbench | `apps/workbench/{src,topoone_app_workbench,server,tests}` + manifest | `/app` URL、`/app` 资产路径、`knowledge.*` RPC 命名空间 | 工作台组 | G3+G4+G5+G6+G7 |
 | docs | `apps/docs/{src,topoone_app_docs,server,tests}` + manifest | `/docs/` 资产路径、`/viewer·/web-root·/projects` URL、`render.*·doc.*` RPC、`:3481` | 文档组 | 同上 |
@@ -80,7 +80,7 @@ Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个�
 
 | 角色 | 拥有模块 | 主要职责 |
 |---|---|---|
-| 核心组 | topoone-core | 引擎/网关/进程治理/RPC/DB/LLM/Agent；维护 218 基线与 10 进程拓扑 |
+| 核心组 | topoone-core | 引擎/网关/进程治理/RPC/DB/LLM/Agent；维护 218 基线与 9 进程拓扑 |
 | 前端基础组 | @topo/web-core | 共享组件/i18n/RPC+token 客户端/门户；执行上提/下沉 |
 | 工作台组 | apps/workbench | 导入/分析/可视化/知识库 |
 | 文档组 | apps/docs | viewer/web-root + render/doc RPC |

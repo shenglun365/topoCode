@@ -79,7 +79,7 @@ GET/POST /api/architect/...
 | `topoone.db`（main：projects/analysis_tasks/model_configs/agent_* 等 24 表） | kb（核心） | 子项目**读**经 RPC/HTTP；写仅核心 |
 | `projects/<pid>/project.db`（26 表：AST/社区/LLM 结果/agent_task_history 等） | kb（核心） | 同上（architect 经 HTTP 只读） |
 | knowledge / sessions / chat 各库 | kb / llm / chat | 各 owner 独占 |
-| `architect.db`（arch_* 表） | architect :3470 | architect 独占；其中 `arch_bus_messages`（非项目路由全局单表）由 agent-bus :3486 共享，broker 读写边界=仅该表（create/mark/pending/list） |
+| `architect.db`（arch_* 表） | architect :3470 | architect 独占（原 agent-bus 共享的 `arch_bus_messages` 已随 broker 退役移除，见 `db_schema._DROPPED_TABLES`） |
 | docs 业务表（web_root 等） | docs :3481 | docs 独占 |
 | `~/.topocode/token`、`logs/`、`source-cache/` | gateway/supervisor | 用户级，模块不得改动布局 |
 
@@ -94,7 +94,7 @@ GET/POST /api/architect/...
 | G3 后端测试 | core + 4 app pytest 全绿 | `npm run test:py`（当前 252） |
 | G4 前端类型 | 全 workspace type-check | `npm run type-check` |
 | G5 前端构建 | 全量 build（core bundle + portal + 4 app） | `npm run build` |
-| G6 进程拓扑 | `topo serve` 10 进程全 OK（kb/gateway/llm/agent/mcp/runner/docs/chat/architect/agent-bus） | `topo status` |
+| G6 进程拓扑 | `topo serve` 9 进程全 OK（kb/gateway/llm/agent/mcp/runner/docs/chat/architect） | `topo status` |
 | G7 URL 布局 | 5 SPA 入口 HTML+资产 200 + 子项目 API 带 token 200 | curl 矩阵（见 §7） |
 | G8 事件桥 | `/ws/events` 101 + 事件流 + 无 token 401 | WS 握手 + 鉴权抽查 |
 
@@ -115,7 +115,7 @@ GET/POST /api/architect/...
 # 一键
 npm run setup                 # .venv + pip install -e(core+4apps) + npm install
 npm run dev                   # 全栈（core + 4 前端 dev）
-npm run serve / topo serve    # 仅后端 10 进程（:3456）
+npm run serve / topo serve    # 仅后端 9 进程（:3456）
 npm run status / topo status  # 进程状态
 npm run build                 # core bundle + portal + 4 app
 npm run test                  # test:py + test:fe
