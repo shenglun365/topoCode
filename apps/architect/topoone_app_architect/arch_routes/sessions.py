@@ -1168,6 +1168,23 @@ async def session_guide(conv_id: str):
 
 # ── v2 统一会话: coding subagent 任务 REST(轻门禁/投递/停止) ──
 
+@router.post("/tasks/{task_id}/merge")
+async def task_merge(task_id: str, request: Request):
+    """确认合并(本地 PR 语义, 环节十五): 门禁通过后执行合并, 任务记 merged 终态。
+
+    body: {mode?: "ff"(默认, 仅快进) | "no-ff"(强制合并提交, 冲突中止回显)}。"""
+    from . import exec_bridge
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    mode = "no-ff" if str((body or {}).get("mode") or "") == "no-ff" else "ff"
+    res = await asyncio.to_thread(exec_bridge.merge_branch, task_id, mode)
+    if not res.get("ok"):
+        return err(int(res.get("code") or 400), res.get("error") or "merge-failed")
+    return ok(res)
+
+
 @router.get("/tasks/{task_id}/merge-precheck")
 async def task_merge_precheck(task_id: str):
     """合并入口检查(环节十五): 主目录推进/任务分支内容/是否可直并。"""

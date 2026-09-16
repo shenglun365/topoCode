@@ -279,6 +279,15 @@ def propose_task(conv: dict, title: str, instruction: str,
     task = {**task, "ok": True}
     _resume_note = (f"\n\n> 🔁 续跑：将承接上次失败任务的进度分支 `{resume_branch}`"
                     "（进度已自动保全）" if resume_branch else "")
+    # 未合并预警(本地 PR 语义): 基线不含同会话未合并分支的改动 → 卡片显式提示
+    _unmerged_note = ""
+    try:
+        from .execution import conv_root_project as _crp2
+        _root0, _proj0 = _crp2(conv)
+        if _root0:
+            _unmerged_note = _unmerged_branch_notes(conv_id, _root0)
+    except Exception:  # noqa: BLE001
+        pass
     # 空边界保护(环节十三): 需求未声明边界 → 卡片显式标注(确认=显式接受;
     # confirm 时范围探针会先尝试 grounding 补全)
     _no_scope_note = ""
@@ -295,7 +304,7 @@ def propose_task(conv: dict, title: str, instruction: str,
             f"📋 **任务待确认**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
             + instruction[:2000]
             + "\n\n---\n确认后开始执行; 可取消或要求 architect 调整。"
-            + _resume_note + _stale_note + _no_scope_note,
+            + _resume_note + _stale_note + _no_scope_note + _unmerged_note,
             msg_meta={"kind": "task_card", "taskId": task["id"]},
             project_id=_pid)
     _publish_task(conv_id, task)
@@ -429,6 +438,15 @@ def confirm_task(task_id: str) -> dict:
     if workspace_files:
         payload["workspaceFiles"] = workspace_files
 
+    # 链式基点(本地 PR 语义): 同会话最近未合并终态分支 head → worktree
+    # 物理包含前序代码; 已合并则回落 HEAD(不传, runner 取当前 HEAD)
+    try:
+        _cb = _chain_base(conv_id, task_id, root)
+        if _cb:
+            payload["baseCommit"] = _cb
+    except Exception:  # noqa: BLE001 — 基点解析失败回落 HEAD
+        pass
+
     res = _runner("/api/implement", payload, timeout=20.0)
     if not res or not res.get("ok"):
         err = (res or {}).get("error") or "runner 服务不可达(:3458)"
@@ -560,6 +578,122 @@ def merge_precheck(task_id: str) -> Dict[str, Any]:
     return {"ok": True, "checkable": True, "fastForward": not main_new,
             "mainNewCommits": main_new, "branchCommits": branch_commits,
             "advice": advice}
+
+
+def _chain_base(conv_id: str, exclude_task_id: str, root: str) -> str:
+    """链式基点(本地 PR 语义, 环节十五): 同会话最近一个**未合并**终态任务
+    分支的 head 作为新任务基点——worktree 物理包含前序代码(文字+代码一致);
+    前序分支已合并进主(merge-base --is-ancestor) → 回落 HEAD(返回 "")。
+
+    只在同会话链内; 跨会话靠卡片未合并预警暴露。
+    """
+    try:
+        from ..agent.governance.boundary import _git_run
+        for t in sorted(store.TasksStore.of_conv(conv_id),
+                        key=lambda x: x.get("createdAt") or 0, reverse=True):
+            if t.get("id") == exclude_task_id:
+                continue
+            if (t.get("status") or "") not in _TASK_TERMINAL:
+                continue
+            branch = str(t.get("branch") or "")
+            if not branch.startswith("task/"):
+                continue
+            if _git_run(["merge-base", "--is-ancestor", branch, "HEAD"],
+                        root, check=False).returncode == 0:
+                continue                      # 已合并 → 基线已含, 跳过
+            r = _git_run(["rev-parse", branch], root, check=False)
+            if r.returncode == 0:
+                return r.stdout.strip()
+    except Exception as e:  # noqa: BLE001 — 基点解析失败回落 HEAD
+        logger.debug("[exec-bridge] chain_base: %s", e)
+    return ""
+
+
+def _unmerged_branch_notes(conv_id: str, root: str, limit: int = 3) -> str:
+    """同项目未合并终态分支清单 → 任务卡预警文案(基线不含其改动)。"""
+    try:
+        from ..agent.governance.boundary import _git_run
+        items = []
+        for t in sorted(store.TasksStore.of_conv(conv_id),
+                        key=lambda x: x.get("createdAt") or 0, reverse=True):
+            if (t.get("status") or "") not in _TASK_TERMINAL:
+                continue
+            branch = str(t.get("branch") or "")
+            if not branch.startswith("task/"):
+                continue
+            if _git_run(["merge-base", "--is-ancestor", branch, "HEAD"],
+                        root, check=False).returncode == 0:
+                continue
+            r = _git_run(["rev-parse", branch], root, check=False)
+            if r.returncode != 0:
+                continue
+            items.append(f"`{branch}`({t.get('title')})")
+            if len(items) >= limit:
+                break
+        if not items:
+            return ""
+        return ("\n\n> ⚠️ 存在未合并分支: " + ", ".join(items)
+                + "——当前任务基线**不含**其改动; 如需基于其成果请先合并"
+                  "(完成卡上有「合并检查/确认合并」)。")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[exec-bridge] unmerged notes: %s", e)
+        return ""
+
+
+def merge_branch(task_id: str, mode: str = "ff") -> Dict[str, Any]:
+    """确认合并(本地 PR 语义, 环节十五): 门禁(precheck)通过后执行合并。
+
+    mode: ff = 仅快进(主目录无推进时); no-ff = 强制合并提交(冲突则中止回显)。
+    成功 → 任务行记 merged_at/merged_head(merged 终态, 分支内容已进主)。
+    """
+    task = store.TasksStore.get(task_id)
+    if not task:
+        return {"ok": False, "error": "task-not-found", "code": 404}
+    if (task.get("status") or "") != "done":
+        return {"ok": False, "error": "仅 done 任务可合并", "code": 400}
+    if str(task.get("mergedAt") or "") not in ("", "0") or int(task.get("mergedAt") or 0):
+        return {"ok": False, "error": "任务已合并(勿重复)", "code": 400}
+    pre = merge_precheck(task_id)
+    if not pre.get("ok"):
+        return pre
+    if not pre.get("checkable"):
+        return {"ok": False, "error": str(pre.get("advice")), "code": 400}
+    conv = store.ConversationsStore.get(task.get("conversationId") or "") or {}
+    from .execution import conv_root_project
+    root, _project = conv_root_project(conv)
+    from ..agent.governance.boundary import _git_run
+    if _git_run(["status", "--porcelain"], root, check=False).stdout.strip():
+        return {"ok": False,
+                "error": "主目录有未提交改动——先 commit 或 stash 再合并", "code": 400}
+    branch = str(task.get("branch") or "")
+    if pre.get("fastForward"):
+        r = _git_run(["merge", "--ff-only", branch], root, check=False)
+    else:
+        if mode != "no-ff":
+            return {"ok": False,
+                    "error": (str(pre.get("advice"))
+                              + " (确认主目录处理完毕后可用 mode=no-ff 强制合并)"),
+                    "code": 400}
+        r = _git_run(["merge", "--no-ff", "-m",
+                      f"merge {branch} (task {task_id}: {task.get('title')})",
+                      branch], root, check=False)
+    if r.returncode != 0:
+        st = _git_run(["status", "--porcelain"], root, check=False)
+        conflicts = [ln[3:].strip() for ln in st.stdout.splitlines()
+                     if ln.startswith(("UU", "AA", "DD"))]
+        if conflicts:
+            _git_run(["merge", "--abort"], root, check=False)
+            return {"ok": False,
+                    "error": (f"合并冲突: {', '.join(conflicts[:5])}——已中止"
+                              "(主目录未动), 请解决冲突后重试"), "code": 409}
+        return {"ok": False,
+                "error": f"合并失败: {(r.stderr or r.stdout or '')[:200]}",
+                "code": 400}
+    head = _git_run(["rev-parse", "HEAD"], root).stdout.strip()
+    from .common import _ts
+    store.TasksStore.update(task_id, {"mergedAt": _ts(), "mergedHead": head})
+    return {"ok": True, "mergedHead": head, "mode": mode,
+            "advice": f"已合并 {branch} → 主目录({head[:12]})。"}
 
 
 def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:

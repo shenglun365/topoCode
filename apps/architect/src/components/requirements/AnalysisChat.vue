@@ -101,6 +101,7 @@ function openAssetRef(id: string) {
 // ── S3 投喂门: 消息级「转达 coding」(dock 执行 POST /feed, 结果本地消息) ──
 const feedBusyIdx = ref(-1)
 const mergeBusyIdx = ref(-1)
+const mergedDone = ref<Record<number, boolean>>({})
 
 /** 合并入口检查(环节十五): git 事实 → 轻提示(可否直并/需先 rebase)。 */
 async function runMergePrecheck(i: number, taskId: string) {
@@ -112,6 +113,21 @@ async function runMergePrecheck(i: number, taskId: string) {
     showToast(`合并检查: ${ff} — ${r.advice}`)
   } catch (e: any) {
     showToast(`✗ 合并检查失败: ${e?.message || e}`)
+  } finally {
+    mergeBusyIdx.value = -1
+  }
+}
+
+/** 确认合并(本地 PR 语义): 门禁通过后执行; 冲突/需 rebase → 提示原文。 */
+async function confirmMerge(i: number, taskId: string) {
+  mergeBusyIdx.value = i
+  try {
+    const r = await apiPost<{ mergedHead: string; advice: string }>(
+      `/tasks/${taskId}/merge`, { mode: 'ff' })
+    mergedDone.value[i] = true
+    showToast(`✓ ${r.advice}`)
+  } catch (e: any) {
+    showToast(`✗ 合并未执行: ${e?.message || e}`)
   } finally {
     mergeBusyIdx.value = -1
   }
@@ -1178,7 +1194,18 @@ onUnmounted(() => {
               <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
               合并检查
             </button>
-            <span v-if="mergeBusyIdx === i" class="text-[10px] text-ctp-overlay0">检查中…</span>
+            <button
+              v-if="!mergedDone[i]"
+              class="flex items-center gap-1.5 text-[10px] text-ctp-blue hover:text-ctp-sky transition-colors"
+              :disabled="mergeBusyIdx === i"
+              title="确认合并 — 门禁通过后执行(ff 仅快进; 主目录有推进时提示先 rebase)"
+              @click="confirmMerge(i, m.meta.taskId)"
+            >
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              确认合并
+            </button>
+            <span v-else class="text-[10px] text-ctp-green">✓ 已合并</span>
+            <span v-if="mergeBusyIdx === i" class="text-[10px] text-ctp-overlay0">处理中…</span>
           </div>
           <!-- 转达摘要回执: 折叠卡(留"给执行器发过什么"的感知, 点开看全文) -->
           <div
