@@ -127,17 +127,27 @@ def propose_task_tool(title: str, instruction: str,
 
 
 def assemble_task_instruction(task: dict, prior_brief: str = "",
-                              policy: Optional[Any] = None) -> str:
+                              policy: Optional[Any] = None,
+                              runtime: Optional[dict] = None) -> str:
     """任务指令组装: task.instruction(architect 整理) 为正文 + 绑定需求规约
     补充(边界/验收) + 工作环境/DoD 系统段(确定性注入, 不依赖 LLM)。
 
     policy: 挡位策略(gears.GearPolicy, 环节十二a)——确认节奏/粒度按挡分叉;
     None → 默认档(T1)。
     prior_brief: 前情链简报(同会话近期终态任务摘要, confirm 时自动注入)。
+    runtime: 运行时身份事实(A3/postmortem 防误验)——{"branch","root"};
+    已知即注入「运行时身份」段, 杜绝 agent 把主目录服务探测当完成依据。
     """
     if policy is None:
         from ..governance.gears import default_policy
         policy = default_policy()
+    if getattr(policy, "cap_note", ""):
+        # M1: 实测边界封顶随指令告知 subagent(编排已按能力边界降档)
+        parts_style_note = ("> 🛡️ " + str(policy.cap_note)
+                            + "——本次任务编排已按你的实测能力边界降档, "
+                              "请严格按微步/步骤粒度推进, 里程碑报告照常。\n")
+    else:
+        parts_style_note = ""
     rid = task.get("reqId") or ""
     r = _store().RequirementsStore.get(rid) or {} if rid else {}
     active = _store().RequirementsStore.spec_active(rid) or {} if rid else {}
@@ -146,6 +156,8 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
         a = r.get("analysis") or {}
     parts = [f"# 实施任务：{task.get('title') or '任务'}"
              + (f"（{rid} · 规约 v{active.get('ver') or '?'}）" if rid else "")]
+    if parts_style_note:
+        parts.append(parts_style_note)
     body = str(task.get("instruction") or "").strip()
     if prior_brief:
         parts.append("## 前情简报(同会话近期任务)\n" + prior_brief
@@ -176,6 +188,21 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
         "由用户手工执行, 你提供文件与部署说明即可。\n"
         "- 环境类问题(sudo/依赖/编译工具)先自主查证仓库与 README; "
         "只对**需求歧义**集中一次性提问, 不要为环境搭建反复提问。")
+    runtime = runtime or {}
+    _branch = str(runtime.get("branch") or "").strip()
+    _root = str(runtime.get("root") or "").strip()
+    if _branch or _root:
+        ident = ["## 运行时身份(防误验, 先确认)"]
+        if _branch:
+            ident.append(f"- 任务分支: `{_branch}`——你的 cwd 即该分支的隔离 worktree 根, "
+                         "与用户主目录相互独立。")
+        if _root:
+            ident.append(f"- 主仓位置: `{_root}`(用户主检出)——你**不在**主目录工作; "
+                         "主目录当前运行的服务/端口与你完全无关。")
+        ident.append("- 验收事实约定: 构建/测试/检查一律在你 worktree 内执行; "
+                     "**禁止**把「主目录服务的 HTTP 探测 200」当作完成依据——"
+                     "那不是你的产出。")
+        parts.append("\n".join(ident))
     if a.get("designMd") or a.get("implementationPath"):
         parts.append("## 实现方案(遵循执行)\n"
                      + str(a.get("designMd") or a.get("implementationPath")))

@@ -84,20 +84,22 @@ def test_feed_delivered_and_queued_flags(tmp_path, monkeypatch):
     task = _mk_active_task(conv["id"], status="running")
     monkeypatch.setattr(eb, "active_task_of", lambda cid: task)
     monkeypatch.setattr(eb, "task_input",
-                        lambda tid, text: {"ok": True, "queued": True})
+                        lambda tid, text, echo=True: {"ok": True, "queued": True})
     r = client.post(f"/api/architect/sessions/{conv['id']}/feed",
                     json={"text": "补充约束"}, headers=h).json()["data"]
     assert r["delivered"] is True and r["queued"] is True
     assert "已排队" in r["summary"]
     forwarded = {}
-    def _input(tid, text):
+    def _input(tid, text, echo=True):
         forwarded["task_id"], forwarded["text"] = tid, text
+        forwarded["echo"] = echo
         return {"ok": True, "queued": False}
     monkeypatch.setattr(eb, "task_input", _input)
     r2 = client.post(f"/api/architect/sessions/{conv['id']}/feed",
                      json={"text": "定向正文"}, headers=h).json()["data"]
     assert r2["delivered"] is True
-    assert forwarded == {"task_id": task["id"], "text": "定向正文"}
+    assert forwarded["task_id"] == task["id"] and forwarded["text"] == "定向正文"
+    assert forwarded["echo"] is False   # R4: 投喂路径关回声防主流双写
 
 
 def test_feed_hint_message_rejected(tmp_path, monkeypatch):

@@ -827,7 +827,9 @@ async def feed_to_coding(conv_id: str, request: Request):
     # P3: 投喂目标 = 活跃 v2 任务(running/waiting_input → task_input 转达/排队)
     task = exec_bridge.active_task_of(conv_id)
     if task and (task.get("status") or "") in ("running", ST.TASK_WAITING_INPUT):
-        res = await asyncio.to_thread(exec_bridge.task_input, task["id"], text)
+        # 投喂路径自带子会话审计落流 → echo=False 防主流双写(R4 回声)
+        res = await asyncio.to_thread(exec_bridge.task_input, task["id"], text,
+                                      echo=False)
         if res.get("ok"):
             delivered, queued = True, bool(res.get("queued"))
         else:
@@ -1249,8 +1251,9 @@ async def task_set_executor(task_id: str, request: Request):
     except Exception:  # noqa: BLE001
         return err(400, "invalid-json")
     etype = str((body or {}).get("executorType") or "").strip()
-    if etype not in ("cline", "opencode", "codex"):
-        return err(400, "executorType 取值 cline/opencode/codex")
+    from ..agent.execution.capabilities import is_valid_type, executor_types
+    if not is_valid_type(etype):        # B1 单源: 双命名空间归一判断
+        return err(400, "executorType 取值: " + "/".join(executor_types()))
     task = await asyncio.to_thread(exec_bridge.task_set_executor, task_id, etype)
     if not task:
         return err(404, "任务不存在或已不可切换")
@@ -1287,7 +1290,9 @@ async def task_input(task_id: str, request: Request):
     res = await asyncio.to_thread(exec_bridge.task_input, task_id, text)
     if not res.get("ok"):
         return err(400, str(res.get("error") or "input-failed"))
-    return ok({"queued": bool(res.get("queued"))})
+    # R4 回声: requestId 全链路关联(主流已落 task_input_echo 持久回执)
+    return ok({"queued": bool(res.get("queued")),
+               "requestId": res.get("requestId") or ""})
 
 
 @router.get("/tasks")

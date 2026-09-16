@@ -36,6 +36,7 @@ class StartResult:
     branch: str = ""
     worktree: str = ""
     session_id: str = ""
+    base_commit: str = ""
     error: str = ""
     raw: Dict[str, Any] = field(default_factory=dict)
 
@@ -68,22 +69,30 @@ class RunnerClient:
     def __init__(self, transport: Callable[..., Optional[dict]]):
         self._transport = transport
 
+    def _t(self, path: str, payload: Optional[dict] = None,
+           timeout: float = 12.0) -> Optional[dict]:
+        """统一传输调用形状: payload/timeout 恒以关键字传递——匹配 _runner(path,
+        payload=None, timeout=...) 契约, 兼容测试桩的最小签名(lambda path, **kw)。"""
+        fn = self._transport
+        return fn(path, payload=payload, timeout=timeout)
+
     # ── 作业生命周期 ──
 
     def start_implement(self, payload: Dict[str, Any], timeout: float = 20.0) -> StartResult:
-        res = self._transport("/api/implement", payload, timeout) or {}
+        res = self._t("/api/implement", payload, timeout) or {}
         out = StartResult(
             ok=bool(res.get("ok")),
             job_id=str(res.get("jobId") or ""),
             branch=str(res.get("branch") or ""),
             worktree=str(res.get("worktree") or ""),
             session_id=str(res.get("sessionId") or ""),
+            base_commit=str(res.get("baseCommit") or ""),
             error=str(res.get("error") or ("" if res.get("ok") else "runner 服务不可达(:3458)")),
             raw=res)
         return out
 
     def snapshot(self, job_id: str, since: int = 0, timeout: float = 12.0) -> Optional[Snapshot]:
-        raw = self._transport(f"/api/implement/{job_id}?since={since}", None, timeout)
+        raw = self._t(f"/api/implement/{job_id}?since={since}", None, timeout)
         if raw is None:
             return None                      # runner 不可达(调用方区分 连续不可达/句柄丢失)
         if not raw.get("ok"):
@@ -98,35 +107,39 @@ class RunnerClient:
                         session_id=str(raw.get("sessionId") or ""),
                         events=events, raw=raw)
 
-    def input(self, job_id: str, text: str, timeout: float = 15.0) -> InputResult:
-        res = self._transport(f"/api/implement/{job_id}/input", {"text": text}, timeout) or {}
+    def input(self, job_id: str, text: str, steer: bool = False,
+              timeout: float = 15.0) -> InputResult:
+        payload: Dict[str, Any] = {"text": text}
+        if steer:                                # P4: running 态 steer 直达(cline 优先投递)
+            payload["steer"] = True              # runner 侧不支持的执行器自动回退排队
+        res = self._t(f"/api/implement/{job_id}/input", payload, timeout) or {}
         return InputResult(ok=bool(res.get("ok")), queued=bool(res.get("queued")),
                            error=str(res.get("error") or ""))
 
     def finish(self, job_id: str, keep_worktree: bool = True, timeout: float = 30.0) -> Dict[str, Any]:
-        return self._transport(f"/api/implement/{job_id}/finish",
+        return self._t(f"/api/implement/{job_id}/finish",
                                {"keepWorktree": keep_worktree}, timeout) or {}
 
     def running(self, timeout: float = 8.0) -> Dict[str, Any]:
-        return self._transport("/api/implement/running", None, timeout) or {}
+        return self._t("/api/implement/running", None, timeout) or {}
 
     def diff(self, job_id: str, timeout: float = 30.0) -> Dict[str, Any]:
-        return self._transport(f"/api/implement/{job_id}/diff", None, timeout) or {}
+        return self._t(f"/api/implement/{job_id}/diff", None, timeout) or {}
 
     # ── cline v2 内省面（透传 runner；非 cline 执行器由 runner 报不支持）──
 
     def messages(self, job_id: str, display: bool = True,
                  timeout: float = 30.0) -> Dict[str, Any]:
-        return self._transport(
+        return self._t(
             f"/api/implement/{job_id}/messages?display={'true' if display else 'false'}",
             None, timeout) or {}
 
     def usage(self, job_id: str, timeout: float = 15.0) -> Dict[str, Any]:
-        return self._transport(f"/api/implement/{job_id}/usage", None, timeout) or {}
+        return self._t(f"/api/implement/{job_id}/usage", None, timeout) or {}
 
     def checkpoints(self, job_id: str, run_count: int = 1,
                     timeout: float = 60.0) -> Dict[str, Any]:
-        return self._transport(
+        return self._t(
             f"/api/implement/{job_id}/checkpoints?runCount={int(run_count)}",
             None, timeout) or {}
 
@@ -135,28 +148,28 @@ class RunnerClient:
         payload: Dict[str, Any] = {"runCount": int(run_count)}
         if options:
             payload["options"] = options
-        return self._transport(f"/api/implement/{job_id}/restore", payload, timeout) or {}
+        return self._t(f"/api/implement/{job_id}/restore", payload, timeout) or {}
 
     def update_model(self, job_id: str, model_id: str,
                      timeout: float = 15.0) -> Dict[str, Any]:
-        return self._transport(f"/api/implement/{job_id}/model",
+        return self._t(f"/api/implement/{job_id}/model",
                                {"modelId": model_id}, timeout) or {}
 
     def approval(self, job_id: str, request_id: str, approved: bool,
                  reason: str = "", timeout: float = 15.0) -> Dict[str, Any]:
-        return self._transport(f"/api/implement/{job_id}/approval",
+        return self._t(f"/api/implement/{job_id}/approval",
                                {"requestId": request_id, "approved": approved,
                                 "reason": reason}, timeout) or {}
 
     def pending(self, job_id: str, timeout: float = 15.0) -> Dict[str, Any]:
-        return self._transport(f"/api/implement/{job_id}/pending", None, timeout) or {}
+        return self._t(f"/api/implement/{job_id}/pending", None, timeout) or {}
 
     def proceed(self, job_id: str, tool_call_id: str = "",
                 timeout: float = 30.0) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
         if tool_call_id:
             payload["toolCallId"] = tool_call_id
-        return self._transport(f"/api/implement/{job_id}/proceed",
+        return self._t(f"/api/implement/{job_id}/proceed",
                                payload or None, timeout) or {}
 
     def events_ws_url(self, base: str, job_id: str, since: int) -> str:

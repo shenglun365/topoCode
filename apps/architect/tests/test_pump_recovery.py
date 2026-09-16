@@ -54,8 +54,8 @@ def test_recover_done_task_finalizes(tmp_path, monkeypatch):
                "text": "[[IMPLEMENT_DONE]] 完成了改动",
                "changedFiles": ["a.py", "b.py"]}
     monkeypatch.setattr(eb, "_runner",
-                        lambda path, **kw: _snapshot("done", [done_ev])
-                        if path.endswith("/impl-x") else None)
+                        lambda path, payload=None, **kw: _snapshot("done", [done_ev])
+                        if path.split("?")[0].endswith("/impl-x") else None)
     monkeypatch.setattr(eb, "_acceptance_brief", lambda *a, **k: "(简报)")
     out = eb.recover_conv_tasks(conv["id"])
     assert out["finished"] == 1 and out["repump"] == []
@@ -73,8 +73,8 @@ def test_recover_failed_task(tmp_path, monkeypatch):
     t = _mk_running_task(conv["id"])
     fail_ev = {"seq": 3, "kind": "failed", "text": "编译失败: xxx"}
     monkeypatch.setattr(eb, "_runner",
-                        lambda path, **kw: _snapshot("failed", [fail_ev], "boom")
-                        if path.endswith("/impl-x") else None)
+                        lambda path, payload=None, **kw: _snapshot("failed", [fail_ev], "boom")
+                        if path.split("?")[0].endswith("/impl-x") else None)
     out = eb.recover_conv_tasks(conv["id"])
     assert out["finished"] == 1
     assert store.TasksStore.get(t["id"])["status"] == "failed"
@@ -87,7 +87,7 @@ def test_recover_lost_job_fails_explicitly(tmp_path, monkeypatch):
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     t = _mk_running_task(conv["id"])
     monkeypatch.setattr(eb, "_runner",
-                        lambda path, **kw: {"ok": False, "error": "作业不存在"})
+                        lambda path, payload=None, **kw: {"ok": False, "error": "作业不存在"})
     out = eb.recover_conv_tasks(conv["id"])
     assert out["finished"] == 1
     row = store.TasksStore.get(t["id"])
@@ -99,7 +99,7 @@ def test_recover_unreachable_runner_noop(tmp_path, monkeypatch):
     _env(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     t = _mk_running_task(conv["id"])
-    monkeypatch.setattr(eb, "_runner", lambda path, **kw: None)  # 不可达
+    monkeypatch.setattr(eb, "_runner", lambda path, payload=None, **kw: None)  # 不可达
     out = eb.recover_conv_tasks(conv["id"])
     assert out == {"finished": 0, "repump": []}
     assert store.TasksStore.get(t["id"])["status"] == "running"
@@ -110,7 +110,7 @@ def test_recover_running_returns_repump(tmp_path, monkeypatch):
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     t = _mk_running_task(conv["id"])
     monkeypatch.setattr(eb, "_runner",
-                        lambda path, **kw: _snapshot("running", [
+                        lambda path, payload=None, **kw: _snapshot("running", [
                             {"seq": 1, "kind": "session_ready", "text": "ready"}]))
     out = eb.recover_conv_tasks(conv["id"])
     assert out["finished"] == 0
@@ -174,8 +174,8 @@ def test_recover_sweep_converges_stale_tasks(tmp_path, monkeypatch):
     done_ev = {"seq": 2, "kind": "done", "text": "[[IMPLEMENT_DONE]] ok",
                "changedFiles": []}
     monkeypatch.setattr(eb, "_runner",
-                        lambda path, **kw: _snapshot("done", [done_ev])
-                        if path.endswith("/impl-x") else None)
+                        lambda path, payload=None, **kw: _snapshot("done", [done_ev])
+                        if path.split("?")[0].endswith("/impl-x") else None)
     monkeypatch.setattr(eb, "_acceptance_brief", lambda *a, **k: "(简报)")
     n = eb.recover_sweep()
     assert n == 1
@@ -184,7 +184,7 @@ def test_recover_sweep_converges_stale_tasks(tmp_path, monkeypatch):
 
 def test_recover_sweep_noop_when_idle(tmp_path, monkeypatch):
     _env(tmp_path, monkeypatch)
-    monkeypatch.setattr(eb, "_runner", lambda path, **kw: None)
+    monkeypatch.setattr(eb, "_runner", lambda path, payload=None, **kw: None)
     assert eb.recover_sweep() == 0
 
 

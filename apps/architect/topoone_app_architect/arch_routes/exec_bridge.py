@@ -16,10 +16,12 @@ import os
 import re
 import time
 import urllib.request
+import uuid
 from typing import Any, Dict, List, Optional
 
 from . import store
 from .store import states as ST
+from ..agent.execution.runner_client import RunnerClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,15 @@ def _runner(path: str, payload: Optional[dict] = None, timeout: float = 12.0) ->
     except Exception as e:  # noqa: BLE001
         logger.debug("[exec-bridge] runner %s failed: %s", path, e)
         return None
+
+
+def _client() -> "RunnerClient":
+    """类型化 runner 访问端(R1 收敛裸 HTTP 调用; G7 关闭)。
+
+    调用时构造、晚绑定模块级 _runner——保持既有 monkeypatch.setattr(eb, "_runner")
+    测试接缝不变(导入期绑定会使打桩失效)。
+    """
+    return RunnerClient(_runner)
 
 
 def _ts() -> int:
@@ -215,7 +226,7 @@ def stop(conv_id: str, reason: str = "") -> str:
     if not jobs:
         return "当前会话没有运行中的作业。"
     for j in jobs:
-        _runner(f"/api/implement/{j['jobId']}/finish", {"keepWorktree": True}, timeout=30.0)
+        _client().finish(str(j["jobId"]), keep_worktree=True, timeout=30.0)
         _job_upsert(conv_id, {"jobId": j["jobId"], "status": "stopped",
                               "endedAt": _ts()})
     _aggregate_work_state(conv_id)
@@ -471,7 +482,8 @@ def confirm_task(task_id: str) -> dict:
     # 挡位策略(环节十二a): 指令按挡分叉 + 任务级轮次上限随挡下发
     policy = _task_gear(task, conv)
     payload["instruction"] = _task_instruction(task, _task_chain_brief(conv_id, task_id),
-                                               policy=policy) \
+                                               policy=policy,
+                                               runtime={"branch": branch, "root": root}) \
         + probe_note + missing_note
     # hint 已含注册表默认兜底(上方选定单源)——此处不得按空 executorId 重查覆盖
     for k in ("model", "basePort", "autoStart", "baseUrl"):
@@ -508,16 +520,16 @@ def confirm_task(task_id: str) -> dict:
     except Exception:  # noqa: BLE001 — 基点解析失败回落 HEAD
         pass
 
-    res = _runner("/api/implement", payload, timeout=20.0)
-    if not res or not res.get("ok"):
-        err = (res or {}).get("error") or "runner 服务不可达(:3458)"
+    sr = _client().start_implement(payload, 20.0)
+    if not sr.ok:
+        err = sr.error or "runner 服务不可达(:3458)"
         store.TasksStore.finish(task_id, "failed", err)
         return {"ok": False, "error": err}
     store.TasksStore.update(task_id, {
-        "status": "running", "runner_job_id": res["jobId"],
-        "worktree": res.get("worktree") or "", "branch": res.get("branch") or branch,
-        "session_ref": res.get("sessionId") or "",
-        "baseCommit": res.get("baseCommit") or ""})
+        "status": "running", "runner_job_id": sr.job_id,
+        "worktree": sr.worktree, "branch": sr.branch or branch,
+        "session_ref": sr.session_id,
+        "baseCommit": sr.base_commit})
     try:
         store.ConversationsStore.set_work_state(conv_id, "running")
     except Exception:  # noqa: BLE001
@@ -525,9 +537,9 @@ def confirm_task(task_id: str) -> dict:
     agent = task.get("executorType") or _etype
     pid = (conv or {}).get("projectId") or ""
     _append(conv_id, "user",
-            f"🚀 **{task['title']}** 启动（`{res['jobId']}` 分支 `{branch}`）",
+            f"🚀 **{task['title']}** 启动（`{sr.job_id}` 分支 `{branch}`）",
             msg_meta={"kind": "task_start", "taskId": task_id}, project_id=pid)
-    _start_task_pump(conv_id, task_id, res["jobId"], rid, agent)
+    _start_task_pump(conv_id, task_id, sr.job_id, rid, agent)
     t = store.TasksStore.get(task_id) or {}
     _publish_task(conv_id, t)
     return {"ok": True, "task": t}
@@ -537,20 +549,24 @@ def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
     """设定任务执行器(别名归一: cline→cline-sdk)。仅 pending_confirm 可换——
     运行中引擎已固化(换=新任务); 返回更新后任务行(不可换返回 None)。"""
     from .agent_executors import normalize_executor_type
+    from ..agent.execution.capabilities import is_valid_type
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") != ST.TASK_PENDING_CONFIRM:
         return None
     etype = normalize_executor_type(executor_type)
-    if etype not in ("cline-sdk", "opencode", "codex-server"):
+    if not is_valid_type(etype):        # B1 单源: 替代散落元组成员判断
         return None
     return store.TasksStore.update(task_id, {"executor_type": etype})
 
 
-def task_input(task_id: str, text: str) -> Dict[str, Any]:
+def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
     """用户回复 → 转达 subagent(waiting_input 立即; running 排队续跑)。
 
     审批指令: `/approve {requestId}` | `/deny {requestId} [理由]` →
     转发 runner approval 端点(越界确认桥), 不作为回合输入。
+    echo(R4 回声): 转达成功时在主流落一条带 requestId 的持久回执
+    (role=user, meta.kind=task_input_echo)——「发出→落地」可对账; 投喂等
+    已自带落流的调用方传 echo=False 防双写。
     """
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") not in (ST.TASK_WAITING_INPUT, "running"):
@@ -565,11 +581,9 @@ def task_input(task_id: str, text: str) -> Dict[str, Any]:
             return {"ok": False, "error": "缺少 requestId（用法: /approve {id} 或 /deny {id} [理由]）"}
         reason = parts[2].strip() if len(parts) > 2 else ""
         job_id = str(task.get("runnerJobId") or "")
-        res = _runner(f"/api/implement/{job_id}/approval",
-                      {"requestId": request_id,
-                       "approved": approve,
-                       "reason": reason or ("approved" if approve else "rejected by user")},
-                      15.0)
+        res = _client().approval(job_id, request_id, approve,
+                                 reason or ("approved" if approve else "rejected by user"),
+                                 15.0)
         if res and res.get("ok"):
             conv_id = task.get("conversationId") or ""
             _append(conv_id, "assistant",
@@ -578,19 +592,27 @@ def task_input(task_id: str, text: str) -> Dict[str, Any]:
                     project_id=(store.ConversationsStore.get(conv_id) or {}).get("projectId") or "")
             return {"ok": True, "approval": True}
         return {"ok": False, "error": (res or {}).get("error") or "审批转发失败"}
-    res = _runner(f"/api/implement/{task.get('runnerJobId')}/input",
-                  {"text": stripped[:12000],
-                   # P4: running 态优先 steer 直达（cline pending 优先投递）；
-                   # runner 侧不支持的执行器自动回退排队
-                   **({"steer": True} if (task.get("status") or "") == "running" else {})},
-                  15.0)
-    if res and res.get("ok"):
+    # P4: running 态优先 steer 直达（cline pending 优先投递）；
+    # runner 侧不支持的执行器自动回退排队
+    steer = (task.get("status") or "") == "running"
+    res = _client().input(str(task.get("runnerJobId") or ""), stripped[:12000],
+                          steer=steer, timeout=15.0)
+    if res.ok:
         if (task.get("status") or "") == ST.TASK_WAITING_INPUT:
             store.TasksStore.update(task_id, {"status": "running"})
             t = store.TasksStore.get(task_id) or {}
             _publish_task(task["conversationId"], t)
-        return {"ok": True, "queued": bool(res.get("queued"))}
-    return {"ok": False, "error": (res or {}).get("error") or "runner 不可达"}
+        request_id = uuid.uuid4().hex[:12]
+        if echo:
+            conv_id = task.get("conversationId") or ""
+            _append(conv_id, "user", stripped[:12000],
+                    msg_meta={"kind": "task_input_echo", "taskId": task_id,
+                              "requestId": request_id, "queued": res.queued,
+                              "steer": steer},
+                    project_id=(store.ConversationsStore.get(conv_id) or {}
+                                ).get("projectId") or "")
+        return {"ok": True, "queued": res.queued, "requestId": request_id}
+    return {"ok": False, "error": res.error or "runner 不可达"}
 
 
 def merge_precheck(task_id: str) -> Dict[str, Any]:
@@ -727,8 +749,7 @@ def _post_merge_cleanup(task: dict, root: str) -> str:
     job_id = str(task.get("runnerJobId") or "")
     if job_id:
         try:
-            _runner(f"/api/implement/{job_id}/finish",
-                    {"keepWorktree": False}, timeout=30.0)
+            _client().finish(job_id, keep_worktree=False, timeout=30.0)
             notes.append("runner 资源已释放")
         except Exception:  # noqa: BLE001
             notes.append("runner 资源释放失败(可稍后任务清理)")
@@ -804,8 +825,7 @@ def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
         t = store.TasksStore.get(task_id) or {}
         _publish_task(task["conversationId"], t)
         return {"ok": True, "task": t}
-    _runner(f"/api/implement/{task.get('runnerJobId')}/finish",
-            {"keepWorktree": True}, timeout=30.0)
+    _client().finish(str(task.get("runnerJobId") or ""), keep_worktree=True, timeout=30.0)
     store.TasksStore.finish(task_id, "cancelled", reason or "用户停止")
     for fut in (_TASK_PUMPS.pop(task["conversationId"], None) or {}).values():
         fut.cancel()
@@ -961,9 +981,9 @@ def recover_conv_tasks(conv_id: str) -> dict:
         job_id = t.get("runnerJobId") or ""
         if not job_id:
             continue
-        res = _runner(f"/api/implement/{job_id}", timeout=8.0)
-        if not res or not res.get("ok"):
-            if res and "作业不存在" in str(res.get("error") or ""):
+        snap = _client().snapshot(job_id, timeout=8.0)
+        if snap is None or not snap.ok:
+            if snap is not None and "作业不存在" in (snap.error or ""):
                 err = "runner 作业已丢失(执行器服务重启)——无法续跑, 请重新发起任务。"
                 _handle_task_event({"kind": "failed", "text": err},
                                    _task_ctx(conv_id, t["id"], job_id,
@@ -971,7 +991,7 @@ def recover_conv_tasks(conv_id: str) -> dict:
                                              t.get("executorType") or ""))
                 out["finished"] += 1
             continue
-        evs = res.get("events") or []
+        evs = snap.events or []
         last_term = None
         for ev in evs:
             if (ev.get("kind") or "") in ("done", "failed", "input_required"):
@@ -1017,32 +1037,37 @@ def _publish_progress(conv_id: str, task_id: str, prog: dict,
 
 
 def _build_workspace_files(executor_type: str, executor_cfg: dict, task: dict) -> list:
-    """P5: 执行器约定文件组装（cline→.cline/rules|agents, opencode/codex→AGENTS.md）。
+    """P5: 执行器约定文件组装（B1 单源 capabilities: cline→.cline/rules|agents
+    目录约定; opencode/codex→AGENTS.md 单文件——映射查 caps(), 不再字面判型）。
 
     数据源（后续接 KB 语义资产的扩展点）:
     - task.rulesMd        任务级规约文本
     - cfg.rulesMd         执行器级规约文本
     - cfg.teams.agents    cline teams 成员配置([{name, content}])
     """
+    from ..agent.execution.capabilities import caps
     files: list = []
+    cap = caps(executor_type)
+    rules_dir = str(cap.get("workspace_rules") or "")
+    agents_dir = str(cap.get("workspace_agents") or "")
     rules_parts = []
     for src in (task.get("rulesMd"), (executor_cfg or {}).get("rulesMd")):
         if isinstance(src, str) and src.strip():
             rules_parts.append(src.strip())
     if rules_parts:
         content = "\n\n".join(rules_parts)
-        if executor_type == "cline-sdk":
-            files.append({"path": ".cline/rules/000-guide.md", "content": content})
+        if rules_dir:
+            files.append({"path": f"{rules_dir}/000-guide.md", "content": content})
         else:
             files.append({"path": "AGENTS.md", "content": content})
-    if executor_type == "cline-sdk":
+    if agents_dir:
         teams = (executor_cfg or {}).get("teams") or {}
         for a in (teams.get("agents") if isinstance(teams, dict) else []) or []:
             if isinstance(a, dict) and str(a.get("name") or "").strip() \
                     and isinstance(a.get("content"), str):
                 name = "".join(c for c in str(a["name"]) if c.isalnum() or c in "-_")
                 if name:
-                    files.append({"path": f".cline/agents/{name}.md",
+                    files.append({"path": f"{agents_dir}/{name}.md",
                                   "content": str(a["content"])})
     return files
 
@@ -1268,10 +1293,19 @@ async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
                 task_id, "cancelled" if status == "stopped" else status)
             _publish_task(conv_id, store.TasksStore.get(task_id) or {})
 
-    await _pumps.run_event_pump(
-        base=RUNNER_BASE, job_id=job_id, runner=_runner,
-        on_event=on_event, on_snapshot=on_snapshot,
-        on_lost=on_lost, on_finished=on_finished)
+    try:
+        await _pumps.run_event_pump(
+            base=RUNNER_BASE, job_id=job_id, runner=_runner,
+            on_event=on_event, on_snapshot=on_snapshot,
+            on_lost=on_lost, on_finished=on_finished)
+    finally:
+        # G5 修复: 泵退出(done/failed/lost/cancel)即清理句柄, 防长会话累积
+        # (此前仅 task_stop 弹出; finally 统一收口, 取消路径同样覆盖)
+        jobs = _TASK_PUMPS.get(conv_id)
+        if jobs is not None:
+            jobs.pop(job_id, None)
+            if not jobs:
+                _TASK_PUMPS.pop(conv_id, None)
 
 
 def _task_gear(task: dict, conv: Optional[dict] = None):
@@ -1286,10 +1320,12 @@ def _task_gear(task: dict, conv: Optional[dict] = None):
                         hint.get("executorConfig") or {})
 
 
-def _task_instruction(task: dict, prior_brief: str = "", policy=None) -> str:
-    """任务指令组装(P4 委托 planning.task_plan; 挡位策略按挡分叉, 环节十二a)。"""
+def _task_instruction(task: dict, prior_brief: str = "", policy=None,
+                      runtime: Optional[dict] = None) -> str:
+    """任务指令组装(P4 委托 planning.task_plan; 挡位策略按挡分叉, 环节十二a;
+    runtime=运行时身份事实 A3)。"""
     from ..agent.planning.task_plan import assemble_task_instruction
-    return assemble_task_instruction(task, prior_brief, policy=policy)
+    return assemble_task_instruction(task, prior_brief, policy=policy, runtime=runtime)
 
 
 def _meta_get(conv: dict) -> dict:
