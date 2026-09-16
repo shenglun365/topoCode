@@ -79,6 +79,11 @@ subagent 里程碑报告 → 回写需求边界 → 下一任务/批次先验增
 
 ### 环节十二a: 挡位体系(策略表 + 解析链 + 模板分叉)
 
+> **状态: 已落地**。as-built: 挡位指引合并进 orchestrator 单条系统消息
+> (废除 prompt.gear_guidance 二值文本与独立注入); req_agent 死常量
+> (_QUICK_DENY_TOOLS/_QUICK_KB_PREFIXES)拆除——挡位行为差异全部走提示词面;
+> strict/quick 前端线协议值保持不变(quick→T0, strict→auto 服务端映射)。
+
 **目标**: 现有 quick/strict 二值升级为 T0-T4 连续挡位, 策略数据驱动。
 
 **策略表**(`agent/governance/gears.py`, 新模块):

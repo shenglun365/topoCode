@@ -404,20 +404,23 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     except Exception:  # noqa: BLE001
         pass
 
-    # ── 分析挡位(会话级 analysisMode): strict=需求分析→规约→任务 | quick=轻整理直出任务卡 ──
+    # ── 分析挡位(会话级 analysisMode → 挡位策略, 环节十二a) ──
     try:
         _mode = str((conv or {}).get("analysisMode") or "strict").strip() or "strict"
     except Exception:  # noqa: BLE001
         _mode = "strict"
+    try:
+        from ..arch_routes.agent_executors import executor_hint_by_id
+        _gear_cfg = (executor_hint_by_id(str((conv or {}).get("executorId") or ""),
+                                          conv) or {}).get("executorConfig") or {}
+    except Exception:  # noqa: BLE001
+        _gear_cfg = {}
+    from .governance.gears import resolve_gear
+    _gear = resolve_gear(_mode, _gear_cfg)
     msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
                                 skill_scenarios=[str(s) for s in skill_scenarios],
                                 model_id=eff_model or model_id or "")
-    # v2 统一会话编排契约: 通用 agent 模式——能力分界 + 路由
-    _spec_note = (
-        "快捷挡: 不做需求分析, 不调用 req.propose(直接 task.propose 建卡)。"
-        if _mode == "quick" else
-        "严格挡: 开发类需求先 req.propose 产需求卡(创建即 ready), 再 task.propose 建卡;"
-        "分析/问答类请求直接回答不产卡。")
+    # v2 统一会话编排契约: 通用 agent 模式——能力分界 + 路由 + 挡位指引(单消息)
     msgs.insert(1, {"role": "system", "content":
         "【工作模式(通用 agent 路由)】你是 architect 外循环(编排者)。可调度资源: "
         "A. 你自己(知识/分析面): KB 架构资产检索、需求澄清与方案设计、数据资产、"
@@ -431,15 +434,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         "「统计文件数」「跑个脚本」)→ task.propose, 不要用 KB 检索话术推给用户; "
         "需要项目上下文/架构语义的 → 你自己分析。 "
         "执行期间 subagent 的提问/进展/完成会以消息进入本会话, 用户直接回复即转达。"
-        + _spec_note})
+        + _gear.architect_note})
     if assign_contract:
         msgs.insert(1, {"role": "system", "content": assign_contract})
-    # 挡位指引注入独立 system 消息(最后插入 → 恒在 msgs[1]; 不进块注册表, 等价模式不变)
-    try:
-        from .cognition.prompt import gear_guidance
-        msgs.insert(1, {"role": "system", "content": gear_guidance(_mode)})
-    except Exception:  # noqa: BLE001
-        pass
     # ---- 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
     io = _TurnIO(send, conv_id, last_user_msg_id)
     tools_used: set = set()

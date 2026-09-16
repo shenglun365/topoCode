@@ -322,10 +322,14 @@ def confirm_task(task_id: str) -> dict:
     if conflict:
         store.TasksStore.finish(task_id, "failed", f"边界冲突: {conflict}")
         return {"ok": False, "error": conflict}
-    payload = {"root": root, "instruction": _task_instruction(task, _task_chain_brief(conv_id, task_id)),
+    payload = {"root": root,
                "branchName": branch, "projectId": project,
                "boundaries": {"files": boundary_files, "components": [],
                               "readOnly": False}}
+    # 挡位策略(环节十二a): 指令按挡分叉 + 任务级轮次上限随挡下发
+    policy = _task_gear(task, conv)
+    payload["instruction"] = _task_instruction(task, _task_chain_brief(conv_id, task_id),
+                                               policy=policy)
     # hint 已含注册表默认兜底(上方选定单源)——此处不得按空 executorId 重查覆盖
     for k in ("model", "basePort", "autoStart", "baseUrl"):
         v = hint.get(k)
@@ -333,7 +337,9 @@ def confirm_task(task_id: str) -> dict:
             payload[k] = v
     if hint.get("executorId"):
         payload["executorId"] = hint["executorId"]
-        payload["executorConfig"] = hint.get("executorConfig") or {}
+        payload["executorConfig"] = {**(hint.get("executorConfig") or {}),
+                                     # 任务级轮次随挡下发(挡位表单源, 覆盖注册表默认)
+                                     "max_iterations": policy.max_iterations}
     if _etype:
         payload["executorType"] = _etype   # 引擎选择以 task 为准(无注册表也可指定)
     # 回合超时配置下发(执行器注册表 config → runner 看门狗参数)
@@ -898,10 +904,22 @@ async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
         on_lost=on_lost, on_finished=on_finished)
 
 
-def _task_instruction(task: dict, prior_brief: str = "") -> str:
-    """任务指令组装(P4 委托 planning.task_plan, 原文迁入保真)。"""
+def _task_gear(task: dict, conv: Optional[dict] = None):
+    """任务挡位解析(环节十二a): 会话 analysisMode + 执行器配置 → GearPolicy。"""
+    from ..agent.governance.gears import resolve_gear
+    _conv = conv or store.ConversationsStore.get(task.get("conversationId") or "") or {}
+    try:
+        hint = executor_hint_by_id(str(task.get("executorId") or ""), _conv) or {}
+    except Exception:  # noqa: BLE001 — 注册表不可读时按无配置解析
+        hint = {}
+    return resolve_gear(str(_conv.get("analysisMode") or ""),
+                        hint.get("executorConfig") or {})
+
+
+def _task_instruction(task: dict, prior_brief: str = "", policy=None) -> str:
+    """任务指令组装(P4 委托 planning.task_plan; 挡位策略按挡分叉, 环节十二a)。"""
     from ..agent.planning.task_plan import assemble_task_instruction
-    return assemble_task_instruction(task, prior_brief)
+    return assemble_task_instruction(task, prior_brief, policy=policy)
 
 
 def _meta_get(conv: dict) -> dict:
@@ -993,6 +1011,8 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                             "model_id": cfg.get("model_id") or "",
                             "api_key": cfg.get("api_key") or "",
                             "max_iterations": cfg.get("max_iterations"),
+                            "capability": cfg.get("capability") or "",
+                            "tierProbed": cfg.get("tierProbed") or "",
                             "arch_url": cfg.get("arch_url") or "",
                             "codex_bin": cfg.get("codex_bin") or "",
                             "codex_home": cfg.get("codex_home") or "",

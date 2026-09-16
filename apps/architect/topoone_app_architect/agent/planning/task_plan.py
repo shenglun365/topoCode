@@ -126,12 +126,18 @@ def propose_task_tool(title: str, instruction: str,
             "hint": "任务卡已生成, 等待用户确认后执行; 请告知用户可确认/取消/调整。"}
 
 
-def assemble_task_instruction(task: dict, prior_brief: str = "") -> str:
+def assemble_task_instruction(task: dict, prior_brief: str = "",
+                              policy: Optional[Any] = None) -> str:
     """任务指令组装: task.instruction(architect 整理) 为正文 + 绑定需求规约
     补充(边界/验收) + 工作环境/DoD 系统段(确定性注入, 不依赖 LLM)。
 
+    policy: 挡位策略(gears.GearPolicy, 环节十二a)——确认节奏/粒度按挡分叉;
+    None → 默认档(T1)。
     prior_brief: 前情链简报(同会话近期终态任务摘要, confirm 时自动注入)。
     """
+    if policy is None:
+        from ..governance.gears import default_policy
+        policy = default_policy()
     rid = task.get("reqId") or ""
     r = _store().RequirementsStore.get(rid) or {} if rid else {}
     active = _store().RequirementsStore.spec_active(rid) or {} if rid else {}
@@ -197,6 +203,7 @@ def assemble_task_instruction(task: dict, prior_brief: str = "") -> str:
         "（头文件解耦/前向声明链/重构 include 等一律不做）；\n"
         "4. 全部完成后输出 [[IMPLEMENT_DONE]] 与摘要(变更文件/验证结果/编译结果/遗留项)；"
         "任一环节需要用户操作、确认、澄清或补充信息时，输出 [[NEED_INPUT]] 与具体问题后结束回合等待。")
+    # 里程碑协议(环节十一) + 挡位粒度/节奏分叉(环节十二a, 数据驱动)
     parts.append(
         "## 里程碑协议（重要，防止无限消耗）\n"
         "- 预计超过约 15 次工具调用的复杂任务：先探索代码库，在首次回复中提交"
@@ -208,5 +215,8 @@ def assemble_task_instruction(task: dict, prior_brief: str = "") -> str:
         "  `下一里程碑: 名称 或 \"全部完成\"`），"
         "然后输出 [[NEED_INPUT]] 等待用户指示；**禁止未提交报告就连续跨里程碑推进**；\n"
         "- 预计 15 次工具调用以内的简单任务：直接执行，完成后输出 [[IMPLEMENT_DONE]]。")
+    agent_note = str(getattr(policy, "agent_note", "") or "").strip()
+    if agent_note:
+        parts.append("## 执行方式（按任务挡位）\n" + agent_note)
     return "\n\n".join(parts)
 

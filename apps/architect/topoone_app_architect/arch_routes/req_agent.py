@@ -219,12 +219,9 @@ def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-# ── 分析挡位工具门禁(会话级 analysisMode: strict/quick) ─────────────
-# quick:  需求分析/规约工具拦截(轻整理直出任务卡) + KB 域工具不可用
-_QUICK_DENY_TOOLS = {
-    "req.propose", "req.clarify", "req.collect", "req.assess", "req.spec", "req.plan",
-}
-_QUICK_KB_PREFIXES = ("kb.", "map.", "asset.")
+# ── 分析挡位(会话级 analysisMode) → 挡位体系已迁 agent/governance/gears.py
+#    (环节十二a, T0-T4 数据驱动); 旧二值工具门禁已随流程缓解层拆除——
+#    挡位行为差异全部走提示词面(orchestrator 注入 architect_note)。
 # 规约状态机工具: v2 默认退役(模型面不可见)——strict 挡恢复启用, quick 挡保持退役
 _SPEC_TOOLS = {"req.propose", "req.amend"}
 

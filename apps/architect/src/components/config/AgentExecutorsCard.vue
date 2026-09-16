@@ -156,10 +156,10 @@ function toggleExpand(e: ExecEntry) {
 
 function onTypeChange(e: ExecEntry) {
   const defaults: Record<string, Record<string, any>> = {
-    opencode: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800, models: [] },
+    opencode: { auto_start: true, base_port: 3478, permission: 'auto', timeout: 1800, capability: '', models: [] },
     'remote-agent': { agent_url: '', api_key: '', git_remote: 'auto', timeout: 3600, models: [] },
     'codex-server': { codex_bin: 'codex', approval_policy: 'never', sandbox_mode: 'workspace-write', timeout: 3600, models: [] },
-    'cline-sdk': { node_bin: 'node', sidecar_script: '', provider_id: 'openai-compatible', model_id: '', base_url: '', api_key: '', max_iterations: 40, system_prompt: '', tool_policies: {}, models: [] },
+    'cline-sdk': { node_bin: 'node', sidecar_script: '', provider_id: 'openai-compatible', model_id: '', base_url: '', api_key: '', max_iterations: 2000, capability: '', system_prompt: '', tool_policies: {}, models: [] },
     cli: { command: '', timeout: 600 },
     'serve-generic': { base_url: '', api_key: '' },
     mock: {},
@@ -319,6 +319,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'auto_start', label: '自动拉起', kind: 'bool' },
     { key: 'permission', label: '权限策略', kind: 'select', options: ['auto', 'ask'] },
     { key: 'timeout', label: '超时(秒)', kind: 'num' },
+    { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2', 'T3', 'T4'] },
     { key: 'model', label: '默认模型', kind: 'model-select' },
   ],
   'remote-agent': [
@@ -327,9 +328,10 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'git_remote', label: '共享仓库(auto=内置)' },
     { key: 'timeout', label: '超时(秒)', kind: 'num' },
   ],
-  'codex-server': [
-    { key: 'codex_bin', label: 'codex 路径' },
-    { key: 'model', label: '默认模型', kind: 'model-select' },
+    'codex-server': [
+        { key: 'codex_bin', label: 'codex 路径' },
+        { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2', 'T3', 'T4'] },
+        { key: 'model', label: '默认模型', kind: 'model-select' },
     { key: 'codex_home', label: 'CODEX_HOME(隔离)' },
     { key: 'approval_policy', label: '审批策略', kind: 'select', options: ['never', 'on-request', 'on-failure', 'untrusted'] },
     { key: 'sandbox_mode', label: '沙箱', kind: 'select', options: ['workspace-write', 'read-only', 'danger-full-access'] },
@@ -341,6 +343,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'base_url', label: '端点(本地必填, /v1)' },
     { key: 'api_key', label: 'API Key' },
     { key: 'max_iterations', label: '最大迭代', kind: 'num' },
+    { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2', 'T3', 'T4'] },
     { key: 'system_prompt', label: '系统提示(空=默认协议)' },
     { key: 'node_bin', label: 'node 路径(需≥22)' },
     { key: 'sidecar_script', label: 'sidecar 路径' },

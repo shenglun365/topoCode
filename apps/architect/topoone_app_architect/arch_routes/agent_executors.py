@@ -41,6 +41,7 @@ DEFAULT_EXECUTORS = [
         "config": {"node_bin": "node", "sidecar_script": "",
                    "provider_id": "", "model_id": "", "api_key": "",
                    "max_iterations": 2000,  # 上限放大由循环护栏兜底(环节十一: 重复指纹/无进展/停滞看门狗), 正常消耗远低于此
+                   "capability": "",        # 能力档位 T0-T4(空=未标定, 解析链落 T1; 十二b 探测写入 tierProbed)
                    "system_prompt": "", "tool_policies": {}, "models": [],
                    "mcp_servers": [],
                    "teams": {"enabled": False, "teamName": "", "agents": []}},
@@ -176,6 +177,11 @@ def _validate(entries: list[dict]) -> Optional[str]:
         names = [m["name"] for m in cfg["models"]]
         if len(names) != len(set(names)):
             return f"执行器 {eid} 模型名称重复"
+        # 能力档位写侧校验(环节十二a): 空=未标定(解析链落默认 T1)
+        cap = str(cfg.get("capability") or "").strip()
+        if cap and cap not in ("T0", "T1", "T2", "T3", "T4"):
+            return f"执行器 {eid} 能力档位非法: {cap!r}(允许 T0-T4 或留空)"
+        cfg["capability"] = cap
         # 模型配置写入校验(cline-sdk 专属, cv-163/166/168 教训: 空 model/悬空默认/
         # 坏 url 均运行期才炸; opencode 等类型 models.url 为可选元数据不强制)
         if e.get("type") == "cline-sdk":

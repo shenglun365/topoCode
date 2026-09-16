@@ -509,21 +509,22 @@ async def set_session_model(conv_id: str, request: Request):
 
 @router.post("/sessions/{conv_id}/analysis-mode")
 async def set_analysis_mode(conv_id: str, request: Request):
-    """切换会话分析挡位(strict/quick, 即时生效于本会话后续回合)。
+    """切换会话分析挡位(即时生效于本会话后续回合)。
 
-    body: {mode} strict=开发类需求先需求分析出卡(卡即 ready) | quick=轻整理直出任务卡。
+    body: {mode} — quick=T0 直通车 | strict/auto=按执行器能力自动 |
+    T0-T4=钉死指定档(挡位体系见 agent/governance/gears.py)。
     """
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
     data = await request.json()
     mode = str(data.get("mode") or "").strip()
-    if mode not in ("strict", "quick"):
-        return err(400, "mode 须为 strict 或 quick")
+    from ..agent.governance.gears import GEAR_MODES, gear_note
+    if mode not in GEAR_MODES:
+        return err(400, f"mode 须为 {'/'.join(GEAR_MODES)}")
     store.ConversationsStore.update(conv_id, {"analysisMode": mode})
-    note = ("严格挡：开发类需求先需求分析产出需求卡(即 ready)，再建任务卡"
-            if mode == "strict" else "快捷挡：轻整理直出任务卡")
-    return ok({"conversationId": conv_id, "analysisMode": mode, "summary": note})
+    return ok({"conversationId": conv_id, "analysisMode": mode,
+               "summary": gear_note(mode)})
 
 
 @router.post("/sessions/{conv_id}/msg-digest")

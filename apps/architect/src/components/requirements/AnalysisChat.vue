@@ -266,15 +266,15 @@ function pickRoute(r: RouteTarget) {
   routeMenuOpen.value = false
   routeOverride.value = r
 }
-/** 快捷挡直切开关(闪电 icon): 严格=关(暗) / 快捷=开(高亮), 点击取反, 上抛宿主 REST 即时生效。 */
+/** 快捷挡直切开关(闪电 icon): 标准=关(暗, 按执行器能力档位自动适配) / 快捷=开(高亮, T0 直通车), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
 const quickOn = computed(() => (props.analysisMode || 'strict') === 'quick')
 /** 空白对话(会话未创建)锁定: 挡位是会话级字段, 无 conv_id 可写。 */
 const quickLocked = computed(() => props.hasSession === false)
 const quickTitle = computed(() => {
   if (quickLocked.value) return '快捷挡需在已有会话中切换 — 发送首条消息创建会话后可用'
   return quickOn.value
-    ? '快捷挡已开启 — 直出任务卡(关 KB)（点击关闭）'
-    : '快捷挡 — 直出任务卡(关 KB)（点击开启）'
+    ? 'T0 直通车已开启 — 直出任务卡·关 KB（点击关闭回到标准挡）'
+    : '标准挡 — 按执行器能力档位自动适配（点击开启 T0 直通车）'
 })
 function toggleQuickMode() {
   if (quickLocked.value) return
