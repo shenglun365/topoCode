@@ -1,13 +1,7 @@
-"""兼容 shim(P5): 策略矩阵(agent.cognition.strategy) + 修复外循环(agent.reflection.repair)。
+"""兼容 shim(P5): 修复外循环(agent.reflection.repair)——策略矩阵已拆除(cv-175)。
 
 存量 `from .adaptation import X` 路径保持可用(sessions/units/planning/req_spec)。
 """
-from ..agent.cognition.strategy import (  # noqa: F401
-    STRATEGY_MATRIX,
-    _DEFAULT_STRATEGIES,
-    strategies_for_model,
-    strategies_for_tier,
-)
 from ..agent.reflection.repair import (  # noqa: F401
     RepairTask,
     json_dumps,

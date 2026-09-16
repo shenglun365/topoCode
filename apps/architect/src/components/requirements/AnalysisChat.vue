@@ -81,8 +81,6 @@ const emit = defineEmits<{
   'contract-confirm': [id: string]
   'contract-delete': [id: string]
   'contract-edit-save': [id: string, patch: Record<string, unknown>]
-  'job-accept': [meta: Record<string, any>]
-  'job-resume': []
   'spec-apply': [p: { index: number; payload: Record<string, unknown> }]
   'convention-confirm': [id: string]
   'convention-ignore': [id: string]
@@ -1163,28 +1161,6 @@ onUnmounted(() => {
             v-else
             :content="m.content"
           />
-
-          <!-- 作业事件卡操作(生命周期重构): done→验收 / waiting_input→继续执行快捷 -->
-          <div
-            v-if="m.meta?.kind === 'job_done'"
-            class="mt-2 flex items-center gap-2"
-          >
-            <button
-              class="btn btn-xs btn-primary"
-              @click="emit('job-accept', m.meta)"
-            >{{ t('session.job.accept') }}</button>
-            <span class="text-[10px] text-ctp-overlay0">{{ t('session.job.acceptHint') }}</span>
-          </div>
-          <div
-            v-else-if="m.meta?.kind === 'job_input'"
-            class="mt-2 flex items-center gap-2"
-          >
-            <button
-              class="btn btn-xs"
-              @click="emit('job-resume')"
-            >{{ t('session.job.resume') }}</button>
-            <span class="text-[10px] text-ctp-overlay0">{{ t('session.job.resumeHint') }}</span>
-          </div>
 
           <!-- 需求卡动作(创建即 ready): [一键建卡执行]——点击发 /指令 后端直通 -->
           <div

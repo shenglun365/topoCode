@@ -532,11 +532,6 @@ async function stopExec() {
     stopBusy.value = false
   }
 }
-function resumeJob() {
-  void conv.send('/继续', { ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}) })
-  onSent()
-}
-
 // running 态准实时同步: 复用 5s 轮询——刷新 workState + 增量消息(泵产物)
 async function syncRunningState(force = false) {
   if (!conv.activeId) return
@@ -559,42 +554,6 @@ async function syncRunningState(force = false) {
       }
     }
   } catch { /* 列表失败无碍 */ }
-}
-
-// 验收视图(done 消息卡「验收」): 差异+简报+通过/返工
-const acceptOpen = ref(false)
-const acceptMsg = ref('')
-const acceptDiff = ref('')
-const acceptMeta = ref<Record<string, any> | null>(null)
-const acceptBusy = ref(false)
-async function openAccept(meta: Record<string, any>) {
-  acceptMeta.value = meta
-  acceptMsg.value = ''
-  acceptDiff.value = ''
-  acceptOpen.value = true
-  try {
-    const d = await apiGet<{ message: string }>(`/sessions/${conv.activeId}/diff`)
-    acceptDiff.value = d?.message || ''
-  } catch (e: any) {
-    acceptDiff.value = e?.message || String(e)
-  }
-}
-async function acceptPass() {
-  if (!conv.activeReqId || acceptBusy.value) return
-  acceptBusy.value = true
-  try {
-    await apiPost(`/requirements/${conv.activeReqId}/done`, { done: true })
-    acceptMsg.value = t('session.job.acceptDone')
-    acceptOpen.value = false
-  } catch (e: any) {
-    acceptMsg.value = e?.message || String(e)
-  } finally {
-    acceptBusy.value = false
-  }
-}
-function acceptRework() {
-  acceptOpen.value = false
-  conv.pushDraft(t('session.job.reworkDraft'))
 }
 
 // 命名规约提议卡(资产对话): 确认固化 / 忽略(原资产页逻辑迁至 dock)
@@ -822,30 +781,6 @@ async function pollRunningState() {
         </div>
       </div>
 
-      <!-- 验收视图(作业 done 消息卡入口): 差异 + 简报 + 通过/返工 -->
-      <div
-        v-if="acceptOpen"
-        class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
-        @click.self="acceptOpen = false"
-      >
-        <div class="panel flex max-h-[80%] w-full max-w-lg flex-col">
-          <div class="panel-header">
-            <span>{{ t('session.job.acceptTitle') }}（{{ acceptMeta?.branch || '' }}）</span>
-            <button class="btn btn-xs btn-ghost" @click="acceptOpen = false">
-              <XMarkIcon class="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div class="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-            <div class="whitespace-pre-wrap rounded-lg border border-ctp-surface1 bg-ctp-mantle/60 p-2.5 text-[11px] leading-relaxed text-ctp-subtext0">{{ acceptDiff || '…' }}</div>
-            <p v-if="acceptMsg" class="text-[11px] text-ctp-yellow break-all">{{ acceptMsg }}</p>
-          </div>
-          <div class="flex items-center justify-end gap-2 border-t border-ctp-surface0 p-2.5">
-            <button class="btn btn-xs" :disabled="acceptBusy" @click="acceptRework">{{ t('session.job.rework') }}</button>
-            <button class="btn btn-xs btn-primary" :disabled="acceptBusy || !conv.activeReqId" @click="acceptPass">{{ t('session.job.pass') }}</button>
-          </div>
-        </div>
-      </div>
-
       <AnalysisChat
         class="h-full"
         :turns="conv.turns"
@@ -878,8 +813,6 @@ async function pollRunningState() {
         @bind-executor="onBindExecutor"
         @set-model="onSetModel"
         @send="onSendChat"
-        @job-accept="openAccept"
-        @job-resume="resumeJob"
         @feed-turn="onFeedTurn"
         @spec-apply="onSpecApply"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"

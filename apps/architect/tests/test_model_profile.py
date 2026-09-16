@@ -136,21 +136,6 @@ def test_repair_loop_parse_only(tmp_path, monkeypatch):
     assert not out2["ok"] and out2["action"] == "failed"
 
 
-def test_strategy_matrix():
-    from topoone_app_architect.arch_routes import adaptation as ad
-    assert ad.strategies_for_tier(0)["draft_card"] is False
-    assert ad.strategies_for_tier(2)["draft_card"] is True
-    assert ad.strategies_for_tier(4)["lenient_parse"] == "max"
-    assert ad.strategies_for_tier(3)["postprocess"] is True
-    assert ad.strategies_for_tier(1)["postprocess"] is False
-
-
-# ── P2: 草稿卡确定性收敛 + guard 代落库 ───────────────────────────────
-
-SPEC_FENCE = ('方案如下\n```json\n{"title": "Nginx 监控", "requirementMd": "查找 nginx 进程", '
-              '"designMd": "psutil 扫描+表格输出", "acceptanceMd": ["运行显示 PID"]}\n```')
-
-
 def _mk_conv_nobind(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
