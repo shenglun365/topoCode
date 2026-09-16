@@ -38,6 +38,17 @@ _KINDS = (
     "team", "mcp",
 )
 
+# A6.1 反向请求(ServerRequest)类型契约——runner → 宿主(architect) 需应答的事件:
+#   approval_request  宿主必须经 /approval 端点应答(requestId, approved, reason)
+#   input_required    宿主必须经 /input 转达用户回复(或显式跳过)
+# done/failed 为终态通知(非请求), K2 结构化回执的载体。
+SERVER_REQUEST_TYPES = ("approval_request", "input_required")
+TURN_COMPLETED_KINDS = ("done", "failed")
+
+
+def is_server_request(kind: str) -> bool:
+    return kind in SERVER_REQUEST_TYPES
+
 
 class EventKind:
     """事件类型常量(字符串单源; 用 plain str 便于 JSON 直传与存量比较)。"""
@@ -65,6 +76,30 @@ class EventKind:
 
 def is_valid_kind(kind: str) -> bool:
     return kind in _KINDS
+
+
+def schema_snapshot() -> Dict[str, Any]:
+    """事件契约快照(R2 契约门禁; rpc-method-baseline 同模式)。
+
+    输出当前 schema 全量事实, 确定性可序列化(禁时间戳等易变值), 供
+    runner 侧基线比对与 architect 侧消费测试共同守护。基线文件:
+    packages/core/runner-events-baseline.json(生成: scripts/runner-events-baseline.py)。
+    """
+    constants = {name: value for name, value in sorted(vars(EventKind).items())
+                 if not name.startswith("_") and isinstance(value, str)}
+    return {
+        "kindCount": len(_KINDS),
+        "kinds": list(_KINDS),                       # 顺序即契约: 只许尾部追加
+        "eventKindConstants": constants,             # EventKind 常量 ↔ _KINDS 一致性由测试锁定
+        "eventBaseShape": ["seq", "ts", "kind", "text"],
+        "textLimit": _TEXT_LIMIT,
+        "bus": {"maxEvents": EventBus.MAX_EVENTS, "queueSize": EventBus.QUEUE_SIZE},
+        "parsePolicy": {"requireDict": True, "requireSeqIntable": True,
+                        "unknownKindTolerant": True},  # 老 runner 新 kind 向后兼容
+        # A6.1: 反向请求类型契约(宿主应答制) + 终态通知映射
+        "serverRequestTypes": list(SERVER_REQUEST_TYPES),
+        "turnCompletedKinds": list(TURN_COMPLETED_KINDS),
+    }
 
 
 def make_event(seq: int, kind: str, text: str = "", **extra: Any) -> Dict[str, Any]:

@@ -22,7 +22,8 @@ from topoone.plugins.runner.turn_adapter import TurnAdapter, TurnOutcome  # noqa
 from topoone.plugins.runner.implement import ImplementJob  # noqa: E402
 
 SNAPSHOT_KEYS = {"jobId", "status", "error", "branch", "worktree", "root",
-                 "boundaries", "sessionId", "executorId", "lastActivityTs", "events"}
+                 "boundaries", "sessionId", "executorId", "lastActivityTs",
+                 "turnContext", "pendingApprovals", "events"}
 EVENT_BASE_KEYS = {"seq", "ts", "kind", "text"}
 
 

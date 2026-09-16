@@ -122,6 +122,14 @@ class ImplementJob:
         self.adapter: TurnAdapter = adapter or build_adapter(
             "opencode", "opencode",
             {"base_port": base_port, "auto_start": auto_start, "base_url": base_url})
+        # A6.3 TurnContext: 作业级上下文事实 + 每轮快照(恢复/合并检查/审计消费)
+        self.turn_context: Dict[str, Any] = {
+            "model": model, "base": self.base, "branch": branch,
+            "root": self.root, "executorId": self.adapter.executor_id,
+            "turns": []}
+        # A6.1 反向请求登记表: approval_request 在答 → 断线重连/恢复后宿主可见
+        # (dsh queued-minus-delivered 最小形态; 应答经 /approval 销账)
+        self.pending_requests: Dict[str, Dict[str, Any]] = {}
         self.turn_timeout = float(turn_timeout)
         self.stall_sec = float(stall_sec)
         self.project_id = project_id
@@ -168,7 +176,26 @@ class ImplementJob:
                 "sessionId": self.session_id,
                 "executorId": self.adapter.executor_id,
                 "lastActivityTs": self.last_activity_ts,
+                "turnContext": {**self.turn_context,
+                                "turns": self.turn_context["turns"][-5:]},
+                "pendingApprovals": [
+                    {"requestId": rid, **{k: v for k, v in row.items()
+                                          if k != "requestId"}}
+                    for rid, row in sorted(self.pending_requests.items())],
                 "events": self.bus.since(since)}
+
+    # ── A6.1 反向请求登记(A5 切片: 应答前可见) ──
+
+    def register_pending_request(self, request_id: str, tool_name: str = "",
+                                 tool_input: Any = None) -> None:
+        if not request_id:
+            return
+        self.pending_requests[str(request_id)] = {
+            "toolName": str(tool_name or ""), "toolInput": tool_input,
+            "ts": int(time.time() * 1000)}
+
+    def resolve_pending_request(self, request_id: str) -> Optional[Dict[str, Any]]:
+        return self.pending_requests.pop(str(request_id or ""), None)
 
     # ── 生命周期 ──
 
@@ -235,6 +262,12 @@ class ImplementJob:
         return {"ok": True, "queued": False}
 
     async def _run_turn(self, text: str) -> None:
+        # A6.3 TurnContext: 每轮快照(回合号/时点/模型——恢复与审计消费)
+        self.turn_context["turns"].append({
+            "turn": len(self.turn_context["turns"]) + 1,
+            "startedAt": int(time.time() * 1000),
+            "model": self.model or ""})
+        self.turn_context["turns"] = self.turn_context["turns"][-20:]
         try:
             outcome = await self.adapter.run_turn(self, text)
             output = outcome.output or ""
@@ -757,6 +790,11 @@ def register(app: FastAPI) -> None:
         try:
             ok = await fn(job, request_id, body.get("approved") is True,
                           str(body.get("reason") or ""))
+            if ok:
+                # A6.1 反向请求销账(queued-minus-delivered: 应答即出队)
+                resolve = getattr(job, "resolve_pending_request", None)
+                if resolve:
+                    resolve(request_id)
             return {"ok": bool(ok)}
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)[:300]}

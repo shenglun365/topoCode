@@ -1,0 +1,67 @@
+{
+  "apiVersion": 1,
+  "description": "runner REST 面基线（R1 契约门禁；路径/方法集冻结，新增端点=追加，改名/删除=破坏性变更）",
+  "pathCount": 20,
+  "paths": {
+    "/api/implement": [
+      "post"
+    ],
+    "/api/implement/gc": [
+      "post"
+    ],
+    "/api/implement/list": [
+      "get"
+    ],
+    "/api/implement/running": [
+      "get"
+    ],
+    "/api/implement/{job_id}": [
+      "get"
+    ],
+    "/api/implement/{job_id}/abort": [
+      "post"
+    ],
+    "/api/implement/{job_id}/approval": [
+      "post"
+    ],
+    "/api/implement/{job_id}/checkpoints": [
+      "get"
+    ],
+    "/api/implement/{job_id}/diff": [
+      "get"
+    ],
+    "/api/implement/{job_id}/finish": [
+      "post"
+    ],
+    "/api/implement/{job_id}/input": [
+      "post"
+    ],
+    "/api/implement/{job_id}/messages": [
+      "get"
+    ],
+    "/api/implement/{job_id}/model": [
+      "post"
+    ],
+    "/api/implement/{job_id}/pending": [
+      "get"
+    ],
+    "/api/implement/{job_id}/proceed": [
+      "post"
+    ],
+    "/api/implement/{job_id}/restore": [
+      "post"
+    ],
+    "/api/implement/{job_id}/usage": [
+      "get"
+    ],
+    "/api/probe": [
+      "post"
+    ],
+    "/health": [
+      "get"
+    ],
+    "/healthz": [
+      "get"
+    ]
+  }
+}

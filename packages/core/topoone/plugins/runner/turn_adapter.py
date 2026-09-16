@@ -1011,6 +1011,13 @@ class ClineTurnAdapter(TurnAdapter):
             job.emit("turn_outcome", str(params.get("summary") or ""),
                      status=params.get("status"))
         elif t == "approval_request":
+            # A6.1 反向请求登记: 应答前宿主可经 snapshot.pendingApprovals 可见
+            # (断线重连/恢复后不丢挂起请求; 应答经 /approval 销账)
+            register = getattr(job, "register_pending_request", None)
+            if register:
+                register(str(params.get("requestId") or ""),
+                         str(params.get("toolName") or ""),
+                         params.get("input"))
             job.emit("approval_request",
                      f"工具 {params.get('toolName')} 等待确认",
                      requestId=params.get("requestId"),
