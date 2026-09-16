@@ -82,10 +82,21 @@ class LoopGuard:
         return (bool(self._verdict), self._verdict)
 
     def _close_round(self) -> None:
-        """usage → 回合收口: 指纹比对 + 轮缓冲复位。"""
-        fp = (tuple(self._round_tools), _norm_digest(" ".join(self._round_text)))
+        """usage → 回合收口: 指纹比对 + 轮缓冲复位。
+
+        **只统计有实质叙述的轮**(误伤修复, cv-181 实证): 指纹的证据是
+        "模型在字面重复自己"——静默轮(无文本)没有这个证据, 且不同命令
+        批次在工具名指纹下不可区分; 静默轮重置计数。真静默循环由
+        implement 无进展看门狗(文件状态)兜底。
+        """
+        text_digest = _norm_digest(" ".join(self._round_text))
+        fp = (tuple(self._round_tools), text_digest)
         self._round_tools = []
         self._round_text = []
+        if not text_digest:
+            self._last_fp = None
+            self._fp_streak = 0
+            return
         if fp == self._last_fp:
             self._fp_streak += 1
         else:

@@ -66,6 +66,41 @@ def test_fingerprint_requires_same_tool_sequence():
     assert not loop
 
 
+def test_silent_rounds_do_not_fingerprint():
+    """静默轮(无叙述)不参与指纹——不同命令批次在工具名指纹下不可区分,
+    误伤修复(cv-181): 连续纯 run_commands 零叙述 = 正常探索/编译批次。"""
+    g = LoopGuard()
+    for _ in range(8):
+        for _ in range(2):
+            g.feed("tool", tool_name="run_commands")
+        loop, _ = g.feed("usage")
+        assert not loop
+    # 静默轮重置后, 带叙述的真循环仍可检出
+    for _ in range(3):
+        loop, _ = _round(g, "still trying the same fix", "run_commands")
+    assert loop
+
+
+def test_narrated_loop_interleaved_with_silent_not_fingerprinted():
+    """交错静默轮 → 指纹不触发(静默重置, 按设计); 此类循环由
+    错误签名检测器(同文本 ×5 非连续)兜底。"""
+    g = LoopGuard()
+    for _ in range(6):
+        loop, _ = _round(g, "retrying the identical compile fix", "run_commands")
+        assert not loop                     # 指纹永不触发
+        g.feed("tool", tool_name="run_commands")
+        g.feed("usage")
+    # 错误签名检测器兜底: 同一叙述累计 5 次即判
+    g2 = LoopGuard()
+    verdict = (False, "")
+    for _ in range(5):
+        g2.feed("tool", tool_name="run_commands")
+        verdict = g2.feed("text", text="retrying the identical compile fix")
+        g2.feed("usage")
+    # 真循环仍被检出: 叙述相同 → 指纹(第3轮)先于签名(第5次)触发, 任一即可
+    assert verdict[0] and ("指纹轮" in verdict[1] or "签名重复" in verdict[1])
+
+
 # ── 错误/叙述签名 ────────────────────────────────────────────────────
 
 def test_text_signature_triggers_on_repetition():
