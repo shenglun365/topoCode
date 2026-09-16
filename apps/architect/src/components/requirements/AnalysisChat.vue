@@ -74,6 +74,7 @@ const emit = defineEmits<{
   answers: [answers: Record<string, string>]
   'confirm-draft': []
   'delete-turn': [index: number]
+  'rollback-to': [index: number]
   'feed-turn': [p: { index: number; id?: string; summarize?: boolean }]
   'refresh-asset': [assetId: string]
   'toggle-diagram-skill': [enabled: boolean]
@@ -99,6 +100,22 @@ function openAssetRef(id: string) {
 
 // ── S3 投喂门: 消息级「转达 coding」(dock 执行 POST /feed, 结果本地消息) ──
 const feedBusyIdx = ref(-1)
+const mergeBusyIdx = ref(-1)
+
+/** 合并入口检查(环节十五): git 事实 → 轻提示(可否直并/需先 rebase)。 */
+async function runMergePrecheck(i: number, taskId: string) {
+  mergeBusyIdx.value = i
+  try {
+    const r = await apiGet<{ fastForward: boolean | null; mainNewCommits: string[]; branchCommits: string[]; advice: string }>(
+      `/tasks/${taskId}/merge-precheck`)
+    const ff = r.fastForward === true ? '✓ 可直接合并' : r.fastForward === false ? '⚠ 主目录有推进, 需先 rebase' : '— 无基点, 请手工检视'
+    showToast(`合并检查: ${ff} — ${r.advice}`)
+  } catch (e: any) {
+    showToast(`✗ 合并检查失败: ${e?.message || e}`)
+  } finally {
+    mergeBusyIdx.value = -1
+  }
+}
 
 // ── 规约 JSON 识别(字段签名): 「写入需求」按钮的显示条件与载荷提取 ──
 const SPEC_FIELDS = [
@@ -1128,6 +1145,14 @@ onUnmounted(() => {
             >
               <TrashIcon class="w-3 h-3" />
             </button>
+            <button
+              class="text-ctp-overlay0 hover:text-ctp-peach transition-colors p-0.5"
+              title="回退到此 — 之后消息作废(运行中任务须先停止)"
+              :disabled="busy"
+              @click="emit('rollback-to', i)"
+            >
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
+            </button>
           </div>
 
           <div
@@ -1138,6 +1163,22 @@ onUnmounted(() => {
               <BookOpenIcon class="w-3 h-3" />{{ t('requirement.chat.reasoning') }}
             </div>
             {{ m.reasoning }}
+          </div>
+          <!-- 完成卡合并入口(环节十五): git 事实检视(主目录推进/分支内容/可否直并) -->
+          <div
+            v-if="m.meta?.kind === 'task_done' && m.meta?.taskId"
+            class="mt-1.5 flex items-center gap-2"
+          >
+            <button
+              class="flex items-center gap-1.5 text-[10px] text-ctp-green hover:text-ctp-teal transition-colors"
+              :disabled="mergeBusyIdx === i"
+              title="合并入口检查 — 主目录是否有推进/是否可直接合并"
+              @click="runMergePrecheck(i, m.meta.taskId)"
+            >
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
+              合并检查
+            </button>
+            <span v-if="mergeBusyIdx === i" class="text-[10px] text-ctp-overlay0">检查中…</span>
           </div>
           <!-- 转达摘要回执: 折叠卡(留"给执行器发过什么"的感知, 点开看全文) -->
           <div

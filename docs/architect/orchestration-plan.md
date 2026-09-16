@@ -198,6 +198,13 @@ prompts.py 被分叉取代的单一 DoD 常量; 前端 quick/strict 旧文案。
 
 ### 环节十五: 回退消息 + 合并入口 hash 检查(收尾, 可与十二b 并行)
 
+> **状态: 已落地**。as-built: 回退 = DELETE
+> `/requirements/conversations/{id}/messages/{msgId}/after`(time+rowid 排序
+> 语义与 messages() 一致, 运行中任务 409 守卫, 前端消息行内回退按钮 →
+> conversation-store.rollbackTo 本地截断); 合并入口 = GET
+> `/tasks/{id}/merge-precheck`(fastForward/mainNewCommits/branchCommits/
+> advice), done 卡"合并检查"按钮 → 轻提示。
+
 **目标**: "停止→调整上下文→再执行"补齐最后缺口; 合并时刻的安全检查。
 
 **内容**:

@@ -119,6 +119,26 @@ async def delete_conversation_message(conv_id: str, message_id: str):
     return ok({"deleted": ok_deleted, "id": message_id})
 
 
+@router.delete("/requirements/conversations/{conv_id}/messages/{message_id}/after")
+async def rollback_conversation_messages(conv_id: str, message_id: str):
+    """回退到消息 N(环节十五): 截断其后全部消息(不含自身)。
+
+    语义: 回退点之后作废——配合"停止→调整上下文→再执行"。运行中任务
+    须先停止; 会话 reqId 绑定与任务库回执不受影响。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "Conversation not found")
+    from . import exec_bridge
+    active = exec_bridge.active_task_of(conv_id)
+    if active and (active.get("status") or "") in ("running", "waiting_input"):
+        return err(409, "有运行中/待输入任务——请先停止任务再回退")
+    removed = store.ConversationsStore.delete_messages_after(conv_id, message_id)
+    if removed < 0:
+        return err(404, "Message not found")
+    store.ConversationsStore.update(conv_id, {"updatedAt": _ts()})
+    return ok({"rollbackTo": message_id, "removed": removed})
+
+
 @router.patch("/requirements/conversations/{conv_id}")
 async def update_conversation(conv_id: str, request: Request):
     """绑定会话到正式提案(临时会话保存后 rebind req_id)，或更新标题。"""

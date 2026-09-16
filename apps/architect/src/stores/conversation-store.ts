@@ -355,6 +355,18 @@ export const useConversationStore = defineStore('archConversation', () => {
     }
   }
 
+  /** 回退到消息 N(环节十五): 截断其后全部消息(停止→调整上下文→再执行)。 */
+  async function rollbackTo(index: number) {
+    const arr = turns.value
+    const convId = activeId.value
+    const turn = arr[index]
+    if (!turn) return
+    const msgId = turn.id
+    if (!msgId || !convId) return
+    await requirementService.rollbackMessages(convId, msgId)
+    arr.splice(index + 1)
+  }
+
   function stop() { abortCtl.value?.abort() }
 
   async function refreshActiveMeta() {
@@ -390,6 +402,6 @@ export const useConversationStore = defineStore('archConversation', () => {
     tasks, refreshTasks, taskAction,
     registerChatHook,
     openConversation, newConversation, applyConversation, dropConversation,
-    send, sendAnswers, deleteTurn, stop, refreshActiveMeta, refreshActiveMessages, pushLocalHint,
+    send, sendAnswers, deleteTurn, rollbackTo, stop, refreshActiveMeta, refreshActiveMessages, pushLocalHint,
   }
 })

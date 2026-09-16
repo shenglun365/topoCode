@@ -817,6 +817,7 @@ async function pollRunningState() {
         @spec-apply="onSpecApply"
         @answers="(a) => { conv.sendAnswers(a); onSent() }"
         @delete-turn="conv.deleteTurn"
+        @rollback-to="conv.rollbackTo"
         @toggle-diagram-skill="conv.toggleDiagramSkill"
         @convention-confirm="onConventionConfirm"
         @convention-ignore="onConventionIgnore"

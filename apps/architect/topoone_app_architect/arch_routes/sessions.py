@@ -1168,6 +1168,16 @@ async def session_guide(conv_id: str):
 
 # ── v2 统一会话: coding subagent 任务 REST(轻门禁/投递/停止) ──
 
+@router.get("/tasks/{task_id}/merge-precheck")
+async def task_merge_precheck(task_id: str):
+    """合并入口检查(环节十五): 主目录推进/任务分支内容/是否可直并。"""
+    from . import exec_bridge
+    res = await asyncio.to_thread(exec_bridge.merge_precheck, task_id)
+    if not res.get("ok"):
+        return err(int(res.get("code") or 400), res.get("error") or "precheck-failed")
+    return ok(res)
+
+
 @router.post("/tasks/{task_id}/cleanup")
 async def task_cleanup(task_id: str, request: Request):
     """T5 终态任务对账清理: runner finish(释放执行器资源/可选删 worktree)。

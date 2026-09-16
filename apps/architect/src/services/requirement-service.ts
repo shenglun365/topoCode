@@ -43,6 +43,14 @@ export const requirementService = {
   async deleteMessage(convId: string, messageId: string): Promise<{ deleted: boolean; id: string }> {
     return apiDelete<{ deleted: boolean; id: string }>(`/requirements/conversations/${convId}/messages/${messageId}`)
   },
+  /** 回退到消息 N(环节十五): 截断其后全部消息(回退点之后作废)。 */
+  async rollbackMessages(convId: string, messageId: string): Promise<{ rollbackTo: string; removed: number }> {
+    return apiDelete<{ rollbackTo: string; removed: number }>(`/requirements/conversations/${convId}/messages/${messageId}/after`)
+  },
+  /** 合并入口检查(环节十五): 任务分支合并前 git 事实检视。 */
+  async mergePrecheck(taskId: string): Promise<{ fastForward: boolean | null; mainNewCommits: string[]; branchCommits: string[]; advice: string }> {
+    return apiGet(`/tasks/${taskId}/merge-precheck`)
+  },
   /** 绑定临时会话到正式提案(保存/入池后 rebind req_id)。 */
   async bindConversation(id: string, reqId: string, title?: string): Promise<ConversationDetail | null> {
     const data: { reqId: string; title?: string } = { reqId }

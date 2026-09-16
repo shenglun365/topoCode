@@ -514,6 +514,54 @@ def task_input(task_id: str, text: str) -> Dict[str, Any]:
     return {"ok": False, "error": (res or {}).get("error") or "runner 不可达"}
 
 
+def merge_precheck(task_id: str) -> Dict[str, Any]:
+    """合并入口检查(环节十五): 任务分支合并前的 git 事实检视。
+
+    - 主目录 HEAD vs 任务基点(baseCommit): 基点以来主目录有推进 → 需先
+      rebase/冲突检测(这是"逐步 hash 校验"该守的位置——git 三方合并本身
+      即 hash 校验, 我们守合并入口);
+    - 任务分支推进清单: 验收合并内容。
+    """
+    task = store.TasksStore.get(task_id)
+    if not task:
+        return {"ok": False, "error": "task-not-found", "code": 404}
+    if (task.get("status") or "") not in _TASK_TERMINAL:
+        return {"ok": False, "error": "任务非终态——先完成/停止再合并", "code": 400}
+    base = str(task.get("baseCommit") or "")
+    branch = str(task.get("branch") or "")
+    conv = store.ConversationsStore.get(task.get("conversationId") or "") or {}
+    from .execution import conv_root_project
+    root, _project = conv_root_project(conv)
+    if not root or not os.path.isdir(root):
+        return {"ok": False, "error": "no-project-root", "code": 400}
+    from ..agent.governance.boundary import _git_run
+    branch_commits: List[str] = []
+    if branch:
+        r = _git_run(["log", "--oneline", f"{base}..{branch}", "-n", "20"],
+                     root, check=False)
+        if r.returncode == 0:
+            branch_commits = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    if not base:
+        return {"ok": True, "checkable": False, "fastForward": None,
+                "mainNewCommits": [], "branchCommits": branch_commits,
+                "advice": "任务无基点记录(旧任务)——请手工 git log 检视后合并。"}
+    r = _git_run(["log", "--oneline", f"{base}..HEAD", "-n", "20"],
+                 root, check=False)
+    if r.returncode != 0:
+        return {"ok": False,
+                "error": "基点不在当前仓库历史中(主分支可能已重写)", "code": 400}
+    main_new = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    if main_new:
+        advice = (f"主目录自任务基点已有 {len(main_new)} 个新提交"
+                  f"({'; '.join(main_new[:3])})——合并前请先在任务分支上"
+                  " rebase 主目录并解决冲突, 或用合并工具逐文件检视。")
+    else:
+        advice = "主目录自任务基点无新提交——可直接合并(无冲突风险)。"
+    return {"ok": True, "checkable": True, "fastForward": not main_new,
+            "mainNewCommits": main_new, "branchCommits": branch_commits,
+            "advice": advice}
+
+
 def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
     """停止任务(保留 worktree/分支)。"""
     task = store.TasksStore.get(task_id)

@@ -280,6 +280,28 @@ class ConversationsStore:
         return cur.rowcount > 0
 
     @classmethod
+    def delete_messages_after(cls, conv_id: str, message_id: str) -> int:
+        """回退到消息 N(环节十五): 删除其后全部消息(不含自身)。
+
+        排序语义与 messages() 一致(time ASC, rowid ASC)。返回删除数;
+        -1 = 锚点消息不存在。回退点之后语义作废(非任意删改)。"""
+        db, found = _locate_db(cls.TABLE, conv_id)
+        if not found:
+            return -1
+        row = db.fetchone(
+            f"SELECT time, rowid FROM {cls.MSG_TABLE} "
+            "WHERE conversation_id = ? AND id = ?",
+            (conv_id, message_id))
+        if not row:
+            return -1
+        cur = db.execute(
+            f"DELETE FROM {cls.MSG_TABLE} WHERE conversation_id = ? AND "
+            "(time > ? OR (time = ? AND rowid > ?))",
+            (conv_id, row["time"], row["time"], row["rowid"]))
+        db.commit()
+        return cur.rowcount
+
+    @classmethod
     def delete(cls, conv_id: str) -> bool:
         db, found = _locate_db(cls.TABLE, conv_id)
         if not found:
