@@ -28,9 +28,10 @@
       "TOOL": "tool",
       "TURN_OUTCOME": "turn_outcome",
       "USAGE": "usage",
-      "USER_INPUT": "user_input"
+      "USER_INPUT": "user_input",
+      "VERIFY": "verify"
     },
-    "kindCount": 16,
+    "kindCount": 17,
     "kinds": [
       "session_ready",
       "user_input",
@@ -47,7 +48,8 @@
       "turn_outcome",
       "approval_request",
       "team",
-      "mcp"
+      "mcp",
+      "verify"
     ],
     "parsePolicy": {
       "requireDict": true,

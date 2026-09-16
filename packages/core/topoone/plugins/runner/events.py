@@ -36,6 +36,7 @@ _KINDS = (
     "progress", "aborted", "finished", "text",
     "tool", "usage", "notice", "turn_outcome", "approval_request",
     "team", "mcp",
+    "verify",   # V1 程序化验收门禁: done 后实测验证矩阵(环节级判定+原因码)
 )
 
 # A6.1 反向请求(ServerRequest)类型契约——runner → 宿主(architect) 需应答的事件:
@@ -68,6 +69,7 @@ class EventKind:
     APPROVAL_REQUEST = "approval_request"
     TEAM = "team"
     MCP = "mcp"
+    VERIFY = "verify"
 
     @classmethod
     def all(cls) -> tuple:

@@ -417,7 +417,7 @@ AGENTS.md/skills 等静态文件形式存在；TopoCode 是 **"cognition first"*
 | **1 卫生线**（**首批开工**） | R2 schema fixture → R1 runner REST OpenAPI 化 + RunnerClient 收敛（=G7/批次 A2）→ R4 requestId 回声 + 代际重连（C2 取消帧同批设计）→ 批次 A1 泵泄漏复核 → A3 运行时身份注入（`build_task_instruction` 注入 worktree/分支/宿主事实） | 无 | R2 fixture 常驻；`test_exec_implement` / `test_exec_bridge_events` 回归 | **已落地（2026-09-17）**，as-built 见下 |
 | **2 挡位参数源** | B2 分层边界测试（先立，护住后续）→ B1 能力矩阵单源（含 `cline-sdk` 别名归一）→ M1 能力边界档案（顺修 t4 profiles 缓存 bug）→ M2 策略表增补（工具面/上下文预算/指令模板/结构化输出/reasoning 五维 + 预留 L/S 档） | 批次 1 | gears.py 策略表扩展 + 模板快照测试 | **已落地（2026-09-17）**，as-built 见下 |
 | **3 交互契约** | A6.1 统一反向请求通道（+ conformance kit：伪适配器升格参考实现；A5 pending 持久化同批设计）→ A6.3 TurnContext 每轮快照 → A4 审批桥增强（reject 带反馈，迁入通道） | 批次 1（R1 类型化 client + R2 fixture）+ 批次 2（B1 降级路由） | 一致性套件全绿；G2/G4 关闭 | **已落地（2026-09-17）**，as-built 见下 |
-| **4 验收与 KB 沉淀** | V 组 V1→V2→V3→V4（**R3 并入 L4 编排层**）→ V5 → K2（arch_assets 表基座 + V5 验证矩阵 = 回执 schema 主体）+ A1 KB 沉淀（rides A6.1 通道） | 批次 3 A6.1；V 组排期归 roadmap P2-T5 | 按 V 设计文档门禁（G3+G6 / G3+G4+G5+G7） | 排期随 roadmap Phase 2 |
+| **4 验收与 KB 沉淀** | V 组 V1→V2→V3→V4（**R3 并入 L4 编排层**）→ V5 → K2（arch_assets 表基座 + V5 验证矩阵 = 回执 schema 主体）+ A1 KB 沉淀（rides A6.1 通道） | 批次 3 A6.1；V 组排期归 roadmap P2-T5 | 按 V 设计文档门禁（G3+G6 / G3+G4+G5+G7） | **V1 已落地（2026-09-17）**，V2~V5/K2/A1 续作，as-built 见下 |
 | **5 专项与拍板项** | M4 协议健壮性（前置 B4 工具文档单源化 + B3 `handle_chat` 拆解；终极方向受限生成）→ M3 分船（需拍板；实现载体 L6 模型路由）→ K1 格式版本化（专项设计）→ K3/K4 → A2 DAG/CAS（需拍板） | 批次 2/4 | 各自设计小档 + 门禁 | 需产品拍板后逐项立项 |
 | 随需插入 | A6.2 Item 投影（随前端改造）；A6.4 steer 协议化（小）；M5 边界透明化（M1 数据就绪后）；L 组训练侧（roadmap Phase 2 末） | — | — | — |
 
@@ -486,6 +486,22 @@ AGENTS.md/skills 等静态文件形式存在；TopoCode 是 **"cognition first"*
 > - **M1 接线收尾**：`assemble_task_instruction` 封顶时注入「实测能力边界降档」提示段。
 > - 余项归位：exec_bridge 存档 turnContext 到 arch_tasks（需 store 列扩展）随 K2
 >   （批次 4）；完整代际基线重连随 A5 主体（批次 4）。
+
+> **批次 4 as-built（2026-09-17 起，V1 切片；全量门禁 881 passed）**：
+> - **V1 门禁核心**（`runner/verify.py` + `ImplementJob._run_verify_gate`）：
+>   - L1 发现链 P0 config（start payload.verify）→ P1 CI（workflows run 行/Makefile
+>     test: 目标）→ P2 约定（package.json scripts / pyproject [tool.pytest] / go.mod /
+>     Cargo.toml）→ P3 启发（test_*.py 存在 → pytest）→ 未命中 C 档 NO_VERIFY_CONFIG；
+>   - L2 执行：cwd=worktree + 白名单拒绝（rm/curl/sudo/git push 等，WHITELIST_REJECTED）
+>     + 超时分级（build 300s/test 600s × timeoutMul，TIMEOUT 原因码）+ 输出头尾截断；
+>   - 级别判定：overall B（有执行）/ C（想验验不了：无命令或白名单拒绝——宁可不验
+>     不可假验）/ D（diff 纯文档资源 → 仅人工审查）；A 档待 V2 结构化适配器；
+>   - 事件：done 分支 emit `verify`（kind append-only，events 基线 17 kinds 已同步），
+>     只观测不改终态（V4 编排后续作）；`RUNNER_VERIFY_DISABLE=1` 运维逃生；
+>     无有效 worktree（测试桩/异常作业）跳过。
+> - **批次 4 余项**（V2 语言适配器→V3 回归基线→V4 修复回注/升级（R3 并入）→V5
+>   反馈落流与 DONE 诚实化 → K2（arch_assets 基座+矩阵=回执 schema）→ A1 KB 沉淀）
+>   按 V 设计文档续作——V5 的矩阵消费面与本档 K2/A1 合流点不变。
 
 **门禁**（沿用）：`npm run test:py` / `test:fe` / `type-check`；runner 侧改动加 R2 fixture
 与一致性套件；纯 KB 线先出设计小档再动码。

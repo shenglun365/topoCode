@@ -84,7 +84,8 @@ class ImplementJob:
                  adapter: Optional[TurnAdapter] = None,
                  turn_timeout: float = _TURN_TIMEOUT,
                  stall_sec: float = _DEFAULT_STALL_SEC,
-                 project_id: str = ""):
+                 project_id: str = "",
+                 verify_config: Optional[Dict[str, Any]] = None):
         self.id = job_id
         self.root = os.path.abspath(root)
         self.wt = wt
@@ -133,6 +134,8 @@ class ImplementJob:
         self.turn_timeout = float(turn_timeout)
         self.stall_sec = float(stall_sec)
         self.project_id = project_id
+        # V1 程序化验收门禁: start payload.verify {build?, test?, timeoutMul?}
+        self.verify_config = verify_config if isinstance(verify_config, dict) else {}
         # 活动信号(adapter 刷新; 看门狗消费)
         self.last_activity_ts = self.created_at
         self.last_error = ""
@@ -261,6 +264,23 @@ class ImplementJob:
         self._kick_turn(text)
         return {"ok": True, "queued": False}
 
+    async def _run_verify_gate(self, changed: List[str]) -> None:
+        """V1 程序化验收门禁: done 自述后实测验证, 矩阵落 verify 事件。
+
+        只观测不改终态——失败修复回注/L3 升级编排归 V4(RUNNER_VERIFY_DISABLE=1 可关)。
+        """
+        if os.environ.get("RUNNER_VERIFY_DISABLE") == "1":
+            return
+        if not self.wt or not os.path.isdir(self.wt):
+            return                     # 无有效 worktree(测试桩/异常作业): 无从验证
+        try:
+            from . import verify as _verify
+            matrix = await asyncio.to_thread(
+                _verify.verify_and_judge, self.wt, self.verify_config, changed)
+            self.emit("verify", _verify.matrix_summary(matrix), **matrix)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[implement] verify gate failed job=%s: %s", self.id, e)
+
     async def _run_turn(self, text: str) -> None:
         # A6.3 TurnContext: 每轮快照(回合号/时点/模型——恢复与审计消费)
         self.turn_context["turns"].append({
@@ -276,6 +296,7 @@ class ImplementJob:
                 self.status = "done"
                 self._commit_progress()
                 self.emit("done", output, changedFiles=changed)
+                await self._run_verify_gate(changed)
             elif _MARK_NEED in output or True:
                 # 兜底: 无标记的回合结束也归为等待输入(agent 提问/未守约)
                 self.status = "waiting_input"
@@ -588,7 +609,8 @@ def register(app: FastAPI) -> None:
             adapter=adapter,
             turn_timeout=float(body.get("turnTimeout") or _TURN_TIMEOUT),
             stall_sec=float(body.get("stallSec") or _DEFAULT_STALL_SEC),
-            project_id=str(body.get("projectId") or ""))
+            project_id=str(body.get("projectId") or ""),
+            verify_config=body.get("verify") if isinstance(body.get("verify"), dict) else None)
         _JOBS[job_id] = job
         # 子会话复活: 预置执行器原生会话 id(空=新建会话)
         job.session_id = str(body.get("sessionRef") or "")
