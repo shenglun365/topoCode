@@ -863,6 +863,12 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         store.TasksStore.finish(task_id, "done", clean[:2000])
         _task_reaggregate_work_state(conv_id)
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+        # 任务计划(环节十四): 步骤完成 → 回填 + 预填下一步 / 汇总
+        try:
+            from ..agent.planning.task_plan import on_plan_task_done
+            on_plan_task_done(conv_id, task_id)
+        except Exception:  # noqa: BLE001
+            pass
     elif kind == "failed":
         _append(conv_id, "assistant",
                 f"❌ **任务失败**「{title}」：{text}\n分支已保留, 可重新发起。",
@@ -871,6 +877,12 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         store.TasksStore.finish(task_id, "failed", text[:2000])
         _task_reaggregate_work_state(conv_id)
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+        # 任务计划(环节十四): 步骤标 failed(下次 /执行 自动重发)
+        try:
+            from ..agent.planning.task_plan import on_plan_task_failed
+            on_plan_task_failed(task_id)
+        except Exception:  # noqa: BLE001
+            pass
     elif kind == "progress":
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
         prog = {**prev,

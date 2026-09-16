@@ -174,6 +174,12 @@ prompts.py 被分叉取代的单一 DoD 常量; 前端 quick/strict 旧文案。
 
 ### 环节十四: 任务计划 + 分批下发总控
 
+> **状态: 已落地**。as-built: 计划存需求行 `taskPlan` JSON 列(主/项目库双迁移,
+> 注册 _JSON_COLUMNS 解析); 拆步 LLM 仅 T2+ 挡位(pre_split≠none)且 ≥2 步才成计划,
+> 单步回落原单卡路径; done/failed 事件钩子驱动"预填下一步/步骤重发/汇总回执";
+> 跨会话并行天然由既有 check_mutex 兜底(同会话单活跃任务互斥不变),
+> 不做自动并行调度。taskPlan/taskPlanDone 卡以 markdown 文本落流(词汇表已注册)。
+
 **目标**: 需求 → 多任务卡编排 → 有序下发 → 汇总验收(最小可行, 不做 DAG PM 系统)。
 
 **内容**:

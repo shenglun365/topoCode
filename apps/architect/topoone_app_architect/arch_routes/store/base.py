@@ -48,7 +48,7 @@ def _to_camel(key: str) -> str:
 # JSON 列(列名按 DB snake_case)。row 解码时对这些列做 loads。
 _JSON_COLUMNS = {
     "config", "acceptance", "analysis", "trace_to", "suggestion",
-    "spec_versions", "roles",
+    "spec_versions", "roles", "task_plan",
     "req_ids", "changes", "impact", "root", "history",
     "design",
     "session_ids", "test_ids", "amendments", "stats",

@@ -220,3 +220,234 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
         parts.append("## 执行方式（按任务挡位）\n" + agent_note)
     return "\n\n".join(parts)
 
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 任务计划(环节十四): 需求 → 有序步骤 → 顺序下发 + 汇总验收
+# 存储需求行 taskPlan(JSON): [{seq,title,instruction,taskId,status}]
+#   status: pending(待下发) | proposed(卡已建) | done | failed
+# 触发: /执行 在 T2+ 挡位(pre_split≠none)生成计划(单步则走原单卡路径);
+#       任务 done 事件驱动下一步预填; 全部 done → 汇总回执。
+# ══════════════════════════════════════════════════════════════════════
+
+def get_plan(rid: str) -> list:
+    rows = _store().RequirementsStore.get(rid or "") or {}
+    plan = rows.get("taskPlan")
+    if isinstance(plan, str) and plan.strip():
+        try:
+            plan = json.loads(plan)
+        except Exception:  # noqa: BLE001
+            plan = None
+    return plan if isinstance(plan, list) else []
+
+
+def save_plan(rid: str, plan: list) -> None:
+    _store().RequirementsStore.update(rid, {"taskPlan": plan})
+
+
+def split_tasks_llm(req_text: str) -> Optional[list]:
+    """LLM 拆步: ≥2 步返回步骤列表; 单步/失败/不可用 → None(回落单卡)。"""
+    if not (req_text or "").strip():
+        return None
+    schema = {
+        "type": "object",
+        "properties": {
+            "tasks": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"title": {"type": "string"},
+                               "instruction": {"type": "string"}},
+                "required": ["title", "instruction"]}},
+        },
+        "required": ["tasks"],
+    }
+    from ...arch_routes import req_agent as _ra
+    try:
+        res = _ra.llm_sync(
+            [{"role": "system",
+              "content": "你是任务计划器。把需求拆成**有序的实施步骤**(每步单一模块级"
+                         "目标、可独立构建验证)。规则: 2-5 步; 若需求足够单一一步可完成,"
+                         "返回单步; 步骤 instruction 写实质内容(目标/涉及文件/验证方式)。"
+                         "只输出结构化结果。"},
+             {"role": "user", "content": f"需求文本:\n{req_text[:6000]}"}],
+            mode="structured", output_schema=schema, max_tokens=2048)
+    except Exception as e:  # noqa: BLE001
+        logger.info("[task-plan] llm 不可用: %s", e)
+        return None
+    payload = (res or {}).get("output")
+    tasks = (payload or {}).get("tasks")
+    if not isinstance(tasks, list):
+        return None
+    out = []
+    for t in tasks[:5]:
+        if not isinstance(t, dict):
+            continue
+        title = str(t.get("title") or "").strip()
+        instr = str(t.get("instruction") or "").strip()
+        if title and instr:
+            out.append({"title": title[:120], "instruction": instr[:4000]})
+    return out if len(out) >= 2 else None
+
+
+def _step_instruction(plan: list, idx: int) -> str:
+    step = plan[idx]
+    return (f"{step.get('instruction')}\n\n"
+            f"> 本任务属于任务计划: 步骤 {idx + 1}/{len(plan)}（{step.get('title')}）。"
+            "只完成本步范围; 后续步骤由系统在完成后自动预填。")
+
+
+def propose_plan_step(conv: dict, rid: str, idx: int,
+                      executor_hint: Optional[dict] = None) -> dict:
+    """下发计划第 idx 步(0 基): 建任务卡 + 回填步骤状态。"""
+    plan = get_plan(rid)
+    if idx >= len(plan):
+        return {"ok": False, "error": "计划步骤越界"}
+    from ...arch_routes import exec_bridge as eb
+    req = _store().RequirementsStore.get(rid) or {}
+    base_title = str(req.get("title") or "实施任务").strip()[:60]
+    step = plan[idx]
+    task = eb.propose_task(
+        conv, f"{base_title} · 步骤{idx + 1}/{len(plan)} {step.get('title')}",
+        _step_instruction(plan, idx), executor_hint=executor_hint)
+    if task.get("id"):
+        plan[idx]["taskId"] = task["id"]
+        plan[idx]["status"] = "proposed"
+        save_plan(rid, plan)
+    return {"ok": bool(task.get("id")), "task": task,
+            "error": str(task.get("error") or "")}
+
+
+def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: str,
+                           fallback_instruction: str,
+                           executor_hint: Optional[dict] = None) -> Optional[dict]:
+    """/执行 计划入口: T2+ 挡位生成/续发计划; None = 走原单卡路径。
+
+    - 挡位 pre_split=none(T0/T1) → None
+    - 已有计划: 有待发/失败步骤 → 续发下一步; 全部完成 → 汇总提示(None 由调用方回落? 不, 直接返回提示)
+    - 无计划: LLM 拆步 ≥2 → 建计划 + taskPlan 卡 + 下发第一步; 否则 None
+    """
+    from ...arch_routes.agent_executors import normalize_executor_type
+    from ...arch_routes.exec_bridge import executor_hint_by_id
+    from ..governance.gears import resolve_gear
+    _hint = executor_hint
+    if not _hint:
+        _bound = executor_hint_by_id(str((conv or {}).get("executorId") or ""), conv)
+        _hint = {"executorType": normalize_executor_type(
+            (_bound or {}).get("executorType") or ""),
+            "executorId": (_bound or {}).get("id") or ""}
+    _cfg = {}
+    if _hint.get("executorId"):
+        _cfg = (executor_hint_by_id(str(_hint["executorId"]), conv)
+                or {}).get("executorConfig") or {}
+    policy = resolve_gear(str((conv or {}).get("analysisMode") or ""), _cfg)
+    if policy.pre_split == "none":
+        return None
+
+    plan = get_plan(rid)
+    if plan:
+        pending = [i for i, s in enumerate(plan)
+                   if s.get("status") in ("pending", "failed")]
+        if not pending:
+            return {"ok": False,
+                    "receipt": "📋 任务计划已全部完成。如需继续演进, 请 `/调整` "
+                               "完善需求后重新 `/执行`。"}
+        idx = pending[0]
+        out = propose_plan_step(conv, rid, idx, executor_hint=_hint)
+        if out.get("ok"):
+            retried = "重发" if plan[idx].get("status") == "failed" else "下发"
+            out["receipt"] = f"📋 计划步骤 {idx + 1}/{len(plan)} 已{retried}，待确认执行。"
+        return out or {"ok": False, "receipt": "计划步骤下发失败"}
+
+    steps = split_tasks_llm(req_text)
+    if not steps:
+        return None
+    plan = [{"seq": i + 1, "title": s["title"], "instruction": s["instruction"],
+             "taskId": "", "status": "pending"} for i, s in enumerate(steps)]
+    save_plan(rid, plan)
+    _land_plan_card(conv, rid, plan)
+    out = propose_plan_step(conv, rid, 0, executor_hint=_hint)
+    if out.get("ok"):
+        out["receipt"] = (f"📋 已生成任务计划({len(plan)} 步)并下发第一步，"
+                          "待确认执行; 后续步骤完成后自动预填。")
+    return out
+
+
+def _land_plan_card(conv: dict, rid: str, plan: list) -> None:
+    from ...arch_routes import exec_bridge as eb
+    lines = "\n".join(
+        f"{i + 1}. **{s.get('title')}** — {s.get('instruction', '')[:80]}"
+        for i, s in enumerate(plan))
+    eb._append(conv["id"], "assistant",
+               f"📋 **任务计划**（{len(plan)} 步, 需求 {rid}）\n\n{lines}\n\n"
+               "---\n顺序下发: 每步完成确认后自动预填下一步; 全部完成后出汇总。",
+               msg_meta={"kind": "taskPlan", "requirementId": rid,
+                         "total": len(plan)},
+               project_id=(conv or {}).get("projectId") or "")
+
+
+def on_plan_task_done(conv_id: str, task_id: str) -> None:
+    """done 事件钩子: 回填步骤状态 → 预填下一步 / 汇总。"""
+    try:
+        from ...arch_routes import store as _s
+        task = _s.TasksStore.get(task_id) or {}
+        rid = task.get("reqId") or ""
+        plan = get_plan(rid)
+        if not plan:
+            return
+        for s in plan:
+            if s.get("taskId") == task_id:
+                s["status"] = "done"
+                s["result"] = str(task.get("resultMd") or "")[:400]
+        save_plan(rid, plan)
+        pending = [i for i, s in enumerate(plan)
+                   if s.get("status") in ("pending", "failed")]
+        if pending:
+            conv = _s.ConversationsStore.get(conv_id) or {}
+            out = propose_plan_step(conv, rid, pending[0])
+            if out.get("ok"):
+                from ...arch_routes import exec_bridge as eb
+                eb._append(conv_id, "assistant",
+                           f"➡️ 计划步骤 {pending[0] + 1}/{len(plan)} 已预填"
+                           "（含前情简报），待确认执行。",
+                           msg_meta={"kind": "taskPlan", "requirementId": rid,
+                                     "total": len(plan)},
+                           project_id=(conv or {}).get("projectId") or "")
+        else:
+            _finish_plan_receipt(conv_id, rid, plan)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[task-plan] done hook: %s", e)
+
+
+def on_plan_task_failed(task_id: str) -> None:
+    """failed 事件钩子: 步骤标 failed(下次 /执行 自动重发该步)。"""
+    try:
+        from ...arch_routes import store as _s
+        task = _s.TasksStore.get(task_id) or {}
+        rid = task.get("reqId") or ""
+        plan = get_plan(rid)
+        for s in plan:
+            if s.get("taskId") == task_id:
+                s["status"] = "failed"
+        if plan:
+            save_plan(rid, plan)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[task-plan] failed hook: %s", e)
+
+
+def _finish_plan_receipt(conv_id: str, rid: str, plan: list) -> None:
+    from ...arch_routes import exec_bridge as eb
+    from ...arch_routes import store as _s
+    conv = _s.ConversationsStore.get(conv_id) or {}
+    lines = "\n".join(
+        f"- 步骤 {s.get('seq')}: **{s.get('title')}** — "
+        f"{str(s.get('result') or '完成')[:120]}" for s in plan)
+    branches = [str(t.get("branch") or "") for t in
+                (_s.TasksStore.get(s.get("taskId")) or {} for s in plan)
+                if t.get("branch")]
+    merge_note = (f"\n\n🔀 各步骤分支: {', '.join(b for b in branches if b)}——"
+                  "合并时请逐分支检视(主目录若有推进先 rebase)。") if branches else ""
+    eb._append(conv_id, "assistant",
+               f"✅ **任务计划全部完成**（{len(plan)} 步, 需求 {rid}）\n\n{lines}"
+               + merge_note,
+               msg_meta={"kind": "taskPlanDone", "requirementId": rid,
+                         "total": len(plan)},
+               project_id=(conv or {}).get("projectId") or "")

@@ -153,6 +153,15 @@ def run_execute(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
     instruction = _instruction_from_snapshot(snap)
     if not instruction.strip():
         return {"ok": False, "receipt": "规约内容为空，无法建卡。请 `/调整` 完善后重试。"}
+    # 任务计划(环节十四): T2+ 挡位生成/续发有序计划; None = 单卡路径
+    from ..planning.task_plan import maybe_plan_and_propose
+    plan_res = maybe_plan_and_propose(
+        conv, req_id,
+        "\n".join(str(x) for x in (title, snap.get("desc"),
+                                   snap.get("designMd")) if x),
+        title, instruction, executor_hint=hint)
+    if plan_res is not None:
+        return plan_res
     task = exec_bridge.propose_task(conv, title, instruction, executor_hint=hint)
     if not task.get("id"):
         # 无可用执行器等建卡失败: 原文显式返回(不降级不吞错)

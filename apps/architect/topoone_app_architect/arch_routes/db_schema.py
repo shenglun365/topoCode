@@ -567,6 +567,15 @@ def _main_migrations(db) -> None:
     _add_cols(db, "arch_tasks", [
         ("base_commit", "TEXT DEFAULT ''"),
     ])
+    # 环节十四: 需求任务计划列(需求表无 project_id, 主库/项目库双补)
+    _add_cols(db, "arch_requirements", [
+        ("task_plan", "TEXT"),
+    ])
+    # 环节十四: 需求任务计划(JSON, [{seq,title,instruction,taskId,status}])——
+    # 需求表无 project_id 列, 主库/项目库路由双补
+    _add_cols(db, "arch_requirements", [
+        ("task_plan", "TEXT"),
+    ])
 
 
 # 已退役表(重整裁决: 清除旧数据, 不做兼容)
@@ -708,6 +717,7 @@ def _project_migrations(db) -> None:
         ("source_type", "TEXT DEFAULT ''"),
         ("source_conversation_id", "TEXT DEFAULT ''"),
         ("created_at", "INTEGER DEFAULT 0"),
+        ("task_plan", "TEXT"),
     ])
     _add_cols(db, "arch_conversations", [
         ("tags", "TEXT"),

@@ -15,6 +15,8 @@
 | task_progress      | 执行回执 | taskId                                  | 文本                  |
 | turnError          | 错误卡   | —                                       | ❌ 文本(review=error) |
 | digest_sent        | 转达存证 | chars                                   | 折叠卡                |
+| taskPlan           | 计划卡   | requirementId, total                    | 文本(步骤清单)        |
+| taskPlanDone       | 汇总回执 | requirementId, total                    | 文本(合并提醒)        |
 
 历史遗留(仅存在于旧数据, 渲染层兼容降级, 不再产生): specCreated、guard、
 specDraft、task_* 旧语义变体。
@@ -40,6 +42,8 @@ KIND_TASK_CARD = "task_card"
 KIND_TASK_APPROVAL = "task_approval"
 KIND_TURN_ERROR = "turnError"
 KIND_DIGEST = "digest_sent"
+KIND_TASK_PLAN = "taskPlan"          # 环节十四: 任务计划卡(有序步骤清单)
+KIND_TASK_PLAN_DONE = "taskPlanDone"  # 环节十四: 计划全部完成汇总回执
 KIND_TASK_RECEIPTS = (
     "task_start", "task_input", "task_done", "task_failed",
     "task_approval_done", "task_progress",
@@ -47,7 +51,7 @@ KIND_TASK_RECEIPTS = (
 
 _KNOWN_KINDS = frozenset(
     (KIND_REQUIREMENT, KIND_TASK_CARD, KIND_TASK_APPROVAL, KIND_TURN_ERROR,
-     KIND_DIGEST, *KIND_TASK_RECEIPTS))
+     KIND_DIGEST, KIND_TASK_PLAN, KIND_TASK_PLAN_DONE, *KIND_TASK_RECEIPTS))
 
 _ERROR_REVIEW_STATE = "error"
 
