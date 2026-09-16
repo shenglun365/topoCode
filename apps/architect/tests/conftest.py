@@ -1,22 +1,40 @@
-"""pytest 全局夹具：测试数据目录隔离。
+"""公共测试夹具(规范化环节六) — 环境隔离/客户端/WS 助手单源。
 
-必须在任何 topoone_app_architect 模块导入前设置 ARCH_DATA_DIR——
-否则 store 会写进开发库 ~/.topocode（曾把测试会话/需求泄漏进会话中心）。
+旧形态: 每个测试文件手写 _setup/_env/_client(同一套 env 重置五连,
+四处漂移——有的 reset_req 有的没有) + WS 收发助手两份签名不同。
+新规范: 环境隔离用 isolate_arch()/arch_env 夹具; WS 助手从
+tests.ws_helpers 导入; 新测试禁止再手写 env 重置序列。
 """
-import os
+from __future__ import annotations
 
 import pytest
-import tempfile
 
-if not os.environ.get("ARCH_DATA_DIR"):
-    os.environ["ARCH_DATA_DIR"] = tempfile.mkdtemp(prefix="topo-arch-test-")
+import topoone_app_architect.arch_routes.ctx as C
 
 
-@pytest.fixture(autouse=True)
-def _isolate_arch_ctx():
-    """每测试清 architect 请求上下文(contextvar 泄漏隔离: 前序测试的
-    conv/req/project 残留会串库串需求)。"""
-    from topoone_app_architect.arch_routes import ctx
-    tk = (ctx.set_conv(""), ctx.set_req(""), ctx.set_project(""))
-    yield
-    ctx.reset_conv(tk[0]); ctx.reset_req(tk[1]); ctx.reset_project(tk[2])
+def isolate_arch(tmp_path, monkeypatch) -> str:
+    """architect 环境隔离: 独立数据目录 + 单例/上下文全重置。返回 data 路径。"""
+    data = str(tmp_path / "arch")
+    monkeypatch.setenv("ARCH_DATA_DIR", data)
+    C._db = None
+    C._kb = None
+    C._data_dir = None
+    C._project_dbs.clear()
+    C.reset_project(C._project_var.set(None))
+    C.reset_req(C._req_var.set(None))
+    C.setup(data_dir=data)
+    return data
+
+
+@pytest.fixture()
+def arch_env(tmp_path, monkeypatch) -> str:
+    """环境隔离夹具(等价 isolate_arch)。"""
+    return isolate_arch(tmp_path, monkeypatch)
+
+
+@pytest.fixture()
+def client(arch_env):
+    """裸 TestClient(LLM 未 stub——需要 stub 的测试自建, 如 test_direct_commands)。"""
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    return TestClient(build_app(data_dir=arch_env))

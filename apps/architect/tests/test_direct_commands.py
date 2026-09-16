@@ -32,15 +32,8 @@ WS_PATH = "/api/architect/ws/kb-analysis"
 
 
 def _client(tmp_path, monkeypatch):
-    data = str(tmp_path / "arch")
-    monkeypatch.setenv("ARCH_DATA_DIR", data)
-    C._db = None
-    C._kb = None
-    C._data_dir = None
-    C._project_dbs.clear()
-    C.reset_project(C._project_var.set(None))
-    C.reset_req(C._req_var.set(None))
-    C.setup(data_dir=data)
+    from tests.conftest import isolate_arch
+    data = isolate_arch(tmp_path, monkeypatch)
     monkeypatch.setattr(req_agent, "llm_chat_start", lambda *a, **k: None)
     captured = {"calls": 0}
 
@@ -52,13 +45,11 @@ def _client(tmp_path, monkeypatch):
     return TestClient(build_app(data_dir=data)), captured
 
 
+from tests.ws_helpers import recv_until as _recv_until_base
+
+
 def _recv_until(ws, *types):
-    seen = []
-    while True:
-        ev = ws.receive_json()
-        seen.append(ev["type"])
-        if ev["type"] in types:
-            return ev, seen
+    return _recv_until_base(ws, *types)
 
 
 def _mk_conv(**kw):

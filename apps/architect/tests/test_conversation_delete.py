@@ -16,15 +16,8 @@ from topoone_app_architect.server import build_app
 
 
 def _setup(tmp_path, monkeypatch):
-    data = str(tmp_path / "arch")
-    monkeypatch.setenv("ARCH_DATA_DIR", data)
-    C._db = None
-    C._kb = None
-    C._data_dir = None
-    C._project_dbs.clear()
-    C.reset_project(C._project_var.set(None))
-    C.reset_req(C._req_var.set(None))
-    return C.setup(data_dir=data)
+    from tests.conftest import isolate_arch
+    return isolate_arch(tmp_path, monkeypatch)
 
 
 def _client(tmp_path, monkeypatch):

@@ -6,7 +6,6 @@
 import json
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -16,13 +15,7 @@ import topoone_app_architect.arch_routes.ctx as C
 import topoone_app_architect.arch_routes.store as store
 
 
-@pytest.fixture()
-def arch_env():
-    data = tempfile.mkdtemp(prefix="topo-cards-")
-    os.environ["ARCH_DATA_DIR"] = data
-    C._db = None; C._kb = None; C._data_dir = None; C._project_dbs.clear()
-    C.setup(data_dir=data)
-    yield data
+
 
 
 def test_land_unknown_kind_raises(arch_env):

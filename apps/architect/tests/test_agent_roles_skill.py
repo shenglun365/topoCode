@@ -20,14 +20,8 @@ from topoone_app_architect.arch_routes.store import (
 
 
 def _setup(tmp_path, monkeypatch):
-    data = str(tmp_path / "arch")
-    monkeypatch.setenv("ARCH_DATA_DIR", data)
-    C._db = None
-    C._kb = None
-    C._data_dir = None
-    C._project_dbs.clear()
-    C.reset_project(C._project_var.set(None))
-    return C.setup(data_dir=data)
+    from tests.conftest import isolate_arch
+    return isolate_arch(tmp_path, monkeypatch)
 
 
 # ── 角色注册表 ─────────────────────────────────────────────────

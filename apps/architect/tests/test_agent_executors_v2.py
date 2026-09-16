@@ -24,7 +24,10 @@ def test_cline_is_default_executor():
     assert oc and oc[0].get("default") is False
 
 
-def test_cline_config_schema_extended():
+def test_cline_config_schema_extended(tmp_path, monkeypatch):
+    """隔离环境(规范化环节六): 读默认注册表, 不受开发机真实库状态影响。"""
+    from tests.conftest import isolate_arch
+    isolate_arch(tmp_path, monkeypatch)
     entry = [e for e in ae.load_executors() if e.get("id") == "cline"][0]
     cfg = entry["config"]
     for key in ("node_bin", "sidecar_script", "provider_id", "model_id",

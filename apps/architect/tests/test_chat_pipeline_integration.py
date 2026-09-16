@@ -73,17 +73,18 @@ def pipeline(tmp_path, monkeypatch):
     return client, gw, tmp_path
 
 
+from tests.ws_helpers import chat as _ws_chat  # 规范化环节六: 收发助手单源
+from tests.ws_helpers import recv_until as _recv_until_base
+
+
 def _recv_until(ws, *types):
-    while True:
-        ev = ws.receive_json()
-        if ev["type"] in types:
-            return ev
+    ev, _seen = _recv_until_base(ws, *types)
+    return ev
 
 
 def _chat(ws, content, conv_id=""):
-    ws.send_json({"type": "chat", "kind": "generic", "title": "t",
-                  "conversationId": conv_id,
-                  "messages": [{"role": "user", "content": content}]})
+    _ws_chat(ws, content, conv_id=conv_id, kind="generic", title="t",
+             messages=[{"role": "user", "content": content}])
 
 
 def test_full_pipeline_real_bodies_chat_with_tool_round(pipeline):
