@@ -701,6 +701,40 @@ def _unmerged_branch_notes(conv_id: str, root: str, limit: int = 3) -> str:
         return ""
 
 
+def _post_merge_cleanup(task: dict, root: str) -> str:
+    """合并后清理(本地 PR 语义·生命周期闭环): merged 终态意味着内容已进
+    主目录——分支/worktree 是过程产物, 随合并同意一并清理(GitHub
+    auto-delete-head-branch 同款)。最佳努力: 清理失败不影响合并结果。
+
+    - failed 分支不在此列(续跑锚点); branch -d 仅已合并可删(git 层保险)
+    """
+    from ..agent.governance.boundary import _git_run
+    notes = []
+    wt = str(task.get("worktree") or "")
+    if wt and os.path.isdir(wt):
+        r = _git_run(["worktree", "remove", "--force", wt], root, check=False)
+        notes.append("worktree 已移除" if r.returncode == 0
+                     else f"worktree 移除失败({(r.stderr or '')[:80]})")
+        if os.path.isdir(wt):   # 注册已清但目录残留(构建产物) → 兜底删目录
+            import shutil as _shutil
+            _shutil.rmtree(wt, ignore_errors=True)
+            notes.append("worktree 目录已兜底删除")
+    branch = str(task.get("branch") or "")
+    if branch:
+        r = _git_run(["branch", "-d", branch], root, check=False)
+        notes.append("分支已删除" if r.returncode == 0
+                     else f"分支删除失败({(r.stderr or '')[:80]})")
+    job_id = str(task.get("runnerJobId") or "")
+    if job_id:
+        try:
+            _runner(f"/api/implement/{job_id}/finish",
+                    {"keepWorktree": False}, timeout=30.0)
+            notes.append("runner 资源已释放")
+        except Exception:  # noqa: BLE001
+            notes.append("runner 资源释放失败(可稍后任务清理)")
+    return "；".join(notes)
+
+
 def merge_branch(task_id: str, mode: str = "ff") -> Dict[str, Any]:
     """确认合并(本地 PR 语义, 环节十五): 门禁(precheck)通过后执行合并。
 
@@ -753,8 +787,11 @@ def merge_branch(task_id: str, mode: str = "ff") -> Dict[str, Any]:
     head = _git_run(["rev-parse", "HEAD"], root).stdout.strip()
     from .common import _ts
     store.TasksStore.update(task_id, {"mergedAt": _ts(), "mergedHead": head})
+    # 生命周期闭环(用户裁决): 合并同意 = 过程产物清理同意(worktree/分支)
+    cleanup_note = _post_merge_cleanup(task, root)
     return {"ok": True, "mergedHead": head, "mode": mode,
-            "advice": f"已合并 {branch} → 主目录({head[:12]})。"}
+            "advice": (f"已合并 {branch} → 主目录({head[:12]})。"
+                       + (f"清理: {cleanup_note}。" if cleanup_note else ""))}
 
 
 def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:

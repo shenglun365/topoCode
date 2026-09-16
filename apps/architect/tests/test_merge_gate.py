@@ -60,7 +60,15 @@ def test_merge_ff_success_and_terminal(arch_env, tmp_path, monkeypatch, git_proj
     g("add", "-A")
     g("commit", "-qm", "feat")
     g("checkout", "-q", "main")
+    # 任务行带 worktree(真实注册的 worktree)——合并后应自动清理
+    g("worktree", "add", "-q", str(tmp_path / "wt9"), "task/9")
     conv_id, task_id, eb = _mk_conv_task(arch_env, tmp_path, monkeypatch, base=base)
+    store.TasksStore.update(task_id, {"worktree": str(tmp_path / "wt9"),
+                                      "runnerJobId": "job-mg"})
+    finish_calls = []
+    monkeypatch.setattr(eb, "_runner",
+                        lambda path, payload=None, timeout=12.0:
+                        finish_calls.append(path) or {"ok": True})
     res = eb.merge_branch(task_id)
     assert res["ok"] and res["mode"] == "ff"
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
@@ -68,8 +76,14 @@ def test_merge_ff_success_and_terminal(arch_env, tmp_path, monkeypatch, git_proj
     assert res["mergedHead"] == head
     row = store.TasksStore.get(task_id)
     assert int(row["mergedAt"] or 0) > 0 and row["mergedHead"] == head
-    # 幂等: 重复合并拒绝
-    assert eb.merge_branch(task_id)["code"] == 400
+    assert eb.merge_branch(task_id)["code"] == 400          # 幂等: 重复合并拒绝
+    # 生命周期闭环: worktree 移除 + 分支删除 + runner 资源释放
+    assert not os.path.isdir(str(tmp_path / "wt9"))
+    branches = subprocess.run(["git", "branch", "--list", "task/9"], cwd=repo,
+                              capture_output=True, text=True).stdout.strip()
+    assert branches == ""                                   # -d 已删(内容在 master)
+    assert any(p.endswith("/finish") for p in finish_calls)
+    assert "worktree 已移除" in res["advice"] and "分支已删除" in res["advice"]
 
 
 def test_merge_ff_blocked_when_main_advanced(arch_env, tmp_path, monkeypatch, git_project):
