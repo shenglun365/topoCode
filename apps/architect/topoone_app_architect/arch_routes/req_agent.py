@@ -1214,6 +1214,7 @@ def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
 
 # ── LLM 通道: 实现迁至 agent.cognition.llm(P1), 此处 re-export 兼容存量引用 ──
 
+from ..agent.cognition import prompt as _disc  # noqa: F401,E402
 from ..agent.cognition.llm import (  # noqa: F401,E402
     _LLM_CALL_TIMEOUT,
     _MAX_TOKENS_KEY,
@@ -1362,25 +1363,12 @@ _CAPABILITY_DOC = (
     "target=execution 评估执行结果(实际 diff 足迹 + 与方案的偏差集)。报告内资产卡可点击联动资产地图。方案确认前/执行完成后调用\n"
     "- capability.mine：能力提炼——扫描会话(消息+方案/回执单元)提炼 规约/流程/技巧/skill 提案入待审队列, "
     "设计者采纳后生效(规约入规约库/skill 文档注入能力文档)。会话出现可复用模式时主动提议\n\n"
-    "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
-    "先且仅先输出一个工具调用块，格式为：\n"
-    '[TOOL_CALL]{"tool":"<工具名>","arguments":{参数}}[/TOOL_CALL]\n'
-    "硬性规则(防编造)：凡是会改数据或有真实执行结果的指令(提取/刷新/保存/委派执行等)，"
-    "必须实际调用对应工具拿到同步返回的结果，再如实转述；"
-    "严禁不调用工具就输出『已启动/报告/条数/检查结果』等编造结论。\n"
-    "需求落库纪律(必须遵守)：\n"
-    "1. 修改既有需求(用户确认后补充约束/调整方案/完善规约) → 必须用 [TOOL_CALL] 调 "
-    "req.amend，严禁重新 req.propose 或输出裸 JSON 围栏当作工具调用；\n"
-    "2. RQ 编号/数据 ID 一律由系统管理：工具调用不传 reqId(系统自动取会话绑定)，"
-    "回复中的编号只来自工具返回，严禁自造编号；"
-    "用户仅要求查看/显示需求卡时直接概述内容或调 conv.read，严禁 req.amend(查看不是修改)；\n"
-    "3. 需求卡按需出现——只有开发类需求(要写代码/改代码/交付组件)才 req.propose(创建即 ready)；"
-    "分析/问答/检索类请求直接回答，不要产卡。\n"
-    "会话指令符号(系统直通，与模型无关)：用户消息恰为 /提取需求 或 /执行 时由系统确定性执行"
-    "(提取需求=从历史提取需求卡; 执行=需求卡建任务卡, 用户卡片确认后 subagent 启动)——"
-    "模型不会收到这两类消息，也不要在回复中代用户发出指令；"
-    "/调整 会作为普通消息进入对话(由你整理修订内容)。\n"
-    "各工具的参数：\n"
+    # 工具调用纪律: 引用 cognition.prompt 单源常量(禁止手工复制——cv-177 漂移教训)
+    + _disc.TOOL_PROTOCOL_HEAD
+    + _disc.ANTI_FABRICATION
+    + _disc.REQ_CARD_DISCIPLINE
+    + _disc.DIRECT_CMD_SYMBOLS
+    + "各工具的参数：\n"
     '- kb.asset.search: {"text": "检索关键词", "preferred": ["资产ID(可选)"]}\n'
     '- kb.code_mappings: {"asset_ids": ["资产ID"]}\n'
     "- kb.baseline: {}\n"
