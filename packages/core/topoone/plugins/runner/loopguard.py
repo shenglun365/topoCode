@@ -34,8 +34,10 @@ def _norm_digest(text: str) -> str:
 class LoopGuard:
     """回合内循环检测器(每回合新建; 事件驱动, 纯内存零 IO)。"""
 
-    def __init__(self, repeat_rounds: int = 3, signature_hits: int = 5,
+    def __init__(self, repeat_rounds: int = 3, signature_hits: int = 8,
                  min_sig_len: int = 40):
+        # signature_hits=8: 重复状态话术("编译通过, 测试全绿"类)在长回合里
+        # 可以合法重复多次——×5 过紧会误杀(误伤排查); ×8 已远超正常重复密度
         self._repeat_rounds = max(2, int(repeat_rounds))
         self._signature_hits = max(2, int(signature_hits))
         self._min_sig_len = int(min_sig_len)

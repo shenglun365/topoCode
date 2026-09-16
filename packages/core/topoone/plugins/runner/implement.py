@@ -49,9 +49,10 @@ _WATCH_INTERVAL = 30.0
 _WATCH_ABORT_GRACE = 10.0
 _DEFAULT_STALL_SEC = 180.0
 # 无进展看门狗: worktree 状态哈希连续 N 个探测周期不变(已动过文件的前提下)
-# → 判定循环空转(环节十一)。6×30s=3min——纯编译/命令重跑无文件变化即命中;
-# 正常编辑-编译循环每次编辑都会改变 porcelain → 计数归零。
-_PROGRESS_TICKS = 6
+# → 判定循环空转(环节十一)。10×30s=5min——纯编译/命令重跑无文件变化即命中;
+# 正常编辑-编译循环每次编辑都会改变内容哈希 → 计数归零。
+# 5min 而非 3min: 全量重建/长冒烟套件可无写入运行数分钟(误伤排查, cv-181 同类)
+_PROGRESS_TICKS = 10
 
 _MARK_NEED = "[[NEED_INPUT]]"
 _MARK_DONE = "[[IMPLEMENT_DONE]]"
@@ -364,7 +365,9 @@ class ImplementJob:
                 reason = ""
                 if p.status == "error":
                     reason = f"执行器通道错误: {p.last_error or 'unknown'}"
-                elif p.status != "busy" and stall > self.stall_sec:
+                elif p.status == "idle" and stall > self.stall_sec:
+                    # 只有明确 idle 才判停滞; unknown = 观测不到(serve 抖动),
+                    # 误杀长编译等无流式事件阶段(cv-181 同类, 排查修复)
                     reason = (f"回合活动停滞 {stall:.0f}s(阈值 {self.stall_sec:.0f}s,"
                               "疑似 LLM 无响应/通道挂起)")
                 if not reason:

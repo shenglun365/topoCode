@@ -21,7 +21,9 @@ logger = logging.getLogger("arch.execution.pumps")
 POLL_INTERVAL = 2.5
 WS_IDLE_SEC = 10.0         # 订阅空闲窗口(超时→snapshot 校准一轮, 保留 lost/终态判定)
 WS_RETRY_GAP = 4           # 订阅失败后的重试间隔(轮询轮)
-MAX_CONSECUTIVE_ERR = 5
+# 8 次(每次 snapshot 12s 超时 + poll 间隔) ≈ 2 分钟 runner 不可达容错——
+# runner 重启/滚动升级窗口内不误杀 running 任务为 lost(重启后 recover_sweep 重挂)
+MAX_CONSECUTIVE_ERR = 8
 
 SendFn = Callable[[dict], Any]
 OnEvent = Callable[[dict], None]

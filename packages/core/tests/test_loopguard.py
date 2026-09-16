@@ -90,8 +90,8 @@ def test_narrated_loop_interleaved_with_silent_not_fingerprinted():
         assert not loop                     # 指纹永不触发
         g.feed("tool", tool_name="run_commands")
         g.feed("usage")
-    # 错误签名检测器兜底: 同一叙述累计 5 次即判
-    g2 = LoopGuard()
+    # 错误签名检测器兜底: 同一叙述累计 5 次即判(显式收紧阈值)
+    g2 = LoopGuard(signature_hits=5)
     verdict = (False, "")
     for _ in range(5):
         g2.feed("tool", tool_name="run_commands")
@@ -104,7 +104,7 @@ def test_narrated_loop_interleaved_with_silent_not_fingerprinted():
 # ── 错误/叙述签名 ────────────────────────────────────────────────────
 
 def test_text_signature_triggers_on_repetition():
-    g = LoopGuard()
+    g = LoopGuard(signature_hits=5)      # 收紧参数显式传, 测触发语义
     long_text = "编译仍然失败: undefined reference to ngx_http_healthcheck_handler " * 1
     verdict = (False, "")
     for _ in range(5):
@@ -112,15 +112,28 @@ def test_text_signature_triggers_on_repetition():
     assert verdict[0] and "签名重复 5 次" in verdict[1]
 
 
-def test_text_signature_ignores_short_text():
+def test_text_signature_default_tolerance():
+    """默认阈值 ×8: 合法的重复状态话术(≤7 次)不触发——误伤排查。"""
     g = LoopGuard()
+    long_ok = "编译通过，全部测试通过，验证结果符合预期，继续下一个里程碑的处理流程和报告输出约定"
+    assert len(long_ok) >= 40              # 超过 min_sig_len(否则被长度过滤, 另有测试覆盖)
+    verdict = (False, "")
+    for _ in range(7):
+        verdict = g.feed("text", text=long_ok)
+        assert not verdict[0]
+    verdict = g.feed("text", text=long_ok)
+    assert verdict[0] and "签名重复 8 次" in verdict[1]
+
+
+def test_text_signature_ignores_short_text():
+    g = LoopGuard(signature_hits=5)
     for _ in range(10):
         loop, _ = g.feed("text", text="ok")
     assert not loop
 
 
 def test_verdict_is_sticky():
-    g = LoopGuard()
+    g = LoopGuard(signature_hits=5)
     long_text = "still failing with the same undefined reference error output"
     for _ in range(5):
         g.feed("text", text=long_text)
