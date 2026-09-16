@@ -165,6 +165,7 @@ class ImplementJob:
         except Exception as e:  # noqa: BLE001
             self.status = "failed"
             self.error = str(e)
+            self._commit_progress()
             self.emit("failed", f"作业启动失败: {e}")
 
     def _kick_turn(self, text: str) -> None:
@@ -204,10 +205,12 @@ class ImplementJob:
             changed = self._diff_files() or outcome.changed_files
             if _MARK_DONE in output:
                 self.status = "done"
+                self._commit_progress()
                 self.emit("done", output, changedFiles=changed)
             elif _MARK_NEED in output or True:
                 # 兜底: 无标记的回合结束也归为等待输入(agent 提问/未守约)
                 self.status = "waiting_input"
+                self._commit_progress()
                 self.emit("input_required", output, changedFiles=changed)
         except asyncio.CancelledError:
             raise
@@ -217,6 +220,7 @@ class ImplementJob:
                 return
             self.status = "failed"
             self.error = str(e)
+            self._commit_progress()
             self.emit("failed", f"回合执行失败: {e}")
             # 终态后 SSE 订阅(若有)不再有意义, 停止重连空转
             stop = getattr(self, "sse_stop", None)
@@ -256,6 +260,7 @@ class ImplementJob:
                 # 先终态(abort 后 run_turn 的终态检查/异常路径据此收口), 再中止回合
                 self.status = "failed"
                 self.error = reason
+                self._commit_progress()
                 self.emit("failed", f"⚠️ {reason}——已中止回合。")
                 try:
                     await self.adapter.abort(self)
@@ -279,8 +284,22 @@ class ImplementJob:
             return {"ok": True}
         return {"ok": False, "error": "执行器中止调用失败(回合可能仍在等待)"}
 
+    def _commit_progress(self) -> None:
+        """终态进度保全(cv-177): 把 worktree 改动 commit 到任务分支——
+        失败重跑时分支已含全部进度, 续跑不再从零开始。尽力而为, 失败不阻断。"""
+        try:
+            _git(["add", "-A"], cwd=self.wt, check=False)
+            st = _git(["status", "--porcelain"], cwd=self.wt, check=False)
+            if not st.stdout.strip():
+                return
+            msg = f"task(progress): {self.status} (job {self.id})"
+            _git(["commit", "-m", msg, "--no-verify"], cwd=self.wt, check=False)
+        except Exception:  # noqa: BLE001
+            pass
+
     async def finish(self, keep_worktree: bool = True) -> Dict[str, Any]:
         self.status = "stopped" if self.status != "done" else self.status
+        self._commit_progress()
         self.emit("finished", f"作业结束(保 worktree={keep_worktree})")
         d = self.diff()
         try:
@@ -319,6 +338,28 @@ class ImplementJob:
 
 
 _JOBS: Dict[str, ImplementJob] = {}
+
+
+def _commit_progress_in_existing_worktree(root: str, branch: str) -> None:
+    """续跑让位(cv-177): 找到占用 branch 的旧 worktree → 提交其未提交进度 →
+    remove 让位。旧 worktree 的未提交改动是上次失败任务的全部进度, 丢了就白跑。"""
+    try:
+        out = _git(["worktree", "list", "--porcelain"], cwd=root, check=False)
+        cur = None
+        for ln in out.stdout.splitlines():
+            if ln.startswith("worktree "):
+                cur = ln[9:].strip()
+            elif ln.startswith("branch ") and ln[7:].strip() == f"refs/heads/{branch}":
+                if cur and os.path.isdir(cur):
+                    _git(["add", "-A"], cwd=cur, check=False)
+                    st = _git(["status", "--porcelain"], cwd=cur, check=False)
+                    if st.stdout.strip():
+                        _git(["commit", "-m", f"task(progress): resume handoff (branch {branch})",
+                              "--no-verify"], cwd=cur, check=False)
+                    _git(["worktree", "remove", "--force", cur], cwd=root, check=False)
+                return
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _wt_root_dir() -> str:
@@ -376,9 +417,16 @@ def register(app: FastAPI) -> None:
         try:
             os.makedirs(os.path.dirname(wt), exist_ok=True)
             r = _git(["worktree", "add", "-b", branch, wt, base], cwd=root, check=False)
+            resumed = False
             if r.returncode != 0:
-                # 分支已存在等场景: 重试 detach? 直接报错(architect 侧换名)
-                return {"ok": False, "error": f"worktree 创建失败: {r.stderr.strip()[:300]}"}
+                # 分支已存在 → 续跑复用(cv-177): 旧 worktree 提交进度后让位,
+                # 新 worktree 检出已有分支承接全部进度
+                _commit_progress_in_existing_worktree(root, branch)
+                r2 = _git(["worktree", "add", wt, branch], cwd=root, check=False)
+                if r2.returncode != 0:
+                    return {"ok": False,
+                            "error": f"worktree 创建失败: {r2.stderr.strip()[:300]}"}
+                resumed = True
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)}
         try:
@@ -410,10 +458,13 @@ def register(app: FastAPI) -> None:
         # P5: 规约/规则/agent 配置落盘 worktree（cline .cline/rules|agents、AGENTS.md）
         written = _write_workspace_files(wt, body.get("workspaceFiles"))
         job.turn_task = asyncio.create_task(job.start())
+        if resumed:
+            logger.info("[implement] job %s RESUMED branch=%s(承接上次进度)",
+                        job_id, branch)
         logger.info("[implement] job %s created root=%s branch=%s files=%s",
                     job_id, root, branch, written)
         return {"ok": True, "jobId": job_id, "branch": branch, "worktree": wt,
-                "status": job.status, "workspaceFiles": written}
+                "status": job.status, "workspaceFiles": written, "resumed": resumed}
 
     @app.get("/api/implement/running")
     async def implement_running():

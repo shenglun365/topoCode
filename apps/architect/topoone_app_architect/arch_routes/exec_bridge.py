@@ -177,6 +177,30 @@ _TASK_TERMINAL = ("done", "failed", "cancelled")
 _TASK_ACTIVE = (ST.TASK_PENDING_CONFIRM, "running", ST.TASK_WAITING_INPUT)
 
 
+def _last_failed_branch(conv_id: str) -> str:
+    """取会话最近一次失败任务的分支(跨主库+项目库扫描——任务库路由存在
+    读写分裂隐患, 与 recover_sweep 同法兜住; 路由统一另行排查)。"""
+    try:
+        from .store.base import _db, _scan_dbs
+        seen = []
+        for db in [_db(), *_scan_dbs()]:
+            try:
+                rows = db.fetchall(
+                    "SELECT id, branch, created_at FROM arch_tasks "
+                    "WHERE conversation_id = ? AND status = 'failed' "
+                    "AND branch LIKE 'task/%' ORDER BY created_at DESC",
+                    (conv_id,))
+                seen.extend(rows or [])
+            except Exception:  # noqa: BLE001
+                continue
+        seen.sort(key=lambda r: r.get("created_at") or 0, reverse=True)
+        for r in seen:
+            return str(r.get("branch") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 def propose_task(conv: dict, title: str, instruction: str,
                  executor_hint: Optional[dict] = None) -> dict:
     """轻门禁入口: 建任务(pending_confirm) + 任务卡消息落统一流。
@@ -204,6 +228,9 @@ def propose_task(conv: dict, title: str, instruction: str,
         # 无 executorConfig 可查, sidecar 收到空 model 被拒)——eid 取同一注册项
         _def = default_executor() or {}
         _eid = str(_def.get("id") or "")
+    # 续跑衔接(cv-177): 会话存在失败任务且其分支仍在 → 新任务复用该分支,
+    # runner 检出已有分支承接上次进度(终态自动 commit 已保全)——重跑不再从零开始。
+    resume_branch = _last_failed_branch(conv_id)
     _rid = (conv or {}).get("reqId") or ""
     _spec_ver = 0
     if _rid:
@@ -219,14 +246,17 @@ def propose_task(conv: dict, title: str, instruction: str,
         "executorType": etype,
         "executorId": _eid,
         "specVer": _spec_ver,
+        **({"branch": resume_branch} if resume_branch else {}),
     })
     # 错误契约(docs/architect/error-contract.md): 成功形状显式 ok=True
     # (失败形状 {"ok": False, "error"}; store 行为规范列, ok 仅回执层)
     task = {**task, "ok": True}
+    _resume_note = (f"\n\n> 🔁 续跑：将承接上次失败任务的进度分支 `{resume_branch}`"
+                     "（进度已自动保全）" if resume_branch else "")
     _append(conv_id, "assistant",
             f"📋 **任务待确认**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
             + instruction[:2000]
-            + "\n\n---\n确认后开始执行; 可取消或要求 architect 调整。",
+            + "\n\n---\n确认后开始执行; 可取消或要求 architect 调整。" + _resume_note,
             msg_meta={"kind": "task_card", "taskId": task["id"]},
             project_id=_pid)
     _publish_task(conv_id, task)

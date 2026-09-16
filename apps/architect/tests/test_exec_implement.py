@@ -601,3 +601,16 @@ def test_task_text_quasi_streaming_and_tool_trail(tmp_path, monkeypatch):
         eb._handle_task_event({"kind": "tool", "toolName": f"t{i}"}, ctx)
     assert len(store.TasksStore.get(task["id"])["progress"]["process"]) == 30
     assert store.TasksStore.get(task["id"])["progress"]["process"][-1]["s"] == "▸ t34"
+
+
+def test_propose_task_resumes_failed_branch(tmp_path, monkeypatch):
+    """cv-177 裁决: 同需求上次任务失败 → 新任务卡复用其分支(续跑承接进度)。"""
+    _setup(tmp_path, monkeypatch)
+    conv, eb2, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    old_t = store.TasksStore.create({"conversationId": conv["id"], "reqId": "RQ-1",
+                                     "title": "旧任务", "instruction": "x",
+                                     "status": "failed"})
+    store.TasksStore.update(old_t["id"], {"branch": "task/15"})   # confirm 时由 runner 回写
+    t = eb2.propose_task(conv, "新任务", "目标: 续跑")
+    assert t["branch"] == "task/15"
+    assert t["ok"] is True
