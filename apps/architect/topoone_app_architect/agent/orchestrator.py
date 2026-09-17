@@ -270,29 +270,75 @@ class _TurnIO:
 
 
 async def handle_chat(data: dict, send: SendFn) -> None:
-    """自由对话回合：持久化历史 → 发起 llm.chat 流式 → 逐字转发。"""
+    """自由对话回合(B3 五段管线编排): 闸门 → 路由 → 上下文 → 执行 → 落库。
+
+    每段为独立函数(_chat_gate/_chat_route/_chat_context/_run_llm_tool_loop/
+    _chat_land), 本体只做请求解析与段间接线(行为等价重构, 无新抽象层)。
+    """
     from ..arch_routes import req_agent
     from ..arch_routes import store
     from ..arch_routes.common import _ts
 
     now = _ts()
-
-    _register_session_tools()
+    # ---- 请求解析(段间共享的入口事实) ----
     history = data.get("messages") or []
     if not history and data.get("content"):
         history = [{"role": "user", "content": data.get("content", "")}]
     model_id = data.get("modelId") or data.get("model") or ""
-    project = (data.get("project") or "").strip()
     root = (data.get("root") or "").strip()
-    kind = data.get("kind") or "chat"
-    title = data.get("title") or ""
+    project = (data.get("project") or "").strip()
     diagram_skill = bool(data.get("diagramSkill") or data.get("diagram_skill"))
+    skill_scenarios = data.get("skillScenarios") or []
+    if not isinstance(skill_scenarios, list):
+        skill_scenarios = []
+    skill_scenarios = [str(s) for s in skill_scenarios]
 
+    # ---- ① 闸门: 绑定/归档闸/自愈/需求回填 + 用户消息落库 ----
+    gate = await _chat_gate(data, send, now)
+    if gate is None:
+        return
+    conv_id, conv = gate["conv_id"], gate["conv"]
+
+    # ---- ② 路由: transfer 收尾 / 直通指令 / 文字确认(命中即收束) ----
+    handled, decision = await _chat_route(data, gate, send)
+    if handled:
+        return
+    assign_contract = decision.contract or None
+
+    # ---- ③ 上下文: 角色模型路由 + 懒探测 + 挡位 + 消息装配 ----
+    eff_model, msgs = _chat_context(data, gate, skill_scenarios, history,
+                                    model_id, assign_contract)
+
+    # ---- ④ 执行: 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
+    io = _TurnIO(send, conv_id, gate["last_user_msg_id"])
+    tools_used: set = set()
+    tool_errors: dict = {}
+    loop = await _run_llm_tool_loop(io, conv_id, msgs, root, project,
+                                    eff_model, model_id, tools_used, tool_errors)
+
+    # ---- ⑤⑥ 落库 + 终态事件(正常 done / 错误 turnError) ----
+    await _chat_land(io, msgs, gate, conv, loop, eff_model, model_id,
+                     root, project, tools_used, tool_errors)
+
+
+async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:
+    """管线阶段① 会话闸门(行为等价抽取自 handle_chat)。
+
+    绑定/归档闸/自愈/需求回填(感知层) + P1 泵恢复(惰性) + 用户消息落单流。
+    失败已回错误事件 → None; 成功 → {conv_id, conv, question, last_user_msg_id}。
+    """
+    from ..arch_routes import req_agent
+    from ..arch_routes import store
+    from ..arch_routes.common import _ts
+
+    _register_session_tools()
+    history = data.get("messages") or []
     # 请求级项目上下文(项目库路由；WS 无 HTTP 查询串，按消息载荷设置)
     from ..arch_routes import ctx as _ctx
     from ..arch_routes.project import _resolve_project as _rp
     try:
-        _proj = _rp(root, project)
+        _proj = _rp((data.get("root") or "").strip(),
+                    (data.get("project") or "").strip())
         if _proj and _proj.get("id"):
             _ctx.set_project(_proj["id"])
     except Exception:
@@ -302,11 +348,10 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         _ctx.set_req(data.get("reqId") or "")
     except Exception:
         pass
-    # ---- 会话闸门(感知层): 绑定/归档闸/自愈/需求回填 ----
     binding = bind_session(data, store, _ctx, store.next_id)
     if binding.error_event is not None:
         await send(binding.error_event)
-        return
+        return None
     conv_id = binding.conv_id
     conv = binding.conv
     # P1 泵恢复(惰性): 服务重启丢内存泵/runner 作业 → 打开会话时核对收尾,
@@ -314,6 +359,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     try:
         if any((t.get("status") or "") in ("running", "waiting_input")
                for t in store.TasksStore.of_conv(conv_id)):
+            from ..arch_routes import exec_bridge as _eb
             _rec = await asyncio.to_thread(_eb.recover_conv_tasks, conv_id)
             for _tid, _jid, _rid2, _ag in (_rec or {}).get("repump", []):
                 _eb._start_task_pump(conv_id, _tid, _jid, _rid2, _ag)
@@ -330,20 +376,29 @@ async def handle_chat(data: dict, send: SendFn) -> None:
             "id": last_user_msg_id, "conversationId": conv_id,
             "role": "user", "time": now, "content": m.get("content", ""),
         })
+    return {"conv_id": conv_id, "conv": conv, "question": question,
+            "last_user_msg_id": last_user_msg_id}
 
-    # ---- 上下文: 能力文档 + 历史(带软拒绝范围) + 按场景 skill 文档 ----
-    skill_scenarios = data.get("skillScenarios") or []
-    if not isinstance(skill_scenarios, list):
-        skill_scenarios = []
-    # ---- v2 subagent 路由(感知层): transfer 提前收尾 / assign 注入契约 / chat ----
-    from ..arch_routes import exec_bridge as _eb
+
+async def _chat_route(data: dict, gate: dict, send: SendFn):
+    """管线阶段② 收件人路由(行为等价抽取自 handle_chat)。
+
+    transfer(收件人既定回复)/语境摘要审计回执 → 已处理(True);
+    /指令与文字确认确定性直通(cv-152: 指令不落回模型) → 已处理(True);
+    其余返回 (False, decision)——assign 契约随 decision 交给上下文段。
+    """
+    from ..arch_routes import store
+    from ..arch_routes.common import _ts
+
+    conv_id = gate["conv_id"]
+    question = gate["question"]
     attach_to = str(data.get("attachTo") or "").strip()
     agent_pick = str(data.get("agent") or "").strip()
     digest = str(data.get("digest") or "").strip()[:2000]   # 语境摘要(用户选史生成)
+    from ..arch_routes import exec_bridge as _eb
     decision = _route_decide(conv_id, question, attach_to, agent_pick, store, _eb,
                              digest=digest)
     final_b = decision.reply or None
-    assign_contract = decision.contract or None
     if final_b is not None:
         assistant_msg_id_b = store.next_id("m")
         store.ConversationsStore.append_message({
@@ -363,14 +418,14 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         except Exception:  # noqa: BLE001
             pass
         await send({"type": "chat_start", "conversationId": conv_id,
-                                   "requestId": "", "userMessageId": last_user_msg_id})
+                                   "requestId": "", "userMessageId": gate["last_user_msg_id"]})
         for i in range(0, len(final_b), 96):
             await send({"type": "chunk", "requestId": "",
                                        "delta": final_b[i:i + 96]})
             await asyncio.sleep(0.01)
         await send({"type": "done", "conversationId": conv_id,
                                    "content": final_b, "messageId": assistant_msg_id_b})
-        return
+        return True, decision
 
     # ── 会话指令直通(v2): /定稿 /执行 确定性执行不经 LLM(cv-152 教训: 指令落回
     #    模型会引用 v1 旧契约(coding.task.execute)死胡同)。仅 chat 路由生效——
@@ -379,18 +434,31 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         from .perception.commands import match_command as _cmd_match
         _cmd = _cmd_match(question)
         if _cmd:
-            await _run_direct_command(_cmd["cmd"], conv, send, store, last_user_msg_id,
+            await _run_direct_command(_cmd["cmd"], gate["conv"], send, store,
+                                      gate["last_user_msg_id"],
                                       executor=_cmd.get("executor") or "")
-            return
+            return True, decision
         # 文字确认(卡片确认同义路径): 有待确认卡才拦——否则「确认」是普通对话
         from .perception.commands import match_confirm as _confirm_match, \
             has_pending_task as _cmds_has_pending
         _conf = _confirm_match(question)
         if _conf and _cmds_has_pending(conv_id):
-            await _run_direct_confirm(conv, send, store, last_user_msg_id,
+            await _run_direct_confirm(gate["conv"], send, store,
+                                      gate["last_user_msg_id"],
                                       executor=_conf.get("executor") or "")
-            return
+            return True, decision
+    return False, decision
 
+
+def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
+                  model_id: str, assign_contract) -> tuple:
+    """管线阶段③ 消息装配(行为等价抽取自 handle_chat)。
+
+    角色模型路由(§9/B1 per-call) → 能力档案懒探测 → 分析挡位(十二a) →
+    _build_chat_messages + 通用 agent 路由系统段 + assign 契约段。
+    返回 (eff_model, msgs)。
+    """
+    conv = gate["conv"]
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，
     # 无角色命中时 eff_model=None → 回退全局偏好(既有链不变)。护栏 R3：per-call 参数。
     from ..arch_routes import agent_roles as _roles
@@ -417,8 +485,12 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         _gear_cfg = {}
     from .governance.gears import resolve_gear
     _gear = resolve_gear(_mode, _gear_cfg)
-    msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
-                                skill_scenarios=[str(s) for s in skill_scenarios],
+    msgs = _build_chat_messages((data.get("root") or "").strip(),
+                                (data.get("project") or "").strip(),
+                                history,
+                                diagram_skill=bool(data.get("diagramSkill")
+                                                   or data.get("diagram_skill")),
+                                skill_scenarios=skill_scenarios,
                                 model_id=eff_model or model_id or "")
     # v2 统一会话编排契约: 通用 agent 模式——能力分界 + 路由 + 挡位指引(单消息)
     msgs.insert(1, {"role": "system", "content":
@@ -437,12 +509,23 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         + _gear.architect_note})
     if assign_contract:
         msgs.insert(1, {"role": "system", "content": assign_contract})
-    # ---- 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
-    io = _TurnIO(send, conv_id, last_user_msg_id)
-    tools_used: set = set()
-    tool_errors: dict = {}
-    loop = await _run_llm_tool_loop(io, conv_id, msgs, root, project,
-                                    eff_model, model_id, tools_used, tool_errors)
+    return eff_model, msgs
+
+
+async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
+                     loop: dict, eff_model: Optional[str], model_id: str,
+                     root: str, project: str, tools_used: set,
+                     tool_errors: dict) -> None:
+    """管线阶段⑤⑥ 回合落库 + 终态事件(行为等价抽取自 handle_chat)。
+
+    正常: 确定性围栏代落(_post_turn_land) → assistant 单流落库 → done 事件;
+    空返回: turnError 折叠卡 + error 事件(错误必须完整可见且可刷新)。
+    """
+    from ..arch_routes import req_agent
+    from ..arch_routes import store
+    from ..arch_routes.common import _ts
+
+    conv_id = gate["conv_id"]
     request_id = loop["request_id"]
     assistant_text = loop["assistant_text"]
     visible = loop["visible"]

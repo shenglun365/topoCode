@@ -221,3 +221,21 @@ def test_default_free_chat_persists_and_injects_routing_contract(tmp_path, monke
     systems = [m["content"] for m in captured["msgs"] if m["role"] == "system"]
     assert any("通用 agent 路由" in s for s in systems), "应注入通用路由契约"
     assert any("task.propose" in s for s in systems)
+
+
+def test_handle_chat_five_stage_pipeline_structure():
+    """B3 结构守卫: handle_chat 为五段管线编排体, 阶段函数在案且被引用。
+
+    防回内联——闸门/路由/上下文/落库逻辑曾全部堆在 handle_chat(~230 行)。
+    """
+    import inspect
+    from topoone_app_architect.agent import orchestrator as orch
+    for fn in ("_chat_gate", "_chat_route", "_chat_context", "_chat_land"):
+        assert hasattr(orch, fn), f"管线阶段 {fn} 缺失"
+    src = inspect.getsource(orch.handle_chat)
+    for fn in ("_chat_gate(", "_chat_route(", "_chat_context(",
+               "_run_llm_tool_loop(", "_chat_land("):
+        assert fn in src, f"handle_chat 未引用阶段 {fn}"
+    # 编排体保持精简(接线而非实现): 不再包含落库/系统段等实现细节
+    assert "append_message" not in src
+    assert "【工作模式(通用 agent 路由)】" not in src
