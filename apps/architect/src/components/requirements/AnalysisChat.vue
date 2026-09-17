@@ -1016,7 +1016,8 @@ onUnmounted(() => {
         <div
           v-for="(m, i) in turns"
           :key="i"
-          class="animate-fade-up flex items-start gap-2 rounded-lg"
+          :id="(m as any).id ? `msg-${(m as any).id}` : undefined"
+          class="animate-fade-up flex items-start gap-2 rounded-lg scroll-mt-2"
           :class="selIds.has((m as any).id) ? 'ring-1 ring-ctp-blue' : (digestMode ? 'cursor-pointer hover:ring-1 hover:ring-ctp-blue/40' : '')"
           @copy="onMsgCopy"
           @click="toggleSel(m)"

@@ -958,10 +958,74 @@ async def assemble_session(conv_id: str):
 
 # ── 备案文档(DocsStore): 会话派生的总结性文档 ──────────────────
 
+@router.get("/sessions/{conv_id}/outline")
+async def session_outline(conv_id: str):
+    """会话大纲(K3, 拍板: 回合对颗粒度): user/assistant 回合对 fold + 回执卡单独标注。
+
+    dsh session-turn-outline 同构: prompt 预览 50 字/response 预览 120 字,
+    锚点=回合首条消息 id(前端滚动定位)。纯只读投影, 零协议变更。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    msgs = store.ConversationsStore.messages(conv_id, limit=1000)
+    turns: list = []
+    cards: list = []
+    cur: dict | None = None
+    for m in msgs:
+        meta = m.get("meta") or {}
+        kind = meta.get("kind")
+        if kind:
+            cards.append({"id": m.get("id") or "", "kind": kind,
+                          "ts": m.get("time") or 0,
+                          "preview": (m.get("content") or "").strip().replace("\n", " ")[:60]})
+            if cur:
+                cur["msgCount"] += 1
+            continue
+        role = m.get("role")
+        content = (m.get("content") or "").strip().replace("\n", " ")
+        if role == "user":
+            cur = {"id": m.get("id") or "", "ts": m.get("time") or 0,
+                   "prompt": content[:50], "response": "", "msgCount": 1}
+            turns.append(cur)
+        elif role == "assistant":
+            if cur is None:
+                cur = {"id": m.get("id") or "", "ts": m.get("time") or 0,
+                       "prompt": "(无提示)", "response": "", "msgCount": 0}
+                turns.append(cur)
+            if not cur["response"]:
+                cur["response"] = content[:120]
+            cur["msgCount"] += 1
+    return ok({"turns": turns, "cards": cards, "count": len(turns)})
+
+
+def _doc_outline(md: str, limit: int = 20) -> list:
+    """文档 H2 大纲(C 顺带): fence 感知(代码块内 ## 不计)。"""
+    out: list = []
+    in_fence = False
+    for ln in (md or "").splitlines():
+        s = ln.strip()
+        if s.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence or not s.startswith("## "):
+            continue
+        text = s[3:].strip()
+        if text:
+            out.append({"text": text[:40]})
+            if len(out) >= limit:
+                break
+    return out
+
+
 @router.get("/session-docs")
 async def list_docs(conversation_id: str = "", type: str = "", limit: int = 200):
-    return ok(store.DocsStore.all(
-        conversation_id=conversation_id or None, type_=type or None, limit=limit))
+    docs = store.DocsStore.all(
+        conversation_id=conversation_id or None, type_=type or None, limit=limit)
+    # K3-C 顺带: 文档内 H2 大纲(目录树)
+    for d in docs:
+        d["outline"] = _doc_outline(d.get("contentMd") or "")
+    return ok(docs)
 
 
 @router.post("/session-docs")

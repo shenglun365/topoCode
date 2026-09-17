@@ -12,6 +12,7 @@ import {
   DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
   ArrowUpTrayIcon, ArrowDownTrayIcon, BoltIcon,
   FolderIcon, ClockIcon, XMarkIcon, ClipboardDocumentIcon, StopIcon,
+  ListBulletIcon, ChevronDownIcon, ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useAppDialog } from '@/composables/useAppDialog'
@@ -78,6 +79,39 @@ const statusFilter = ref('all')      // 生命周期重构: all | active | runni
 
 // PR3 角色徽标: 会话列表显示 executor 角色名
 async function loadRoles() { /* 角色目录已退役(执行器直绑); 保留空挂点防引用 */ }
+
+// ── K3 会话大纲(拍板: 会话中心详情页 + 回合对颗粒度) ──
+interface OutlineTurn { id: string; ts: number; prompt: string; response: string; msgCount: number }
+interface OutlineCard { id: string; kind: string; ts: number; preview: string }
+const outlineTurns = ref<OutlineTurn[]>([])
+const outlineCards = ref<OutlineCard[]>([])
+const outlineOpen = ref(true)
+const outlineLoading = ref(false)
+
+async function loadOutline(id: string) {
+  outlineLoading.value = true
+  try {
+    const d = await apiGet<{ turns: OutlineTurn[]; cards: OutlineCard[] }>(`/sessions/${id}/outline`)
+    outlineTurns.value = d?.turns || []
+    outlineCards.value = (d?.cards || []).slice(-20)
+  } catch { outlineTurns.value = []; outlineCards.value = [] } finally {
+    outlineLoading.value = false
+  }
+}
+
+watch(() => conv.activeId, (id) => { if (id) void loadOutline(id) }, { immediate: true })
+
+function gotoTurn(id: string) {
+  const el = document.getElementById(`msg-${id}`)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function fmtOutlineTs(ts: any): string {
+  const n = Number(ts)
+  if (!n) return ''
+  const d = new Date(n)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 async function load() {
   loading.value = true
@@ -393,6 +427,51 @@ function reviewClass(rs?: string) {
         </p>
       </div>
     </section>
+
+      <!-- K3 会话大纲侧栏(回合对; 点击滚动定位到对话栏消息) -->
+      <section
+        v-if="conv.activeId"
+        class="mt-2 flex max-h-[38%] shrink-0 flex-col panel px-2.5 py-2"
+      >
+        <button
+          class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1 hover:text-ctp-subtext1"
+          @click="outlineOpen = !outlineOpen"
+        >
+          <ListBulletIcon class="h-3 w-3" />{{ t('session.outline.title') }}
+          <span class="font-mono text-ctp-overlay0">{{ outlineTurns.length }}</span>
+          <span class="flex-1" />
+          <ChevronDownIcon v-if="outlineOpen" class="h-3 w-3" />
+          <ChevronRightIcon v-else class="h-3 w-3" />
+        </button>
+        <div v-if="outlineOpen" class="mt-1.5 min-h-0 flex-1 overflow-y-auto">
+          <p v-if="!outlineTurns.length && !outlineLoading" class="py-3 text-center text-[10px] text-ctp-overlay0">
+            {{ t('session.outline.empty') }}
+          </p>
+          <button
+            v-for="(ot, i) in outlineTurns"
+            :key="ot.id || i"
+            class="mb-1 block w-full rounded border border-ctp-surface1/60 bg-ctp-mantle/60 px-2 py-1 text-left hover:border-ctp-blue/40 hover:bg-ctp-surface0/60"
+            :title="ot.prompt"
+            @click="gotoTurn(ot.id)"
+          >
+            <div class="flex items-center gap-1.5">
+              <span class="font-mono text-[9px] text-ctp-sky">{{ String(i + 1).padStart(2, '0') }}</span>
+              <span class="min-w-0 flex-1 truncate text-[10px] text-ctp-subtext1">{{ ot.prompt || t('session.outline.noPrompt') }}</span>
+              <span class="shrink-0 font-mono text-[8px] text-ctp-overlay0">{{ fmtOutlineTs(ot.ts) }}</span>
+            </div>
+            <div v-if="ot.response" class="mt-0.5 truncate text-[9px] text-ctp-overlay0">{{ ot.response }}</div>
+          </button>
+          <div v-if="outlineCards.length" class="mt-1.5 flex flex-wrap gap-1">
+            <button
+              v-for="cd in outlineCards"
+              :key="cd.id"
+              class="chip !text-[8px] bg-ctp-surface0/70 text-ctp-overlay1 hover:text-ctp-subtext1"
+              :title="cd.preview"
+              @click="gotoTurn(cd.id)"
+            >{{ cd.kind }}</button>
+          </div>
+        </div>
+      </section>
 
 
         </div>

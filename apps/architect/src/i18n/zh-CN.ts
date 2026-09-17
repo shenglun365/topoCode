@@ -498,6 +498,7 @@ export default {
     openInDock: '在会话栏打开',
     noSummary: '暂无摘要，可点击 ✨ 生成',
     summary: '会话摘要',
+    outline: { title: '会话大纲', empty: '暂无回合——发首条消息生成', noPrompt: '(无提示)' },
     msgUnit: '条',
     dock: {
       open: '打开会话栏',

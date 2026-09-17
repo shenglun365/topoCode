@@ -474,6 +474,7 @@ export default {
     openInDock: 'Open in dock',
     noSummary: 'No summary yet — click ✨ to generate',
     summary: 'Summary',
+    outline: { title: 'Outline', empty: 'No turns yet — send a message', noPrompt: '(no prompt)' },
     msgUnit: 'msgs',
     dock: {
       open: 'Open conversation dock',
