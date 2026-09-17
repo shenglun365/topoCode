@@ -217,67 +217,100 @@ def _fmt_ts(ts) -> str:
 
 def ctx_search(query: str, type_: str = "", conversation_id: str = "",
                project_id: str = "", limit: int = 20) -> str:
-    """跨会话检索单元+消息+备案文档 → Markdown 命中列表(带溯源)。"""
+    """跨会话检索单元+消息+备案文档 → Markdown 命中列表(带溯源)。
+
+    P2 词典检索侧映射: 查询词经 glossary(term/alias)扩展同义/规范词,
+    合并检索(命中带 via 溯源)——外围独立循环, 不涉主模型上下文。
+    """
     if not (query or "").strip():
         return "# ctx.search\n\nquery 为空。用法: ctx.search(query=\"支付\")"
-    like = f"%{query.strip()}%"
-    hits: List[dict] = []
 
-    # 1) 上下文单元
-    try:
-        for u in _store().ContextUnitsStore.search(query.strip(), type_=type_ or None,
-                                                conversation_id=conversation_id or None,
-                                                project_id=project_id or None,
-                                                limit=limit):
-            hits.append({"src": "unit", "type": u.get("type"), "title": u.get("title") or "-",
-                         "excerpt": (u.get("content") or "")[:200], "conv": u.get("conversationId") or "",
-                         "ts": u.get("createdAt"), "importance": u.get("importance") or 0})
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[ctx.search] units: %s", e)
-
-    # 2) 会话消息(不限定类型；按内容命中)
-    if not type_:
+    def _gather(qs: str, per_limit: int) -> List[dict]:
+        hits: List[dict] = []
+        # 1) 上下文单元
         try:
-            rows = _store().ConversationsStore.summaries(limit=200)
-        except Exception:
-            rows = []
-        for c in rows:
-            if conversation_id and c.get("id") != conversation_id:
-                continue
-            for m in _store().ConversationsStore.messages(c.get("id") or "", limit=50):
-                content = (m.get("content") or "")
-                if query.strip().lower() in content.lower():
-                    hits.append({"src": "message", "type": f"消息/{c.get('kind')}",
-                                 "title": c.get("title") or "-",
-                                 "excerpt": content[:200], "conv": c.get("id"),
-                                 "ts": m.get("time"), "importance": 0})
-                    if len(hits) >= limit * 2:
-                        break
-            if len(hits) >= limit * 2:
-                break
-
-    # 3) 备案文档
-    if not type_:
-        try:
-            for d in _store().DocsStore.all(project_id=project_id or None, limit=100):
-                blob = f"{d.get('title') or ''}\n{d.get('contentMd') or ''}"
-                if query.strip().lower() in blob.lower():
-                    hits.append({"src": "doc", "type": f"备案/{d.get('type')}",
-                                 "title": d.get("title") or "-",
-                                 "excerpt": (d.get("contentMd") or "")[:200],
-                                 "conv": d.get("conversationId") or "",
-                                 "ts": d.get("updatedAt"), "importance": 1})
+            for u in _store().ContextUnitsStore.search(qs, type_=type_ or None,
+                                                       conversation_id=conversation_id or None,
+                                                       project_id=project_id or None,
+                                                       limit=per_limit):
+                hits.append({"src": "unit", "type": u.get("type"), "title": u.get("title") or "-",
+                             "excerpt": (u.get("content") or "")[:200], "conv": u.get("conversationId") or "",
+                             "ts": u.get("createdAt"), "importance": u.get("importance") or 0})
         except Exception as e:  # noqa: BLE001
-            logger.warning("[ctx.search] docs: %s", e)
+            logger.warning("[ctx.search] units: %s", e)
+
+        # 2) 会话消息(不限定类型；按内容命中)
+        if not type_:
+            try:
+                rows = _store().ConversationsStore.summaries(limit=200)
+            except Exception:
+                rows = []
+            for c in rows:
+                if conversation_id and c.get("id") != conversation_id:
+                    continue
+                for m in _store().ConversationsStore.messages(c.get("id") or "", limit=50):
+                    content = (m.get("content") or "")
+                    if qs.lower() in content.lower():
+                        hits.append({"src": "message", "type": f"消息/{c.get('kind')}",
+                                     "title": c.get("title") or "-",
+                                     "excerpt": content[:200], "conv": c.get("id"),
+                                     "ts": m.get("time"), "importance": 0})
+                        if len(hits) >= per_limit * 2:
+                            break
+                if len(hits) >= per_limit * 2:
+                    break
+
+        # 3) 备案文档
+        if not type_:
+            try:
+                for d in _store().DocsStore.all(project_id=project_id or None, limit=100):
+                    blob = f"{d.get('title') or ''}\n{d.get('contentMd') or ''}"
+                    if qs.lower() in blob.lower():
+                        hits.append({"src": "doc", "type": f"备案/{d.get('type')}",
+                                     "title": d.get("title") or "-",
+                                     "excerpt": (d.get("contentMd") or "")[:200],
+                                     "conv": d.get("conversationId") or "",
+                                     "ts": d.get("updatedAt"), "importance": 1})
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[ctx.search] docs: %s", e)
+        return hits
+
+    hits = _gather(query.strip(), limit)
+    # 词典扩展(项目作用域; 无词典/无 pid 零开销)
+    extras: List[str] = []
+    try:
+        pid = project_id
+        if not pid and conversation_id:
+            pid = (_store().ConversationsStore.get(conversation_id) or {}).get("projectId") or ""
+        if pid:
+            from .glossary_map import expand_query
+            extras = expand_query(query, _store().GlossaryStore.list(pid, limit=500))
+    except Exception as e:  # noqa: BLE001 — 词典映射失败不阻断检索
+        logger.warning("[ctx.search] glossary 扩展失败: %s", e)
+    if extras:
+        seen = {(h.get("src"), h.get("conv"), h.get("title"), h.get("ts"))
+                for h in hits}
+        for extra in extras:
+            for h in _gather(extra, max(3, limit // 3)):
+                key = (h.get("src"), h.get("conv"), h.get("title"), h.get("ts"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                h["via"] = extra
+                hits.append(h)
 
     hits.sort(key=lambda h: (-(h.get("importance") or 0), -(int(h.get("ts") or 0))))
     hits = hits[:limit]
     out = [f"# ctx.search「{query.strip()}」({len(hits)} 命中)", ""]
+    if extras:
+        out.append(f"词典扩展: {', '.join(extras)}")
+        out.append("")
     if not hits:
         out.append("无命中。")
     for h in hits:
+        via = f" · 经「{h['via']}」扩展命中" if h.get("via") else ""
         out.append(f"## [{h['type']}] {h['title']}")
-        out.append(f"会话 `{h['conv'] or '-'}` · {_fmt_ts(h.get('ts'))} · 来源 {h['src']}")
+        out.append(f"会话 `{h['conv'] or '-'}` · {_fmt_ts(h.get('ts'))} · 来源 {h['src']}{via}")
         out.append("")
         out.append((h["excerpt"] or "").strip().replace("\n", " ")[:180])
         out.append("")
