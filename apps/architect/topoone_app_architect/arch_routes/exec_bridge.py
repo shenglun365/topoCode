@@ -623,6 +623,18 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
                     f"{'✅ 已批准' if approve else '🚫 已拒绝'} 工具调用 `{request_id}`。",
                     msg_meta={"kind": "task_approval_done", "taskId": task_id},
                     project_id=(store.ConversationsStore.get(conv_id) or {}).get("projectId") or "")
+            # 需求跟踪台账: 决议回填(按 requestId 定位挂起的「决策」条目)
+            try:
+                from .store.tracking import TrackingItemsStore
+                from .store.states import TRACK_DONE, TRACK_WAITING
+                for d in TrackingItemsStore.find_by_ref("approval", request_id, category="决策"):
+                    if (d.get("state") or "") == TRACK_WAITING:
+                        TrackingItemsStore.update(d["id"], {
+                            "state": TRACK_DONE, "waitingFor": "",
+                            "result": ("批准" if approve else "拒绝") + (f"：{reason}" if reason else ""),
+                            "resultState": "ok"})
+            except Exception:  # noqa: BLE001
+                pass
             return {"ok": True, "approval": True}
         return {"ok": False, "error": (res or {}).get("error") or "审批转发失败"}
     # P4: running 态优先 steer 直达（cline pending 优先投递）；
@@ -1178,7 +1190,7 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
                        ("verify_test", "测试")):
         if prog.get(key) is not None:
             meta_lines.append(f"- {label}: {prog[key]}")
-    return store.ContextUnitsStore.create({
+    unit = store.ContextUnitsStore.create({
         "conversationId": conv_id, "projectId": pid,
         "type": "execution_report",
         "title": f"任务回执[{status}]：{title}",
@@ -1188,6 +1200,24 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
                  "files": [str(f) for f in (changed_files or [])][:50],
                  "executorType": t.get("executorType") or ""},
         "importance": 1})
+    # 需求跟踪台账: 回执挂账(终态结果), 失败不阻断沉淀
+    try:
+        from .store.tracking import emit as _tr_emit
+        from .store.states import TRACK_DONE, TRACK_FAILED
+        ok_receipt = status == "done"
+        _tr_emit(category="回执",
+                 title=f"任务回执[{status}]：{title}",
+                 content=(summary or "")[:2000],
+                 action_type="编码", creator_role="coding",
+                 creator_id=str(t.get("executorType") or ""),
+                 state=(TRACK_DONE if ok_receipt else TRACK_FAILED),
+                 result=(summary or "")[:300],
+                 result_state=("ok" if ok_receipt else "failed"),
+                 ref_type="task", ref_id=task_id,
+                 conversation_id=conv_id, project_id=pid)
+    except Exception:  # noqa: BLE001
+        pass
+    return unit
 
 
 def _handle_task_event(ev: dict, ctx: dict) -> None:
@@ -1357,6 +1387,19 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 msg_meta={"kind": "task_approval", "taskId": task_id,
                           "approvalJobId": job_id, "approvalRequestId": req_id},
                 project_id=pid, agent=agent)
+        # 需求跟踪台账: 决策请求挂账(waiting/等用户), 失败不阻断执行流
+        try:
+            from .store.tracking import emit as _tr_emit
+            from .store.states import TRACK_WAITING
+            _tr_emit(category="决策",
+                     title=f"越界审批：{tool_name}（任务「{title}」）",
+                     content=f"任务 {task_id} 的执行器请求使用工具 `{tool_name}`，等待用户批准。",
+                     action_type="决策", creator_role="coding",
+                     assignee_role="user", state=TRACK_WAITING, waiting_for="user",
+                     ref_type="approval", ref_id=req_id,
+                     conversation_id=conv_id, project_id=pid)
+        except Exception:  # noqa: BLE001
+            pass
     elif kind == "verify":
         # V5 反馈落流: 验证矩阵 → 进度留痕; FAIL 落简短消息(通过不落流防刷屏;
         # 修复回注/退回的完整叙事由 notice/input_required 事件承载)

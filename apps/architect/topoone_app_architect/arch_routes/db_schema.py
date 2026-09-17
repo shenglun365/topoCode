@@ -265,6 +265,38 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_tasks_conv ON arch_tasks(conversation_id, project_id);
 
+    -- 需求跟踪台账(会话中心左栏): 工作条目六维度——谁创建/内容/待谁操作/操作类型/
+    -- 结果/当前状态; 分类与操作类型为可配置字典(collab config tracking.*)非固化枚举。
+    -- 主会话+子会话双 ID: 精确跟踪需求在主线与其 coding 子会话中的执行。
+    -- (运行时台账, 非知识资产——不进 kb-schema-versions 登记, 同 arch_tasks 先例)
+    CREATE TABLE IF NOT EXISTS arch_tracking_items (
+        id TEXT PRIMARY KEY,
+        category TEXT DEFAULT '',           -- 开放分类标签: 需求|方案|任务|回执|决策|异常|…(字典)
+        title TEXT DEFAULT '',
+        content TEXT DEFAULT '',            -- 创建的内容(正文/摘要)
+        action_type TEXT DEFAULT '',        -- 操作类型: 编码|设计|分析|决策|…(字典)
+        creator_role TEXT DEFAULT '',       -- user | architect | coding
+        creator_id TEXT DEFAULT '',         -- 执行器实例 id(creator_role=coding 时)
+        assignee_role TEXT DEFAULT '',      -- 待操作角色(空=无待办)
+        assignee_id TEXT DEFAULT '',
+        state TEXT DEFAULT 'done',          -- running|waiting|done|failed|cancelled
+        waiting_for TEXT DEFAULT '',        -- state=waiting 时的目标角色
+        result TEXT DEFAULT '',             -- 操作结果摘要(终态回填)
+        result_state TEXT DEFAULT '',       -- ok | failed | cancelled
+        valid INTEGER DEFAULT 1,            -- 有效性(人工作废=0)
+        main_conversation_id TEXT DEFAULT '',  -- 主会话(需求主线)
+        conversation_id TEXT DEFAULT '',    -- 直接(子)会话
+        ref_type TEXT DEFAULT '',           -- 溯源: requirement|task|unit|…
+        ref_id TEXT DEFAULT '',
+        project_id TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_tracking_conv
+        ON arch_tracking_items(main_conversation_id, project_id);
+    CREATE INDEX IF NOT EXISTS idx_arch_tracking_ref
+        ON arch_tracking_items(ref_type, ref_id);
+
     CREATE TABLE IF NOT EXISTS arch_blueprints (
         id TEXT PRIMARY KEY,
         req_ids TEXT, title TEXT, description TEXT,

@@ -71,7 +71,14 @@ class TasksStore:
             except Exception:  # noqa: BLE001
                 pass
         _insert(cls.TABLE, payload)
-        return _row_to_api(payload)
+        row = _row_to_api(payload)
+        # 需求跟踪台账: 任务创建即挂账(等待确认/执行中), 失败不阻断主流程
+        try:
+            from .tracking import sync_task
+            sync_task(row)
+        except Exception:  # noqa: BLE001
+            pass
+        return row
 
     @classmethod
     def get(cls, task_id: str):
@@ -81,9 +88,20 @@ class TasksStore:
     @classmethod
     def update(cls, task_id: str, data: dict) -> dict:
         data = dict(data)
+        # 需求跟踪台账: 状态机变化单向同步(取旧状态供 决议回填/等待角色 判定)
+        prev_status = ""
+        if "status" in data:
+            prev_status = ((cls.get(task_id) or {}).get("status") or "")
         data["updated_at"] = _now()
         row = _update(cls.TABLE, task_id, data)
-        return _row_to_api(row) if isinstance(row, dict) else (row or {})
+        out = _row_to_api(row) if isinstance(row, dict) else (row or {})
+        if prev_status and "status" in data and (out.get("status") or "") != prev_status:
+            try:
+                from .tracking import sync_task
+                sync_task(out, prev_status=prev_status)
+            except Exception:  # noqa: BLE001
+                pass
+        return out
 
     @classmethod
     def of_conv(cls, conv_id: str) -> list[dict]:

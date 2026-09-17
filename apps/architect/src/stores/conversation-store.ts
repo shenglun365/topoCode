@@ -12,6 +12,7 @@ import { chatStream, stageOfTool, type ChatStreamEvent, type KbAnalysisTurn } fr
 import type { SemanticAsset } from '@/types'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { requirementService } from '@/services/requirement-service'
+import { outlineAbbrCache } from '@/services/outline-cache'
 import { readModelPref } from '@topo/web-core/shell'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import { useChatProgress } from '@/composables/useChatProgress'
@@ -176,6 +177,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     setDockOpen(true)
     try {
       const detail = await sessionService.messages(meta.id)
+      // 过期响应守卫: 拉取期间会话已被删除/切换 → 丢弃, 不复活旧会话到对话区
+      if (activeId.value !== meta.id) return
       applyConversation({ ...detail, reqId: meta.reqId })
     } catch { /* 无历史 → 空对话 */ }
     void refreshTasks()
@@ -251,6 +254,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     for (const [k, snap] of scopeCache) {
       if (snap.activeId === convId) scopeCache.delete(k)
     }
+    // 大纲标题缩略缓存随会话删除清理(K3 浮窗)
+    outlineAbbrCache.removeConversation(convId)
     if (activeId.value === convId) newConversation()
   }
 
@@ -350,6 +355,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     if (!turn) return
     const msgId = turn.id
     arr.splice(index, 1)
+    // 大纲标题缩略缓存随消息删除清理(K3 浮窗)
+    if (msgId && convId) outlineAbbrCache.removeMessages(convId, [msgId])
     if (msgId && convId) {
       requirementService.deleteMessage(convId, msgId).catch(() => { /* 本地已删, 后端失败忽略 */ })
     }
@@ -364,7 +371,10 @@ export const useConversationStore = defineStore('archConversation', () => {
     const msgId = turn.id
     if (!msgId || !convId) return
     await requirementService.rollbackMessages(convId, msgId)
-    arr.splice(index + 1)
+    const removed = arr.splice(index + 1)
+    // 被截断消息的缩略缓存一并清理(K3 浮窗; 保留锚点自身——回合仍在)
+    const removedIds = removed.map((m) => m.id).filter((x): x is string => !!x)
+    if (removedIds.length) outlineAbbrCache.removeMessages(convId, removedIds)
   }
 
   function stop() { abortCtl.value?.abort() }

@@ -58,6 +58,19 @@ export interface ContextUnit {
   createdAt?: number
 }
 
+/** 会话知识单元(K2 沉淀): /units 投影行(跨会话列示时带 conversationId)。 */
+export interface SessionUnit {
+  id: string
+  conversationId?: string
+  projectId?: string
+  type: string
+  title: string
+  content: string
+  refs?: Record<string, unknown>
+  importance?: number
+  createdAt?: number
+}
+
 export interface SessionDoc {
   id: string
   conversationId: string
@@ -108,6 +121,25 @@ export const sessionService = {
   },
   async context(id: string): Promise<ContextUnit[]> {
     return apiGet<ContextUnit[]>(`/sessions/${id}/context`)
+  },
+  // ── 知识单元(知识资产) ──
+  /** convId 缺省 + scope=all → 跨全库汇总(会话中心左栏统一视图, 条目带 conversationId)。 */
+  async units(params?: { convId?: string; type?: string; q?: string; scope?: string; limit?: number }): Promise<{ units: SessionUnit[] }> {
+    const p = new URLSearchParams()
+    if (params?.convId) p.set('convId', params.convId)
+    if (params?.type) p.set('type', params.type)
+    if (params?.q?.trim()) p.set('q', params.q.trim())
+    if (params?.scope) p.set('scope', params.scope)
+    p.set('limit', String(params?.limit ?? 200))
+    return apiGet<{ units: SessionUnit[] }>(`/units?${p.toString()}`)
+  },
+  async removeUnit(unitId: string): Promise<void> {
+    await apiDelete(`/units/${unitId}`)
+  },
+  /** 会话大纲条目标题语义缩略(批量按需补算; 结果由前端 outline-cache 缓存)。 */
+  async abbreviateOutline(items: { id: string; text: string }[]): Promise<{ items: { id: string; short: string; degraded?: boolean }[]; degraded?: boolean }> {
+    return apiPost<{ items: { id: string; short: string; degraded?: boolean }[]; degraded?: boolean }>(
+      '/sessions/outline/abbreviate', { items: items.slice(0, 20) })
   },
   // ── 备案文档 ──
   async docs(conversationId?: string): Promise<SessionDoc[]> {

@@ -183,6 +183,21 @@ async def create_requirement(request: Request):
         "sourceType": src_type or "manual", "sourceConversationId": src_conv,
     }
     store.RequirementsStore.create(req)
+    # 需求跟踪台账: 手工登记挂账(draft=等待用户完善), 失败不阻断
+    try:
+        from .store.tracking import emit as _tr_emit
+        from .store.states import TRACK_DONE, TRACK_WAITING
+        status = req.get("status") or "draft"
+        is_draft = status == "draft"
+        _tr_emit(category="需求", title=req.get("title") or req["id"],
+                 content=req.get("desc") or "", action_type="分析",
+                 creator_role="user",
+                 state=(TRACK_WAITING if is_draft else TRACK_DONE),
+                 waiting_for=("user" if is_draft else ""),
+                 ref_type="requirement", ref_id=req["id"],
+                 conversation_id=src_conv)
+    except Exception:  # noqa: BLE001
+        pass
     return ok(store.RequirementsStore.get(req["id"]))
 
 

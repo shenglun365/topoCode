@@ -11,9 +11,10 @@ import {
   XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
   ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
   PencilSquareIcon, SparklesIcon, BookOpenIcon, ArchiveBoxIcon, CubeTransparentIcon,
-  DocumentTextIcon,
+  DocumentTextIcon, ListBulletIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
+import SessionOutlineWindow from '@/components/chat/SessionOutlineWindow.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { namingService } from '@/services/naming-service'
@@ -29,6 +30,10 @@ const props = withDefaults(defineProps<{
   skillScenarios?: string[]
   /** 场景标识(sessions=会话中心 / asset=资产管理)：对话状态按场景隔离互不影响。 */
   scope?: string
+  /** 知识资产面板(输入框上方): 缺省显示; 会话中心移至左栏后传 false。 */
+  assetsPanel?: boolean
+  /** 会话大纲按钮+浮窗(输入框上侧工具栏): 缺省关闭, 会话中心开启。 */
+  outline?: boolean
 }>(), { inline: false })
 
 const { t } = useI18n()
@@ -38,6 +43,9 @@ const conv = useConversationStore()
 
 const recent = ref<ConversationMeta[]>([])
 const listOpen = ref(false)
+
+// ── 会话大纲浮窗(按钮在 #toolbar-extra; 浮窗 Teleport 到 body) ──
+const outlineOpen = ref(false)
 
 // ── 会话操作(工具条): 提炼报告由服务端沉淀为会话消息 ──
 const mining = ref(false)
@@ -226,6 +234,7 @@ function onLocalCmd(name: string) {
 function onConversationRemoved(e: Event) {
   const id = (e as CustomEvent).detail as string
   if (id) conv.dropConversation(id)
+  void loadRecent()   // 会话切换浮层清单同步(删除后不残留)
 }
 
 function switchTo(meta: ConversationMeta) {
@@ -802,6 +811,7 @@ async function pollRunningState() {
         @summarize-title="summarizeTitle"
         :diagram-skill="conv.diagramSkill"
         :read-only="(conv.activeMeta as any)?.status === 'archived'"
+        :show-assets-panel="props.assetsPanel"
         :job-state="jobState"
         :bound-executor-id="boundExecutorId"
         :executor-models="boundModelNames"
@@ -873,6 +883,15 @@ async function pollRunningState() {
           </div>
         </template>
         <template #toolbar-extra>
+          <!-- 会话大纲浮窗开关(会话中心启用): 开合两态均缩略为此按钮 -->
+          <button
+            v-if="props.outline"
+            class="btn btn-xs !px-1.5"
+            :class="outlineOpen ? 'btn-blue' : 'btn-ghost'"
+            :disabled="!conv.activeId"
+            :title="t('session.outline.title')"
+            @click="outlineOpen = !outlineOpen"
+          ><ListBulletIcon class="w-3.5 h-3.5" /></button>
           <!-- 纯 icon 工具条(title 提示); 动作均可用 /命令 触达(引导/摘要/提炼/归档) -->
           <button
             v-if="isExecutionConv"
@@ -903,5 +922,11 @@ async function pollRunningState() {
         </template>
       </AnalysisChat>
     </div>
+
+    <!-- 会话大纲浮窗(Teleport body): 关闭/最小化缩回工具栏大纲按钮 -->
+    <SessionOutlineWindow
+      v-if="props.outline && outlineOpen"
+      @close="outlineOpen = false"
+    />
   </aside>
 </template>

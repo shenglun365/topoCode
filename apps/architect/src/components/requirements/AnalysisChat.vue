@@ -53,6 +53,8 @@ const props = defineProps<{
   hasSession?: boolean
   /** 会话 id(语境摘要 REST 用); 空=无会话。 */
   convId?: string
+  /** 知识资产面板(输入框上方折叠条): 缺省显示; 会话中心已移至左栏, 传 false 隐藏。 */
+  showAssetsPanel?: boolean
   /** v2 coding subagent 任务清单(arch_tasks, 倒序; TaskCard 渲染 + 语境路由用)。 */
   tasks?: Array<Record<string, any>>
 }>()
@@ -1905,9 +1907,9 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 知识资产面板(K2): 任务回执/里程碑沉淀清单, 检索+删除 -->
+    <!-- 知识资产面板(K2): 任务回执/里程碑沉淀清单, 检索+删除(会话中心场景移至左栏, showAssetsPanel=false 隐藏) -->
     <AssetsPanel
-      v-if="props.convId"
+      v-if="props.showAssetsPanel !== false && props.convId"
       :conv-id="props.convId"
       :read-only="props.readOnly"
     />

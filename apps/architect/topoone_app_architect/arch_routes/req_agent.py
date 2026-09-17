@@ -1060,6 +1060,21 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     }
     _store.RequirementsStore.create(req)
     _sync_analysis_cache(req["id"], snapshot)
+    # 需求跟踪台账: 需求落库即挂账(生成=done), 失败不阻断需求流
+    try:
+        from .store.tracking import emit as _tr_emit
+        from .store.states import TRACK_DONE
+        _tr_emit(category="需求",
+                 title=str(req.get("title") or req["id"])[:200],
+                 content=str(snapshot.get("desc") or "")[:2000],
+                 action_type="分析", creator_role="architect",
+                 state=TRACK_DONE, result=f"需求卡已创建({req['id']}，ready)",
+                 result_state="ok",
+                 ref_type="requirement", ref_id=req["id"],
+                 conversation_id=conv_id,
+                 project_id=str(req.get("projectId") or ""))
+    except Exception:  # noqa: BLE001
+        pass
     # 回写会话绑定(后端真相源): amend 契约/守卫修复/执行链路依赖 conv.reqId
     if conv_id:
         try:

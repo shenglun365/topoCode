@@ -143,7 +143,7 @@ def land_error_pattern(project_id: str, pattern: Dict[str, Any],
         row = store.ContextUnitsStore.update(
             u["id"], {"content": content, "refs": refs})
         return row or u
-    return store.ContextUnitsStore.create({
+    row = store.ContextUnitsStore.create({
         "conversationId": conv_id, "projectId": project_id,
         "type": "error_pattern",
         "title": f"错误模式: {sig}",
@@ -153,6 +153,20 @@ def land_error_pattern(project_id: str, pattern: Dict[str, Any],
                  "convs": [conv_id] if conv_id else [],
                  "lastSeenAt": int(time.time() * 1000)},
         "importance": 2})
+    # 需求跟踪台账: 新模式挂「异常」条目(同签名追加不重复挂), 失败不阻断
+    try:
+        from ...arch_routes.store.tracking import emit as _tr_emit
+        from ...arch_routes.store.states import TRACK_DONE
+        _tr_emit(category="异常", title=f"错误模式: {sig}",
+                 content=f"**归因**: {cause}\n**修正**: {fix}"[:1000],
+                 action_type="分析", creator_role="architect",
+                 state=TRACK_DONE, result="已提炼为错误模式(项目级)",
+                 result_state="ok",
+                 ref_type="unit", ref_id=row.get("id") or "",
+                 conversation_id=conv_id, project_id=project_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return row
 
 
 def distill_errors(conv_id: str, limit: int = 20,

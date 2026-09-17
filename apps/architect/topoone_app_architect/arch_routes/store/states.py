@@ -44,3 +44,13 @@ SPEC_SUPERSEDED = "superseded"
 # 会话
 CONV_ACTIVE = "active"
 CONV_ARCHIVED = "archived"
+
+# 需求跟踪台账(tracking.state)
+TRACK_RUNNING = "running"
+TRACK_WAITING = "waiting"
+TRACK_DONE = "done"
+TRACK_FAILED = "failed"
+TRACK_CANCELLED = "cancelled"
+TRACK_TERMINAL = (TRACK_DONE, TRACK_FAILED, TRACK_CANCELLED)
+# 台账角色词汇(creator/assignee/waiting_for 共用; 实例粒度走 *_id)
+TRACK_ROLES = ("user", "architect", "coding")

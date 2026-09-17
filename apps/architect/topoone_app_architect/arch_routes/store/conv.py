@@ -424,6 +424,28 @@ class ContextUnitsStore:
         return [cls._api(r) for r in rows]
 
     @classmethod
+    def all_across(cls, type_: str = None, q: str = None, limit: int = 200) -> list[dict]:
+        """跨全库(主库+各项目库)扫描合并: 会话中心统一视图, 不受请求项目上下文限制。
+
+        与 ConversationsStore._summaries_scan 同构: 各库独立 LIMIT 后归并重排再截断。"""
+        from .base import _scan_dbs
+        conds, params = [], []
+        if q:
+            conds.append("(title LIKE ? OR content LIKE ?)")
+            params += [f"%{q}%", f"%{q}%"]
+        if type_:
+            conds.append("type = ?")
+            params.append(type_)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        sql = f"SELECT * FROM {cls.TABLE}{where} ORDER BY created_at DESC LIMIT ?"
+        params = (*params, int(limit))
+        out: list[dict] = []
+        for d in _scan_dbs():
+            out.extend(cls._api(r) for r in d.fetchall(sql, params))
+        out.sort(key=lambda r: (r.get("createdAt") is None, r.get("createdAt") or 0), reverse=True)
+        return out[: int(limit)]
+
+    @classmethod
     def get(cls, unit_id: str):
         return _get(cls.TABLE, unit_id)
 

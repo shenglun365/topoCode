@@ -313,6 +313,13 @@ def _delete_session_cascade(conv_id: str) -> int:
         TasksStore.delete_by_conv(conv_id)
     except Exception:  # noqa: BLE001
         pass
+    # 需求跟踪台账: 清该会话(直接/主线)的条目——主会话删除时其子会话条目
+    # 经 main_conversation_id 一并清除; 递归子会话调用各清残留(失败不阻断)
+    try:
+        from .store.tracking import TrackingItemsStore
+        TrackingItemsStore.delete_by_conversation(conv_id)
+    except Exception:  # noqa: BLE001
+        pass
     n = 0
     for sub in store.ConversationsStore.by_parent(conv_id):
         n += _delete_session_cascade(sub["id"])
@@ -999,6 +1006,52 @@ async def session_outline(conv_id: str):
     return ok({"turns": turns, "cards": cards, "count": len(turns)})
 
 
+@router.post("/sessions/outline/abbreviate")
+async def outline_abbreviate(request: Request):
+    """会话大纲条目标题语义缩略(K3 浮窗): 批量用户输入 → ≤16 字语义短标题。
+
+    纯按需计算不落库——缩略结果由前端 LS 缓存(随会话/消息删除清理)。
+    LLM 未配置/失败 → 降级为截断(short=text[:16]), 条目标注 degraded=true,
+    响应级 degraded=任一条降级。
+    """
+    data = await request.json()
+    items = data.get("items")
+    if not isinstance(items, list):
+        return err(400, "items 非法")
+    items = items[:20]
+    out: list = []
+    degraded_any = False
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        iid = str(it.get("id") or "")
+        text = str(it.get("text") or "").strip().replace("\n", " ")
+        short, deg = text[:16], True
+        if text:
+            try:
+                from .adaptation import summarize_task
+                from .agent_roles import load_light_tasks_cfg
+                from ..agent.governance.light_tasks import resolve_light_task_model
+                r = summarize_task(
+                    task_id="outline_abbrev",
+                    system="你是会话大纲助手。把用户输入缩略为不超过16字的语义短标题，"
+                           "保留关键名词与意图，只输出短标题本身。",
+                    material=text[:160],
+                    max_tokens=64,
+                    model_id=resolve_light_task_model("summary", load_light_tasks_cfg()),
+                )
+                s = ""
+                if r.get("ok") and r.get("output"):
+                    s = str(r["output"]).strip().splitlines()[0] if str(r["output"]).strip() else ""
+                if s:
+                    short, deg = s[:24], False
+            except Exception:  # noqa: BLE001 —— 模型未配置/网络失败等一律截断降级
+                pass
+        degraded_any = degraded_any or deg
+        out.append({"id": iid, "short": short, "degraded": deg})
+    return ok({"items": out, "degraded": degraded_any})
+
+
 def _doc_outline(md: str, limit: int = 20) -> list:
     """文档 H2 大纲(C 顺带): fence 感知(代码块内 ## 不计)。"""
     out: list = []
@@ -1441,20 +1494,38 @@ async def tasks_of(conv_id: str = fastapi.Query("", alias="convId")):
 async def units_of(conv_id: str = fastapi.Query("", alias="convId"),
                    type: str = fastapi.Query("", alias="type"),
                    q: str = fastapi.Query("", alias="q"),
+                   scope: str = fastapi.Query("", alias="scope"),
                    limit: int = fastapi.Query(100, alias="limit")):
-    """会话知识单元清单(存储归一: 回执/分析/产物/错误等, 检索面读侧)。?convId= 会话 id。"""
-    if not conv_id:
-        return err(400, "convId 必填")
-    conv = store.ConversationsStore.get(conv_id)
-    if not conv:
-        return err(404, "会话不存在")
-    if q.strip():
-        rows = store.ContextUnitsStore.search(q.strip(), type_=type or None,
-                                              conversation_id=conv_id,
-                                              limit=max(1, min(limit, 200)))
+    """会话知识单元清单(存储归一: 回执/分析/产物/错误等, 检索面读侧)。
+
+    ?convId= 会话 id; 缺省时跨会话列示:
+      - scope=all: 跨全库(主库+各项目库)汇总 —— 会话中心左栏知识资产统一视图,
+        条目携带 conversationId 供前端标注/联动来源会话;
+      - 其余: 按请求项目上下文路由读。
+    """
+    cap = max(1, min(limit, 200))
+    if conv_id:
+        conv = store.ConversationsStore.get(conv_id)
+        if not conv:
+            return err(404, "会话不存在")
+        if q.strip():
+            rows = store.ContextUnitsStore.search(q.strip(), type_=type or None,
+                                                  conversation_id=conv_id,
+                                                  limit=cap)
+        else:
+            rows = store.ContextUnitsStore.all(conversation_id=conv_id, type_=type or None,
+                                               limit=cap)
+    elif scope == "all":
+        rows = store.ContextUnitsStore.all_across(type_=type or None,
+                                                  q=q.strip() or None, limit=cap)
     else:
-        rows = store.ContextUnitsStore.all(conversation_id=conv_id, type_=type or None,
-                                           limit=max(1, min(limit, 200)))
+        if q.strip():
+            rows = store.ContextUnitsStore.search(q.strip(), type_=type or None, limit=cap)
+        else:
+            rows = store.ContextUnitsStore.all(type_=type or None, limit=cap)
+        # scan 归并路径未整体重排 → 按 createdAt 重排后截断
+        rows = sorted(rows, key=lambda r: (r.get("createdAt") is None, r.get("createdAt") or 0),
+                      reverse=True)[:cap]
     return ok({"units": rows})
 
 

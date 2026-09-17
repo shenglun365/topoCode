@@ -19,6 +19,7 @@ from . import naming
 from . import mainkb
 from . import capability_mining
 from . import llm_dataset
+from . import tracking
 
 router = APIRouter(prefix="/api/architect")
 router.include_router(project.router)
@@ -49,3 +50,4 @@ router.include_router(mainkb.router)
 router.include_router(capability_mining.router)
 router.include_router(diagram.router)
 router.include_router(design.router)
+router.include_router(tracking.router)

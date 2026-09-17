@@ -2,7 +2,8 @@
 /**
  * 会话中心(P1) —— 会话是唯一主体，流程不复存在。
  * 组织维度: 时间/模块/自定义分组(元数据)；流程视图=过滤器。
- * 详情: 摘要/备案文档/关联执行；对话本体在全局会话栏(ConversationDock)。
+ * 对话本体在全局会话栏(ConversationDock)；大纲为浮窗(工具栏大纲按钮)；
+ * 左栏第二标签页 = 需求跟踪(六维度工作台账, SessionTrackingPanel)。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -12,24 +13,50 @@ import {
   DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
   ArrowUpTrayIcon, ArrowDownTrayIcon, BoltIcon,
   FolderIcon, ClockIcon, XMarkIcon, ClipboardDocumentIcon, StopIcon,
-  ListBulletIcon, ChevronDownIcon, ChevronRightIcon,
+  ArrowsRightLeftIcon,
 } from '@heroicons/vue/24/outline'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useAppDialog } from '@/composables/useAppDialog'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
-import { apiGet, apiPost } from '@/services/api-client'
+import { trackingService, type TrackingVocab } from '@/services/tracking-service'
+import { apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
 import { copyText } from '@/utils/clipboard'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
+import SessionTrackingPanel from '@/components/sessions/SessionTrackingPanel.vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const conv = useConversationStore()
 
-// ── 布局: 左栏信息(列表+详情) / 右栏对话(inline 停靠)——与资产地图页同构 ──
+// ── 布局: 左栏信息(会话列表/知识资产 标签页) / 右栏对话(inline 停靠)——与资产地图页同构 ──
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 62, min: 40, max: 78 })
+
+/** 左栏标签页: 会话列表 / 需求跟踪(单按钮切换)。 */
+const leftTab = ref<'sessions' | 'assets'>('sessions')
+
+// ── 需求跟踪筛选(顶栏持有, 面板 props 透传) ──
+const trackingCategory = ref('')
+const trackingState = ref('')
+const trackingAssignee = ref('')
+const trackingQ = ref('')
+const trackingRefreshNonce = ref(0)
+const trackingCount = ref(0)
+const trackingLoading = ref(false)
+const trackingVocab = ref<TrackingVocab | null>(null)
+function trackingStateLabel(s: string): string {
+  const key = `session.tracking.state.${s}`
+  const label = t(key)
+  return label === key ? s : label
+}
+function trackingRoleLabel(r: string): string {
+  const key = `session.tracking.role.${r}`
+  const label = t(key)
+  return label === key ? r : label
+}
+const toolbarBusy = computed(() => (leftTab.value === 'assets' ? trackingLoading.value : loading.value))
 
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
@@ -80,39 +107,6 @@ const statusFilter = ref('all')      // 生命周期重构: all | active | runni
 // PR3 角色徽标: 会话列表显示 executor 角色名
 async function loadRoles() { /* 角色目录已退役(执行器直绑); 保留空挂点防引用 */ }
 
-// ── K3 会话大纲(拍板: 会话中心详情页 + 回合对颗粒度) ──
-interface OutlineTurn { id: string; ts: number; prompt: string; response: string; msgCount: number }
-interface OutlineCard { id: string; kind: string; ts: number; preview: string }
-const outlineTurns = ref<OutlineTurn[]>([])
-const outlineCards = ref<OutlineCard[]>([])
-const outlineOpen = ref(true)
-const outlineLoading = ref(false)
-
-async function loadOutline(id: string) {
-  outlineLoading.value = true
-  try {
-    const d = await apiGet<{ turns: OutlineTurn[]; cards: OutlineCard[] }>(`/sessions/${id}/outline`)
-    outlineTurns.value = d?.turns || []
-    outlineCards.value = (d?.cards || []).slice(-20)
-  } catch { outlineTurns.value = []; outlineCards.value = [] } finally {
-    outlineLoading.value = false
-  }
-}
-
-watch(() => conv.activeId, (id) => { if (id) void loadOutline(id) }, { immediate: true })
-
-function gotoTurn(id: string) {
-  const el = document.getElementById(`msg-${id}`)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-function fmtOutlineTs(ts: any): string {
-  const n = Number(ts)
-  if (!n) return ''
-  const d = new Date(n)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
 async function load() {
   loading.value = true
   try {
@@ -128,6 +122,8 @@ async function load() {
 onMounted(async () => {
   // 会话集合变更(右栏对话新建/更新会话) → 左侧列表同步刷新(免手动刷新页面)
   window.addEventListener('arch:sessions-changed', onSessionsChanged)
+  // 需求跟踪字典(分类/操作类型/角色/状态, 顶栏筛选下拉)
+  trackingService.vocab().then((v) => { trackingVocab.value = v }).catch(() => { /* 静默 */ })
   await load()
   // 项目名称映射(引用复制用): arch_projects 全量, 失败静默(降级显示 projectId)
   try {
@@ -245,8 +241,10 @@ async function removeSession(c: ConversationMeta) {
   if (!(await dialog.confirm(t('session.actions.deleteConfirm', { title: c.title }), { danger: true }))) return
   await sessionService.remove(c.id)
   list.value = list.value.filter((x) => x.id !== c.id)
-  // 左右联动: 通知对话栏清除该会话(若正打开)——右侧不残留已删会话
+  // 左右联动: 通知对话栏清除该会话(若正打开)——右侧不残留已删会话;
+  // sessions-changed 供 dock 切换浮层/需求跟踪面板/大纲同步刷新
   window.dispatchEvent(new CustomEvent('arch:conversation-removed', { detail: c.id }))
+  window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: c.id }))
 }
 async function newGroup() {
   const name = await dialog.prompt(t('session.actions.newGroupPrompt'))
@@ -276,39 +274,85 @@ function reviewClass(rs?: string) {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <!-- 顶栏: 搜索/过滤/操作(与资产地图页同构: 页头 + 分栏内容区) -->
+    <!-- 顶栏: 标签页切换 + 上下文筛选/操作(会话列表/知识资产 共用一条工具栏) -->
     <div class="flex shrink-0 flex-wrap items-center gap-2 px-5 pt-5">
-      <div class="relative w-56">
-        <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
-        <input v-model="q" class="input pl-8 text-xs" :placeholder="t('session.searchPlaceholder')">
-      </div>
-      <select v-model="timeFilter" class="input !w-auto !py-1 text-xs">
-        <option value="all">{{ t('session.time.all') }}</option>
-        <option value="today">{{ t('session.time.today') }}</option>
-        <option value="week">{{ t('session.time.week') }}</option>
-        <option value="earlier">{{ t('session.time.earlier') }}</option>
-      </select>
-      <select v-model="statusFilter" class="input !w-auto !py-1 text-xs">
-        <option value="all">{{ t('session.statusFilter.all') }}</option>
-        <option value="active">{{ t('session.status.active') }}</option>
-        <option value="running">{{ t('session.status.running') }}</option>
-        <option value="archived">{{ t('session.status.archived') }}</option>
-      </select>
-      <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
-        <option value="">{{ t('session.group.all') }}</option>
-        <optgroup v-if="groupsInfo.groups.length" :label="t('session.group.custom')">
-          <option v-for="g in groupsInfo.groups" :key="g" :value="`group:${g}`">{{ g }}</option>
-        </optgroup>
-        <optgroup v-if="groupsInfo.modules.length" :label="t('session.group.byModule')">
-          <option v-for="m in groupsInfo.modules" :key="m" :value="`module:${m}`">{{ m }}</option>
-        </optgroup>
-      </select>
-      <button class="btn btn-sm btn-ghost" :title="t('session.group.new')" @click="newGroup">
-        <FolderIcon class="h-3.5 w-3.5" />
+      <!-- 标签页: 会话列表 / 需求跟踪(单按钮切换, 节约工具栏空间) -->
+      <button
+        class="btn btn-sm"
+        :class="leftTab === 'sessions' ? 'btn-blue' : 'btn-primary'"
+        :title="t('session.tabs.switch')"
+        @click="leftTab = leftTab === 'sessions' ? 'assets' : 'sessions'"
+      >
+        <ArrowsRightLeftIcon class="h-3.5 w-3.5 shrink-0" />
+        {{ leftTab === 'sessions' ? t('session.tabs.list') : t('session.tabs.assets') }}
+        <span class="ml-0.5 font-mono opacity-70">{{ leftTab === 'sessions' ? filtered.length : trackingCount }}</span>
       </button>
+
+      <!-- 会话列表筛选(标签页上下文) -->
+      <template v-if="leftTab === 'sessions'">
+        <div class="relative w-56">
+          <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
+          <input v-model="q" class="input pl-8 text-xs" :placeholder="t('session.searchPlaceholder')">
+        </div>
+        <select v-model="timeFilter" class="input !w-auto !py-1 text-xs">
+          <option value="all">{{ t('session.time.all') }}</option>
+          <option value="today">{{ t('session.time.today') }}</option>
+          <option value="week">{{ t('session.time.week') }}</option>
+          <option value="earlier">{{ t('session.time.earlier') }}</option>
+        </select>
+        <select v-model="statusFilter" class="input !w-auto !py-1 text-xs">
+          <option value="all">{{ t('session.statusFilter.all') }}</option>
+          <option value="active">{{ t('session.status.active') }}</option>
+          <option value="running">{{ t('session.status.running') }}</option>
+          <option value="archived">{{ t('session.status.archived') }}</option>
+        </select>
+        <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.group.all') }}</option>
+          <optgroup v-if="groupsInfo.groups.length" :label="t('session.group.custom')">
+            <option v-for="g in groupsInfo.groups" :key="g" :value="`group:${g}`">{{ g }}</option>
+          </optgroup>
+          <optgroup v-if="groupsInfo.modules.length" :label="t('session.group.byModule')">
+            <option v-for="m in groupsInfo.modules" :key="m" :value="`module:${m}`">{{ m }}</option>
+          </optgroup>
+        </select>
+        <button class="btn btn-sm btn-ghost" :title="t('session.group.new')" @click="newGroup">
+          <FolderIcon class="h-3.5 w-3.5" />
+        </button>
+      </template>
+
+      <!-- 需求跟踪筛选(标签页上下文; 分类/操作类型为可配置字典) -->
+      <template v-else>
+        <select v-model="trackingCategory" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.tracking.allCategories') }}</option>
+          <option v-for="c in (trackingVocab?.categories ?? [])" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select v-model="trackingState" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.tracking.allStates') }}</option>
+          <option v-for="s in (trackingVocab?.states ?? [])" :key="s" :value="s">{{ trackingStateLabel(s) }}</option>
+        </select>
+        <select v-model="trackingAssignee" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.tracking.allAssignees') }}</option>
+          <option v-for="r in (trackingVocab?.roles ?? [])" :key="r" :value="r">{{ trackingRoleLabel(r) }}</option>
+        </select>
+        <div class="relative w-56">
+          <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
+          <input
+            v-model="trackingQ"
+            class="input pl-8 text-xs"
+            :placeholder="t('session.tracking.search')"
+            @keydown.enter="trackingRefreshNonce++"
+          >
+        </div>
+      </template>
+
       <div class="ml-auto flex items-center gap-1.5">
-        <button class="btn btn-sm btn-ghost" :disabled="loading" @click="load">
-          <ArrowPathIcon class="h-3.5 w-3.5" :class="loading ? 'animate-spin' : ''" />
+        <button
+          class="btn btn-sm btn-ghost"
+          :disabled="toolbarBusy"
+          :title="t('common.refresh')"
+          @click="leftTab === 'assets' ? trackingRefreshNonce++ : load()"
+        >
+          <ArrowPathIcon class="h-3.5 w-3.5" :class="toolbarBusy ? 'animate-spin' : ''" />
         </button>
         <button class="btn btn-sm btn-blue" @click="newConversation">
           <PlusIcon class="h-3.5 w-3.5" />{{ t('session.newConversation') }}
@@ -323,10 +367,10 @@ function reviewClass(rs?: string) {
       :class="dragging ? 'cursor-col-resize select-none' : ''"
     >
       <div class="flex h-full min-h-0">
-        <!-- 左: 信息区 -->
-        <div class="flex h-full min-h-0 min-w-0" :style="{ width: splitPct + '%' }">
+        <!-- 左: 信息区(标签页内容: 会话列表 / 知识资产; 标签页开关在顶栏工具条) -->
+        <div class="flex h-full min-h-0 min-w-0 flex-col" :style="{ width: splitPct + '%' }">
           <!-- 左: 会话列表 -->
-          <section class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <section v-if="leftTab === 'sessions'" class="flex min-h-0 min-w-0 flex-1 flex-col">
             <div class="min-h-0 flex-1 overflow-auto panel">
         <template v-for="g in grouped" :key="g.key || 'flat'">
           <div v-if="g.key" class="sticky top-0 z-10 flex items-center gap-1.5 bg-ctp-mantle/95 px-3 py-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1 backdrop-blur">
@@ -428,50 +472,19 @@ function reviewClass(rs?: string) {
       </div>
     </section>
 
-      <!-- K3 会话大纲侧栏(回合对; 点击滚动定位到对话栏消息) -->
-      <section
-        v-if="conv.activeId"
-        class="mt-2 flex max-h-[38%] shrink-0 flex-col panel px-2.5 py-2"
-      >
-        <button
-          class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1 hover:text-ctp-subtext1"
-          @click="outlineOpen = !outlineOpen"
-        >
-          <ListBulletIcon class="h-3 w-3" />{{ t('session.outline.title') }}
-          <span class="font-mono text-ctp-overlay0">{{ outlineTurns.length }}</span>
-          <span class="flex-1" />
-          <ChevronDownIcon v-if="outlineOpen" class="h-3 w-3" />
-          <ChevronRightIcon v-else class="h-3 w-3" />
-        </button>
-        <div v-if="outlineOpen" class="mt-1.5 min-h-0 flex-1 overflow-y-auto">
-          <p v-if="!outlineTurns.length && !outlineLoading" class="py-3 text-center text-[10px] text-ctp-overlay0">
-            {{ t('session.outline.empty') }}
-          </p>
-          <button
-            v-for="(ot, i) in outlineTurns"
-            :key="ot.id || i"
-            class="mb-1 block w-full rounded border border-ctp-surface1/60 bg-ctp-mantle/60 px-2 py-1 text-left hover:border-ctp-blue/40 hover:bg-ctp-surface0/60"
-            :title="ot.prompt"
-            @click="gotoTurn(ot.id)"
-          >
-            <div class="flex items-center gap-1.5">
-              <span class="font-mono text-[9px] text-ctp-sky">{{ String(i + 1).padStart(2, '0') }}</span>
-              <span class="min-w-0 flex-1 truncate text-[10px] text-ctp-subtext1">{{ ot.prompt || t('session.outline.noPrompt') }}</span>
-              <span class="shrink-0 font-mono text-[8px] text-ctp-overlay0">{{ fmtOutlineTs(ot.ts) }}</span>
-            </div>
-            <div v-if="ot.response" class="mt-0.5 truncate text-[9px] text-ctp-overlay0">{{ ot.response }}</div>
-          </button>
-          <div v-if="outlineCards.length" class="mt-1.5 flex flex-wrap gap-1">
-            <button
-              v-for="cd in outlineCards"
-              :key="cd.id"
-              class="chip !text-[8px] bg-ctp-surface0/70 text-ctp-overlay1 hover:text-ctp-subtext1"
-              :title="cd.preview"
-              @click="gotoTurn(cd.id)"
-            >{{ cd.kind }}</button>
-          </div>
-        </div>
-      </section>
+      <!-- 需求跟踪(左栏标签页): 六维度工作台账, 跨会话统一视图, 与会话/对话联动 -->
+      <SessionTrackingPanel
+        v-else
+        :sessions="list"
+        :category="trackingCategory"
+        :state="trackingState"
+        :assignee="trackingAssignee"
+        :q="trackingQ"
+        :refresh-nonce="trackingRefreshNonce"
+        :vocab="trackingVocab"
+        @count="trackingCount = $event"
+        @loading="trackingLoading = $event"
+      />
 
 
         </div>
@@ -488,9 +501,17 @@ function reviewClass(rs?: string) {
           />
         </div>
 
-        <!-- 右: 对话栏·inline 停靠(P1 决策2: 唯一对话栏——与资产地图页同构: 左信息/右对话) -->
+        <!-- 右: 对话栏·inline 停靠(P1 决策2: 唯一对话栏——与资产地图页同构: 左信息/右对话)
+             assets-panel=false: 知识资产面板已移左栏; outline: 启用输入框上侧大纲按钮+浮窗 -->
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ConversationDock inline scope="sessions" default-kind="generic" :skill-scenarios="['plan', 'coding', 'capability']" />
+          <ConversationDock
+            inline
+            scope="sessions"
+            default-kind="generic"
+            :skill-scenarios="['plan', 'coding', 'capability']"
+            :assets-panel="false"
+            outline
+          />
         </div>
       </div>
     </div>
