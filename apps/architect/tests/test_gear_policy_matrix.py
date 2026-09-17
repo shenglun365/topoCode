@@ -102,3 +102,21 @@ def test_m1_probe_hard_cap_unit():
     assert probe_hard_cap({"probeDetail": "…上限T2"})[0] == "T2"
     assert probe_hard_cap({"probeDetail": "5/5"}) == (None, "")
     assert probe_hard_cap(None) == (None, "")
+
+
+def test_a_axis_fields_from_architect_profile(tmp_path, monkeypatch):
+    """A 轴补偿: architect 模型档案弱档 → 调度纪律+要素提示升档; 无档案中性默认。"""
+    from topoone_app_architect.agent.governance import gears
+    from topoone_app_architect.agent.cognition import model_profile as mp
+    # 无模型 id → 中性默认(现行为)
+    p = gears.resolve_gear("strict", {})
+    assert p.schedule_discipline == "standard" and p.element_hints == "low"
+    # A2 弱档档案 → strict_pipeline + high(函数内 from-import 命中同一模块对象)
+    monkeypatch.setattr(mp, "tier_of", lambda mid: 2)
+    p2 = gears.resolve_gear("strict", {}, architect_model_id="m-lite")
+    assert p2.schedule_discipline == "strict_pipeline"
+    assert p2.element_hints == "high"
+    # A0 强档 → 中性
+    monkeypatch.setattr(mp, "tier_of", lambda mid: 0)
+    p3 = gears.resolve_gear("strict", {}, architect_model_id="m-strong")
+    assert p3.schedule_discipline == "standard" and p3.element_hints == "low"

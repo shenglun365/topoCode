@@ -105,6 +105,8 @@ def test_r2_no_new_upward_deps():
     graph = _scan()
     violations = []
     for relp, (layer, deps) in sorted(graph.items()):
+        if layer in CROSSCUT:
+            continue    # 横切层(governance/collab)可引任意内核层(文档语义)
         upward = {d for d in deps
                   if d in ORDER and RANK[d] > RANK[layer]}
         extra = upward - _R2_INVENTORY.get(relp, set())

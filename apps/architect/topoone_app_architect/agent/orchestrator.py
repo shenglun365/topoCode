@@ -485,7 +485,8 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     except Exception:  # noqa: BLE001
         _gear_cfg = {}
     from .governance.gears import resolve_gear
-    _gear = resolve_gear(_mode, _gear_cfg)
+    _gear = resolve_gear(_mode, _gear_cfg,
+                         architect_model_id=eff_model or model_id or "")
     msgs = _build_chat_messages((data.get("root") or "").strip(),
                                 (data.get("project") or "").strip(),
                                 history,

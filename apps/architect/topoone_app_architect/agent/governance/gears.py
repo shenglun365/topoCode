@@ -54,6 +54,11 @@ class GearPolicy:
     depends_source: str = "llm"      # (C) A2: 依赖边产出 llm=模型声明 | linear=编排层线性链
     logic_diagram: str = ""          # (C→A) C 弱 → 上游补核心逻辑表达: "uml"=任务指令须附
                                      #      PlantUML/Mermaid 级核心逻辑图(标准语法, 非渲染 IR)
+    # ── A 轴(architect 模型能力)驱动: A 弱 → 调度机制与要素提示补偿 ──
+    schedule_discipline: str = "standard"  # (A) standard|guided|strict_pipeline
+                                           #     (A 弱 → 确定性调度占比升高)
+    element_hints: str = "low"             # (A) low|mid|high 要素框架提示密度
+                                           #     (A 弱 → 澄清/需求按要素清单展开, 引导用户喂全)
 
 
 # ── 刻度细则(三维矩阵定则: 语义由本细则定义, 不靠命名) ─────────────────
@@ -157,11 +162,21 @@ def apply_cap(tier: str, cap: str) -> str:
     return cap if order.get(cap, -1) > order.get(tier, -1) else tier
 
 
-def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = None
-                 ) -> GearPolicy:
-    """解析链单源: 会话挡位(+执行器能力) → GearPolicy。
+# A 轴 → 补偿策略映射(职责归属: A 弱 → 调度纪律与要素提示升档)
+A_AXIS_POLICY = {
+    0: ("standard", "low"),        # A0 强: 正常发挥
+    1: ("guided", "mid"),          # A1 中: 引导式调度 + 中密度要素提示
+    2: ("strict_pipeline", "high"),  # A2 弱: 确定性管线为主 + 高密度要素提示
+}
 
-    executor_cfg: 执行器注册表 config(读 capability / tierProbed[十二b])。
+
+def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = None,
+                 architect_model_id: str = "") -> GearPolicy:
+    """解析链单源(三维矩阵): 会话挡位 + 执行器能力(C 轴) + architect 模型(A 轴)。
+
+    executor_cfg: 执行器注册表 config(读 capability / tierProbed[十二b]) → C 轴字段。
+    architect_model_id: architect 对话模型(A 轴) → schedule_discipline/element_hints;
+      无 id 或无档案 → 字段保持中性默认(现行为)。
     未知值一律落默认 T1(显式优于静默升档)。
     M1: 实测来源(tierProbed)叠加探针硬上限封顶(cap_note 随策略携带);
     人工显式 capability 不封顶(人的意志优先)。
@@ -184,6 +199,20 @@ def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = Non
             if capped != tier:
                 import dataclasses
                 policy = dataclasses.replace(policy, tier=capped, cap_note=note)
+    # A 轴补偿(architect 模型能力档案 → 调度纪律/要素提示密度)
+    if architect_model_id:
+        try:
+            from ..cognition import model_profile as _mp
+            a_tier = int(_mp.tier_of(architect_model_id))
+            discipline, hints = A_AXIS_POLICY.get(a_tier, ("standard", "low"))
+            if (discipline, hints) != (policy.schedule_discipline,
+                                       policy.element_hints):
+                import dataclasses
+                policy = dataclasses.replace(
+                    policy, schedule_discipline=discipline,
+                    element_hints=hints)
+        except Exception:  # noqa: BLE001 — A 轴读取失败保持中性默认
+            pass
     return policy
 
 

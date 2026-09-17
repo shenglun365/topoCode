@@ -1434,15 +1434,18 @@ async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
 
 
 def _task_gear(task: dict, conv: Optional[dict] = None):
-    """任务挡位解析(环节十二a): 会话 analysisMode + 执行器配置 → GearPolicy。"""
+    """任务挡位解析(环节十二a, 三维矩阵): 会话 analysisMode + 执行器配置(C 轴)
+    + architect 对话模型(A 轴) → GearPolicy。"""
     from ..agent.governance.gears import resolve_gear
+    from .req_agent import get_model_preference
     _conv = conv or store.ConversationsStore.get(task.get("conversationId") or "") or {}
     try:
         hint = executor_hint_by_id(str(task.get("executorId") or ""), _conv) or {}
     except Exception:  # noqa: BLE001 — 注册表不可读时按无配置解析
         hint = {}
     return resolve_gear(str(_conv.get("analysisMode") or ""),
-                        hint.get("executorConfig") or {})
+                        hint.get("executorConfig") or {},
+                        architect_model_id=get_model_preference())
 
 
 def _task_instruction(task: dict, prior_brief: str = "", policy=None,
