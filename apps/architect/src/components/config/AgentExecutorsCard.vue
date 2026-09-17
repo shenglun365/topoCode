@@ -334,7 +334,16 @@ function capLabel(e: ExecEntry): string {
   const cfg: any = e.config || {}
   if (capRunning.value[e.id]) return '探测中…'
   if (!cfg.tierProbed) return '能力探测'
-  return `实测 ${cfg.tierProbed}（${cfg.probeDetail || ''}）`
+  const weak = cfg.tierProbed === 'T2'
+  return (weak ? '⚠ ' : '') + `实测 ${cfg.tierProbed}（${cfg.probeDetail || ''}）`
+}
+
+/** M5 准入标注(C 轴): 实测 T2 = 弱档(全面补偿运行)——提示不拦截。 */
+function capTone(e: ExecEntry): string {
+  const cfg: any = e.config || {}
+  if (cfg.tierProbed === 'T2') return 'text-ctp-peach'
+  if (cfg.tierProbed) return 'text-ctp-green'
+  return ''
 }
 
 /** 内嵌执行器(architect 自主模式): 不可删除、id 锁定。 */
@@ -526,8 +535,9 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             </button>
             <button
               class="btn !py-0.5 !px-2 !text-[11px]"
+              :class="capTone(e)"
               :disabled="capProbing[e.id]"
-              :title="capLabel(e) + ' —— 5 探针标定套件(实测挡位写入 tierProbed, 解析链优先于 capability)'"
+              :title="capLabel(e) + ' —— 5 探针标定套件(实测挡位写入 tierProbed, 解析链优先于 capability; T2=弱档准入提示, 不拦截)'"
               @click="startCapProbe(e)"
             >
               {{ capLabel(e) }}

@@ -105,6 +105,7 @@ async function saveLightTasks() {
 loadLightTasks()
 
 
+
 const granularityFields = [
   { key: 'estMinMin' as const },
   { key: 'estMinMax' as const },
@@ -281,7 +282,25 @@ async function probeLlm(m: ArchLlmModel) {
   }
 }
 
-// ── 模型能力探测(分级适配): 工具协议/JSON/指令边界 → tier 档案 ──
+// ── 模型能力探测(分级适配 T0-T2): 工具协议/结构化输出/指令边界 → 档案 ──
+function tierLabel(t: number): string {
+  return ({ 0: 'T0 强', 1: 'T1 中', 2: 'T2 弱' } as Record<number, string>)[t] ?? `T${t}`
+}
+/** M5 投影: 档案摘要(分数/structured/准入/历史时间线)。 */
+function profileLine(p: any): string {
+  const caps = p.caps || {}
+  const parts: string[] = []
+  if (caps.probeScore != null) parts.push(`综合 ${caps.probeScore}`)
+  if (p.structured != null) parts.push(p.structured ? 'structured ✓' : 'structured ✗')
+  const hist = (p.probes ?? []).map((h: any) => {
+    const d = new Date(h.ts || 0)
+    const s = h.caps?.probeScore != null ? `(${h.caps.probeScore})` : ''
+    return `${d.getMonth() + 1}/${d.getDate()} T${h.tier}${s}`
+  })
+  if (hist.length) parts.push(`历史: ${hist.join(' → ')}`)
+  if (p.admission?.level === 'weak') parts.push(p.admission.note)
+  return parts.join(' · ')
+}
 const capProbing = ref<Record<string, string>>({})
 const capProfiles = ref<Record<string, any>>({})
 async function loadProfiles() {
@@ -539,19 +558,28 @@ onMounted(() => { void loadCgStatus() })
             <span
               v-if="capProfiles[m.id]"
               class="chip !text-[10px] font-mono"
-              :class="{ 'bg-ctp-mauve/15 text-ctp-mauve': capProfiles[m.id].source === 'probed',
-                       'bg-ctp-yellow/15 text-ctp-yellow': capProfiles[m.id].source === 'manual',
-                       'bg-ctp-overlay0/20 text-ctp-overlay1': !['probed', 'manual'].includes(capProfiles[m.id].source) }"
-              :title="capProfiles[m.id]?.summary || ''"
-            >{{ { probed: '已探测', manual: '手工档', heuristic: '启发式' }[capProfiles[m.id].source] || '启发式' }}</span>
+              :class="{ 'bg-ctp-peach/20 text-ctp-peach': Number(capProfiles[m.id].tier) === 2,
+                       'bg-ctp-green/15 text-ctp-green': Number(capProfiles[m.id].tier) === 0 }"
+              :title="profileLine(capProfiles[m.id])"
+            >{{ tierLabel(Number(capProfiles[m.id].tier)) }}</span>
+            <span
+              v-if="capProfiles[m.id]?.structured"
+              class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal font-mono"
+              title="结构化输出探针达标——受限生成通道(M4-A)自动可用"
+            >struct</span>
+            <span
+              v-if="Number(capProfiles[m.id]?.tier) === 2"
+              class="chip !text-[9px] bg-ctp-red/15 text-ctp-red"
+              title="模型准入提示: 测评较弱——按全面补偿模式运行, 建议更换更强模型(不拦截)"
+            >⚠ 准入</span>
             <select
               v-if="capProfiles[m.id]"
               class="bg-ctp-surface0 text-[10px] rounded px-1 py-0.5 text-ctp-subtext0"
               :value="capProfiles[m.id].tier"
-              title="手工调整能力档位(0=27B+ … 4=1-3B; 手工设定优先于探测)"
+              title="手工调整能力档位(0=T0 强 ≥12B / 1=T1 中 6-12B / 2=T2 弱 <6B 全面补偿; 手工设定优先于探测)"
               @change="setManualTier(m, +($event.target as HTMLSelectElement).value)"
             >
-              <option v-for="i in 5" :key="i" :value="i - 1">t{{ i - 1 }}</option>
+              <option v-for="i in 3" :key="i" :value="i - 1">{{ tierLabel(i - 1) }}</option>
             </select>
             <span
               v-if="capProbing[m.id]"
