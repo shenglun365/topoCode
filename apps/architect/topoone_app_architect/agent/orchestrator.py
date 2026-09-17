@@ -511,6 +511,12 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
         + _gear.architect_note})
     if assign_contract:
         msgs.insert(1, {"role": "system", "content": assign_contract})
+    # U 轴: 要素框架提示(A 弱 → 澄清按要素清单展开, 引导用户喂全信息帮 architect 补位)
+    from .governance.gears import ELEMENT_HINT_HIGH, ELEMENT_HINT_MID
+    if _gear.element_hints == "high":
+        msgs.insert(1, {"role": "system", "content": ELEMENT_HINT_HIGH})
+    elif _gear.element_hints == "mid":
+        msgs.insert(1, {"role": "system", "content": ELEMENT_HINT_MID})
     return eff_model, msgs, _gear
 
 

@@ -120,3 +120,18 @@ def test_a_axis_fields_from_architect_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(mp, "tier_of", lambda mid: 0)
     p3 = gears.resolve_gear("strict", {}, architect_model_id="m-strong")
     assert p3.schedule_discipline == "standard" and p3.element_hints == "low"
+
+
+def test_element_hints_injected_by_a_axis(monkeypatch):
+    """U 轴: A 弱 → 高密度要素提示进对话系统段; A 强 → 无提示。"""
+    from topoone_app_architect.agent.cognition import model_profile as mp
+    from topoone_app_architect.agent.governance import gears
+    from topoone_app_architect.agent.governance.gears import (
+        ELEMENT_HINT_HIGH, ELEMENT_HINT_MID)
+    assert "①目标" in ELEMENT_HINT_HIGH and "验收标准" in ELEMENT_HINT_HIGH
+    monkeypatch.setattr(mp, "tier_of", lambda mid: 2)
+    p2 = gears.resolve_gear("strict", {}, architect_model_id="m-lite")
+    assert p2.element_hints == "high"
+    monkeypatch.setattr(mp, "tier_of", lambda mid: 1)
+    p1 = gears.resolve_gear("strict", {}, architect_model_id="m-mid")
+    assert p1.element_hints == "mid"
