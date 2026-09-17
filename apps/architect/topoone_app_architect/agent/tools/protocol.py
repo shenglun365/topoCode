@@ -117,6 +117,11 @@ def _tool_call_regions(text: str) -> List[tuple]:
 
     闭合块 = 开标签..闭合标签尾；未闭合块 = 开标签..首个配对 JSON 尾。
     无合法 JSON 的裸 "TOOL_CALL]" 提及不当块处理(避免误删正文)。
+    ⚠️ 未闭合且 JSON 残缺(花括号不配对，本地模型退化实测 cv-182)也要认块：
+    开标签后紧跟 '{' 载荷起始即视为工具块(正文提及后跟的是散文，不会以 '{'
+    开头，守卫保留)；区域切到「下一开标签/文末」。此时 payload 解析必失败
+    → 不执行(audit regions>0 & valid=0 供数据集回流)，但 strip 生效——
+    杜绝残缺协议块裸文本透传到对话。
     """
     regions: List[tuple] = []
     opens = list(_TOOL_CALL_OPEN.finditer(text or ""))
@@ -130,6 +135,8 @@ def _tool_call_regions(text: str) -> List[tuple]:
         if spans:
             s, e = spans[0]
             regions.append((m.start(), m.end() + e, text[m.end():m.end() + e]))
+        elif text[m.end():seg_end].lstrip().startswith("{"):
+            regions.append((m.start(), seg_end, text[m.end():seg_end]))
     return regions
 
 

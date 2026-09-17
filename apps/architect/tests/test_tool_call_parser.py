@@ -11,7 +11,8 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-from topoone_app_architect.arch_routes.req_agent import extract_tool_calls, strip_tool_blocks
+from topoone_app_architect.arch_routes.req_agent import (
+    extract_tool_calls, strip_tool_blocks, tool_parse_audit)
 
 
 class TestExtractToolCalls:
@@ -115,3 +116,37 @@ class TestUnclosedBlocks:
     def test_multiple_unclosed_stripped(self):
         t = "\n".join(f'[TOOL_CALL]{{"tool":"t{i}","arguments":{{}}}}' for i in range(3))
         assert "TOOL_CALL" not in strip_tool_blocks(t)
+
+
+class TestTruncatedJsonBlocks:
+    """生产实测回归(cv-182, nginx-src 本地模型)：未闭合 且 JSON 残缺
+    (花括号不配对，缺收尾 '}' )——旧解析器 0 regions → strip 失效，
+    残缺协议块整段透传落库+假流式重发。修后：认块剥显示，payload 解析
+    失败不执行(audit regions>0/valid=0 供数据集回流)，正文提及守卫保留。"""
+
+    CV182_SHAPE = ('[TOOL_CALL]{"tool":"req.propose","arguments":{"title":"x",'
+                   '"requirementMd":"构建脚本\\n\\n核心目标：覆盖 {全} 流程。",'
+                   '"priority":"P1"')
+
+    def test_truncated_json_region_detected(self):
+        audit = tool_parse_audit(self.CV182_SHAPE)
+        assert audit == {"regions": 1, "valid": 0}
+
+    def test_truncated_json_not_executed(self):
+        # 残缺载荷不得修 parse 后带残参执行
+        assert extract_tool_calls(self.CV182_SHAPE) == []
+
+    def test_truncated_json_stripped_clean(self):
+        assert strip_tool_blocks(self.CV182_SHAPE) == ""
+
+    def test_truncated_json_with_prose_around(self):
+        t = '好的，我来创建需求。\n' + self.CV182_SHAPE
+        out = strip_tool_blocks(t)
+        assert "TOOL_CALL" not in out
+        assert "我来创建需求" in out
+
+    def test_prose_mention_still_guarded(self):
+        # 正文提及(后跟散文而非 '{' 载荷)不当块处理
+        t = '可输出 [TOOL_CALL] 调用工具，格式见文档。'
+        assert tool_parse_audit(t) == {"regions": 0, "valid": 0}
+        assert strip_tool_blocks(t) == t.strip()
