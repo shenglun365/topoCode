@@ -202,6 +202,18 @@ provider 跑 format=json_schema 冒烟，确认网关透传与行为）。B4/B3 
 
 ## 4. K1 知识资产格式版本化
 
+> **as-built（2026-09-17，4 commits `c3751da`→`b8f3857`，971 passed）**：
+> 原推荐 B（arch_assets 加版本列）被**知识资产体系收敛专项**取代（需求重对齐裁决：
+> L1 语义资产=基础 / L2 词典=外围映射 / L3 会话派生=主战场 / L4 严格 SWE 工件=降级退役）。
+> 落地：P0 arch_assets 退役（回执→execution_report/里程碑→analysis/错误→error 单元，
+> asset.* 工具→artifact 单元，REST /assets→/units，AssetsPanel 切换；顺带修复存量 bug：
+> failed 回执因 rid 未定义从未沉淀）；P1 错误提炼（distill.py build/land 分离，手动触发
+> `POST /sessions/{id}/distill-errors`，error_pattern 项目级单元，签名=粗类别+project，
+> 归因以 coding agent 失败回执为准）；P2 ctx.search 词典检索侧扩展（glossary_map 纯函数，
+> 外围独立循环不进提示词）；P3 K1 版本化对象改为新持久四表（schema_version+只追加迁移链+
+> 惰性迁移，登记文档 `kb-schema-versions.md`，含 P2-T6 提升通道预留）。
+> 需求/验收合并方案：**另开专项讨论**（主业务链暂保留原状）。
+
 ### 4.1 现状
 
 - `arch_assets`（2026-09-17 批次 4 K2 建立）：`meta TEXT`（JSON 载荷，键随
