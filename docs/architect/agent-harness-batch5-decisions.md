@@ -20,7 +20,7 @@
 | 5 | M4 协议健壮性 | 受限生成为终局；前置 B4 文档单源化 + B3 handle_chat 拆解 | B4 S~M, B3 M, 受限生成 M | 网关支持面 | 中 | ⑤ |
 | 6 | K3 大纲投影 | 只读大纲端点 + 侧栏跳转；分页回载随 A6.2 | S~M | 无 | 低 | ⑥ |
 | 7 | M5 边界透明化 | ~~边界说明卡~~ **已随三维矩阵专项落地**（见 §11 as-built） | S | ✅ | 低 | ✅ |
-| 8 | A6.2 Item 投影 | 最小投影（tool_call/file_change）+ conformance 扩展 + UI 守门 | M | conformance kit | 中 | ⑧ |
+| 8 | A6.2 Item 投影 | ~~B 最小投影~~ **A 全量落地**（开放注册制 + 一次性替换，见 §7 as-built） | M | ✅ | 中 | ✅ |
 | 9 | A2 DAG/CAS | **DAG 已落地**（task_graph/就绪下发/fail-fast，depends_source 按 C 档）；writeScopes 告警尾量；CAS 暂缓 | ✅ | 中 | ⑨→尾量 |
 
 **搁置**：L 组训练侧（roadmap Phase 2 末内容，经 2026-09-17 裁决搁置不进行；
@@ -320,6 +320,18 @@ provider 跑 format=json_schema 冒烟，确认网关透传与行为）。B4/B3 
 ---
 
 ## 7. A6.2 Item 投影（随需并入）
+
+> **as-built（2026-09-17，3 commits `535d71b`/`f055be7`/`acc0c79`，993 passed +
+> vitest 16 passed）**：拍板升级为 **A 全量投影 + 开放注册制（不局限于四类，
+> 按需拓展）+ 前端一次性替换**。落地：切片 1 投影纯函数层 `agent/execution/
+> items.py`（内置 9 类型注册 + 未注册 kind → event 透传不丢信息 + 计数域
+> NON_ITEM 黑名单 + as_legacy_events 反向桥零破坏存量消费）；切片 2 持久化
+> `arch_stream_items`（仅非落消息类型，运行时流表不入 K1 登记）+ 泵挂钩 +
+> `GET /sessions/{id}/items`（beforeTs 分页=K3-B 挂点）+ `/messages` 读侧
+> `item_from_card` 15 种卡片全映射；切片 3 前端一次性替换（AnalysisChat 六处
+> meta.kind 分支 → m.item.type 统一投影；StreamItems 执行流面板 + SSE 实时）；
+> 切片 4 守门：vitest UI 守门测试（渲染面禁 meta.kind/executorType 分支）+
+> conformance 全词汇断言（runner 17 kind 三选一归宿/卡片词汇↔映射对账）。
 
 ### 7.1 现状
 
