@@ -285,7 +285,10 @@ def split_tasks_llm(req_text: str) -> Optional[list]:
             "tasks": {"type": "array", "items": {
                 "type": "object",
                 "properties": {"title": {"type": "string"},
-                               "instruction": {"type": "string"}},
+                               "instruction": {"type": "string"},
+                               "depends": {"type": "array",
+                                           "items": {"type": "integer"},
+                                           "description": "前置步骤序号(1 基, 仅强依赖)"}},
                 "required": ["title", "instruction"]}},
         },
         "required": ["tasks"],
@@ -314,7 +317,11 @@ def split_tasks_llm(req_text: str) -> Optional[list]:
         title = str(t.get("title") or "").strip()
         instr = str(t.get("instruction") or "").strip()
         if title and instr:
-            out.append({"title": title[:120], "instruction": instr[:4000]})
+            row = {"title": title[:120], "instruction": instr[:4000]}
+            deps = t.get("depends")
+            if isinstance(deps, list) and deps:
+                row["depends"] = deps          # llm 挡声明; linear 挡由调用方覆盖
+            out.append(row)
     return out if len(out) >= 2 else None
 
 
@@ -374,24 +381,57 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
 
     plan = get_plan(rid)
     if plan:
-        pending = [i for i, s in enumerate(plan)
-                   if s.get("status") in ("pending", "failed")]
-        if not pending:
+        from . import task_graph as _tg
+        cand = [i for i, s in enumerate(plan)
+                if s.get("status") in ("pending", "failed")]
+        if not cand:
             return {"ok": False,
                     "receipt": "📋 任务计划已全部完成。如需继续演进, 请 `/调整` "
                                "完善需求后重新 `/执行`。"}
-        idx = pending[0]
+        norm = _tg.normalize_plan(plan)
+        by_seq = {s.get("seq"): s for s in norm}
+
+        def _sat(i: int) -> bool:
+            for d in norm[i].get("depends") or []:
+                row = by_seq.get(d)
+                if not row or row.get("status") != "done":
+                    return False
+            return True
+
+        ready = [i for i in cand if _sat(i)]   # failed 重试亦需依赖满足
+        if not ready:
+            # fail-fast: 失败步骤阻塞后继等人工(不自动跳过)
+            overview = _tg.blocked_summary(plan)
+            return {"ok": False,
+                    "receipt": f"📋 计划暂无可就绪步骤（{overview}）。"
+                               "处理失败步骤后再 `/执行` 重发。"}
+        idx = ready[0]
         out = propose_plan_step(conv, rid, idx, executor_hint=_hint)
         if out.get("ok"):
             retried = "重发" if plan[idx].get("status") == "failed" else "下发"
-            out["receipt"] = f"📋 计划步骤 {idx + 1}/{len(plan)} 已{retried}，待确认执行。"
+            deps = plan[idx].get("depends") or []
+            dep_note = f"（依赖 {', '.join('#' + str(d) for d in deps)} 已完成）" if deps else ""
+            out["receipt"] = (f"📋 计划步骤 {idx + 1}/{len(plan)} 已{retried}"
+                              f"{dep_note}，待确认执行。")
         return out or {"ok": False, "receipt": "计划步骤下发失败"}
 
     steps = split_tasks_llm(req_text)
     if not steps:
         return None
     plan = [{"seq": i + 1, "title": s["title"], "instruction": s["instruction"],
-             "taskId": "", "status": "pending"} for i, s in enumerate(steps)]
+             "taskId": "", "status": "pending",
+             **({"depends": s.get("depends") or []}
+                if policy.depends_source == "llm" and s.get("depends") else {})}
+            for i, s in enumerate(steps)]
+    # A2: 建图确定性校验(不信任模型产出); 失败 → 降级线性链并明示
+    from . import task_graph as _tg
+    if policy.depends_source == "llm":
+        graph = _tg.validate_graph(plan)
+        if not graph["ok"]:
+            plan = _tg.linear_depends(plan)
+    else:
+        plan = _tg.linear_depends(plan)     # 弱挡: LLM 不产边, 编排层线性链
+    plan = _tg.normalize_plan(plan)
     save_plan(rid, plan)
     _land_plan_card(conv, rid, plan)
     out = propose_plan_step(conv, rid, 0, executor_hint=_hint)
@@ -428,21 +468,39 @@ def on_plan_task_done(conv_id: str, task_id: str) -> None:
                 s["status"] = "done"
                 s["result"] = str(task.get("resultMd") or "")[:400]
         save_plan(rid, plan)
-        pending = [i for i, s in enumerate(plan)
-                   if s.get("status") in ("pending", "failed")]
-        if pending:
+        from . import task_graph as _tg
+        ready = [i for i in _tg.ready_indices(plan)
+                 if plan[i].get("status") == "pending"]
+        if ready:
             conv = _s.ConversationsStore.get(conv_id) or {}
-            out = propose_plan_step(conv, rid, pending[0])
+            out = propose_plan_step(conv, rid, ready[0])
             if out.get("ok"):
                 from ...arch_routes import exec_bridge as eb
+                deps = plan[ready[0]].get("depends") or []
+                dep_note = (f"（依赖 {', '.join('#' + str(d) for d in deps)}"
+                            "已完成）" if deps else "")
                 eb._append(conv_id, "assistant",
-                           f"➡️ 计划步骤 {pending[0] + 1}/{len(plan)} 已预填"
-                           "（含前情简报），待确认执行。",
+                           f"➡️ 计划步骤 {ready[0] + 1}/{len(plan)} 已预填"
+                           f"{dep_note}（含前情简报），待确认执行。",
                            msg_meta={"kind": "taskPlan", "requirementId": rid,
                                      "total": len(plan)},
                            project_id=(conv or {}).get("projectId") or "")
         else:
-            _finish_plan_receipt(conv_id, rid, plan)
+            blocked = [s for s in plan if s.get("status") == "pending"]
+            failed = [s for s in plan if s.get("status") == "failed"]
+            if blocked and not failed:
+                # fail-fast: 存在失败依赖 → 后继阻塞等人工(不自动跳过)
+                conv = _s.ConversationsStore.get(conv_id) or {}
+                from ...arch_routes import exec_bridge as eb
+                overview = _tg.blocked_summary(plan)
+                eb._append(conv_id, "assistant",
+                           f"⛔ 计划后继步骤被阻塞（{overview}）——"
+                           "请处理失败步骤后再 `/执行` 重发。",
+                           msg_meta={"kind": "taskPlan", "requirementId": rid,
+                                     "total": len(plan)},
+                           project_id=(conv or {}).get("projectId") or "")
+            elif not failed:
+                _finish_plan_receipt(conv_id, rid, plan)
     except Exception as e:  # noqa: BLE001
         logger.warning("[task-plan] done hook: %s", e)
 
