@@ -1516,6 +1516,64 @@ def tool_task_propose(title: str, instruction: str,
                              root=root, project=project)
 
 
+# ── K2 知识资产工具面(LLM 可读写; 会话作用域) ──────────────────────────
+
+@register_architect_tool(
+    "asset.upsert",
+    "沉淀/更新会话知识资产(五类: requirement 需求表格 / todo 待办 / plan 执行快照 / "
+    "data_asset 数据资产 / analysis 分析产物)。任务回执与里程碑报告系统已自动沉淀, "
+    "本工具用于补充人工/分析性知识(结论、约定、可复用片段)。",
+)
+def tool_asset_upsert(kind: str, title: str, content: str,
+                      assetId: Optional[str] = None,
+                      meta: Optional[Dict[str, Any]] = None,
+                      conversationId: Optional[str] = None,
+                      reqId: Optional[str] = None) -> Dict[str, Any]:
+    from . import ctx as _ctx
+    from .store import AssetsStore
+    conv_id = conversationId or _ctx.get_conv() or ""
+    if not conv_id:
+        return {"ok": False, "error": "no-conversation"}
+    if assetId:
+        row = AssetsStore.update(assetId, {"kind": kind, "title": title,
+                                           "content": content, "meta": meta or {}})
+        if not row:
+            return {"ok": False, "error": "asset-not-found"}
+        return {"ok": True, "asset": row}
+    row = AssetsStore.create({"conversationId": conv_id, "kind": kind,
+                              "title": title, "content": content,
+                              "meta": meta or {}, "source": "llm",
+                              "reqId": reqId or ""})
+    return {"ok": True, "asset": row}
+
+
+@register_architect_tool(
+    "asset.list",
+    "列出会话知识资产(可按类别过滤/关键词检索标题与正文)——先查后用, 避免重复沉淀。",
+)
+def tool_asset_list(kind: Optional[str] = None, q: Optional[str] = None,
+                    limit: int = 50,
+                    conversationId: Optional[str] = None) -> Dict[str, Any]:
+    from . import ctx as _ctx
+    from .store import AssetsStore
+    conv_id = conversationId or _ctx.get_conv() or ""
+    if not conv_id:
+        return {"ok": False, "error": "no-conversation"}
+    rows = AssetsStore.of_conv(conv_id, kind=kind or "", q=q or "",
+                               limit=max(1, min(int(limit), 200)))
+    return {"ok": True, "assets": rows, "count": len(rows)}
+
+
+@register_architect_tool(
+    "asset.delete",
+    "删除会话知识资产(误沉淀/过期知识清理)。",
+)
+def tool_asset_delete(assetId: str) -> Dict[str, Any]:
+    from .store import AssetsStore
+    removed = AssetsStore.delete(assetId)
+    return {"ok": bool(removed), "deleted": bool(removed)}
+
+
 @register_architect_skill("req.clarify", "需求澄清：依据需求+KB 命中生成需用户确认的澄清问题清单", steps=2)
 def _skill_clarify():
     pass

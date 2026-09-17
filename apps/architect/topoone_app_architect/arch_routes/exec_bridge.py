@@ -1121,6 +1121,26 @@ def _merge_req_scope(rid: str, files: List[str]) -> int:
         return 0
 
 
+def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
+                           title: str, summary: str, changed_files,
+                           branch: str, pid: str) -> Optional[dict]:
+    """K2 知识沉淀: 任务终态回执 → arch_assets(kind=plan, source=task_receipt)。"""
+    t = store.TasksStore.get(task_id) or {}
+    prog = t.get("progress") or {}
+    meta = {"taskId": task_id, "status": status, "branch": branch,
+            "changedFiles": [str(f) for f in (changed_files or [])][:50],
+            "executorType": t.get("executorType") or ""}
+    for key in ("verifyOverall", "verify_build", "verify_test"):
+        if prog.get(key) is not None:
+            meta[key] = prog[key]
+    return store.AssetsStore.create({
+        "conversationId": conv_id, "projectId": pid, "reqId": rid,
+        "taskId": task_id, "kind": "plan",
+        "title": f"任务回执[{status}]：{title}",
+        "content": (summary or "")[:4000],
+        "meta": meta, "source": "task_receipt"})
+
+
 def _handle_task_event(ev: dict, ctx: dict) -> None:
     """v2: runner 事件 → 任务生命周期 + 统一流消息(agent=executor)。
 
@@ -1154,6 +1174,19 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 "\n\n直接回复即转达; 也可 @architect 讨论。",
                 msg_meta={"kind": "task_input", "taskId": task_id},
                 project_id=pid, agent=agent)
+        if ms_files:
+            # K2 知识沉淀: 里程碑报告 → arch_assets(kind=analysis, source=milestone)
+            try:
+                store.AssetsStore.create({
+                    "conversationId": conv_id, "projectId": pid,
+                    "reqId": ctx.get("rid") or "", "taskId": task_id,
+                    "kind": "analysis", "title": f"里程碑报告：{title}",
+                    "content": clean[:4000],
+                    "meta": {"files": ms_files[:50], "merged": merged},
+                    "source": "milestone"})
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[exec-bridge] 里程碑沉淀失败 task=%s: %s",
+                               task_id, e)
         store.TasksStore.update(task_id, {"status": ST.TASK_WAITING_INPUT})
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
     elif kind == "done":
@@ -1182,6 +1215,12 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             on_plan_task_done(conv_id, task_id)
         except Exception:  # noqa: BLE001
             pass
+        # K2 知识沉淀: 任务回执 → arch_assets(kind=plan 执行快照, source=task_receipt)
+        try:
+            _sediment_task_receipt(conv_id, task_id, ctx.get("rid") or "", "done",
+                                   title, clean or text, changed, branch, pid)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec-bridge] 回执沉淀失败 task=%s: %s", task_id, e)
     elif kind == "failed":
         _append(conv_id, "assistant",
                 f"❌ **任务失败**「{title}」：{text}\n分支已保留, 可重新发起。",
@@ -1196,6 +1235,14 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             on_plan_task_failed(task_id)
         except Exception:  # noqa: BLE001
             pass
+        # K2 知识沉淀: 失败回执同样入账(教训资产)
+        try:
+            _sediment_task_receipt(conv_id, task_id, rid, "failed", title,
+                                   text, ev.get("changedFiles") or "",
+                                   (store.TasksStore.get(task_id) or {}).get("branch") or "",
+                                   pid)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec-bridge] 失败回执沉淀失败 task=%s: %s", task_id, e)
     elif kind == "progress":
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
         prog = {**prev,

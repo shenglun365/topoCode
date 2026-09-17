@@ -1304,3 +1304,18 @@ async def tasks_of(conv_id: str = fastapi.Query("", alias="convId")):
     if not conv:
         return err(404, "会话不存在")
     return ok({"tasks": _tasks_of_conv(conv)})
+
+
+@router.get("/assets")
+async def assets_of(conv_id: str = fastapi.Query("", alias="convId"),
+                    kind: str = fastapi.Query("", alias="kind"),
+                    q: str = fastapi.Query("", alias="q"),
+                    limit: int = fastapi.Query(100, alias="limit")):
+    """会话知识资产清单(K2: 任务回执/里程碑/LLM 与人工沉淀)。?convId= 会话 id。"""
+    if not conv_id:
+        return err(400, "convId 必填")
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    rows = store.AssetsStore.of_conv(conv_id, kind=kind, q=q, limit=limit)
+    return ok({"assets": rows})
