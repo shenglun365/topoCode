@@ -17,6 +17,24 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+# M4-A 受限生成(单调用/轮): structured 模式的输出 schema——约束解码层保证
+# 输出是合法 JSON, 文本协议解析层退化为 json.loads 单一路径。
+# 语义: 每轮至多一个工具调用; 无工具可调时不使用本 schema(终稿轮走普通文本)。
+TOOL_CALL_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "tool": {
+            "type": "string",
+            "description": "要调用的工具名(必须来自可用工具清单; 空串=本轮不调用工具)",
+        },
+        "arguments": {
+            "type": "object",
+            "description": "工具参数对象(键名与工具定义一致)",
+        },
+    },
+    "required": ["tool"],
+}
+
 _TOOL_CALL_OPEN = re.compile(r'(?:```(?:json)?\s*)?\[?\s*(?<![/\w])TOOL_CALL\]',
                              re.DOTALL)
 _TOOL_CALL_CLOSE = re.compile(r'\[/TOOL_CALL[>\]]+\]?\s*(?:```)?')

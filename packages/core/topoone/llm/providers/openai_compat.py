@@ -201,12 +201,31 @@ class OpenAICompatProvider(BaseLLMProvider):
             payload['tools'] = tools
             payload['tool_choice'] = 'auto'
 
+        # M4-A 受限生成: structured 模式映射 OpenAI response_format json_schema
+        # (vLLM/LM Studio 等兼容端支持)。拒收(4xx)降级重试一次不带 →
+        # 约束解码失败回提示词约束基线, 不让 A 的可用性依赖 provider 支持面。
+        use_rf = mode == 'structured' and isinstance(output_schema, dict)
+        if use_rf:
+            payload['response_format'] = {
+                "type": "json_schema",
+                "json_schema": {"name": "output", "schema": output_schema},
+            }
+
         from .base import llm_request_timeout
         resp = requests.post(
             f"{base_url}/v1/chat/completions",
             json=payload, headers=headers,
             timeout=llm_request_timeout(model_config),
         )
+        if use_rf and resp.status_code >= 400:
+            logger.warning("[openai-compat-provider] response_format 被拒(%s) → 降级提示词约束",
+                           resp.status_code)
+            payload.pop('response_format', None)
+            resp = requests.post(
+                f"{base_url}/v1/chat/completions",
+                json=payload, headers=headers,
+                timeout=llm_request_timeout(model_config),
+            )
         data = resp.json()
         choice = data.get('choices', [{}])[0]
         msg = choice.get('message', {})

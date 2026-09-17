@@ -120,12 +120,27 @@ class OllamaProvider(BaseLLMProvider):
             payload['options']['num_predict'] = mt
         if mode == 'tools' and tools:
             payload['tools'] = tools
+        # M4-A 受限生成: structured 模式透传 json_schema 约束解码(Ollama /api/chat
+        # 原生 format 字段)。老版本/异常网关拒收(4xx)时降级重试一次不带 format
+        # ——约束解码失败回提示词约束基线, 不让 A 的可用性依赖 provider 版本。
+        use_format = mode == 'structured' and isinstance(output_schema, dict)
+        if use_format:
+            payload['format'] = output_schema
         from .base import llm_request_timeout
         resp = requests.post(
             f"{model_config['url'].rstrip('/')}/api/chat",
             json=payload,
             timeout=llm_request_timeout(model_config),
         )
+        if use_format and resp.status_code >= 400:
+            logger.warning("[ollama-provider] format 透传被拒(%s) → 降级提示词约束",
+                           resp.status_code)
+            payload.pop('format', None)
+            resp = requests.post(
+                f"{model_config['url'].rstrip('/')}/api/chat",
+                json=payload,
+                timeout=llm_request_timeout(model_config),
+            )
         data = resp.json()
         msg = data.get('message', {})
         content = msg.get('content', '')

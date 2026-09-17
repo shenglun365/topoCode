@@ -662,6 +662,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
     msgs/tools_used/tool_errors 原地变更(守卫与遥测依赖)。"""
     from ..arch_routes import req_agent
     max_rounds = max(1, int(max_tool_rounds or _MAX_TOOL_ROUNDS))
+    structured_on = True    # M4-A: 受限生成通道开关(逐轮按支持位判定+失败降级)
     request_id = None
     assistant_text = ""
     visible = ""
@@ -673,6 +674,39 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             logger.warning("[kb-chat] 回合总预算耗尽 conv=%s elapsed=%.0fs",
                            conv_id, __import__("time").time() - io.t0)
             break
+        # ── M4-A 两段式: 受限生成工具轮(非流式约束解码) + 文本终稿轮(流式) ──
+        # 支持位模型才走本通道(支持位未配置 = 全程文本协议, 现行为不变);
+        # structured 失败显式 nudge 后本回合降级文本协议(不静默)。
+        _model_key = eff_model or req_agent.get_model_preference()
+        if structured_on and req_agent.structured_model_enabled(_model_key):
+            sres = await asyncio.to_thread(req_agent.structured_tool_round,
+                                           msgs, _model_key)
+            tool_round += 1
+            if sres["error"]:
+                logger.info("[kb-chat] structured 轮失败 → 降级文本协议 conv=%s: %s",
+                            conv_id, sres["error"][:120])
+                msgs.append({"role": "user", "content":
+                             f"结构化工具调用未成功({sres['error'][:160]})。"
+                             "请直接基于已有信息作答，或改用文本协议输出工具调用块。"})
+                structured_on = False
+                continue
+            if not sres["calls"]:
+                structured_on = False     # 模型示意无更多工具 → 转终稿流式轮
+                continue
+            await io.ensure_chat_start()
+            results: List[Dict[str, str]] = []
+            for c in sres["calls"]:
+                tr = await _run_tool_with_progress(
+                    io.send, "", c.get("tool", ""), c.get("arguments", {}),
+                    root, project, model_id=eff_model)
+                results.append(tr)
+                if not tr.get("ok"):
+                    tool_errors[c.get("tool", "")] = tr.get("text", "")[:200]
+            if results:
+                tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
+                msgs.append({"role": "assistant", "content": "(已调用工具)"})
+                msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+            continue
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾

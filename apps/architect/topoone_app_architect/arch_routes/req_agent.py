@@ -1243,6 +1243,48 @@ def record_tool_parse_audit(content: str, calls: list, surface: str = "chat") ->
         pass
 
 
+# ── M4-A 受限生成(structured 通道) ────────────────────────────────────
+
+_STRUCTURED_MODELS_KEY = "llm.structuredModels"
+
+
+def structured_model_enabled(model_id: str) -> bool:
+    """模型 structured 支持位(单源: CollabConfig 键 llm.structuredModels JSON 数组)。
+
+    探针冒烟用例可写位; 未配置 = 走文本协议(现行为, 零散落分支)。
+    """
+    try:
+        raw = store.CollabConfigStore.get(_STRUCTURED_MODELS_KEY, "") or "[]"
+        ids = json.loads(raw)
+        return isinstance(ids, list) and (model_id or "") in {str(x) for x in ids}
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def structured_tool_round(msgs: list, model_id: str = "",
+                          schema: Optional[dict] = None,
+                          max_tokens: Optional[int] = None) -> Dict[str, Any]:
+    """受限生成单轮(非流式): mode=structured → 主后端约束解码+校验重试。
+
+    返回 {'calls': [{tool, arguments}], 'content': str, 'error': str|''}。
+    calls 为空且无 error = 模型未调用工具(空 tool)——调用方转终稿轮。
+    """
+    from ..agent.tools.protocol import TOOL_CALL_SCHEMA
+    res = llm_sync(msgs, mode="structured",
+                   output_schema=schema or TOOL_CALL_SCHEMA,
+                   max_tokens=max_tokens, model_id=model_id)
+    res = res or {}
+    err = str(res.get("structuredError") or "")
+    out = res.get("output")
+    calls: List[Dict[str, Any]] = []
+    if isinstance(out, dict) and str(out.get("tool") or "").strip():
+        args = out.get("arguments")
+        calls = [{"tool": str(out["tool"]).strip(),
+                  "arguments": args if isinstance(args, dict) else {}}]
+    return {"calls": calls, "content": str(res.get("content") or ""),
+            "error": err}
+
+
 def run_tools_loop(msgs: List[Dict[str, str]], *,
                    root: Optional[str] = None, project: Optional[str] = None,
                    model_id: Optional[str] = None,
@@ -1251,6 +1293,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                    max_tokens: Optional[int] = None,
                    max_rounds: int = 4,
                    allowed: Optional[List[str]] = None,
+                   tool_schema: Optional[Dict[str, Any]] = None,
                    on_error: Optional[Callable[[str], None]] = None,
                    on_progress: Optional[Callable[[str, Dict[str, Any]], None]] = None) -> Dict[str, Any]:
     """统一工具调用循环(同步通道)：解析模型输出的 `[TOOL_CALL]` 块 → 逐个执行 →
@@ -1288,6 +1331,48 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
 
     for _round in range(max_rounds + 1):
         _prog("llm", round=_round + 1)
+        use_structured = tool_schema is not None \
+            and structured_model_enabled(model_id or "")
+        if use_structured:
+            # M4-A 受限生成轮: 约束解码直达工具 JSON(非流式); 终稿轮转普通模式
+            sres = structured_tool_round(work, model_id or "",
+                                         schema=tool_schema,
+                                         max_tokens=max_tokens)
+            if sres["error"]:
+                # 失败显式不静默: 一次性 nudge 后本循环降级文本协议
+                from ..agent.reflection.dataset import record
+                record("tool_parse_fail", surface="structured",
+                       sample=sres["error"][:300])
+                work.append({"role": "user", "content":
+                             f"结构化工具调用未成功({sres['error'][:160]})。"
+                             "请直接基于已有信息作答，或改用文本协议输出工具调用块。"})
+                tool_schema = None
+                continue
+            calls = sres["calls"]
+            if not calls:
+                # 空 tool = 模型示意无更多工具 → 转终稿轮(普通文本模式)
+                work.append({"role": "user", "content":
+                             "请基于以上工具结果直接给出面向用户的最终回答"
+                             "(不要工具调用)。"})
+                tool_schema = None
+                continue
+            results: List[Dict[str, str]] = []
+            for ci, c in enumerate(calls):
+                name = c.get("tool", "")
+                args = c.get("arguments", {})
+                _prog("tool", tool=name, idx=ci + 1, total=len(calls))
+                if allowed and name not in allowed:
+                    results.append({"name": name,
+                                    "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
+                                            "请改用允许的工具，或直接基于已有信息作答。"})
+                    continue
+                result = run_arch_tool(name, args, root, project)
+                results.append({"name": name, "text": tool_result_text(name, result)})
+            if results:
+                tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
+                work.append({"role": "assistant", "content": "(已调用工具)"})
+                work.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+            continue
         res = llm_sync(work, mode=mode, output_schema=output_schema,
                        max_tokens=max_tokens, model_id=model_id, on_error=_err)
         content = (res or {}).get("content", "") if res else ""
