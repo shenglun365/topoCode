@@ -156,6 +156,11 @@
         >{{ p.s }}</span>
       </div>
     </div>
+    <StreamItems
+      v-if="convId"
+      :conv-id="convId"
+      :task-id="task.id"
+    />
     <div v-if="task.status === 'waiting_input'" class="mt-1 text-ctp-peach">
       ⏸ 等待你的输入——直接回复即转达
     </div>
@@ -167,8 +172,9 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 import { apiPost } from '@/services/api-client'
+import StreamItems from './StreamItems.vue'
 
-const props = defineProps<{ task: Record<string, any> }>()
+const props = defineProps<{ task: Record<string, any>; convId?: string }>()
 defineEmits<{ (e: 'confirm' | 'cancel', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
 
 // ── 验收配置(V1): 仅 pending_confirm 可写, 启动时随 start payload 下发 ──

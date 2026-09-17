@@ -45,6 +45,8 @@ export interface KbAnalysisTurn {
   formDraft?: FormDraft
   /** 消息级元数据(作业事件标记等: {jobId, kind, branch}) */
   meta?: Record<string, any>
+  /** A6.2 统一投影(UI 守门: 前端只渲染 item, 禁 meta.kind/executorType 分支)。 */
+  item?: { type: string; id: string; ts: number; status?: string; text?: string; payload?: Record<string, any> }
   /** 语义数据资产卡片(提取/检索结果，供对话确认)。 */
   assets?: SemanticAsset[]
   /** 契约条目固化卡(方案对话 🧾 固化产出，逐条确认/修改/删)。 */

@@ -151,6 +151,13 @@ function _debounceRefresh() {
 
 function onConvEvent(d: any) {
   if (d?.conversationId && d.conversationId !== conv.activeId) return
+  if (d?.type === 'items' && Array.isArray(d.items)) {
+    // A6.2: 流 item(工具轨迹/文件变更/通知) → 按 taskId 解耦广播给 TaskCard 流面板
+    window.dispatchEvent(new CustomEvent('arch:stream-items', {
+      detail: { taskId: d.taskId, items: d.items },
+    }))
+    return
+  }
   if (d?.type === 'progress') {
     // v2 执行进展(准流式): 全量 progress 合并(滚动文本尾+工具轨迹) → TaskCard 过程面板
     const patch = {

@@ -1034,21 +1034,23 @@ onUnmounted(() => {
             <CpuChipIcon class="w-3 h-3 shrink-0" />
             <span class="font-mono">{{ (m as any).agent || 'architect' }}</span>
           </div>
+          <!-- A6.2 守门: 渲染只经统一投影(m.item), 禁历史卡片键/执行器类型分支 -->
           <TaskCard
-            v-if="m.meta?.kind === 'task_card' && taskById(m.meta.taskId)"
-            :task="taskById(m.meta.taskId)!"
+            v-if="m.item?.type === 'task' && taskById(m.item.payload?.taskId)"
+            :conv-id="convId"
+            :task="taskById(m.item.payload?.taskId)!"
             class="mb-2"
             @confirm="(id: string) => emit('task-confirm', id)"
             @cancel="(id: string) => emit('task-cancel', id)"
             @set-executor="(id: string, ex: string) => emit('task-executor', { taskId: id, executorType: ex })"
           />
           <div
-            v-if="m.meta?.kind === 'task_approval'"
+            v-if="m.item?.type === 'approval'"
             class="mb-2 flex items-center gap-2 rounded-md border border-ctp-yellow/30 bg-ctp-yellow/10 px-2.5 py-1.5"
           >
             <ExclamationCircleIcon class="w-4 h-4 shrink-0 text-ctp-yellow" />
             <span class="text-[11px] text-ctp-yellow flex-1 min-w-0 truncate">
-              {{ approvalDone[m.id] === 'approved' ? '✓ 已批准' : approvalDone[m.id] === 'rejected' ? '✗ 已拒绝' : `工具 ${m.meta.approvalRequestId || ''} 请求执行，等待确认` }}
+              {{ approvalDone[m.id] === 'approved' ? '✓ 已批准' : approvalDone[m.id] === 'rejected' ? '✗ 已拒绝' : `工具 ${m.item.payload?.approvalRequestId || ''} 请求执行，等待确认` }}
             </span>
             <template v-if="!approvalDone[m.id]">
               <button
@@ -1137,7 +1139,7 @@ onUnmounted(() => {
               />
             </button>
             <button
-              v-if="m.role === 'assistant' && !(m.meta?.kind)"
+              v-if="m.role === 'assistant' && !m.item"
               class="text-ctp-overlay0 hover:text-ctp-mauve transition-colors p-0.5"
               :title="t('session.subs.feedHint')"
               :disabled="feedBusyIdx === i"
@@ -1146,7 +1148,7 @@ onUnmounted(() => {
               <PaperAirplaneIcon class="w-3 h-3 rotate-90" />
             </button>
             <button
-              v-if="m.role === 'assistant' && !(m.meta?.kind)"
+              v-if="m.role === 'assistant' && !m.item"
               class="text-ctp-overlay0 hover:text-ctp-yellow transition-colors p-0.5"
               :title="t('session.subs.feedSummaryHint')"
               :disabled="feedBusyIdx === i"
@@ -1183,14 +1185,14 @@ onUnmounted(() => {
           </div>
           <!-- 完成卡合并入口(环节十五): git 事实检视(主目录推进/分支内容/可否直并) -->
           <div
-            v-if="m.meta?.kind === 'task_done' && m.meta?.taskId"
+            v-if="m.item?.type === 'turn_completed' && m.item?.status === 'done' && m.item?.payload?.taskId"
             class="mt-1.5 flex items-center gap-2"
           >
             <button
               class="flex items-center gap-1.5 text-[10px] text-ctp-green hover:text-ctp-teal transition-colors"
               :disabled="mergeBusyIdx === i"
               title="合并入口检查 — 主目录是否有推进/是否可直接合并"
-              @click="runMergePrecheck(i, m.meta.taskId)"
+              @click="runMergePrecheck(i, m.item.payload?.taskId)"
             >
               <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 0 0 9 9" /></svg>
               合并检查
@@ -1200,7 +1202,7 @@ onUnmounted(() => {
               class="flex items-center gap-1.5 text-[10px] text-ctp-blue hover:text-ctp-sky transition-colors"
               :disabled="mergeBusyIdx === i"
               title="确认合并 — 门禁通过后执行(ff 仅快进; 主目录有推进时提示先 rebase)"
-              @click="confirmMerge(i, m.meta.taskId)"
+              @click="confirmMerge(i, m.item.payload?.taskId)"
             >
               <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
               确认合并
@@ -1210,7 +1212,7 @@ onUnmounted(() => {
           </div>
           <!-- 转达摘要回执: 折叠卡(留"给执行器发过什么"的感知, 点开看全文) -->
           <div
-            v-if="m.meta?.kind === 'digest_sent'"
+            v-if="m.item?.type === 'digest'"
             class="rounded-md border border-ctp-teal/25 bg-ctp-teal/5 px-2.5 py-1.5"
           >
             <button
@@ -1218,7 +1220,7 @@ onUnmounted(() => {
               @click="toggleDigestSent(i)"
             >
               <ClipboardDocumentIcon class="w-3 h-3" />
-              转达摘要 · {{ m.meta.chars ?? m.content.length }} 字
+              转达摘要 · {{ m.item.payload?.chars ?? m.content.length }} 字
               <span>{{ digestSentOpen[i] ? '▲ 收起' : '▼ 展开' }}</span>
             </button>
             <div
@@ -1233,7 +1235,7 @@ onUnmounted(() => {
 
           <!-- 需求卡动作(创建即 ready): [一键建卡执行]——点击发 /指令 后端直通 -->
           <div
-            v-if="m.meta?.kind === 'specCreated' || m.meta?.kind === 'specReady'"
+            v-if="m.item?.type === 'spec'"
             class="mt-2 flex items-center gap-2"
           >
             <button
@@ -1247,7 +1249,7 @@ onUnmounted(() => {
 
           <!-- 规约 JSON 落库按钮(字段签名识别, 任何含载荷的助手消息) -->
           <div
-            v-if="!m.meta?.kind && specPayloadOf(i)"
+            v-if="!m.item && specPayloadOf(i)"
             class="mt-2 flex items-center gap-2"
           >
             <button
