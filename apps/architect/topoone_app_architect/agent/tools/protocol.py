@@ -141,3 +141,16 @@ def strip_tool_blocks(text: str) -> str:
         pos = end
     out.append(text[pos:])
     return "".join(out).strip()
+
+
+def tool_parse_audit(text: str) -> Dict[str, int]:
+    """解析审计(纯函数, 零 IO): 工具块区域数 vs 有效调用数。
+
+    C 失败样例回流的判据源: regions>0 且 valid<regions = 存在格式损坏
+    (未闭合/JSON 破损/字段缺失)——调用方负责落 llm_dataset(本层不做 IO)。
+    """
+    if not text:
+        return {"regions": 0, "valid": 0}
+    regions = _tool_call_regions(text)
+    valid = sum(1 for _s, _e, content in regions if _parse_tool_payload(content))
+    return {"regions": len(regions), "valid": valid}

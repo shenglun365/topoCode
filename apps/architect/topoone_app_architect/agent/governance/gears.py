@@ -48,6 +48,7 @@ class GearPolicy:
     prompt_style: str = "standard"   # standard|structured|minimal(弱模型更短更清单化)
     structured_output: bool = False  # True → 报告走工具契约(非文本固定行)
     reasoning_effort: str = "high"   # high|medium|low(推理档位映射)
+    tool_rounds: int = 4             # M4-B: chat 侧工具轮次上限(弱档更早触顶, 损失有界)
 
 
 _TIERS: Dict[str, GearPolicy] = {
@@ -90,6 +91,7 @@ _TIERS: Dict[str, GearPolicy] = {
             "(每步单一动作), 拆到步骤粒度再下发。"),
         agent_note="按任务上下文中的步骤序列逐步执行；关键步骤(编译前/破坏性操作/方案分叉)完成后简短报告再继续；里程碑协议照常。",
         tool_surface="reduced", ctx_budget=0.35, prompt_style="structured", structured_output=True, reasoning_effort="low",
+        tool_rounds=3,
     ),
     "T4": GearPolicy(
         tier="T4", label="微步确认", kb=True, pre_split="micro",
@@ -99,6 +101,7 @@ _TIERS: Dict[str, GearPolicy] = {
             "每步单独可验证, 预期频繁交互确认。"),
         agent_note="微步模式：每完成一步即输出 [[NEED_INPUT]] 等待用户确认后再进行下一步。",
         tool_surface="minimal", ctx_budget=0.25, prompt_style="minimal", structured_output=True, reasoning_effort="low",
+        tool_rounds=2,
     ),
 }
 

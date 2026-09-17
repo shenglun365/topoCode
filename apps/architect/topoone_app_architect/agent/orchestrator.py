@@ -306,15 +306,16 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     assign_contract = decision.contract or None
 
     # ---- ③ 上下文: 角色模型路由 + 懒探测 + 挡位 + 消息装配 ----
-    eff_model, msgs = _chat_context(data, gate, skill_scenarios, history,
-                                    model_id, assign_contract)
+    eff_model, msgs, gear = _chat_context(data, gate, skill_scenarios, history,
+                                          model_id, assign_contract)
 
     # ---- ④ 执行: 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
     io = _TurnIO(send, conv_id, gate["last_user_msg_id"])
     tools_used: set = set()
     tool_errors: dict = {}
     loop = await _run_llm_tool_loop(io, conv_id, msgs, root, project,
-                                    eff_model, model_id, tools_used, tool_errors)
+                                    eff_model, model_id, tools_used, tool_errors,
+                                    max_tool_rounds=gear.tool_rounds)
 
     # ---- ⑤⑥ 落库 + 终态事件(正常 done / 错误 turnError) ----
     await _chat_land(io, msgs, gate, conv, loop, eff_model, model_id,
@@ -456,7 +457,7 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
 
     角色模型路由(§9/B1 per-call) → 能力档案懒探测 → 分析挡位(十二a) →
     _build_chat_messages + 通用 agent 路由系统段 + assign 契约段。
-    返回 (eff_model, msgs)。
+    返回 (eff_model, msgs, gear)——gear.tool_rounds 供执行段轮次按挡(M4-B)。
     """
     conv = gate["conv"]
     # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，
@@ -509,7 +510,76 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
         + _gear.architect_note})
     if assign_contract:
         msgs.insert(1, {"role": "system", "content": assign_contract})
-    return eff_model, msgs
+    return eff_model, msgs, _gear
+
+
+async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
+                     loop: dict, eff_model: Optional[str], model_id: str,
+                     root: str, project: str, tools_used: set,
+                     tool_errors: dict) -> None:
+    """管线阶段⑤⑥ 回合落库 + 终态事件(行为等价抽取自 handle_chat)。
+
+    正常: 确定性围栏代落(_post_turn_land) → assistant 单流落库 → done 事件;
+    空返回: turnError 折叠卡 + error 事件(错误必须完整可见且可刷新)。
+    """
+    from ..arch_routes import req_agent
+    from ..arch_routes import store
+    from ..arch_routes.common import _ts
+
+    conv_id = gate["conv_id"]
+    request_id = loop["request_id"]
+    assistant_text = loop["assistant_text"]
+    visible = loop["visible"]
+    tool_round = loop["tool_round"]
+    loop_fell_back = loop["loop_fell_back"]
+    final_content = visible or assistant_text
+
+    # ---- 回合后落库通道(仅确定性围栏, 缓解守卫已按用户裁决拆除 cv-175) ----
+    final_content, conv, tools_used, tool_errors = await _post_turn_land(
+        io, conv_id, msgs, root, project, eff_model, model_id, conv,
+        tools_used, tool_errors, final_content, request_id)
+
+    if final_content:
+        assistant_msg_id = store.next_id("m")
+        msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
+                   "role": "assistant", "time": _ts(), "content": final_content}
+        store.ConversationsStore.append_message(msg_row)
+        try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
+            store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
+        except Exception:  # noqa: BLE001
+            pass
+        done_ev = {"type": "done", "conversationId": conv_id,
+                   "content": final_content, "messageId": assistant_msg_id}
+        await io.send_ev(done_ev)
+        try:
+            from ..arch_routes import llm_dataset as _lds
+            _lds.record("llm_stream_done", ok=True,
+                        chars=len(final_content),
+                        latencyMs=int((__import__("time").time() - io.t0) * 1000),
+                        toolRounds=tool_round, model=eff_model or "",
+                        degraded=loop_fell_back)
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        # 空返回: 带上失败上下文落库(turnError)+回传——错误必须完整可见且可刷新
+        detail = "LLM 未返回内容"
+        if tool_errors:
+            detail += "；工具失败: " + "; ".join(
+                f"{k}: {str(v)[:160]}" for k, v in list(tool_errors.items())[:3])
+        if loop_fell_back:
+            detail += "（流式通道中断，已走同步降级通道仍未产出）"
+        elapsed = int(__import__("time").time() - io.t0)
+        detail += f"；回合耗时 {elapsed}s（总预算 {int(_TURN_BUDGET_S)}s）"
+        hint = _model_health_hint(eff_model or req_agent.get_model_preference())
+        if hint:
+            detail += "。" + hint
+        try:
+            from .collab import cards as _cards
+            _cards.land(conv_id, f"❌ {detail}", kind=_cards.KIND_TURN_ERROR,
+                        review_state="error")
+        except Exception:  # noqa: BLE001
+            logger.warning("[kb-chat] turnError 落库失败 conv=%s", conv_id)
+        await io.send_ev({"type": "error", "requestId": request_id, "message": detail})
 
 
 async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
@@ -583,18 +653,21 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
 
 async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                              root: str, project: str, eff_model: Optional[str],
-                             model_id: str, tools_used: set, tool_errors: dict) -> dict:
+                             model_id: str, tools_used: set, tool_errors: dict,
+                             max_tool_rounds: int = _MAX_TOOL_ROUNDS) -> dict:
     """管线阶段④ LLM 工具循环: 流式/降级/工具轮/预算门禁(行为等价抽取)。
 
+    max_tool_rounds: 工具轮次上限按挡下发(M4-B, gear.tool_rounds);
     返回 {request_id, assistant_text, visible, tool_round, loop_fell_back};
     msgs/tools_used/tool_errors 原地变更(守卫与遥测依赖)。"""
     from ..arch_routes import req_agent
+    max_rounds = max(1, int(max_tool_rounds or _MAX_TOOL_ROUNDS))
     request_id = None
     assistant_text = ""
     visible = ""
     tool_round = 0
     loop_fell_back = False
-    while tool_round <= _MAX_TOOL_ROUNDS:
+    while tool_round <= max_rounds:
         # 回合总预算: 超时终止(不再续流式轮/降级/nudge), 详因落 turnError
         if io.budget_left() <= 0:
             logger.warning("[kb-chat] 回合总预算耗尽 conv=%s elapsed=%.0fs",
@@ -605,7 +678,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
             loop_fell_back = True
             await io.ensure_chat_start()
-            assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
+            assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
             break
         request_id = rid
         await io.send_ev({"type": "chat_start", "conversationId": conv_id,
@@ -653,14 +726,15 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             loop_fell_back = True
             if io.budget_left() > 0:
                 await io.ensure_chat_start()
-                assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
+                assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
             break
 
         # 本轮工具调用解析并在 architect 侧执行
         calls = req_agent.extract_tool_calls(round_text)
+        req_agent.record_tool_parse_audit(round_text, calls, surface="chat")
         if calls:
             # 达到最大工具轮次时也要执行本轮工具后用 llm.sync 收尾，避免空答案
-            if tool_round >= _MAX_TOOL_ROUNDS:
+            if tool_round >= max_rounds:
                 results: List[Dict[str, str]] = []
                 for c in calls:
                     name = c.get("tool", "")
@@ -677,7 +751,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 loop_fell_back = True
                 if io.budget_left() > 0:
                     await io.ensure_chat_start()
-                    assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
+                    assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
                 break
             tool_round += 1
             results: List[Dict[str, str]] = []
@@ -716,7 +790,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
     if (not loop_fell_back and not assistant_text and not visible
             and io.budget_left() > 0):
         await io.ensure_chat_start()
-        assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used)
+        assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
 
     # 降级通道(llm.sync / 断流收尾)无逐字流 → 假流式补发；实时转发路径
     # visible 已含全部内容，跳过避免重复。断流后收尾的极端场景 partial

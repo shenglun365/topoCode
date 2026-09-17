@@ -52,6 +52,7 @@ from ..agent.tools.protocol import (  # noqa: F401,E402
     _tool_call_regions,
     extract_tool_calls,
     strip_tool_blocks,
+    tool_parse_audit,
 )
 from ..agent.tools.registry import (  # noqa: F401,E402
     _ARCHIVED_DENY_TOOLS,
@@ -1224,6 +1225,24 @@ def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None
     _cards.land(conv_id, text, kind=meta.pop("kind", None),
                 project_id="", **meta)
 
+def record_tool_parse_audit(content: str, calls: list, surface: str = "chat") -> None:
+    """M4-C 失败样例回流: 有工具块但有效调用缺失/部分损坏 → 沉淀探针样本。
+
+    落 llm_dataset(kind=tool_parse_fail, events.jsonl); 采集绝不影响业务。
+    样本仅供探针判分用例库(orchestration-plan §7)与人工导出, 不自动改行为。
+    """
+    try:
+        audit = tool_parse_audit(content or "")
+        if not audit["regions"] or audit["valid"] >= audit["regions"]:
+            return
+        from ..agent.reflection.dataset import record
+        record("tool_parse_fail", surface=surface,
+               regions=audit["regions"], valid=audit["valid"],
+               sample=(content or "")[-500:])
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def run_tools_loop(msgs: List[Dict[str, str]], *,
                    root: Optional[str] = None, project: Optional[str] = None,
                    model_id: Optional[str] = None,
@@ -1275,6 +1294,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
         if not content:
             return {"content": "", "output": None, "error": last_err}
         calls = extract_tool_calls(content)
+        record_tool_parse_audit(content, calls, surface="sync")
         if not calls:
             return {
                 "content": strip_tool_blocks(content),

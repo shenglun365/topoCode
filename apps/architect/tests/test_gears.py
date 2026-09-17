@@ -151,3 +151,17 @@ def test_analysis_mode_rest_accepts_tiers(client):
     r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
                     json={"mode": "bogus"})
     assert r.status_code == 400
+
+
+def test_tool_rounds_by_tier():
+    """M4-B: chat 侧工具轮次按挡——强挡保持现行为 4, 弱挡更早触顶(损失有界)。"""
+    from topoone_app_architect.agent.governance.gears import resolve_gear
+    assert resolve_gear("quick", {}).tool_rounds == 4      # T0 现行为不变
+    assert resolve_gear("strict", {}).tool_rounds == 4     # T1 现行为不变
+    from topoone_app_architect.agent.governance.gears import _TIERS
+    assert _TIERS["T3"].tool_rounds == 3
+    assert _TIERS["T4"].tool_rounds == 2
+    # 封顶链(replace 只改 tier 字段): T2 被封顶为 T3 时轮次保持 T2 现值(既有语义)
+    capped = resolve_gear("strict", {"tierProbed": "T2",
+                                     "probeDetail": "指令跟随探针未过——上限T3"})
+    assert capped.tier == "T3" and capped.tool_rounds == 4

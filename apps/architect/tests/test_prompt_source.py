@@ -113,3 +113,40 @@ def test_registry_entry_prefers_explicit_doc_over_tables():
         assert "- b4.dummy: {\"x\": 1}" in doc
     finally:
         _ARCH_TOOLS.pop("b4.dummy", None)
+
+
+def test_tool_parse_audit_counts_broken_blocks():
+    """M4-C 判据源(纯函数): 区域数 vs 有效调用数。"""
+    from topoone_app_architect.agent.tools.protocol import tool_parse_audit
+    good = '[TOOL_CALL]{"tool":"kb.baseline","arguments":{}}[/TOOL_CALL]'
+    assert tool_parse_audit(good) == {"regions": 1, "valid": 1}
+    assert tool_parse_audit("普通文本无工具块") == {"regions": 0, "valid": 0}
+    # 区域命中但 JSON 破损(arguments 值缺失)
+    bad = '[TOOL_CALL]{"tool": "kb.baseline", "arguments": }[/TOOL_CALL]'
+    assert tool_parse_audit(bad) == {"regions": 1, "valid": 0}
+    audit = tool_parse_audit(bad + good)
+    assert audit["regions"] == 2 and audit["valid"] == 1
+
+
+def test_record_tool_parse_fail_samples(tmp_path, monkeypatch):
+    """损坏样本落 llm_dataset(kind=tool_parse_fail); 正常输出零事件。"""
+    import json
+    import topoone_app_architect.arch_routes.ctx as C
+    data = str(tmp_path / "d")
+    C._db = None; C._kb = None; C._data_dir = None
+    C._project_dbs.clear()
+    C.reset_project(C._project_var.set(None)); C.reset_req(C._req_var.set(None))
+    C.setup(data_dir=data)
+    from topoone_app_architect.agent.reflection import dataset as ds
+    from topoone_app_architect.arch_routes import req_agent
+    good = '[TOOL_CALL]{"tool":"kb.baseline","arguments":{}}[/TOOL_CALL]'
+    req_agent.record_tool_parse_audit(good, [{"tool": "kb.baseline"}])
+    bad = ('前文\n[TOOL_CALL]{"tool": "kb.baseline", "arguments": }'
+           "[/TOOL_CALL]")
+    req_agent.record_tool_parse_audit(bad, [], surface="chat")
+    path = ds._path()
+    rows = [json.loads(ln) for ln in open(path, encoding="utf-8")]
+    fails = [r for r in rows if r["kind"] == "tool_parse_fail"]
+    assert len(fails) == 1
+    assert fails[0]["regions"] == 1 and fails[0]["valid"] == 0
+    assert fails[0]["surface"] == "chat" and "kb.baseline" in fails[0]["sample"]
