@@ -182,6 +182,7 @@ ARCH_PROJECT_TABLES_SQL = """
     -- 非流程实体——随时生成、随时增删(裁决2)。
     CREATE TABLE IF NOT EXISTS arch_docs (
         id TEXT PRIMARY KEY,
+        schema_version INTEGER DEFAULT 1,  -- K1 格式版本化(登记: docs/architect/kb-schema-versions.md)
         project_id TEXT DEFAULT '',
         conversation_id TEXT DEFAULT '',    -- 来源会话(证据链)
         type TEXT DEFAULT 'requirement_summary',  -- requirement_summary | dev_digest | note
@@ -197,6 +198,7 @@ ARCH_PROJECT_TABLES_SQL = """
     -- 消息本体不复制(存对话消息表)，此处只留派生单元：工具轨迹/产物/决策/摘要/执行回执。
     CREATE TABLE IF NOT EXISTS arch_context_units (
         id TEXT PRIMARY KEY,
+        schema_version INTEGER DEFAULT 1,  -- K1 格式版本化(登记: docs/architect/kb-schema-versions.md)
         conversation_id TEXT DEFAULT '',
         project_id TEXT DEFAULT '',
         type TEXT DEFAULT 'note',          -- tool_call | artifact | decision | session_summary | execution_report | execution_brief | analysis | error | error_pattern | note
@@ -284,6 +286,7 @@ ARCH_PROJECT_TABLES_SQL = """
 
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,
+        schema_version INTEGER DEFAULT 1,  -- K1 格式版本化(登记: docs/architect/kb-schema-versions.md)
         project_id TEXT DEFAULT '',
         kind TEXT DEFAULT 'entity',          -- entity | contract | state | rule | process | decision
         level TEXT DEFAULT 'logic',          -- implementation | logic | business(抽象粒度)
@@ -435,6 +438,7 @@ CREATE TABLE IF NOT EXISTS arch_capability_proposals (
     -- 术语表（词典，纯参考非约束）
     CREATE TABLE IF NOT EXISTS arch_glossary (
         id TEXT PRIMARY KEY,
+        schema_version INTEGER DEFAULT 1,  -- K1 格式版本化(登记: docs/architect/kb-schema-versions.md)
         project_id TEXT NOT NULL,
         term TEXT NOT NULL,
         alias TEXT,                         -- JSON: 别名/英文对应

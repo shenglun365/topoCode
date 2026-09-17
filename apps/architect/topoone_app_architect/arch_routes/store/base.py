@@ -98,6 +98,13 @@ def _row_to_api(row: dict) -> dict:
     return out
 
 
+def _row_to_api_v(table: str, row: dict) -> dict:
+    """版本化行读取(K1): _row_to_api + 表级迁移链惰性应用(读时补齐, 不刷库)。"""
+    out = _row_to_api(row)
+    from .migrations import apply_migrations
+    return apply_migrations(table, out)
+
+
 def _data_to_db(data: dict) -> dict:
     """API 形状 → DB 列(camelCase → snake_case + JSON 编码)。"""
     out = {}
@@ -395,7 +402,10 @@ def _get(table: str, row_id: str, project_id: Optional[str] = None) -> Optional[
     if not found:
         return None
     row = db.fetchone(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
-    return _row_to_api(row) if row else None
+    if not row:
+        return None
+    from .migrations import apply_migrations  # K1: 读时惰性迁移(未登记表恒等)
+    return apply_migrations(table, _row_to_api(row))
 
 
 def _fetchall_plus_global(table: str, project_id: str, where: str = "1=1",

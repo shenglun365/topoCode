@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from .base import _delete, _dumps, _fetchall_routed, _get, _insert, _locate_db, _now_ms, _row_to_api, _target_db, _update
+from .base import _delete, _dumps, _fetchall_routed, _get, _insert, _locate_db, _now_ms, _row_to_api, _row_to_api_v, _target_db, _update
 
 class FrameworkConfigStore:
     """认知框架配置（版本行即变更审计；每 project 至多一行 active=1）。
@@ -278,6 +278,11 @@ class GlossaryStore:
     TABLE = "arch_glossary"
 
     @classmethod
+    def _api(cls, row: dict) -> dict:
+        return _row_to_api_v("arch_glossary", row)
+
+
+    @classmethod
     def create(cls, project_id: str, term: str, alias: Optional[list] = None,
                definition: str = "", source: str = "manual",
                source_ref: str = "", author: str = "") -> dict:
@@ -302,7 +307,7 @@ class GlossaryStore:
             f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
             f"ORDER BY term ASC LIMIT ?",
             tuple(params + [int(limit)]), project_id or None)
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def update(cls, row_id: str, patch: dict) -> Optional[dict]:

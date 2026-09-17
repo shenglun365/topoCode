@@ -1,7 +1,7 @@
 """store 拆分模块（A1-T3：纯移动）。"""
 from __future__ import annotations
 
-from .base import _delete, _dumps, _fetchall_routed, _get, _insert, _locate_db, _route_read, _row_to_api, _scan_dbs, _target_db, _to_snake, _update
+from .base import _delete, _dumps, _fetchall_routed, _get, _insert, _locate_db, _route_read, _row_to_api, _row_to_api_v, _scan_dbs, _target_db, _to_snake, _update
 
 class SemanticAssetsStore:
     """语义数据资产(architect 自持，随最新代码结构增量更新)。
@@ -10,6 +10,11 @@ class SemanticAssetsStore:
     """
 
     TABLE = "arch_semantic_assets"
+
+    @classmethod
+    def _api(cls, row: dict) -> dict:
+        return _row_to_api_v("arch_semantic_assets", row)
+
     KINDS = ("entity", "contract", "state", "rule", "process", "decision")
     LEVELS = ("implementation", "logic", "business")
     # 列表瘦身列(仅排除 pseudo/detail/line_notes/node_brief/edge_notes)：
@@ -41,7 +46,7 @@ class SemanticAssetsStore:
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(int(limit))
         rows, mode = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id or None)
-        out = [_row_to_api(r) for r in rows]
+        out = [cls._api(r) for r in rows]
         if mode == "scan":
             out.sort(key=lambda r: (r.get("updatedAt") is None, r.get("updatedAt") or 0), reverse=True)
             out = out[: int(limit)]
@@ -63,7 +68,7 @@ class SemanticAssetsStore:
             (project_id, scope_type, scope_key),
             project_id or None,
         )
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def create(cls, data: dict) -> dict:
@@ -133,7 +138,7 @@ class SemanticAssetsStore:
                f"ORDER BY updated_at DESC LIMIT ? OFFSET ?")
         params += [int(limit), int(offset)]
         rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id or None)
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def count(cls, project_id: str, text: str = "", kind: str = "",
@@ -214,7 +219,7 @@ class SemanticAssetsStore:
             (project_id,),
             project_id or None,
         )
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def all_status(cls, project_id: str, limit: int = 400, light: bool = False) -> list[dict]:
@@ -231,7 +236,7 @@ class SemanticAssetsStore:
             (project_id, int(limit)),
             project_id or None,
         )
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def purge(cls, project_id: str, ids: list) -> int:

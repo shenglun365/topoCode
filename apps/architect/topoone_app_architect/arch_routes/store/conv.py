@@ -1,7 +1,7 @@
 """store 拆分模块（A1-T3：纯移动）。"""
 from __future__ import annotations
 
-from .base import PROJECT_TABLES, _all, _db, _dumps, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _target_db, _to_snake, _update, next_id
+from .base import PROJECT_TABLES, _all, _db, _dumps, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _row_to_api_v, _target_db, _to_snake, _update, next_id
 
 
 class UnitTestsStore:
@@ -320,6 +320,11 @@ class ContextUnitsStore:
     TABLE = "arch_context_units"
 
     @classmethod
+    def _api(cls, row: dict) -> dict:
+        return _row_to_api_v("arch_context_units", row)
+
+
+    @classmethod
     def all(cls, conversation_id: str = None, type_: str = None,
             project_id: str = None, limit: int = 200) -> list[dict]:
         sql = f"SELECT * FROM {cls.TABLE}"
@@ -338,7 +343,7 @@ class ContextUnitsStore:
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(int(limit))
         rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def search(cls, q: str, type_: str = None, conversation_id: str = None,
@@ -359,7 +364,7 @@ class ContextUnitsStore:
         sql += " ORDER BY importance DESC, created_at DESC LIMIT ?"
         params.append(int(limit))
         rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def get(cls, unit_id: str):
@@ -386,7 +391,7 @@ class ContextUnitsStore:
             "created_at": data.get("createdAt") or now,
         }
         _insert(cls.TABLE, payload)
-        return _row_to_api(payload)
+        return cls._api(payload)
 
     @classmethod
     def delete(cls, unit_id: str) -> bool:
@@ -412,6 +417,11 @@ class DocsStore:
     TABLE = "arch_docs"
 
     @classmethod
+    def _api(cls, row: dict) -> dict:
+        return _row_to_api_v("arch_docs", row)
+
+
+    @classmethod
     def all(cls, project_id: str = None, conversation_id: str = None,
             type_: str = None, limit: int = 200) -> list[dict]:
         sql = f"SELECT * FROM {cls.TABLE}"
@@ -430,7 +440,7 @@ class DocsStore:
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(int(limit))
         rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
-        return [_row_to_api(r) for r in rows]
+        return [cls._api(r) for r in rows]
 
     @classmethod
     def get(cls, doc_id: str):
@@ -451,7 +461,7 @@ class DocsStore:
             "updated_at": data.get("updatedAt") or now,
         }
         _insert(cls.TABLE, payload)
-        return _row_to_api(payload)
+        return cls._api(payload)
 
     @classmethod
     def update(cls, doc_id: str, data: dict) -> Optional[dict]:
