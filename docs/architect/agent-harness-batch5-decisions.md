@@ -14,11 +14,11 @@
 | # | 条目 | 推荐方案 | 工作量 | 依赖 | 风险 | 建议顺序 |
 |---|------|---------|--------|------|------|---------|
 | 1 | K1 格式版本化 | 表级 `schema_version` 列 + 只追加迁移链 + 版本登记文档 | S | 无 | 低 | ① |
-| 2 | A6.4 steer 协议化 | 协议带 `delivery` + B1 能力矩阵降级 queue | S | 无 | 低 | ② |
+| 2 | A6.4 steer 协议化 | **已落地**（delivery 协议位+降级回执卡，见 §8 as-built） | S | ✅ | 低 | ✅ |
 | 3 | M3 轻重分船 | ~~角色表扩轻任务角色~~ **已落地：资产助理/轻任务模型两域分列**（见 §2 as-built） | S | 无 | 低 | ✅ |
 | 4 | K4 @引用不读内容 | 检索返回裁剪（预览+定位符）+ 系统段显式纪律 | S~M | 探针回归 | 中 | ④ |
 | 5 | M4 协议健壮性 | 受限生成为终局；前置 B4 文档单源化 + B3 handle_chat 拆解 | B4 S~M, B3 M, 受限生成 M | 网关支持面 | 中 | ⑤ |
-| 6 | K3 大纲投影 | 只读大纲端点 + 侧栏跳转；分页回载随 A6.2 | S~M | 无 | 低 | ⑥ |
+| 6 | K3 大纲投影 | ~~B 分页回载~~ **A+C 已落地**（回合对大纲端点+会话中心侧栏+docs H2，见 §5 as-built） | S~M | ✅ | 低 | ✅ |
 | 7 | M5 边界透明化 | ~~边界说明卡~~ **已随三维矩阵专项落地**（见 §11 as-built） | S | ✅ | 低 | ✅ |
 | 8 | A6.2 Item 投影 | ~~B 最小投影~~ **A 全量落地**（开放注册制 + 一次性替换，见 §7 as-built） | M | ✅ | 中 | ✅ |
 | 9 | A2 DAG/CAS | **DAG 已落地**（task_graph/就绪下发/fail-fast，depends_source 按 C 档）；writeScopes 告警尾量；CAS 暂缓 | ✅ | 中 | ⑨→尾量 |
@@ -251,6 +251,13 @@ provider 跑 format=json_schema 冒烟，确认网关透传与行为）。B4/B3 
 
 ## 5. K3 turn-outline 式大纲投影
 
+> **as-built（2026-09-17，`7830fc2`，998 passed）**：拍板=入口**会话中心详情页**、
+> 颗粒度**回合对**。落地：`GET /sessions/{id}/outline`（O(turn) fold：prompt 50 字/
+> response 120 字/锚点=回合首条消息 id/msgCount；回执卡单独标注不入回合正文）；
+> SessionsPage 左栏大纲侧栏（活跃会话联动，点击 scrollIntoView 定位，消息锚点
+> `msg-{id}`）；C 顺带——`/session-docs` 增 `outline` 字段（H2 大纲，fence 感知）。
+> B(seq 分页回载)挂点已由 A6.2 `/items` beforeTs 具备，未单独实施。
+
 ### 5.1 现状
 
 - 会话消息全量拉取：`GET /sessions/{id}/messages` 返回全部消息，前端一次性
@@ -365,6 +372,13 @@ provider 跑 format=json_schema 冒烟，确认网关透传与行为）。B4/B3 
 ---
 
 ## 8. A6.4 steer 协议化（随需并入）
+
+> **as-built（2026-09-17，`8c876cc`，995 passed）**：拍板=方案 A + 降级提示落
+> **回执卡**。落地：runner `user_input` 响应增 `delivery`(steered|queued|started)
+> +`reason`（steer 请求降级三态：执行器不支持/适配器拒绝/通道异常，只增不改保留
+> queued/steered 旧字段）；runner_client 透传；exec_bridge task_input_echo 回执卡
+> 追加提示行（⚡ 已直达/⏳ 已排队+原因/✓ 新回合下发）+ meta 携 delivery/reason
+> （item_from_card payload 同步）；B1 能力矩阵 steer 位既有，协议位消费该位。
 
 ### 8.1 现状
 
