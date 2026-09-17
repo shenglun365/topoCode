@@ -207,7 +207,7 @@ def item_from_card(meta: Optional[dict], text: str = "",
     if spec_.get("payload") == "meta":
         payload = {k: v for k, v in (meta or {}).items() if k != "kind"}
     for k in ("taskId", "requestId", "branch", "approvalRequestId",
-              "approvalJobId"):
+              "approvalJobId", "delivery", "reason"):
         if (meta or {}).get(k) and k not in payload:
             payload[k] = meta[k]
     if payload:

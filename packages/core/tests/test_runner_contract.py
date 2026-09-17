@@ -92,11 +92,13 @@ def test_user_input_response_shape():
     """user_input 响应: 排队 {ok,queued} / 终态 {ok,error}。"""
     j = _job()
     r = asyncio.run(j.user_input("补充"))
-    assert set(r.keys()) == {"ok", "queued"} and r["queued"] is False
+    # A6.4: delivery 协议位(steered|queued|started) + reason 必备
+    assert {"ok", "queued", "delivery", "steered", "reason"} <= set(r.keys())
+    assert r["queued"] is False and r["delivery"] == "started"
     j2 = _job()
     j2._busy = True
     r2 = asyncio.run(j2.user_input("排队"))
-    assert set(r2.keys()) == {"ok", "queued"} and r2["queued"] is True
+    assert r2["queued"] is True and r2["delivery"] == "queued"
     j3 = _job()
     j3.status = "done"
     r3 = asyncio.run(j3.user_input("拒收"))

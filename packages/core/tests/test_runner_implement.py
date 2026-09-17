@@ -57,11 +57,41 @@ def test_user_input_queues_while_busy():
     j.status = "running"
     r = asyncio.run(j.user_input("用方案 B"))
     assert r["ok"] and r["queued"] is True
+    assert r["delivery"] == "queued"    # A6.4: 实际送达语义显式回传
     assert j.pending_inputs == ["用方案 B"]
     # 终态拒收
     j.status = "done"
     r2 = asyncio.run(j.user_input("再改改"))
     assert not r2["ok"]
+
+
+def test_input_delivery_semantics_a64():
+    """A6.4: started / steer 降级(执行器不支持) / steer 直达三态。"""
+    # started: 空闲新回合
+    j = _job()
+    j.status = "running"
+    r = asyncio.run(j.user_input("开工", steer=True))
+    assert r["delivery"] == "started" and r["reason"] == ""
+    # steer 降级: busy + 执行器无 steer 能力 → queued + reason
+    j2 = _job()
+    j2._busy = True
+    j2.status = "running"
+    r2 = asyncio.run(j2.user_input("插一句", steer=True))
+    assert r2["delivery"] == "queued"
+    assert "steer" in r2["reason"]
+    assert j2.pending_inputs == ["插一句"]
+    # steer 直达: busy + adapter 有 steer
+    j3 = _job()
+    j3._busy = True
+    j3.status = "running"
+
+    class _Steerable(_FakeAdapter):
+        async def steer(self, job, text):
+            return True
+    j3.adapter = _Steerable()
+    r3 = asyncio.run(j3.user_input("直达补充", steer=True))
+    assert r3["delivery"] == "steered" and r3["queued"] is False
+    assert j3.pending_inputs == []
 
 
 def test_turn_marker_classification():

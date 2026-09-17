@@ -57,3 +57,32 @@ def test_input_failure_no_echo_no_request_id(tmp_path, monkeypatch):
     assert not r["ok"] and not r.get("requestId")
     msgs = store.ConversationsStore.messages(conv["id"])
     assert not [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_input_echo"]
+
+
+def test_input_echo_delivery_note_a64(tmp_path, monkeypatch):
+    """A6.4 降级提示(回执卡, 拍板: 回执卡): 实际送达语义进回执内容与 meta。"""
+    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    task = eb.propose_task(conv, "D", "x")
+    assert eb.confirm_task(task["id"])["ok"]
+
+    class _Res:
+        ok = True
+        queued = True
+        error = ""
+        delivery = "queued"
+        reason = "执行器 steer 未送达（适配器拒绝/不支持当前形态）"
+
+    class _Client:
+        def input(self, job_id, text, steer=False, timeout=15.0):
+            return _Res()
+
+    monkeypatch.setattr(eb, "_client", lambda: _Client())
+    r = eb.task_input(task["id"], "排队补一句")
+    assert r["ok"] and r["delivery"] == "queued" and r["reason"]
+    msgs = store.ConversationsStore.messages(conv["id"])
+    echo = [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_input_echo"]
+    assert echo, "回执缺失"
+    last = echo[-1]
+    assert last["meta"]["delivery"] == "queued"
+    assert "已排队" in (last["content"] or "")
+    assert "steer" in (last["content"] or "")

@@ -637,14 +637,27 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
             _publish_task(task["conversationId"], t)
         request_id = uuid.uuid4().hex[:12]
         if echo:
+            # A6.4 降级提示(回执卡, 拍板 2026-09-17): 实际送达语义显式可见
+            delivery = getattr(res, "delivery", "") or (
+                "queued" if res.queued else "started")
+            reason = getattr(res, "reason", "")
+            note = {
+                "steered": "⚡ 已直达执行中回合（steer）",
+                "queued": "⏳ 已排队，当前回合结束后送达"
+                          + (f"——{reason}" if reason else ""),
+                "started": "✓ 已作为新回合下发",
+            }.get(delivery, "")
             conv_id = task.get("conversationId") or ""
-            _append(conv_id, "user", stripped[:12000],
+            _append(conv_id, "user",
+                    stripped[:12000] + (f"\n\n---\n_{note}_" if note else ""),
                     msg_meta={"kind": "task_input_echo", "taskId": task_id,
                               "requestId": request_id, "queued": res.queued,
-                              "steer": steer},
+                              "steer": steer, "delivery": delivery,
+                              "reason": reason},
                     project_id=(store.ConversationsStore.get(conv_id) or {}
                                 ).get("projectId") or "")
-        return {"ok": True, "queued": res.queued, "requestId": request_id}
+        return {"ok": True, "queued": res.queued, "requestId": request_id,
+                "delivery": getattr(res, "delivery", ""), "reason": getattr(res, "reason", "")}
     return {"ok": False, "error": res.error or "runner 不可达"}
 
 

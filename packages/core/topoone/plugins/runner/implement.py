@@ -256,24 +256,36 @@ class ImplementJob:
 
     async def user_input(self, text: str, steer: bool = False) -> Dict[str, Any]:
         """用户输入：不 busy 触发新回合；busy 时 steer=true 且执行器支持 →
-        直达注入（cline pending 优先投递），否则排队缓冲。"""
+        直达注入（cline pending 优先投递），否则排队缓冲。
+
+        A6.4 delivery 协议位: 实际送达语义显式回传——steered(直达)/
+        queued(排队)/started(新回合)；请求 steer 但降级时带 reason
+        (执行器不支持/通道异常)，architect 据此落回执卡提示。
+        """
         if self.status in ("done", "failed", "stopped"):
             return {"ok": False, "error": f"作业已终态({self.status})，不可追加输入"}
+        fallback_reason = ""
         if self._busy and steer:
             steer_fn = getattr(self.adapter, "steer", None)
-            if steer_fn is not None:
+            if steer_fn is None:
+                fallback_reason = "执行器不支持 steer 直达(B1 能力矩阵: steer=false)"
+            else:
                 try:
                     if await steer_fn(self, text):
                         self.emit("user_input", text, steered=True)
-                        return {"ok": True, "steered": True}
-                except Exception:  # noqa: BLE001
-                    pass
+                        return {"ok": True, "steered": True, "queued": False,
+                                "delivery": "steered", "reason": ""}
+                    fallback_reason = "执行器 steer 未送达（适配器拒绝/不支持当前形态）"
+                except Exception:  # noqa: BLE001 — steer 通道故障降级排队, 不阻断转达
+                    fallback_reason = "steer 通道异常，已降级排队"
         self.emit("user_input", text)
         if self._busy:
             self.pending_inputs.append(text)
-            return {"ok": True, "queued": True}
+            return {"ok": True, "queued": True, "steered": False,
+                    "delivery": "queued", "reason": fallback_reason}
         self._kick_turn(text)
-        return {"ok": True, "queued": False}
+        return {"ok": True, "queued": False, "steered": False,
+                "delivery": "started", "reason": ""}
 
     async def _prepare_baseline(self) -> None:
         """V3: 基点临时 worktree 异步跑一次基线测试(缓存 key: root+base+cmd)。"""

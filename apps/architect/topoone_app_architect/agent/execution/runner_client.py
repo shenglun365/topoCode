@@ -57,6 +57,8 @@ class InputResult:
     ok: bool
     queued: bool = False
     error: str = ""
+    delivery: str = ""     # A6.4: steered|queued|started(实际送达语义)
+    reason: str = ""       # steer 降级原因(执行器不支持/通道异常)
 
 
 class RunnerClient:
@@ -114,7 +116,9 @@ class RunnerClient:
             payload["steer"] = True              # runner 侧不支持的执行器自动回退排队
         res = self._t(f"/api/implement/{job_id}/input", payload, timeout) or {}
         return InputResult(ok=bool(res.get("ok")), queued=bool(res.get("queued")),
-                           error=str(res.get("error") or ""))
+                           error=str(res.get("error") or ""),
+                           delivery=str(res.get("delivery") or ""),
+                           reason=str(res.get("reason") or ""))
 
     def finish(self, job_id: str, keep_worktree: bool = True, timeout: float = 30.0) -> Dict[str, Any]:
         return self._t(f"/api/implement/{job_id}/finish",

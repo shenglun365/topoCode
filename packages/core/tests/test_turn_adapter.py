@@ -774,7 +774,7 @@ def test_implement_steer_direct_when_busy(monkeypatch):
 
     j.adapter.steer = lambda job, text: fake_steer(text)
     res = asyncio.run(j.user_input("转向", steer=True))
-    assert res == {"ok": True, "steered": True}
+    assert res["ok"] and res["delivery"] == "steered"  # A6.4 协议位
     assert j.pending_inputs == []            # 未排队
 
     # busy + steer 但 adapter 不支持 → 排队
@@ -783,12 +783,12 @@ def test_implement_steer_direct_when_busy(monkeypatch):
         adapter=_WatchFakeAdapter(lambda: None))
     j2._busy = True
     res2 = asyncio.run(j2.user_input("继续", steer=True))
-    assert res2 == {"ok": True, "queued": True}
+    assert res2["queued"] is True and res2["delivery"] == "queued"  # A6.4
     assert j2.pending_inputs == ["继续"]
 
     # busy + 无 steer → 排队（原行为）
     res3 = asyncio.run(j2.user_input("普通补充"))
-    assert res3 == {"ok": True, "queued": True}
+    assert res3["queued"] is True and res3["delivery"] == "queued"
 
 
 def test_implement_steer_terminal_rejected():
