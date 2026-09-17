@@ -1053,12 +1053,12 @@ export default {
     title: '系统管理',
     desc: '系统级配置的查看与管理，包括外接 coding agent 适配器与从 KB 导入的模型配置。',
     roles: {
-      title: '分析任务模型映射',
+      title: '资产助理（数据资产·语义分析）',
       save: '保存映射',
       saving: '保存中…',
       saved: '已保存',
       modelPlaceholder: '模型 id（留空 = 跟随缺省模型）',
-      hint: '为不同类型的认知工作指定不同模型：以调用参数即时生效，不影响其它页面的全局模型选择。',
+      hint: '为数据资产管理·语义提取管线的各工种（提取/归纳/评估等）指定模型：以调用参数即时生效，不影响其它页面的全局模型选择。编码编排侧的轻任务模型在「轻任务模型」分区单独配置。',
       modelMissing: '不在实例模型表中',
       triggerLabel: '触发',
       items: {
@@ -1070,11 +1070,24 @@ export default {
         mine: { label: '能力提炼', note: '从历史会话中沉淀可复用的规约与技巧，建议强模型。', trigger: '能力提炼（定时批量/手动）' },
       },
     },
+    lightTasks: {
+      title: '轻任务模型（编码编排侧）',
+      save: '保存',
+      saving: '保存中…',
+      saved: '已保存',
+      modelPlaceholder: '模型 id（留空 = 跟随缺省模型）',
+      hint: 'architect 编排侧的轻量 LLM 调用（会话标题/摘要生成、范围探针）可单独指定小模型档，节省强档算力。与「资产助理」无涉：那是数据资产·语义分析管线的工种绑定。',
+      modelMissing: '不在实例模型表中',
+      items: {
+        summary: { label: '标题/摘要', note: '会话标题与摘要生成（同一次调用），快模型即可。' },
+        probe: { label: '范围探针', note: '需求边界 grounding 补全（任务确认前单次调用），中档即可。' },
+      },
+    },
 
     tabs: {
       instance: 'Architect 实例设置（模型）',
       executors: 'Coding Agent 执行器',
-      roleModels: '分析任务模型映射',
+      roleModels: '模型分派（资产助理/轻任务）',
       other: '其他配置',
     },
 

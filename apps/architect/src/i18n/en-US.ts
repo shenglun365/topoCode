@@ -1024,12 +1024,12 @@ export default {
     title: 'System Management',
     desc: 'View and manage system-level configuration, including external coding agent adapters and model config imported from KB.',
     roles: {
-      title: 'Analysis Task Model Mapping',
+      title: 'Asset Assistants (Data-Asset / Semantic Analysis)',
       save: 'Save Mapping',
       saving: 'Saving…',
       saved: 'Saved',
       modelPlaceholder: 'Model id (empty = follow default model)',
-      hint: 'Assign different models to different kinds of cognitive work. Applied per call without affecting the global model selection of other pages.',
+      hint: 'Assign models to crafts of the data-asset / semantic-extraction pipeline (extraction, induction, evaluation…). Applied per call without affecting the global model selection. Coding-orchestration light tasks are configured separately under "Light-Task Models".',
       modelMissing: 'not in instance models',
       triggerLabel: 'Triggered by ',
       items: {
@@ -1045,7 +1045,7 @@ export default {
     tabs: {
       instance: 'Architect Instance (Models)',
       executors: 'Coding Agent Executors',
-      roleModels: 'Analysis Task Model Mapping',
+      roleModels: 'Model Assignment (Assistants / Light Tasks)',
       other: 'General',
     },
 

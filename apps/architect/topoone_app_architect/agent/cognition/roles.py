@@ -1,7 +1,11 @@
-"""tAgent 角色注册表(实现层) — 不同认知工作绑不同模型/API。
+"""资产助理注册表(实现层, 原名 tAgent 角色注册表) — 数据资产管理·语义提取
+管线的「工种 → 模型」绑定。
 
-角色 = {name, label, modelId, note}；配置三级：全局偏好 < 项目级 < 主 KB 下发。
+资产助理 = {name, label, modelId, note}；配置三级：全局偏好 < 项目级 < 主 KB 下发。
 消费方式：**per-call model_id 参数**生效（护栏 R3：不得写全局 llm 配置）。
+消费点全部在语义/数据资产管线（asset_extract / sem.engine / naming / evaluator）；
+与编码编排侧的「轻任务模型」(governance/light_tasks.py) 是两个领域，勿混；
+与已清退的会话角色(T4, sessions._roles_of 僵尸兼容) 无涉。
 
 REST(GET/PUT /agent/roles)留在 arch_routes.agent_roles 适配层。
 """

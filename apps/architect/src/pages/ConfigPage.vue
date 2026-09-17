@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon, PencilSquareIcon } from '@heroicons/vue/24/outline'
+import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon, PencilSquareIcon, BoltIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchProjectStore } from '@/stores/project-store'
@@ -27,7 +27,7 @@ const project = useArchProjectStore()
 spec.load()
 
 
-// ── 分析任务模型映射（原 M1 角色模型映射；per-call 生效，不写全局 llm 配置） ──
+// ── 资产助理（数据资产·语义分析管线工种；per-call 生效，不写全局 llm 配置） ──
 interface AgentRole { name: string; label: string; modelId: string; note?: string }
 const roles = ref<AgentRole[]>([])
 const rolesSaving = ref(false)
@@ -63,6 +63,46 @@ async function saveRoles() {
 }
 
 loadRoles()
+
+// ── 轻任务模型（编码编排侧：标题摘要/范围探针；与资产助理分属两域） ──
+interface LightTask { key: string; label: string; note: string; modelId: string }
+const lightTasks = ref<LightTask[]>([])
+const lightSaving = ref(false)
+const lightSavedAt = ref(0)
+
+async function loadLightTasks() {
+  try {
+    const r = await apiGet<{ lightTasks: Record<string, string> }>('/agent/light-tasks')
+    const cfg = r.lightTasks || {}
+    lightTasks.value = ['summary', 'probe'].map((k) => ({
+      key: k,
+      label: te(`config.lightTasks.items.${k}.label`)
+        ? t(`config.lightTasks.items.${k}.label`) : k,
+      note: te(`config.lightTasks.items.${k}.note`)
+        ? t(`config.lightTasks.items.${k}.note`) : '',
+      modelId: cfg[k] || '',
+    }))
+  } catch {
+    lightTasks.value = []
+  }
+}
+
+async function saveLightTasks() {
+  lightSaving.value = true
+  try {
+    const payload = Object.fromEntries(lightTasks.value.map((x) => [x.key, x.modelId]))
+    const r = await apiPut<{ lightTasks: Record<string, string> }>(
+      '/agent/light-tasks', { lightTasks: payload })
+    const cfg = r.lightTasks || {}
+    lightTasks.value = lightTasks.value.map((x) => ({ ...x, modelId: cfg[x.key] || '' }))
+    lightSavedAt.value = Date.now()
+    setTimeout(() => { lightSavedAt.value = 0 }, 2000)
+  } finally {
+    lightSaving.value = false
+  }
+}
+
+loadLightTasks()
 
 
 const granularityFields = [
@@ -572,7 +612,7 @@ onMounted(() => { void loadCgStatus() })
 
 
 
-    <!-- ═══ tab: 角色模型映射 ═══ -->
+    <!-- ═══ tab: 资产助理(数据资产·语义分析) + 轻任务模型(编排侧) ═══ -->
     <div v-show="activeTab === 'roleModels'">
     <div class="panel overflow-hidden">
       <div class="panel-header">
@@ -615,6 +655,45 @@ onMounted(() => { void loadCgStatus() })
       </div>
       <p class="px-4 pb-3 text-[10px] text-ctp-overlay0 leading-relaxed">
         {{ t('config.roles.hint') }}
+      </p>
+    </div>
+
+    <!-- 轻任务模型(编码编排侧): 与资产助理分属两域 -->
+    <div class="panel mt-4 overflow-hidden">
+      <div class="panel-header">
+        <span class="flex items-center gap-2">
+          <BoltIcon class="w-4 h-4 text-ctp-peach" />{{ t('config.lightTasks.title') }}
+        </span>
+        <button
+          class="btn btn-xs btn-blue"
+          :disabled="lightSaving"
+          @click="saveLightTasks"
+        >
+          {{ lightSaving ? t('config.lightTasks.saving') : (lightSavedAt ? t('config.lightTasks.saved') : t('config.lightTasks.save')) }}
+        </button>
+      </div>
+      <div class="divide-y divide-ctp-surface0">
+        <div
+          v-for="lt in lightTasks"
+          :key="lt.key"
+          class="flex items-center gap-3 px-4 py-2.5 text-xs"
+        >
+          <span class="w-20 font-semibold text-ctp-text shrink-0">{{ lt.label }}</span>
+          <span class="flex-1 text-[10px] leading-snug text-ctp-overlay1">{{ lt.note }}</span>
+          <select v-model="lt.modelId" class="input !py-1 !px-2 !text-[11px] w-64 font-mono">
+            <option value="">{{ t('config.lightTasks.modelPlaceholder') }}</option>
+            <option
+              v-if="lt.modelId && !llmModels.some((m) => m.id === lt.modelId)"
+              :value="lt.modelId"
+            >{{ lt.modelId }}（{{ t('config.lightTasks.modelMissing') }}）</option>
+            <option v-for="m in llmModels" :key="m.id" :value="m.id">
+              {{ m.name }}（{{ m.model }}@{{ m.url }}）
+            </option>
+          </select>
+        </div>
+      </div>
+      <p class="px-4 pb-3 text-[10px] text-ctp-overlay0 leading-relaxed">
+        {{ t('config.lightTasks.hint') }}
       </p>
     </div>
     </div>

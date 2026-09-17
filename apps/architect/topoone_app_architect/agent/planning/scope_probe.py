@@ -93,11 +93,15 @@ def probe_scope(root: str, project: Optional[str], req_text: str,
     if g["kb"]:
         user_parts.append("架构资产命中:\n" + "\n".join(g["kb"]))
     from ...arch_routes import req_agent as _ra
+    from ...arch_routes.agent_roles import load_light_tasks_cfg
+    from ..governance.light_tasks import resolve_light_task_model
     try:
         res = _ra.llm_sync(
             [{"role": "system", "content": sys_prompt},
              {"role": "user", "content": "\n\n".join(user_parts)}],
-            mode="structured", output_schema=schema, max_tokens=1024)
+            mode="structured", output_schema=schema, max_tokens=1024,
+            model_id=resolve_light_task_model("probe", load_light_tasks_cfg())
+            or None)
     except Exception as e:  # noqa: BLE001
         logger.info("[scope-probe] llm 不可用: %s", e)
         return {"ok": False, "error": f"llm 不可用: {e}"}
