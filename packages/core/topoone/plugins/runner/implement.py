@@ -280,16 +280,20 @@ class ImplementJob:
         try:
             from . import verify as _verify
             cmd = str(self.verify_config.get("test") or "").strip()
+            adapter = ""
             if not cmd:
                 plan = _verify.discover_verify(self.wt, self.verify_config)
                 cmd = (plan.get("test") or {}).get("cmd") or ""
+                adapter = (plan.get("test") or {}).get("adapter") or ""
+            else:
+                adapter = getattr(_verify, "_infer_adapter")(cmd)
             if not cmd:
                 return
             self.baseline = await asyncio.to_thread(
                 _verify.run_baseline, self.root, self.base, cmd,
                 self._verify_state_dir(),
                 float(self.verify_config.get("timeoutMul") or 1.0),
-                self._verify_state_dir())
+                self._verify_state_dir(), adapter)
             logger.info("[implement] baseline ready job=%s tests=%s",
                         self.id, len((self.baseline or {}).get("perTest") or []))
         except Exception as e:  # noqa: BLE001

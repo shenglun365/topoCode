@@ -8,6 +8,7 @@ import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/ser
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
+import AssetsPanel from '@/components/chat/AssetsPanel.vue'
 import { apiPost, apiGet } from '@/services/api-client'
 import type { SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
@@ -1900,6 +1901,13 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 知识资产面板(K2): 任务回执/里程碑沉淀清单, 检索+删除 -->
+    <AssetsPanel
+      v-if="props.convId"
+      :conv-id="props.convId"
+      :read-only="props.readOnly"
+    />
 
     <div class="relative flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
       <!-- `/` 命令提示浮层(会话指令发后端 + 会话操作本地执行) -->

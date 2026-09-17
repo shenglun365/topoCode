@@ -548,6 +548,36 @@ def confirm_task(task_id: str) -> dict:
     return {"ok": True, "task": t}
 
 
+def task_set_verify_config(task_id: str, cfg: dict) -> Optional[dict]:
+    """设定任务验收门禁配置(V1 P0 最高权威来源; 仅 pending_confirm 可改——
+    running 任务配置已随 start payload 下发, 再改不生效)。白名单收敛+越界钳制。"""
+    task = store.TasksStore.get(task_id)
+    if not task or (task.get("status") or "") != ST.TASK_PENDING_CONFIRM:
+        return None
+    clean: dict = {}
+    for k in ("maxAttempts", "autoRepair", "timeoutMul", "build", "test"):
+        v = (cfg or {}).get(k)
+        if v is None or v == "":
+            continue
+        if k == "autoRepair":
+            clean[k] = bool(v) if isinstance(v, bool) \
+                else str(v).strip().lower() == "true"
+        elif k == "maxAttempts":
+            try:
+                clean[k] = max(1, min(int(v), 6))
+            except (TypeError, ValueError):
+                return None
+        elif k == "timeoutMul":
+            try:
+                clean[k] = max(0.5, min(float(v), 10.0))
+            except (TypeError, ValueError):
+                return None
+        else:
+            clean[k] = str(v).strip()[:500]
+    store.TasksStore.update(task_id, {"verifyConfig": clean})
+    return store.TasksStore.get(task_id)
+
+
 def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
     """设定任务执行器(别名归一: cline→cline-sdk)。仅 pending_confirm 可换——
     运行中引擎已固化(换=新任务); 返回更新后任务行(不可换返回 None)。"""
@@ -1166,8 +1196,31 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         ms_note = ""
         if ms_files:
             shown = "\n".join(f"- `{f}`" for f in ms_files[:12])
+            # A1 增强: 回执携带验收状态(实测矩阵) + 规约边界规模——事实→边界,
+            # 状态→回执双向回写; 无验收记录不虚构(零假设)
+            prog = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+            vo = str(prog.get("verifyOverall") or "")
+            verify_line = ""
+            if vo:
+                marks = {"A": "✅ A 结构化验收通过",
+                         "B": "✅ B 退出码验收通过",
+                         "PASS_WITH_KNOWN": "✅ 通过(含存量失败)",
+                         "C": "⚠️ C 未能自动验收——合并前请人工核验",
+                         "D": "ℹ️ D 纯文档/资源变更(仅人工审查)"}
+                verify_line = "\n\n**验收状态**：" + marks.get(
+                    vo, "❌ 验收未过——变更未经验证" if vo == "FAIL" else f"⚠️ {vo}")
+            boundary_n = 0
+            if ctx.get("rid"):
+                try:
+                    _snap = (store.RequirementsStore.spec_active(ctx["rid"])
+                             or {}).get("snapshot") or {}
+                    boundary_n = len(_snap.get("allowedScope") or [])
+                except Exception:  # noqa: BLE001
+                    pass
             ms_note = (f"\n\n**📋 里程碑报告**（改动文件已并入需求边界"
-                       f"{f'，新增 {merged} 项' if merged else ''}）\n{shown}")
+                       f"{f'，新增 {merged} 项' if merged else ''}"
+                       f"{f'，边界共 {boundary_n} 文件' if boundary_n else ''}）\n{shown}"
+                       + verify_line)
         _append(conv_id, "assistant",
                 f"⏸ **{agent} 需要你的输入**（任务「{title}」）\n\n{clean}"
                 + ms_note +
@@ -1182,7 +1235,8 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                     "reqId": ctx.get("rid") or "", "taskId": task_id,
                     "kind": "analysis", "title": f"里程碑报告：{title}",
                     "content": clean[:4000],
-                    "meta": {"files": ms_files[:50], "merged": merged},
+                    "meta": {"files": ms_files[:50], "merged": merged,
+                             "verifyOverall": vo},
                     "source": "milestone"})
             except Exception as e:  # noqa: BLE001
                 logger.warning("[exec-bridge] 里程碑沉淀失败 task=%s: %s",

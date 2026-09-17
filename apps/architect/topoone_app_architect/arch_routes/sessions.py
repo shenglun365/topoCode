@@ -1260,6 +1260,26 @@ async def task_set_executor(task_id: str, request: Request):
     return ok({"task": task})
 
 
+@router.post("/tasks/{task_id}/verify-config")
+async def task_verify_config(task_id: str, request: Request):
+    """设定任务验收门禁配置(待确认态; V1 发现链 P0 显式来源)。
+
+    body: {verifyConfig: {maxAttempts?, autoRepair?, timeoutMul?, build?, test?}}"""
+    from . import exec_bridge
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return err(400, "invalid-json")
+    cfg = (body or {}).get("verifyConfig")
+    if not isinstance(cfg, dict):
+        return err(400, "verifyConfig 必须为对象")
+    task = await asyncio.to_thread(exec_bridge.task_set_verify_config,
+                                   task_id, cfg)
+    if task is None:
+        return err(400, "任务不存在或已不可修改(仅待确认态可改)")
+    return ok({"task": task})
+
+
 @router.post("/tasks/{task_id}/cancel")
 async def task_cancel(task_id: str, request: Request):
     """取消(待确认)/停止(执行中)任务; 保留 worktree/分支。"""
@@ -1319,3 +1339,12 @@ async def assets_of(conv_id: str = fastapi.Query("", alias="convId"),
         return err(404, "会话不存在")
     rows = store.AssetsStore.of_conv(conv_id, kind=kind, q=q, limit=limit)
     return ok({"assets": rows})
+
+
+@router.delete("/assets/{asset_id}")
+async def asset_remove(asset_id: str):
+    """删除会话知识资产(误沉淀/过期清理)。"""
+    removed = await asyncio.to_thread(store.AssetsStore.delete, asset_id)
+    if not removed:
+        return err(404, "资产不存在")
+    return ok({"deleted": True, "id": asset_id})

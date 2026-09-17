@@ -60,7 +60,7 @@ _JSON_COLUMNS = {
     "name_alias", "pending_rejudge",
     "symbols", "imports", "refs", "statements", "routes", "constants",
     "comp_ids", "progress", "messages",
-    "payload",
+    "payload", "verify_config",
     # M0 冻结 schema JSON 列（plan-C-M0.md §6）
     "affected_summary", "target_asset_ids", "anchor_basis",
     "applies_kinds", "scenarios", "alias", "origin", "target", "behavior",

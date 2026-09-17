@@ -34,6 +34,80 @@ def test_discovery_p2_conventions(tmp_path):
     assert plan["test"] == {"cmd": "npm run test", "source": "convention"}
 
 
+# ── V2 尾量: jest/vitest 结构化适配器 ──────────────────────────────
+
+def test_discovery_p2_node_adapter_attached(tmp_path):
+    """scripts.test 命中 + 依赖含 vitest → npm run test 携 adapter 标记。"""
+    _mkfile(tmp_path, "package.json",
+            '{"scripts": {"test": "vitest run"},'
+            ' "devDependencies": {"vitest": "^1.0"}}')
+    plan = vf.discover_verify(str(tmp_path), None)
+    assert plan["test"]["cmd"] == "npm run test"
+    assert plan["test"]["adapter"] == "vitest"
+
+
+def test_discovery_p0_jest_cmd_infers_adapter(tmp_path):
+    plan = vf.discover_verify(str(tmp_path),
+                              {"test": "npx jest --coverage"})
+    assert plan["test"]["adapter"] == "jest"
+
+
+def test_augment_jest_npm_separator():
+    out = vf.augment_command("test", "npm run test", "/r", adapter="jest")
+    assert out == "npm run test -- --json --outputFile=/r/jest.json"
+    out2 = vf.augment_command("test", "npx jest", "/r", adapter="jest")
+    assert out2 == "npx jest --json --outputFile=/r/jest.json"
+    # 幂等: 已带 outputFile 不改写
+    assert vf.augment_command("test", out, "/r", adapter="jest") == out
+
+
+def test_augment_vitest_reporter_flags():
+    out = vf.augment_command("test", "npm run test", "/r", adapter="vitest")
+    assert out == ("npm run test -- --reporter=json "
+                   "--outputFile=/r/jest.json")
+    out2 = vf.augment_command("test", "vitest run", "/r")
+    assert "vitest" in out2 and "--reporter=json" in out2 \
+        and "--outputFile=/r/jest.json" in out2
+
+
+def test_parse_jest_json_report(tmp_path):
+    rep = tmp_path / "jest.json"
+    rep.write_text(
+        '{"numTotalTests": 3, "testResults": [{"assertionResults": ['
+        '{"fullName": "sum works", "status": "passed", "duration": 2},'
+        '{"fullName": "sum fails", "status": "failed", "duration": 1,'
+        ' "failureMessages": ["expect(1).toBe(2)"]},'
+        '{"fullName": "skipped one", "status": "pending", "duration": 0}'
+        ']}]}', encoding="utf-8")
+    parsed = vf._parse_jest_json(str(rep))
+    assert parsed is not None
+    assert parsed["summary"] == {"total": 3, "passed": 1,
+                                 "failed": 1, "skipped": 1}
+    failed = [r for r in parsed["perTest"] if r["status"] == "failed"]
+    assert failed[0]["name"] == "sum fails" and "toBe(2)" in failed[0]["message"]
+
+
+def test_attach_structured_jest_report_flips_verdict(tmp_path):
+    """退出码 0 但 jest 报告有失败 → 以报告为准(防假通过)。"""
+    import json as _json
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "jest.json").write_text(_json.dumps({
+        "testResults": [{"assertionResults": [
+            {"fullName": "a", "status": "passed"},
+            {"fullName": "b", "status": "failed",
+             "failureMessages": ["x"]},
+        ]}]}, ensure_ascii=False), encoding="utf-8")
+    result = vf._stage_result("npm run test", "convention", "test",
+                              "PASS", exit_code=0)
+    out = vf._attach_structured(result, "test", "npm run test",
+                                str(report_dir), "")
+    assert out["structured"] is True
+    assert out["verdict"] == "FAIL" and out["reason"] == "TEST_FAILED"
+    assert out["summary"]["failed"] == 1
+
+
+
 def test_discovery_p2_pytest_convention(tmp_path):
     _mkfile(tmp_path, "pyproject.toml", "[tool.pytest]\naddopts = '-q'\n")
     plan = vf.discover_verify(str(tmp_path), None)

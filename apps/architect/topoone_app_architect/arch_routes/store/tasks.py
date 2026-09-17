@@ -53,6 +53,9 @@ class TasksStore:
             "base_commit": data.get("baseCommit") or "",
             "progress": json.dumps(data.get("progress") or {}, ensure_ascii=False),
             "result_md": data.get("resultMd") or "",
+            "verify_config": json.dumps(data.get("verifyConfig") or {},
+                                        ensure_ascii=False)
+            if data.get("verifyConfig") else None,
             "created_at": data.get("createdAt") or _now(),
             "updated_at": _now(),
             "finished_at": 0,

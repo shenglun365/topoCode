@@ -760,6 +760,8 @@ def _project_migrations(db) -> None:
         # 环节十五: 本地 PR 语义——合并门禁终态(merged_at>0 = 已合并关闭)
         ("merged_at", "INTEGER DEFAULT 0"),
         ("merged_head", "TEXT DEFAULT ''"),
+        # V1 验收门禁: 任务级 P0 显式配置(verify.py 发现链最高权威)
+        ("verify_config", "TEXT"),
     ])
     _migrate_lifecycle_v2(db)
     _add_cols(db, "arch_unit_tests", [

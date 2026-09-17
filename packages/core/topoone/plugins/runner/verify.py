@@ -62,14 +62,41 @@ def _stage_result(cmd: str, source: str, stage: str,
 
 # ── V2 结构化适配器（A 档）: 报告旗标注入 + 结果解析 ────────────────────
 
-def augment_command(stage: str, cmd: str, report_dir: str) -> str:
-    """给已知测试命令注入结构化报告旗标(幂等——已带旗标不改写)。"""
+def augment_command(stage: str, cmd: str, report_dir: str,
+                    adapter: str = "") -> str:
+    """给已知测试命令注入结构化报告旗标(幂等——已带旗标不改写)。
+
+    adapter: jest|vitest(node 栈; 由发现链/命令文本推断)。npm/yarn/pnpm 脚本
+    需 ` -- ` 透传旗标; 直接二进制直接追加。
+    """
     report = os.path.join(report_dir, "junit.xml").replace(os.sep, "/")
     if stage == "test" and "pytest" in cmd and "junitxml" not in cmd:
         return f"{cmd} --junitxml={report}"
     if stage == "test" and cmd.strip().startswith("go test") and "-json" not in cmd:
         return f"{cmd} -json"
+    if stage == "test":
+        adapter = adapter or _infer_adapter(cmd)
+        if adapter:
+            rep = os.path.join(report_dir, "jest.json").replace(os.sep, "/")
+            if adapter == "vitest" and "outputFile" not in cmd \
+                    and "reporter=json" not in cmd:
+                return cmd + _node_arg_sep(cmd) + f"--reporter=json --outputFile={rep}"
+            if adapter == "jest" and "outputFile" not in cmd:
+                return cmd + _node_arg_sep(cmd) + f"--json --outputFile={rep}"
     return cmd
+
+
+def _infer_adapter(cmd: str) -> str:
+    c = (cmd or "").lower()
+    if "vitest" in c:
+        return "vitest"
+    if "jest" in c:
+        return "jest"
+    return ""
+
+
+def _node_arg_sep(cmd: str) -> str:
+    return " -- " if re.match(r"^(npm|yarn|pnpm)\b", (cmd or "").strip()) else " "
 
 
 def _parse_junit(path: str) -> Optional[Dict[str, Any]]:
@@ -106,6 +133,40 @@ def _parse_junit(path: str) -> Optional[Dict[str, Any]]:
         return None
     return {"perTest": per,
             "summary": {"total": total, "passed": passed,
+                        "failed": failed, "skipped": skipped}}
+
+
+def _parse_jest_json(path: str) -> Optional[Dict[str, Any]]:
+    """jest/vitest JSON 报告 → {perTest, summary}; 解析失败/无用例返回 None。
+
+    两家 reporter 均兼容 jest JSON 形状(numTotalTests/testResults[].assertionResults)。
+    """
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(data, dict) or not isinstance(
+            data.get("testResults"), list):
+        return None
+    per: List[Dict[str, Any]] = []
+    for tr in data["testResults"]:
+        for a in tr.get("assertionResults") or []:
+            st = a.get("status") or "passed"
+            status = "failed" if st == "failed" else \
+                ("passed" if st == "passed" else "skipped")
+            msg = ""
+            if status == "failed":
+                msg = " \n".join(a.get("failureMessages") or [])[:400]
+            per.append({"name": str(a.get("fullName") or a.get("title") or "").strip(),
+                        "status": status,
+                        "durationMs": int(a.get("duration") or 0),
+                        "message": msg})
+    if not per:
+        return None
+    failed = sum(1 for r in per if r["status"] == "failed")
+    skipped = sum(1 for r in per if r["status"] == "skipped")
+    return {"perTest": per,
+            "summary": {"total": len(per), "passed": len(per) - failed - skipped,
                         "failed": failed, "skipped": skipped}}
 
 
@@ -147,6 +208,10 @@ def _attach_structured(result: Dict[str, Any], stage: str, cmd: str,
     junit = os.path.join(report_dir, "junit.xml")
     if os.path.isfile(junit):
         parsed = _parse_junit(junit)
+    if parsed is None:
+        jest_rep = os.path.join(report_dir, "jest.json")
+        if os.path.isfile(jest_rep):
+            parsed = _parse_jest_json(jest_rep)
     if parsed is None and "go test" in cmd:
         parsed = _parse_go_json(combined)
     if parsed is None:
@@ -222,6 +287,27 @@ def _package_json_script(wt: str, key: str) -> Optional[str]:
     return f"npm run {key}" if isinstance(val, str) and val.strip() else None
 
 
+def _node_test_runner(wt: str) -> str:
+    """package.json(scripts+依赖) 检测 node 测试框架 → adapter 名(vitest|jest|空)。
+
+    jest 家族含 vue-jest/ts-jest 等 transform 依赖名; vitest 优先(更具体的信号)。
+    """
+    p = os.path.join(wt, "package.json")
+    if not os.path.isfile(p):
+        return ""
+    try:
+        pkg = json.load(open(p, encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return ""
+    deps = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
+    hay = json.dumps(deps) + json.dumps(pkg.get("scripts") or {})
+    if "vitest" in hay:
+        return "vitest"
+    if "jest" in hay:
+        return "jest"
+    return ""
+
+
 def discover_verify(wt: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """L1 发现链: 返回 {build: {cmd,source}|None, test: {cmd,source}|None, level, reason}。
 
@@ -229,11 +315,15 @@ def discover_verify(wt: str, config: Optional[Dict[str, Any]] = None) -> Dict[st
     """
     cfg = config if isinstance(config, dict) else {}
     plan: Dict[str, Any] = {"build": None, "test": None, "level": "", "reason": ""}
-    # P0 显式配置(最高权威, 命中即停)
+    # P0 显式配置(最高权威, 命中即停); adapter 从命令文本推断(jest/vitest 报告注入用)
     for stage, key in (("build", "build"), ("test", "test")):
         val = str(cfg.get(key) or "").strip()
         if val:
-            plan[stage] = {"cmd": val, "source": "config"}
+            entry: Dict[str, Any] = {"cmd": val, "source": "config"}
+            adapter = _infer_adapter(val)
+            if adapter:
+                entry["adapter"] = adapter
+            plan[stage] = entry
     if plan["build"] or plan["test"]:
         plan["level"] = ""
         return plan
@@ -250,7 +340,11 @@ def discover_verify(wt: str, config: Optional[Dict[str, Any]] = None) -> Dict[st
     if plan["test"] is None:
         cmd = _package_json_script(wt, "test")
         if cmd:
-            plan["test"] = {"cmd": cmd, "source": "convention"}
+            entry: Dict[str, Any] = {"cmd": cmd, "source": "convention"}
+            adapter = _node_test_runner(wt)
+            if adapter:
+                entry["adapter"] = adapter
+            plan["test"] = entry
         elif os.path.isfile(os.path.join(wt, "pyproject.toml")) and "[tool.pytest]" in \
                 open(os.path.join(wt, "pyproject.toml"), encoding="utf-8",
                      errors="replace").read():
@@ -277,12 +371,13 @@ def discover_verify(wt: str, config: Optional[Dict[str, Any]] = None) -> Dict[st
 
 
 def _run_stage(wt: str, stage: str, cmd: str, source: str,
-               timeout_mul: float, report_dir: str = "") -> Dict[str, Any]:
+               timeout_mul: float, report_dir: str = "",
+               adapter: str = "") -> Dict[str, Any]:
     """L2 执行: cwd=wt 白名单前置 + 超时分级 + 输出头尾截断 + V2 结构化报告。"""
     if not _command_allowed(cmd):
         return _stage_result(cmd, source, stage, "UNVERIFIABLE",
                              "WHITELIST_REJECTED")
-    exec_cmd = augment_command(stage, cmd, report_dir) if report_dir else cmd
+    exec_cmd = augment_command(stage, cmd, report_dir, adapter) if report_dir else cmd
     timeout = max(1.0, _BASE_TIMEOUT.get(stage, 300.0) * (timeout_mul or 1.0))
     started = time.monotonic()
     try:
@@ -340,10 +435,12 @@ def verify_and_judge(wt: str, config: Optional[Dict[str, Any]] = None,
                               "test": None, "regression": None}
     if plan["build"]:
         matrix["build"] = _run_stage(wt, "build", plan["build"]["cmd"],
-                                     plan["build"]["source"], mul, report_dir)
+                                     plan["build"]["source"], mul, report_dir,
+                                     plan["build"].get("adapter") or "")
     if plan["test"]:
         matrix["test"] = _run_stage(wt, "test", plan["test"]["cmd"],
-                                    plan["test"]["source"], mul, report_dir)
+                                    plan["test"]["source"], mul, report_dir,
+                                    plan["test"].get("adapter") or "")
     # V3 回归对比(仅结构化可 per-test 对照; 退出码档无基线可比)
     test = matrix.get("test")
     if test and test.get("structured"):
@@ -403,7 +500,7 @@ def load_baseline(state_dir: str, root: str, base: str, cmd: str) -> Optional[Di
 
 def run_baseline(root: str, base: str, test_cmd: str, state_dir: str,
                  timeout_mul: float = 1.0,
-                 report_dir: str = "") -> Dict[str, Any]:
+                 report_dir: str = "", adapter: str = "") -> Dict[str, Any]:
     """作业基点临时 worktree 跑一次 test 命令, 结果缓存(key: root+base+cmd 哈希)。
 
     基线失败(无工具链等) → {"perTest": [], "error": ...}——不阻塞实施, 仅延后对比。
@@ -419,7 +516,7 @@ def run_baseline(root: str, base: str, test_cmd: str, state_dir: str,
         r = subprocess.run(["git", "worktree", "add", "--detach", tmp_wt, base],
                            cwd=root, capture_output=True, text=True, check=True)
         result = _run_stage(tmp_wt, "test", test_cmd, "baseline",
-                            timeout_mul, report_dir)
+                            timeout_mul, report_dir, adapter)
         out = {"perTest": result.get("perTest") or [],
                "summary": result.get("summary") or {},
                "error": result.get("logTail", "")[:400]}
