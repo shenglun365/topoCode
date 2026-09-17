@@ -446,6 +446,23 @@ def _executor_model_names(entry: dict) -> list:
             if (m.get("name") or m.get("model"))]
 
 
+@router.post("/sessions/{conv_id}/distill-errors")
+async def distill_errors_route(conv_id: str, limit: int = 20):
+    """错误提炼(P1, 手动触发): 会话错误历史 → error_pattern 项目级知识单元。
+
+    提炼即沉淀(build/land 分离为扩展点, 本期直连); 归因以 coding agent
+    失败回执为准; 同签名追加场景不增行。前端触发位后续再定。
+    """
+    from ..agent.memory.distill import distill_errors
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    result = await asyncio.to_thread(distill_errors, conv_id, max(1, min(limit, 50)))
+    if not result.get("ok"):
+        return err(502, result.get("error") or "distill-failed")
+    return ok(result)
+
+
 @router.post("/sessions/{conv_id}/bind")
 async def bind_executor(conv_id: str, request: Request):
     """绑定 coding 执行器——一次绑定不可换(换=克隆)。architect 角色恒有, 不在绑定面。"""

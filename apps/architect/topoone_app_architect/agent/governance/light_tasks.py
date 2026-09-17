@@ -22,6 +22,7 @@ from typing import Any, Dict, Iterable
 LIGHT_TASKS: Dict[str, str] = {
     "summary": "会话标题/摘要生成(memory.units summarize_conversation)",
     "probe": "范围探针 grounding 补全(planning.scope_probe)",
+    "distill": "错误提炼: 错误历史 → 归因/修正模式(memory.distill)",
 }
 
 LIGHT_TASKS_KEY = "llm.lightTaskModels"

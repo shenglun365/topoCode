@@ -31,6 +31,10 @@ _R1_INVENTORY = {
     "planning/scope_probe.py", "planning/task_plan.py", "perception/commands.py",
     "collab/cards.py", "memory/dossier.py", "memory/store.py",
     "memory/units.py", "memory/working.py", "governance/boundary.py",
+    # memory/distill.py(2026-09-17 P1 立条): 错误提炼编排层, 与 memory/units.py
+    # 同款依赖(store/adaptation/agent_roles 惰性导入)——读错误材料 + 轻任务
+    # 提炼 + 落 error_pattern 单元; 依赖注入拆解与 units 清退同批处置。
+    "memory/distill.py",
 }
 
 # 存量违规冻结——低层引高层。
