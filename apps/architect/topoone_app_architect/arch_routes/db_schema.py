@@ -222,6 +222,24 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_conv_msgs_conv ON arch_conversation_messages(conversation_id);
 
+    -- A6.2 Item 投影: 执行器事件流的非落消息类型(工具轨迹/文件变更/通知)持久化
+    -- (运行时流表, 非知识资产——不在 kb-schema-versions 登记范围)
+    CREATE TABLE IF NOT EXISTS arch_stream_items (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT DEFAULT '',
+        project_id TEXT DEFAULT '',
+        task_id TEXT DEFAULT '',
+        job_id TEXT DEFAULT '',
+        type TEXT DEFAULT 'event',          -- item 类型(开放注册制: agent/execution/items.py)
+        status TEXT DEFAULT '',
+        text TEXT DEFAULT '',
+        payload TEXT,                       -- JSON: files/requestId 等扩展载荷
+        seq INTEGER,                        -- runner 事件 seq(可缺)
+        created_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_stream_items_conv
+        ON arch_stream_items(conversation_id, task_id, created_at);
+
     -- v2 重构(统一会话): coding subagent 任务(替代 conv.meta.jobs 账本+规约执行门禁)。
     -- 单流模型: 任务回执以消息(agent=executor_type)落统一流, 此表只管生命周期。
     CREATE TABLE IF NOT EXISTS arch_tasks (

@@ -1,7 +1,9 @@
 """store 拆分模块（A1-T3：纯移动）。"""
 from __future__ import annotations
 
-from .base import PROJECT_TABLES, _all, _db, _dumps, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _row_to_api_v, _target_db, _to_snake, _update, next_id
+from .base import (PROJECT_TABLES, _all, _db, _dumps, _fetchall_routed, _get,
+                   _insert, _locate_db, _row_to_api, _row_to_api_v, _scan_dbs,
+                   _target_db, _to_snake, _update, next_id)
 
 
 class UnitTestsStore:
@@ -312,6 +314,61 @@ class ConversationsStore:
         return cur.rowcount > 0
 
 
+
+
+class StreamItemsStore:
+    """A6.2 事件流 item 投影持久化(仅非落消息类型: 工具轨迹/文件变更/通知)。
+
+    投影语义单源在 agent/execution/items.py(纯函数); 本 store 只管存取。
+    落消息类卡片(approval/verify/turn_completed...)经 GET /messages 的
+    item_from_card 读侧投影渲染, 不入本表(避免双源)。
+    """
+
+    TABLE = "arch_stream_items"
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        now = int(__import__("time").time() * 1000)
+        payload = {
+            "id": data.get("id") or next_id("si"),
+            "conversationId": data.get("conversationId") or "",
+            "projectId": data.get("projectId") or "",
+            "taskId": data.get("taskId") or "",
+            "jobId": data.get("jobId") or "",
+            "type": data.get("type") or "event",
+            "status": data.get("status") or "",
+            "text": data.get("text") or "",
+            "payload": data.get("payload") or {},
+            "seq": data.get("seq"),
+            "createdAt": data.get("createdAt") or now,
+        }
+        _insert(cls.TABLE, payload)
+        return payload
+
+    @classmethod
+    def for_conv(cls, conversation_id: str, task_id: str = None,
+                 before_ts: int = None, limit: int = 200) -> list[dict]:
+        """会话流 item(新→旧); task_id/before_ts 过滤(分页回载挂点)。"""
+        conds, params = ["conversation_id = ?"], [conversation_id]
+        if task_id:
+            conds.append("task_id = ?")
+            params.append(task_id)
+        if before_ts:
+            conds.append("created_at < ?")
+            params.append(int(before_ts))
+        sql = (f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+               f"ORDER BY created_at DESC, id DESC LIMIT ?")
+        params.append(int(limit))
+        rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), None)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def delete_by_conversation(cls, conversation_id: str) -> None:
+        for d in _scan_dbs():
+            cur = d.execute(f"DELETE FROM {cls.TABLE} WHERE conversation_id = ?",
+                            (conversation_id,))
+            if cur.rowcount:
+                d.commit()
 
 
 class ContextUnitsStore:

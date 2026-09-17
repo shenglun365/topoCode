@@ -341,7 +341,36 @@ async def session_messages(conv_id: str):
                 _eb._start_task_pump(conv_id, tid, jid, rid, ag)
     except Exception:  # noqa: BLE001
         pass
-    return ok({"id": conv_id, "messages": store.ConversationsStore.messages(conv_id, limit=1000)})
+    msgs = store.ConversationsStore.messages(conv_id, limit=1000)
+    # A6.2 UI 守门: 卡片消息读侧投影为 item——前端只渲染 item, 零 meta.kind 分支
+    try:
+        from ..agent.execution.items import item_from_card
+        for m in msgs:
+            it_ = item_from_card(m.get("meta"), m.get("content") or "",
+                                 ts=m.get("time"), msg_id=m.get("id") or "")
+            if it_:
+                m["item"] = it_
+    except Exception:  # noqa: BLE001 — 投影失败降级为原始消息(不影响读取)
+        pass
+    return ok({"id": conv_id, "messages": msgs})
+
+
+@router.get("/sessions/{conv_id}/items")
+async def session_stream_items(conv_id: str,
+                               task_id: str = fastapi.Query("", alias="taskId"),
+                               before_ts: int = fastapi.Query(0, alias="beforeTs"),
+                               limit: int = fastapi.Query(200, alias="limit")):
+    """会话流 item(A6.2: 工具轨迹/文件变更/通知, 新→旧; beforeTs 分页回载挂点)。
+
+    落消息类卡片经 /messages 的 item 投影渲染, 不入流表(单一来源)。
+    """
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    rows = store.StreamItemsStore.for_conv(conv_id, task_id=task_id or None,
+                                           before_ts=before_ts or None,
+                                           limit=max(1, min(limit, 500)))
+    return ok({"items": rows})
 
 
 @router.post("/sessions/{conv_id}/summarize")

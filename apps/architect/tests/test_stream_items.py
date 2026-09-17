@@ -126,8 +126,10 @@ def test_registry_from_kinds_declared_and_within_runner_vocabulary():
                     "failed", "progress", "aborted", "finished", "text",
                     "tool", "usage", "notice", "turn_outcome",
                     "approval_request", "team", "mcp", "verify",
-                    # architect 合成事件(非 runner 词汇, 显式允许)
-                    "reasoning", "plan"}
+                        # architect 合成事件(非 runner 词汇, 显式允许)
+                        "reasoning", "plan",
+                        # 卡片域合成(item_from_card 读侧投影词汇)
+                        "task_status", "turn_error", "digest", "spec"}
     for t, spec in it.item_types().items():
         assert spec["from_kinds"], f"{t} 未声明 from_kinds"
         unknown = set(spec["from_kinds"]) - runner_kinds

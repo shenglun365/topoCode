@@ -1388,6 +1388,36 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 project_id=pid, agent=agent)
 
 
+def _land_stream_items(ev: dict, conv_id: str, task_id: str, job_id: str,
+                       pid: str) -> None:
+    """A6.2: 执行器事件 → item 投影(仅非落消息类型)——持久化 + SSE 单通道。
+
+    投影语义单源 agent/execution/items.py; 落消息类卡片不入流表(读侧投影)。
+    """
+    try:
+        from ..agent.execution.items import project_event, STREAM_PERSIST_TYPES
+        items = [i for i in project_event(ev)
+                 if i.get("type") in STREAM_PERSIST_TYPES]
+        if not items:
+            return
+        for it_ in items:
+            try:
+                store.StreamItemsStore.create({
+                    "id": it_["id"], "conversationId": conv_id,
+                    "projectId": pid, "taskId": task_id, "jobId": job_id,
+                    "type": it_["type"], "status": it_.get("status") or "",
+                    "text": it_.get("text") or "",
+                    "payload": it_.get("payload") or {},
+                    "seq": it_.get("seq")})
+            except Exception:  # noqa: BLE001 — 重复 id(泵重放)幂等跳过
+                pass
+        from ..agent.collab.sse import emit
+        emit("items", conv_id, taskId=task_id, items=items)
+    except Exception as e:  # noqa: BLE001 — 投影故障不阻断既有事件处理
+        logger.warning("[exec-bridge] stream item 投影失败 task=%s: %s",
+                       task_id, e)
+
+
 async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
                      agent: str) -> None:
     """任务泵: 骨架委托 agent.execution.pumps(唯一实现), 事件走 task 路径。"""
@@ -1396,6 +1426,8 @@ async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
                 conv_id, task_id, job_id)
 
     def on_event(ev: dict) -> None:
+        _land_stream_items(ev, conv_id, task_id, job_id,
+                           (store.ConversationsStore.get(conv_id) or {}).get("projectId") or "")
         _handle_task_event(ev, _task_ctx(conv_id, task_id, job_id, rid, agent))
 
     def on_snapshot(snap: dict) -> None:

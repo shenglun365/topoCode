@@ -139,10 +139,80 @@ register_item_type("task_input", ("input_required",), _project_task_input)
 register_item_type("notice", ("notice",), _project_notice)
 register_item_type("reasoning", ("reasoning",), _project_reasoning)      # architect 合成
 register_item_type("plan", ("plan",), _project_plan)                     # architect 合成
+# 卡片域合成类型(不产自 runner 事件流, 供 item_from_card 统一词汇)
+register_item_type("task_status", ("task_status",),
+                   lambda ev: [_base("task_status", ev,
+                                     status=str(ev.get("status") or ""),
+                                     text=(ev.get("text") or "")[:500])])
+register_item_type("turn_error", ("turn_error",),
+                   lambda ev: [_base("turn_error", ev, status="error",
+                                     text=(ev.get("text") or "")[:2000])])
+register_item_type("digest", ("digest",),
+                   lambda ev: [_base("digest", ev, text=(ev.get("text") or "")[:500])])
+register_item_type("spec", ("spec",),
+                   lambda ev: [_base("spec", ev,
+                                     status=str(ev.get("status") or ""),
+                                     text=(ev.get("text") or "")[:500])])
 
 # 不产 item 的计数/进度域(进度条消费, 防刷屏)——声明性黑名单
 NON_ITEM_KINDS = ("progress", "usage", "team", "mcp", "session_ready",
                   "user_input", "turn_outcome", "text", "aborted", "finished")
+
+# 落库/独立 SSE 的流类型: 今日「不落会话消息」的事件投影(工具轨迹/文件变更/
+# 通知)。其余类型(approval/verify/task_input/turn_completed 等)既有落消息路径
+# 不变——经 GET /messages 的 item_from_card 投影渲染, 避免双源双渲染。
+STREAM_PERSIST_TYPES = ("tool_call", "file_change", "notice")
+
+
+# ── 卡片 → item(会话消息读侧投影; 前端零 meta.kind 分支的依据) ──────
+
+# meta.kind → (item.type, 覆盖字段); 未列出 = 非卡片消息(纯 markdown)
+CARD_ITEM_MAP: Dict[str, Dict[str, Any]] = {
+    "task_card": {"type": "task", "payload": "meta"},
+    "task_start": {"type": "task_status", "status": "running"},
+    "task_approval_done": {"type": "task_status", "status": "approved"},
+    "task_done": {"type": "turn_completed", "status": "done"},
+    "task_failed": {"type": "turn_completed", "status": "failed"},
+    "task_input": {"type": "task_input", "status": "waiting"},
+    "task_input_echo": {"type": "task_input", "status": "echo"},
+    "task_approval": {"type": "approval", "status": "pending"},
+    "task_verify": {"type": "verify", "payload": "meta"},
+    "turnError": {"type": "turn_error", "status": "error"},
+    "taskPlan": {"type": "plan", "payload": "meta"},
+    "taskPlanDone": {"type": "plan", "status": "done", "payload": "meta"},
+    "digest_sent": {"type": "digest"},
+    "specCreated": {"type": "spec", "status": "created", "payload": "meta"},
+    "specReady": {"type": "spec", "status": "ready", "payload": "meta"},
+}
+
+
+def item_from_card(meta: Optional[dict], text: str = "",
+                   ts: Any = None, msg_id: str = "") -> Optional[dict]:
+    """会话卡片消息 → item(读侧投影; 纯函数)。非卡片返回 None。
+
+    meta 携带的结构化字段(taskId/requestId/steps/branch...)进入 payload——
+    前端 ItemCard 只吃 item, 不再读 meta.kind(守门规则)。
+    """
+    kind = str((meta or {}).get("kind") or "")
+    spec_ = CARD_ITEM_MAP.get(kind)
+    if not spec_:
+        return None
+    it_: Dict[str, Any] = {"type": spec_["type"], "id": msg_id or _item_id(
+        {"text": text, "ts": ts}, spec_["type"])}
+    it_["ts"] = int(ts or time.time() * 1000)
+    if spec_.get("status"):
+        it_["status"] = spec_["status"]
+    it_["text"] = (text or "")[:4000]
+    payload: Dict[str, Any] = {}
+    if spec_.get("payload") == "meta":
+        payload = {k: v for k, v in (meta or {}).items() if k != "kind"}
+    for k in ("taskId", "requestId", "branch", "approvalRequestId",
+              "approvalJobId"):
+        if (meta or {}).get(k) and k not in payload:
+            payload[k] = meta[k]
+    if payload:
+        it_["payload"] = payload
+    return it_
 
 
 def project_event(ev: dict) -> List[dict]:
