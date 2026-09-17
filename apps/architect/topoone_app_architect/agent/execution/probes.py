@@ -277,21 +277,23 @@ def grade_probe(spec: ProbeSpec, wt: str, base_sha: str,
                        detail="; ".join(parts))
 
 
-_TIER_THRESHOLDS = ((0.90, "T0"), (0.72, "T1"), (0.52, "T2"), (0.32, "T3"))
+# 刻度 T0-T2(2026-09-17 三维矩阵收敛): ≥0.90 强 / ≥0.52 中 / 其余弱(全面补偿)
+_TIER_THRESHOLDS = ((0.90, "T0"), (0.52, "T1"))
+WEAK_TIER = "T2"
 
 
 def score(results: List[ProbeResult]) -> Dict[str, Any]:
-    """综合评分 + 档位映射(探针 follow 否决线: 不过 → 最高 T3)。"""
+    """综合评分 + 档位映射(探针 follow 否决线: 不过 → 最高 T2 全面补偿)。"""
     composite = round(sum(r.weight * r.score for r in results), 3)
-    tier = "T4"
+    tier = WEAK_TIER
     for th, t in _TIER_THRESHOLDS:
         if composite >= th:
             tier = t
             break
     follow = next((r for r in results if r.id == "follow"), None)
     gated = bool(follow and not follow.passed)
-    if gated and tier in ("T0", "T1", "T2"):
-        tier = "T3"
+    if gated and tier in ("T0", "T1"):
+        tier = WEAK_TIER
     passed_n = sum(1 for r in results if r.passed)
     return {"composite": composite, "tier": tier, "followGated": gated,
             "passed": passed_n, "total": len(results),
@@ -363,7 +365,8 @@ async def run_capability_probe(entry: dict, transport: Callable[..., Optional[di
     persist({"tierProbed": summary["tier"],
              "probeScore": summary["composite"],
              "probeDetail": f"{summary['passed']}/{summary['total']}"
-                            + ("(指令跟随否决→上限T3)" if summary["followGated"] else ""),
+                            + ("(指令跟随否决→上限T2)" if summary["followGated"] else ""),
+             "probeStructured": summary["tier"] in ("T0", "T1"),
              "probedAt": int(time.time() * 1000),
              "probedModel": str(cfg.get("model_id") or "")})
     _say(f"探测完成: {summary['tier']} ({summary['passed']}/{summary['total']}, "

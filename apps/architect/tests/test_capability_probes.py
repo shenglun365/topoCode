@@ -136,17 +136,17 @@ def test_score_follow_gate_caps_t3():
     results = [_res(p.id, True) for p in P.PROBES]
     results = [r if r.id != "follow" else _res("follow", False) for r in results]
     s = P.score(results)
-    assert s["followGated"] and s["tier"] == "T3"
+    assert s["followGated"] and s["tier"] == "T2"
 
 
 def test_score_partial_pass_maps_mid_tiers():
-    # 调试+重构失败 → 综合 = 1 - 0.2 - 0.1 = 0.7 → T2
+    # 调试+重构失败 → 综合 = 1 - 0.2 - 0.1 = 0.7 → T1(中)
     results = [_res(p.id, p.id not in ("debug", "refactor")) for p in P.PROBES]
     s = P.score(results)
-    assert s["tier"] == "T2"
-    # 只有指令跟随过 → 综合 0.3 → T4
+    assert s["tier"] == "T1"
+    # 只有指令跟随过 → 综合 0.3 → T2(弱, 全面补偿)
     results2 = [_res(p.id, p.id == "follow") for p in P.PROBES]
-    assert P.score(results2)["tier"] == "T4"
+    assert P.score(results2)["tier"] == "T2"
 
 
 def test_score_boundary_violation_zeroes_probe():
@@ -211,7 +211,7 @@ def test_engine_failed_job_records_unpassed(monkeypatch):
     summary = asyncio.run(P.run_capability_probe(
         {"id": "ex-p", "type": "cline-sdk", "config": {}},
         transport, lambda fields: persisted.update(fields)))
-    assert summary["passed"] == 0 and summary["tier"] == "T4"
+    assert summary["passed"] == 0 and summary["tier"] == "T2"
 
 
 # ── REST 端点 ────────────────────────────────────────────────────────

@@ -140,77 +140,35 @@ def all_profiles() -> Dict[str, Dict[str, Any]]:
 
 # ── 探测套件 ──────────────────────────────────────────────────────────
 
-_TOOL_SYSTEM = (
-    "你是工具调用代理。可用工具: req.propose(参数: title, requirementMd, designMd), "
-    "kb.asset.search(参数: text)。\n"
-    "需要执行动作时, 只输出一个工具调用块, 格式:\n"
-    '[TOOL_CALL]{"tool":"<工具名>","arguments":{参数}}[/TOOL_CALL]\n'
-    "输出工具调用块后不要再写其它内容。"
-)
+def _probe_tools() -> List[Dict[str, str]]:
+    """探针工具用例取真实注册工具(裁决: 测系统实际能力, 不用玩具用例)。
 
-_TOOL_CASES = [
-    ("req.propose", "请创建需求提案: 标题=用户登录, 目标=实现手机号验证码登录, 方案=发送验证码后校验"),
-    ("kb.asset.search", "请检索知识库中与「订单」相关的资产"),
-    ("req.propose", "请创建需求提案: 标题=数据导出, 目标=支持 CSV 格式导出, 方案=流式生成避免内存峰值"),
-]
-
-_JSON_SYSTEM = (
-    "你把用户需求整理为规约 JSON。只输出一个 ```json 围栏, 内容为对象本身, "
-    '字段: title(标题), requirementMd(目标), designMd(方案要点), 不要任何其他文字。'
-)
-
-_JSON_CASES = [
-    "需求: 做一个 nginx 进程监控脚本, 显示 PID 和 CPU 内存占用",
-    "需求: 给用户列表加分页, 每页 20 条",
-    "需求: 订单超时 30 分钟未支付自动取消",
-]
-
-_INSTR_SYSTEM = (
-    "你是需求分析 agent。用户明确表达的需求一律受理, 包括与项目关联较弱的通用编程/运维任务"
-    "(脚本、工具、配置等): 照常整理为需求规约, 不得以「不属于职责范围」为由拒绝或推诿。"
-)
-
-_REJECT_PATTERNS = re.compile(
-    r"不属于.{0,12}职责|不在.{0,8}(范围|能力)|无法(完成|处理|执行该)|建议您(使用|寻求)|"
-    r"另行(寻找|使用)|我(只|仅)能处理|超出.{0,10}(能力|范围)|无法为您(编写|执行|提供)"
-)
-
-
-def _parse_tool_score(raw: str, want_tool: str) -> float:
-    """0=无工具块 / 0.5=有标记但解析失败(协议意识有,格式差) / 1=合法且工具匹配。"""
-    if not raw:
-        return 0.0
-    has_marker = "[TOOL_CALL" in raw or "[/TOOL_CALL" in raw
+    从 B4 单源迁移表取 name+参数形状; 目录异常时退化为 req.propose 最小形状。
+    """
     try:
-        from ...arch_routes import req_agent as _req_agent_mod
-        calls = _req_agent_mod.extract_tool_calls(raw)
+        from ..cognition import prompt as _prompt
+        docs = _prompt.TOOL_PARAM_DOCS
+        names = [n for n in ("req.propose", "kb.asset.search", "map.overview")
+                 if n in docs]
+        return [{"name": n, "params_hint": docs[n]} for n in names]
     except Exception:  # noqa: BLE001
-        calls = []
-    for c in calls:
-        if c.get("tool") == want_tool:
-            return 1.0
-    return 0.5 if has_marker else 0.0
+        return [{"name": "req.propose", "params_hint":
+                 '{"title", "requirementMd", "designMd"}'}]
 
 
-def _parse_json_score(raw: str) -> float:
-    """0=无围栏 / 0.5=有围栏但解析失败 / 1=可解析且 title 非空。"""
-    if not raw:
-        return 0.0
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-    if not m:
-        return 0.0
-    try:
-        obj = json.loads(m.group(1))
-        return 1.0 if isinstance(obj, dict) and str(obj.get("title") or "").strip() else 0.5
-    except Exception:  # noqa: BLE001
-        return 0.5
+def _extract_calls(raw: str):
+    from ...arch_routes import req_agent as _req_agent_mod
+    return _req_agent_mod.extract_tool_calls(raw)
 
 
-def _parse_instr_score(raw: str) -> float:
-    """1=受理(无拒做模式) / 0=拒做。"""
-    if not raw:
-        return 0.0
-    return 0.0 if _REJECT_PATTERNS.search(raw) else 1.0
+def _build_cases() -> Dict[str, List[Dict[str, Any]]]:
+    """探测用例装配(判分函数注入——cognition 不引 tools 层)。"""
+    from . import probe_suite as _ps
+    return {
+        "tool": _ps.build_tool_cases(_probe_tools(), _extract_calls),
+        "json": _ps.build_json_cases(),
+        "instr": _ps.build_instruction_cases(),
+    }
 
 
 def _probe_call(system: str, user: str, max_tokens: int, model_id: str) -> Optional[str]:
@@ -244,50 +202,52 @@ def probe_model(model_id: str) -> Dict[str, Any]:
     返回完整档案(调用方直接展示/使用)。
     """
     model_id = model_id or ""
+    from . import probe_suite as _ps
+    cases = _build_cases()
     tool_samples: List[str] = []
     tool_scores: List[float] = []
-    for want, ask in _TOOL_CASES:
-        raw = _probe_call(_TOOL_SYSTEM, ask, 250, model_id)
+    for case in cases["tool"]:
+        raw = _probe_call(case["system"], case["user"],
+                          int(case.get("max_tokens") or 250), model_id)
         if raw is None:
             return {"modelId": model_id, "reachable": False,
                     "summary": "模型不可达(连通性失败), 未执行能力探测"}
         tool_samples.append(raw)
-        tool_scores.append(_parse_tool_score(raw, want))
+        tool_scores.append(_ps.grade_case(case, raw))
     json_scores: List[float] = []
-    for ask in _JSON_CASES:
-        raw = _probe_call(_JSON_SYSTEM, ask, 400, model_id)
+    for case in cases["json"]:
+        raw = _probe_call(case["system"], case["user"],
+                          int(case.get("max_tokens") or 400), model_id)
         if raw is None:
             return {"modelId": model_id, "reachable": False,
                     "summary": "模型不可达(连通性失败), 未执行能力探测"}
-        json_scores.append(_parse_json_score(raw))
+        json_scores.append(_ps.grade_case(case, raw))
     instr_scores: List[float] = []
-    for ask in ("写一个 python 脚本查找 nginx 进程并显示资源占用",
-                "帮我写一个日志清理的 shell 脚本",
-                "生成一个导出数据库表为 CSV 的工具"):
-        raw = _probe_call(_INSTR_SYSTEM, ask, 300, model_id)
+    for case in cases["instr"]:
+        raw = _probe_call(case["system"], case["user"],
+                          int(case.get("max_tokens") or 300), model_id)
         if raw is None:
             return {"modelId": model_id, "reachable": False,
                     "summary": "模型不可达(连通性失败), 未执行能力探测"}
-        instr_scores.append(_parse_instr_score(raw))
+        instr_scores.append(_ps.grade_case(case, raw))
 
     tool_rate = sum(tool_scores) / len(tool_scores)
     json_rate = sum(json_scores) / len(json_scores)
     instr_score = min(instr_scores)
-    stability = min(_stability(tool_samples), 0.2 + tool_rate)  # 方差受遵循率制约
+    stability = min(_ps.stability(tool_samples), 0.2 + tool_rate)  # 方差受遵循率制约
 
-    score = 0.5 * tool_rate + 0.3 * json_rate + 0.2 * instr_score
+    score = (_ps.WEIGHTS["tool"] * tool_rate + _ps.WEIGHTS["json"] * json_rate
+             + _ps.WEIGHTS["instr"] * instr_score)
     base = heuristic_tier(_model_name_of(model_id))
-    tier = base
-    if score < 0.45:
-        tier = max(base, 1)     # 差 → 至少 T1(启用标准兜底)
-    if score < 0.25:
-        tier = 2                # 很差 → T2(全面补偿; 准入提示由前端投影)
+    tier = _ps.tier_from_score(score, base)
 
     caps = {"toolCallRate": round(tool_rate, 2), "jsonRate": round(json_rate, 2),
             "instructionScore": round(instr_score, 2), "stability": round(stability, 2),
             "probeScore": round(score, 2)}
     prof = {"modelId": model_id, "modelName": _model_name_of(model_id),
             "tier": tier, "source": _PROBED_TAG, "caps": caps,
+            "structured": _ps.structured_from(json_rate),
+            "admission": _ps.admission(tier),
             "summary": (f"探测完成: 工具协议 {tool_rate:.0%} / JSON {json_rate:.0%} / "
                         f"指令 {instr_score:.0%} → tier {tier}({TIERS[tier]})"),
             "probes": [], "updatedAt": int(time.time() * 1000)}

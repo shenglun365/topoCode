@@ -77,9 +77,12 @@ def test_probe_model_good_small_model(tmp_path, monkeypatch):
     from topoone_app_architect.arch_routes import model_profile as mp
 
     def smart_sync(messages, mode="chat", model_id=None, max_tokens=None, **kw):
+        import re as _re
         user = messages[-1]["content"] if messages else ""
-        if "req.propose" in str(messages[0]["content"]) or "创建需求提案" in user:
-            tool = "kb.asset.search" if "检索" in user else "req.propose"
+        if "req.propose" in str(messages[0]["content"]) or "调用" in user:
+            tool = next((n for n in ("kb.asset.search", "map.overview",
+                                     "req.propose") if n in user),
+                        "req.propose")
             return {"content": f'[TOOL_CALL]{{"tool":"{tool}","arguments":{{}}}}[/TOOL_CALL]'}
         if "整理为规约" in messages[0]["content"] or "```json" in messages[0]["content"]:
             return {"content": JSON_OK}

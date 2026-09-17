@@ -1249,14 +1249,26 @@ _STRUCTURED_MODELS_KEY = "llm.structuredModels"
 
 
 def structured_model_enabled(model_id: str) -> bool:
-    """模型 structured 支持位(单源: CollabConfig 键 llm.structuredModels JSON 数组)。
+    """模型 structured 支持位(双源: ①能力档案探针位 ②CollabConfig 手工清单)。
 
-    探针冒烟用例可写位; 未配置 = 走文本协议(现行为, 零散落分支)。
+    档案位(model_profile.structured, 探针 structured 冒烟写入)为单源方向;
+    旧手工清单 llm.structuredModels 保留为手工覆盖兼容。未配置且无档案 = 走
+    文本协议(现行为, 零散落分支)。
     """
+    mid = model_id or ""
+    if not mid:
+        return False
+    try:
+        from ..agent.cognition import model_profile as _mp
+        prof = _mp.get_profile(mid)
+        if isinstance(prof, dict) and prof.get("structured") is True:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
     try:
         raw = store.CollabConfigStore.get(_STRUCTURED_MODELS_KEY, "") or "[]"
         ids = json.loads(raw)
-        return isinstance(ids, list) and (model_id or "") in {str(x) for x in ids}
+        return isinstance(ids, list) and mid in {str(x) for x in ids}
     except Exception:  # noqa: BLE001
         return False
 
