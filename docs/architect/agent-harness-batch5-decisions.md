@@ -19,9 +19,9 @@
 | 4 | K4 @引用不读内容 | 检索返回裁剪（预览+定位符）+ 系统段显式纪律 | S~M | 探针回归 | 中 | ④ |
 | 5 | M4 协议健壮性 | 受限生成为终局；前置 B4 文档单源化 + B3 handle_chat 拆解 | B4 S~M, B3 M, 受限生成 M | 网关支持面 | 中 | ⑤ |
 | 6 | K3 大纲投影 | 只读大纲端点 + 侧栏跳转；分页回载随 A6.2 | S~M | 无 | 低 | ⑥ |
-| 7 | M5 边界透明化 | 边界说明卡 + 探针历史先行；降档提示随 M1 | S~M | M1（部分） | 低 | ⑦ |
+| 7 | M5 边界透明化 | ~~边界说明卡~~ **已随三维矩阵专项落地**（见 §11 as-built） | S | ✅ | 低 | ✅ |
 | 8 | A6.2 Item 投影 | 最小投影（tool_call/file_change）+ conformance 扩展 + UI 守门 | M | conformance kit | 中 | ⑧ |
-| 9 | A2 DAG/CAS | taskPlan 加 `depends` + 环检测；writeScopes 告警；**CAS 暂缓** | S~M（DAG）/ L（CAS） | 无 | 中 | ⑨ |
+| 9 | A2 DAG/CAS | **DAG 已落地**（task_graph/就绪下发/fail-fast，depends_source 按 C 档）；writeScopes 告警尾量；CAS 暂缓 | ✅ | 中 | ⑨→尾量 |
 
 **搁置**：L 组训练侧（roadmap Phase 2 末内容，经 2026-09-17 裁决搁置不进行；
 本档不展开，M 线合流点保留在主档 §9.3 裁决③）。
@@ -422,3 +422,43 @@ M4（B4/B3 前置可与任意项并行）→ K3 → M5(A+B) → A6.2(B) → A2(A
 - 批次 4 全项（V1~V5 / K2 后端 / jest-vitest 适配器 / 验收配置 UI /
   AssetsPanel / A1 增强）已落地，全量门禁 900 passed，commit 至 `87310c0`。
 - 本档并入的随需三项（A6.2/A6.4/M5）自主档随需行移入；L 组搁置。
+
+---
+
+## 11. 三维能力矩阵专项 as-built（2026-09-17，7 切片全落地）
+
+> 本专项由 A2 粒度讨论 + M5 并入讨论升级而来（用户架构裁决），收编 M1 完整版/
+> M5/M4 structured 位/A2 depends_source。**全量门禁 951 passed**（8 commits：
+> `a652231`→`61bfe45`）。
+
+### 定则（用户逐条拍板）
+
+1. **双维分立**：A 轴（architect 模型能力）与 C 轴（coding agent 模型能力）是
+   两个维度——**统一测评标准（同探针维度/同刻度/同准入），分立档案**；
+2. **刻度收敛 T0-T2**：语义由规则细则定义（策略表注释），旧 T2/T3/T4→T2 读路径
+   归一，别名兼容一个版本；
+3. **职责归属**（无综合评分）：一个策略字段一个职责方，值=职责方能力档直推——
+   C 弱 → A 在需求分析/方案设计/任务编排补（拆更细/结构化/核心逻辑图）；
+   A 弱 → 调度机制（确定性管线）+ 用户要素提示 + KB grounding 补；
+4. **U 轴不测评用户**：A 弱 → **要素框架提示**（按五要素清单展开澄清，引导用户
+   喂全信息）；override 通道 = 既有会话挡位钉死 + 任务卡执行器切换；
+5. **准入机制**：测评不足明确提示但不强制退出（可按 T2 最低档全面补偿运行）；
+6. **补偿组件复用**：组件与挡位解耦（挡位只定启用+强度），如隔离修复循环。
+
+### 落地明细
+
+| 切片 | Commit | 内容 |
+|---|---|---|
+| 1 刻度收敛 | `a652231` | gears T0-T2 三行全字段重排 + depends_source/logic_diagram 新字段 + 旧值归一（resolve/REST/执行器写侧）+ probe_hard_cap 新刻度（兼容旧「上限T3」文本）+ 前端档位选项 |
+| 2 双维档案 | `f3e04e2` | `probe_suite.py` 统一标准（维度权重/刻度/准入/structured 判据）；**用例接系统实际能力**（真实注册工具+系统基本指令，parse_fn 注入保持层序）；A 档案 structured 位+admission 字段；C 轴刻度归一+probeStructured |
+| 3 双轴 resolve | `8ba9ce8` | GearPolicy 增 A 轴字段 schedule_discipline/element_hints；`resolve_gear(mode, c_cfg, architect_model_id)` 职责直推；chat/task 消费接线；R2 横切豁免修正 |
+| 4 补偿组件 | `a947ff8` | `repair_tasks.py` 修复任务注册表（register_repair 扩展点）；tool_call 隔离修复（未知工具名幻觉，每调用限 1 次，失败如实）；三处执行点接入；样本落 llm_dataset |
+| 5 U 轴 | `e83a0c1` | ELEMENT_HINT_HIGH/MID（五要素=既有约束项，非新词汇）；按 element_hints 密度注入对话系统段 |
+| 6 A2 接入 | `4723878` | `task_graph.py` 纯函数（validate 自依赖/悬空/重复/环 + ready + linear）；split_tasks_llm depends 声明（llm 挡）；弱挡线性链兜底；就绪下发+fail-fast（waiting_input 不解锁，失败阻塞后继等人工） |
+| 7 M5 投影 | `61bfe45` | A 轴：档位徽标+structured+T2 准入 ⚠+历史时间线；C 轴：实测 T2 ⚠ 准入标注——均提示不拦截 |
+
+### 尾量
+
+- A2 writeScopes advisory 告警（确认卡内重叠提示）
+- M2 尾维消费深化（reasoning_effort→provider 参数；tool_surface→MCP 注入裁剪实接）
+- runtimeSignals 运行时信号回流（M1 预留字段已置，降档自动提示待数据积累）
