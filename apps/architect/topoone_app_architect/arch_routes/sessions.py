@@ -1327,25 +1327,31 @@ async def tasks_of(conv_id: str = fastapi.Query("", alias="convId")):
     return ok({"tasks": _tasks_of_conv(conv)})
 
 
-@router.get("/assets")
-async def assets_of(conv_id: str = fastapi.Query("", alias="convId"),
-                    kind: str = fastapi.Query("", alias="kind"),
-                    q: str = fastapi.Query("", alias="q"),
-                    limit: int = fastapi.Query(100, alias="limit")):
-    """会话知识资产清单(K2: 任务回执/里程碑/LLM 与人工沉淀)。?convId= 会话 id。"""
+@router.get("/units")
+async def units_of(conv_id: str = fastapi.Query("", alias="convId"),
+                   type: str = fastapi.Query("", alias="type"),
+                   q: str = fastapi.Query("", alias="q"),
+                   limit: int = fastapi.Query(100, alias="limit")):
+    """会话知识单元清单(存储归一: 回执/分析/产物/错误等, 检索面读侧)。?convId= 会话 id。"""
     if not conv_id:
         return err(400, "convId 必填")
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
-    rows = store.AssetsStore.of_conv(conv_id, kind=kind, q=q, limit=limit)
-    return ok({"assets": rows})
+    if q.strip():
+        rows = store.ContextUnitsStore.search(q.strip(), type_=type or None,
+                                              conversation_id=conv_id,
+                                              limit=max(1, min(limit, 200)))
+    else:
+        rows = store.ContextUnitsStore.all(conversation_id=conv_id, type_=type or None,
+                                           limit=max(1, min(limit, 200)))
+    return ok({"units": rows})
 
 
-@router.delete("/assets/{asset_id}")
-async def asset_remove(asset_id: str):
-    """删除会话知识资产(误沉淀/过期清理)。"""
-    removed = await asyncio.to_thread(store.AssetsStore.delete, asset_id)
+@router.delete("/units/{unit_id}")
+async def unit_remove(unit_id: str):
+    """删除会话知识单元(误沉淀/过期清理)。"""
+    removed = await asyncio.to_thread(store.ContextUnitsStore.delete, unit_id)
     if not removed:
-        return err(404, "资产不存在")
-    return ok({"deleted": True, "id": asset_id})
+        return err(404, "单元不存在")
+    return ok({"deleted": True, "id": unit_id})

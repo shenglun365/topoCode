@@ -11,7 +11,6 @@ from .semantic import AstCacheStore, SemanticAssetsStore, SemanticRefsStore
 from .blueprint import BlueprintsStore, CollabConfigStore, SnapshotsStore, StagingScansStore, TagsStore
 from .core import ProjectsStore, RequirementsStore
 from .tasks import TasksStore
-from .assets import ASSET_KINDS, ASSET_SOURCES, AssetsStore
 from .states import (  # noqa: F401
     ACTIVE_STATES, CONV_ACTIVE, CONV_ARCHIVED, REQ_CANCELLED, REQ_DONE,
     REQ_DRAFT, REQ_READY, REQ_OPEN_STATES, SPEC_CONFIRMED, SPEC_DRAFT,

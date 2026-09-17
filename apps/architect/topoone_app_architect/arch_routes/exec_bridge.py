@@ -1154,21 +1154,27 @@ def _merge_req_scope(rid: str, files: List[str]) -> int:
 def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
                            title: str, summary: str, changed_files,
                            branch: str, pid: str) -> Optional[dict]:
-    """K2 知识沉淀: 任务终态回执 → arch_assets(kind=plan, source=task_receipt)。"""
+    """知识沉淀(存储归一): 任务终态回执 → execution_report 单元(会话派生记忆, 检索面可捞)。
+
+    归因来源: coding agent 执行报告(正文 summary)——P1 distill-errors 的材料。
+    """
     t = store.TasksStore.get(task_id) or {}
     prog = t.get("progress") or {}
-    meta = {"taskId": task_id, "status": status, "branch": branch,
-            "changedFiles": [str(f) for f in (changed_files or [])][:50],
-            "executorType": t.get("executorType") or ""}
-    for key in ("verifyOverall", "verify_build", "verify_test"):
+    meta_lines = [f"- 任务: {task_id} · 状态: {status}" + (f" · 分支: {branch}" if branch else "")]
+    for key, label in (("verifyOverall", "验收"), ("verify_build", "构建"),
+                       ("verify_test", "测试")):
         if prog.get(key) is not None:
-            meta[key] = prog[key]
-    return store.AssetsStore.create({
-        "conversationId": conv_id, "projectId": pid, "reqId": rid,
-        "taskId": task_id, "kind": "plan",
+            meta_lines.append(f"- {label}: {prog[key]}")
+    return store.ContextUnitsStore.create({
+        "conversationId": conv_id, "projectId": pid,
+        "type": "execution_report",
         "title": f"任务回执[{status}]：{title}",
-        "content": (summary or "")[:4000],
-        "meta": meta, "source": "task_receipt"})
+        "content": ((summary or "")[:4000] + "\n\n**回执**\n"
+                    + "\n".join(meta_lines)),
+        "refs": {"taskId": task_id, "reqId": rid,
+                 "files": [str(f) for f in (changed_files or [])][:50],
+                 "executorType": t.get("executorType") or ""},
+        "importance": 1})
 
 
 def _handle_task_event(ev: dict, ctx: dict) -> None:
@@ -1228,16 +1234,17 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 msg_meta={"kind": "task_input", "taskId": task_id},
                 project_id=pid, agent=agent)
         if ms_files:
-            # K2 知识沉淀: 里程碑报告 → arch_assets(kind=analysis, source=milestone)
+            # 知识沉淀(存储归一): 里程碑报告 → analysis 单元
             try:
-                store.AssetsStore.create({
+                store.ContextUnitsStore.create({
                     "conversationId": conv_id, "projectId": pid,
-                    "reqId": ctx.get("rid") or "", "taskId": task_id,
-                    "kind": "analysis", "title": f"里程碑报告：{title}",
+                    "type": "analysis",
+                    "title": f"里程碑报告：{title}",
                     "content": clean[:4000],
-                    "meta": {"files": ms_files[:50], "merged": merged,
+                    "refs": {"taskId": task_id, "reqId": ctx.get("rid") or "",
+                             "files": ms_files[:50], "merged": merged,
                              "verifyOverall": vo},
-                    "source": "milestone"})
+                    "importance": 1})
             except Exception as e:  # noqa: BLE001
                 logger.warning("[exec-bridge] 里程碑沉淀失败 task=%s: %s",
                                task_id, e)
@@ -1269,7 +1276,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             on_plan_task_done(conv_id, task_id)
         except Exception:  # noqa: BLE001
             pass
-        # K2 知识沉淀: 任务回执 → arch_assets(kind=plan 执行快照, source=task_receipt)
+        # 知识沉淀: 任务回执 → execution_report 单元(会话派生记忆)
         try:
             _sediment_task_receipt(conv_id, task_id, ctx.get("rid") or "", "done",
                                    title, clean or text, changed, branch, pid)
@@ -1289,10 +1296,10 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             on_plan_task_failed(task_id)
         except Exception:  # noqa: BLE001
             pass
-        # K2 知识沉淀: 失败回执同样入账(教训资产)
+        # 知识沉淀: 失败回执同样入单元(P1 distill 材料/教训)
         try:
-            _sediment_task_receipt(conv_id, task_id, rid, "failed", title,
-                                   text, ev.get("changedFiles") or "",
+            _sediment_task_receipt(conv_id, task_id, ctx.get("rid") or "", "failed",
+                                   title, text, ev.get("changedFiles") or "",
                                    (store.TasksStore.get(task_id) or {}).get("branch") or "",
                                    pid)
         except Exception as e:  # noqa: BLE001

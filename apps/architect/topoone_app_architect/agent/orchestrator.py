@@ -584,6 +584,8 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
             from .collab import cards as _cards
             _cards.land(conv_id, f"❌ {detail}", kind=_cards.KIND_TURN_ERROR,
                         review_state="error")
+            from .memory.units import record_turn_error
+            record_turn_error(conv_id, detail)
         except Exception:  # noqa: BLE001
             logger.warning("[kb-chat] turnError 落库失败 conv=%s", conv_id)
         await io.send_ev({"type": "error", "requestId": request_id, "message": detail})
@@ -653,6 +655,8 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
             from .collab import cards as _cards
             _cards.land(conv_id, f"❌ {detail}", kind=_cards.KIND_TURN_ERROR,
                         review_state="error")
+            from .memory.units import record_turn_error
+            record_turn_error(conv_id, detail)
         except Exception:  # noqa: BLE001
             logger.warning("[kb-chat] turnError 落库失败 conv=%s", conv_id)
         await io.send_ev({"type": "error", "requestId": request_id, "message": detail})

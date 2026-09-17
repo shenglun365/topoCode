@@ -57,14 +57,13 @@
       >
         <span
           class="chip !text-[9px] shrink-0 font-mono"
-          :class="kindCls(a.kind)"
-        >{{ kindLabel(a.kind) }}</span>
+          :class="kindCls(a.type)"
+        >{{ kindLabel(a.type) }}</span>
         <div class="min-w-0 flex-1">
           <div class="truncate text-[11px] text-ctp-subtext1">{{ a.title || '(无标题)' }}</div>
           <div class="truncate text-[9px] text-ctp-overlay0">
-            <span class="font-mono">{{ srcLabel(a.source) }}</span>
-            <template v-if="nFiles(a.meta)"> · {{ nFiles(a.meta) }} 文件</template>
-            <template v-if="a.meta?.verifyOverall"> · 验收 {{ a.meta.verifyOverall }}</template>
+            <template v-if="nFiles(a)"> · {{ nFiles(a) }} 文件</template>
+            <template v-if="a.importance"> · ★</template>
             · {{ fmtTime(a.createdAt) }}
           </div>
         </div>
@@ -95,40 +94,33 @@ const q = ref('')
 
 const KINDS = [
   { v: '', label: '全部' },
-  { v: 'plan', label: '回执' },
+  { v: 'execution_report', label: '回执' },
   { v: 'analysis', label: '分析' },
-  { v: 'requirement', label: '需求' },
-  { v: 'todo', label: '待办' },
-  { v: 'data_asset', label: '数据' },
+  { v: 'artifact', label: '产物' },
+  { v: 'error', label: '错误' },
+  { v: 'error_pattern', label: '模式' },
 ]
 
 const KIND_CLS: Record<string, string> = {
-  plan: 'bg-ctp-blue/15 text-ctp-blue',
+  execution_report: 'bg-ctp-blue/15 text-ctp-blue',
   analysis: 'bg-ctp-teal/15 text-ctp-teal',
-  requirement: 'bg-ctp-mauve/15 text-ctp-mauve',
-  todo: 'bg-ctp-yellow/15 text-ctp-yellow',
-  data_asset: 'bg-ctp-green/15 text-ctp-green',
+  artifact: 'bg-ctp-mauve/15 text-ctp-mauve',
+  error: 'bg-ctp-red/15 text-ctp-red',
+  error_pattern: 'bg-ctp-yellow/15 text-ctp-yellow',
 }
 const KIND_LABEL: Record<string, string> = {
-  plan: '回执', analysis: '分析', requirement: '需求',
-  todo: '待办', data_asset: '数据',
-}
-const SRC_LABEL: Record<string, string> = {
-  task_receipt: '任务回执', milestone: '里程碑', verify: '验收',
-  manual: '人工', llm: 'agent',
+  execution_report: '回执', analysis: '分析', artifact: '产物',
+  error: '错误', error_pattern: '模式',
 }
 
 function kindCls(k: string): string {
   return KIND_CLS[k] || 'bg-ctp-surface1 text-ctp-overlay0'
 }
 function kindLabel(k: string): string {
-  return KIND_LABEL[k] || k || '未知'
+  return KIND_LABEL[k] || k || '单元'
 }
-function srcLabel(s: string): string {
-  return SRC_LABEL[s] || s || '人工'
-}
-function nFiles(meta: any): number {
-  const f = meta?.files || meta?.changedFiles
+function nFiles(u: any): number {
+  const f = u?.refs?.files
   return Array.isArray(f) ? f.length : 0
 }
 function fmtTime(ts: any): string {
@@ -146,20 +138,20 @@ async function load() {
   loading.value = true
   try {
     const params = new URLSearchParams({ convId: props.convId, limit: '100' })
-    if (kind.value) params.set('kind', kind.value)
+    if (kind.value) params.set('type', kind.value)
     if (q.value.trim()) params.set('q', q.value.trim())
-    const res = await apiGet<{ assets: any[] }>(`/assets?${params.toString()}`)
-    assets.value = res?.assets || []
+    const res = await apiGet<{ units: any[] }>(`/units?${params.toString()}`)
+    assets.value = res?.units || []
     if (!kind.value && !q.value.trim()) total.value = assets.value.length
   } catch { /* 保持现状 */ } finally {
     loading.value = false
   }
 }
 
-async function remove(a: any) {
+async function remove(u: any) {
   try {
-    await apiDelete(`/assets/${a.id}`)
-    assets.value = assets.value.filter((x) => x.id !== a.id)
+    await apiDelete(`/units/${u.id}`)
+    assets.value = assets.value.filter((x) => x.id !== u.id)
   } catch { /* 静默 */ }
 }
 </script>

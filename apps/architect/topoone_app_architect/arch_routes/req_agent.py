@@ -1665,61 +1665,64 @@ def tool_task_propose(title: str, instruction: str,
                              root=root, project=project)
 
 
-# ── K2 知识资产工具面(LLM 可读写; 会话作用域) ──────────────────────────
+# ── 会话知识单元工具面(LLM 可读写; 存储归一后落 arch_context_units) ────────
 
 @register_architect_tool(
     "asset.upsert",
-    "沉淀/更新会话知识资产(五类: requirement 需求表格 / todo 待办 / plan 执行快照 / "
-    "data_asset 数据资产 / analysis 分析产物)。任务回执与里程碑报告系统已自动沉淀, "
-    "本工具用于补充人工/分析性知识(结论、约定、可复用片段)。",
+    "沉淀/更新会话知识单元(artifact 类型: 结论、约定、待办、可复用片段等分析性知识)。"
+    "任务回执与里程碑报告系统已自动沉淀(execution_report/analysis), "
+    "本工具用于补充人工/分析性知识。",
 )
-def tool_asset_upsert(kind: str, title: str, content: str,
-                      assetId: Optional[str] = None,
-                      meta: Optional[Dict[str, Any]] = None,
+def tool_asset_upsert(title: str, content: str,
+                      unitId: Optional[str] = None,
                       conversationId: Optional[str] = None,
                       reqId: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx as _ctx
-    from .store import AssetsStore
+    from .store import ContextUnitsStore
     conv_id = conversationId or _ctx.get_conv() or ""
     if not conv_id:
         return {"ok": False, "error": "no-conversation"}
-    if assetId:
-        row = AssetsStore.update(assetId, {"kind": kind, "title": title,
-                                           "content": content, "meta": meta or {}})
+    if unitId:
+        row = ContextUnitsStore.update(unitId, {"title": title, "content": content})
         if not row:
-            return {"ok": False, "error": "asset-not-found"}
-        return {"ok": True, "asset": row}
-    row = AssetsStore.create({"conversationId": conv_id, "kind": kind,
-                              "title": title, "content": content,
-                              "meta": meta or {}, "source": "llm",
-                              "reqId": reqId or ""})
-    return {"ok": True, "asset": row}
+            return {"ok": False, "error": "unit-not-found"}
+        return {"ok": True, "unit": row}
+    row = ContextUnitsStore.create({
+        "conversationId": conv_id, "type": "artifact",
+        "title": title, "content": content,
+        "refs": {"reqId": reqId or ""}, "importance": 1})
+    return {"ok": True, "unit": row}
 
 
 @register_architect_tool(
     "asset.list",
-    "列出会话知识资产(可按类别过滤/关键词检索标题与正文)——先查后用, 避免重复沉淀。",
+    "列出会话沉淀的知识单元(回执/分析/产物/决策/摘要, 可按类型过滤/关键词检索)——先查后用, 避免重复沉淀。",
 )
-def tool_asset_list(kind: Optional[str] = None, q: Optional[str] = None,
+def tool_asset_list(type: Optional[str] = None, q: Optional[str] = None,
                     limit: int = 50,
                     conversationId: Optional[str] = None) -> Dict[str, Any]:
     from . import ctx as _ctx
-    from .store import AssetsStore
+    from .store import ContextUnitsStore
     conv_id = conversationId or _ctx.get_conv() or ""
     if not conv_id:
         return {"ok": False, "error": "no-conversation"}
-    rows = AssetsStore.of_conv(conv_id, kind=kind or "", q=q or "",
-                               limit=max(1, min(int(limit), 200)))
-    return {"ok": True, "assets": rows, "count": len(rows)}
+    if q:
+        rows = ContextUnitsStore.search(q, type_=type or None,
+                                        conversation_id=conv_id,
+                                        limit=max(1, min(int(limit), 200)))
+    else:
+        rows = ContextUnitsStore.all(conversation_id=conv_id, type_=type or None,
+                                     limit=max(1, min(int(limit), 200)))
+    return {"ok": True, "units": rows, "count": len(rows)}
 
 
 @register_architect_tool(
     "asset.delete",
-    "删除会话知识资产(误沉淀/过期知识清理)。",
+    "删除会话知识单元(误沉淀/过期知识清理)。",
 )
-def tool_asset_delete(assetId: str) -> Dict[str, Any]:
-    from .store import AssetsStore
-    removed = AssetsStore.delete(assetId)
+def tool_asset_delete(unitId: str) -> Dict[str, Any]:
+    from .store import ContextUnitsStore
+    removed = ContextUnitsStore.delete(unitId)
     return {"ok": bool(removed), "deleted": bool(removed)}
 
 

@@ -199,7 +199,7 @@ ARCH_PROJECT_TABLES_SQL = """
         id TEXT PRIMARY KEY,
         conversation_id TEXT DEFAULT '',
         project_id TEXT DEFAULT '',
-        type TEXT DEFAULT 'note',          -- tool_call | artifact | decision | session_summary | execution_report | execution_brief | note
+        type TEXT DEFAULT 'note',          -- tool_call | artifact | decision | session_summary | execution_report | execution_brief | analysis | error | error_pattern | note
         title TEXT DEFAULT '',
         content TEXT DEFAULT '',           -- markdown 正文
         refs TEXT,                         -- JSON: {modules:[], components:[], files:[], execIds:[], reqIds:[]}
@@ -529,25 +529,6 @@ CREATE TABLE IF NOT EXISTS arch_capability_proposals (
         created_at INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_arch_aopin_report ON arch_acceptance_opinions(project_id, report_id);
-
-    -- K2 知识资产基座(v2-todo P1): 任务回执/里程碑/人工与 LLM 资产沉淀
-    CREATE TABLE IF NOT EXISTS arch_assets (
-        id TEXT PRIMARY KEY,
-        conversation_id TEXT DEFAULT '',
-        project_id TEXT DEFAULT '',
-        req_id TEXT DEFAULT '',
-        task_id TEXT DEFAULT '',
-        kind TEXT DEFAULT 'analysis',       -- requirement|todo|plan|data_asset|analysis
-        title TEXT DEFAULT '',
-        content TEXT DEFAULT '',            -- 正文/摘要(结构化细目入 meta)
-        meta TEXT,                          -- JSON: changedFiles/verify/branch 等扩展载荷
-        source TEXT DEFAULT 'manual',       -- manual|llm|task_receipt|milestone|verify
-        status TEXT DEFAULT 'active',       -- active|archived
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_arch_assets_conv ON arch_assets(conversation_id, project_id);
-    CREATE INDEX IF NOT EXISTS idx_arch_assets_kind ON arch_assets(kind);
 """
 
 # 旧单库全量 schema(迁移脚本/兼容参考用；新库分主/项目两套)

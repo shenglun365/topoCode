@@ -64,6 +64,8 @@ async def kb_analysis_ws(websocket: WebSocket):
                             from ..agent.collab import cards as _cards
                             _cards.land(conv_id, f"❌ 回合失败：{detail}",
                                         kind=_cards.KIND_TURN_ERROR)
+                            from ..agent.memory.units import record_turn_error
+                            record_turn_error(conv_id, f"回合失败：{detail}")
                         except Exception:  # noqa: BLE001
                             logger.exception("[kb-chat] turnError 落库失败 conv=%s",
                                              conv_id)

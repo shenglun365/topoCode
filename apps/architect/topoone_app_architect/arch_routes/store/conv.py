@@ -366,6 +366,12 @@ class ContextUnitsStore:
         return _get(cls.TABLE, unit_id)
 
     @classmethod
+    def update(cls, unit_id: str, data: dict) -> Optional[dict]:
+        """单元内容修正/累积(如 error_pattern 同签名追加场景)。"""
+        _update(cls.TABLE, unit_id, data)
+        return cls.get(unit_id)
+
+    @classmethod
     def create(cls, data: dict) -> dict:
         now = int(__import__("time").time() * 1000)
         payload = {

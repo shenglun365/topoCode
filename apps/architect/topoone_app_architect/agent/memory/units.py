@@ -102,6 +102,26 @@ def record_tool_call(conv_id: str, name: str, args: Dict[str, Any],
 
 
 
+def record_turn_error(conv_id: str, detail: str,
+                      project_id: str = "") -> None:
+    """回合级错误(turnError) → error 单元——错误历史进入检索面(ctx.search 可捞)。
+
+    与消息卡并行落库: 卡面向用户呈现, 单元面向 agent 检索/后续提炼(P1 distill 材料)。
+    """
+    if not conv_id:
+        return
+    try:
+        _store().ContextUnitsStore.create({
+            "conversationId": conv_id, "projectId": project_id,
+            "type": "error",
+            "title": f"回合错误: {detail.strip()[:60]}",
+            "content": detail[:2000],
+            "refs": {}, "importance": 1,
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[ctx-registry] error 单元写入失败: %s", e)
+
+
 def _conv_meta(conv: dict) -> dict:
     """会话 meta 字段(JSON) → dict。"""
     raw = conv.get("meta")
