@@ -211,12 +211,20 @@ def test_chat_system_prompt_no_reject_boundary():
 
 
 def test_chat_system_prompt_registry_equivalence():
-    """registry 等价模式: 与旧拼接逐字节一致(rstrip 尾空白); 单源模式可渲染。"""
+    """registry 等价模式(single_source=false 覆盖): 与旧拼接逐字节一致。
+
+    B4 后默认走单源渲染(见 test_prompt_source), 等价模式保留为回退通道——
+    本测试守卫块化重构本身的行为等价性。
+    """
     from topoone_app_architect.arch_routes import req_agent, prompt_registry
-    for kw in ({}, {"diagram_skill": True}, {"skill_scenarios": ["plan"]}):
-        a = req_agent.chat_system_prompt(None, None, **kw)
-        b = req_agent.chat_system_prompt_legacy(None, None, **kw)
-        assert a.rstrip() == b.rstrip(), f"等价失败: {kw}"
+    prompt_registry.set_overrides({"single_source": False})
+    try:
+        for kw in ({}, {"diagram_skill": True}, {"skill_scenarios": ["plan"]}):
+            a = req_agent.chat_system_prompt(None, None, **kw)
+            b = req_agent.chat_system_prompt_legacy(None, None, **kw)
+            assert a.rstrip() == b.rstrip(), f"等价失败: {kw}"
+    finally:
+        prompt_registry.set_overrides({})
     # 单源模式: 注册表渲染能力文档(含协议+全部工具名)
     doc = prompt_registry.capability_doc_from_tools()
     from topoone_app_architect.arch_routes.req_agent import _ARCH_TOOLS

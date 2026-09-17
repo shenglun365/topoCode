@@ -42,3 +42,74 @@ def test_discipline_no_stale_finalize_wording():
     for seg in (disc.ANTI_FABRICATION, disc.REQ_CARD_DISCIPLINE,
                 disc.DIRECT_CMD_SYMBOLS):
         assert "定稿" not in seg
+
+
+# ── B4 工具文档单源化(注册表 → 能力文档渲染) ─────────────────────────
+
+def _all_registered_tools():
+    return req_agent._ARCH_TOOLS
+
+
+def test_capability_doc_covers_all_registered_tools():
+    """单源渲染覆盖全部注册工具(diagram.build/validate 除外——归 diagram_skill 块)。"""
+    doc = disc.capability_doc_from_tools()
+    assert doc, "单源渲染不应为空(注册表非空)"
+    for name in _all_registered_tools():
+        if name in ("diagram.build", "diagram.validate"):
+            assert name not in doc
+            continue
+        assert f"- {name}：" in doc, f"工具 {name} 未出现在单源能力清单"
+
+
+def test_capability_doc_params_from_registry_tables():
+    """参数段来自注册表迁移表——非空且含代表性条目。"""
+    doc = disc.capability_doc_from_tools()
+    assert "各工具的参数：" in doc
+    assert "- kb.asset.search:" in doc
+    assert '"text": "检索关键词"' in doc
+    # 迁移表抽查: brief 与原文逐字对齐
+    assert disc.TOOL_BRIEFS["kb.baseline"] in doc
+    assert disc.TOOL_PARAM_DOCS["kb.graph"] in doc
+
+
+def test_capability_doc_structure_complete():
+    """单源文档必须含 纪律段/范围段/层级约定/图表输出 四大段(结构对齐原文)。"""
+    doc = disc.capability_doc_from_tools()
+    for seg in (disc._TIER_CONVENTION_DOC, disc._SCOPE_DOC,
+                disc._DIAGRAM_OUTPUT_DOC, disc.ANTI_FABRICATION,
+                disc.REQ_CARD_DISCIPLINE):
+        assert seg in doc
+
+
+def test_capability_default_is_single_source():
+    """默认单源: 渲染结果含「不在等价模式手写清单内」的注册工具(conv.read)。"""
+    doc = req_agent.chat_system_prompt(None, None)
+    assert "conv.read：" in doc, "默认应走单源渲染(含存量迁移未覆盖的注册工具)"
+    # 覆盖回退: single_source=false → 等价模式(无 conv.read 行)
+    try:
+        disc.set_overrides({"single_source": False})
+        legacy = req_agent.chat_system_prompt(None, None)
+        assert "conv.read：" not in legacy
+    finally:
+        disc.set_overrides({})
+
+
+def test_registry_entry_prefers_explicit_doc_over_tables():
+    """注册点显式传参优先于迁移表(新工具直接传 brief/params_doc)。"""
+    from topoone_app_architect.agent.tools.registry import (
+        _ARCH_TOOLS, register_architect_tool)
+
+    @register_architect_tool("b4.dummy", "测试工具。",
+                             params_doc='{"x": 1}', brief="显式简介")
+    def _dummy():
+        return {}
+
+    try:
+        entry = _ARCH_TOOLS["b4.dummy"]
+        assert entry["brief"] == "显式简介"
+        assert entry["params_doc"] == '{"x": 1}'
+        doc = disc.capability_doc_from_tools()
+        assert "- b4.dummy：显式简介" in doc
+        assert "- b4.dummy: {\"x\": 1}" in doc
+    finally:
+        _ARCH_TOOLS.pop("b4.dummy", None)

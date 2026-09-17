@@ -39,15 +39,24 @@ def architect_skills() -> List[Dict[str, Any]]:
 _ARCH_TOOLS: Dict[str, Dict[str, Any]] = {}
 
 
-def register_architect_tool(name: str, description: str = "") -> Callable:
+def register_architect_tool(name: str, description: str = "",
+                            params_doc: str = "", brief: str = "") -> Callable:
+    """注册工具。B4 单源: brief(能力清单一行简介)/params_doc(参数形状)为
+    能力文档渲染元数据, 注册点直接传参(优先于 prompt.py 迁移表)。
+    注: 存量迁移表(TOOL_BRIEFS/TOOL_PARAM_DOCS)在 cognition/prompt.py——
+    它们是提示词内容而非执行元数据, 放 cognition 层避免反向依赖本模块。"""
     def decorator(fn):
-        _ARCH_TOOLS[name] = {"name": name, "description": description, "handler": fn}
+        _ARCH_TOOLS[name] = {"name": name, "description": description,
+                             "handler": fn,
+                             "params_doc": params_doc, "brief": brief}
         return fn
     return decorator
 
 
 def architect_tools() -> List[Dict[str, str]]:
     return [{"name": t["name"], "description": t["description"]} for t in _ARCH_TOOLS.values()]
+
+
 
 
 # 归档会话上禁止的动作类工具(生成/落库/指派); 检索与读取类不在此列
