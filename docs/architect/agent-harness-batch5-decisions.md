@@ -15,7 +15,7 @@
 |---|------|---------|--------|------|------|---------|
 | 1 | K1 格式版本化 | 表级 `schema_version` 列 + 只追加迁移链 + 版本登记文档 | S | 无 | 低 | ① |
 | 2 | A6.4 steer 协议化 | 协议带 `delivery` + B1 能力矩阵降级 queue | S | 无 | 低 | ② |
-| 3 | M3 轻重分船 | 角色表扩轻任务角色 + GearPolicy `lightTask` 字段 | S~M | 无 | 低 | ③ |
+| 3 | M3 轻重分船 | ~~角色表扩轻任务角色~~ **已落地：资产助理/轻任务模型两域分列**（见 §2 as-built） | S | 无 | 低 | ✅ |
 | 4 | K4 @引用不读内容 | 检索返回裁剪（预览+定位符）+ 系统段显式纪律 | S~M | 探针回归 | 中 | ④ |
 | 5 | M4 协议健壮性 | 受限生成为终局；前置 B4 文档单源化 + B3 handle_chat 拆解 | B4 S~M, B3 M, 受限生成 M | 网关支持面 | 中 | ⑤ |
 | 6 | K3 大纲投影 | 只读大纲端点 + 侧栏跳转；分页回载随 A6.2 | S~M | 无 | 低 | ⑥ |
@@ -103,6 +103,27 @@ provider 跑 format=json_schema 冒烟，确认网关透传与行为）。B4/B3 
 ---
 
 ## 2. M3 轻重任务分船（mixed-fleet）
+
+> **as-built（2026-09-17 落地，`d24984b`，全量门禁 926 passed）**
+> 拍板回执：域 1 改名「**资产助理**」、域 2 新增「**轻任务模型**」（按领域分列
+> 命名——现有六角色属数据资产·语义分析管线，编排侧轻任务不复用「角色」词，
+> 避免与已清退的会话角色产生认知混淆）；含 ConfigPage UI。
+>
+> - **域 1 资产助理**（显示层改名，零行为变化）：`cognition/roles.py` docstring
+>   重写（两代角色切割声明：与 T4 清退的会话角色无涉）；ConfigPage/i18n 分区
+>   标题与说明同步；代码标识符、REST `/agent/roles`、存储键不动。
+> - **域 2 轻任务模型**（新增）：`governance/light_tasks.py` **纯函数层**
+>   （词表 summary/probe——标题与摘要同一次调用故不设 title 死键；
+>   `normalize_light_tasks` 词表外键忽略+越界 modelId 剥离〔cv-168 同源教训〕；
+>   `resolve_light_task_model` 宽容读取绝不抛出）；存储读写/模型目录校验留
+>   适配层 `agent_roles.py`（`GET/PUT /agent/light-tasks`）——**R1 棘轮合规，
+>   零新冻结条目**。
+> - **接线（仅 2 处，消费方注入 cfg）**：`memory/units.summarize_conversation` →
+>   `summarize_task(model_id=...)`（原语本就支持 model_id）；`scope_probe` →
+>   `llm_sync(model_id=...)`。空配置 = 现行为零变化。
+> - **裁剪**：原 B 项（GearPolicy `lightTask` 联动）不做——显式配置已足够，
+>   挡位联动属多余间接层。原 C 项（步骤级异档）随 A2 DAG 合流（不变）。
+> - 配置入口：设置页「模型分派」tab 两个分区（资产助理/轻任务模型）+ REST。
 
 ### 2.1 现状
 
