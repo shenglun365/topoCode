@@ -943,7 +943,9 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
     """
     from ..arch_routes import context_registry, req_agent
     await send({"type": "tool_call", "requestId": request_id, "tool": name})
-    result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
+    result = await asyncio.to_thread(
+        req_agent.execute_tool_with_repair, name, args, root, project,
+        model_id or "")
     summary = req_agent.tool_result_text(name, result)
     ok = not (isinstance(result, dict) and result.get("error"))
     event = {

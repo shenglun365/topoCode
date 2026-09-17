@@ -1225,6 +1225,36 @@ def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None
     _cards.land(conv_id, text, kind=meta.pop("kind", None),
                 project_id="", **meta)
 
+def execute_tool_with_repair(name: str, args: dict, root: Optional[str],
+                             project: Optional[str],
+                             model_id: str = "") -> Dict[str, Any]:
+    """M4 补偿组件: 工具执行 + 机械性错误隔离修复(独立循环, 不污染主上下文)。
+
+    修复范围 v1: 「未知工具」(名称幻觉)——每调用限 1 次预算; 修复失败/语义类
+    错误(资产不存在等)原样返回(错误如实可见, cv-175 纪律)。可扩展修复种类见
+    agent/reflection/repair_tasks.py 注册表。
+    """
+    result = run_arch_tool(name, args, root, project)
+    if not (isinstance(result, dict) and result.get("error")):
+        return result
+    err = str(result.get("error") or "")
+    if not err.startswith("未知工具"):
+        return result
+    try:
+        from ..agent.reflection.repair_tasks import run_tool_call_repair
+        fixed = run_tool_call_repair(name, args if isinstance(args, dict) else {},
+                                     err, list(_ARCH_TOOLS), model_id=model_id)
+    except Exception:  # noqa: BLE001 — 修复通道故障不影响既有错误返回
+        return result
+    if not fixed:
+        return result
+    repaired = run_arch_tool(fixed["tool"], fixed["arguments"], root, project)
+    if isinstance(repaired, dict) and repaired.get("error"):
+        logger.info("[tool-repair] 修复后仍失败 tool=%s→%s: %s",
+                    name, fixed["tool"], str(repaired.get("error"))[:120])
+    return repaired
+
+
 def record_tool_parse_audit(content: str, calls: list, surface: str = "chat") -> None:
     """M4-C 失败样例回流: 有工具块但有效调用缺失/部分损坏 → 沉淀探针样本。
 
@@ -1378,7 +1408,8 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                                     "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
                                             "请改用允许的工具，或直接基于已有信息作答。"})
                     continue
-                result = run_arch_tool(name, args, root, project)
+                result = execute_tool_with_repair(name, args, root, project,
+                                                model_id=model_id or "")
                 results.append({"name": name, "text": tool_result_text(name, result)})
             if results:
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
@@ -1407,7 +1438,8 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                                 "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
                                         "请改用允许的工具，或直接基于已有信息作答。"})
                 continue
-            result = run_arch_tool(name, args, root, project)
+            result = execute_tool_with_repair(name, args, root, project,
+                                            model_id=model_id or "")
             results.append({"name": name, "text": tool_result_text(name, result)})
         if not results:
             return {"content": strip_tool_blocks(content), "output": None}
