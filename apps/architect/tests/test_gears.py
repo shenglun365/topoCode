@@ -1,4 +1,4 @@
-"""挡位体系(环节十二a)回归: 解析链 / 指令分叉 / 轮次下发 / REST 白名单。
+"""挡位体系(环节十二a, 刻度 T0-T2)回归: 解析链 / 指令分叉 / 轮次下发 / REST。
 
 Run: cd <repo> && python -m pytest apps/architect/tests/test_gears.py -q
 """
@@ -10,7 +10,7 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect.arch_routes import store
 from topoone_app_architect.agent.governance.gears import (
-    GEAR_MODES, default_policy, gear_note, resolve_gear)
+    GEAR_MODES, default_policy, gear_note, normalize_mode, resolve_gear)
 
 # ── 解析链 ───────────────────────────────────────────────────────────
 
@@ -21,13 +21,20 @@ def test_quick_pins_t0():
 
 def test_strict_is_auto():
     assert resolve_gear("strict").tier == "T1"          # 无执行器配置 → 默认 T1
-    assert resolve_gear("strict", {"capability": "T3"}).tier == "T3"
+    assert resolve_gear("strict", {"capability": "T2"}).tier == "T2"
+
+
+def test_legacy_tier_values_normalized():
+    """旧刻度(T3/T4)在解析链/写侧归一为 T2。"""
+    assert resolve_gear("strict", {"capability": "T3"}).tier == "T2"
+    assert resolve_gear("T4").tier == "T2"
+    assert normalize_mode("T3") == "T2" and normalize_mode("T4") == "T2"
 
 
 def test_auto_prefers_probed_over_capability():
-    cfg = {"capability": "T1", "tierProbed": "T2"}
+    cfg = {"capability": "T0", "tierProbed": "T2"}
     assert resolve_gear("auto", cfg).tier == "T2"
-    assert resolve_gear("auto", {"capability": "T3"}).tier == "T3"
+    assert resolve_gear("auto", {"capability": "T2"}).tier == "T2"
     assert resolve_gear("auto", {}).tier == "T1"
     assert resolve_gear("auto").tier == "T1"
 
@@ -39,20 +46,21 @@ def test_invalid_values_fall_to_default():
 
 
 def test_pinned_tier():
-    assert resolve_gear("T4").tier == "T4"
+    assert resolve_gear("T2").tier == "T2"
     assert resolve_gear("T2", {"capability": "T0"}).tier == "T2"  # 钉死优先于配置
 
 
 def test_policy_fields_data_driven():
-    t3 = resolve_gear("T3")
-    assert t3.pre_split == "steps" and t3.cadence == "key_step"
-    assert t3.max_iterations == 300
+    t2 = resolve_gear("T2")
+    assert t2.pre_split == "steps" and t2.cadence == "key_step"
+    assert t2.max_iterations == 300
+    assert t2.depends_source == "linear" and t2.logic_diagram == "uml"
     assert resolve_gear("T0").max_iterations == 2000
-    assert resolve_gear("T4").cadence == "every_step"
+    assert resolve_gear("T1").depends_source == "llm"
 
 
 def test_gear_modes_whitelist_and_note():
-    assert set(GEAR_MODES) == {"strict", "quick", "auto", "T0", "T1", "T2", "T3", "T4"}
+    assert set(GEAR_MODES) == {"strict", "quick", "auto", "T0", "T1", "T2"}
     assert "T0" in gear_note("quick") and gear_note("T2").startswith("挡位 T2")
 
 
@@ -61,18 +69,18 @@ def test_gear_modes_whitelist_and_note():
 def test_instruction_fork_by_tier():
     from topoone_app_architect.agent.planning.task_plan import assemble_task_instruction
     task = {"title": "T", "instruction": "做"}
-    t4 = assemble_task_instruction(task, "", policy=resolve_gear("T4"))
-    assert "微步模式" in t4 and "执行方式（按任务挡位）" in t4
+    t2 = assemble_task_instruction(task, "", policy=resolve_gear("T2"))
+    assert "步骤序列" in t2 and "执行方式（按任务挡位）" in t2
     t0 = assemble_task_instruction(task, "", policy=resolve_gear("quick"))
     assert "自主推进" in t0
-    assert "微步模式" not in t0
+    assert "步骤序列" not in t0
     default = assemble_task_instruction(task, "")
     assert default_policy().agent_note in default          # None → 默认档
 
 
 def test_milestone_protocol_always_present():
     from topoone_app_architect.agent.planning.task_plan import assemble_task_instruction
-    for mode in ("quick", "T1", "T4"):
+    for mode in ("quick", "T1", "T2"):
         text = assemble_task_instruction({"title": "T", "instruction": "x"},
                                          "", policy=resolve_gear(mode))
         assert "里程碑协议" in text and "禁止未提交报告就连续跨里程碑推进" in text
@@ -80,7 +88,7 @@ def test_milestone_protocol_always_present():
 
 # ── confirm_task: 轮次随挡下发 + 指令分叉 ────────────────────────────
 
-def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T4"):
+def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2"):
     conv = store.ConversationsStore.create({
         "projectId": "proj-g", "title": "g", "meta": {"root": str(tmp_path / "p")},
         "analysisMode": mode})
@@ -92,7 +100,7 @@ def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T4"):
     from topoone_app_architect.arch_routes import agent_executors as ae
     monkeypatch.setattr(ae, "load_executors", lambda: [
         {"id": "ex-g", "type": "cline-sdk", "enabled": True,
-         "config": {"max_iterations": 2000, "capability": "T3"}}])
+         "config": {"max_iterations": 2000, "capability": "T2"}}])
     calls = {"implement": []}
 
     def _fake_runner(path, payload=None, timeout=12.0):
@@ -109,14 +117,14 @@ def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T4"):
 
 
 def test_confirm_tier_iterations_injected(arch_env, tmp_path, monkeypatch):
-    """会话钉 T4 → 任务级轮次 100 覆盖注册表 2000; 指令含微步段。"""
-    conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T4")
+    """会话钉 T2 → 任务级轮次 300 覆盖注册表 2000; 指令含步骤编排段。"""
+    conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2")
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
                                             "executorId": "ex-g"})
     assert eb.confirm_task(task["id"])["ok"]
     pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
-    assert pl["executorConfig"]["max_iterations"] == 100
-    assert "微步模式" in pl["instruction"]
+    assert pl["executorConfig"]["max_iterations"] == 300
+    assert "步骤序列" in pl["instruction"]
 
 
 def test_confirm_quick_mode_registry_iterations(arch_env, tmp_path, monkeypatch):
@@ -130,7 +138,7 @@ def test_confirm_quick_mode_registry_iterations(arch_env, tmp_path, monkeypatch)
 
 
 def test_confirm_auto_uses_executor_capability(arch_env, tmp_path, monkeypatch):
-    """strict(=auto) + 执行器 capability=T3 → 轮次 300。"""
+    """strict(=auto) + 执行器 capability=T2 → 轮次 300。"""
     conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="strict")
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
                                             "executorId": "ex-g"})
@@ -142,10 +150,15 @@ def test_confirm_auto_uses_executor_capability(arch_env, tmp_path, monkeypatch):
 
 # ── REST 白名单 ──────────────────────────────────────────────────────
 
-def test_analysis_mode_rest_accepts_tiers(client):
+def test_analysis_mode_rest_accepts_tiers_and_legacy(client):
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
                     json={"mode": "T2"})
+    assert r.status_code == 200
+    assert store.ConversationsStore.get(conv["id"])["analysisMode"] == "T2"
+    # 旧刻度 T3/T4 归一为 T2 后接受
+    r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
+                    json={"mode": "T3"})
     assert r.status_code == 200
     assert store.ConversationsStore.get(conv["id"])["analysisMode"] == "T2"
     r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
@@ -154,14 +167,12 @@ def test_analysis_mode_rest_accepts_tiers(client):
 
 
 def test_tool_rounds_by_tier():
-    """M4-B: chat 侧工具轮次按挡——强挡保持现行为 4, 弱挡更早触顶(损失有界)。"""
-    from topoone_app_architect.agent.governance.gears import resolve_gear
+    """M4-B: chat 侧工具轮次按挡——强/中挡保持现行为 4, 弱挡更早触顶(损失有界)。"""
+    from topoone_app_architect.agent.governance.gears import _TIERS, resolve_gear
     assert resolve_gear("quick", {}).tool_rounds == 4      # T0 现行为不变
     assert resolve_gear("strict", {}).tool_rounds == 4     # T1 现行为不变
-    from topoone_app_architect.agent.governance.gears import _TIERS
-    assert _TIERS["T3"].tool_rounds == 3
-    assert _TIERS["T4"].tool_rounds == 2
-    # 封顶链(replace 只改 tier 字段): T2 被封顶为 T3 时轮次保持 T2 现值(既有语义)
-    capped = resolve_gear("strict", {"tierProbed": "T2",
+    assert _TIERS["T2"].tool_rounds == 3
+    # 封顶链(replace 只改 tier 字段): T1 被封顶为 T2 时轮次保持 T1 现值(既有语义)
+    capped = resolve_gear("strict", {"tierProbed": "T1",
                                      "probeDetail": "指令跟随探针未过——上限T3"})
-    assert capped.tier == "T3" and capped.tool_rounds == 4
+    assert capped.tier == "T2" and capped.tool_rounds == 4

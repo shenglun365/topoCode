@@ -127,7 +127,7 @@ onUnmounted(() => {
   disconnectConvEvents()
 })
 function onSessionsChanged() { void loadRecent() }
-watch(() => conv.activeId, () => { if (conv.activeId) void maybeHintT4Model() })
+watch(() => conv.activeId, () => { if (conv.activeId) void maybeHintWeakModel() })
 
 /** 任务执行器切换(待确认态): PATCH /tasks/{id}/executor。 */
 async function onTaskExecutor(p: { taskId: string; executorType: string }) {
@@ -351,23 +351,23 @@ const isExecutionConv = computed(() =>
   !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
   && !isRunning.value)
 
-/** v2 模型软提示: 当前会话模型档位 t4(≤2B 级)时提示换 4B+——
- * 测评实证 2B 档工具调用 0 收敛(探测/实操双低), 质量无保障。
+/** 模型准入提示(三维矩阵): 会话模型测评 T2(弱, 全面补偿档)时提示换更强模型——
+ * 刻度细则见 agent/governance/gears.py; 提示不拦截(可按 T2 最低档运行)。
  * 每次会话打开提示一次(不弹窗不打断, 本地消息)。 */
-const t4Hinted = new Set<string>()
+const t2Hinted = new Set<string>()
 let capProfilesCache: Record<string, any> | null = null
-async function maybeHintT4Model() {
+async function maybeHintWeakModel() {
   const mid = readModelPref('architect') || ''
-  if (!mid || t4Hinted.has(conv.activeId) || t4Hinted.has(mid)) return
+  if (!mid || t2Hinted.has(conv.activeId) || t2Hinted.has(mid)) return
   try {
     if (!capProfilesCache) {
       const d = await apiGet<{ profiles: any[] }>('/llm/model-profiles')
       capProfilesCache = Object.fromEntries((d.profiles ?? []).map((p: any) => [p.modelId, p]))
     }
     const p = capProfilesCache[mid]
-    if (p && p.tier === 't4') {
-      t4Hinted.add(conv.activeId); t4Hinted.add(mid)
-      conv.pushLocalHint('💡 软性建议: 当前会话模型较小(t4 档)。近期测评显示 4B 以下模型工具调用收敛率接近 0, 质量无法保障——建议在模型设置中切换 4B 及以上模型。')
+    if (p && Number(p.tier) === 2) {
+      t2Hinted.add(conv.activeId); t2Hinted.add(mid)
+      conv.pushLocalHint('💡 模型准入提示: 当前会话模型测评较弱(T2 档, <6B 级)。系统将按全面补偿模式运行(结构化指令+核心逻辑图+步骤编排), 但产出质量与速度受限——建议在模型设置中切换 T0/T1 档模型。')
     }
   } catch { /* profiles 不可得 → 不提示 */ }
 }

@@ -351,7 +351,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'auto_start', label: '自动拉起', kind: 'bool' },
     { key: 'permission', label: '权限策略', kind: 'select', options: ['auto', 'ask'] },
     { key: 'timeout', label: '超时(秒)', kind: 'num' },
-    { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2', 'T3', 'T4'] },
+    { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2'] },
     { key: 'model', label: '默认模型', kind: 'model-select' },
   ],
   'remote-agent': [
@@ -362,7 +362,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
   ],
     'codex-server': [
         { key: 'codex_bin', label: 'codex 路径' },
-        { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2', 'T3', 'T4'] },
+        { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2'] },
         { key: 'model', label: '默认模型', kind: 'model-select' },
     { key: 'codex_home', label: 'CODEX_HOME(隔离)' },
     { key: 'approval_policy', label: '审批策略', kind: 'select', options: ['never', 'on-request', 'on-failure', 'untrusted'] },
@@ -375,7 +375,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'base_url', label: '端点(本地必填, /v1)' },
     { key: 'api_key', label: 'API Key' },
     { key: 'max_iterations', label: '最大迭代', kind: 'num' },
-    { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2', 'T3', 'T4'] },
+    { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2'] },
     { key: 'system_prompt', label: '系统提示(空=默认协议)' },
     { key: 'node_bin', label: 'node 路径(需≥22)' },
     { key: 'sidecar_script', label: 'sidecar 路径' },

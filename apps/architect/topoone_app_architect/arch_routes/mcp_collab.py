@@ -436,7 +436,7 @@ async def set_model_profile_route(model_id: str, request: Request):
     try:
         tier = int(body.get("tier"))
     except (TypeError, ValueError):
-        return err(400, "缺少整数 tier (0-4)")
+        return err(400, "缺少整数 tier (0-2)")
     from . import model_profile
     return ok(model_profile.set_manual_tier(model_id, tier))
 

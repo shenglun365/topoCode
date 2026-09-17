@@ -512,14 +512,15 @@ async def set_analysis_mode(conv_id: str, request: Request):
     """切换会话分析挡位(即时生效于本会话后续回合)。
 
     body: {mode} — quick=T0 直通车 | strict/auto=按执行器能力自动 |
-    T0-T4=钉死指定档(挡位体系见 agent/governance/gears.py)。
+    T0-T2=钉死指定档(刻度细则见 agent/governance/gears.py; 旧 T3/T4 归一)。
     """
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
     data = await request.json()
     mode = str(data.get("mode") or "").strip()
-    from ..agent.governance.gears import GEAR_MODES, gear_note
+    from ..agent.governance.gears import GEAR_MODES, gear_note, normalize_mode
+    mode = normalize_mode(mode)
     if mode not in GEAR_MODES:
         return err(400, f"mode 须为 {'/'.join(GEAR_MODES)}")
     store.ConversationsStore.update(conv_id, {"analysisMode": mode})

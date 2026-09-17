@@ -187,10 +187,14 @@ def _validate(entries: list[dict]) -> Optional[str]:
         names = [m["name"] for m in cfg["models"]]
         if len(names) != len(set(names)):
             return f"执行器 {eid} 模型名称重复"
-        # 能力档位写侧校验(环节十二a): 空=未标定(解析链落默认 T1)
-        cap = str(cfg.get("capability") or "").strip()
-        if cap and cap not in ("T0", "T1", "T2", "T3", "T4"):
-            return f"执行器 {eid} 能力档位非法: {cap!r}(允许 T0-T4 或留空)"
+        # 能力档位写侧校验(环节十二a): 空=未标定(解析链落默认 T1)。
+        # 刻度 T0-T2; 旧刻度 T3/T4 写侧归一(2026-09-17 收敛)。
+        cap = str(cfg.get("capability") or "").strip().upper()
+        if cap and cap not in ("T0", "T1", "T2"):
+            from ..agent.governance.gears import normalize_mode as _nm
+            cap = _nm(cap)
+        if cap and cap not in ("T0", "T1", "T2"):
+            return f"执行器 {eid} 能力档位非法: {cap!r}(允许 T0-T2 或留空)"
         cfg["capability"] = cap
         # 模型配置写入校验(cline-sdk 专属, cv-163/166/168 教训: 空 model/悬空默认/
         # 坏 url 均运行期才炸; opencode 等类型 models.url 为可选元数据不强制)

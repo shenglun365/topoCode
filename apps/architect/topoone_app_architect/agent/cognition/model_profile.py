@@ -39,11 +39,9 @@ _lazy_tried: set = set()
 _lazy_lock = threading.Lock()
 
 TIERS = {
-    0: "27B+ (全能力, 关闭多余兜底)",
-    1: "12-27B (标准适配)",
-    2: "6-12B (标准兜底: 草稿卡收敛/意图追问/高宽容解析)",
-    3: "3-6B (加强兜底: 输出后处理)",
-    4: "1-3B (极简提示/单轮单任务聚焦/max 宽容解析)",
+    0: "T0 强(≥12B 全能力, 关闭多余兜底)",
+    1: "T1 中(6-12B 标准兜底)",
+    2: "T2 弱(<6B 全面补偿: 结构化指令+核心逻辑图+有界轮次)",
 }
 
 
@@ -63,19 +61,18 @@ def guess_params_b(model_name: str) -> Optional[float]:
 
 
 def heuristic_tier(model_name: str) -> int:
-    """名称启发式 tier(档案缺省/兜底路径)。无法判断 → 1(保守标准档)。"""
+    """名称启发式 tier(档案缺省/兜底路径)。无法判断 → 1(保守标准档)。
+
+    刻度 2026-09-17 收敛 T0-T2: ≥12B 强(0) / 6-12B 中(1) / <6B 弱(2)。
+    """
     b = guess_params_b(model_name)
     if b is None:
         return 1
-    if b >= 27:
-        return 0
     if b >= 12:
-        return 1
+        return 0
     if b >= 6:
-        return 2
-    if b >= 3:
-        return 3
-    return 4
+        return 1
+    return 2
 
 
 # ── 档案存取 ──────────────────────────────────────────────────────────
@@ -281,12 +278,10 @@ def probe_model(model_id: str) -> Dict[str, Any]:
     score = 0.5 * tool_rate + 0.3 * json_rate + 0.2 * instr_score
     base = heuristic_tier(_model_name_of(model_id))
     tier = base
-    if score < 0.5:
-        tier = max(base, 2)     # 差 → 至少 t2(启用兜底)
-    if score < 0.3:
-        tier = max(base, 3)
-    if score < 0.15:
-        tier = max(base, 4)
+    if score < 0.45:
+        tier = max(base, 1)     # 差 → 至少 T1(启用标准兜底)
+    if score < 0.25:
+        tier = 2                # 很差 → T2(全面补偿; 准入提示由前端投影)
 
     caps = {"toolCallRate": round(tool_rate, 2), "jsonRate": round(json_rate, 2),
             "instructionScore": round(instr_score, 2), "stability": round(stability, 2),

@@ -40,7 +40,7 @@ def test_cap_note_wired_into_instruction():
     from topoone_app_architect.agent.governance.gears import resolve_gear
     policy = resolve_gear("strict", {"tierProbed": "T1",
                                      "probeFlags": {"followGate": True}})
-    assert policy.tier == "T3" and policy.cap_note
+    assert policy.tier == "T2" and policy.cap_note
     text = assemble_task_instruction({"title": "T", "instruction": "做"},
                                      policy=policy,
                                      runtime={"branch": "exec/c1"})

@@ -32,9 +32,9 @@ def test_heuristic_tier():
     assert mp.guess_params_b("Qwen2.5-72B-Instruct") == 72.0
     assert mp.guess_params_b("qwen2.5-1.5b") == 1.5
     assert mp.heuristic_tier("Qwen2.5-72B-Instruct") == 0
-    assert mp.heuristic_tier("qwen3.5-9b-mtp") == 2
-    assert mp.heuristic_tier("llama-3.2-3b") == 3
-    assert mp.heuristic_tier("qwen2.5-0.5b") == 4
+    assert mp.heuristic_tier("qwen3.5-9b-mtp") == 1   # 刻度 T0-T2: 9B → T1(中)
+    assert mp.heuristic_tier("llama-3.2-3b") == 2   # 刻度 T0-T2: 3B → T2(弱)
+    assert mp.heuristic_tier("qwen2.5-0.5b") == 2
     assert mp.heuristic_tier("unknown-model") == 1     # 不可判断 → 保守 t1
 
 
@@ -87,10 +87,10 @@ def test_probe_model_good_small_model(tmp_path, monkeypatch):
     monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", smart_sync)
     prof = mp.probe_model("m-8b")
     assert prof.get("modelName") == "m-8b"      # 模型目录空 → 用 id 启发式
-    assert prof["tier"] == 2                    # 8b 启发式 t2, 满分不升档
+    assert prof["tier"] == 1                    # 8b 启发式 T1, 满分不升档
     assert prof["caps"]["toolCallRate"] == 1.0
     assert prof["source"] == "probed"
-    assert mp.tier_of("m-8b") == 2
+    assert mp.tier_of("m-8b") == 1
 
 
 def test_probe_model_degrades_tier(tmp_path, monkeypatch):
