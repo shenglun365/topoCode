@@ -30,6 +30,33 @@
 
 ## 1. M4 小模型工具协议健壮性（含前置 B3/B4）
 
+> **as-built（2026-09-17，全部 4 切片落地，全量门禁 920 passed）**
+> 拍板回执：A 直接全量 + 单调用/轮；B3/B4 立项先行；B+C 随行。
+>
+> - **切片 1 B4（`1469d74`）**：`register_architect_tool` 增 `params_doc/brief`
+>   元数据参数；`cognition/prompt.py` 存量迁移表（TOOL_BRIEFS/TOOL_PARAM_DOCS，
+>   与 `_CAPABILITY_DOC` 逐字对齐）；`capability_doc_from_tools` 补全（层级约定段/
+>   图表输出段，diagram.* 归 diagram_skill 块）；**默认切单源**（`single_source:
+>   false` 覆盖可回退等价模式）；迁移表归 cognition 层（层序合规：cognition 不反向
+>   依赖 tools）。
+> - **切片 2 B3（`8aad676`）**：`handle_chat` ~230 行拆为五段管线
+>   （`_chat_gate/_chat_route/_chat_context/_run_llm_tool_loop/_chat_land`），
+>   行为等价（kb_chat 全绿），结构守卫测试防回内联。
+> - **切片 3 B+C（`c65afa9`）**：GearPolicy 增 `tool_rounds`（T0/T1/T2=4 现行为
+>   不变，T3=3、T4=2 弱档更早触顶）；`protocol.tool_parse_audit` 纯审计 +
+>   `record_tool_parse_fail` 埋点（llm_dataset kind=tool_parse_fail，
+>   chat/sync/structured 三面覆盖），样本供探针判分用例库（挂接点接口预留）。
+> - **切片 4 A（`307922d`）**：考古结论——主后端 `llm.sync` 已支持
+>   `mode=structured+output_schema`（校验重试 2 次），缺口仅在 provider 层未消费
+>   `output_schema`。补齐：ollama `format=json_schema` / openai_compat
+>   `response_format`（均带 4xx 降级重试，回提示词约束基线）；`TOOL_CALL_SCHEMA`
+>   （单调用/轮）；`structured_model_enabled`（CollabConfig `llm.structuredModels`
+>   支持位，未配置=现行为）；`structured_tool_round` + `run_tools_loop` 双通道
+>   （受限轮 → 空 tool 转终稿 → 失败 nudge 降级）；chat 循环两段式（受限工具轮
+>   非流式 + 文本终稿轮流式）。
+> - **待办尾巴**：支持位自动写（探针 structured 冒烟用例）、支持位配置 UI、
+>   真机 Ollama/LM Studio 冒烟（零代码验证）。
+
 ### 1.1 现状（代码证据）
 
 - 主 agent 工具调用是**文本协议**：`agent/tools/protocol.py:20` 的
