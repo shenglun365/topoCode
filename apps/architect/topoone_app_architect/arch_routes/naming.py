@@ -100,8 +100,7 @@ def _rejection_facts(pid: str, item_id: str) -> List[Dict[str, Any]]:
 def _induce_rule_llm(item: Dict[str, Any], facts: List[Dict[str, Any]]
                      ) -> Optional[Dict[str, Any]]:
     """LLM（induce 角色）归纳规约；不可达/降级返回 None（调用方回退模板）。"""
-    from .agent_roles import resolve_role_model
-    from .req_agent import llm_sync
+    from ..agent.turns.catalog import catalog_call
     target = item.get("target") or {}
     behavior = item.get("behavior") or {}
     fact_lines = []
@@ -120,13 +119,12 @@ def _induce_rule_llm(item: Dict[str, Any], facts: List[Dict[str, Any]]
         '输出 JSON {"ruleText": "…", "scenarios": ["accept"]}。'
         "scenarios 只能是 accept/extract/naming/general：行为/覆盖类失败选 accept，"
         "命名类失败选 naming 并加 extract。ruleText 一句话、可操作、不空泛。")
-    res = llm_sync(
+    res = catalog_call(
+        "role:induce",
         [{"role": "user", "content": prompt}],
-        mode="structured",
-        output_schema={"type": "object", "properties": {
+        schema={"type": "object", "properties": {
             "ruleText": {"type": "string"},
-            "scenarios": {"type": "array", "items": {"type": "string"}}}},
-        model_id=resolve_role_model("induce"))
+            "scenarios": {"type": "array", "items": {"type": "string"}}}})
     out = (res or {}).get("output") if isinstance(res, dict) else None
     if isinstance(out, dict) and (out.get("ruleText") or "").strip():
         scen = out.get("scenarios") or ["accept"]

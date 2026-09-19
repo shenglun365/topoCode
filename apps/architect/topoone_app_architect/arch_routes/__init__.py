@@ -8,9 +8,11 @@ from fastapi import APIRouter
 
 from . import project, knowledge, requirements, execution, arch_change, mcp_collab, unit_test, websocket, git, greenfield, tags, overview, dirs, docs, semantic_assets, diagram, design
 from . import sessions
+from . import session_docs
 from . import dev_digest
 from . import asset_framework
 from . import agent_executors
+from . import cline_engines
 from . import exec_cline
 from . import agent_roles
 from . import contracts
@@ -26,6 +28,7 @@ router.include_router(project.router)
 router.include_router(knowledge.router)
 router.include_router(requirements.router)
 router.include_router(sessions.router)
+router.include_router(session_docs.router)
 router.include_router(dev_digest.router)
 router.include_router(arch_change.router)
 router.include_router(mcp_collab.router)
@@ -40,6 +43,7 @@ router.include_router(dirs.router)
 router.include_router(docs.router)
 router.include_router(semantic_assets.router)
 router.include_router(agent_executors.router)
+router.include_router(cline_engines.router)
 router.include_router(exec_cline.router)
 router.include_router(asset_framework.router)
 router.include_router(agent_roles.router)

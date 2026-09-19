@@ -48,7 +48,7 @@ def _mk_env(arch_env, tmp_path, monkeypatch, mode="T2", split=None):
     monkeypatch.setattr(eb, "_start_task_pump", lambda *a, **k: None)
     if split is not None:
         import topoone_app_architect.agent.planning.task_plan as tp
-        monkeypatch.setattr(tp, "split_tasks_llm", lambda text: split)
+        monkeypatch.setattr(tp, "split_tasks_llm", lambda text, policy=None: split)
     from topoone_app_architect.agent.perception import commands as cmds
     return conv, cmds, eb, calls
 

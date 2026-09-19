@@ -515,8 +515,9 @@ async function saveRoles() {
 async function onBindExecutor(executorId: string) {
   if (!conv.activeId || !executorId || executorId === boundExecutorId.value) return
   if (boundExecutorId.value) {
-    const okGo = window.confirm(
-      `会话已绑定「${boundExecutorId.value}」。\n切换到「${executorId}」将克隆一个新会话（绑定不可换），继续？`)
+    const okGo = await dialog.confirm(
+      `会话已绑定「${boundExecutorId.value}」。\n切换到「${executorId}」将克隆一个新会话（绑定不可换），继续？`,
+      { danger: true })
     if (!okGo) return
   }
   try {
@@ -532,7 +533,7 @@ async function onBindExecutor(executorId: string) {
       if (newId) await conv.openConversation({ id: newId } as ConversationMeta)
     }
   } catch (e: any) {
-    window.alert(e?.message || String(e))
+    void dialog.alert(e?.message || String(e))
   }
 }
 

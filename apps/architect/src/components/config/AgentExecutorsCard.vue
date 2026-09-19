@@ -20,8 +20,8 @@ import {
   ChevronDownIcon, ChevronRightIcon, WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
 import { apiGet, apiPut, apiPost } from '@/services/api-client'
+import { useAppDialog } from '@/composables/useAppDialog'
 import { useArchProjectStore } from '@/stores/project-store'
-import type { ArchLlmModel } from '@/types'
 
 interface ExecModel { id: string; name: string; model: string; url: string; apiKey: string; maxTokens: number }
 interface ExecEntry {
@@ -35,6 +35,7 @@ interface ExecEntry {
 }
 
 const { t } = useI18n()
+const dialog = useAppDialog()
 const project = useArchProjectStore()
 const entries = ref<ExecEntry[]>([])
 const runtime = ref<any>(null)
@@ -86,7 +87,6 @@ const modelProbing = ref<Record<string, string>>({})   // key: `${execId}/${mode
 const detected = ref<Record<string, { name: string; model: string; url: string; kind: string }[]>>({})
 const showDetected = ref<Record<string, boolean>>({})
 const detecting = ref('')
-const llmModels = ref<ArchLlmModel[]>([])
 
 const TYPES = [
   { value: 'opencode', label: 'opencode (serve 会话)' },
@@ -101,13 +101,9 @@ const TYPES = [
 async function load() {
   loading.value = true
   try {
-    const [d, llm] = await Promise.all([
-      apiGet<{ executors: ExecEntry[]; runtime: any }>('/agent/executors'),
-      apiGet<{ models: ArchLlmModel[] }>('/llm/models').catch(() => ({ models: [] })),
-    ])
+    const d = await apiGet<{ executors: ExecEntry[]; runtime: any }>('/agent/executors')
     entries.value = d.executors ?? []
     runtime.value = d.runtime
-    llmModels.value = llm.models ?? []
     // 重载后按 id 找回展开中的条目(id 未变则保持展开)
     if (expandedEntry.value) {
       expandedEntry.value = entries.value.find((x) => x.id === expandedEntry.value?.id) ?? null
@@ -152,6 +148,8 @@ function setDefault(idx: number) {
 
 function toggleExpand(e: ExecEntry) {
   expandedEntry.value = expandedEntry.value === e ? null : e
+  // cline-sdk 展开时拉取引擎版本面(检测/默认/可装清单)
+  if (expandedEntry.value?.type === 'cline-sdk' && !enginesInfo.value) loadEngines()
 }
 
 function onTypeChange(e: ExecEntry) {
@@ -245,14 +243,51 @@ function toggleModel(e: ExecEntry, dm: { name: string; model: string; url: strin
   })
 }
 
-/** ── cline: 模型与 architect 实例模型保持一致(一键同步) ── */
-function syncInstanceModels(e: ExecEntry) {
-  if (!llmModels.value.length) return
-  e.config.models = llmModels.value.map((m, i) => ({
-    id: `m${Date.now()}${i}`, name: m.name, model: m.model,
-    url: m.url || '', apiKey: '', maxTokens: 0,
-  }))
-  if (!e.config.base_url && llmModels.value[0]?.url) e.config.base_url = llmModels.value[0].url
+/** 表单字段: 内置 cline 模型面只剩默认模型选择(实例实时投影)——
+ * 白名单/provider/base_url/api_key/sidecar_script 全部退役(引擎面板管 sidecar) */
+function fieldsOf(e: ExecEntry) {
+  const fields = typeFields[e.type] || []
+  if (!isBuiltinExec(e)) return fields
+  const hidden = new Set(['sidecar_script', 'provider_id', 'base_url', 'api_key'])
+  return fields.filter((f) => !hidden.has(f.key))
+}
+
+/** ── cline SDK 引擎版本管理(多版本共存隔离) ──
+ * 每版本自包含目录(engines/<ver>: dist+node_modules+data)——进程/存储按版本隔离;
+ * 默认版本随任务下发(cline_data_dir 隔离会话); 显式 sidecar_script 优先。 */
+interface EngineRow { version: string; ok: boolean; missing?: string[]; installedAt?: string; node?: string; dataDir?: string }
+const enginesInfo = ref<{ installed: EngineRow[]; defaultVersion: string; available: any; node: string; repoSidecar: any } | null>(null)
+const enginesLoading = ref(false)
+const engineInstalling = ref('')
+const engineVer = ref('')
+const engineMsg = ref('')
+async function loadEngines() {
+  enginesLoading.value = true
+  try { enginesInfo.value = await apiGet<any>('/agent/executors/cline/engines') } catch { /* 保持旧数据 */ } finally { enginesLoading.value = false }
+}
+async function installEngine(v: string) {
+  if (!v) return
+  engineInstalling.value = v
+  engineMsg.value = `安装 ${v} 中（仓库 sidecar 构建 + npm 依赖安装，可能需要几分钟）…`
+  try {
+    const d = await apiPost<{ status: string; detail: string }>('/agent/executors/cline/engines/install', { version: v })
+    engineMsg.value = `${d.status === 'ok' ? '✓' : '✗'} ${d.detail}`
+    await loadEngines()
+  } catch (e: any) { engineMsg.value = `✗ ${e?.message || e}` } finally { engineInstalling.value = '' }
+}
+async function removeEngine(v: string) {
+  if (!(await dialog.confirm(`移除引擎 ${v}？该版本的会话数据将一并删除。`, { danger: true }))) return
+  try {
+    const d = await apiPost<{ status: string; detail: string }>('/agent/executors/cline/engines/remove', { version: v })
+    engineMsg.value = `${d.status === 'ok' ? '✓' : '✗'} ${d.detail}`
+    await loadEngines()
+  } catch (e: any) { engineMsg.value = `✗ ${e?.message || e}` }
+}
+async function setEngineDefault(v: string) {
+  try {
+    await apiPost('/agent/executors/cline/engines/default', { version: v })
+    await loadEngines()
+  } catch (e: any) { engineMsg.value = `✗ ${e?.message || e}` }
 }
 
 function addModel(e: ExecEntry) {
@@ -498,27 +533,33 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
 
         <!-- 详情(展开) -->
         <div v-if="expandedEntry === e" class="border-t border-ctp-surface0/60">
-          <!-- 身份编辑行 -->
+          <!-- 身份编辑行(内置 cline 免名称/类型配置: 静态标识) -->
           <div class="flex items-center gap-2 px-2.5 py-2 bg-ctp-surface0/40">
-            <input
-              v-model="e.id"
-              class="input !py-0.5 !text-xs font-mono w-28"
-              :disabled="isBuiltinExec(e)"
-              :title="t('config.executors.idHint')"
-            >
-            <select
-              v-model="e.type"
-              class="input !py-0.5 !text-xs w-48"
-              @change="onTypeChange(e)"
-            >
-              <option v-for="ty in TYPES" :key="ty.value" :value="ty.value">
-                {{ ty.label }}
-              </option>
-            </select>
-            <select v-model="e.host" class="input !py-0.5 !text-xs w-16" :title="t('config.executors.hostHint')">
-              <option value="local">{{ t('config.executors.hostLocal') }}</option>
-              <option value="remote">{{ t('config.executors.hostRemote') }}</option>
-            </select>
+            <template v-if="isBuiltinExec(e)">
+              <span class="chip bg-ctp-mauve/15 text-ctp-mauve font-mono">cline</span>
+              <span class="chip bg-ctp-surface0 text-ctp-subtext1">内置 · cline SDK（自主模式）</span>
+              <span class="text-[10px] text-ctp-overlay0">免配置名称/类型 · 不可删除</span>
+            </template>
+            <template v-else>
+              <input
+                v-model="e.id"
+                class="input !py-0.5 !text-xs font-mono w-28"
+                :title="t('config.executors.idHint')"
+              >
+              <select
+                v-model="e.type"
+                class="input !py-0.5 !text-xs w-48"
+                @change="onTypeChange(e)"
+              >
+                <option v-for="ty in TYPES" :key="ty.value" :value="ty.value">
+                  {{ ty.label }}
+                </option>
+              </select>
+              <select v-model="e.host" class="input !py-0.5 !text-xs w-16" :title="t('config.executors.hostHint')">
+                <option value="local">{{ t('config.executors.hostLocal') }}</option>
+                <option value="remote">{{ t('config.executors.hostRemote') }}</option>
+              </select>
+            </template>
             <div class="flex-1" />
             <button
               v-if="e.type === 'opencode'"
@@ -574,12 +615,12 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             <span class="text-[10px] text-ctp-overlay0">{{ t('config.executors.srcDirHint') }}</span>
           </div>
 
-          <!-- 连接参数(随类型) -->
-          <div v-if="typeFields[e.type]?.length" class="px-2.5 py-2 border-t border-ctp-surface0/60">
+          <!-- 连接参数(随类型; 内置 cline 不含 sidecar_script——引擎面板管理) -->
+          <div v-if="fieldsOf(e).length" class="px-2.5 py-2 border-t border-ctp-surface0/60">
             <div class="text-[10px] text-ctp-overlay1 mb-1.5">{{ t('config.executors.connTitle') }}</div>
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <label
-                v-for="f in typeFields[e.type]"
+                v-for="f in fieldsOf(e)"
                 :key="f.key"
                 class="flex flex-col gap-0.5"
               >
@@ -650,20 +691,108 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             <div v-else-if="!detected[keyOf(e)]?.length" class="text-[10px] text-ctp-overlay0">{{ t('config.executors.detectHint') }}</div>
           </div>
 
-          <!-- ══ cline 专属: 与 architect 实例模型保持一致 ══ -->
-          <div v-if="e.type === 'cline-sdk'" class="px-2.5 py-2 border-t border-ctp-surface0/60 space-y-1.5">
-            <div class="flex items-center gap-2">
-              <span class="text-[10px] text-ctp-overlay1">{{ t('config.executors.modelsTitle') }}</span>
-              <span class="text-[10px] text-ctp-overlay0">{{ t('config.executors.clineHint') }}</span>
-              <div class="flex-1" />
-              <button class="btn !py-0 !px-2 !text-[10px]" @click="syncInstanceModels(e)">
-                {{ t('config.executors.syncInstanceModels') }} ({{ llmModels.length }})
-              </button>
-            </div>
+          <!-- ══ cline 专属(内置): 模型面=architect 实例实时投影, 仅选默认模型 ══ -->
+          <div v-if="e.type === 'cline-sdk' && isBuiltinExec(e)" class="px-2.5 py-1.5 border-t border-ctp-surface0/60">
+            <span class="text-[10px] text-ctp-overlay0">
+              模型列表随 architect 实例配置实时同步（无需白名单/端点/密钥重复配置）；「默认模型」在列表范围内选定，会话级可临时切换
+            </span>
           </div>
 
-          <!-- 模型白名单表(各类型通用, opencode 由勾选生成/cline 由同步生成/codex 手动) -->
-          <div v-if="e.config.models" class="px-2.5 py-2 border-t border-ctp-surface0/60 space-y-1.5">
+          <!-- ══ cline 专属(内置): SDK 引擎版本管理(多版本共存·进程/存储按版本隔离) ══ -->
+          <div v-if="e.type === 'cline-sdk' && isBuiltinExec(e)" class="px-2.5 py-2 border-t border-ctp-surface0/60 space-y-1.5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[10px] text-ctp-overlay1">SDK 引擎版本</span>
+              <span class="text-[10px] text-ctp-overlay0">多版本共存，按版本隔离进程与会话存储；默认版本对新会话生效</span>
+              <div class="flex-1" />
+              <button class="btn !py-0 !px-2 !text-[10px]" :disabled="enginesLoading" @click="loadEngines">
+                {{ enginesLoading ? '检测中…' : '检测' }}
+              </button>
+            </div>
+            <div v-if="enginesInfo" class="space-y-1.5">
+              <div class="flex items-center gap-1.5 flex-wrap text-[10px]">
+                <span class="chip bg-ctp-surface0 text-ctp-subtext1" :title="`node 版本（@cline/core 要求 >=22）: ${enginesInfo.node || '未检测到'}`">
+                  node {{ enginesInfo.node || '?' }}
+                </span>
+                <span
+                  v-if="enginesInfo.available?.latest"
+                  class="chip bg-ctp-teal/15 text-ctp-teal"
+                >npm latest {{ enginesInfo.available.latest }}</span>
+                <span
+                  v-else-if="enginesInfo.available?.error"
+                  class="chip bg-ctp-red/15 text-ctp-red"
+                  :title="enginesInfo.available.error"
+                >registry 不可达</span>
+                <span
+                  class="chip"
+                  :class="enginesInfo.repoSidecar?.exists ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-red/15 text-ctp-red'"
+                  :title="enginesInfo.repoSidecar?.path"
+                >仓库内置 {{ enginesInfo.repoSidecar?.exists ? '✓' : '✗' }}</span>
+                <span class="text-ctp-overlay0">
+                  默认: <span class="font-mono">{{ enginesInfo.defaultVersion || '未设(回退仓库内置)' }}</span>
+                </span>
+              </div>
+              <div
+                v-for="eng in enginesInfo.installed"
+                :key="eng.version"
+                class="flex items-center gap-2 text-[11px]"
+              >
+                <input
+                  type="radio"
+                  name="cline-engine-default"
+                  :checked="eng.version === enginesInfo?.defaultVersion"
+                  title="设为执行器默认使用的引擎版本"
+                  @change="setEngineDefault(eng.version)"
+                >
+                <span class="font-mono" :class="eng.ok ? 'text-ctp-text' : 'text-ctp-red'">v{{ eng.version }}</span>
+                <span
+                  class="chip !text-[9px]"
+                  :class="eng.ok ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-red/15 text-ctp-red'"
+                  :title="(eng.missing || []).join('; ')"
+                >{{ eng.ok ? 'ok' : 'broken' }}</span>
+                <span class="text-[10px] text-ctp-overlay0 truncate" :title="eng.dataDir">{{ eng.installedAt || '' }}</span>
+                <div class="flex-1" />
+                <button
+                  class="btn !py-0 !px-2 !text-[10px] text-ctp-red"
+                  :disabled="(enginesInfo?.installed?.length ?? 0) > 1 && eng.version === enginesInfo?.defaultVersion"
+                  :title="(enginesInfo?.installed?.length ?? 0) > 1 && eng.version === enginesInfo?.defaultVersion
+                    ? '默认版本不可移除——先切换默认'
+                    : '移除该版本（含其会话数据）'"
+                  @click="removeEngine(eng.version)"
+                >移除</button>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <select
+                  v-model="engineVer"
+                  class="input !py-0.5 !text-[11px] font-mono w-44"
+                  title="npm 稳定版清单(新→旧, 最多 15 个)"
+                >
+                  <option value="">选择可装版本…</option>
+                  <option
+                    v-for="v in enginesInfo.available?.versions || []"
+                    :key="v"
+                    :value="v"
+                  >{{ v }}{{ v === enginesInfo.available?.latest ? '（latest）' : '' }}</option>
+                </select>
+                <input
+                  v-model="engineVer"
+                  class="input !py-0.5 !text-[11px] font-mono w-32"
+                  placeholder="或输入版本号"
+                >
+                <button
+                  class="btn !py-0 !px-2 !text-[10px]"
+                  :disabled="!engineVer || !!engineInstalling"
+                  @click="installEngine(engineVer)"
+                >
+                  {{ engineInstalling ? `安装 ${engineInstalling} 中…` : '下载安装' }}
+                </button>
+              </div>
+            </div>
+            <div v-else class="text-[10px] text-ctp-overlay0">点击「检测」加载引擎版本面</div>
+            <div v-if="engineMsg" class="text-[10px] font-mono text-ctp-overlay0 break-all whitespace-pre-wrap">{{ engineMsg }}</div>
+          </div>
+
+          <!-- 模型白名单表(opencode 由检测勾选生成/codex 手动维护; 内置 cline 由直选生成——不可手编) -->
+          <div v-if="e.config.models && e.type !== 'cline-sdk'" class="px-2.5 py-2 border-t border-ctp-surface0/60 space-y-1.5">
             <div class="flex items-center gap-2">
               <span class="text-[10px] text-ctp-overlay0">
                 {{ t('config.executors.whitelistCount', { n: (e.config.models ?? []).length }) }}

@@ -81,6 +81,14 @@ async def patch_item(item_id: str, request: Request):
     return ok(row)
 
 
+@router.delete("/tracking/items/{item_id}")
+async def delete_item(item_id: str):
+    """单条删除(误挂/过期条目清理; 会话删除走级联 delete_by_conversation)。"""
+    if not TR.TrackingItemsStore.delete(item_id):
+        return err(404, "条目不存在")
+    return ok({"deleted": True, "id": item_id})
+
+
 @router.get("/tracking/vocab")
 async def get_vocab():
     """字典: 分类/操作类型(可配置) + 角色词汇(结构常量)。"""

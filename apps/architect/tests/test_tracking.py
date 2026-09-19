@@ -134,6 +134,21 @@ def test_rest_items_manual_and_vocab(tmp_path, monkeypatch):
                           json={"categories": []}).status_code == 400
 
 
+def test_rest_delete_item(tmp_path, monkeypatch):
+    """单条删除: 删除后清单不含、重复删除 404; 不影响其他条目。"""
+    _setup_env(tmp_path, monkeypatch)
+    with _mk_app() as client:
+        r1 = client.post("/api/architect/tracking/items",
+                         json={"title": "条目A"}).json()["data"]
+        r2 = client.post("/api/architect/tracking/items",
+                         json={"title": "条目B"}).json()["data"]
+        assert client.delete(f"/api/architect/tracking/items/{r1['id']}").status_code == 200
+        rows = client.get("/api/architect/tracking/items?scope=all").json()["data"]["items"]
+        assert [r["id"] for r in rows] == [r2["id"]]
+        # 重复删除 → 404
+        assert client.delete(f"/api/architect/tracking/items/{r1['id']}").status_code == 404
+
+
 def test_manual_requirement_emits_entry(tmp_path, monkeypatch):
     """手工登记需求(draft) → 自动挂「需求」条目(等待用户完善)。"""
     _setup_env(tmp_path, monkeypatch)

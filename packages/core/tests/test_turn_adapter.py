@@ -984,7 +984,8 @@ def _fake_job(jid="jc1", boundaries=None, model=""):
 
 
 def _patch_sidecar(monkeypatch, fake):
-    monkeypatch.setitem(ta._CLINE_SIDECARS, "node:test.js", fake)
+    # 键与 ClineTurnAdapter._sidecar 同式: node:script:data_dir(引擎版本隔离维度)
+    monkeypatch.setitem(ta._CLINE_SIDECARS, "node:test.js:", fake)
 
 
 def _adapter(**cfg):
@@ -1230,3 +1231,26 @@ def test_cline_system_prompt_dod_discipline():
     # 任务指令公共路径(exec_bridge._task_instruction, architect 侧)不含该纪律
     # ——此处锁 core 侧事实: 纪律只存在于 cline adapter
     assert "验证边界" in prompt and "cv-176" not in prompt
+
+
+# ── cline 引擎多版本共存: 数据目录随版本隔离 ────────────────────────────────
+
+def test_cline_data_dir_isolation():
+    """cline_data_dir(cline_engines 引擎解析下发) → sidecar 单例键含数据目录
+    ——同脚本不同版本 → 独立进程; 空则继承默认存储(仓库内置回退链不变)。"""
+    a1 = ta.ClineTurnAdapter({"node_bin": "node", "sidecar_script": "a.js",
+                              "cline_data_dir": "/d/v0.0.82", "model_id": "m"})
+    a2 = ta.ClineTurnAdapter({"node_bin": "node", "sidecar_script": "a.js",
+                              "cline_data_dir": "/d/v0.0.83", "model_id": "m"})
+    a0 = ta.ClineTurnAdapter({"node_bin": "node", "sidecar_script": "a.js",
+                              "model_id": "m"})
+    assert a1._data_dir == "/d/v0.0.82"
+    sc1, sc2 = a1._sidecar(), a2._sidecar()
+    assert sc1 is not sc2                    # 不同版本 → 独立 sidecar 进程
+    assert sc1._data_dir == "/d/v0.0.82" and sc2._data_dir == "/d/v0.0.83"
+    assert a1._sidecar() is sc1              # 同版本复用单例
+    assert a0._data_dir == "" and a0._sidecar()._data_dir == ""
+    # env 注入面: 有数据目录才设 TOPOCODE_CLINE_DATA_DIR(host.configureStorage 消费)
+    import inspect
+    src = inspect.getsource(ta._SidecarProcess._start_locked)
+    assert "TOPOCODE_CLINE_DATA_DIR" in src

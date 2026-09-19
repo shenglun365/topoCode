@@ -36,6 +36,59 @@ def test_cline_config_schema_extended(tmp_path, monkeypatch):
         assert key in cfg, f"cline config 缺 {key}"
 
 
+def test_cline_builtin_self_heal(tmp_path, monkeypatch):
+    """cline 内置执行器自愈: 注册表缺失(旧数据/误删) → 注入置首;
+    已有用户默认执行器时不抢 default; 幂等不重复注入。"""
+    from tests.conftest import isolate_arch
+    isolate_arch(tmp_path, monkeypatch)
+    ae.save_executors([{"id": "opencode", "type": "opencode", "enabled": True,
+                        "default": True, "config": {"auto_start": True}}])
+    entries = ae.load_executors()
+    assert [e["id"] for e in entries] == ["cline", "opencode"]      # 置首
+    assert [e.get("default") for e in entries] == [False, True]     # 尊重用户默认
+    assert sum(1 for e in ae.load_executors() if e["id"] == "cline") == 1
+
+
+def test_builtin_cline_models_projection(tmp_path, monkeypatch):
+    """内置 cline 模型面=architect 实例模型实时投影: 任务下发注入全量实例条目
+    (端点/密钥随实例), 执行器只持默认模型 model_id; PUT 保存不落盘模型快照。"""
+    import asyncio
+    from fastapi import BackgroundTasks
+    from tests.conftest import isolate_arch
+    isolate_arch(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    from topoone_app_architect.arch_routes import exec_bridge as EB
+    from topoone_app_architect.arch_routes import mcp_collab as MC
+    MC.save_llm_models([
+        {"source": "manual", "id": "m1", "name": "LMS-a", "model": "ma",
+         "provider": "p", "url": "http://u1/v1", "apiKey": "sk-a"},
+        {"source": "manual", "id": "m2", "name": "LMS-b", "model": "mb",
+         "provider": "p", "url": "http://u2/v1"},
+    ])
+    ae.save_executors([{"id": "cline", "type": "cline-sdk", "enabled": True,
+                        "default": True,
+                        "config": {"node_bin": "node", "sidecar_script": "",
+                                   "model_id": "LMS-b", "models": [],
+                                   "api_key": "", "max_iterations": 40}}])
+    # 任务下发: 模型面=实例投影(含密钥/端点), 默认模型=用户选定
+    hint = EB.executor_hint_by_id("cline")
+    cfgx = hint["executorConfig"]
+    assert [m["name"] for m in cfgx["models"]] == ["LMS-a", "LMS-b"]
+    assert cfgx["models"][0]["apiKey"] == "sk-a"
+    assert hint["model"] == "LMS-b"            # 默认模型=用户选定(解析链顶层)
+    # PUT 保存: 投影不落盘(config.models 保持空, 防快照过期复活)
+    class _Req:
+        def __init__(self, body):
+            self._b = body
+        async def json(self):
+            return self._b
+    entries = ae.load_executors()
+    entries[0]["config"]["models"] = [{"name": "stale", "model": "s", "url": "http://x/v1"}]
+    r = asyncio.run(ae.put_executors(_Req({"executors": entries}), BackgroundTasks()))
+    assert r.get("code") == 0, r
+    assert ae.load_executors()[0]["config"]["models"] == []
+
+
 def test_validate_rejects_double_default():
     entries = [
         {"id": "cline", "type": "cline-sdk", "default": True, "config": {}},
@@ -127,21 +180,24 @@ def test_probe_llm_model_stream_detection(monkeypatch):
 
 
 def test_validate_rejects_cline_without_models():
-    """环节四: cline-sdk 无任何模型配置 → 写入拒绝(cv-163 空模型教训前移到写侧)。"""
+    """环节四: cline-sdk(外部) 无任何模型配置 → 写入拒绝(cv-163 空模型教训前移到写侧)。
+    内置 cline 豁免——模型面=实例实时投影, 空 models 合法。"""
     from topoone_app_architect.arch_routes import agent_executors as ae
-    msg = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+    msg = ae._validate([{"id": "cline-x", "type": "cline-sdk", "enabled": True,
                          "config": {"models": []}}])
     assert msg and "需配置模型" in msg
+    assert ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+                          "config": {"models": []}}]) is None
 
 
 def test_validate_rejects_dangling_default_model_id():
     """顶层默认 model_id 未命中 models 条目 → 拒绝(执行模型与 UI 展示一致性)。"""
     from topoone_app_architect.arch_routes import agent_executors as ae
-    msg = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+    msg = ae._validate([{"id": "cline-x", "type": "cline-sdk", "enabled": True,
                          "config": {"model_id": "gone",
                                     "models": [{"name": "m1", "model": "q", "url": "http://h:8082"}]}}])
     assert msg and "未命中" in msg
-    ok = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+    ok = ae._validate([{"id": "cline-x", "type": "cline-sdk", "enabled": True,
                         "config": {"model_id": "m1",
                                    "models": [{"name": "m1", "model": "q", "url": "http://h:8082"}]}}])
     assert ok is None
@@ -157,6 +213,6 @@ def test_validate_url_rule_scoped_to_cline():
 
 def test_validate_rejects_bad_model_url():
     from topoone_app_architect.arch_routes import agent_executors as ae
-    msg = ae._validate([{"id": "cline", "type": "cline-sdk", "enabled": True,
+    msg = ae._validate([{"id": "cline-x", "type": "cline-sdk", "enabled": True,
                          "config": {"models": [{"name": "m1", "model": "q", "url": "ftp://h"}]}}])
     assert msg and "url 非法" in msg

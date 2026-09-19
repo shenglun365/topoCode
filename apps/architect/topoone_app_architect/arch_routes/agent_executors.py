@@ -94,6 +94,27 @@ def _norm_models(raw) -> list:
     return out
 
 
+def _builtin_cline_models() -> list[dict]:
+    """内置 cline 模型面 = architect 实例模型实时投影(免白名单存储、免同步)。
+
+    执行器只选定默认模型(model_id); 全量列表/端点/密钥随实例模型存取——
+    白名单勾选与 provider/base_url/api_key 重复配置面退役(2026-09-19 裁决)。"""
+    try:
+        from .mcp_collab import get_llm_models
+        out = []
+        for m in (get_llm_models() or []):
+            name, model = str(m.get("name") or ""), str(m.get("model") or "")
+            if not name or not model:
+                continue
+            out.append({"id": str(m.get("id") or name), "name": name, "model": model,
+                        "url": str(m.get("url") or ""),
+                        "apiKey": str(m.get("apiKey") or ""),
+                        "maxTokens": int(m.get("maxTokens") or 0)})
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def load_executors() -> list[dict]:
     raw = store.CollabConfigStore.get(CONFIG_KEY, "")
     if not raw:
@@ -102,10 +123,22 @@ def load_executors() -> list[dict]:
         entries = json.loads(raw)
         if isinstance(entries, list):
             _norm_iterations(entries)
-            return entries
+            return _ensure_builtin(entries)
         return []
     except Exception:  # noqa: BLE001
         return []
+
+
+def _ensure_builtin(entries: list[dict]) -> list[dict]:
+    """cline 内置执行器自愈: 注册表缺失(旧数据/误删) → 注入默认条目置首。
+
+    内置执行器免名称/类型配置、不可删除; 注册表已有用户默认执行器时
+    自愈条目不抢 default(尊重用户选择)。"""
+    if any((e or {}).get("id") == "cline" for e in entries):
+        return entries
+    builtin = json.loads(json.dumps(DEFAULT_EXECUTORS[0]))
+    builtin["default"] = not any(e.get("default") for e in entries)
+    return [builtin] + entries
 
 
 # 环节十一: 轮次上限放大, 循环护栏(loopguard/无进展/停滞)兜底异常浪费。
@@ -196,9 +229,11 @@ def _validate(entries: list[dict]) -> Optional[str]:
         if cap and cap not in ("T0", "T1", "T2"):
             return f"执行器 {eid} 能力档位非法: {cap!r}(允许 T0-T2 或留空)"
         cfg["capability"] = cap
-        # 模型配置写入校验(cline-sdk 专属, cv-163/166/168 教训: 空 model/悬空默认/
-        # 坏 url 均运行期才炸; opencode 等类型 models.url 为可选元数据不强制)
-        if e.get("type") == "cline-sdk":
+        # 模型配置写入校验(cline-sdk, cv-163/166/168 教训: 空 model/悬空默认/
+        # 坏 url 均运行期才炸; opencode 等类型 models.url 为可选元数据不强制)。
+        # 内置 cline 豁免: 模型面=实例模型实时投影(GET/下发时注入, 不落盘),
+        # 仅选定默认模型——空 models 合法(执行时跟随实例列表首个)。
+        if e.get("type") == "cline-sdk" and eid != "cline":
             if not (cfg.get("model_id") or cfg["models"]):
                 return (f"执行器 {eid}(cline-sdk) 需配置模型：顶层默认 model_id 或 models "
                         "列表至少一项——空模型会被 runner 拒绝。")
@@ -258,8 +293,13 @@ def _get_runner(path: str, timeout: float = 5.0) -> Optional[dict]:
 
 @router.get("/agent/executors")
 async def list_executors():
-    """注册表（脱敏）+ runner 运行态（若可达）。"""
+    """注册表（脱敏）+ runner 运行态（若可达）。内置 cline 模型面=实例实时投影。"""
     entries = _normalize(load_executors())
+    for e in entries:
+        if e.get("id") == "cline" and e.get("type") == "cline-sdk":
+            live = _builtin_cline_models()
+            if live:
+                e.setdefault("config", {})["models"] = live
     runtime = _get_runner("/health")
     return ok({
         "executors": _mask(entries),
@@ -296,6 +336,11 @@ async def put_executors(request: Request, background: BackgroundTasks):
     msg = _validate(entries)
     if msg:
         return err(msg)
+    for e in entries:
+        if e.get("id") == "cline" and e.get("type") == "cline-sdk":
+            # 内置 cline 模型面=实例实时投影: 不落盘(防快照过期复活; 执行时注入)
+            if isinstance(e.get("config"), dict):
+                e["config"]["models"] = []
     save_executors(entries)
     return ok({"saved": len(entries), "updatedAt": _ts()})
 
@@ -386,9 +431,28 @@ async def probe_executor(request: Request):
                                "note": "auto_start 已开启——执行时自动拉起，无需手动启动"})
                 raise
         if etype == "cline-sdk":
-            script = cfg.get("sidecar_script") or _default_sidecar_path()
+            script = str(cfg.get("sidecar_script") or "").strip()
+            engine_note = ""
+            if not script:
+                # 引擎解析链与任务下发同源(exec_bridge.executor_hint_by_id):
+                # 显式配置 > 引擎默认版本 > 仓库内置 dist
+                try:
+                    from .cline_engines import resolve_engine, list_engines
+                    eng = resolve_engine()
+                    if eng:
+                        script = eng["script"]
+                        engine_note = f"；引擎 {eng['version']}（存储隔离 {eng['dataDir']}）"
+                    else:
+                        installed = list_engines()
+                        if installed:
+                            engine_note = ("；已装引擎 "
+                                           + "/".join(e["version"] for e in installed)
+                                           + " 但无有效默认——回退仓库内置 sidecar")
+                except Exception:  # noqa: BLE001
+                    pass
+            script = script or _default_sidecar_path()
             exists = os.path.isfile(script)
-            detail = f"sidecar: {script} {'存在' if exists else '缺失（需 npm run build -w packages/agent-sidecar）'}"
+            detail = f"sidecar: {script} {'存在' if exists else '缺失（需 npm run build -w packages/agent-sidecar）'}" + engine_note
             # node 版本门槛（@cline/core 硬性要求 >=22）
             node_ver = ""
             try:
@@ -570,12 +634,20 @@ INSTALL_CMDS = {
 def _env_detect() -> dict:
     """检测已适配的 coding agent 安装状态(未适配类型不检)。
 
-    opencode/codex: which + --version; cline: node + 内置 sidecar 产物。
+    opencode/codex: which + --version; cline: node + 内置 sidecar 产物 + 引擎版本。
     """
     sidecar = _default_sidecar_path()
     node = _bin_version("node")
     oc = _bin_version("opencode")
     cx = _bin_version("codex")
+    engines: list = []
+    engine_default = ""
+    try:
+        from .cline_engines import list_engines, default_version
+        engines = [e["version"] for e in list_engines()]
+        engine_default = default_version()
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "opencode": {"installed": bool(oc), "version": oc,
                      "installCmd": INSTALL_CMDS["opencode"]},
@@ -584,6 +656,7 @@ def _env_detect() -> dict:
         "cline": {"installed": bool(node) and os.path.isfile(sidecar),
                   "version": node, "sidecar": sidecar,
                   "sidecarExists": os.path.isfile(sidecar),
+                  "engines": engines, "engineDefault": engine_default,
                   "installCmd": "npm run build -w packages/agent-sidecar（topoOne-ui 仓库根）"},
     }
 

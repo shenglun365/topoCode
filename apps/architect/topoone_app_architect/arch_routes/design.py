@@ -130,7 +130,8 @@ _SCOPE_SCHEMA = {
 def req_harness_scope(req: Dict[str, Any], root: Optional[str], project: Optional[str],
                       model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向1: 按业务需求圈定需要迭代的数据资产范围(核心/相关 + 业务理由)。"""
-    from .req_agent import llm_sync, get_max_tokens_preference
+    from ..agent.turns.catalog import catalog_call
+    from .req_agent import get_max_tokens_preference
     catalog = data_asset_catalog(root, project)
     items = catalog["items"]
     title = req.get("title", "")
@@ -147,10 +148,10 @@ def req_harness_scope(req: Dict[str, Any], root: Optional[str], project: Optiona
         f"需求标题：{title}\n需求描述：{desc or '(未提供)'}\n模式：{mode}\n\n"
         f"候选数据资产目录({len(items)} 项)：\n{_catalog_text(items)}\n\n请圈定本次迭代的数据资产范围。"
     )
-    res = llm_sync([{"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_prompt}],
-                   mode="structured", output_schema=_SCOPE_SCHEMA,
-                   max_tokens=get_max_tokens_preference(), model_id=model_id)
+    res = catalog_call("design", [{"role": "system", "content": sys_prompt},
+                                   {"role": "user", "content": user_prompt}],
+                       schema=_SCOPE_SCHEMA,
+                       max_tokens=get_max_tokens_preference(), model_id=model_id)
     if not res:
         return None
     output = res.get("output")
@@ -398,7 +399,8 @@ def req_harness_design(req: Dict[str, Any], analysis: Dict[str, Any],
                        root: Optional[str], project: Optional[str],
                        model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向2: 基于需求 + 已圈定范围生成设计方案(数据层/接口流程层/语义层)。"""
-    from .req_agent import llm_sync, get_max_tokens_preference
+    from ..agent.turns.catalog import catalog_call
+    from .req_agent import get_max_tokens_preference
     catalog = data_asset_catalog(root, project)
     model = catalog["model"]
     before = [_norm_table(t) for t in (model.get("erTables") or [])]
@@ -425,10 +427,10 @@ def req_harness_design(req: Dict[str, Any], analysis: Dict[str, Any],
                     for t in before) + "\n\n"
         "请输出详细设计方案。"
     )
-    res = llm_sync([{"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_prompt}],
-                   mode="structured", output_schema=_DESIGN_SCHEMA,
-                   max_tokens=get_max_tokens_preference(), model_id=model_id)
+    res = catalog_call("design", [{"role": "system", "content": sys_prompt},
+                                   {"role": "user", "content": user_prompt}],
+                       schema=_DESIGN_SCHEMA,
+                       max_tokens=get_max_tokens_preference(), model_id=model_id)
     if not res:
         return None
     output = res.get("output")

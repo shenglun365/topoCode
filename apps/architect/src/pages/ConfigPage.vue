@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon, PencilSquareIcon, BoltIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchProjectStore } from '@/stores/project-store'
-import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
+import { apiGet, apiPost, apiPut, apiDelete, apiBaseUrl, getToken } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
+import { useAppDialog } from '@/composables/useAppDialog'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t, te } = useI18n()
+const dialog = useAppDialog()
 
 // ── 设置页子 tab ──
 const TABS = [
@@ -142,18 +144,19 @@ const importError = ref('')
 const showAddManual = ref(false)
 const manualForm = reactive({ name: '', provider: '', model: '', url: '' })
 const addingManual = ref(false)
-// 编辑手动模型条目(配置成功后允许修改): editingManualId 非空 = 表单为编辑态
+// 编辑手动模型条目: 就地在条目位置切换编辑框(不跳顶部表单)
 const editingManualId = ref('')
 function startEditManual(m: ArchLlmModel) {
   editingManualId.value = m.id
-  showAddManual.value = true
+  showAddManual.value = false
   manualForm.name = m.name
   manualForm.provider = m.provider || ''
   manualForm.model = m.model
   manualForm.url = m.url || ''
-  nextTick(() => {
-    document.getElementById('llm-manual-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  })
+}
+function toggleAddManual() {
+  showAddManual.value = !showAddManual.value
+  if (showAddManual.value) resetManualForm()
 }
 function resetManualForm() {
   editingManualId.value = ''
@@ -260,11 +263,20 @@ async function removeModel(m: ArchLlmModel) {
   const tip = m.source === 'imported'
     ? t('config.llm.unlinkImportedTip')
     : t('config.llm.deleteManualTip')
-  if (!window.confirm(tip)) return
+  if (!(await dialog.confirm(tip, { danger: true }))) return
   if (await backendUp()) {
     await apiDelete<{ id: string }>(`/llm/models/${m.id}`).catch(() => {})
   }
   llmModels.value = llmModels.value.filter((x) => x.id !== m.id)
+}
+
+// 清空全部测评档案(旧套件/旧刻度残留清理): 各模型回到未测评态, 重探生成新档案
+async function clearAllProfiles() {
+  if (!(await dialog.confirm(t('config.llm.clearProfilesConfirm'), { danger: true }))) return
+  try {
+    await apiDelete<{ cleared: number }>('/llm/model-profiles')
+    capProfiles.value = {}
+  } catch { /* api 层提示 */ }
 }
 
 loadLlm()
@@ -286,22 +298,105 @@ async function probeLlm(m: ArchLlmModel) {
 function tierLabel(t: number): string {
   return ({ 0: 'T0 强', 1: 'T1 中', 2: 'T2 弱' } as Record<number, string>)[t] ?? `T${t}`
 }
-/** M5 投影: 档案摘要(分数/structured/准入/历史时间线)。 */
-function profileLine(p: any): string {
-  const caps = p.caps || {}
-  const parts: string[] = []
-  if (caps.probeScore != null) parts.push(`综合 ${caps.probeScore}`)
-  if (p.structured != null) parts.push(p.structured ? 'structured ✓' : 'structured ✗')
+// 准入三档投影: insufficient(模型能力不足, 补偿复核未通过) / weak(T2 补偿可运行) /
+// 无档案 admission 字段(手工档/启发式)时退回 tier===2 判 weak(维持原语义)
+function admissionLevel(m: ArchLlmModel): string {
+  const p: any = capProfiles.value[m.id]
+  if (p?.admission?.level) return String(p.admission.level)
+  return Number(p?.tier) === 2 ? 'weak' : ''
+}
+function admissionNote(m: ArchLlmModel): string {
+  const p: any = capProfiles.value[m.id]
+  return String(p?.admission?.note
+    || (admissionLevel(m) === 'weak' ? 'T2 档——按全面补偿模式运行(未做补偿复核)' : ''))
+}
+
+// 测评详情 chip(恒渲染定宽, 状态吸收 Q3A): 未测评/测评中…/排队中…/T0-T2/能力不足/测评失败
+// 注意: 「进行中」判据用 capActive(瞬时态); capProbing 是结果回执(✗/⏳ 常驻展示,
+// ✓ 成功即清除)——若拿它判进行中, 完成后 chip 会永远停在「测评中…」
+function evalChipState(m: ArchLlmModel): { text: string; cls: string; title: string } {
+  if (capActive.value[m.id]) {
+    const msg = capProbing.value[m.id] || ''
+    return {
+      text: msg.startsWith('排队') ? '排队中…' : '测评中…',
+      cls: 'bg-ctp-yellow/15 text-ctp-yellow',
+      title: msg || '探测闸门串行执行中',
+    }
+  }
+  const receipt = capProbing.value[m.id] || ''
+  if (receipt.startsWith('✗')) {
+    return { text: '测评失败', cls: 'bg-ctp-red/20 text-ctp-red', title: receipt }
+  }
+  if (receipt.startsWith('⏳')) {
+    return { text: '测评中…', cls: 'bg-ctp-yellow/15 text-ctp-yellow', title: receipt }
+  }
+  const p: any = capProfiles.value[m.id]
+  if (!p) {
+    return { text: '未测评', cls: 'bg-ctp-surface0/60 text-ctp-overlay0',
+             title: '尚未探测——点「能力探测」开始' }
+  }
+  if (admissionLevel(m) === 'insufficient') {
+    return { text: '能力不足', cls: 'bg-ctp-red/20 text-ctp-red', title: admissionNote(m) }
+  }
+  // 综合分直显 + 四档配色(评分与策略解耦——策略档位在浮层内查看/调整):
+  // ≥0.90 强(绿) / ≥0.75 良(青) / ≥0.60 中(黄) / <0.60 弱(橙)
+  const score = Number(p.caps?.probeScore)
+  if (!Number.isFinite(score)) {
+    return { text: `T${Number(p.tier)}·未评分`, cls: 'bg-ctp-surface0/60 text-ctp-overlay0',
+             title: '手工策略档位(无探测分数)' }
+  }
+  return {
+    text: `${score.toFixed(2)} ${score >= 0.90 ? '强' : score >= 0.75 ? '良' : score >= 0.60 ? '中' : '弱'}`,
+    cls: score >= 0.90 ? 'bg-ctp-green/15 text-ctp-green'
+       : score >= 0.75 ? 'bg-ctp-teal/15 text-ctp-teal'
+       : score >= 0.60 ? 'bg-ctp-yellow/15 text-ctp-yellow'
+       : 'bg-ctp-peach/20 text-ctp-peach',
+    title: `综合 ${score}（≥0.90 强 / ≥0.75 良 / ≥0.60 中 / <0.60 弱）——执行策略悬停面板内查看/调整`,
+  }
+}
+
+// 探测历史时间线(悬停面板用)
+function historyText(p: any): string {
   const hist = (p.probes ?? []).map((h: any) => {
     const d = new Date(h.ts || 0)
-    const s = h.caps?.probeScore != null ? `(${h.caps.probeScore})` : ''
-    return `${d.getMonth() + 1}/${d.getDate()} T${h.tier}${s}`
+    return `${d.getMonth() + 1}/${d.getDate()} T${h.tier}`
   })
-  if (hist.length) parts.push(`历史: ${hist.join(' → ')}`)
-  if (p.admission?.level === 'weak') parts.push(p.admission.note)
-  return parts.join(' · ')
+  return hist.length ? `历史: ${hist.join(' → ')}` : '首次探测'
 }
-const capProbing = ref<Record<string, string>>({})
+
+// 测评浮层开关: 500ms 延迟关闭(短暂移出不闪断) + 主动关闭按钮兜底
+const openEvalId = ref('')
+const openEvalUp = ref(false)   // 视口下半部 → 浮层向上展开(底行防溢出可视区)
+let evalCloseTimer: ReturnType<typeof setTimeout> | null = null
+function cancelEvalClose() {
+  if (evalCloseTimer) { clearTimeout(evalCloseTimer); evalCloseTimer = null }
+}
+function openEvalPanel(id: string, e?: MouseEvent) {
+  cancelEvalClose()
+  openEvalId.value = id
+  if (e) {
+    const rect = (e.currentTarget as HTMLElement | undefined)?.getBoundingClientRect()
+    // 浮层高约 240px: 触发元素底部距视口底不足此高度 → 向上展开
+    openEvalUp.value = !!rect && rect.bottom + 240 > window.innerHeight
+  }
+}
+
+/** 面板内悬停: 只续期防关闭, 不重算位置(用面板 rect 重算会与 chip 首算不一致 → 跳位) */
+function keepEvalPanel(id: string) {
+  cancelEvalClose()
+  openEvalId.value = id
+}
+function scheduleEvalClose() {
+  cancelEvalClose()
+  evalCloseTimer = setTimeout(() => {
+    evalCloseTimer = null
+    openEvalId.value = ''
+  }, 500)
+}
+function closeEvalPanel() {
+  cancelEvalClose()
+  openEvalId.value = ''
+}
 const capProfiles = ref<Record<string, any>>({})
 async function loadProfiles() {
   try {
@@ -310,21 +405,118 @@ async function loadProfiles() {
   } catch { /* 后端未就绪静默 */ }
 }
 loadProfiles()
+const capProbing = ref<Record<string, string>>({})
+// 探测并发治理联动(后端互斥串行+FIFO 排队+滤重): 任一探测进行中,
+// 其余模型按钮禁用并提示排队; 同模型重复点击前端滤重早退。
+// capActive 仅"在跑"瞬时态(结束即清); capProbing 存结果回执(持续展示)
+const capActive = ref<Record<string, boolean>>({})
+// 注意 .value: 对 RefImpl 本体做 Object.values 会枚举内部字段 → 恒真(按钮永久禁用)
+const capBusy = computed(() => Object.values(capActive.value).some(Boolean))
+const capAbort: Record<string, AbortController> = {}
 async function capabilityProbe(m: ArchLlmModel) {
-  capProbing.value[m.id] = '探测中…(~9 次小调用)'
+  if (capActive.value[m.id]) return
+  const wasBusy = capBusy.value
+  capActive.value = { ...capActive.value, [m.id]: true }
+  const ac = new AbortController()
+  capAbort[m.id] = ac
+  capProbing.value[m.id] = wasBusy
+    ? '排队中…(后端串行探测, 等待前置完成)'
+    : '探测中…(~10 次小调用)'
   try {
     const { apiPost } = await import('@/services/api-client')
-    const d = await apiPost<any>(`/llm/models/${m.id}/capability-probe`, {})
+    // 兜底超时: 探测请求悬挂(模型服务无响应等)时恢复按钮可用, 不无限置灰
+    // 15 分钟: 六维用例 16 次(T2 补偿复核 18 次)大模型慢推理场景
+    const d = await Promise.race([
+      apiPost<any>(`/llm/models/${m.id}/capability-probe`, {}, ac.signal),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('探测超时(15 分钟)')), 900000)),
+    ])
     if (d?.reachable === false) {
       capProbing.value[m.id] = `✗ ${d.summary || '模型不可达'}`
+    } else if (d?.dedup) {
+      capProbing.value[m.id] = `⏳ ${d.summary || '已在探测中(滤重)'}`
     } else {
       capProfiles.value = { ...capProfiles.value, [m.id]: d }
-      capProbing.value[m.id] = `✓ ${d.summary || `tier ${d.tier}`}`
+      // 成功即档案生效 → chip 由档案驱动实时刷新; ✗/⏳ 回执保留展示
+      delete capProbing.value[m.id]
     }
   } catch (e: any) {
+    if (e?.name === 'AbortError') return   // 服务端真值对账主动放弃, 提示已由对账写入
     capProbing.value[m.id] = `✗ ${e?.message || e}`
+  } finally {
+    delete capAbort[m.id]
+    const next = { ...capActive.value }
+    delete next[m.id]
+    capActive.value = next
   }
 }
+
+// 闸门自省(置灰期间可视化 + 服务端真值对账): 忙时每 2s 轮询
+// /llm/capability-probe/status——闸门空闲而前端仍有在途请求 = 孤儿请求
+// (响应丢失/后端重启), 连续 2 次空闲即主动 abort 回收, 不再无限置灰。
+const capGateStatus = ref<{ running: string; queue: string[] } | null>(null)
+const capGateLastError = ref('')
+const capGateTicked = ref(false)   // 首帧竞态防护: 首次 tick 落地前不判「不可达」
+const gateModelName = (mid: string) => llmModels.value.find((x) => x.id === mid)?.name || mid
+let capGateTimer: ReturnType<typeof setInterval> | null = null
+let capGateIdleTicks = 0
+function stopGatePoll() {
+  if (capGateTimer) { clearInterval(capGateTimer); capGateTimer = null }
+  capGateStatus.value = null
+  capGateLastError.value = ''
+  capGateTicked.value = false
+  capGateIdleTicks = 0
+}
+async function recoverOrphans() {
+  const mids = Object.keys(capActive.value)
+  for (const ac of Object.values(capAbort)) { try { ac.abort() } catch { /* 已闭合 */ } }
+  for (const mid of mids) {
+    capProbing.value[mid] = '✗ 与后端探测闸门失联(响应丢失或后端重启), 请重试'
+  }
+}
+watch(capBusy, (busy) => {
+  if (!busy) { stopGatePoll(); return }
+  const tick = async () => {
+    const url = `${apiBaseUrl()}/llm/capability-probe/status`
+    const ac = new AbortController()
+    const killer = setTimeout(() => ac.abort(), 8000)   // 悬挂防护: 8s 未返回即显式失败
+    try {
+      const tok = getToken()
+      const resp = await fetch(url, {
+        headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+        signal: ac.signal,
+      })
+      const raw = await resp.text()
+      let d: any = null
+      try { d = JSON.parse(raw)?.data } catch { /* 非 JSON 包体 */ }
+      capGateLastError.value = ''
+      capGateTicked.value = true
+      capGateStatus.value = { running: d?.running || '', queue: d?.queue || [] }
+      const idle = !(d?.running || '').trim() && !(d?.queue || []).length
+      capGateIdleTicks = idle ? capGateIdleTicks + 1 : 0
+      if (idle && capGateIdleTicks >= 2 && capBusy.value) {
+        capGateIdleTicks = 0
+        await recoverOrphans()
+      }
+    } catch (e) {
+      capGateLastError.value = ac.signal.aborted
+        ? '状态查询悬挂超时(8s)——该请求被浏览器挂起未返回'
+        : String((e as Error)?.message || e)
+      capGateTicked.value = true
+      capGateStatus.value = null
+    } finally {
+      clearTimeout(killer)
+    }
+  }
+  void tick()
+  capGateTimer = setInterval(() => {
+    if (!capBusy.value) stopGatePoll()
+    else void tick()
+  }, 2000)
+})
+onUnmounted(() => {
+  stopGatePoll()
+  cancelEvalClose()
+})
 async function setManualTier(m: ArchLlmModel, tier: number) {
   try {
     const { apiPut } = await import('@/services/api-client')
@@ -469,25 +661,49 @@ onMounted(() => { void loadCgStatus() })
           </button>
           <button
             class="btn !py-1 !px-3 !text-xs"
-            @click="showAddManual = !showAddManual"
+            @click="toggleAddManual"
           >
             <PlusIcon class="w-3.5 h-3.5" />{{ t('config.llm.addManual') }}
+          </button>
+          <button
+            v-if="Object.keys(capProfiles).length"
+            class="btn !py-1 !px-3 !text-xs text-ctp-red"
+            :title="t('config.llm.clearProfilesTip')"
+            @click="clearAllProfiles"
+          >
+            <TrashIcon class="w-3.5 h-3.5" />{{ t('config.llm.clearProfiles') }}
           </button>
         </span>
       </div>
       <div class="p-3 text-xs space-y-2">
         <div class="text-[11px] text-ctp-overlay0">{{ t('config.llm.desc') }}</div>
+        <div
+          v-if="capBusy"
+          class="text-[10px] font-mono"
+          :class="!capGateTicked ? 'text-ctp-overlay0'
+                  : capGateStatus ? 'text-ctp-yellow' : 'text-ctp-red'"
+          title="探测闸门: 全局互斥串行, 完成后按钮自动恢复"
+        >
+          <template v-if="!capGateTicked">
+            ⏳ 正在查询闸门状态…
+          </template>
+          <template v-else-if="capGateStatus">
+            ⏳ 能力探测中: {{ capGateStatus.running ? gateModelName(capGateStatus.running) : '等待闸门…' }}<span
+              v-if="capGateStatus.queue.length"
+            >(排队 {{ capGateStatus.queue.length }}: {{ capGateStatus.queue.map(gateModelName).join('、') }})</span>
+          </template>
+          <template v-else>
+            ⚠ 闸门状态不可达——{{ capGateLastError || '网络/代理失败' }}
+          </template>
+        </div>
         <div v-if="importMsg" class="chip bg-ctp-green/15 text-ctp-green">{{ importMsg }}</div>
         <div v-if="importError" class="chip bg-ctp-red/15 text-ctp-red">{{ importError }}</div>
 
         <form
-          v-if="showAddManual"
+          v-if="showAddManual && !editingManualId"
           class="border border-ctp-surface0 rounded-lg p-2.5 space-y-2"
           @submit.prevent="addManual"
         >
-          <div v-if="editingManualId" class="text-[11px] text-ctp-blue">
-            {{ t('config.llm.editingManual') }}
-          </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <label class="flex flex-col gap-0.5">
               <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualName') }}</span>
@@ -506,17 +722,18 @@ onMounted(() => { void loadCgStatus() })
               <input v-model="manualForm.url" class="input !py-1 !text-xs">
             </label>
           </div>
-          <button
-            type="submit"
-            class="btn btn-primary !px-3 !py-1 !text-xs"
-            :disabled="addingManual || !manualForm.name || !manualForm.model"
-          >{{ editingManualId ? t('config.llm.saveManual') : t('config.llm.addManual') }}</button>
-          <button
-            v-if="editingManualId"
-            type="button"
-            class="btn btn-ghost !px-3 !py-1 !text-xs"
-            @click="resetManualForm(); showAddManual = false"
-          >{{ t('common.cancel') }}</button>
+          <div class="flex justify-end gap-2">
+            <button
+              type="submit"
+              class="btn btn-primary !px-3 !py-1 !text-xs"
+              :disabled="addingManual || !manualForm.name || !manualForm.model"
+            >{{ t('config.llm.addManual') }}</button>
+            <button
+              type="button"
+              class="btn btn-ghost !px-3 !py-1 !text-xs"
+              @click="resetManualForm(); showAddManual = false"
+            >{{ t('common.cancel') }}</button>
+          </div>
         </form>
 
         <div
@@ -525,11 +742,45 @@ onMounted(() => { void loadCgStatus() })
         >{{ t('config.llm.noModels') }}</div>
 
         <div class="divide-y divide-ctp-surface0">
-          <div
-            v-for="m in llmModels"
-            :key="m.id"
-            class="flex items-center gap-3 py-2"
-          >
+          <template v-for="m in llmModels" :key="m.id">
+            <!-- 编辑态: 就地切换为编辑框(不跳顶部表单) -->
+            <form
+              v-if="editingManualId === m.id"
+              class="py-2 space-y-2"
+              @submit.prevent="addManual"
+            >
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <label class="flex flex-col gap-0.5">
+                  <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualName') }}</span>
+                  <input v-model="manualForm.name" class="input !py-1 !text-xs">
+                </label>
+                <label class="flex flex-col gap-0.5">
+                  <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualProvider') }}</span>
+                  <input v-model="manualForm.provider" class="input !py-1 !text-xs" placeholder="custom">
+                </label>
+                <label class="flex flex-col gap-0.5">
+                  <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualModel') }}</span>
+                  <input v-model="manualForm.model" class="input !py-1 !text-xs">
+                </label>
+                <label class="flex flex-col gap-0.5">
+                  <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualUrl') }}</span>
+                  <input v-model="manualForm.url" class="input !py-1 !text-xs">
+                </label>
+              </div>
+              <div class="flex justify-end gap-2">
+                <button
+                  type="submit"
+                  class="btn btn-primary !px-3 !py-1 !text-xs"
+                  :disabled="addingManual || !manualForm.name || !manualForm.model"
+                >{{ t('config.llm.saveManual') }}</button>
+                <button
+                  type="button"
+                  class="btn btn-ghost !px-3 !py-1 !text-xs"
+                  @click="resetManualForm"
+                >{{ t('common.cancel') }}</button>
+              </div>
+            </form>
+            <div v-else class="flex items-center gap-3 py-2">
             <input
               type="radio"
               :name="'llm-active'"
@@ -555,49 +806,96 @@ onMounted(() => { void loadCgStatus() })
               </div>
             </div>
             <div class="flex-1" />
+            <!-- 固定槽位(防 UI 乱动): 测评 chip 恒渲染定宽 / 连通状态格恒渲染定宽 / 按钮组恒在 -->
+            <div class="relative shrink-0">
+              <span
+                class="chip !text-[10px] font-mono w-[96px] justify-center cursor-help"
+                :class="evalChipState(m).cls"
+                :title="evalChipState(m).title"
+                @mouseenter="openEvalPanel(m.id, $event)"
+                @mouseleave="scheduleEvalClose"
+              >{{ evalChipState(m).text }}</span>
+              <!-- 详情浮层(Q1A: 六维分数+准入+档位调整集中一处; absolute 零布局影响;
+                   位于测评 chip 左侧; 视口下半部自动向上展开防溢出;
+                   500ms 延迟关闭 + × 主动关闭兜底) -->
+              <div
+                v-if="capProfiles[m.id] && openEvalId === m.id"
+                class="absolute right-full mr-1.5 z-30 w-[360px] rounded-md border border-ctp-surface0 bg-ctp-base shadow-md p-2.5 text-[10px] space-y-1.5 text-left"
+                :class="openEvalUp ? 'bottom-0' : 'top-0'"
+                @mouseenter="keepEvalPanel(m.id)"
+                @mouseleave="scheduleEvalClose"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-mono text-ctp-subtext1">测评分数</span>
+                  <button
+                    type="button"
+                    class="w-4 h-4 leading-none rounded text-ctp-overlay1 hover:text-ctp-red hover:bg-ctp-surface0"
+                    title="关闭浮层"
+                    @click="closeEvalPanel"
+                  >×</button>
+                </div>
+                <div class="font-mono text-ctp-subtext0">
+                  综合
+                  <span
+                    class="font-bold"
+                    :class="Number(capProfiles[m.id].caps?.probeScore) >= 0.90 ? 'text-ctp-green'
+                            : Number(capProfiles[m.id].caps?.probeScore) >= 0.75 ? 'text-ctp-teal'
+                            : Number(capProfiles[m.id].caps?.probeScore) >= 0.60 ? 'text-ctp-yellow'
+                            : 'text-ctp-peach'"
+                  >{{ capProfiles[m.id].caps?.probeScore ?? '—' }}</span>
+                  · 工具 {{ capProfiles[m.id].caps?.toolCallRate ?? '—' }} ·
+                  JSON {{ capProfiles[m.id].caps?.jsonRate ?? '—' }} ·
+                  指令 {{ capProfiles[m.id].caps?.instructionScore ?? '—' }}
+                </div>
+                <div class="font-mono text-ctp-subtext0">
+                  需求 {{ capProfiles[m.id].caps?.requirementScore ?? '—' }} ·
+                  架构 {{ capProfiles[m.id].caps?.archScore ?? '—' }} ·
+                  模块 {{ capProfiles[m.id].caps?.moduleScore ?? '—' }}
+                </div>
+                <div class="border-t border-ctp-surface0 pt-1 space-y-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-mono text-ctp-subtext1">执行策略（T0 直通车 / T1 预拆 / T2 步骤补偿）</span>
+                    <select
+                      class="bg-ctp-surface0 text-[10px] rounded px-1 py-0.5 text-ctp-subtext0"
+                      :value="capProfiles[m.id].tier"
+                      title="执行策略档位——与评分解耦: 默认按映射区间建议, 手动调整优先且不被探测覆盖"
+                      @change="setManualTier(m, +($event.target as HTMLSelectElement).value)"
+                    >
+                      <option v-for="i in 3" :key="i" :value="i - 1">{{ tierLabel(i - 1) }}</option>
+                    </select>
+                  </div>
+                  <div class="text-ctp-overlay0">
+                    默认映射: ≥0.90→T0 / ≥0.52→T1 / 其余→T2（非硬性绑定, 手动调整优先）
+                  </div>
+                </div>
+                <div class="font-mono text-ctp-subtext0">
+                  <span
+                    v-if="capProfiles[m.id].caps?.compensationRate != null"
+                  >补偿复核 {{ Math.round(capProfiles[m.id].caps.compensationRate * 100) }}% · </span><span
+                    v-if="capProfiles[m.id].structured"
+                    class="text-ctp-teal"
+                  >structured ✓</span>
+                </div>
+                <div
+                  class="text-ctp-subtext0"
+                  :class="admissionLevel(m) === 'insufficient' ? 'text-ctp-red' : ''"
+                >{{ admissionNote(m) || '准入: pass' }}</div>
+                <div class="text-ctp-overlay0">{{ historyText(capProfiles[m.id]) }}</div>
+              </div>
+            </div>
             <span
-              v-if="capProfiles[m.id]"
-              class="chip !text-[10px] font-mono"
-              :class="{ 'bg-ctp-peach/20 text-ctp-peach': Number(capProfiles[m.id].tier) === 2,
-                       'bg-ctp-green/15 text-ctp-green': Number(capProfiles[m.id].tier) === 0 }"
-              :title="profileLine(capProfiles[m.id])"
-            >{{ tierLabel(Number(capProfiles[m.id].tier)) }}</span>
-            <span
-              v-if="capProfiles[m.id]?.structured"
-              class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal font-mono"
-              title="结构化输出探针达标——受限生成通道(M4-A)自动可用"
-            >struct</span>
-            <span
-              v-if="Number(capProfiles[m.id]?.tier) === 2"
-              class="chip !text-[9px] bg-ctp-red/15 text-ctp-red"
-              title="模型准入提示: 测评较弱——按全面补偿模式运行, 建议更换更强模型(不拦截)"
-            >⚠ 准入</span>
-            <select
-              v-if="capProfiles[m.id]"
-              class="bg-ctp-surface0 text-[10px] rounded px-1 py-0.5 text-ctp-subtext0"
-              :value="capProfiles[m.id].tier"
-              title="手工调整能力档位(0=T0 强 ≥12B / 1=T1 中 6-12B / 2=T2 弱 <6B 全面补偿; 手工设定优先于探测)"
-              @change="setManualTier(m, +($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="i in 3" :key="i" :value="i - 1">{{ tierLabel(i - 1) }}</option>
-            </select>
-            <span
-              v-if="capProbing[m.id]"
-              class="text-[10px] font-mono max-w-[260px] truncate"
-              :class="capProbing[m.id].startsWith('✓') ? 'text-ctp-green' : 'text-ctp-overlay0'"
-              :title="capProbing[m.id]"
-            >{{ capProbing[m.id] }}</span>
+              class="text-[10px] font-mono w-[150px] shrink-0 truncate text-right"
+              :class="llmProbing[m.id]?.startsWith('✓') ? 'text-ctp-green'
+                      : llmProbing[m.id] ? 'text-ctp-red' : ''"
+              :title="llmProbing[m.id] || ''"
+            >{{ llmProbing[m.id] || '' }}</span>
             <button
               class="btn !py-0 !px-2 !text-[10px]"
+              :class="{ 'opacity-50 cursor-not-allowed': capBusy }"
+              :disabled="capBusy"
               :title="t('config.llm.capProbeTip')"
               @click="capabilityProbe(m)"
             >{{ t('config.llm.capProbe') }}</button>
-            <span
-              v-if="llmProbing[m.id]"
-              class="text-[10px] font-mono max-w-[260px] truncate"
-              :class="llmProbing[m.id].startsWith('✓') ? 'text-ctp-green' : 'text-ctp-red'"
-              :title="llmProbing[m.id]"
-            >{{ llmProbing[m.id] }}</span>
             <button
               class="btn !py-0 !px-2 !text-[10px]"
               @click="probeLlm(m)"
@@ -616,7 +914,8 @@ onMounted(() => { void loadCgStatus() })
             >
               <TrashIcon class="w-3 h-3" />{{ m.source === 'imported' ? t('config.llm.unlinkBtn') : t('config.llm.delete') }}
             </button>
-          </div>
+            </div>
+          </template>
         </div>
         <div class="flex gap-4 text-[10px] text-ctp-overlay0">
           <span class="flex items-center gap-1">

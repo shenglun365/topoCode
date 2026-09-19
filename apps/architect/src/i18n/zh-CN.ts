@@ -8,6 +8,7 @@ export default {
     fontScale: '界面字号（当前字体 1~3 倍）',
     contextLimit: '输出上限',
     logoThemeToggle: '点击切换 logo 配色',
+    modelScopeHint: '作用范围：architect 主控链路（对话/规划、语义分析、大纲缩略、蓝图设计、任务挡位）；不改变 coding 执行器的模型（执行器模型在其配置白名单内选择）',
   },
   workbench: {
     sessions: {
@@ -522,6 +523,8 @@ export default {
       markDone: '标记完成',
       invalid: '标记作废',
       restore: '恢复有效',
+      delete: '删除条目',
+      deleteConfirm: '删除跟踪条目「{title}」？该操作不可恢复。',
       state: { running: '执行中', waiting: '等待操作', done: '已完成', failed: '失败', cancelled: '已取消' },
       role: { user: '用户', architect: '架构师', coding: '执行器' },
     },
@@ -1214,6 +1217,9 @@ export default {
       active: '分析模型',
       activeHint: 'architect 需求/规格分析使用的模型。手动设置为空时由主后端默认模型兜底。',
       addManual: '添加手动模型',
+      clearProfiles: '清空测评',
+      clearProfilesTip: '删除全部模型能力测评档案（旧套件/旧刻度残留清理）',
+      clearProfilesConfirm: '确定清空全部模型能力测评档案？所有模型将回到未测评态，重新探测后生成新档案。',
       manualName: '名称',
       manualProvider: '提供方',
       manualModel: '模型',

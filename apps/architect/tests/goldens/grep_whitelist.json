@@ -1,0 +1,43 @@
+{
+ "llm_sync_callers": [
+  "agent/cognition/model_profile.py",
+  "agent/reflection/mining.py",
+  "agent/reflection/repair.py",
+  "agent/turns/call.py",
+  "arch_routes/req_agent.py",
+  "arch_routes/sem/engine.py",
+  "arch_routes/semantic_assets.py"
+ ],
+ "tier_literal_files": [
+  "agent/cognition/model_profile.py",
+  "agent/cognition/probe_suite.py",
+  "agent/cognition/prompt.py",
+  "agent/cognition/roles.py",
+  "agent/compensation/carriers.py",
+  "agent/compensation/ctx.py",
+  "agent/compensation/providers/intratier.py",
+  "agent/execution/dispatch.py",
+  "agent/execution/probes.py",
+  "agent/governance/gears.py",
+  "agent/perception/commands.py",
+  "agent/planning/scope_probe.py",
+  "agent/planning/task_plan.py",
+  "agent/requirements/harness.py",
+  "agent/turns/call.py",
+  "agent/turns/catalog.py",
+  "agent/turns/context.py",
+  "arch_routes/agent_executors.py",
+  "arch_routes/req_agent.py",
+  "arch_routes/requirements.py",
+  "arch_routes/sem/engine.py",
+  "arch_routes/sessions.py",
+  "arch_routes/store/__init__.py",
+  "arch_routes/store/base.py",
+  "arch_routes/store/blueprint.py",
+  "arch_routes/store/contract.py",
+  "arch_routes/store/conv.py",
+  "arch_routes/store/core.py",
+  "arch_routes/store/governance.py",
+  "arch_routes/store/semantic.py"
+ ]
+}

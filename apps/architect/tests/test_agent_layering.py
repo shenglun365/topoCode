@@ -17,10 +17,12 @@ import os
 
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                          "topoone_app_architect", "agent")
-ORDER = ["perception", "cognition", "planning", "memory", "tools",
-         "execution", "reflection"]
+ORDER = ["perception", "compensation", "cognition", "planning", "memory",
+         "tools", "execution", "reflection", "requirements", "turns"]
 RANK = {name: i for i, name in enumerate(ORDER)}
 CROSSCUT = {"collab", "governance"}
+# M1(2026-09-19): compensation=L1 补偿内核(设计 §3, 供各层引), turns=L2 回合引擎
+# (设计 §4, 内核顶层执行半边)——均入层序刻度, 详见 docs/architect/agent-capability-design-2609.md。
 
 # 存量违规冻结（2026-09-17 快照）——内核反向依赖适配层(arch_routes)。
 # 多为 store/req_agent 历史接缝; 清退时删除条目, 禁止新增。
@@ -35,15 +37,50 @@ _R1_INVENTORY = {
     # 同款依赖(store/adaptation/agent_roles 惰性导入)——读错误材料 + 轻任务
     # 提炼 + 落 error_pattern 单元; 依赖注入拆解与 units 清退同批处置。
     "memory/distill.py",
+    # turns/{chat,context}.py(2026-09-19 M1 立条): 自 orchestrator(R3 例外层)
+    # 机械搬迁的阶段函数, arch_routes 惰性导入随行; ChatTurn 接缝重构时清退。
+    "turns/chat.py", "turns/context.py",
+    # execution/{merge,recover}.py(2026-09-19 M2 立条): 自 exec_bridge 机械
+    # 迁出的合并域/恢复对账域(store/execution/runner 接缝随行); DispatchTurn
+    # 接缝重构时随 runner_client 单源化(G7)清退。
+    "execution/merge.py", "execution/recover.py",
+    # sessions/coding.py(2026-09-19 M2 立条): 自 arch_routes/sessions.py 迁出的
+    # coding 子会话编排(adaptation 摘要中继随行)。
+    "sessions/coding.py",
+    # turns/call.py(2026-09-19 M3 立条): CallTurn 为 llm_sync 唯一白名单调用方
+    # (D12 门禁)——链 3 全量收编后本条即门禁正源, 不清退。
+    "turns/call.py",
+    # turns/catalog.py(2026-09-19 M4 立条): CallCatalog 领域路由
+    # (agent_roles 适配层 cfg 加载随行; 配置域 REST 不变)。
+    "turns/catalog.py",
+    # tools/impl/*(2026-09-19 M3 立条): 自 req_agent 按域迁出的工具实现
+    # (common/project/semantic_assets/store 惰性导入随行); DispatchTurn 接缝
+    # 重构时随 runner_client 单源化清退。
+    "tools/impl/kb.py", "tools/impl/map.py", "tools/impl/semantic.py",
+    "tools/impl/asset.py", "tools/impl/diagram.py",
+    # requirements/harness.py(2026-09-19 M3 立条): clarify/collect LLM 编排
+    # (run_tools_loop/semantic_assets/design 随行); M4 迁 CallTurn 后清退。
+    "requirements/harness.py",
+    # execution/dispatch.py(2026-09-19 M4 立条): 自 exec_bridge 迁出的下发域
+    # (store/execution/req_agent 接缝随行, _eb() 调用期绑定); DispatchTurn
+    # 接缝重构时随 runner_client 单源化(G7)清退。
+    "execution/dispatch.py",
 }
 
 # 存量违规冻结——低层引高层。
 # cognition→reflection: llm/model_profile 引 reflection 评测产物;
 # perception→planning: commands 引任务计划。清退时删除条目。
+# →turns(2026-09-19 M3 立条): R3.1 链3收编——入口/计划/探针调用点经 CallTurn
+# 统一入口(设计 §4 目标形态: 入口层路由进内核 L2), 属目标架构而非债务。
 _R2_INVENTORY = {
+    # requirements/harness.py(2026-09-19 M4 立条): clarify/collect 经 CallTurn
+    # (R3.1 链3②; M4 目标形态——需求域路由进内核 L2)。
+    "requirements/harness.py": {"turns"},
     "cognition/llm.py": {"reflection"},
     "cognition/model_profile.py": {"reflection"},
-    "perception/commands.py": {"planning"},
+    "perception/commands.py": {"planning", "turns", "compensation"},
+    "planning/task_plan.py": {"turns"},
+    "planning/scope_probe.py": {"turns"},
 }
 
 

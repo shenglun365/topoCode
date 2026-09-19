@@ -172,7 +172,7 @@ def test_confirm_empty_scope_probe_enriches(arch_env, tmp_path, monkeypatch, git
     conv, eb, calls = _mk_conv_req(arch_env, tmp_path, monkeypatch)
     import topoone_app_architect.agent.planning.scope_probe as sp
     monkeypatch.setattr(sp, "probe_scope",
-                        lambda root, project, text, rid="":
+                        lambda root, project, text, rid="", tier="T1":
                         {"ok": True, "files": [{"path": "src/probed.py",
                                                 "source": "tree"}], "note": ""})
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk"})

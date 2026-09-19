@@ -24,10 +24,13 @@ const props = withDefaults(defineProps<{
   contextLabel?: string
   initialModel?: string
   initialContext?: number
+  /** 悬停提示: 该模型选择的作用范围(各 app 用自身 i18n 传入; 空则不提示) */
+  scopeHint?: string
 }>(), {
   contextOptions: () => [...CONTEXT_OPTIONS],
   modelLabel: '',
   contextLabel: '',
+  scopeHint: '',
 })
 
 const emit = defineEmits<{
@@ -100,7 +103,7 @@ async function onContextChange(e: Event) {
 
 <template>
   <div ref="root" class="model-dropdown">
-    <button class="toolbar-btn" type="button" :title="modelLabel" @click.stop="toggle">
+    <button class="toolbar-btn" type="button" :title="scopeHint || modelLabel" @click.stop="toggle">
       <svg
         width="16"
         height="16"
@@ -119,7 +122,13 @@ async function onContextChange(e: Event) {
       <div v-if="open" class="toolbar-popover" @click.stop>
       <div class="popover-row">
         <label>{{ modelLabel || tShell('model') }}</label>
-        <select class="toolbar-select" :value="modelId" :disabled="loading" @change="onModelChange">
+        <select
+          class="toolbar-select"
+          :value="modelId"
+          :disabled="loading"
+          :title="scopeHint || modelLabel"
+          @change="onModelChange"
+        >
           <option v-if="loading" value="">{{ tShell('loading') }}</option>
           <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
         </select>

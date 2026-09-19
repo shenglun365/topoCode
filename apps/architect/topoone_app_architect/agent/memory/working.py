@@ -20,15 +20,20 @@ def history_window(history, cap: int = 20) -> List[dict]:
 
 def build_chat_messages(root, project, history, cap=20, diagram_skill: bool = False,
                         skill_scenarios: Optional[List[str]] = None,
-                        model_id: str = "") -> List[dict]:
+                        model_id: str = "",
+                        tool_surface: str = "full",
+                        kb_enabled: bool = True,
+                        ctx_budget: float = 1.0) -> List[dict]:
     """组装 prompt: 能力文档(system) + 最近 N 条历史。
 
     skill_scenarios 非空 → 按场景注入语义资产 skill 文档（资产管理对话='extract'）。
     model_id 非空 → 查模型能力档案(小模型收紧预算/大模型放开)。
+    R3.4: tool_surface/kb_enabled/ctx_budget 透传 chat_system_prompt(缺省不变)。
     """
     from ...arch_routes.req_agent import chat_system_prompt
     msgs: List[dict] = [{"role": "system", "content": chat_system_prompt(
         root, project, diagram_skill=diagram_skill, skill_scenarios=skill_scenarios,
-        model_id=model_id)}]
+        model_id=model_id, tool_surface=tool_surface, kb_enabled=kb_enabled,
+        ctx_budget=ctx_budget)}]
     msgs.extend(history_window(history, cap=cap))
     return msgs

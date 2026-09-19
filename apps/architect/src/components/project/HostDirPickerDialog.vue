@@ -171,7 +171,6 @@ onMounted(() => load())
 <template>
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-ctp-base/70 backdrop-blur-sm"
-    @click.self="emit('close')"
   >
     <div class="panel w-full max-w-2xl p-5 flex flex-col max-h-[85vh]">
       <div class="flex items-center justify-between mb-1">

@@ -1,0 +1,87 @@
+"""内置补偿 Provider — 文案型补偿收编(R1.1, 行为等价 D3)。
+
+收编来源(逐字等价, 原调用点已委托至此):
+- ArchitectNoteProvider ← orchestrator 系统消息拼接(gears 策略行 architect_note)
+- ElementHintProvider   ← orchestrator U 轴注入(gears ELEMENT_HINT_HIGH/MID)
+- CapNoteProvider       ← task_plan cap_note 段(🛡️ 实测封顶告知)
+M1 约定: 活动路径先经本模块函数取文(字节级等价), 管线 assemble() 随
+ChatTurn(M3/M4)接管; Provider 登记即消费清单门禁依据(R1.2)。
+"""
+from __future__ import annotations
+
+from ..carriers import PromptPiece, RunParams
+from ..ctx import CompensationCtx, Purpose
+
+
+# ── 取文函数(活动路径委托口; 与 Provider.assemble 同源) ──────────────
+
+def architect_note_text(policy) -> str:
+    """architect 编排指引(gears 策略行, 系统消息尾缀)。"""
+    return str(getattr(policy, "architect_note", "") or "")
+
+
+def element_hint_text(policy) -> str:
+    """U 轴要素框架提示(A 弱升档; low → 空串不注入)。"""
+    from ...governance.gears import ELEMENT_HINT_HIGH, ELEMENT_HINT_MID
+    density = getattr(policy, "element_hints", "low")
+    if density == "high":
+        return ELEMENT_HINT_HIGH
+    if density == "mid":
+        return ELEMENT_HINT_MID
+    return ""
+
+
+def cap_note_section(policy) -> str:
+    """cap_note 指令段(M1 实测封顶告知 subagent; 空串=无封顶)。"""
+    if getattr(policy, "cap_note", ""):
+        return ("> 🛡️ " + str(policy.cap_note)
+                + "——本次任务编排已按你的实测能力边界降档, "
+                  "请严格按微步/步骤粒度推进, 里程碑报告照常。\n")
+    return ""
+
+
+# ── Provider 形态(管线载体; conclude 在 M3/M4 随回合引擎接线) ─────────
+
+class ArchitectNoteProvider:
+    name = "architect_note"
+    purposes = frozenset()              # 全目的
+    consumes = frozenset({"architect_note"})
+
+    def assemble(self, ctx: CompensationCtx, prompt) -> None:
+        text = architect_note_text(ctx.gear)
+        if text:
+            prompt.pieces.append(
+                PromptPiece(placement="system", key=self.name, text=text))
+
+    def conclude(self, ctx: CompensationCtx, output):
+        return None
+
+
+class ElementHintProvider:
+    name = "element_hints"
+    purposes = frozenset({Purpose.REQUIREMENT})
+    consumes = frozenset({"element_hints"})
+
+    def assemble(self, ctx: CompensationCtx, prompt) -> None:
+        text = element_hint_text(ctx.gear)
+        if text:
+            prompt.pieces.append(
+                PromptPiece(placement="system", key=self.name, text=text))
+
+    def conclude(self, ctx: CompensationCtx, output):
+        return None
+
+
+class CapNoteProvider:
+    name = "cap_note"
+    purposes = frozenset()
+    consumes = frozenset({"cap_note"})
+
+    def assemble(self, ctx: CompensationCtx, prompt) -> None:
+        text = cap_note_section(ctx.gear)
+        if text:
+            prompt.pieces.append(
+                PromptPiece(placement="section", key=self.name, text=text))
+
+    def conclude(self, ctx: CompensationCtx, output):
+        return None

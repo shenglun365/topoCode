@@ -27,8 +27,9 @@ def _store():
 
 _OVERRIDES_KEY = "prompt.overrides"
 
-# tier → system 总字符预算(恒置块之外的条件块裁剪目标)
-DEFAULT_BUDGET: Dict[int, int] = {0: 26000, 1: 22000, 2: 16000, 3: 10000, 4: 6000}
+# tier → system 总字符预算(恒置块之外的条件块裁剪目标; R2.2: 三档刻度对齐,
+# 旧 3/4 档键随 2026-09-17 五档收敛移除——读路径已归一, 不会命中)
+DEFAULT_BUDGET: Dict[int, int] = {0: 26000, 1: 22000, 2: 16000}
 
 
 # ── 覆盖配置 ──────────────────────────────────────────────────────────
@@ -98,10 +99,39 @@ def _r_boundary(_ctx: Dict[str, Any]) -> str:
 def _r_capability(ctx: Dict[str, Any]) -> str:
     # B4 单源化默认开(双轨漂移消灭); `single_source: false` 覆盖可回退等价模式
     if _overrides().get("single_source", True):
-        doc = capability_doc_from_tools()
+        doc = capability_doc_from_tools(
+            tool_surface=ctx.get("tool_surface") or "full",
+            kb_enabled=ctx.get("kb_enabled", True))
         if doc:
             return doc
     return _legacy_capability_doc()
+
+
+# R3.4: 工具面按挡裁剪(toolsurface 消费落地; kb=False → 检索工具同裁)
+_KB_RETRIEVAL_TOOLS = ("kb.asset.search", "kb.code_mappings", "kb.baseline",
+                       "kb.graph")
+_WRITE_TOOLS = ("asset.semantic.save", "asset.semantic.update",
+                "asset.semantic.merge", "asset.semantic.split",
+                "asset.upsert", "mcp.call", "convention.propose",
+                "contract.propose")
+_MINIMAL_KEEP = ("kb.asset.search", "project.ctx", "map.overview",
+                 "code.read_symbols", "asset.semantic.search",
+                 "asset.semantic.detail")
+
+
+def _filter_tools(entries, tool_surface: str, kb_enabled: bool):
+    """R3.4 工具面过滤: full=全量 / reduced=裁 KB 写+MCP 写 / minimal=只读核心;
+    kb=False(T0 直通车)叠加裁 kb.* 检索工具。"""
+    out = []
+    for name, entry in entries:
+        if not kb_enabled and name in _KB_RETRIEVAL_TOOLS:
+            continue
+        if tool_surface == "minimal" and name not in _MINIMAL_KEEP:
+            continue
+        if tool_surface == "reduced" and name in _WRITE_TOOLS:
+            continue
+        out.append((name, entry))
+    return out
 
 
 def _legacy_capability_doc() -> str:
@@ -172,19 +202,11 @@ def render_system(ctx: Dict[str, Any]) -> str:
         if text:
             rendered.append((blk, text))
     # 预算裁剪: 条件块按 priority 降序淘汰直到达标(恒置块保留)
-    budget = budget_for(tier)
-    total = sum(len(t) for _, t in rendered)
-    optional = sorted([r for r in rendered if not r[0].required],
-                      key=lambda r: -r[0].priority)
-    dropped = []
-    for blk, text in optional:
-        if total <= budget:
-            break
-        total -= len(text) + 2
-        rendered.remove((blk, text))
-        dropped.append(blk.block_id)
-    if dropped:
-        logger.info("[prompt-registry] tier=%s 预算 %s 裁剪块: %s", tier, budget, dropped)
+    # M1 收编: 裁剪循环经 compensation.providers.budget(逐字等价, R1.1)
+    # R3.4: ctx_budget 系数实消费(dossier/工具结果同系数的提示预算面)
+    budget = int(budget_for(tier) * float(ctx.get("ctx_budget", 1.0) or 1.0))
+    from ..compensation.providers import trim_optional_blocks
+    rendered, _ = trim_optional_blocks(rendered, budget, tier, logger)
     rendered.sort(key=lambda r: r[0].order)
     return "\n\n".join(t for _, t in rendered)
 
@@ -338,16 +360,19 @@ def _tool_params_doc(name: str, entry: Dict[str, Any]) -> str:
         or TOOL_PARAM_DOCS.get(name, "")
 
 
-def capability_doc_from_tools() -> str:
+def capability_doc_from_tools(tool_surface: str = "full",
+                              kb_enabled: bool = True) -> str:
     """由 _ARCH_TOOLS 注册表渲染能力文档(单源模式, B4 默认)。
 
     结构对齐 _CAPABILITY_DOC: 工具清单(brief 单源) + 层级约定 + 工具调用协议 +
     硬性规则(防编造) + 需求落库纪律 + 会话指令符号 + 参数表(params_doc 单源) +
     可处理范围 + 图表输出纪律。无注册工具时返回空串(调用方回退等价模式)。
+    R3.4: tool_surface/kb_enabled 按挡裁剪工具面(缺省 full/True 行为不变)。
     """
     from ...arch_routes import req_agent as _req_agent_mod
     entries = [(n, e) for n, e in _req_agent_mod._ARCH_TOOLS.items()
                if n not in ("diagram.build", "diagram.validate")]
+    entries = _filter_tools(entries, tool_surface, kb_enabled)
     if not entries:
         return ""
     lines = ["你可以使用以下能力(skills/tools)："]

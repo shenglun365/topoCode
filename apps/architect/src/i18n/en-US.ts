@@ -8,6 +8,7 @@ export default {
     fontScale: 'Interface font scale (1x–3x of current)',
     contextLimit: 'Output limit',
     logoThemeToggle: 'Click to switch logo theme',
+    modelScopeHint: 'Scope: architect brain only (chat/planning, semantic analysis, outline abbreviate, blueprint design, gear policy); does not change coding executor models (chosen in each executor\'s model whitelist)',
   },
   workbench: {
     sessions: {
@@ -498,6 +499,8 @@ export default {
       markDone: 'Mark done',
       invalid: 'Invalidate',
       restore: 'Restore',
+      delete: 'Delete entry',
+      deleteConfirm: 'Delete tracking entry "{title}"? This cannot be undone.',
       state: { running: 'Running', waiting: 'Waiting', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' },
       role: { user: 'User', architect: 'Architect', coding: 'Executor' },
     },
@@ -1172,6 +1175,9 @@ export default {
       active: 'Analysis Model',
       activeHint: 'Model used for architect requirement/spec analysis. Empty falls back to main backend default model.',
       addManual: 'Add Manual Model',
+      clearProfiles: 'Clear Profiles',
+      clearProfilesTip: 'Delete all model capability profiles (legacy suite/scale cleanup)',
+      clearProfilesConfirm: 'Clear all model capability profiles? All models return to unprobed state; re-probe to regenerate.',
       manualName: 'Name',
       manualProvider: 'Provider',
       manualModel: 'Model',

@@ -295,8 +295,16 @@ async def analyze_clarify(request: Request):
 
     from .req_agent import req_harness_clarify
     from .common import KbUnavailableError
+    tier = "T1"
     try:
-        agent = req_harness_clarify(req, body.get("root"), body.get("project"), model_id=model_id)
+        from ..agent.governance.gears import resolve_gear
+        _cv = store.ConversationsStore.get(req.get("ownerConv") or "") or {}
+        tier = resolve_gear(str(_cv.get("analysisMode") or "")).tier
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        agent = req_harness_clarify(req, body.get("root"), body.get("project"), model_id=model_id,
+                                    tier=tier)
     except KbUnavailableError as e:
         return err(502, str(e))
     if agent and agent.get("questions"):
@@ -338,10 +346,18 @@ async def analyze_collect(request: Request):
 
     from .req_agent import req_harness_collect
     from .common import KbUnavailableError
+    tier = "T1"
+    try:
+        from ..agent.governance.gears import resolve_gear
+        _cv = store.ConversationsStore.get(base.get("ownerConv") or "") or {}
+        tier = resolve_gear(str(_cv.get("analysisMode") or "")).tier
+    except Exception:  # noqa: BLE001
+        pass
     try:
         agent = req_harness_collect({"turns": body.get("turns") or [], "base": base,
                                      "answers": answers, "note": body.get("note")},
-                                    body.get("root"), body.get("project"), model_id=model_id)
+                                    body.get("root"), body.get("project"), model_id=model_id,
+                                    tier=tier)
     except KbUnavailableError as e:
         return err(502, str(e))
     if agent and agent.get("report"):

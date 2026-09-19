@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("arch.planning.scope_probe")
@@ -57,10 +58,12 @@ def gather_grounding(root: str, project: Optional[str], req_text: str,
 
 
 def probe_scope(root: str, project: Optional[str], req_text: str,
-                rid: str = "") -> Dict[str, Any]:
+                rid: str = "", tier: str = "T1") -> Dict[str, Any]:
     """范围探针: grounding + 单次 LLM → {ok, files: [{path, source}], note}。
 
     files 已归一(去 ./、去尾 /、去重、截断); 来源引用非法 → inference。
+    R3.1 链3收编(D7-①): 经 CallTurn——T2 附逐文件 source 标注示例脚手架/
+    按挡重试; 兜底(R2.3 启发式)由调用方接线。tier 缺省 T1(基线行为不变)。
     """
     if not (req_text or "").strip():
         return {"ok": False, "error": "需求文本为空"}
@@ -92,20 +95,22 @@ def probe_scope(root: str, project: Optional[str], req_text: str,
         user_parts.append("同项目历史需求边界:\n" + "\n".join(g["history"][:20]))
     if g["kb"]:
         user_parts.append("架构资产命中:\n" + "\n".join(g["kb"]))
-    from ...arch_routes import req_agent as _ra
+    # R3.1 链3收编(D7-①): 经 CallTurn(分目的脚手架/按挡重试; llm 不可用计失败)
+    from ...agent.compensation.ctx import Purpose
+    from ...agent.turns import call as _call_turn
     from ...arch_routes.agent_roles import load_light_tasks_cfg
     from ..governance.light_tasks import resolve_light_task_model
-    try:
-        res = _ra.llm_sync(
-            [{"role": "system", "content": sys_prompt},
-             {"role": "user", "content": "\n\n".join(user_parts)}],
-            mode="structured", output_schema=schema, max_tokens=1024,
-            model_id=resolve_light_task_model("probe", load_light_tasks_cfg())
-            or None)
-    except Exception as e:  # noqa: BLE001
-        logger.info("[scope-probe] llm 不可用: %s", e)
-        return {"ok": False, "error": f"llm 不可用: {e}"}
-    payload = (res or {}).get("output")
+    r = _call_turn.call(
+        Purpose.PROBE,
+        [{"role": "system", "content": sys_prompt},
+         {"role": "user", "content": "\n\n".join(user_parts)}],
+        tier=tier, schema=schema, max_tokens=1024,
+        model_id=resolve_light_task_model("probe", load_light_tasks_cfg())
+        or None,
+        validate=lambda p: (isinstance((p or {}).get("files"), list)
+                            and bool(p["files"]), "files 非列表或为空"),
+        fallback=lambda: None)
+    payload = r.get("output") if r.get("ok") else None
     if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
         return {"ok": False, "error": "探针输出无效"}
     files: List[Dict[str, str]] = []
@@ -125,3 +130,62 @@ def probe_scope(root: str, project: Optional[str], req_text: str,
                       "source": src if src in _VALID_SOURCES else "inference"})
     return {"ok": bool(files), "files": files,
             "note": str(payload.get("note") or "")[:200]}
+
+
+# ── R2.3: 探针失败 → 确定性启发式兜底(零 LLM; 开关 r2_3_probe_fallback) ──
+
+_PATH_TOKEN = re.compile(r"[`\"']?([\w./-]+\.[A-Za-z]{1,8}|[\w-]+/[\w./-]+)[`\"']?")
+
+
+def heuristic_scope_fallback(root: str, req_text: str,
+                             exclude_rid: str = "") -> Dict[str, Any]:
+    """探针失败兜底(R2.3): 文件树前缀匹配 + 历史需求边界先验(确定性, 零 LLM)。
+
+    产出与 probe_scope 同形: {ok, files: [{path, source}], note, degraded: True}。
+    来源: tree=需求文本中的路径 token 命中文件树(前缀匹配);
+          history=同项目其他需求边界条目(取目录前缀, 最多 5 项)。
+    精度有限——调用方须在卡片/指令中明示降级来源(设计 §3.3 ScopeGroundProvider)。
+    """
+    from ..governance.boundary import list_repo_files
+    files: List[Dict[str, str]] = []
+    seen: set = set()
+
+    def _add(path: str, source: str) -> None:
+        path = path.rstrip("/")
+        if path and path not in seen and not path.startswith("/"):
+            seen.add(path)
+            files.append({"path": path, "source": source})
+
+    tree = list_repo_files(root or "")
+    tree_set = set(tree)
+    # ① 需求文本中的路径 token → 文件树前缀匹配
+    for tok in _PATH_TOKEN.findall(req_text or "")[:40]:
+        tok = tok.lstrip("./")
+        if tok in tree_set:
+            _add(tok, "tree")
+            continue
+        hits = [f for f in tree if f.startswith(tok.rstrip("/"))
+                and len(files) < _MAX_PROPOSED]
+        if hits:
+            _add(tok.rstrip("/"), "tree" if tok in tree_set else "tree")
+    # ② 历史需求边界先验(同项目, 目录前缀级)
+    try:
+        from ...arch_routes import store
+        for r in store.RequirementsStore.all():
+            if len(files) >= _MAX_PROPOSED:
+                break
+            if r.get("id") == exclude_rid:
+                continue
+            snap = (store.RequirementsStore.spec_active(r.get("id") or "")
+                    or {}).get("snapshot") or {}
+            scope = [str(x) for x in (snap.get("allowedScope") or [])][:2]
+            for s in scope:
+                if len(files) >= _MAX_PROPOSED:
+                    break
+                _add(s.rstrip("/") if "/" in s else s.rsplit("/", 1)[0]
+                     if "." in s else s, "history")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[scope-probe] fallback history: %s", e)
+    return {"ok": bool(files), "files": files[:_MAX_PROPOSED],
+            "note": "探针不可用——文件树/历史边界启发式兜底(精度有限)",
+            "degraded": True}

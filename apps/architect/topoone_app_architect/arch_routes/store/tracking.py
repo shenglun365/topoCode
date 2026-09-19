@@ -17,7 +17,7 @@ import logging
 import time
 from typing import Optional
 
-from .base import _fetchall_routed, _get, _insert, _row_to_api, _scan_dbs, _update, next_id
+from .base import _delete, _fetchall_routed, _get, _insert, _row_to_api, _scan_dbs, _update, next_id
 from .states import (
     TASK_PENDING_CONFIRM, TASK_RUNNING, TASK_WAITING_INPUT,
     TRACK_CANCELLED, TRACK_DONE, TRACK_FAILED, TRACK_RUNNING, TRACK_WAITING,
@@ -157,6 +157,11 @@ class TrackingItemsStore:
         if category:
             out = [r for r in out if (r.get("category") or "") == category]
         return out
+
+    @classmethod
+    def delete(cls, item_id: str) -> bool:
+        """单条删除(误挂/过期条目清理; 会话删除走 delete_by_conversation 级联)。"""
+        return bool(_delete(cls.TABLE, item_id))
 
     @classmethod
     def delete_by_conversation(cls, conv_id: str) -> int:

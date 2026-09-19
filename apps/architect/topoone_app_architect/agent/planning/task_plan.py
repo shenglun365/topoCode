@@ -128,7 +128,8 @@ def propose_task_tool(title: str, instruction: str,
 
 def assemble_task_instruction(task: dict, prior_brief: str = "",
                               policy: Optional[Any] = None,
-                              runtime: Optional[dict] = None) -> str:
+                              runtime: Optional[dict] = None,
+                              probe_score: Optional[float] = None) -> str:
     """任务指令组装: task.instruction(architect 整理) 为正文 + 绑定需求规约
     补充(边界/验收) + 工作环境/DoD 系统段(确定性注入, 不依赖 LLM)。
 
@@ -137,17 +138,28 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
     prior_brief: 前情链简报(同会话近期终态任务摘要, confirm 时自动注入)。
     runtime: 运行时身份事实(A3/postmortem 防误验)——{"branch","root"};
     已知即注入「运行时身份」段, 杜绝 agent 把主目录服务探测当完成依据。
+    probe_score: C 轴执行器探测分(R2.5 同挡个体差异, 仅 T1/T2; 开关
+    r2_5_intra_tier)——弱则密度升档, T2 强则允许并步。
     """
     if policy is None:
         from ..governance.gears import default_policy
         policy = default_policy()
-    if getattr(policy, "cap_note", ""):
-        # M1: 实测边界封顶随指令告知 subagent(编排已按能力边界降档)
-        parts_style_note = ("> 🛡️ " + str(policy.cap_note)
-                            + "——本次任务编排已按你的实测能力边界降档, "
-                              "请严格按微步/步骤粒度推进, 里程碑报告照常。\n")
-    else:
-        parts_style_note = ""
+    # M1 收编: cap_note 段经 compensation.providers(字节级等价, R1.1)
+    from ..compensation.providers import cap_note_section
+    parts_style_note = cap_note_section(policy)
+    # R2.5(开关 r2_5_intra_tier): 同挡密度微调段(仅 T1/T2)
+    try:
+        from ..compensation.overrides import read_overrides
+        from ..compensation.overrides import override_enabled as _oe
+        from ...arch_routes import store as _s
+        if _oe(read_overrides(_s.CollabConfigStore.get), "r2_5_intra_tier"):
+            from ..compensation.providers.intratier import intra_tier_note
+            _intra = intra_tier_note(str(getattr(policy, "tier", "") or ""),
+                                     probe_score)
+            if _intra:
+                parts_style_note += _intra + "\n"
+    except Exception:  # noqa: BLE001 — 微调基础设施异常不阻塞指令组装
+        pass
     rid = task.get("reqId") or ""
     r = _store().RequirementsStore.get(rid) or {} if rid else {}
     active = _store().RequirementsStore.spec_active(rid) or {} if rid else {}
@@ -233,21 +245,15 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
         "确实无法链接时（内部函数未导出等），必须在摘要中显式声明\"复制实现\"及原因；\n"
         "5. 全部完成后输出 [[IMPLEMENT_DONE]] 与摘要(变更文件/验证结果/编译结果/遗留项)；"
         "任一环节需要用户操作、确认、澄清或补充信息时，输出 [[NEED_INPUT]] 与具体问题后结束回合等待。")
-    # 里程碑协议(环节十一) + 挡位粒度/节奏分叉(环节十二a, 数据驱动)
-    parts.append(
-        "## 里程碑协议（重要，防止无限消耗）\n"
-        "- 预计超过约 15 次工具调用的复杂任务：先探索代码库，在首次回复中提交"
-        "**里程碑计划**（按功能模块+可独立验证标准划分；每个里程碑给出：目标、"
-        "涉及文件、验证方式），然后输出 [[NEED_INPUT]] 等待用户确认后再动手；\n"
-        "- 每个里程碑完成后：输出里程碑报告（固定三行格式：\n"
-        "  `改动文件: 文件a, 文件b, 文件c`\n"
-        "  `验证: 构建与冒烟结果`\n"
-        "  `下一里程碑: 名称 或 \"全部完成\"`），"
-        "然后输出 [[NEED_INPUT]] 等待用户指示；**禁止未提交报告就连续跨里程碑推进**；\n"
-        "- 预计 15 次工具调用以内的简单任务：直接执行，完成后输出 [[IMPLEMENT_DONE]]。")
-    agent_note = str(getattr(policy, "agent_note", "") or "").strip()
+    # M1 收编: 里程碑协议 + 挡位粒度/节奏分叉经 compensation.providers
+    # (环节十一/十二a 文案单源迁移, 字节级等价 R1.1)
+    # R3.3: structured_output 挡 → 报告优先 JSON 块契约(双轨解析, 白名单行为变更)
+    from ..compensation.providers import agent_note_section, milestone_section
+    parts.append(milestone_section(
+        structured=bool(getattr(policy, "structured_output", False))))
+    agent_note = agent_note_section(policy)
     if agent_note:
-        parts.append("## 执行方式（按任务挡位）\n" + agent_note)
+        parts.append(agent_note)
     return "\n\n".join(parts)
 
 
@@ -275,8 +281,11 @@ def save_plan(rid: str, plan: list) -> None:
     _store().RequirementsStore.update(rid, {"taskPlan": plan})
 
 
-def split_tasks_llm(req_text: str) -> Optional[list]:
-    """LLM 拆步: ≥2 步返回步骤列表; 单步/失败/不可用 → None(回落单卡)。"""
+def split_tasks_llm(req_text: str, policy: Optional[Any] = None) -> Optional[list]:
+    """LLM 拆步: ≥2 步返回步骤列表; 单步/失败/不可用 → None(回落单卡)。
+
+    R3.1 链3收编(D7-①): 经 CallTurn——T2 附步骤模板脚手架(每步=文件+动作+验证,
+    禁跨模块)/按挡重试; 兜底维持单卡(返回 None)。"""
     if not (req_text or "").strip():
         return None
     schema = {
@@ -293,20 +302,23 @@ def split_tasks_llm(req_text: str) -> Optional[list]:
         },
         "required": ["tasks"],
     }
-    from ...arch_routes import req_agent as _ra
-    try:
-        res = _ra.llm_sync(
-            [{"role": "system",
-              "content": "你是任务计划器。把需求拆成**有序的实施步骤**(每步单一模块级"
-                         "目标、可独立构建验证)。规则: 2-5 步; 若需求足够单一一步可完成,"
-                         "返回单步; 步骤 instruction 写实质内容(目标/涉及文件/验证方式)。"
-                         "只输出结构化结果。"},
-             {"role": "user", "content": f"需求文本:\n{req_text[:6000]}"}],
-            mode="structured", output_schema=schema, max_tokens=2048)
-    except Exception as e:  # noqa: BLE001
-        logger.info("[task-plan] llm 不可用: %s", e)
-        return None
-    payload = (res or {}).get("output")
+    # R3.1(D7-①): 经 CallTurn(分目的脚手架/按挡重试; 遥测带 tier/purpose)
+    from ...agent.compensation.ctx import Purpose
+    from ...agent.turns import call as _call_turn
+    r = _call_turn.call(
+        Purpose.SPLIT,
+        [{"role": "system",
+          "content": "你是任务计划器。把需求拆成**有序的实施步骤**(每步单一模块级"
+                     "目标、可独立构建验证)。规则: 2-5 步; 若需求足够单一一步可完成,"
+                     "返回单步; 步骤 instruction 写实质内容(目标/涉及文件/验证方式)。"
+                     "只输出结构化结果。"},
+         {"role": "user", "content": f"需求文本:\n{req_text[:6000]}"}],
+        tier=str(getattr(policy, "tier", "") or "T1"),
+        schema=schema, max_tokens=2048,
+        validate=lambda p: (isinstance((p or {}).get("tasks"), list)
+                            and bool(p["tasks"]), "tasks 非列表或为空"),
+        fallback=lambda: None)
+    payload = r.get("output") if r.get("ok") else None
     tasks = (payload or {}).get("tasks")
     if not isinstance(tasks, list):
         return None
@@ -344,7 +356,8 @@ def propose_plan_step(conv: dict, rid: str, idx: int,
     step = plan[idx]
     task = eb.propose_task(
         conv, f"{base_title} · 步骤{idx + 1}/{len(plan)} {step.get('title')}",
-        _step_instruction(plan, idx), executor_hint=executor_hint)
+        _step_instruction(plan, idx), executor_hint=executor_hint,
+        gate_diagram=False)   # R3.2: 计划步骤卡豁免图门禁(图随计划上下文)
     if task.get("id"):
         plan[idx]["taskId"] = task["id"]
         plan[idx]["status"] = "proposed"
@@ -415,7 +428,7 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
                               f"{dep_note}，待确认执行。")
         return out or {"ok": False, "receipt": "计划步骤下发失败"}
 
-    steps = split_tasks_llm(req_text)
+    steps = split_tasks_llm(req_text, policy=policy)
     if not steps:
         return None
     plan = [{"seq": i + 1, "title": s["title"], "instruction": s["instruction"],

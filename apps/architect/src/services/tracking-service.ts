@@ -3,7 +3,7 @@
  * 条目 = 工作记录六维度: 谁创建/内容/待谁操作/操作类型/结果/当前状态。
  * 自动挂账在后端事件点完成; 此处承担 手动挂账/流转修正/字典管理/清单读取。
  */
-import { apiGet, apiPatch, apiPost, apiPut } from './api-client'
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from './api-client'
 
 export interface TrackingItem {
   id: string
@@ -70,6 +70,9 @@ export const trackingService = {
     'category' | 'title' | 'content' | 'actionType' | 'assigneeRole' | 'assigneeId'
     | 'state' | 'waitingFor' | 'result' | 'resultState' | 'valid'>>): Promise<TrackingItem> {
     return apiPatch<TrackingItem>(`/tracking/items/${id}`, patch)
+  },
+  async delete(id: string): Promise<{ deleted: boolean; id: string }> {
+    return apiDelete<{ deleted: boolean; id: string }>(`/tracking/items/${id}`)
   },
   async vocab(): Promise<TrackingVocab> {
     return apiGet<TrackingVocab>('/tracking/vocab')

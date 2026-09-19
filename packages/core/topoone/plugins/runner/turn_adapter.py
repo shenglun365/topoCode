@@ -715,9 +715,12 @@ class _SidecarProcess:
     """cline sidecar v2（ClineCore 会话宿主）：共享单例、懒拉起、崩溃自动重启、
     请求-响应关联、按 sessionId 多路分发事件。"""
 
-    def __init__(self, node_bin: str, script: str):
+    def __init__(self, node_bin: str, script: str, data_dir: str = ""):
         self._node = node_bin or "node"
         self._script = script
+        # 引擎版本数据隔离: TOPOCODE_CLINE_DATA_DIR 注入 → 会话/设置按版本分目录
+        # (host.configureStorage 运行时读取; 空则继承默认 ~/.topocode/cline/default)
+        self._data_dir = data_dir or ""
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._lock = asyncio.Lock()
         self._req_id = 0
@@ -745,12 +748,17 @@ class _SidecarProcess:
             return
         run_dir = os.path.join(os.path.expanduser("~"), ".topocode", "runner")
         os.makedirs(run_dir, exist_ok=True)
+        env = None
+        if self._data_dir:
+            os.makedirs(self._data_dir, exist_ok=True)
+            env = {**os.environ, "TOPOCODE_CLINE_DATA_DIR": self._data_dir}
         self._proc = await asyncio.create_subprocess_exec(
             self._node, self._script,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=open(os.path.join(run_dir, f"cline-sidecar-{time.strftime('%Y%m%d')}.log"),
                         "ab"),  # noqa: SIM115
             limit=16 * 1024 * 1024,
+            env=env,
         )
         self._reader_task = asyncio.create_task(self._read_loop())
         try:
@@ -875,6 +883,9 @@ class ClineTurnAdapter(TurnAdapter):
         self._node = str(config.get("node_bin") or "node")
         self._script = (str(config.get("sidecar_script") or "").strip()
                         or _default_sidecar_script())
+        # 引擎版本数据目录(cline_engines 解析下发; 空=sidecar 默认存储)
+        self._data_dir = str(config.get("cline_data_dir")
+                             or config.get("data_dir") or "").strip()
         self._provider_id = str(config.get("provider_id") or "")
         self._model_id = str(config.get("model_id") or "")
         self._api_key = str(config.get("api_key") or "")
@@ -904,10 +915,11 @@ class ClineTurnAdapter(TurnAdapter):
     # ── 共享 sidecar ──
 
     def _sidecar(self) -> _SidecarProcess:
-        key = f"{self._node}:{self._script}"
+        # 单例键含数据目录: 同 sidecar 脚本不同版本数据目录 → 独立进程(多版本共存)
+        key = f"{self._node}:{self._script}:{self._data_dir}"
         sc = _CLINE_SIDECARS.get(key)
         if sc is None:
-            sc = _SidecarProcess(self._node, self._script)
+            sc = _SidecarProcess(self._node, self._script, self._data_dir)
             _CLINE_SIDECARS[key] = sc
         return sc
 

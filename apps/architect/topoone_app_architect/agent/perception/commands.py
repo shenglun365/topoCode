@@ -104,15 +104,38 @@ def run_extract_req(conv: Dict[str, Any]) -> Dict[str, Any]:
         },
         "required": ["title", "requirementMd"],
     }
-    res = req_agent.llm_sync(
+    # R3.1 链3收编(D7-①): /提取需求 迁 CallTurn——分目的脚手架(T2)/按挡重试/
+    # 确定性兜底(解析失败→澄清问询, 不再直接失败)。T0/T1 行为等价(仅重试增量)。
+    from ...agent.compensation.ctx import Purpose
+    from ...agent.governance.gears import resolve_gear
+    from ...agent.turns import call as _call_turn
+    tier = resolve_gear(str((conv or {}).get("analysisMode") or "")).tier
+
+    def _validate(p):
+        if not isinstance(p, dict) or not (p.get("title") or "").strip():
+            return False, "输出非 JSON 对象或缺少有效 title"
+        return True, ""
+
+    def _fallback():
+        # §5.4 兜底: 解析失败 → 回落澄清问询(列缺失要素请用户补全)
+        return {"__clarify__": True}
+
+    r = _call_turn.call(
+        Purpose.EXTRACTION,
         [{"role": "system",
           "content": "你是需求分析师。从对话记录提取开发类需求规约：title 简短；"
                      "requirementMd=需求目标；designMd=技术方案要点(可从讨论归纳)；"
                      "allowedScopeMd/forbiddenScopeMd=允许/禁止改动范围(逐条行)；"
                      "acceptanceMd=验收标准(逐条行)。只输出结构化结果，不要发明讨论中没有的约束。"},
          {"role": "user", "content": f"对话记录:\n{transcript[:12000]}"}],
-        mode="structured", output_schema=schema, max_tokens=2048)
-    payload = (res or {}).get("output")
+        tier=tier, schema=schema, max_tokens=2048,
+        validate=_validate, fallback=_fallback)
+    if r.get("degraded"):
+        return {"ok": False, "receipt":
+                "未能从对话中自动提取出完整需求——请补充以下要点后重试 /提取需求，"
+                "或直接描述任务让我建卡(/执行)：\n"
+                "- 目标(要达成什么)\n- 范围(可改哪些文件/模块)\n- 验收(如何算完成)"}
+    payload = r.get("output")
     if not isinstance(payload, dict) or not (payload.get("title") or "").strip():
         return {"ok": False, "receipt":
                 "未能从对话中提取出有效需求——请补充说明目标/范围后重试,"

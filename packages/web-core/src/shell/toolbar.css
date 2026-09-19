@@ -41,7 +41,8 @@
   font-size: calc(13px * var(--ui-scale));
 }
 .model-name {
-  max-width: calc(120px * var(--ui-scale));
+  /* 随模型名自适应撑开按钮(常规名完整显示); 220px 封顶防极端长名挤爆顶栏 */
+  max-width: calc(220px * var(--ui-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -54,7 +55,11 @@
   top: calc(100% + 6px);
   right: 0;
   z-index: 1000;
+  /* 面板随最宽行(select 选项)自适应撑开, 选项不再超出 select 边框;
+     min-width 保短名单不至于太窄, max-width 防极端长名溢出屏幕 */
+  width: max-content;
   min-width: calc(230px * var(--ui-scale));
+  max-width: min(92vw, 380px);
   padding: calc(10px * var(--ui-scale));
   background: var(--bg-secondary, #181825);
   border: 1px solid var(--border, #45475a);
@@ -76,5 +81,7 @@
   flex-shrink: 0;
 }
 .popover-row .toolbar-select {
+  /* 行内 select 按选项自然宽度撑开(面板 max-content 配合), 下限防抖动 */
   min-width: calc(130px * var(--ui-scale));
+  width: auto;
 }

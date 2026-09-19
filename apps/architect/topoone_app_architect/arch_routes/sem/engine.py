@@ -2528,10 +2528,9 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
     pseudo, degraded = "", True
     if snippet:
         try:
-            from ..req_agent import llm_sync, get_max_tokens_preference
-            from ..agent_roles import resolve_role_model
+            from ..req_agent import get_max_tokens_preference
+            from ...agent.turns.catalog import catalog_call
             # tAgent 角色模型路由(§9/B1)：伪码解释走 pseudo 角色；显式传入优先
-            model_id = resolve_role_model("pseudo", model_id)
             sys_prompt = (
                 "你是资深架构师。基于给定的真实源码片段与该语义资产的类别/描述/结构，"
                 "用中文写一段『伪码级』实现走查：带编号的伪码步骤概括它在本项目里具体怎么实现"
@@ -2543,11 +2542,11 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
                 f"真实源码片段:\n{snippet}\n\n"
                 "请输出伪码级实现走查(纯文本，不要 Markdown 代码块)。"
             )
-            res = llm_sync([{"role": "system", "content": sys_prompt},
-                            {"role": "user", "content": user_prompt}],
-                           mode="chat", max_tokens=get_max_tokens_preference(), model_id=model_id)
-            if isinstance(res, dict):
-                pseudo = (res.get("content") or "").strip()
+            res = catalog_call("role:pseudo",
+                               [{"role": "system", "content": sys_prompt},
+                                {"role": "user", "content": user_prompt}],
+                               max_tokens=get_max_tokens_preference(), model_id=model_id)
+            pseudo = (res.get("content") or "").strip() if res.get("ok") else ""
         except Exception as e:
             logger.warning("[semantic] pseudo LLM 失败: %s", e)
             pseudo = ""
@@ -2581,10 +2580,9 @@ def generate_desc(asset_id: str, root: Optional[str] = None,
     desc, degraded = "", True
     if snippet:
         try:
-            from ..req_agent import llm_sync, get_max_tokens_preference
-            from ..agent_roles import resolve_role_model
-            # 名称解析走 extract 角色；摘要同样跟随(显式传入优先)
-            model_id = resolve_role_model("extract", model_id)
+            from ..req_agent import get_max_tokens_preference
+            from ...agent.turns.catalog import catalog_call
+            # 名称解析走 extract 角色；摘要同样跟随(显式传入优先; 目录路由解析)
             detail_txt = json.dumps(a.get("detail") or {}, ensure_ascii=False)[:800]
             sys_prompt = (
                 "你是代码语义资产功能摘要生成器。结构化种子(字段/调用链/分支/路由/常量)"
@@ -2598,11 +2596,11 @@ def generate_desc(asset_id: str, root: Optional[str] = None,
                 f"真实源码片段:\n{snippet}\n\n"
                 "请输出功能摘要(纯文本一段话，不要 Markdown 代码块)。"
             )
-            res = llm_sync([{"role": "system", "content": sys_prompt},
-                            {"role": "user", "content": user_prompt}],
-                           mode="chat", max_tokens=get_max_tokens_preference(), model_id=model_id)
-            if isinstance(res, dict):
-                desc = (res.get("content") or "").strip()
+            res = catalog_call("role:extract",
+                               [{"role": "system", "content": sys_prompt},
+                                {"role": "user", "content": user_prompt}],
+                               max_tokens=get_max_tokens_preference(), model_id=model_id)
+            desc = (res.get("content") or "").strip() if res.get("ok") else ""
         except Exception as e:
             logger.warning("[semantic] desc LLM 失败: %s", e)
             desc = ""
@@ -2739,13 +2737,13 @@ def generate_node_brief(a: dict, root: Optional[str], project: Optional[str],
                 "只输出简介正文。"
             )
             user_prompt = "\n".join(ctx_lines) + f"\n\n真实源码片段:\n{snippet}\n\n请输出简介。"
-            from ..req_agent import llm_sync, get_max_tokens_preference
-            from ..agent_roles import resolve_role_model
-            model_id = resolve_role_model("pseudo", model_id)
-            res = llm_sync([{"role": "system", "content": sys_prompt},
-                            {"role": "user", "content": user_prompt}],
-                           mode="chat", max_tokens=get_max_tokens_preference(), model_id=model_id)
-            brief = (res.get("content") or "").strip() if isinstance(res, dict) else ""
+            from ..req_agent import get_max_tokens_preference
+            from ...agent.turns.catalog import catalog_call
+            res = catalog_call("role:pseudo",
+                               [{"role": "system", "content": sys_prompt},
+                                {"role": "user", "content": user_prompt}],
+                               max_tokens=get_max_tokens_preference(), model_id=model_id)
+            brief = (res.get("content") or "").strip() if res.get("ok") else ""
             brief = brief.strip('"').strip()
             if brief and not _brief_grounded(brief, a):
                 logger.warning("[semantic] node brief 未通过接地校验(未引用真实符号): %s", aid)
@@ -2802,12 +2800,12 @@ def generate_node_briefs_batch(pid: str, file: str, assets: List[dict],
     user_prompt = (terms_txt + "\n" if terms_txt else "") + (conv_txt + "\n" if conv_txt else "") \
         + "\n\n".join(ctx_blocks) + "\n\n请输出 JSON。"
     try:
-        from ..req_agent import llm_sync, get_max_tokens_preference
-        from ..agent_roles import resolve_role_model
-        mid = resolve_role_model("pseudo", model_id)
-        res = llm_sync([{"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": user_prompt}],
-                       mode="chat", max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=mid)
+        from ..req_agent import get_max_tokens_preference
+        from ...agent.turns.catalog import catalog_call
+        res = catalog_call("role:pseudo",
+                           [{"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": user_prompt}],
+                           max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=model_id)
         raw = (res.get("content") or "").strip() if isinstance(res, dict) else ""
         if raw.startswith("```"):
             raw = raw.strip("`")
@@ -2915,13 +2913,13 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
             + "\n\ntarget 资产清单:\n" + "\n".join(tgt_blocks) + "\n\n请输出 JSON。")
     notes: Dict[str, str] = {}
     try:
-        from ..req_agent import llm_sync, get_max_tokens_preference
-        from ..agent_roles import resolve_role_model
-        mid = resolve_role_model("pseudo", model_id)
-        res = llm_sync([{"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": user}],
-                       mode="chat", max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=mid)
-        raw = (res.get("content") or "").strip() if isinstance(res, dict) else ""
+        from ..req_agent import get_max_tokens_preference
+        from ...agent.turns.catalog import catalog_call
+        res = catalog_call("role:pseudo",
+                           [{"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": user}],
+                           max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=model_id)
+        raw = (res.get("content") or "").strip() if res.get("ok") else ""
         if raw.startswith("```"):
             raw = raw.strip("`")
             if raw.lower().startswith("json"):
@@ -3163,6 +3161,7 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
     from ..agent_roles import resolve_role_model
     # 逐行解读与伪码走查同属 pseudo 角色(查询期轻量解读)；
     # 多轮工具调用(白名单只读工具，封顶 3 轮)允许模型补读符号/检索资产后再给注解。
+    # M4: 多轮循环独立推进非单次调用, 保留原通道不经 CallTurn。
     model_id = resolve_role_model("pseudo", model_id)
 
     def _attempt(sub_start: int, sub_codes: List[str]) -> Tuple[Dict[int, str], str, bool]:

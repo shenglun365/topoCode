@@ -370,10 +370,10 @@ def activate_l3_opinion(pid: str, report_id: str, item_id: str,
                  if instruction else "\n\n请对该条目期望是否被满足给出 L3 语义参考意见。")
           )},
     ]
+    from ..agent.turns.catalog import catalog_call
     from .agent_roles import role_model_id
-    from .req_agent import llm_sync
-    model_id = role_model_id("verify")
-    res = llm_sync(messages, mode="chat", model_id=model_id or None)
+    model_id = role_model_id("verify")   # 存档口径(与目录路由同源)
+    res = catalog_call("role:verify", messages)
     content = ((res or {}).get("content") or "").strip()
     if not content:
         raise RuntimeError("模型不可用，无法生成 L3 参考意见（请稍后重试）")
@@ -417,10 +417,10 @@ def draft_fix_instruction(pid: str, item_id: str) -> Dict[str, Any]:
                 if fail_facts else "（无失败事实——条目可能尚未验收或全部通过）")
          )},
     ]
+    from ..agent.turns.catalog import catalog_call
     from .agent_roles import role_model_id
-    from .req_agent import llm_sync
-    model_id = role_model_id("verify")
-    res = llm_sync(messages, mode="chat", model_id=model_id or None)
+    model_id = role_model_id("verify")   # 存档口径(与目录路由同源)
+    res = catalog_call("role:verify", messages)
     content = ((res or {}).get("content") or "").strip()
     if not content:
         raise RuntimeError("模型不可用，无法起草修复指令（请稍后重试）")

@@ -120,7 +120,7 @@ def test_confirm_tier_iterations_injected(arch_env, tmp_path, monkeypatch):
     """会话钉 T2 → 任务级轮次 300 覆盖注册表 2000; 指令含步骤编排段。"""
     conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2")
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
-                                            "executorId": "ex-g"})
+                                            "executorId": "ex-g"}, gate_diagram=False)
     assert eb.confirm_task(task["id"])["ok"]
     pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
     assert pl["executorConfig"]["max_iterations"] == 300
@@ -131,7 +131,7 @@ def test_confirm_quick_mode_registry_iterations(arch_env, tmp_path, monkeypatch)
     """quick(T0) → 2000; 注册表 capability=T1 不影响钉死的 quick。"""
     conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="quick")
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
-                                            "executorId": "ex-g"})
+                                            "executorId": "ex-g"}, gate_diagram=False)
     assert eb.confirm_task(task["id"])["ok"]
     pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
     assert pl["executorConfig"]["max_iterations"] == 2000
@@ -141,7 +141,7 @@ def test_confirm_auto_uses_executor_capability(arch_env, tmp_path, monkeypatch):
     """strict(=auto) + 执行器 capability=T2 → 轮次 300。"""
     conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="strict")
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
-                                            "executorId": "ex-g"})
+                                            "executorId": "ex-g"}, gate_diagram=False)
     assert eb.confirm_task(task["id"])["ok"]
     pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
     assert pl["executorConfig"]["max_iterations"] == 300

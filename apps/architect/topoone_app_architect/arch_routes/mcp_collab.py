@@ -168,7 +168,28 @@ def get_llm_models() -> list:
 
 
 def save_llm_models(models: list) -> None:
-    store.CollabConfigStore.set(_MODELS_KEY, json.dumps(models, ensure_ascii=False))
+    """持久化模型目录。存储前按 id 归一: 同 id 保留 updatedAt 最新的一条。
+
+    KB 同步按 model 名复用主库 id(_sync_manual_to_kb), 同一逻辑模型的
+    多个名称/配置变体曾造成「同 id 双行」(id 冲突导致编辑歧义/渲染 key 冲突)。
+    """
+    by_id: dict = {}
+    order: list = []
+    extras: list = []
+    for m in models or []:
+        mid = str(m.get("id") or "")
+        if not mid:
+            extras.append(m)
+            continue
+        if mid in by_id:
+            old = by_id[mid]
+            if int(m.get("updatedAt") or 0) >= int(old.get("updatedAt") or 0):
+                by_id[mid] = m
+        else:
+            by_id[mid] = m
+            order.append(mid)
+    merged = [by_id[k] for k in order] + extras
+    store.CollabConfigStore.set(_MODELS_KEY, json.dumps(merged, ensure_ascii=False))
 
 
 def _model_identity(m: dict) -> str:
@@ -327,7 +348,13 @@ async def add_manual_llm_model_route(request: Request):
         "updatedAt": _ts(),
     }
     entry = _sync_manual_to_kb(entry)
-    models = [m for m in get_llm_models() if m.get("source") != "manual" or _model_identity(m) != _model_identity(entry)]
+    # id 唯一化: KB 同步按 model 名复用主库 id, 旧变体行可能已持同 id → 移除
+    # (否则同 id 双行: 编辑歧义 + 前端 :key 冲突); 身份去重保持原语义
+    eid = str(entry.get("id") or "")
+    models = [m for m in get_llm_models()
+              if str(m.get("id") or "") != eid
+              and (m.get("source") != "manual"
+                   or _model_identity(m) != _model_identity(entry))]
     models.append(entry)
     save_llm_models(models)
     return ok(entry)
@@ -421,12 +448,37 @@ async def get_model_profiles():
                "tiers": model_profile.TIERS})
 
 
+@router.get("/llm/capability-probe/status")
+async def capability_probe_gate_status():
+    """探测闸门状态(自省): {running: 在跑模型id, queue: [排队模型id]}——
+    前端置灰期间展示真实进度; 亦可供 curl 排查按钮全灰是否为探测在途。
+    注意引真实模块: `from . import model_profile` 是兼容 shim, 不含 _probe_gate。"""
+    from ..agent.cognition import model_profile
+    return ok(model_profile._probe_gate.status())
+
+
 @router.post("/llm/models/{model_id}/capability-probe")
 async def capability_probe_route(model_id: str):
-    """能力探测(同步执行, ~9 次小调用): 工具协议/JSON 围栏/指令边界 → tier 档案。"""
+    """能力探测(~10 次小调用): 工具协议/JSON 围栏/指令边界 → tier 档案。
+    并发治理: 全局互斥串行 + FIFO 排队 + 同模型滤重(重复点击立即回执)。"""
     from . import model_profile
     import asyncio
-    return ok(await asyncio.to_thread(model_profile.probe_model, model_id))
+    res = await asyncio.to_thread(model_profile.probe_model_gated, model_id)
+    return ok(res["profile"])
+
+
+@router.delete("/llm/model-profiles")
+async def clear_model_profiles():
+    """清空全部模型能力档案(旧套件/旧刻度残留清理; 各模型回到未探测态)。"""
+    from ..agent.cognition import model_profile
+    return ok({"cleared": model_profile.clear_profiles()})
+
+
+@router.delete("/llm/model-profiles/{model_id}")
+async def clear_model_profile(model_id: str):
+    """清空单个模型档案(重探前复位)。"""
+    from ..agent.cognition import model_profile
+    return ok({"cleared": model_profile.clear_profile(model_id)})
 
 
 @router.put("/llm/model-profiles/{model_id}")

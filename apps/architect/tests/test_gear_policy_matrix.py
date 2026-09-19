@@ -13,19 +13,22 @@ from topoone_app_architect.agent.governance.gears import (
 
 
 def test_m2_policy_table_dims():
-    """维度随挡全量声明(T0 直出 / T1 任务级预拆 / T2 全面补偿)。"""
+    """维度随挡全量声明(T0 直出 / T1 任务级预拆 / T2 全面补偿)。
+
+    D11(2026-09-19): reasoning_effort 迁出 GearPolicy——推理强度属模型能力
+    属性(探测支持位)+用户自选, 不随挡位(见 agent-capability-design §5.2)。"""
     expect = {
-        # (surface, budget, style, structured, effort)
-        "T0": ("full", 1.0, "standard", False, "high"),
-        "T1": ("full", 0.6, "structured", True, "medium"),
-        "T2": ("reduced", 0.35, "structured", True, "low"),
+        # (surface, budget, style, structured)
+        "T0": ("full", 1.0, "standard", False),
+        "T1": ("full", 0.6, "structured", True),
+        "T2": ("reduced", 0.35, "structured", True),
     }
-    for tid, (surface, budget, style, structured, effort) in expect.items():
+    for tid, (surface, budget, style, structured) in expect.items():
         p = _TIERS[tid]
         assert (p.tool_surface, p.ctx_budget, p.prompt_style,
-                p.structured_output, p.reasoning_effort) == \
-            (surface, budget, style, structured, effort), tid
+                p.structured_output) == (surface, budget, style, structured), tid
     assert default_policy().cap_note == ""
+    assert not hasattr(_TIERS["T0"], "reasoning_effort")   # D11 迁出守恒
 
 
 def test_m3_matrix_attribution_fields():

@@ -1,15 +1,21 @@
-"""任务挡位体系(环节十二a) — T0-T4 策略表 + 解析链单源。
+"""任务挡位体系(环节十二a) — T0-T2 策略表 + 解析链单源。
 
-挡位 = 下发策略参数行(数据驱动), 不是代码分支: 解析一次 → GearPolicy
-对象逐层传递(指令模板/确认节奏/轮次/architect 指引), 禁止 tier 字面量
-散落各处。新增挡位 = 加一行策略, 无新代码路径。
+策略与分数解耦(2026-09-18 裁决):
+  - 挡位 = 执行策略选择, 固定三档 T0/T1/T2, 不随评分细分;
+  - 评分(综合分)与挡位之间只有**默认区间映射**(≥0.90→T0 / ≥0.52→T1 / 其余→T2),
+    非硬性绑定——模型策略可手动调整, 手动优先于映射(probe 不覆盖 manual 档);
+  - 策略定义分两组:
+    · 通用机制(UNIVERSAL_MECHANISMS): 全档共享的补偿/保障, 不随 tier 分叉
+      (错误修复外循环(独立上下文)/受限生成通道(按 structured 探测位)/实测硬上限);
+    · 能力匹配字段(下表 C/A 标注): 业务拆分粒度/确认节奏/工具面/预算等,
+      按模型能力匹配——这是挡位间的真正差异。
 
 解析链(会话 analysisMode):
   quick  → 钉死 T0(直通车·关 KB; 前端闪电钮开)
   strict → 等价 auto(legacy 值)
   auto   → 实测档位(执行器 tierProbed, 环节十二b 落地) >
            执行器配置 capability > 默认 T1
-  T0-T4  → 钉死该档
+  T0-T2  → 钉死该档
 
 消费面:
   - orchestrator: architect_note(policy) → 编排者系统指引
@@ -28,6 +34,21 @@ GEAR_MODES = ("strict", "quick", "auto", *GEAR_IDS)
 # M3 预留: 模型四级成本梯度(L 确定性/S 微调小模型/M 大本地/H 云端)——
 # 异档分船编排按此标签路由(roadmap L 组 ↔ agent-harness-evaluation §9.3 裁决③)
 MODEL_GRADIENTS = ("L", "S", "M", "H")
+
+# ── 通用机制(全档共享, 不随 tier 分叉; 2026-09-18 策略拆分裁决) ──────────
+# 普适补偿/保障对所有挡位一律生效——能力差异只由 GearPolicy 的能力匹配字段
+# 表达, 通用机制不「按档开关」。
+UNIVERSAL_MECHANISMS: Dict[str, str] = {
+    "repair_loop": "错误修复外循环(独立上下文, reflection.repair.run_repair_loop)"
+                   "——参数修复/守卫修复, 全档可用",
+    "structured_channel": "受限生成通道(M4-A)——按 structured 探测位启用, 非按档",
+    "gear_cap": "实测硬上限封顶(probe_hard_cap)——边界是实测的, 不是配置的",
+}
+
+
+def universal_mechanisms_note() -> str:
+    """通用机制说明(回执/文档用)。"""
+    return "；".join(UNIVERSAL_MECHANISMS.values())
 
 
 @dataclass(frozen=True)
@@ -49,7 +70,6 @@ class GearPolicy:
     ctx_budget: float = 1.0          # KB grounding/任务卡/里程碑历史 预算系数
     prompt_style: str = "standard"   # (C) standard|structured|minimal(弱模型更短更清单化)
     structured_output: bool = False  # (C) True → 报告走工具契约(非文本固定行)
-    reasoning_effort: str = "high"   # (C) high|medium|low(推理档位映射)
     tool_rounds: int = 4             # (C) M4-B: chat 侧工具轮次上限(弱档更早触顶)
     depends_source: str = "llm"      # (C) A2: 依赖边产出 llm=模型声明 | linear=编排层线性链
     logic_diagram: str = ""          # (C→A) C 弱 → 上游补核心逻辑表达: "uml"=任务指令须附
@@ -79,7 +99,7 @@ _TIERS: Dict[str, GearPolicy] = {
             "内联 @执行器 前缀(如 @cline)直接按指定执行器建卡。"),
         agent_note="执行器自主推进, 减少不必要暂停；里程碑协议照常(计划确认+每里程碑报告)。",
         tool_surface="full", ctx_budget=1.0, prompt_style="standard",
-        structured_output=False, reasoning_effort="high",
+        structured_output=False,
         tool_rounds=4, depends_source="llm", logic_diagram="",
     ),
     "T1": GearPolicy(
@@ -93,7 +113,7 @@ _TIERS: Dict[str, GearPolicy] = {
             "内联 @执行器 前缀(如 @cline)按用户指定执行器建任务卡。"),
         agent_note="本任务为预拆后的单一模块级任务：聚焦本卡边界, 不要扩展到其他模块；里程碑协议照常。",
         tool_surface="full", ctx_budget=0.6, prompt_style="structured",
-        structured_output=True, reasoning_effort="medium",
+        structured_output=True,
         tool_rounds=4, depends_source="llm", logic_diagram="",
     ),
     "T2": GearPolicy(
@@ -106,7 +126,7 @@ _TIERS: Dict[str, GearPolicy] = {
             "执行器能力有限, 用图补足方案理解, 不依赖其自行推断。"),
         agent_note="按任务上下文中的步骤序列逐步执行；关键步骤(编译前/破坏性操作/方案分叉)完成后简短报告再继续；里程碑协议照常。",
         tool_surface="reduced", ctx_budget=0.35, prompt_style="structured",
-        structured_output=True, reasoning_effort="low",
+        structured_output=True,
         tool_rounds=3, depends_source="linear", logic_diagram="uml",
     ),
 }
@@ -171,21 +191,29 @@ A_AXIS_POLICY = {
 
 
 def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = None,
-                 architect_model_id: str = "") -> GearPolicy:
+                 architect_model_id: str = "",
+                 overrides: Optional[Dict[str, Any]] = None) -> GearPolicy:
     """解析链单源(三维矩阵): 会话挡位 + 执行器能力(C 轴) + architect 模型(A 轴)。
 
     executor_cfg: 执行器注册表 config(读 capability / tierProbed[十二b]) → C 轴字段。
     architect_model_id: architect 对话模型(A 轴) → schedule_discipline/element_hints;
       无 id 或无档案 → 字段保持中性默认(现行为)。
+    overrides: 补偿白名单开关(compensation.overrides, R2.1)。
     未知值一律落默认 T1(显式优于静默升档)。
     M1: 实测来源(tierProbed)叠加探针硬上限封顶(cap_note 随策略携带);
     人工显式 capability 不封顶(人的意志优先)。
+    R2.1(开关 r2_1_axis_stack, 默认新行为): 显式挡决定**基线策略行**, A 轴补偿
+    叠加生效; quick(直通车)豁免保持零补偿纯净直通。开关关闭 → 回退旧短路语义。
     """
     mode = normalize_mode(str(session_mode or "").strip())
     if mode == "quick":
         return _TIERS["T0"]
     if mode in _TIERS:
-        return _TIERS[mode]
+        policy = _TIERS[mode]
+        if not _axis_stack_enabled(overrides):
+            return policy          # 旧短路语义(回退开关)
+        # R2.1: 显式挡不封顶(人的意志优先), 仅叠加 A 轴补偿
+        return _apply_a_axis(policy, architect_model_id)
     # strict / auto / 未知 → auto 链: 实测档位 > 配置档位 > 默认
     cfg = executor_cfg if isinstance(executor_cfg, dict) else {}
     tier = (_valid_tier(cfg.get("tierProbed"))
@@ -199,20 +227,31 @@ def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = Non
             if capped != tier:
                 import dataclasses
                 policy = dataclasses.replace(policy, tier=capped, cap_note=note)
-    # A 轴补偿(architect 模型能力档案 → 调度纪律/要素提示密度)
-    if architect_model_id:
-        try:
-            from ..cognition import model_profile as _mp
-            a_tier = int(_mp.tier_of(architect_model_id))
-            discipline, hints = A_AXIS_POLICY.get(a_tier, ("standard", "low"))
-            if (discipline, hints) != (policy.schedule_discipline,
-                                       policy.element_hints):
-                import dataclasses
-                policy = dataclasses.replace(
-                    policy, schedule_discipline=discipline,
-                    element_hints=hints)
-        except Exception:  # noqa: BLE001 — A 轴读取失败保持中性默认
-            pass
+    return _apply_a_axis(policy, architect_model_id)
+
+
+def _axis_stack_enabled(overrides: Optional[Dict[str, Any]]) -> bool:
+    """R2.1 白名单开关(缺省 = 新行为; 显式 false 回退旧短路)。"""
+    from ..compensation.overrides import override_enabled
+    return override_enabled(overrides or {}, "r2_1_axis_stack")
+
+
+def _apply_a_axis(policy: GearPolicy, architect_model_id: str) -> GearPolicy:
+    """A 轴补偿叠加(architect 模型能力档案 → 调度纪律/要素提示密度)。"""
+    if not architect_model_id:
+        return policy
+    try:
+        from ..cognition import model_profile as _mp
+        a_tier = int(_mp.tier_of(architect_model_id))
+        discipline, hints = A_AXIS_POLICY.get(a_tier, ("standard", "low"))
+        if (discipline, hints) != (policy.schedule_discipline,
+                                   policy.element_hints):
+            import dataclasses
+            return dataclasses.replace(
+                policy, schedule_discipline=discipline,
+                element_hints=hints)
+    except Exception:  # noqa: BLE001 — A 轴读取失败保持中性默认
+        pass
     return policy
 
 

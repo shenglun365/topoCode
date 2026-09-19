@@ -186,9 +186,13 @@ def test_turn_budget_exhaustion_terminates_hang(pipeline, monkeypatch):
     """cv-162 回归: 模型 hang(流式无事件+同步空返回)时回合必须在总预算内
     终止并落 turnError——不再串联 60s 空闲×N 轮 + 191s sync 卡 6.5 分钟。"""
     import time as _t
-    import topoone_app_architect.agent.orchestrator as orch
-    monkeypatch.setattr(orch, "_STREAM_IDLE_TIMEOUT_S", 0.3)
-    monkeypatch.setattr(orch, "_TURN_BUDGET_S", 1.5)
+    import topoone_app_architect.agent.turns.base as turns_base
+    import topoone_app_architect.agent.turns.chat as turns_chat
+    # M1 拆分: 常量单源在 turns.base, chat.py 导入绑定——patch 两处读取点
+    monkeypatch.setattr(turns_base, "_STREAM_IDLE_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(turns_chat, "_STREAM_IDLE_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(turns_base, "_TURN_BUDGET_S", 1.5)
+    monkeypatch.setattr(turns_chat, "_TURN_BUDGET_S", 1.5)
     client, gw, _tmp = pipeline
     gw.chat_rid = "rid-hang"    # 流式"可用"但 ZMQ 永远不来事件 → 每轮 idle
     with client:

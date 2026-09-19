@@ -15,6 +15,7 @@ import { CheckIcon, ChevronDownIcon, PlusIcon, XMarkIcon } from '@heroicons/vue/
 import { trackingService, type TrackingItem, type TrackingVocab } from '@/services/tracking-service'
 import type { ConversationMeta } from '@/services/session-service'
 import { useConversationStore } from '@/stores/conversation-store'
+import { useAppDialog } from '@/composables/useAppDialog'
 
 const props = defineProps<{
   /** 会话中心已加载的会话列表: 主会话标题映射与打开联动。 */
@@ -36,6 +37,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const dialog = useAppDialog()
 const conv = useConversationStore()
 
 const loading = ref(false)
@@ -119,6 +121,19 @@ async function toggleValid(item: TrackingItem) {
   try {
     const updated = await trackingService.update(item.id, { valid: !item.valid })
     replace(updated)
+  } catch { /* 静默 */ } finally { busyId.value = '' }
+}
+async function removeItem(item: TrackingItem) {
+  if (busyId.value) return
+  const okGo = await dialog.confirm(
+    t('session.tracking.deleteConfirm', { title: item.title || t('session.tracking.untitled') }),
+    { danger: true })
+  if (!okGo) return
+  busyId.value = item.id
+  try {
+    await trackingService.delete(item.id)
+    items.value = items.value.filter((x) => x.id !== item.id)
+    emit('count', items.value.length)
   } catch { /* 静默 */ } finally { busyId.value = '' }
 }
 function replace(updated: TrackingItem) {
@@ -274,6 +289,11 @@ function fmtTime(ts: unknown): string {
               :title="item.valid ? t('session.tracking.invalid') : t('session.tracking.restore')"
               @click="toggleValid(item)"
             >{{ item.valid ? '🚫' : '↺' }}</button>
+            <button
+              class="rounded p-0.5 text-ctp-overlay0 hover:text-ctp-red"
+              :title="t('session.tracking.delete')"
+              @click="removeItem(item)"
+            >✕</button>
           </span>
         </div>
         <p

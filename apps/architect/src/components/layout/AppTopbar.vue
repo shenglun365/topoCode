@@ -86,6 +86,7 @@ function onFontSize(v: number) {
         app-key="architect"
         :provider="modelProvider"
         :context-options="[]"
+        :scope-hint="t('app.modelScopeHint')"
       />
     </template>
   </AppToolbar>

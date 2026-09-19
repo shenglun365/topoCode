@@ -10,6 +10,7 @@ from ..agent.cognition.model_profile import (  # noqa: F401
     guess_params_b,
     heuristic_tier,
     probe_model,
+    probe_model_gated,
     set_manual_tier,
     tier_of,
 )

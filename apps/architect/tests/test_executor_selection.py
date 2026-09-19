@@ -64,8 +64,10 @@ def test_default_executor_from_registry(tmp_path, monkeypatch):
         {"id": "cline", "type": "cline-sdk", "enabled": True, "default": False},
     ])
     assert ae.default_executor()["id"] == "opencode"
-    # 全部禁用 → None(调用方必须显式失败)
+    # 全部禁用(含内置 cline) → None(调用方必须显式失败)
+    # 注: 内置 cline 缺失时会自愈再生(enabled)——显式禁用才可致无可用执行器
     _set_registry([
+        {"id": "cline", "type": "cline-sdk", "enabled": False, "default": True},
         {"id": "opencode", "type": "opencode", "enabled": False, "default": True},
     ])
     assert ae.default_executor() is None
@@ -152,7 +154,11 @@ def test_propose_task_explicit_hint_normalized(tmp_path, monkeypatch):
 
 def test_propose_task_no_executor_fails_explicitly(tmp_path, monkeypatch):
     _env(tmp_path, monkeypatch)
-    _set_registry([{"id": "opencode", "type": "opencode", "enabled": False, "default": True}])
+    # 内置 cline 需显式禁用方可触发无可用执行器(缺失时自愈再生)
+    _set_registry([
+        {"id": "cline", "type": "cline-sdk", "enabled": False, "default": True},
+        {"id": "opencode", "type": "opencode", "enabled": False, "default": True},
+    ])
     conv = _mk_conv()
     r = eb.propose_task(conv, "标题", "指令内容")
     assert r.get("ok") is False and "无可用执行器" in r["error"]
@@ -209,7 +215,11 @@ def test_run_execute_unknown_executor_fails(tmp_path, monkeypatch):
 
 def test_confirm_task_without_executor_fails(tmp_path, monkeypatch):
     _env(tmp_path, monkeypatch)
-    _set_registry([{"id": "opencode", "type": "opencode", "enabled": False, "default": True}])
+    # 内置 cline 需显式禁用方可触发无可用执行器(缺失时自愈再生)
+    _set_registry([
+        {"id": "cline", "type": "cline-sdk", "enabled": False, "default": True},
+        {"id": "opencode", "type": "opencode", "enabled": False, "default": True},
+    ])
     conv = _mk_conv()
     t = store.TasksStore.create({"conversationId": conv["id"], "title": "T",
                                  "instruction": "x", "status": "pending_confirm",
