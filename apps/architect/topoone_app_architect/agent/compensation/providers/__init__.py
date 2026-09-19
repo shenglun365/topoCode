@@ -11,8 +11,9 @@ from .builtin import (ArchitectNoteProvider, CapNoteProvider,
                       ElementHintProvider, architect_note_text,
                       cap_note_section, element_hint_text)
 from .milestone import MilestoneProvider, agent_note_section, milestone_section
-from .output import (LogicDiagramGateProvider, StructuredOutputProvider,
-                     parse_json_block, validate_logic_diagram)
+from .output import (JSON_REPORT_HINT, LogicDiagramGateProvider,
+                     StructuredOutputProvider, parse_json_block,
+                     validate_logic_diagram)
 from .scaffold import ScaffoldProvider
 from .toolsurface import ToolSurfaceProvider
 
@@ -44,5 +45,5 @@ __all__ = [
     "BUILTIN_PROVIDERS", "register_builtin", "architect_note_text",
     "element_hint_text", "cap_note_section", "milestone_section",
     "agent_note_section", "trim_optional_blocks", "parse_json_block",
-    "validate_logic_diagram",
+    "validate_logic_diagram", "JSON_REPORT_HINT",
 ]

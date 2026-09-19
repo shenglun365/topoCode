@@ -938,8 +938,9 @@ async def assemble_session(conv_id: str):
 from .session_docs import _doc_outline  # noqa: F401 — 测试引用接缝
 
 # M2 拆分: guide 文案与 state 构建器迁 session_guide.py(行为等价)
-from .session_guide import (_GUIDE_SYSTEM, _guide_jobs_state,
-                            _guide_req_state)
+from .session_guide import GUIDE_SYSTEM as _GUIDE_SYSTEM
+from .session_guide import guide_jobs_state as _guide_jobs_state
+from .session_guide import guide_req_state as _guide_req_state
 
 
 @router.post("/sessions/{conv_id}/stop-exec")

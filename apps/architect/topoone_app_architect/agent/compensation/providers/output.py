@@ -12,7 +12,7 @@ import json
 import re
 from typing import Any, Dict, Optional, Tuple
 
-from ..carriers import GateResult, PromptPiece
+from ..carriers import GateResult
 from ..ctx import CompensationCtx
 
 _JSON_BLOCK = re.compile(r"```json\s*\n?(\{.*?\})\s*```", re.DOTALL)
@@ -46,18 +46,25 @@ def validate_logic_diagram(text: str) -> GateResult:
     return GateResult(passed=True, note=f"逻辑图校验通过(边={edges})")
 
 
+# R3.3 JSON 报告提示单源(milestone_section(structured) 追加段与此同源,
+# 消除文案双源——A3 审计收敛)
+JSON_REPORT_HINT = (
+    "\n- **报告格式(优先)**：里程碑报告优先以 ```json 块给出：\n"
+    '  `{"changed_files": ["文件a"], "verify": "构建与冒烟结果", '
+    '"next": "下一里程碑或全部完成"}`；\n'
+    "  无法结构化时再用上面的固定三行文本(两种格式系统都能解析)。")
+
+
 class StructuredOutputProvider:
+    """消费位声明 + 双轨解析函数单源(A3 收敛: assemble 不再产重复文案,
+    里程碑提示由 milestone.JSON_REPORT_HINT 单源注入)。"""
+
     name = "structured_output"
     purposes = frozenset()
     consumes = frozenset({"structured_output"})
 
     def assemble(self, ctx: CompensationCtx, prompt) -> None:
-        if getattr(ctx.gear, "structured_output", False):
-            prompt.pieces.append(PromptPiece(
-                placement="scaffold", key="output_contract_decl",
-                text="[输出契约] 里程碑/完成报告优先以 ```json 块给出"
-                     "(changed_files/verify/next); 无法结构化时用固定三行文本。",
-                priority=60))
+        return None
 
     def conclude(self, ctx: CompensationCtx, output):
         if not getattr(ctx.gear, "structured_output", False):
@@ -76,12 +83,8 @@ class LogicDiagramGateProvider:
     consumes = frozenset({"logic_diagram"})
 
     def assemble(self, ctx: CompensationCtx, prompt) -> None:
-        if str(getattr(ctx.gear, "logic_diagram", "") or "") == "uml":
-            prompt.pieces.append(PromptPiece(
-                placement="scaffold", key="logic_diagram_req",
-                text="[图门禁] 任务指令须附核心逻辑图(PlantUML/Mermaid 标准语法,"
-                     " activity/sequence 类), 下发前将做确定性校验。",
-                priority=60))
+        # A3 收敛: 图门禁提示由 dispatch 拒绝回执承载(活路径), 此处仅声明消费
+        return None
 
     def conclude(self, ctx: CompensationCtx, output):
         if str(getattr(ctx.gear, "logic_diagram", "") or "") != "uml":

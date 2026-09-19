@@ -3,8 +3,8 @@
 M0 骨架: 仅类型定义与词表冻结, 零行为接线(D3 收编等价前提)。
 - purpose 词表 D10 冻结: 四组 19 项, 词表外 purpose 视为编码错误(fail-fast);
 - CompensationCtx 由管线在回合构造前组装一次, 逐层只读传递;
-- 挡位字面量(T0/T1/T2)禁止出现在本包(门禁 test_grep_gates);
-  挡位语义一律经 gear(governance.gears.GearPolicy) 表达。
+- 挡位刻度经 governance.gears.GEAR_IDS 单源引用(字面量禁散落,
+  门禁 test_grep_gates); 挡位语义一律经 gear(GearPolicy) 表达。
 """
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ class CompensationCtx:
 # R2.4: 分目的弱分阈值——该目的探测分低于此值 → 有效档降一档(只降不升)。
 PURPOSE_WEAK_SCORE = 0.40
 
-_TIER_ORDER = ("T0", "T1", "T2")
+from ..governance.gears import GEAR_IDS as _TIER_ORDER
 
 
 def resolve_ctx(gear: Any, axis: Axis, purpose: Purpose,
@@ -143,7 +143,7 @@ def resolve_ctx(gear: Any, axis: Axis, purpose: Purpose,
     """组装 CompensationCtx(R2.4): a_tier = gear.tier 经分目的细化。
 
     细化语义(只降不升, 行为等价——弱档才触发): 本目的探测分存在且
-    < PURPOSE_WEAK_SCORE → 有效档向弱侧移一档(T0→T1→T2 封底);
+    < PURPOSE_WEAK_SCORE → 有效档向弱侧移一档(最弱挡封底);
     分数良好或未探测 → 有效档=挡位原档。挡位本身不改动(策略行单源不变)。"""
     scores = scores or CapabilityScores()
     tier = str(getattr(gear, "tier", "") or "")

@@ -82,7 +82,7 @@ class ArtifactGate:
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    """失败重试策略(按挡: T0 失败即报 / T1 nudge 1 / T2 nudge 2 + 确定性兜底)。"""
+    """失败重试策略(按挡 nudge 次数单源 gears.RETRY_NUDGES + 确定性兜底)。"""
 
     max_nudges: int = 0
     nudge_hint: str = ""

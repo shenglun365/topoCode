@@ -77,7 +77,7 @@ def propose_task(conv: dict, title: str, instruction: str,
 
     由 LLM 工具 task.propose / architect 编排调用; 用户确认(REST/卡片按钮)
     后 confirm_task 真正拉起 runner。
-    R3.2(r3_2_logic_gate, 默认启用): T2 任务指令须附核心逻辑图(ArtifactGate
+    R3.2(r3_2_logic_gate, 默认启用): 弱挡任务指令须附核心逻辑图(ArtifactGate
     确定性校验: 图围栏存在且边≥3)——缺失拒绝建卡, 回执 nudge architect 补图;
     计划步骤卡(plan 下发)豁免(gate_diagram=False), 图随计划首卡/需求上下文。
     """
@@ -95,7 +95,7 @@ def propose_task(conv: dict, title: str, instruction: str,
                     _gate = validate_logic_diagram(instruction or "")
                     if not _gate.passed:
                         return {"ok": False, "error":
-                                f"任务指令缺少核心逻辑图({_gate.note})——T2 弱模型挡要求"
+                                f"任务指令缺少核心逻辑图({_gate.note})——当前挡位(弱模型补偿)"
                                 " instruction 附 PlantUML/Mermaid 标准语法核心逻辑图"
                                 "(activity/sequence 类, ≥3 条边)。请补图后重新 task.propose。"}
         except Exception:  # noqa: BLE001 — 门禁基础设施异常不阻塞建卡主链
@@ -270,8 +270,10 @@ def confirm_task(task_id: str) -> dict:
                 _a.get("requirementMd") or (store.RequirementsStore.spec_active(rid)
                                             or {}).get("snapshot", {}).get("requirementMd"),
                 _a.get("designMd")) if x)
+            from ...agent.governance.gears import DEFAULT_TIER_ID as _DT
             pr = probe_scope(root, project, _req_text, rid=rid,
-                             tier=str(getattr(_eb()._task_gear(task), "tier", "") or "T1"))
+                             tier=str(getattr(_eb()._task_gear(task), "tier", "")
+                                      or _DT))
             if pr.get("ok") and pr.get("files"):
                 _probe_ok = True
                 new = [f["path"] for f in pr["files"] if f["path"] not in boundary_files]

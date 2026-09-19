@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from ..governance.gears import DEFAULT_TIER_ID as _DEFAULT_TIER
+
 # ── Harness: 需求澄清 / 需求收集 ─────────────────────────────────────
 
 _SYSTEM_PROMPT = (
@@ -50,11 +52,11 @@ def _hint(hits: List[Dict[str, Any]]) -> str:
 def req_harness_clarify(req: Dict[str, Any], root: Optional[str] = None,
                         project: Optional[str] = None,
                         model_id: Optional[str] = None,
-                        tier: str = "T1") -> Optional[Dict[str, Any]]:
+                        tier: str = _DEFAULT_TIER) -> Optional[Dict[str, Any]]:
     """clarify 回合: KB 资产检索 → LLM 生成澄清问题清单。返回 None 表示未生成(调用方明确报 502，不回退伪造)。
 
     model_id: 本次对话选择的模型(可选)；空则回退全局 llm.modelId → 主后端默认。
-    tier: 会话挡位(R3.1 链3② D7-②): T2 附问题模板槽位脚手架 + 兜底静态三问。
+    tier: 会话挡位(R3.1 链3② D7-②): 弱挡附问题模板槽位脚手架 + 兜底静态三问。
     """
     from ...arch_routes import req_agent as _ra   # 调用期解析(run_tools_loop/打桩接缝)
     from ..compensation.ctx import Purpose
@@ -126,11 +128,11 @@ def _parse_json_array(text: str) -> List[Dict[str, Any]]:
 def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
                         project: Optional[str] = None,
                         model_id: Optional[str] = None,
-                        tier: str = "T1") -> Optional[Dict[str, Any]]:
+                        tier: str = _DEFAULT_TIER) -> Optional[Dict[str, Any]]:
     """collect 回合: 上下文+答案 → LLM structured 产出 RequirementAnalysis。返回 None 降级。
 
     model_id: 本次对话选择的模型(可选)；空则回退全局 llm.modelId → 主后端默认。
-    tier: 会话挡位(R3.1 链3② D7-②): T2 附八字段逐项脚手架; 兜底维持 None(502)。
+    tier: 会话挡位(R3.1 链3② D7-②): 弱挡附八字段逐项脚手架; 兜底维持 None(502)。
     """
     from ...arch_routes import req_agent as _ra   # 调用期解析(run_tools_loop/打桩接缝)
     base = ctx.get("base") or {}
@@ -208,7 +210,7 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
             f"\n\n完整数据资产目录({len(catalog_items)} 项)，assetScope 只从其中选择，不要臆造不存在的资产：\n"
             f"{catalog_text}"
         )
-    # R3.1 链3②(D7-②): 经 CallTurn——T2 八字段逐项脚手架/按挡重试;
+    # R3.1 链3②(D7-②): 经 CallTurn——弱挡八字段逐项脚手架/按挡重试;
     # 兜底维持 None(requirements REST 明确 502, 不回退伪造)
     from ..compensation.ctx import Purpose
     from ..turns import call as _call_turn

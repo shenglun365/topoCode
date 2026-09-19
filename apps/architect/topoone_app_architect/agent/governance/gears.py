@@ -137,6 +137,12 @@ _LEGACY_TIER_MAP = {"T0": "T0", "T1": "T1",
 
 _DEFAULT_TIER = "T1"
 
+# ── 公开刻度常量(供补偿/回合/下发层引用; 字面量禁散落——门禁 test_grep_gates) ──
+DEFAULT_TIER_ID = _DEFAULT_TIER       # 解析链缺省挡
+WEAKEST_TIER = GEAR_IDS[-1]           # 最弱挡(补偿脚手架唯一注入挡)
+RETRY_NUDGES: Dict[str, int] = {"T0": 0, "T1": 1, "T2": 2}
+# 按挡 nudge 次数(R3.1 RetryPolicy 单源: 强挡失败即报/中挡 1/弱挡 2)
+
 
 def _valid_tier(v: Any) -> Optional[str]:
     """刻度归一: 新刻度原样; 旧刻度(T3/T4 等)映射新刻度; 未知 → None。"""

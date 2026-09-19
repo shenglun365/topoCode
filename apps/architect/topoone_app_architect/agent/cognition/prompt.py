@@ -121,7 +121,11 @@ _MINIMAL_KEEP = ("kb.asset.search", "project.ctx", "map.overview",
 
 def _filter_tools(entries, tool_surface: str, kb_enabled: bool):
     """R3.4 工具面过滤: full=全量 / reduced=裁 KB 写+MCP 写 / minimal=只读核心;
-    kb=False(T0 直通车)叠加裁 kb.* 检索工具。"""
+    kb=False(T0 直通车)叠加裁 kb.* 检索工具。
+
+    ⚠️ 执法边界(审计 B1): 本过滤为**提示级**——只裁能力文档声明面,
+    run_arch_tool 执行面不拒绝(弱模型若仍发被裁工具会执行);
+    硬执法待 ChatTurn 消费 RunParams 时接线(设计 §12 后续轨道)。"""
     out = []
     for name, entry in entries:
         if not kb_enabled and name in _KB_RETRIEVAL_TOOLS:

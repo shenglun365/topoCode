@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from ..compensation.ctx import Purpose
+from ..governance.gears import DEFAULT_TIER_ID
 from .call import call
 
 
@@ -72,7 +73,7 @@ def resolve_key(name: str) -> str:
     return ALIASES.get(name, name)
 
 
-def catalog_call(name: str, messages, *, tier: str = "T1",
+def catalog_call(name: str, messages, *, tier: str = DEFAULT_TIER_ID,
                  model_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """目录统一入口: key(或别名) → 领域模型路由 → CallTurn。
 

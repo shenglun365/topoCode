@@ -27,10 +27,8 @@ def milestone_section(structured: bool = False) -> str:
             "然后输出 [[NEED_INPUT]] 等待用户指示；**禁止未提交报告就连续跨里程碑推进**；\n"
             "- 预计 15 次工具调用以内的简单任务：直接执行，完成后输出 [[IMPLEMENT_DONE]]。")
     if structured:
-        base += ("\n- **报告格式(优先)**：里程碑报告优先以 ```json 块给出：\n"
-                 "  `{\"changed_files\": [\"文件a\"], \"verify\": \"构建与冒烟结果\", "
-                 "\"next\": \"下一里程碑或全部完成\"}`；\n"
-                 "  无法结构化时再用上面的固定三行文本(两种格式系统都能解析)。")
+        from .output import JSON_REPORT_HINT
+        base += JSON_REPORT_HINT
     return base
 
 

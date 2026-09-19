@@ -45,6 +45,7 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
         _gear_cfg = {}
     from ...arch_routes import store as _store_mod
     from ..compensation.overrides import read_overrides, override_enabled
+    from ..governance.gears import WEAKEST_TIER
     _overrides = read_overrides(_store_mod.CollabConfigStore.get)
     from ..governance.gears import resolve_gear
     _gear = resolve_gear(_mode, _gear_cfg,
@@ -59,13 +60,14 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     # M5 探测-策略闭环: 只记差距遥测, 不动态升挡(D6)
     try:
         from ...arch_routes import model_profile as _mp2
-        from ..compensation.ctx import CapabilityScores, Purpose as _Purpose
+        from ..compensation.ctx import (PURPOSE_WEAK_SCORE, CapabilityScores,
+                                Purpose as _Purpose)
         _caps = ((_mp2.get_profile(eff_model or model_id or "") or {}).get("caps") or {})
         _scores = CapabilityScores(
             requirement=_caps.get("requirementScore"),
             arch=_caps.get("archScore"), module=_caps.get("moduleScore"))
         _ps = _scores.dimension(_Purpose.REQUIREMENT)
-        if _ps is not None and _ps < 0.40 and _gear.tier != "T2":
+        if _ps is not None and _ps < PURPOSE_WEAK_SCORE and _gear.tier != WEAKEST_TIER:
             from ...arch_routes import llm_dataset as _lds
             _lds.record("comp_gap", purpose="requirement", tier=_gear.tier,
                         score=_ps, model=eff_model or model_id or "")

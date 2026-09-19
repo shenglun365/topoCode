@@ -14,7 +14,6 @@ sys.path.insert(0, _repo)
 import topoone_app_architect.arch_routes.req_agent as _ra
 from topoone_app_architect.agent.compensation.providers.milestone import (
     milestone_section)
-from topoone_app_architect.arch_routes.session_guide import _GUIDE_SYSTEM  # noqa: F401
 
 _DIAGRAM = "```mermaid\na->b\nb->c\nc->d\nd->e\n```\n"
 

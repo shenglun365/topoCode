@@ -192,7 +192,11 @@ def run_execute(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
         title, instruction, executor_hint=hint)
     if plan_res is not None:
         return plan_res
-    task = exec_bridge.propose_task(conv, title, instruction, executor_hint=hint)
+    # P0 审计修复(A1): 直通单卡路径豁免图门禁——本路径无 LLM 在环,
+    # "回炉 nudge architect"无从发生; 图门禁仅适用于 chat task.propose 路径
+    # (architect LLM 可收到拒绝错误并补图重发)。
+    task = exec_bridge.propose_task(conv, title, instruction, executor_hint=hint,
+                                    gate_diagram=False)
     if not task.get("id"):
         # 无可用执行器等建卡失败: 原文显式返回(不降级不吞错)
         return {"ok": False, "receipt": str(task.get("error") or "建卡失败")}

@@ -16,6 +16,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from ..governance.gears import DEFAULT_TIER_ID as _DEFAULT_TIER  # 缺省挡单源(def 期求值)
+
 logger = logging.getLogger("arch.planning.scope_probe")
 
 _VALID_SOURCES = ("tree", "history", "kb", "inference")
@@ -58,7 +60,8 @@ def gather_grounding(root: str, project: Optional[str], req_text: str,
 
 
 def probe_scope(root: str, project: Optional[str], req_text: str,
-                rid: str = "", tier: str = "T1") -> Dict[str, Any]:
+                rid: str = "",
+                tier: str = _DEFAULT_TIER) -> Dict[str, Any]:
     """范围探针: grounding + 单次 LLM → {ok, files: [{path, source}], note}。
 
     files 已归一(去 ./、去尾 /、去重、截断); 来源引用非法 → inference。

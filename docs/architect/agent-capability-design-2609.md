@@ -310,3 +310,25 @@ apps/architect/tests/          # §7 四门禁 + 既有 28 个测试文件回归
 - 本文为整体设计稿；实施中的接口变更回写本文对应章节，行为变更须同步需求规格 §0 白名单决策（append-only）；
 - §3.3 / §5.1 收编映射表与代码强耦合，对应阶段合入后回写校验（对齐 agent-session-flow.md 维护约定）；
 - 决策记录新增追加行，不修改既有行。
+
+---
+
+## 14. 审计与处置记录（2026-09-19）
+
+### 14.1 已处置项
+
+| 审计项 | 处置 |
+|---|---|
+| A1 图门禁误伤 `/执行` 直通 | `commands.py` 单卡路径 `gate_diagram=False`（无 LLM 在环不可回炉）；门禁仅适用于 chat `task.propose` 路径；回归测试 `test_audit_fixes.py` ×2 |
+| A2 门禁再生纪律 | 再生脚本入库 `tests/goldens/regen_baselines.py`（默认 dry-run diff 预览，`--confirm` 落盘；显式豁免文件不入基线）；挡位字面量清理 8 文件出白名单（刻度常量单源 `gears.DEFAULT_TIER_ID/WEAKEST_TIER/RETRY_NUDGES`）；`dispatch.py` 显式 `NEW_FILE_WHITELIST` 登记（替换追溯豁免） |
+| A3 纸面管线 | 函数库形态声明（§0 注）；`IntraTierProvider` 空壳删除；JSON 报告提示单源 `output.JSON_REPORT_HINT`（milestone/dispatch 同源）；StructuredOutput/LogicDiagramGate 的 assemble 重复文案删除 |
+| B1 工具面执法边界 | `prompt._filter_tools` 显式标注"提示级"；硬执法列 §12 后续轨道 |
+| B5/B6 | session_guide 别名清理（规范名单源导入） |
+
+### 14.2 已知残留（验收时定夺）
+
+- **B3 测试基线侵蚀**：全程修改既有测试约 10 处——机械适配（桩签名 `+policy/+tier`、patch 目标迁移 `turns.base`、`gate_diagram=False`）与覆盖变化（gears confirm 测试绕过图门禁，由 `test_audit_fixes` 补 chat 路径覆盖）混合；台账即本节。
+- **B4 golden 两度再生**：等价基线含 R3.3 白名单文案变更，未分离存档；后续 golden 变更经 regen 脚本 diff 显式化。
+- **B2 D12 未收口**：`llm_sync` 白名单 7 项（探测套件 §5.7 范围外 / reflection 通用机制 / chat 循环 / sem M 级 tAgent SE 域）——按规格"链 3 全量收编后仅 turns/call"未实现为硬门禁，现为带理由冻结。
+- **req_agent 门面（§8.2-④）**：工具实现部分已溶解；余量 1207 行为 A 轴 chat 管线 + mcp/规约工具 + re-export 的**永久驻留**形态，建议验收时确认此结论并更新 §8.2。
+- **C 项低危**：`llm.py` 317 行（目标 ≤300 边际未收）；harness `degraded` 未透出 REST；R3.2 拒绝文案前端卡片化呈现未验证；`_eb()` 间接 30+ 处（DispatchTurn 重构时收敛）。

@@ -20,9 +20,6 @@ GUIDE_SYSTEM = (
     "3. 输出 markdown 无序列表，每条一句话；只输出列表本身，不要标题、不要解释、不要代码围栏。"
 )
 
-# 兼容别名(既有引用sessions._GUIDE_SYSTEM 形态)
-_GUIDE_SYSTEM = GUIDE_SYSTEM
-
 
 def guide_req_state(req_id: str) -> Optional[dict]:
     if not req_id:
@@ -58,8 +55,3 @@ def guide_jobs_state(conv_id: str) -> list:
         return out
     except Exception:  # noqa: BLE001
         return []
-
-
-# 兼容别名
-_guide_req_state = guide_req_state
-_guide_jobs_state = guide_jobs_state
