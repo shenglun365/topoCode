@@ -619,6 +619,9 @@ def _main_migrations(db) -> None:
     ])
     # 环节十一: arch_tasks 兼主库路由(无项目上下文写入主库)——基点快照列两库都补
     _add_cols(db, "arch_tasks", [
+        # cv-201: 执行形态 inplace(就地) | worktree(隔离)——merge/finish 守卫
+        # 依据; 缺省 ''=旧任务(未知), 走原 git 流不短路
+        ("workspace", "TEXT DEFAULT ''"),
         ("base_commit", "TEXT DEFAULT ''"),
         ("merged_at", "INTEGER DEFAULT 0"),
         ("merged_head", "TEXT DEFAULT ''"),
@@ -790,6 +793,9 @@ def _project_migrations(db) -> None:
         ("agent", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_tasks", [
+        # cv-201: 执行形态 inplace(就地) | worktree(隔离)——merge/finish 守卫
+        # 依据; 缺省 ''=旧任务(未知), 走原 git 流不短路
+        ("workspace", "TEXT DEFAULT ''"),
         ("spec_ver", "INTEGER DEFAULT 0"),
         # 环节十一: 任务分支基点 commit(交接边界快照)——里程碑比对/合并入口
         # precheck(主目录是否前移)的数据源

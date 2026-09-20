@@ -109,12 +109,10 @@ async def run_probe(request: Request):
     wt = os.path.join(probe_dir, f"probe-{int(time.time() * 1000)}")
 
     def _cleanup_worktree() -> None:
-        _git(["worktree", "remove", "--force", wt], cwd=root, check=False)
-        _git(["worktree", "prune"], cwd=root, check=False)
+        return None   # 就地模式: 项目目录不可清理
 
-    r = _git(["worktree", "add", "--detach", wt, base], cwd=root, check=False)
-    if r.returncode != 0:
-        return {"ok": False, "error": f"worktree 创建失败: {r.stderr.strip()[:300]}"}
+    # cv-201: 无条件就地(与 implement 同规)——探针直接在项目目录作业
+    wt = root
 
     prompt = _PROBE_HARNESS
     if files:

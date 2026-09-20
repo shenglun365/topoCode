@@ -32,6 +32,11 @@ def merge_precheck(task_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "task-not-found", "code": 404}
     if (task.get("status") or "") not in _TASK_TERMINAL_ref():
         return {"ok": False, "error": "任务非终态——先完成/停止再合并", "code": 400}
+    # cv-201: 就地任务变更已直接生效于项目目录, 无分支可合
+    if str(task.get("workspace") or "") == "inplace":
+        return {"ok": True, "checkable": False, "fastForward": None,
+                "mainNewCommits": [], "branchCommits": [],
+                "advice": "就地模式任务——变更已直接生效于项目目录, 无需合并。"}
     base = str(task.get("baseCommit") or "")
     branch = str(task.get("branch") or "")
     conv = store.ConversationsStore.get(task.get("conversationId") or "") or {}
@@ -184,6 +189,13 @@ def merge_branch(task_id: str, mode: str = "ff") -> Dict[str, Any]:
     if not pre.get("ok"):
         return pre
     if not pre.get("checkable"):
+        # 就地任务: 变更已生效——直接记 merged 终态(无 git 动作)
+        if "就地模式" in str(pre.get("advice") or ""):
+            import time as _t
+            return store.TasksStore.update(task_id, {
+                "mergedAt": int(_t.time() * 1000),
+                "mergedHead": str(task.get("runnerJobId") or "inplace")}) or {
+                "ok": True, "merged": True, "inplace": True}
         return {"ok": False, "error": str(pre.get("advice")), "code": 400}
     conv = store.ConversationsStore.get(task.get("conversationId") or "") or {}
     from ...arch_routes.execution import conv_root_project

@@ -35,6 +35,7 @@ class StartResult:
     job_id: str = ""
     branch: str = ""
     worktree: str = ""
+    workspace: str = ""      # inplace(就地, cv-201 默认) | worktree(隔离)
     session_id: str = ""
     base_commit: str = ""
     error: str = ""
@@ -87,6 +88,7 @@ class RunnerClient:
             job_id=str(res.get("jobId") or ""),
             branch=str(res.get("branch") or ""),
             worktree=str(res.get("worktree") or ""),
+            workspace=str(res.get("workspace") or "inplace"),
             session_id=str(res.get("sessionId") or ""),
             base_commit=str(res.get("baseCommit") or ""),
             error=str(res.get("error") or ("" if res.get("ok") else "runner 服务不可达(:3458)")),

@@ -42,6 +42,7 @@ def _mk_conv_task(arch_env, tmp_path, monkeypatch, rid="RQ-mg", status="done",
     task = store.TasksStore.create({"conversationId": conv_id, "title": "T",
                                     "instruction": "x", "status": status,
                                     "executorType": "cline-sdk", "branch": branch,
+                                    "workspace": "worktree",
                                     "baseCommit": base or ""})
     from topoone_app_architect.arch_routes import exec_bridge as eb
     monkeypatch.setattr(

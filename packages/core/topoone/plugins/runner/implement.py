@@ -549,17 +549,10 @@ class ImplementJob:
         return {"ok": False, "error": "执行器中止调用失败(回合可能仍在等待)"}
 
     def _commit_progress(self) -> None:
-        """终态进度保全(cv-177): 把 worktree 改动 commit 到任务分支——
-        失败重跑时分支已含全部进度, 续跑不再从零开始。尽力而为, 失败不阻断。"""
-        try:
-            _git(["add", "-A"], cwd=self.wt, check=False)
-            st = _git(["status", "--porcelain"], cwd=self.wt, check=False)
-            if not st.stdout.strip():
-                return
-            msg = f"task(progress): {self.status} (job {self.id})"
-            _git(["commit", "-m", msg, "--no-verify"], cwd=self.wt, check=False)
-        except Exception:  # noqa: BLE001
-            pass
+        """就地模式(cv-201): 不做任何 git 写操作——auto-commit 会把用户的
+        未提交工作一并卷入, 提交权归还用户。(原 worktree 进度保全语义随
+        worktree 一并退役。)"""
+        return None
 
     async def finish(self, keep_worktree: bool = True) -> Dict[str, Any]:
         self.status = "stopped" if self.status != "done" else self.status
@@ -580,54 +573,25 @@ class ImplementJob:
     # ── diff ──
 
     def _diff_files(self) -> List[str]:
-        """变更文件清单: 对任务基点(base SHA)的 name-only diff。
+        """变更文件清单(就地只读视图): status --porcelain 列改动, 不碰索引。
 
-        不用 status——自动 commit 进度后 worktree 恒干净, status 恒空;
-        对基点的 diff 在 commit 前后语义一致(改了什么 vs 任务起点)。"""
+        (原实现 `add -A -N`+diff 基点——就地模式下会污染用户索引并卷入其
+        未提交工作, cv-200 教训。)"""
         try:
-            _git(["add", "-A", "-N"], cwd=self.wt, check=False)
-            d = _git(["diff", "--name-only", self.base], cwd=self.wt, check=False)
-            return [ln.strip() for ln in d.stdout.splitlines() if ln.strip()]
+            st = _git(["status", "--porcelain"], cwd=self.wt, check=False)
+            if st.returncode != 0:
+                return []
+            return [ln[3:].strip() for ln in st.stdout.splitlines() if ln.strip()]
         except Exception:  # noqa: BLE001
             return []
 
     def diff(self) -> Dict[str, Any]:
-        try:
-            _git(["add", "-A", "-N"], cwd=self.wt, check=False)
-            d = _git(["diff", self.base], cwd=self.wt, check=False)
-            add = sum(1 for ln in d.stdout.splitlines()
-                      if ln.startswith("+") and not ln.startswith("+++"))
-            dele = sum(1 for ln in d.stdout.splitlines()
-                       if ln.startswith("-") and not ln.startswith("---"))
-            return {"changedFiles": self._diff_files(), "diff": d.stdout[:200000],
-                    "addLines": add, "delLines": dele}
-        except Exception as e:  # noqa: BLE001
-            return {"changedFiles": [], "diff": "", "error": str(e)}
+        """就地只读差异: 变更文件清单(不碰用户索引, 不产 diff 正文)。"""
+        return {"changedFiles": self._diff_files(), "diff": "",
+                "addLines": 0, "delLines": 0}
 
 
 _JOBS: Dict[str, ImplementJob] = {}
-
-
-def _commit_progress_in_existing_worktree(root: str, branch: str) -> None:
-    """续跑让位(cv-177): 找到占用 branch 的旧 worktree → 提交其未提交进度 →
-    remove 让位。旧 worktree 的未提交改动是上次失败任务的全部进度, 丢了就白跑。"""
-    try:
-        out = _git(["worktree", "list", "--porcelain"], cwd=root, check=False)
-        cur = None
-        for ln in out.stdout.splitlines():
-            if ln.startswith("worktree "):
-                cur = ln[9:].strip()
-            elif ln.startswith("branch ") and ln[7:].strip() == f"refs/heads/{branch}":
-                if cur and os.path.isdir(cur):
-                    _git(["add", "-A"], cwd=cur, check=False)
-                    st = _git(["status", "--porcelain"], cwd=cur, check=False)
-                    if st.stdout.strip():
-                        _git(["commit", "-m", f"task(progress): resume handoff (branch {branch})",
-                              "--no-verify"], cwd=cur, check=False)
-                    _git(["worktree", "remove", "--force", cur], cwd=root, check=False)
-                return
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def _wt_root_dir() -> str:
@@ -681,22 +645,11 @@ def register(app: FastAPI) -> None:
         base = body.get("baseCommit") or "HEAD"
         branch = (body.get("branchName") or "").strip() or f"exec/{uuid.uuid4().hex[:8]}"
         job_id = f"impl-{uuid.uuid4().hex[:10]}"
-        wt = os.path.join(_wt_root_dir(), job_id)
-        try:
-            os.makedirs(os.path.dirname(wt), exist_ok=True)
-            r = _git(["worktree", "add", "-b", branch, wt, base], cwd=root, check=False)
-            resumed = False
-            if r.returncode != 0:
-                # 分支已存在 → 续跑复用(cv-177): 旧 worktree 提交进度后让位,
-                # 新 worktree 检出已有分支承接全部进度
-                _commit_progress_in_existing_worktree(root, branch)
-                r2 = _git(["worktree", "add", wt, branch], cwd=root, check=False)
-                if r2.returncode != 0:
-                    return {"ok": False,
-                            "error": f"worktree 创建失败: {r2.stderr.strip()[:300]}"}
-                resumed = True
-        except Exception as e:  # noqa: BLE001
-            return {"ok": False, "error": str(e)}
+        # cv-201 裁决: **无条件就地**——作业直接在项目 root 执行, 与 git 状态
+        # 无关(git init 的空项目同样不能在隔离目录里配依赖; worktree 是改造
+        # 既有代码的隔离手段, 不是任务分类依据)。隔离诉求由边界互斥 +
+        # 用户显式 git 操作承担; branch/base 参数在就地模式下不生效。
+        wt = root
         try:
             adapter = build_adapter(
                 str(body.get("executorType") or ""),
@@ -704,10 +657,6 @@ def register(app: FastAPI) -> None:
                 dict(body.get("executorConfig") or {}))
         except RuntimeError as e:
             # 如 remote-agent 等不适配交互式作业的类型: 明确报错(不静默回退)
-            try:
-                _git(["worktree", "remove", "--force", wt], cwd=root, check=False)
-            except Exception:  # noqa: BLE001
-                pass
             return {"ok": False, "error": str(e)}
         job = ImplementJob(
             job_id, root, wt, base, branch, instruction + _COLLAB_PROTOCOL,
@@ -727,9 +676,7 @@ def register(app: FastAPI) -> None:
         # P5: 规约/规则/agent 配置落盘 worktree（cline .cline/rules|agents、AGENTS.md）
         written = _write_workspace_files(wt, body.get("workspaceFiles"))
         job.turn_task = asyncio.create_task(job.start())
-        if resumed:
-            logger.info("[implement] job %s RESUMED branch=%s(承接上次进度)",
-                        job_id, branch)
+
         logger.info("[implement] job %s created root=%s branch=%s files=%s",
                     job_id, root, branch, written)
         # 交接边界快照(环节十一): 任务分支基点 commit——里程碑比对/合并入口
@@ -738,8 +685,9 @@ def register(app: FastAPI) -> None:
             base_commit = _git(["rev-parse", "HEAD"], wt, check=False).stdout.strip()
         except Exception:  # noqa: BLE001
             base_commit = ""
-        return {"ok": True, "jobId": job_id, "branch": branch, "worktree": wt,
-                "status": job.status, "workspaceFiles": written, "resumed": resumed,
+        return {"ok": True, "jobId": job_id, "branch": "", "worktree": wt,
+                "workspace": "inplace",
+                "status": job.status, "workspaceFiles": written, "resumed": False,
                 "baseCommit": base_commit}
 
     @app.get("/api/implement/running")

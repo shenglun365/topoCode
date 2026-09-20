@@ -127,7 +127,9 @@ def test_finish_response_shape(tmp_path):
     assert set(out.keys()) == {"ok", "status", "worktree", "branch", "executorId",
                                "changedFiles", "diff", "addLines", "delLines"}
     assert out["ok"] is True and out["status"] == "stopped"
-    assert "new.txt" in out["changedFiles"] and out["addLines"] == 1
+    assert "new.txt" in out["changedFiles"]
+    # cv-201 就地模式: 不产 diff 正文(不碰用户索引), 变更清单只读可用
+    assert out["addLines"] == 0 and out["delLines"] == 0
 
 
 def test_ws_subscriber_event_is_ring_event():

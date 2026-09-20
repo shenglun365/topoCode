@@ -249,3 +249,55 @@ def test_pending_proceed_unsupported(client):
     assert r["ok"] is False and "不支持" in r["error"]
     r2 = client.post("/api/implement/impl-cap/proceed", json={}).json()
     assert r2["ok"] is False
+
+
+def test_inplace_always(client, tmp_path, monkeypatch):
+    """cv-201 裁决: **无条件就地**——作业直接在项目 root 执行。
+
+    与 git 状态无关: 非 git 目录、git init 的空项目, 一律就地;
+    不建 worktree、不初始化仓库、不碰用户工作树的 git 状态。"""
+    calls = []
+
+    class _StartAdapter(_CapableAdapter):
+        async def start_session(self, job) -> None:
+            calls.append(job.wt)
+            job.session_id = job.id
+            job.serve_url = "fake://"
+
+    monkeypatch.setattr(impl, "build_adapter", lambda *a, **k: _StartAdapter())
+
+    import subprocess
+
+    # ① 非 git 目录: 就地, 不产生 .git
+    root = tmp_path / "blank"
+    root.mkdir()
+    r = client.post("/api/implement", json={
+        "root": str(root), "instruction": "搭建环境",
+        "executorType": "fake-cline", "autoStart": False}).json()
+    assert r["ok"] is True, r
+    assert r["workspace"] == "inplace" and r["worktree"] == str(root)
+    assert calls[-1] == str(root)
+    assert not (root / ".git").exists()
+
+    # ② git init 的空项目: 同样就地(隔离目录里配依赖毫无意义)
+    root2 = tmp_path / "inited"
+    root2.mkdir()
+    subprocess.run(["git", "init"], cwd=root2, capture_output=True)
+    r2 = client.post("/api/implement", json={
+        "root": str(root2), "instruction": "配依赖",
+        "executorType": "fake-cline", "autoStart": False}).json()
+    assert r2["ok"] is True and r2["workspace"] == "inplace"
+    assert r2["worktree"] == str(root2)
+
+    # ③ 有 git 仓库且带用户未提交工作: 作业后不卷入用户工作(不 auto-commit)
+    root3 = tmp_path / "repo"
+    root3.mkdir()
+    subprocess.run(["git", "init"], cwd=root3, capture_output=True)
+    (root3 / "user_wip.txt").write_text("用户的未提交工作")
+    r3 = client.post("/api/implement", json={
+        "root": str(root3), "instruction": "任务",
+        "executorType": "fake-cline", "autoStart": False}).json()
+    assert r3["ok"] is True
+    st = subprocess.run(["git", "status", "--porcelain"], cwd=root3,
+                        capture_output=True, text=True).stdout
+    assert "user_wip.txt" in st   # 用户的改动仍在工作区(未被 auto-commit 卷走)

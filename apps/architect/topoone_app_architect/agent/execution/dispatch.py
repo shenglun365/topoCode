@@ -410,6 +410,7 @@ def confirm_task(task_id: str) -> dict:
     store.TasksStore.update(task_id, {
         "status": "running", "runner_job_id": sr.job_id,
         "worktree": sr.worktree, "branch": sr.branch or branch,
+        "workspace": sr.workspace or "inplace",
         "session_ref": sr.session_id,
         "baseCommit": sr.base_commit})
     try:
@@ -418,8 +419,10 @@ def confirm_task(task_id: str) -> dict:
         pass
     agent = task.get("executorType") or _etype
     pid = (conv or {}).get("projectId") or ""
+    _loc = (f"分支 `{branch}`" if (sr.workspace or "inplace") == "worktree"
+            else "就地模式(直接写入项目目录)")
     _eb()._append(conv_id, "user",
-            f"🚀 **{task['title']}** 启动（`{sr.job_id}` 分支 `{branch}`）",
+            f"🚀 **{task['title']}** 启动（`{sr.job_id}` · {_loc}）",
             msg_meta={"kind": "task_start", "taskId": task_id}, project_id=pid)
     _eb()._start_task_pump(conv_id, task_id, sr.job_id, rid, agent)
     t = store.TasksStore.get(task_id) or {}
