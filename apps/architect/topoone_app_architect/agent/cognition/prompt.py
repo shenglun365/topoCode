@@ -108,8 +108,8 @@ def _r_capability(ctx: Dict[str, Any]) -> str:
 
 
 # R3.4: 工具面按挡裁剪(toolsurface 消费落地; kb=False → 检索工具同裁)
-_KB_RETRIEVAL_TOOLS = ("kb.asset.search", "kb.code_mappings", "kb.baseline",
-                       "kb.graph")
+KB_RETRIEVAL_TOOLS = ("kb.asset.search", "kb.code_mappings", "kb.baseline",
+                      "kb.graph")
 _WRITE_TOOLS = ("asset.semantic.save", "asset.semantic.update",
                 "asset.semantic.merge", "asset.semantic.split",
                 "asset.upsert", "mcp.call", "convention.propose",
@@ -128,7 +128,7 @@ def _filter_tools(entries, tool_surface: str, kb_enabled: bool):
     硬执法待 ChatTurn 消费 RunParams 时接线(设计 §12 后续轨道)。"""
     out = []
     for name, entry in entries:
-        if not kb_enabled and name in _KB_RETRIEVAL_TOOLS:
+        if not kb_enabled and name in KB_RETRIEVAL_TOOLS:
             continue
         if tool_surface == "minimal" and name not in _MINIMAL_KEEP:
             continue

@@ -257,6 +257,18 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
                     return {"error": f"会话已归档(只读)：{name} 不可执行。可读取/复制/提炼。"}
         except Exception:  # noqa: BLE001
             pass
+    # cv-187: 未关联 KB(降级)项目 → kb.* 工具执行面拦截(与提示面裁剪同口径),
+    # 杜绝静默空结果误导模型; internal=True 系统确定性路径放行。
+    if name in KB_RETRIEVAL_TOOLS and not internal:
+        try:
+            from .project import kb_degraded as _kb_deg
+            if _kb_deg(root, project):
+                return {"error":
+                        "当前项目未关联知识库(KB)，kb.* 工具不可用。"
+                        "可改用本地能力: asset.semantic.search / map.overview / "
+                        "map.assets / code.read_symbols；或在项目总览关联 KB 后重试。"}
+        except Exception:  # noqa: BLE001
+            pass
     fn = entry["handler"]
     kwargs = _coerce_args(fn, dict(arguments or {}))
     params = inspect.signature(fn).parameters
@@ -312,6 +324,7 @@ from ..agent.tools.impl.kb import (_model, _model_assets, _model_code_mappings,
                                    _project_degraded, tool_kb_asset_search,
                                    tool_kb_baseline, tool_kb_code_mappings,
                                    tool_kb_graph, tool_project_ctx)
+from ..agent.cognition.prompt import KB_RETRIEVAL_TOOLS
 from ..agent.tools.impl.map import (tool_map_assets, tool_map_component,
                                     tool_map_graph, tool_map_overview,
                                     tool_map_rules)

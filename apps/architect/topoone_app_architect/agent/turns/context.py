@@ -56,6 +56,15 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     _r34 = override_enabled(_overrides, "r3_4_dialogue_wiring")
     _tool_surface = str(getattr(_gear, "tool_surface", "full") or "full") if _r34 else "full"
     _kb_enabled = bool(getattr(_gear, "kb", True)) if _r34 else True
+    # cv-187: 项目未关联 KB(无基线, kb_degraded 共用口径) → kb.* 工具自动关闭
+    # (提示面裁剪; 执行面拦截在 run_arch_tool)。判定失败保持原状不误关。
+    try:
+        from ...arch_routes.project import kb_degraded as _kb_deg
+        if _kb_deg((data.get("root") or "").strip(),
+                   (data.get("project") or "").strip()):
+            _kb_enabled = False
+    except Exception:  # noqa: BLE001
+        pass
     _ctx_budget = float(getattr(_gear, "ctx_budget", 1.0) or 1.0) if _r34 else 1.0
     # M5 探测-策略闭环: 只记差距遥测, 不动态升挡(D6)
     try:
@@ -86,7 +95,8 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     # v2 统一会话编排契约: 通用 agent 模式——能力分界 + 路由 + 挡位指引(单消息)
     msgs.insert(1, {"role": "system", "content":
         "【工作模式(通用 agent 路由)】你是 architect 外循环(编排者)。可调度资源: "
-        "A. 你自己(知识/分析面): KB 架构资产检索、需求澄清与方案设计、数据资产、"
+        "A. 你自己(知识/分析面): " + ("KB 架构资产检索、" if _kb_enabled else "")
+        + "需求澄清与方案设计、数据资产、"
         "图/命名/契约/验收等结构化分析。 "
         "B. coding subagent(cline/opencode/codex, 通用执行 agent): 完整的 shell/文件/"
         "读写代码/编译运行能力——代码实现、环境检测、编译构建、文件统计/批量处理、"

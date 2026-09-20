@@ -345,3 +345,17 @@ apps/architect/tests/          # §7 四门禁 + 既有 28 个测试文件回归
 | 语义排除 | saved 不入 `ACTIVE_STATES`: 不吸收转达、不算执行中、`active_task_of` 不返回; `task_input` 对 saved 明确指引先启动 |
 | 前端 | TaskCard: saved=[开始执行|忽略]、ignored=置灰终态; `taskAction` 动作面 +`ignore` |
 | 需求忽略 UI | REST 就绪; 台账面板按钮列后续批次(当前无需求卡独立组件) |
+
+### 14.4 未关联 KB 项目自动关闭 kb.* 工具(2026-09-20, cv-187)
+
+判定单源: `project.kb_degraded`(无项目或无 baselineId 基线——全插件 KB API 共用口径)。
+- **提示面**: `turns/context._chat_context` 中 `kb_enabled = 挡位kb ∧ ¬kb_degraded`;
+  能力文档经 R3.4 `_filter_tools` 裁掉 kb.asset.search / kb.code_mappings /
+  kb.baseline / kb.graph(`KB_RETRIEVAL_TOOLS` 升公开单源); 通用路由文案的
+  「KB 架构资产检索」话术同步条件化(不再引导模型说 KB 话术)。
+- **执行面**: `run_arch_tool` 对 kb.* 四件拦截(提示级裁剪的执行面兜底, 收窄审计
+  B1 缺口), 错误附本地替代指引(asset.semantic.search / map.* / code.read_symbols);
+  `internal=True` 系统确定性路径放行(回退原降级语义)。
+- 消灭的摩擦: 未关联 KB 时工具仍在清单、模型照调 → 静默空结果(asset.search→[],
+  baseline→{})浪费回合; 现在提示面不出现 + 误调即得可读指引。
+- 回归: test_kb_autoclose ×5(判定口径/执行拦截/关联放行/internal 放行/提示面装配)。
