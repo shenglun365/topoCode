@@ -59,7 +59,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   /** 发送(语境路由): text 已剥离内联 @前缀; attachTo=转达任务卡, agent=一次性指派执行器, digest=语境摘要。 */
-  send: [p: { text: string; attachTo?: string; agent?: string; digest?: string }]
+  send: [p: { text: string; attachTo?: string; agent?: string; digest?: string; synthetic?: boolean }]
   /** 分析挡位切换(strict/quick) → 宿主上抛 REST。 */
   'set-analysis-mode': [mode: 'strict' | 'quick']
   'set-clarify-mode': [mode: 'auto' | 'forced']
@@ -749,7 +749,8 @@ async function confirmProposal(m: KbAnalysisTurn) {
 }
 /** 提案卡运行: /执行 直通——按会话绑定执行器建任务卡(确认卡后 subagent 启动)。 */
 function runProposal() {
-  emit('send', { text: '/执行' })
+  // cv-197: 按钮触发的 /执行 为合成消息——不回显气泡(后端落库带 synthetic 标记)
+  emit('send', { text: '/执行', synthetic: true })
 }
 
 // ---- 推理内容(thinking)折叠展示 ----
@@ -1029,6 +1030,7 @@ onUnmounted(() => {
       </div>
         <div
           v-for="(m, i) in turns"
+          v-show="!((m as any).meta?.synthetic)"
           :key="i"
           :id="(m as any).id ? `msg-${(m as any).id}` : undefined"
           class="animate-fade-up flex items-start gap-2 rounded-lg scroll-mt-2"

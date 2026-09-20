@@ -169,6 +169,7 @@ export const useConversationStore = defineStore('archConversation', () => {
       .filter((m) => !_CARD_BUBBLE_KINDS.has(((m.meta as any)?.kind) || ''))
       .filter((m) => !(m.role === 'assistant' && m.content && _TOOL_PLACEHOLDER_RE.test(m.content.trim())
         && (m.meta as any)?.kind !== 'tool_round'))
+      .filter((m) => !(m.role === 'user' && (m.meta as any)?.synthetic))
       .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content))
     activeId.value = conv.id
     if (typeof conv.reqId === 'string') activeReqId.value = conv.reqId
@@ -268,11 +269,12 @@ export const useConversationStore = defineStore('archConversation', () => {
   }
 
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子; digest=语境摘要(转达下发, text 可空)。 */
-  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string; digest?: string }) {
+  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string; digest?: string; synthetic?: boolean }) {
     if (busy.value || (!text.trim() && !opts?.digest)) return
     // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里
     const arr = turns.value
     const userTurn: any = { role: 'user', content: text || '📎 语境摘要转达', agent: opts?.agent || '' }
+    if (opts?.synthetic) userTurn.meta = { synthetic: true }   // cv-197: 不回显
     arr.push(userTurn)
     const idx = arr.push({ role: 'assistant', content: '' }) - 1
     busy.value = true
@@ -287,6 +289,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         .filter((m) => m.meta?.kind !== 'hint' && !(opts?.digest && !text && m === userTurn))
         .map((m) => ({ role: m.role, content: m.content }))
       await chatStream(msgs, {
+        synthetic: opts?.synthetic,
         conversationId: activeId.value || undefined,
         kind: opts?.kind ?? (activeMeta.value as any)?.kind ?? undefined,
         reqId: opts?.reqId ?? (activeReqId.value || undefined),

@@ -134,6 +134,8 @@ export interface ChatStreamOptions {
   diagramSkill?: boolean
   /** 语义资产 skill 场景（plan-C §4.1 按场景加载）：资产管理对话传 ['extract']。 */
   skillScenarios?: string[]
+  /** 合成消息(cv-197: 卡片按钮触发的 /执行 等)——后端落库带 synthetic 标记, 前端不回显。 */
+  synthetic?: boolean
   /** v2 subagent 路由: 显式指派执行器(cline 等); 缺省 architect 自由对话。 */
   agent?: string
   /** v2: 显式指定转达目标任务 id(缺省=最新活跃任务)。 */
@@ -237,6 +239,7 @@ export async function chatStream(
       agent: opts.agent,
       attachTo: opts.attachTo,
       digest: opts.digest,
+      synthetic: opts.synthetic,
     })
 
     return await doneP

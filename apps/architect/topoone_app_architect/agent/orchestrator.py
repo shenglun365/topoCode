@@ -72,15 +72,24 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
     from .perception import commands as _cmds
     from ..arch_routes.common import _ts
     conv_id = conv["id"]
+    # cv-197: 直通链可含 LLM 拆步(最长 LLM_SYNC_TIMEOUT=300s)——零反馈即
+    # 「卡死」观感; 状态事件 + 首尾日志补齐可观测性。
+    logger.info("[direct-cmd] %s conv=%s 开始", cmd, conv_id)
+    try:
+        await send({"type": "status", "phase": "direct_cmd", "cmd": cmd})
+    except Exception:  # noqa: BLE001
+        pass
     meta = None
     if cmd == "提取需求":
         res = _cmds.run_extract_req(conv)
+        logger.info("[direct-cmd] 提取需求 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or res.get('error') or '提取失败'}"
         else:
             content = res.get("receipt") or "需求卡已提取。"
     elif cmd == "执行":
         res = _cmds.run_execute(conv, executor_id=executor)
+        logger.info("[direct-cmd] 执行 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or '建卡失败'}"
         else:
@@ -220,10 +229,12 @@ async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:
     last_user_msg_id = ""
     for m in user_msgs[-1:]:
         last_user_msg_id = store.next_id("m")
-        store.ConversationsStore.append_message({
-            "id": last_user_msg_id, "conversationId": conv_id,
-            "role": "user", "time": now, "content": m.get("content", ""),
-        })
+        row = {"id": last_user_msg_id, "conversationId": conv_id,
+               "role": "user", "time": now, "content": m.get("content", "")}
+        # cv-197: 按钮触发的合成消息(/执行 等)落库带标记, 前端不回显
+        if data.get("synthetic"):
+            row["meta"] = json.dumps({"synthetic": True}, ensure_ascii=False)
+        store.ConversationsStore.append_message(row)
     return {"conv_id": conv_id, "conv": conv, "question": question,
             "last_user_msg_id": last_user_msg_id}
 
