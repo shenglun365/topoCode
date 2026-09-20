@@ -430,10 +430,6 @@ REST `POST /sessions/{id}/clarify-mode`; 前端 AnalysisChat 工具栏对话气�
 - D2 `KB_FACE_TOOLS` 单源(prompt.py), mcp.call 字面量 6 处收编(注册键除外)。
 - D3 `MSG_FLAG_SYNTHETIC` 登记于 collab/cards.py(消息级标记, 非卡片 kind)。
 
-**挂账声明**(不动作, 有归属):
-- D4 行数棘轮单向抬升(chat 620/dispatch 700/req_agent 1311)——偿还绑定既有
-  轨道: ChatTurn 消费 RunParams 接缝重构(届时 context.py 六块全 Provider 化)
-  + DispatchTurn 拆分 + req_agent 域拆分。
-- D5 双词汇声明: 澄清策略库的「目标」词汇(7 类, 关键词匹配)与 Purpose 词表
-  (D10 冻结, 19 项管线目的)**正交**——前者面向用户需求域, 后者面向补偿管线
-  域, 互不替换。策略库当前代码内硬编码, 可配置化(REST/存储)为后续扩展点。
+**挂账声明**(不动作, 有归属): 台账单源见
+`docs/architect/tech-debt-ledger-2609.md`(D4 重构轨道/D5 可配置化/历史遗留项
+集中登记; 偿还一项勾一项, 新挂账必须附理由与归属轨道)。
