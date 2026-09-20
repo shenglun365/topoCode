@@ -13,7 +13,7 @@ import os
 
 # 名字 → (缺省秒, 说明)
 _DEFAULTS: Dict[str, tuple] = {
-    "llm_call": (300.0, "llm.sync/chat 单次调用上限(cognition.llm)"),
+    "llm_call": (600.0, "llm.sync/chat 单次调用上限(cognition.llm)"),
     "se_llm": (180.0, "SE 大脑 llm 通道(tagent_se)"),
     "kb_rpc": (10.0, "KB 网关 RPC 默认(kb_gateway)"),
     "kb_mcp_tools": (5.0, "KB MCP 工具目录(GET /v1/tools)"),

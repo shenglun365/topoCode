@@ -31,7 +31,7 @@ class ModelNotConfigured(RuntimeError):
     产物必非预期——明确报错优于垃圾输出。禁止在此类场景降级。"""
 
 # LLM 同步调用超时(秒)：本地大模型结构化提取/工具循环耗时可能远超 KB 默认 10s，
-# 与 model_configs.timeout 对齐(默认 300s)，可用 LLM_SYNC_TIMEOUT 覆盖。
+# 缺省取统一超时单源 llm_call(600s)，可用 LLM_SYNC_TIMEOUT / TOPO_TIMEOUT_LLM_CALL 覆盖。
 from ..governance.timeouts import get as _timeout_of
 # 统一超时单源(governance.timeouts); 应急覆盖可用 TOPO_TIMEOUT_LLM_CALL 或遗留 LLM_SYNC_TIMEOUT
 _LLM_CALL_TIMEOUT = float(os.environ.get("LLM_SYNC_TIMEOUT")
