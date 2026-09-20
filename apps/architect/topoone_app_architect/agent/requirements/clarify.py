@@ -144,11 +144,13 @@ def clarify_directive(mode: str, question: str,
                       req_snapshot: Optional[Dict[str, Any]] = None) -> str:
     """生成会话内澄清指令段(系统消息; 空串=本回合不注入)。
 
+    规则在本层(确定性判定), 文案经 compensation.providers.builtin 单源(R1.1)。
     - 明确指令(任意挡) → ""(免澄清);
     - forced: 命中策略 → 策略问题集集中提问; 未命中 → 模型自由提问(五要素框架);
       用户答复前不落需求卡;
-    - auto: 仅当已绑定需求且缺口矩阵非空 → 按缺口集中一次提问补齐。
+    - auto/forced(已建需求): 缺口矩阵驱动集中提问。
     """
+    from ..compensation.providers import builtin as _bt
     if is_explicit_instruction(question):
         return ""
     if mode == "forced" and not req_snapshot:
@@ -156,22 +158,13 @@ def clarify_directive(mode: str, question: str,
         if strat:
             qs = "\n".join(f"  {i+1}. [{el}] {q}"
                            for i, (el, q) in enumerate(strat["questions"]))
-            return (f"【需求澄清(强制挡 · {strat['label']})】本回合先澄清后落卡——"
-                    f"按以下切合该目标的问题集中编号提问, 每问先给出你基于上下文的"
-                    f"推断默认值请用户确认或补全, 禁止开放式泛问:\n{qs}\n"
-                    "用户答复后用 req.propose/req.amend 回填再建卡; 首轮禁止直接落需求卡。")
-        return ("【需求澄清(强制挡)】本回合先澄清后落卡——该目标不在策略库覆盖内, "
-                "由你自行组织澄清问题: 按五要素框架(①目标 ②方案要点 ③允许范围 "
-                "④禁止改动 ⑤验收标准)逐项给出推断默认值请用户确认, 禁止开放式泛问; "
-                "用户答复后 req.propose/req.amend 回填再建卡, 首轮禁止直接落需求卡。")
+            return _bt.clarify_forced_strategy_text(strat["label"], qs)
+        return _bt.clarify_forced_free_text()
     if req_snapshot:
         # 强制挡在需求已建后同样走缺口驱动(状态无关, 自然收敛: 答复→amend
         # 回填→缺口缩→不再问), 防止"先澄清"指令对答复回合无限重放。
         gaps = gap_matrix(req_snapshot)
         if gaps:
-            gl = "、".join(gaps)
             tag = "强制挡" if mode == "forced" else "自动"
-            return (f"【需求澄清({tag})】当前规约缺口: {gl}——请集中一次提问补齐"
-                    "(每项给出推断默认值请用户确认), 用户答复后 req.amend 回填; "
-                    "要素齐了再提示可建卡。")
+            return _bt.clarify_gap_text(tag, "、".join(gaps))
     return ""

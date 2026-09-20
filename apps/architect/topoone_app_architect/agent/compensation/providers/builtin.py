@@ -85,3 +85,48 @@ class CapNoteProvider:
 
     def conclude(self, ctx: CompensationCtx, output):
         return None
+
+
+# ── 落卡回合收尾文案(cv-196 收编, R1.1: 文案经 providers 单源, turns 只编排) ──
+CARD_ROUND_CLOSINGS = {
+    "req.propose": "📝 需求卡已创建(ready)——点「开始执行」启动。",
+    "req.amend": "✏️ 规约已修订(ready)。",
+    "task.propose": "📋 任务卡已保存——点「开始执行」启动。",
+}
+
+
+def card_closing_text(tool_name: str) -> str:
+    """落卡工具的确定性收尾文案(未知工具 → 空串)。"""
+    return CARD_ROUND_CLOSINGS.get(tool_name, "")
+
+
+# ── 需求澄清指令模板(cv-190 收编: 规则在 requirements/clarify.py, 文案单源在此) ──
+
+CLARIFY_FORCED_STRATEGY_TMPL = (
+    "【需求澄清(强制挡 · {label})】本回合先澄清后落卡——"
+    "按以下切合该目标的问题集中编号提问, 每问先给出你基于上下文的"
+    "推断默认值请用户确认或补全, 禁止开放式泛问:\n{questions}\n"
+    "用户答复后用 req.propose/req.amend 回填再建卡; 首轮禁止直接落需求卡。")
+
+CLARIFY_FORCED_FREE_TMPL = (
+    "【需求澄清(强制挡)】本回合先澄清后落卡——该目标不在策略库覆盖内, "
+    "由你自行组织澄清问题: 按五要素框架(①目标 ②方案要点 ③允许范围 "
+    "④禁止改动 ⑤验收标准)逐项给出推断默认值请用户确认, 禁止开放式泛问; "
+    "用户答复后 req.propose/req.amend 回填再建卡, 首轮禁止直接落需求卡。")
+
+CLARIFY_GAP_TMPL = (
+    "【需求澄清({tag})】当前规约缺口: {gaps}——请集中一次提问补齐"
+    "(每项给出推断默认值请用户确认), 用户答复后 req.amend 回填; "
+    "要素齐了再提示可建卡。")
+
+
+def clarify_forced_strategy_text(label: str, questions_md: str) -> str:
+    return CLARIFY_FORCED_STRATEGY_TMPL.format(label=label, questions=questions_md)
+
+
+def clarify_forced_free_text() -> str:
+    return CLARIFY_FORCED_FREE_TMPL
+
+
+def clarify_gap_text(tag: str, gaps: str) -> str:
+    return CLARIFY_GAP_TMPL.format(tag=tag, gaps=gaps)

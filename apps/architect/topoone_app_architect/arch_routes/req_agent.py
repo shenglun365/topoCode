@@ -260,7 +260,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
             pass
     # cv-187: 未关联 KB(降级)项目 → kb.* 工具执行面拦截(与提示面裁剪同口径),
     # 杜绝静默空结果误导模型; internal=True 系统确定性路径放行。
-    if (name in KB_RETRIEVAL_TOOLS or name == "mcp.call") and not internal:
+    if name in KB_FACE_TOOLS and not internal:
         try:
             from .project import kb_degraded as _kb_deg
             if _kb_deg(root, project):
@@ -336,7 +336,7 @@ from ..agent.tools.impl.kb import (_model, _model_assets, _model_code_mappings,
                                    _project_degraded, tool_kb_asset_search,
                                    tool_kb_baseline, tool_kb_code_mappings,
                                    tool_kb_graph, tool_project_ctx)
-from ..agent.cognition.prompt import KB_RETRIEVAL_TOOLS
+from ..agent.cognition.prompt import KB_FACE_TOOLS
 from ..agent.tools.impl.map import (tool_map_assets, tool_map_component,
                                     tool_map_graph, tool_map_overview,
                                     tool_map_rules)

@@ -45,6 +45,9 @@ KIND_DIGEST = "digest_sent"
 KIND_TASK_PLAN = "taskPlan"          # 环节十四: 任务计划卡(有序步骤清单)
 KIND_TASK_INPUT_ECHO = "task_input_echo"  # R4: 用户回复转达持久回执(requestId 对账)
 KIND_TASK_PLAN_DONE = "taskPlanDone"  # 环节十四: 计划全部完成汇总回执
+# 消息级标记(非卡片 kind): meta 布尔字段, 落流单点登记(cv-197 审计 D3)
+MSG_FLAG_SYNTHETIC = "synthetic"      # 按钮触发的合成用户消息(/执行 等)——前端不回显
+
 KIND_TASK_IGNORED = "task_ignored"    # 2026-09-20: 用户主动忽略任务卡(置灰回执)
 KIND_REQ_IGNORED = "req_ignored"      # 2026-09-20: 用户主动忽略需求卡(置灰回执)
 KIND_TASK_RECEIPTS = (

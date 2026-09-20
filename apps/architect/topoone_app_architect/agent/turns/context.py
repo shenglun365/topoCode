@@ -8,6 +8,60 @@ from __future__ import annotations
 from typing import List, Optional
 
 
+def _kb_face_enabled(gear, r34: bool, root: str, project: str) -> bool:
+    """R3.4 挡位 kb 开关 ∧ cv-187 项目关联硬门(kb_degraded 共用口径)。
+
+    未关联 KB(无基线) → kb.*/mcp.call 工具自动关闭(提示面; 执行面拦截在
+    run_arch_tool)。判定失败保持原状不误关。"""
+    enabled = bool(getattr(gear, "kb", True)) if r34 else True
+    try:
+        from ...arch_routes.project import kb_degraded as _kb_deg
+        if _kb_deg(root, project):
+            enabled = False
+    except Exception:  # noqa: BLE001
+        pass
+    return enabled
+
+
+def _record_comp_gap(gear, model_id: str) -> None:
+    """M5 探测-策略闭环遥测: 只记差距, 不动态升挡(D6)。失败不阻塞主链。"""
+    try:
+        from ...arch_routes import model_profile as _mp2
+        from ..compensation.ctx import (PURPOSE_WEAK_SCORE, CapabilityScores,
+                                Purpose as _Purpose)
+        _caps = ((_mp2.get_profile(model_id or "") or {}).get("caps") or {})
+        _scores = CapabilityScores(
+            requirement=_caps.get("requirementScore"),
+            arch=_caps.get("archScore"), module=_caps.get("moduleScore"))
+        _ps = _scores.dimension(_Purpose.REQUIREMENT)
+        from ..governance.gears import WEAKEST_TIER as _weakest
+        if _ps is not None and _ps < PURPOSE_WEAK_SCORE and gear.tier != _weakest:
+            from ...arch_routes import llm_dataset as _lds
+            _lds.record("comp_gap", purpose="requirement", tier=gear.tier,
+                        score=_ps, model=model_id or "")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _clarify_directive_msg(gate: dict, conv: dict) -> str:
+    """cv-190 澄清挡位指令(auto 缺口驱动 | forced 先澄清后落卡; 明确指令免澄清)。
+
+    规约快照(已绑定需求)供缺口矩阵; 判定失败静默(不阻塞主链)。"""
+    try:
+        from ...arch_routes import store as _store
+        from ..requirements.clarify import clarify_directive as _cd_fn
+        _mode = str((conv or {}).get("clarifyMode") or "auto").strip()
+        _question = str((gate or {}).get("question") or "")
+        _snap = {}
+        _rid = str((conv or {}).get("reqId") or "")
+        if _rid:
+            _active = _store.RequirementsStore.spec_active(_rid) or {}
+            _snap = _active.get("snapshot") or {}
+        return _cd_fn(_mode, _question, _snap)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
                   model_id: str, assign_contract) -> tuple:
     """管线阶段③ 消息装配(行为等价抽取自 handle_chat)。
@@ -55,33 +109,12 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     # tool_surface/kb 工具面裁剪 + ctx_budget 预算系数; 开关关闭回退缺省(不变)
     _r34 = override_enabled(_overrides, "r3_4_dialogue_wiring")
     _tool_surface = str(getattr(_gear, "tool_surface", "full") or "full") if _r34 else "full"
-    _kb_enabled = bool(getattr(_gear, "kb", True)) if _r34 else True
-    # cv-187: 项目未关联 KB(无基线, kb_degraded 共用口径) → kb.* 工具自动关闭
-    # (提示面裁剪; 执行面拦截在 run_arch_tool)。判定失败保持原状不误关。
-    try:
-        from ...arch_routes.project import kb_degraded as _kb_deg
-        if _kb_deg((data.get("root") or "").strip(),
-                   (data.get("project") or "").strip()):
-            _kb_enabled = False
-    except Exception:  # noqa: BLE001
-        pass
+    _kb_enabled = _kb_face_enabled(
+        _gear, _r34, (data.get("root") or "").strip(),
+        (data.get("project") or "").strip())
     _ctx_budget = float(getattr(_gear, "ctx_budget", 1.0) or 1.0) if _r34 else 1.0
     # M5 探测-策略闭环: 只记差距遥测, 不动态升挡(D6)
-    try:
-        from ...arch_routes import model_profile as _mp2
-        from ..compensation.ctx import (PURPOSE_WEAK_SCORE, CapabilityScores,
-                                Purpose as _Purpose)
-        _caps = ((_mp2.get_profile(eff_model or model_id or "") or {}).get("caps") or {})
-        _scores = CapabilityScores(
-            requirement=_caps.get("requirementScore"),
-            arch=_caps.get("archScore"), module=_caps.get("moduleScore"))
-        _ps = _scores.dimension(_Purpose.REQUIREMENT)
-        if _ps is not None and _ps < PURPOSE_WEAK_SCORE and _gear.tier != WEAKEST_TIER:
-            from ...arch_routes import llm_dataset as _lds
-            _lds.record("comp_gap", purpose="requirement", tier=_gear.tier,
-                        score=_ps, model=eff_model or model_id or "")
-    except Exception:  # noqa: BLE001 — 遥测失败不阻塞主链
-        pass
+    _record_comp_gap(_gear, eff_model or model_id or "")
     msgs = _build_chat_messages((data.get("root") or "").strip(),
                                 (data.get("project") or "").strip(),
                                 history,
@@ -121,22 +154,10 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     _hint = element_hint_text(_gear)
     if _hint:
         msgs.insert(1, {"role": "system", "content": _hint})
-    # cv-190 需求澄清挡位: auto(缺口驱动) | forced(先澄清后落卡); 明确指令免澄清。
-    # 规约快照(已绑定需求)供缺口矩阵; 判定失败静默(不阻塞主链)。
-    try:
-        _cm = str((conv or {}).get("clarifyMode") or "auto").strip()
-        _question = str(gate.get("question") or "")
-        _snap = {}
-        _rid = str((conv or {}).get("reqId") or "")
-        if _rid:
-            _active = _store_mod.RequirementsStore.spec_active(_rid) or {}
-            _snap = _active.get("snapshot") or {}
-        from ..requirements.clarify import clarify_directive as _cd_fn
-        _cd = _cd_fn(_cm, _question, _snap)
-        if _cd:
-            msgs.insert(1, {"role": "system", "content": _cd})
-    except Exception:  # noqa: BLE001
-        pass
+    # cv-190 需求澄清挡位(auto/forced, 明确指令免澄清)
+    _cd = _clarify_directive_msg(gate, conv)
+    if _cd:
+        msgs.insert(1, {"role": "system", "content": _cd})
     return eff_model, msgs, _gear
 
 

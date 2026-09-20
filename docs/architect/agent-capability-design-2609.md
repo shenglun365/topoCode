@@ -417,3 +417,23 @@ REST `POST /sessions/{id}/clarify-mode`; 前端 AnalysisChat 工具栏对话气�
 强制挡即为此互补; 最坏退化为提示词指令略偏, 无硬行为事故。
 **收敛语义**: forced 需求已建后退化为缺口驱动(与 auto 同判据, 防止
 "先澄清"指令对答复回合无限重放——答复→amend 回填→缺口缩→不再问)。
+
+### 14.8 架构审计偿还(2026-09-20, M0-M5 后 16 提交审计)
+
+**合规确认**: 四门禁/分层/词表冻结/执法边界方向/三裁决贯彻——无违例。
+
+**偿还项**(本批落地):
+- D1 文案单源: `_CARD_CLOSINGS`(turns/chat)→`providers.builtin.card_closing_text`;
+  clarify 指令模板→`providers.builtin.clarify_*_text`(requirements→compensation
+  正向边); context.py 六个内联特性块提取为具名装配函数(_kb_face_enabled/
+  _record_comp_gap/_clarify_directive_msg)。
+- D2 `KB_FACE_TOOLS` 单源(prompt.py), mcp.call 字面量 6 处收编(注册键除外)。
+- D3 `MSG_FLAG_SYNTHETIC` 登记于 collab/cards.py(消息级标记, 非卡片 kind)。
+
+**挂账声明**(不动作, 有归属):
+- D4 行数棘轮单向抬升(chat 620/dispatch 700/req_agent 1311)——偿还绑定既有
+  轨道: ChatTurn 消费 RunParams 接缝重构(届时 context.py 六块全 Provider 化)
+  + DispatchTurn 拆分 + req_agent 域拆分。
+- D5 双词汇声明: 澄清策略库的「目标」词汇(7 类, 关键词匹配)与 Purpose 词表
+  (D10 冻结, 19 项管线目的)**正交**——前者面向用户需求域, 后者面向补偿管线
+  域, 互不替换。策略库当前代码内硬编码, 可配置化(REST/存储)为后续扩展点。

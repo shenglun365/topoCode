@@ -232,8 +232,10 @@ async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:
         row = {"id": last_user_msg_id, "conversationId": conv_id,
                "role": "user", "time": now, "content": m.get("content", "")}
         # cv-197: 按钮触发的合成消息(/执行 等)落库带标记, 前端不回显
+        # (标记常量登记于 collab.cards.MSG_FLAG_SYNTHETIC, 审计 D3)
         if data.get("synthetic"):
-            row["meta"] = json.dumps({"synthetic": True}, ensure_ascii=False)
+            from .collab.cards import MSG_FLAG_SYNTHETIC as _flag
+            row["meta"] = json.dumps({_flag: True}, ensure_ascii=False)
         store.ConversationsStore.append_message(row)
     return {"conv_id": conv_id, "conv": conv, "question": question,
             "last_user_msg_id": last_user_msg_id}
