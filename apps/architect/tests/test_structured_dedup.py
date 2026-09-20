@@ -67,7 +67,8 @@ def test_structured_channel_duplicate_propose_deduped(tmp_path, monkeypatch):
     reqs = [r for r in store.RequirementsStore.all()
             if r.get("ownerConv") == conv["id"]]
     assert len(reqs) == 1, f"structured 轮重复提案应去重, 实落 {len(reqs)} 张: {[r['id'] for r in reqs]}"
-    assert rounds["n"] == 4                      # 三轮提案 + 一轮收束
+    # cv-196 收尾短路: 首轮落卡即收束——重复提案轮不再发生(更强的去重)
+    assert rounds["n"] == 1
 
 
 def test_final_round_branch_duplicate_propose_deduped(tmp_path, monkeypatch):

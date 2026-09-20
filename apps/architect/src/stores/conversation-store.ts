@@ -123,16 +123,10 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   // cv-189: 存量历史里的纯占位气泡("(已调用工具)"等, 弱模型模仿产物)不展示;
   // 新落库的紧凑工具回执(meta.kind=tool_round)保留
+  // cv-194/cv-196: 展示层过滤——纯占位气泡隐藏; task_card/specReady 气泡由
+  // 富组件承载(任务清单 TaskCard/需求提案卡)不再重复渲染(落库不动, 真相源保留)
   const _TOOL_PLACEHOLDER_RE = /^[（(]\s*(?:已调用工具|调用知识库检索|调用工具|工具已调用)\s*[)）][。.!！]?\s*$/
-
-  function _mapTurns(messages: { id?: string; role: 'user' | 'assistant'; content: string; meta?: any; agent?: string }[] | undefined) {
-    return (messages ?? [])
-      .filter((m) => m.content?.trim())
-      .filter((m) => !(m.role === 'assistant' && _TOOL_PLACEHOLDER_RE.test(m.content.trim())
-        && (m.meta as any)?.kind !== 'tool_round'))
-      .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: m.meta, agent: (m as any).agent || '' }))
-      .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content && (all[i - 1].agent || '') === (m.agent || '')))
-  }
+  const _CARD_BUBBLE_KINDS = new Set(['task_card', 'specReady'])
 
   /** 任务刷新(会话打开/操作后/SSE task 事件)。 */
   async function refreshTasks() {
@@ -172,6 +166,9 @@ export const useConversationStore = defineStore('archConversation', () => {
     // 旧会话可能累积了重复的页面引导消息——相邻同文 assistant 消息折叠为一条
     turns.value = msgs
       .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: (m as any).meta, agent: (m as any).agent || '' }))
+      .filter((m) => !_CARD_BUBBLE_KINDS.has(((m.meta as any)?.kind) || ''))
+      .filter((m) => !(m.role === 'assistant' && m.content && _TOOL_PLACEHOLDER_RE.test(m.content.trim())
+        && (m.meta as any)?.kind !== 'tool_round'))
       .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content))
     activeId.value = conv.id
     if (typeof conv.reqId === 'string') activeReqId.value = conv.reqId
@@ -414,6 +411,9 @@ export const useConversationStore = defineStore('archConversation', () => {
       const detail = await sessionService.messages(activeId.value)
       if (activeId.value && !busy.value) {
         applyConversation({ ...detail, reqId: activeReqId.value, title: activeTitle.value } as any)
+        // cv-196: 补偿刷新整表替换 turns 会抹掉实时挂载的提案卡——
+        // 与 openConversation 同口径重挂(rehydrateProposals 现成机制)
+        void rehydrateProposals(activeId.value)
       }
     } catch { /* 重拉失败保持现状 */ }
   }

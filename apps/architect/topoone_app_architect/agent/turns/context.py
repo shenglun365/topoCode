@@ -111,6 +111,8 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
         "说「执行/开始做」→ 需求已就绪就 task.propose 建卡, 卡已存在则"
         "告知点「开始执行」; 说「调整/补充」→ req.amend。 "
         "执行期间 subagent 的提问/进展/完成会以消息进入本会话, 用户直接回复即转达。"
+        "回执与卡片(需求卡/任务卡)已自动落流展示——回答中**不要复述**其标题/方案/"
+        "验收等内容, 一句话确认或只补充增量说明即可。 "
         + architect_note_text(_gear)})
     if assign_contract:
         msgs.insert(1, {"role": "system", "content": assign_contract})

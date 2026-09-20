@@ -209,10 +209,11 @@ def propose_task(conv: dict, title: str, instruction: str,
                                   "补全失败则本次执行**无互斥保护**。")
         except Exception:  # noqa: BLE001
             pass
+    # cv-196: 回执瘦身——instruction 全文不再落流(任务清单 TaskCard 是详情
+    # 载体; 流内全文即车轱辘话), 一行确认 + 异常附注。
     _eb()._append(conv_id, "assistant",
-            f"📋 **任务已保存**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
-            + instruction[:2000]
-            + "\n\n---\n点「开始执行」启动; 可继续对话调整, 或忽略本卡。"
+            f"📋 **任务已保存**：**{task['title']}**（执行器 `{etype}`）"
+            "——点「开始执行」启动; 可继续对话调整, 或忽略本卡。"
             + _resume_note + _stale_note + _no_scope_note + _unmerged_note,
             msg_meta={"kind": "task_card", "taskId": task["id"]},
             project_id=_pid)

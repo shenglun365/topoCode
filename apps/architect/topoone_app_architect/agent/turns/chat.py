@@ -23,6 +23,25 @@ logger = logging.getLogger(__name__)
 _PLACEHOLDER_ONLY_RE = _re.compile(
     r"^[（(]\s*(?:已调用工具|调用知识库检索|调用工具|工具已调用)\s*[)）][。.!！]?\s*$")
 
+# cv-196 收尾短路: 落卡工具的产物已由回执/卡片承载——整回合无可见正文且本轮
+# 全为落卡工具时, 跳过模型叙述轮, 用回执合成收尾(消灭车轱辘话 + 省一轮 LLM)。
+_CARD_LANDING_TOOLS = frozenset({"req.propose", "req.amend", "task.propose"})
+_CARD_CLOSINGS = {
+    "req.propose": "📝 需求卡已创建(ready)——点「开始执行」启动。",
+    "req.amend": "✏️ 规约已修订(ready)。",
+    "task.propose": "📋 任务卡已保存——点「开始执行」启动。",
+}
+
+
+def _card_round_closing(results: List[Dict[str, str]]) -> str:
+    """落卡轮的确定性收尾(按本轮工具去重合成; 空串=不适用)。"""
+    seen: List[str] = []
+    for r in results:
+        c = _CARD_CLOSINGS.get(r.get("name", ""))
+        if c and c not in seen:
+            seen.append(c)
+    return "\n".join(seen)
+
 
 def _propose_dup_text() -> str:
     """cv-174: 同回合重复提案回执(三处工具执行分支共用)。"""
@@ -277,6 +296,11 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": "(已调用工具)"})
                 msgs.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
+                if not visible.strip():
+                    _closing = _card_round_closing(results)
+                    if _closing:
+                        assistant_text = _closing
+                        break
             continue
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
@@ -384,6 +408,12 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                 msgs.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
+                # cv-196 收尾短路: 整回合无可见正文且本轮全为落卡工具 → 不再要
+                # 一轮叙述(车轱辘话源头), 用回执合成收尾直接结束。
+                _closing = _card_round_closing(results)
+                if not visible.strip() and _closing:
+                    assistant_text = _closing
+                    break
             # 工具结果回喂后的再生成无任何信号会让前端进度条「卡死」观感——显式报相
             await io.send_ev({"type": "status", "phase": "llm_round",
                                        "round": tool_round + 1})
@@ -502,7 +532,15 @@ async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_roun
         mode="chat", max_tokens=_chat_max_tokens(), max_rounds=max_rounds,
         on_progress=on_progress,
     )
-    return res.get("content", "") if isinstance(res, dict) else ""
+    content = res.get("content", "") if isinstance(res, dict) else ""
+    # cv-196 收尾短路(降级通道同规): 模型零可见正文且本回合并发的全是落卡
+    # 工具 → 用回执合成收尾(消灭车轱辘话)。流式主路径在轮内短路(省一轮)。
+    if not content.strip() and tools_used and tools_used <= _CARD_LANDING_TOOLS:
+        closing = "\n".join(_CARD_CLOSINGS[t] for t in sorted(tools_used)
+                            if t in _CARD_CLOSINGS)
+        if closing:
+            return closing
+    return content
 
 
 async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args: dict,

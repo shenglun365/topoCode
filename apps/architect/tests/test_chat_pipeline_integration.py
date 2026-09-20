@@ -280,3 +280,23 @@ def test_resolve_context_budget_priority(monkeypatch):
     assert llm.resolve_context_budget(None, "m") is None
     monkeypatch.setattr(llm, "get_context_budget_preference", lambda: 16384)
     assert llm.resolve_context_budget(None, "m") == 16384
+
+
+def test_card_round_short_circuit_skips_narration(pipeline):
+    """cv-196 收尾短路: 整回合无可见正文 + 全为落卡工具 → 跳过叙述轮
+    (车轱辘话源头), 用回执合成收尾; 只烧一轮 llm.sync。"""
+    client, gw, _tmp = pipeline
+    gw.sync_script = [
+        '[TOOL_CALL]{"tool":"req.propose","arguments":{"title":"短路验证",'
+        '"requirementMd":"目标: 验证落卡轮不再触发叙述轮"}}[/TOOL_CALL]',
+    ]
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            _chat(ws, "帮我做一个短路验证的小需求")
+            ev = _recv_until(ws, "done")
+    # 降级通道(llm.chat 不可用)在 run_tools_loop 后短路合成——叙述轮的
+    # 产出被替换为回执收尾(流式主路径则整轮省去)
+    assert "需求卡已创建" in ev["content"]
+    assert "需求分析已完成" not in ev["content"]   # 无模型复述
+    msgs = store.ConversationsStore.messages(ev["conversationId"], limit=10)
+    assert not [m for m in msgs if m["content"].strip() == "(已调用工具)"]
