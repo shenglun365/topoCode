@@ -491,6 +491,7 @@ export default {
       acceptDone: '已标记需求完成(阶段性完结)。继续迭代请新建需求。',
     },
     statusFilter: { all: '全部状态' },
+    scope: { allProjects: '全部项目', allProjectsTip: '跨全部项目查看会话(缺省只看当前项目)' },
     time: { all: '全部时间', today: '今天', week: '本周', earlier: '更早' },
     group: { all: '全部分组', custom: '自定义分组', byModule: '按模块', new: '新建分组' },
     filter: { all: '全部' },

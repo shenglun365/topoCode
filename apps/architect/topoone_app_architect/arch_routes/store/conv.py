@@ -198,7 +198,8 @@ class ConversationsStore:
         all_scopes=True: 跨全库(主库+各项目库)扫描合并, 不受请求项目上下文限制
         (会话中心统一视图)。"""
         if all_scopes:
-            return cls._summaries_scan(kind=kind, limit=limit)
+            return cls._summaries_scan(kind=kind, limit=limit,
+                                       project_id=project_id)
         sql = (f"SELECT c.*, "
                "(SELECT COUNT(*) FROM {msg} m WHERE m.conversation_id = c.id) AS msg_count, "
                "(SELECT MIN(m2.time) FROM {msg} m2 WHERE m2.conversation_id = c.id "
@@ -221,8 +222,12 @@ class ConversationsStore:
         return [_row_to_api(r) for r in rows]
 
     @classmethod
-    def _summaries_scan(cls, kind: str = None, limit: int = 100) -> list[dict]:
-        """全库扫描版 summaries(主库+各项目库), 按更新时间归并。"""
+    def _summaries_scan(cls, kind: str = None, limit: int = 100,
+                        project_id: str = None) -> list[dict]:
+        """全库扫描版 summaries(主库+各项目库), 按更新时间归并。
+
+        project_id: 扫描后按 project_id 列过滤(会话中心项目隔离视图;
+        历史行可能落在主库, 故扫全库再按列过滤, 不走单库路由)。"""
         from .base import _scan_dbs
         sql = (f"SELECT c.*, "
                "(SELECT COUNT(*) FROM {msg} m WHERE m.conversation_id = c.id) AS msg_count, "
@@ -231,10 +236,16 @@ class ConversationsStore:
                "(SELECT m3.content FROM {msg} m3 WHERE m3.conversation_id = c.id "
                " AND m3.role = 'user' ORDER BY m3.time ASC, m3.rowid ASC LIMIT 1) AS preview "
                f"FROM {cls.TABLE} c").format(msg=cls.MSG_TABLE)
-        params: tuple = ()
+        conds, params = [], []
         if kind:
-            sql += " WHERE c.kind = ?"
-            params = (kind,)
+            conds.append("c.kind = ?")
+            params.append(kind)
+        if project_id:
+            conds.append("c.project_id = ?")
+            params.append(project_id)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        params = tuple(params)
         out: list[dict] = []
         for d in _scan_dbs():
             out.extend(_row_to_api(r) for r in d.fetchall(sql, params))

@@ -90,11 +90,15 @@ function qs(params?: Record<string, string | number | undefined>): string {
 }
 
 export const sessionService = {
-  async list(params?: { kind?: string; q?: string; limit?: number; scope?: string }): Promise<ConversationMeta[]> {
+  async list(params?: { kind?: string; q?: string; limit?: number; scope?: string; project?: string }): Promise<ConversationMeta[]> {
     return apiGet<ConversationMeta[]>(`/sessions${qs(params)}`)
   },
-  async groups(scope?: string): Promise<SessionGroupsInfo> {
-    return apiGet<SessionGroupsInfo>(`/sessions/groups${scope ? `?scope=${scope}` : ''}`)
+  async groups(scope?: string, project?: string): Promise<SessionGroupsInfo> {
+    const p = new URLSearchParams()
+    if (scope) p.set('scope', scope)
+    if (project) p.set('project', project)
+    const q = p.toString()
+    return apiGet<SessionGroupsInfo>(`/sessions/groups${q ? `?${q}` : ''}`)
   },
   async saveGroups(groups: string[]): Promise<{ groups: string[] }> {
     return apiPut<{ groups: string[] }>('/sessions/groups', { groups })

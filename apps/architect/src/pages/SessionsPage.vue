@@ -21,6 +21,7 @@ import { sessionService, type ContextUnit, type ConversationMeta, type SessionDo
 import { trackingService, type TrackingVocab } from '@/services/tracking-service'
 import { apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
+import { useArchProjectStore } from '@/stores/project-store'
 import { copyText } from '@/utils/clipboard'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
@@ -30,6 +31,7 @@ const { t, te } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const conv = useConversationStore()
+const projectStore = useArchProjectStore()
 
 // ── 布局: 左栏信息(会话列表/知识资产 标签页) / 右栏对话(inline 停靠)——与资产地图页同构 ──
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 62, min: 40, max: 78 })
@@ -107,11 +109,21 @@ const statusFilter = ref('all')      // 生命周期重构: all | active | runni
 // PR3 角色徽标: 会话列表显示 executor 角色名
 async function loadRoles() { /* 角色目录已退役(执行器直绑); 保留空挂点防引用 */ }
 
+// ── 项目隔离(cv-187 反馈): 默认只看当前项目会话; 显式切「全部项目」跨库统一视图 ──
+const includeAllProjects = ref(false)
+const currentProjectId = computed(() => projectStore.project?.id || '')
+
 async function load() {
   loading.value = true
   try {
-    // scope=all: 跨全库(主库+各项目库)汇总 — 会话中心统一视图(会话管理+资产管理)
-    const [l, g] = await Promise.all([sessionService.list({ limit: 400, scope: 'all' }), sessionService.groups('all')])
+    const pid = currentProjectId.value
+    const allMode = includeAllProjects.value || !pid
+    const [l, g] = await Promise.all([
+      allMode
+        ? sessionService.list({ limit: 400, scope: 'all' })
+        : sessionService.list({ limit: 400, project: pid }),
+      allMode ? sessionService.groups('all') : sessionService.groups(undefined, pid),
+    ])
     void loadRoles()
     list.value = l
     groupsInfo.value = g
@@ -119,6 +131,7 @@ async function load() {
     loading.value = false
   }
 }
+watch([currentProjectId, includeAllProjects], () => { void load() })
 onMounted(async () => {
   // 会话集合变更(右栏对话新建/更新会话) → 左侧列表同步刷新(免手动刷新页面)
   window.addEventListener('arch:sessions-changed', onSessionsChanged)
@@ -235,7 +248,10 @@ async function editTags(c: ConversationMeta) {
   }
   await sessionService.update(c.id, { tags })
   c.tags = tags
-  void sessionService.groups().then((g) => { groupsInfo.value = g })
+  const pid = currentProjectId.value
+  const allMode = includeAllProjects.value || !pid
+  void (allMode ? sessionService.groups('all') : sessionService.groups(undefined, pid))
+    .then((g) => { groupsInfo.value = g })
 }
 async function removeSession(c: ConversationMeta) {
   if (!(await dialog.confirm(t('session.actions.deleteConfirm', { title: c.title }), { danger: true }))) return
@@ -306,6 +322,12 @@ function reviewClass(rs?: string) {
           <option value="running">{{ t('session.status.running') }}</option>
           <option value="archived">{{ t('session.status.archived') }}</option>
         </select>
+        <button
+          class="btn btn-sm shrink-0"
+          :class="includeAllProjects ? 'btn-blue' : 'btn-ghost'"
+          :title="t('session.scope.allProjectsTip')"
+          @click="includeAllProjects = !includeAllProjects"
+        >{{ t('session.scope.allProjects') }}</button>
         <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
           <option value="">{{ t('session.group.all') }}</option>
           <optgroup v-if="groupsInfo.groups.length" :label="t('session.group.custom')">

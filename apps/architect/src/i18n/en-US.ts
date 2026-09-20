@@ -467,6 +467,7 @@ export default {
       acceptDone: 'Requirement marked done (stage complete). Start a new one to continue.',
     },
     statusFilter: { all: 'All statuses' },
+    scope: { allProjects: 'All projects', allProjectsTip: 'Show sessions across all projects (default: current project only)' },
     time: { all: 'All time', today: 'Today', week: 'This week', earlier: 'Earlier' },
     group: { all: 'All groups', custom: 'Custom groups', byModule: 'By module', new: 'New group' },
     filter: { all: 'All' },

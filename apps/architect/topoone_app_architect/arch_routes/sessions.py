@@ -104,15 +104,19 @@ async def sse_events(request: Request):
 
 
 @router.get("/sessions")
-async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: str = ""):
+async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: str = "",
+                        project: str = ""):
     """会话列表(全量会话 + 消息数/预览)。q: 标题/摘要模糊过滤(前端侧也过滤)。
 
-    scope=all: 跨全库(主库+各项目库)汇总 —— 会话中心统一视图, 不受 ?project= 限制。
+    project=<id>: 项目隔离视图(全库扫描后按 project_id 列过滤——历史行可能
+    落在主库, 不走单库路由); scope=all: 跨全库统一视图(显式开启才生效);
+    两者缺省: 按请求上下文 ?project= 路由的既有行为。
     """
     # coding 子会话不进列表(防污染): 经主会话「子会话池」弹层管理/进入;
     # 显式 ?kind=coding 查询(子会话管理面)不受影响
     rows = store.ConversationsStore.summaries(
-        kind=kind or None, limit=limit, all_scopes=(scope == "all"))
+        kind=kind or None, limit=limit, project_id=project or None,
+        all_scopes=(scope == "all") or bool(project))
     if kind != "coding":
         rows = [c for c in rows if (c.get("kind") or "") != "coding"]
     items = []
@@ -150,9 +154,13 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
 
 
 @router.get("/sessions/groups")
-async def list_groups(scope: str = ""):
-    """分组维度: 用户自定义分组 + 会话身上出现过的 modules/groups 并集(scope=all 跨全库)。"""
-    convs = store.ConversationsStore.summaries(limit=400, all_scopes=(scope == "all"))
+async def list_groups(scope: str = "", project: str = ""):
+    """分组维度: 用户自定义分组 + 会话身上出现过的 modules/groups 并集。
+
+    project=<id>: 项目隔离(与 /sessions 同口径); scope=all: 跨全库统一视图。"""
+    convs = store.ConversationsStore.summaries(
+        limit=400, project_id=project or None,
+        all_scopes=(scope == "all") or bool(project))
     modules, groups = [], []
     for c in convs:
         t = _tags_of(c)
