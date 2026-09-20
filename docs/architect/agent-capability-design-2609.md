@@ -376,3 +376,21 @@ cv-181 弱模型占位文本不真调, 实证不可纯 NL 化)。
 - 死文档清理: match_command docstring `/定稿` 幻影条目移除(`/摘要` 从未存在)
 
 **不新增 `/摘要`**(ctx.summarize 工具 + digest 简报体系已覆盖, NL 可达)。
+
+### 14.6 KB 注入层硬控制(2026-09-20, cv-189)
+
+**口径升级**: cv-187 只裁能力文档(提示级), 用户在模型 API 日志仍见 KB 叙述。
+现改为**注入层硬控制——未关联 KB(kb_degraded 口径) → KB 面整块不装配**:
+
+| 注入面 | 硬控 |
+|---|---|
+| header | 降级项目 KB 句(含降级提示)整句不注入(单源+legacy 双路) |
+| MCP 块 | `mcp.call`(KB :3460 出向代理)目录/说明整块不装配(单源+legacy 双路) |
+| 能力文档 | kb.* 四件 + mcp.call 一并裁剪; `chat_system_prompt` 入口强制 kb_enabled=False(防调用方漏传) |
+| skill 文档 | extract 场景 `kb.asset.search` 定位指引换本地(asset.semantic.search/map.assets) |
+| 执行面 | run_arch_tool 降级拦截集 +mcp.call(internal 放行) |
+| 中立化 | 工具协议示例/T0 挡指引/可处理范围/asset.semantic.update 简介去 KB 词汇(关联项目同样无 KB 话术) |
+
+**验收门**: 降级项目 `chat_system_prompt(skill_scenarios=["extract"])` 断言
+不含「知识库/kb./KB」任意字样(test_kb_autoclose); 等价性/MCP 渲染测试改在
+非降级口径运行(意图隔离)。

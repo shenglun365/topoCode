@@ -259,7 +259,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
             pass
     # cv-187: 未关联 KB(降级)项目 → kb.* 工具执行面拦截(与提示面裁剪同口径),
     # 杜绝静默空结果误导模型; internal=True 系统确定性路径放行。
-    if name in KB_RETRIEVAL_TOOLS and not internal:
+    if (name in KB_RETRIEVAL_TOOLS or name == "mcp.call") and not internal:
         try:
             from .project import kb_degraded as _kb_deg
             if _kb_deg(root, project):
@@ -1135,6 +1135,14 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
     """
     from . import model_profile as _mp
     from . import prompt_registry as _pr
+    # cv-189 注入层硬控制(入口强制): 未关联 KB → 无论调用方传什么, kb_enabled
+    # 恒 False(能力文档无 kb.*/mcp.call; MCP 块/skill/路由段各自另有降级门)。
+    try:
+        from .project import kb_degraded as _kd
+        if _kd(root, project):
+            kb_enabled = False
+    except Exception:  # noqa: BLE001
+        pass
     tier = _mp.tier_of(model_id or "")
     return _pr.render_system({
         "root": root, "project": project, "diagram_skill": diagram_skill,
@@ -1157,14 +1165,20 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
     mode = "greenfield(从零)" if not project else "existing(既有)"
     degraded = ctx.get("degraded", False)
     bound = ctx.get("bound", False)
+    # cv-189 注入层硬控制: 未关联 KB → KB 叙述整句不注入(与单源 header 同门)
     kb = (
         "KB 已绑定，可检索资产/基线/依赖图。"
         if bound and not degraded
-        else "KB 降级(无资产检索)，仅能基于需求描述给出规划建议，建议先关联知识库。"
+        else ""
     )
     ir_doc = f"\n\n{_ir_schema_doc()}"
     extra = f"\n\n{_diagram_skill_doc()}" if diagram_skill else ""
-    mcp_extra = f"\n\n{_mcp_doc()}"
+    try:
+        from .project import kb_degraded as _kd
+        _mcp_on = not _kd(root, project)
+    except Exception:  # noqa: BLE001
+        _mcp_on = True
+    mcp_extra = f"\n\n{_mcp_doc()}" if _mcp_on else ""
     skill_extra = ""
     if skill_scenarios:
         try:

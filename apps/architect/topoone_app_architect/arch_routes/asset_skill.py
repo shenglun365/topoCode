@@ -211,11 +211,25 @@ def skill_docs(root: Optional[str], project: Optional[str],
     """
     if not scenarios:
         return ""
+    # cv-189 注入层硬控制: 未关联 KB → skill 文档不得出现 kb.* 查询指引,
+    # 组件 ID 定位改走本地资产检索(extract 场景其余内容与 KB 无关, 保留)。
+    degraded = False
+    try:
+        from .project import kb_degraded as _kd
+        degraded = _kd(root, project)
+    except Exception:  # noqa: BLE001
+        degraded = True
     parts: List[str] = []
     for sc in scenarios:
         b = _builtin_for(sc)
-        if b:
-            parts.append(b)
+        if not b:
+            continue
+        if degraded:
+            b = b.replace(
+                "只给组件名 → `kb.asset.search` 取 `id`",
+                "只给组件名 → `asset.semantic.search`(关键词=组件名) 或 "
+                "`map.assets` 查得 `id`(scope.key)")
+        parts.append(b)
     # 项目规约（按场景标签过滤——R7 禁全量注入）
     try:
         from .semantic_assets import project_id_for

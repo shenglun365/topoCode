@@ -84,3 +84,30 @@ def test_chat_context_cuts_kb_tools_when_unlinked(arch_env):
     assert "kb.asset.search" not in unlinked and "kb.code_mappings" not in unlinked
     assert "KB 架构资产检索" not in unlinked          # 路由文案不再引导 KB 检索
     assert "task.propose" in unlinked                # 路由段其余内容完好
+
+
+def test_degraded_prompt_free_of_kb_narrative(arch_env):
+    """cv-189 注入层硬控制验收(模型 API 日志口径):
+    未关联 KB → 系统提示词零 KB 叙述; 已关联 → KB 能力叙述照常。"""
+    from topoone_app_architect.arch_routes import req_agent
+    store.ProjectsStore.create({"id": "proj-kbN", "name": "无基线",
+                                "rootPath": "/tmp/kbN"})
+    store.ProjectsStore.create({"id": "proj-kbL", "name": "有基线",
+                                "rootPath": "/tmp/kbL", "baselineId": "BL-1"})
+    prompt = req_agent.chat_system_prompt("/tmp/kbN", "proj-kbN",
+                                          skill_scenarios=["extract"])
+    for bad in ("知识库", "kb.", "KB"):
+        assert bad not in prompt, f"降级提示词仍含 {bad!r}"
+    # 提取 skill 注入但 kb 定位指引已换本地
+    assert "asset.semantic.extract" in prompt and "map.assets" in prompt
+    linked = req_agent.chat_system_prompt("/tmp/kbL", "proj-kbL",
+                                          skill_scenarios=["extract"])
+    assert "KB 已绑定" in linked and "kb.asset.search" in linked
+
+
+def test_run_arch_tool_blocks_mcp_call_when_degraded(arch_env):
+    """执行面: mcp.call(KB MCP 出向代理)在降级项目上硬拦。"""
+    from topoone_app_architect.arch_routes import req_agent
+    r = req_agent.run_arch_tool("mcp.call", {"tool": "x", "params": {}},
+                                root=None, project=None)
+    assert "未关联知识库" in str(r.get("error")), r

@@ -26,7 +26,7 @@ def test_r34_full_surface_unchanged():
 def test_r34_kb_false_drops_retrieval():
     doc = capability_doc_from_tools(kb_enabled=False)
     assert "kb.asset.search" not in doc and "kb.graph" not in doc
-    assert "mcp.call" in doc                              # 其余保留
+    assert "mcp.call" not in doc                          # cv-189: KB MCP 出向同裁
 
 
 def test_r34_reduced_drops_writes():

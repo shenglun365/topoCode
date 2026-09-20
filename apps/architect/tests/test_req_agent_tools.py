@@ -97,6 +97,10 @@ class TestCapabilityDoc:
 
     def test_system_prompt_includes_new_tools(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
+        # cv-189: 降级项目 MCP 块整块不注入——本测试测 MCP 渲染, 用非降级口径
+        import topoone_app_architect.arch_routes.project as _proj_mod
+        monkeypatch.setattr(_proj_mod, "kb_degraded",
+                            lambda root=None, project_id=None: False)
         req_agent._MCP_TOOLS_CACHE.update({
             "ts": 9999999999.0,
             "tools": [{"name": "arch.read", "description": "x"}],

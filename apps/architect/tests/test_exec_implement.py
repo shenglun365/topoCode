@@ -210,12 +210,17 @@ def test_chat_system_prompt_no_reject_boundary():
     assert "designMd" in s, "边界提示应同步强调 designMd 完整性"
 
 
-def test_chat_system_prompt_registry_equivalence():
+def test_chat_system_prompt_registry_equivalence(monkeypatch):
     """registry 等价模式(single_source=false 覆盖): 与旧拼接逐字节一致。
 
     B4 后默认走单源渲染(见 test_prompt_source), 等价模式保留为回退通道——
     本测试守卫块化重构本身的行为等价性。
+    (cv-189: 降级项目提示词有 KB 硬门, legacy 静态文档无——等价性以
+    非降级上下文为口径, monkeypatch kb_degraded=False。)
     """
+    import topoone_app_architect.arch_routes.project as _proj_mod
+    monkeypatch.setattr(_proj_mod, "kb_degraded",
+                        lambda root=None, project_id=None: False)
     from topoone_app_architect.arch_routes import req_agent, prompt_registry
     prompt_registry.set_overrides({"single_source": False})
     try:

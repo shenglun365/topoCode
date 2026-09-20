@@ -76,8 +76,9 @@ def _r_header(ctx: Dict[str, Any]) -> str:
     mode = "greenfield(从零)" if not ctx.get("project") else "existing(既有)"
     degraded = p.get("degraded", False)
     bound = p.get("bound", False)
-    kb = ("KB 已绑定，可检索资产/基线/依赖图。" if bound and not degraded
-          else "KB 降级(无资产检索)，仅能基于需求描述给出规划建议，建议先关联知识库。")
+    # cv-189 注入层硬控制: 未关联 KB → KB 叙述整句不注入(降级提示也是 KB 话术)
+    kb = ("KB 已绑定，可检索资产/基线/依赖图。"
+          if bound and not degraded else "")
     return ("你是 TopoCode 架构需求分析 agent(自由对话)。\n"
             f"当前项目：{p.get('name') or '(未绑定)'}，模式：{mode}。{kb}")
 
@@ -128,7 +129,7 @@ def _filter_tools(entries, tool_surface: str, kb_enabled: bool):
     硬执法待 ChatTurn 消费 RunParams 时接线(设计 §12 后续轨道)。"""
     out = []
     for name, entry in entries:
-        if not kb_enabled and name in KB_RETRIEVAL_TOOLS:
+        if not kb_enabled and (name in KB_RETRIEVAL_TOOLS or name == "mcp.call"):
             continue
         if tool_surface == "minimal" and name not in _MINIMAL_KEEP:
             continue
@@ -156,6 +157,13 @@ def _r_diagram_skill(ctx: Dict[str, Any]) -> str:
 
 
 def _r_mcp(_ctx: Dict[str, Any]) -> str:
+    # cv-189 注入层硬控制: 未关联 KB → MCP 块整块不装配(mcp.call 走 KB :3460)
+    try:
+        from ...arch_routes.project import kb_degraded as _kd
+        if _kd(_ctx.get("root"), _ctx.get("project")):
+            return ""
+    except Exception:  # noqa: BLE001 — 判定失败保持原状
+        pass
     from ...arch_routes import req_agent as _req5
     return _req5._mcp_doc()
 
@@ -407,7 +415,7 @@ def capability_doc_from_tools(tool_surface: str = "full",
 # 唯一源: chat 面(_PROTOCOL_DOC)与工具面(req_agent 能力文档)共同引用拼接。
 # 禁止在任何调用面手工复制这些段落——漂移即事故(cv-177: 两份副本三处不一致)。
 TOOL_PROTOCOL_HEAD = (
-    "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
+    "工具调用协议(重要)：当需要检索项目数据才能回答(例如确认真实资产、组件与边界)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<工具名>","arguments":{参数}}[/TOOL_CALL]\n'
 )
@@ -446,7 +454,7 @@ _SCOPE_DOC = (
     "可处理范围：\n"
     "1. 需求分析/澄清/范围收敛、资产命中与影响评估；\n"
     "2. 产品设计、软件开发实现建议(非文档化的帮助性建议)；\n"
-    "3. 新项目引导(从零建立开发环境/确立目标)、未关联 KB 的已有项目建立 KB 的引导(非强制)。\n"
+    "3. 新项目引导(从零建立开发环境/确立目标)。\n"
     "越界处理(软拒绝)：对与需求分析无关的通用闲聊/外包式实现请求，礼貌说明能力范围并引导回"
     "需求分析语境，不深入执行，但允许用户继续提问。\n"
     "回复保持简洁、直接、可操作，可输出 Markdown。"

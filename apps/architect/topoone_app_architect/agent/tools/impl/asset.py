@@ -26,7 +26,7 @@ def tool_asset_semantic_save(root: Optional[str] = None,
     "asset.semantic.update",
     "认知层编辑既有语义资产(仅改名/描述，overlay 审计)：patch={name? 新名(旧名自动入历史), desc? 新描述}。"
     "与 asset.semantic.save(新建)互补——已提取资产的措辞修正用本工具，勿重复 save。"
-    "main-KB 关联项目会拒绝(应在主 KB 界面编辑)，错误信息含深链。",
+    "主库关联项目会拒绝(应在主库界面编辑)，错误信息含深链。",
 )
 def tool_asset_semantic_update(root: Optional[str] = None,
                                project: Optional[str] = None,

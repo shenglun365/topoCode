@@ -93,7 +93,7 @@ _TIERS: Dict[str, GearPolicy] = {
         tier="T0", label="强模型直通车·直出任务卡", kb=False, pre_split="none",
         cadence="milestone", max_iterations=2000,
         architect_note=(
-            "快捷挡(T0 直通车)：不做需求分析(不调用 req.propose 与 KB 检索类工具)。"
+            "快捷挡(T0 直通车)：不做需求分析(不调用 req.propose 与资产检索类工具)。"
             "依据用户请求直接整理实质任务(目标/方案要点/边界/验收)调用 task.propose "
             "创建任务卡供用户确认执行；请求过于模糊时先集中提问。"
             "内联 @执行器 前缀(如 @cline)直接按指定执行器建卡。"),
