@@ -493,7 +493,7 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
                 pass
             return {"ok": True, "requirementId": bound_rid, "ver": entry["ver"],
                     "updated": True, "title": title,
-                    "hint": "需求卡已更新(ready)；`/执行` 启动作业"}
+                    "hint": "需求卡已更新(ready)——点卡片「开始执行」启动, 或直接说\"执行\""}
 
     req = {
         "id": _store.next_id("RQ"), "kind": "user-story",
@@ -532,19 +532,19 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
             logger.warning("[req.propose] conv.reqId 回写失败 conv=%s: %s", conv_id, e)
     # 方案缺失如实提示(不再门禁拦截——执行器自行判断, 信息进任务指令)
     no_design = not str(designMd or "").strip()
-    receipt = (f"📝 **需求卡已创建**：`{req['id']}` {title}（ready，`/执行` 启动作业）")
+    receipt = (f"📝 **需求卡已创建**：`{req['id']}` {title}（ready——点「开始执行」启动，或直接说\"执行\"）")
     if no_design:
         receipt = (f"📝 **需求卡已创建**：`{req['id']}` {title}（ready；"
-                   "⚠️ 未包含实现方案——建议 `/调整` 补充后执行)")
+                   "⚠️ 未包含实现方案——建议直接在对话中说明要补充的方案)")
     try:
         log_conv_event(conv_id, receipt,
                        meta={"kind": "specReady", "requirementId": req["id"],
                              "ver": 1, "noDesign": no_design})
     except Exception:  # noqa: BLE001
         pass
-    hint = "需求卡已创建(ready)；`/执行` 启动作业"
+    hint = "需求卡已创建(ready)——点卡片「开始执行」启动, 或直接说\"执行\""
     if no_design:
-        hint += "(⚠️ 方案缺失, 建议 /调整 补全)"
+        hint += "(⚠️ 方案缺失, 建议直接在对话中说明要补充的方案)"
     return {"ok": True, "requirementId": req["id"], "ver": 1, "updated": False,
             "title": title, "noDesign": no_design, "hint": hint}
 
@@ -678,7 +678,7 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                              "ver": entry["ver"], "updated": True})
     except Exception:  # noqa: BLE001
         pass
-    hint = "修订已就绪(ready)；`/执行` 按新版本执行"
+    hint = "修订已就绪(ready)——点「开始执行」按新版本执行"
     if ignored:
         hint += f"；已忽略不支持的参数: {','.join(sorted(set(ignored)))}"
     return {"ok": True, "reqId": req_id, "ver": entry["ver"], "amended": changed,

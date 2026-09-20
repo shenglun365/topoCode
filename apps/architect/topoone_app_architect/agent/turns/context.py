@@ -107,6 +107,9 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
         "路由原则: 用户的问题不需要本项目知识库就能动手的(如「检测编译环境」"
         "「统计文件数」「跑个脚本」)→ task.propose, 不要用 KB 检索话术推给用户; "
         "需要项目上下文/架构语义的 → 你自己分析。 "
+        "意图映射: 用户说「整理成需求卡/提取需求」→ req.propose; "
+        "说「执行/开始做」→ 需求已就绪就 task.propose 建卡, 卡已存在则"
+        "告知点「开始执行」; 说「调整/补充」→ req.amend。 "
         "执行期间 subagent 的提问/进展/完成会以消息进入本会话, 用户直接回复即转达。"
         + architect_note_text(_gear)})
     if assign_contract:

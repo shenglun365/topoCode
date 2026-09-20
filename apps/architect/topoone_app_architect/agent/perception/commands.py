@@ -25,8 +25,9 @@ _CONFIRM_RE = re.compile(
 def match_command(question: str) -> Optional[Dict[str, str]]:
     """整条消息恰为指令(可带 @执行器 前缀)时返回 {cmd, executor}；其余 None。
 
-    @cline /执行 → {"cmd": "执行", "executor": "cline"}(显式执行器直通建卡);
-    /定稿 → {"cmd": "定稿", "executor": ""}。"""
+    @cline /执行 → {"cmd": "执行", "executor": "cline"}(显式执行器直通建卡)。
+    (2026-09-20 处置: 直通链保留为前端按钮通道+确定性兜底(cv-152/181), 用户面
+    收敛到自然语言+按钮——回执/引导文案不再宣传斜杠语法。)"""
     m = _COMMAND_RE.match((question or "").strip())
     if not m:
         return None

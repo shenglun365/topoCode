@@ -399,8 +399,8 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
                 if s.get("status") in ("pending", "failed")]
         if not cand:
             return {"ok": False,
-                    "receipt": "📋 任务计划已全部完成。如需继续演进, 请 `/调整` "
-                               "完善需求后重新 `/执行`。"}
+                    "receipt": "📋 任务计划已全部完成。如需继续演进, "
+                               "直接在对话中说明要调整的内容后再说\"执行\"。"}
         norm = _tg.normalize_plan(plan)
         by_seq = {s.get("seq"): s for s in norm}
 
@@ -508,7 +508,7 @@ def on_plan_task_done(conv_id: str, task_id: str) -> None:
                 overview = _tg.blocked_summary(plan)
                 eb._append(conv_id, "assistant",
                            f"⛔ 计划后继步骤被阻塞（{overview}）——"
-                           "请处理失败步骤后再 `/执行` 重发。",
+                           "请处理失败步骤后再说\"执行\"重发。",
                            msg_meta={"kind": "taskPlan", "requirementId": rid,
                                      "total": len(plan)},
                            project_id=(conv or {}).get("projectId") or "")
