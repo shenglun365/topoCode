@@ -34,7 +34,7 @@ const router = useRouter()
 // ---- 对话模型: 统一用顶部工具栏选择(读同一 localStorage 键 topoone-model-architect, 透传后端) ----
 
 // ---- P1 全局会话栏: 聊天引擎在 conversation-store，页面经钩子响应工具事件 ----
-const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane()
+const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 50 })
 const conv = useConversationStore()
 const historyOpen = ref(false)
 /** 对话回合反应式视图(提取进度等页面写回合，dock 内同步渲染)。 */

@@ -34,7 +34,7 @@ const conv = useConversationStore()
 const projectStore = useArchProjectStore()
 
 // ── 布局: 左栏信息(会话列表/知识资产 标签页) / 右栏对话(inline 停靠)——与资产地图页同构 ──
-const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 62, min: 40, max: 78 })
+const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 50, min: 40, max: 78 })
 
 /** 左栏标签页: 会话列表 / 需求跟踪(单按钮切换)。 */
 const leftTab = ref<'sessions' | 'assets'>('sessions')
