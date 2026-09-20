@@ -114,6 +114,7 @@ export const useConversationStore = defineStore('archConversation', () => {
     turns.value = []
     busy.value = false
     busyLabel.value = ''
+    flushPendingMsgRefresh()
   }
 
   /** ── v2 统一会话: 单流(消息带 agent 标注, 读侧视觉归因) + 任务清单 ── */
@@ -342,6 +343,7 @@ export const useConversationStore = defineStore('archConversation', () => {
     } finally {
       abortCtl.value = null
       busy.value = false
+      flushPendingMsgRefresh()   // cv-194: 回合中挂起的消息重拉在此补偿
     }
   }
 
@@ -400,10 +402,14 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   /**
    * 重拉当前会话消息(SSE conv-message 事件触发——coding 子会话事件双落到
-   * 主会话的消息无需手动刷新即见)。流式回合进行中(busy)不刷, 避免打断渲染。
+   * 主会话的消息无需手动刷新即见)。流式回合进行中(busy)不刷(避免打断渲染),
+   * 但请求改为挂起——busy 解除后补偿刷新一次(cv-194: 回合中落流的需求卡/
+   * 任务回执此前被静默丢弃, 只能刷新页面才可见)。
    */
+  let pendingMsgRefresh = false
   async function refreshActiveMessages() {
-    if (!activeId.value || busy.value) return
+    if (!activeId.value) return
+    if (busy.value) { pendingMsgRefresh = true; return }
     try {
       const detail = await sessionService.messages(activeId.value)
       if (activeId.value && !busy.value) {
@@ -412,7 +418,15 @@ export const useConversationStore = defineStore('archConversation', () => {
     } catch { /* 重拉失败保持现状 */ }
   }
 
+  /** busy 解除后的补偿刷新(cv-194): 250ms 让 done 内容挂载先完成。 */
+  function flushPendingMsgRefresh() {
+    if (!pendingMsgRefresh) return
+    pendingMsgRefresh = false
+    setTimeout(() => { if (!busy.value) void refreshActiveMessages() }, 250)
+  }
+
   return {
+    flushPendingMsgRefresh,
     dockOpen, setDockOpen, toggleDock,
     scope, setScope,
     activeId, activeTitle, activeReqId, activeMeta,
