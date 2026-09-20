@@ -124,6 +124,7 @@ class ConversationsStore:
             "review_state": data.get("reviewState") or "read",
             "analysis_mode": data.get("analysisMode") or "strict",
             "clarify_mode": data.get("clarifyMode") or "auto",
+            "isolated": 1 if data.get("isolated") else 0,
             "parent_conv_id": data.get("parentConvId") or "",
             "executor_id": data.get("executorId") or "",
             "session_ref": data.get("sessionRef") or "",

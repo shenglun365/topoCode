@@ -47,6 +47,8 @@ const props = defineProps<{
   analysisMode?: 'strict' | 'quick'
   /** 需求澄清挡位(cv-190): auto(自动, 缺口驱动) | forced(强制, 先澄清后落卡)。 */
   clarifyMode?: 'auto' | 'forced'
+  /** worktree 隔离模式(cv-202): false=就地(缺省) | true=显式要求隔离执行。 */
+  isolated?: boolean
   /** 会话是否已存在: false=空白对话(记录未创建)——挡位是会话级字段无处可写, 直切钮禁用+提示。 */
   hasSession?: boolean
   /** 会话 id(语境摘要 REST 用); 空=无会话。 */
@@ -63,6 +65,7 @@ const emit = defineEmits<{
   /** 分析挡位切换(strict/quick) → 宿主上抛 REST。 */
   'set-analysis-mode': [mode: 'strict' | 'quick']
   'set-clarify-mode': [mode: 'auto' | 'forced']
+  'set-isolated': [on: boolean]
   /** 工具栏执行器选择: 上抛宿主执行绑定(未绑=bind; 已绑切换=克隆新会话)。 */
   'bind-executor': [executorId: string]
   'task-confirm': [taskId: string]
@@ -326,6 +329,19 @@ const clarifyTitle = computed(() => {
 function toggleClarifyMode() {
   if (quickLocked.value) return
   emit('set-clarify-mode', clarifyForced.value ? 'auto' : 'forced')
+}
+
+/** worktree 隔离挡位(cv-202): 缺省就地; 显式开启后任务在 worktree 分支作业。 */
+const isolatedOn = computed(() => !!props.isolated)
+const isolatedTitle = computed(() => {
+  if (quickLocked.value) return '隔离模式需在已有会话中切换 — 发送首条消息创建会话后可用'
+  return isolatedOn.value
+    ? '隔离模式 — 任务在独立 worktree 分支作业, 完成后合并回项目目录（点击切回就地）'
+    : '就地模式 — 直接写入项目目录（点击开启隔离模式）'
+})
+function toggleIsolated() {
+  if (quickLocked.value) return
+  emit('set-isolated', !isolatedOn.value)
 }
 
 // ── 执行器选择(路由钮内, 靠右): 完整名称显示 + 清单选择; 绑定/克隆语义在宿主 ──
@@ -1805,6 +1821,16 @@ onUnmounted(() => {
         @click="toggleClarifyMode"
       >
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>
+      </button>
+      <!-- worktree 隔离挡位(cv-202): 就地(缺省, 置灰) / 隔离(显式开启, 高亮) -->
+      <button
+        class="btn btn-xs !px-1.5"
+        :class="isolatedOn ? 'btn-blue' : 'btn-ghost opacity-50 hover:opacity-100'"
+        :disabled="quickLocked"
+        :title="isolatedTitle"
+        @click="toggleIsolated"
+      >
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5" /><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5" /><path d="M21 3l-9 9" /></svg>
       </button>
       <!-- 语境摘要(仅转达语境): 选史 → 生成摘要 → 随转达下发执行器 -->
       <button

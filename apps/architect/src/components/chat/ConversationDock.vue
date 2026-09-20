@@ -392,9 +392,12 @@ async function maybeHintWeakModel() {
 const analysisMode = ref<'strict' | 'quick'>('strict')
 /** 需求澄清挡位(cv-190): auto | forced——随会话打开从真相源同步。 */
 const clarifyMode = ref<'auto' | 'forced'>('auto')
+/** worktree 隔离模式(cv-202): 缺省就地。 */
+const isolated = ref(false)
 watch(() => conv.activeId, () => {
   analysisMode.value = ((conv.activeMeta as any)?.analysisMode as 'strict' | 'quick') || 'strict'
   clarifyMode.value = ((conv.activeMeta as any)?.clarifyMode as 'auto' | 'forced') || 'auto'
+  isolated.value = !!(conv.activeMeta as any)?.isolated
 })
 async function onSetClarifyMode(mode: 'auto' | 'forced') {
   if (!conv.activeId) return
@@ -404,6 +407,16 @@ async function onSetClarifyMode(mode: 'auto' | 'forced') {
     if (r?.clarifyMode) clarifyMode.value = r.clarifyMode
     if (conv.activeMeta) (conv.activeMeta as any).clarifyMode = clarifyMode.value
   } catch { /* REST 失败保留本地值(下轮打开会话时从后端真相源校正) */ }
+}
+
+async function onSetIsolated(on: boolean) {
+  if (!conv.activeId) return
+  isolated.value = on
+  try {
+    const r = await apiPost<{ isolated?: boolean }>(`/sessions/${conv.activeId}/isolated`, { on })
+    if (typeof r?.isolated === 'boolean') isolated.value = r.isolated
+    if (conv.activeMeta) (conv.activeMeta as any).isolated = isolated.value
+  } catch { /* REST 失败保留本地值 */ }
 }
 
 async function onSetAnalysisMode(mode: 'strict' | 'quick') {
@@ -833,11 +846,13 @@ async function pollRunningState() {
         :executor-model="currentExecutorModel"
         :analysis-mode="analysisMode"
         :clarify-mode="clarifyMode"
+        :isolated="isolated"
         :has-session="!!conv.activeId"
         :conv-id="conv.activeId || undefined"
         :tasks="conv.tasks"
         @set-analysis-mode="onSetAnalysisMode"
         @set-clarify-mode="onSetClarifyMode"
+        @set-isolated="onSetIsolated"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
         @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
         @task-ignore="(id: string) => void conv.taskAction(id, 'ignore')"

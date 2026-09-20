@@ -787,6 +787,8 @@ def _project_migrations(db) -> None:
         ("analysis_mode", "TEXT DEFAULT 'strict'"),
         # cv-190: 需求澄清挡位 auto(有缺口才问) | forced(先澄清后落卡)
         ("clarify_mode", "TEXT DEFAULT 'auto'"),
+        # cv-202: worktree 隔离模式(0=就地缺省 | 1=显式要求隔离执行)
+        ("isolated", "INTEGER DEFAULT 0"),
     ])
     # v2 统一会话: 消息 agent 标注(''=architect 外循环; cline/opencode/codex=subagent)
     _add_cols(db, "arch_conversation_messages", [

@@ -591,6 +591,28 @@ class ImplementJob:
                 "addLines": 0, "delLines": 0}
 
 
+def _commit_progress_in_existing_worktree(root: str, branch: str) -> None:
+    """续跑让位(cv-177): 找到占用 branch 的旧 worktree → 提交其未提交进度 →
+    remove 让位。旧 worktree 的未提交改动是上次失败任务的全部进度, 丢了就白跑。"""
+    try:
+        out = _git(["worktree", "list", "--porcelain"], cwd=root, check=False)
+        cur = None
+        for ln in out.stdout.splitlines():
+            if ln.startswith("worktree "):
+                cur = ln[9:].strip()
+            elif ln.startswith("branch ") and ln[7:].strip() == f"refs/heads/{branch}":
+                if cur and os.path.isdir(cur):
+                    _git(["add", "-A"], cwd=cur, check=False)
+                    st = _git(["status", "--porcelain"], cwd=cur, check=False)
+                    if st.stdout.strip():
+                        _git(["commit", "-m", f"task(progress): {branch}",
+                              "--no-verify"], cwd=cur, check=False)
+                    _git(["worktree", "remove", "--force", cur], cwd=root,
+                         check=False)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 _JOBS: Dict[str, ImplementJob] = {}
 
 
@@ -645,11 +667,37 @@ def register(app: FastAPI) -> None:
         base = body.get("baseCommit") or "HEAD"
         branch = (body.get("branchName") or "").strip() or f"exec/{uuid.uuid4().hex[:8]}"
         job_id = f"impl-{uuid.uuid4().hex[:10]}"
-        # cv-201 裁决: **无条件就地**——作业直接在项目 root 执行, 与 git 状态
-        # 无关(git init 的空项目同样不能在隔离目录里配依赖; worktree 是改造
-        # 既有代码的隔离手段, 不是任务分类依据)。隔离诉求由边界互斥 +
-        # 用户显式 git 操作承担; branch/base 参数在就地模式下不生效。
+        # cv-201/cv-202 执行形态: **就地(in-place)为缺省**, worktree 仅在
+        # 用户显式要求(body.worktree=true)且仓库可建基点(存在提交)时启用——
+        # 隔离是用户/会话级开关, 不是按任务目标推断的分类。
+        # git init 无提交的空项目即使显式要求也回落就地(无法建基点, 且隔离
+        # 目录里配依赖毫无意义)。
+        want_worktree = bool(body.get("worktree", False))
+        _head = _git(["rev-parse", "--verify", "HEAD"], cwd=root, check=False)
         wt = root
+        resumed = False
+        worktree_notice = ""
+        if want_worktree and _head.returncode == 0:
+            wt = os.path.join(_wt_root_dir(), job_id)
+            try:
+                os.makedirs(os.path.dirname(wt), exist_ok=True)
+                branch = (body.get("branchName") or "").strip() or f"exec/{uuid.uuid4().hex[:8]}"
+                r = _git(["worktree", "add", "-b", branch, wt, "HEAD"],
+                         cwd=root, check=False)
+                if r.returncode != 0:
+                    # 分支已存在 → 续跑复用(cv-177): 旧 worktree 提交进度后让位
+                    _commit_progress_in_existing_worktree(root, branch)
+                    r2 = _git(["worktree", "add", wt, branch], cwd=root, check=False)
+                    if r2.returncode != 0:
+                        wt = root
+                        worktree_notice = "worktree 创建失败——已回落就地模式"
+                    else:
+                        resumed = True
+            except Exception as e:  # noqa: BLE001
+                wt = root
+                worktree_notice = f"worktree 创建异常({e})——已回落就地模式"
+        elif want_worktree:
+            worktree_notice = "仓库无提交/未初始化——worktree 不可用, 已回落就地模式"
         try:
             adapter = build_adapter(
                 str(body.get("executorType") or ""),
@@ -685,10 +733,13 @@ def register(app: FastAPI) -> None:
             base_commit = _git(["rev-parse", "HEAD"], wt, check=False).stdout.strip()
         except Exception:  # noqa: BLE001
             base_commit = ""
-        return {"ok": True, "jobId": job_id, "branch": "", "worktree": wt,
-                "workspace": "inplace",
-                "status": job.status, "workspaceFiles": written, "resumed": False,
-                "baseCommit": base_commit}
+        resp = {"ok": True, "jobId": job_id, "branch": branch, "worktree": wt,
+                "workspace": "worktree" if wt != root else "inplace",
+                "status": job.status, "workspaceFiles": written,
+                "resumed": resumed, "baseCommit": base_commit}
+        if worktree_notice:
+            resp["notice"] = worktree_notice
+        return resp
 
     @app.get("/api/implement/running")
     async def implement_running():

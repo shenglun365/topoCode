@@ -301,3 +301,45 @@ def test_inplace_always(client, tmp_path, monkeypatch):
     st = subprocess.run(["git", "status", "--porcelain"], cwd=root3,
                         capture_output=True, text=True).stdout
     assert "user_wip.txt" in st   # 用户的改动仍在工作区(未被 auto-commit 卷走)
+
+
+def test_worktree_explicit_optin(client, tmp_path, monkeypatch):
+    """cv-202: worktree 仅显式要求 + 仓库有提交时启用; 否则回落就地并带提示。"""
+    import subprocess
+
+    class _StartAdapter(_CapableAdapter):
+        async def start_session(self, job) -> None:
+            job.session_id = job.id
+            job.serve_url = "fake://"
+
+    monkeypatch.setattr(impl, "build_adapter", lambda *a, **k: _StartAdapter())
+    monkeypatch.setattr(impl, "_wt_root_dir", lambda: str(tmp_path / "wt-root"))
+
+    # ① git init 无提交 + 显式要求 → 回落就地 + notice(无法建基点)
+    empty = tmp_path / "empty-repo"
+    empty.mkdir()
+    subprocess.run(["git", "init"], cwd=empty, capture_output=True)
+    r = client.post("/api/implement", json={
+        "root": str(empty), "instruction": "配依赖", "autoStart": False,
+        "executorType": "fake-cline", "worktree": True}).json()
+    assert r["ok"] and r["workspace"] == "inplace" and "回落" in r.get("notice", ""), r
+
+    # ② 有提交仓库 + 显式要求 → worktree 隔离(wt≠root)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+    (repo / "a.txt").write_text("base")
+    subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@l",
+                    "commit", "-m", "init"], cwd=repo, capture_output=True)
+    r2 = client.post("/api/implement", json={
+        "root": str(repo), "instruction": "改造既有代码", "autoStart": False,
+        "executorType": "fake-cline", "worktree": True}).json()
+    assert r2["ok"] and r2["workspace"] == "worktree", r2
+    assert r2["worktree"] != str(repo)          # 隔离目录
+
+    # ③ 缺省(不传) → 就地
+    r3 = client.post("/api/implement", json={
+        "root": str(repo), "instruction": "就地任务", "autoStart": False,
+        "executorType": "fake-cline"}).json()
+    assert r3["ok"] and r3["workspace"] == "inplace"

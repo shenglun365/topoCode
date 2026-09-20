@@ -131,6 +131,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "workState": c.get("workState") or "architect",
             "analysisMode": c.get("analysisMode") or "strict",
             "clarifyMode": c.get("clarifyMode") or "auto",
+            "isolated": bool(c.get("isolated")),
             "reviewState": c.get("reviewState") or "read",
             "roles": _roles_of(c),
             "executorId": c.get("executorId") or "",
@@ -588,6 +589,21 @@ async def set_analysis_mode(conv_id: str, request: Request):
     store.ConversationsStore.update(conv_id, {"analysisMode": mode})
     return ok({"conversationId": conv_id, "analysisMode": mode,
                "summary": gear_note(mode)})
+
+
+@router.post("/sessions/{conv_id}/isolated")
+async def set_isolated(conv_id: str, request: Request):
+    """worktree 隔离模式(cv-202): on=显式要求隔离执行(任务在 worktree 分支
+    作业, 合并回主目录); off=就地(直接写入项目目录, 缺省)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    data = await request.json()
+    on = bool(data.get("on"))
+    store.ConversationsStore.update(conv_id, {"isolated": 1 if on else 0})
+    return ok({"conversationId": conv_id, "isolated": on,
+               "summary": "隔离模式已开启(任务在 worktree 分支作业, 合并后生效)"
+               if on else "就地模式(直接写入项目目录)"})
 
 
 @router.post("/sessions/{conv_id}/clarify-mode")

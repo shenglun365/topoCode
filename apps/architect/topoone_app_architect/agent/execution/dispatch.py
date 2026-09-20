@@ -401,6 +401,8 @@ def confirm_task(task_id: str) -> dict:
             payload["baseCommit"] = _cb
     except Exception:  # noqa: BLE001 — 基点解析失败回落 HEAD
         pass
+    # cv-202: worktree 隔离仅用户显式开启(会话隔离开关)时请求
+    payload["worktree"] = bool((conv or {}).get("isolated"))
 
     sr = _eb()._client().start_implement(payload, 20.0)
     if not sr.ok:
@@ -419,10 +421,13 @@ def confirm_task(task_id: str) -> dict:
         pass
     agent = task.get("executorType") or _etype
     pid = (conv or {}).get("projectId") or ""
-    _loc = (f"分支 `{branch}`" if (sr.workspace or "inplace") == "worktree"
+    _loc = (f"分支 `{branch}`(隔离 worktree)"
+            if (sr.workspace or "inplace") == "worktree"
             else "就地模式(直接写入项目目录)")
+    _note = str((sr.raw or {}).get("notice") or "")
     _eb()._append(conv_id, "user",
-            f"🚀 **{task['title']}** 启动（`{sr.job_id}` · {_loc}）",
+            f"🚀 **{task['title']}** 启动（`{sr.job_id}` · {_loc}）"
+            + (f"\n> ⚠️ {_note}" if _note else ""),
             msg_meta={"kind": "task_start", "taskId": task_id}, project_id=pid)
     _eb()._start_task_pump(conv_id, task_id, sr.job_id, rid, agent)
     t = store.TasksStore.get(task_id) or {}
