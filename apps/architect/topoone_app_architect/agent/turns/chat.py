@@ -17,6 +17,12 @@ from .base import (_MAX_TOOL_ROUNDS, _MIN_CHAT_MAX_TOKENS, _STREAM_IDLE_TIMEOUT_
 logger = logging.getLogger(__name__)
 
 
+def _propose_dup_text() -> str:
+    """cv-174: 同回合重复提案回执(三处工具执行分支共用)。"""
+    return ("重复的 req.propose 已忽略——本回合已创建规约(以首个为准)；"
+            "如需修改请用 req.amend")
+
+
 # ── LLM chunk 实时转发过滤器 ─────────────────────────────────────────────
 # 旧实现整轮缓冲 round_text、结束后才 24 字符假流式重发——LLM 生成期间(可长达
 # 数十秒)前端零反馈，用户感知为「处理完成后还要等很久才有消息」。
@@ -238,6 +244,14 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             await io.ensure_chat_start()
             results: List[Dict[str, str]] = []
             for c in sres["calls"]:
+                # cv-174 守卫(structured 轮同样适用——受限生成通道弱模型连发提案
+                # 曾一回合落 4 张重复需求卡, cv-185 实证)
+                if c.get("tool") == "req.propose" and "req.propose" in tools_used:
+                    results.append({"name": "req.propose",
+                                    "text": _propose_dup_text()})
+                    continue
+                if c.get("tool"):
+                    tools_used.add(c.get("tool"))   # cv-174 守卫依赖(回写与流式分支同规)
                 tr = await _run_tool_with_progress(
                     io.send, "", c.get("tool", ""), c.get("arguments", {}),
                     root, project, model_id=eff_model)
@@ -315,6 +329,10 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 for c in calls:
                     name = c.get("tool", "")
                     args = c.get("arguments", {})
+                    if name == "req.propose" and "req.propose" in tools_used:
+                        # cv-174 守卫(满轮收尾分支同样适用)
+                        results.append({"name": name, "text": _propose_dup_text()})
+                        continue
                     tr = await _run_tool_with_progress(
                         io.send, rid, name, args, root, project, model_id=eff_model)
                     results.append(tr)
@@ -336,8 +354,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 args = c.get("arguments", {})
                 if name == "req.propose" and "req.propose" in tools_used:
                     # cv-174: 同回合重复提案 → 不再落库, 防止一回合多个需求
-                    results.append({"name": name,
-                                    "text": "重复的 req.propose 已忽略——本回合已创建规约(以首个为准)；如需修改请用 req.amend"})
+                    results.append({"name": name, "text": _propose_dup_text()})
                     continue
                 if name:
                     tools_used.add(name)

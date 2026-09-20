@@ -794,6 +794,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
     """
     work = list(msgs or [])
     last_err = ""
+    _proposed: set = set()   # cv-174: 本循环已落库的提案(去重守卫)
 
     def _err(msg: str) -> None:
         nonlocal last_err
@@ -848,6 +849,13 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                                     "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
                                             "请改用允许的工具，或直接基于已有信息作答。"})
                     continue
+                if name == "req.propose" and "req.propose" in _proposed:
+                    # cv-174(同步降级路径同样适用): 同回合重复提案不落库
+                    results.append({"name": name,
+                                    "text": "重复的 req.propose 已忽略——本次循环已创建规约(以首个为准)；如需修改请用 req.amend"})
+                    continue
+                if name == "req.propose":
+                    _proposed.add(name)
                 result = execute_tool_with_repair(name, args, root, project,
                                                 model_id=model_id or "")
                 results.append({"name": name, "text": tool_result_text(name, result)})
