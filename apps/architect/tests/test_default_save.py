@@ -173,3 +173,31 @@ def test_requirement_ignore_rest(arch_env):
     assert r2.get("code") == 0
     msgs = store.ConversationsStore.messages(conv["id"])
     assert any("需求已忽略" in (m.get("content") or "") for m in msgs)
+
+
+def test_run_button_auto_starts(arch_env, tmp_path, monkeypatch):
+    """cv-200: 按钮「运行」= 建卡即启动(auto_start)——不再要求二次点开始。"""
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    root = tmp_path / "p"; root.mkdir()
+    conv = _mk_conv(projectId="proj-as", meta={"root": str(root)})
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-as"))
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_start_task_pump", lambda *a, **k: None)
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "j-as", "branch": "task/as",
+                    "worktree": str(tmp_path / "wt"), "sessionId": "s",
+                    "baseCommit": "sha-as"}
+        return {"ok": True}
+
+    monkeypatch.setattr(eb, "_runner", _fake_runner)
+    _mk_req(conv["id"])   # 绑定需求(ready)——按钮路径的前提
+    conv = store.ConversationsStore.get(conv["id"])   # 重取: _mk_req 回写 reqId
+    from topoone_app_architect.agent.perception import commands as cmds
+    r = cmds.run_execute(conv, skip_plan=True, auto_start=True)
+    assert r.get("ok") and r["task"]["status"] == "running", r
+    # 完结态/忽略态不会被误启动语义破坏: confirm 幂等由 dispatch 门禁保证

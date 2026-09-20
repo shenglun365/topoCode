@@ -152,7 +152,8 @@ def run_extract_req(conv: Dict[str, Any], on_phase=None) -> Dict[str, Any]:
 
 
 def run_execute(conv: Dict[str, Any], executor_id: str = "",
-                skip_plan: bool = False, on_phase=None) -> Dict[str, Any]:
+                skip_plan: bool = False, on_phase=None,
+                auto_start: bool = False) -> Dict[str, Any]:
     """直通 /执行：绑定 ready 规约 → 服务端建任务卡(待用户卡片确认)。
 
     executor_id(@cline 前缀)显式指定执行器——查注册表, 查不到显式失败不降级。"""
@@ -211,6 +212,17 @@ def run_execute(conv: Dict[str, Any], executor_id: str = "",
     if not task.get("id"):
         # 无可用执行器等建卡失败: 原文显式返回(不降级不吞错)
         return {"ok": False, "receipt": str(task.get("error") or "建卡失败")}
+    # cv-200: 按钮路径(auto_start)建卡即启动——「运行」语义 = 直接开跑,
+    # 不再要求二次点「开始执行」; 失败时任务停在建卡态, 错误如实透出。
+    if auto_start:
+        if on_phase:
+            on_phase("start")
+        c = exec_bridge.confirm_task(task["id"])
+        if not c.get("ok"):
+            return {"ok": False,
+                    "receipt": str(c.get("error") or "任务启动失败"),
+                    "task": task}
+        task["status"] = "running"
     return {"ok": True, "task": task}
 
 

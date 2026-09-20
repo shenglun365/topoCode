@@ -87,7 +87,8 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
     def _on_phase(phase: str) -> None:
         _labels = {"plan": "正在生成任务计划（拆步编排，最长可达数分钟）…",
                    "extract": "正在从对话历史提取需求…",
-                   "card": "正在创建任务卡…"}
+                   "card": "正在创建任务卡…",
+                   "start": "正在启动任务（worktree/执行器拉起）…"}
         try:
             asyncio.run_coroutine_threadsafe(
                 send({"type": "status", "phase": f"cmd_{phase}",
@@ -104,16 +105,22 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
         else:
             content = res.get("receipt") or "需求卡已提取。"
     elif cmd == "执行":
+        # cv-200: 按钮合成路径建卡即启动(「运行」=直接开跑)
         res = _cmds.run_execute(conv, executor_id=executor,
-                                skip_plan=skip_plan, on_phase=_on_phase)
+                                skip_plan=skip_plan, on_phase=_on_phase,
+                                auto_start=skip_plan)
         logger.info("[direct-cmd] 执行 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or '建卡失败'}"
         else:
             t = res.get("task") or {}
             etag = f"（执行器 `{t.get('executorType')}`{('·' + executor) if executor else ''}）"
-            content = (f"📋 已从规约创建任务卡：**{t.get('title')}**{etag}（待确认）——"
-                       "在卡片上确认后 coding subagent 开始执行。")
+            if (t.get("status") or "") == "running":
+                content = (f"🚀 任务已启动：**{t.get('title')}**{etag}——"
+                           "进展与提问会进入本会话, 直接回复即可转达。")
+            else:
+                content = (f"📋 已从规约创建任务卡：**{t.get('title')}**{etag}（待确认）——"
+                           "在卡片上确认后 coding subagent 开始执行。")
             # 任务卡本体已由 propose_task 落流(带确认按钮); 此处仅回执指针(不落库)
             msg_id = store.next_id("m")
             await send({"type": "chat_start", "conversationId": conv_id,
