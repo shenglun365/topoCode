@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from . import store
 
+from ..agent.cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
 logger = logging.getLogger(__name__)
 
 from ..agent.planning.req_spec import (  # noqa: F401,E402
@@ -940,7 +941,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
             if results:
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 work.append({"role": "assistant", "content": "(已调用工具)"})
-                work.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+                work.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
             continue
         res = llm_sync(work, mode=mode, output_schema=output_schema,
                        max_tokens=max_tokens, model_id=model_id, on_error=_err)
@@ -971,7 +972,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
             return {"content": strip_tool_blocks(content), "output": None}
         tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
         work.append({"role": "assistant", "content": strip_tool_blocks(content) or "(调用知识库检索)"})
-        work.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+        work.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
     return {"content": "", "output": None, "error": last_err or "工具调用轮次耗尽"}
 
 

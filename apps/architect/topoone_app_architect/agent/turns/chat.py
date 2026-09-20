@@ -14,6 +14,7 @@ from typing import Awaitable, Callable, Dict, List, Optional
 from .base import (_MAX_TOOL_ROUNDS, _MIN_CHAT_MAX_TOKENS, _STREAM_IDLE_TIMEOUT_S,
                    _TURN_BUDGET_S, SendFn, _TurnIO)
 
+from ..cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
 logger = logging.getLogger(__name__)
 
 
@@ -261,7 +262,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             if results:
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": "(已调用工具)"})
-                msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+                msgs.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
             continue
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
@@ -341,7 +342,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 if results:
                     tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                     msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
-                    msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+                    msgs.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
                 loop_fell_back = True
                 if io.budget_left() > 0:
                     await io.ensure_chat_start()
@@ -368,7 +369,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             if results:
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
-                msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+                msgs.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
             # 工具结果回喂后的再生成无任何信号会让前端进度条「卡死」观感——显式报相
             await io.send_ev({"type": "status", "phase": "llm_round",
                                        "round": tool_round + 1})
