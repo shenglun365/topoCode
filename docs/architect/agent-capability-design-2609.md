@@ -394,3 +394,26 @@ cv-181 弱模型占位文本不真调, 实证不可纯 NL 化)。
 **验收门**: 降级项目 `chat_system_prompt(skill_scenarios=["extract"])` 断言
 不含「知识库/kb./KB」任意字样(test_kb_autoclose); 等价性/MCP 渲染测试改在
 非降级口径运行(意图隔离)。
+
+### 14.7 需求澄清挡位引擎(2026-09-20, cv-190)
+
+**裁决**: 澄清 = 会话输入框**挡位按钮**(工具栏, 快捷挡旁), 两模式:
+- **auto(自动, 缺省)**: 确定性缺口矩阵(五要素: 目标正文/方案要点/允许范围/
+  需求目标清单/验收标准)非空 → 集中一次提问补齐; 需求卡未建时不干预(模型路由判断);
+- **forced(强制)**: 每需求回合**先澄清后落卡**——命中策略库用切合目标的标准化
+  问题集(每问带推断默认值, 禁开放式泛问); **未命中策略库 → 模型自由提问**
+  (五要素框架兜底, 不强行套库)。
+- **明确指令免澄清**(任意挡): 「修改为/改成/删除/新增 X」正则判定
+  (`is_explicit_instruction`, 例「按钮UI 修改为 xxx」)。
+
+**实现**(全确定性, 零新增 LLM 依赖): `agent/requirements/clarify.py` 单源
+(策略库 7 目标×4 问 / `match_strategy` 关键词评分 / `gap_matrix` 快照判空 /
+`clarify_directive` 指令生成); 接线 `turns/context._chat_context`(gate.question
+匹配, conv.clarifyMode 挡位); 会话列 `clarify_mode`(DEFAULT auto) +
+REST `POST /sessions/{id}/clarify-mode`; 前端 AnalysisChat 工具栏对话气泡
+按钮(dock analysisMode 同款接线)。
+
+**精度边界**: auto 挡需求卡未建时的模糊检测仍靠模型路由(无快照可测)——
+强制挡即为此互补; 最坏退化为提示词指令略偏, 无硬行为事故。
+**收敛语义**: forced 需求已建后退化为缺口驱动(与 auto 同判据, 防止
+"先澄清"指令对答复回合无限重放——答复→amend 回填→缺口缩→不再问)。

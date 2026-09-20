@@ -45,6 +45,8 @@ const props = defineProps<{
   executorModel?: string
   /** v2 分析挡位(strict/quick): 快捷挡直切钮展示并可切换(上抛宿主 → REST 即时生效)。 */
   analysisMode?: 'strict' | 'quick'
+  /** 需求澄清挡位(cv-190): auto(自动, 缺口驱动) | forced(强制, 先澄清后落卡)。 */
+  clarifyMode?: 'auto' | 'forced'
   /** 会话是否已存在: false=空白对话(记录未创建)——挡位是会话级字段无处可写, 直切钮禁用+提示。 */
   hasSession?: boolean
   /** 会话 id(语境摘要 REST 用); 空=无会话。 */
@@ -60,6 +62,7 @@ const emit = defineEmits<{
   send: [p: { text: string; attachTo?: string; agent?: string; digest?: string }]
   /** 分析挡位切换(strict/quick) → 宿主上抛 REST。 */
   'set-analysis-mode': [mode: 'strict' | 'quick']
+  'set-clarify-mode': [mode: 'auto' | 'forced']
   /** 工具栏执行器选择: 上抛宿主执行绑定(未绑=bind; 已绑切换=克隆新会话)。 */
   'bind-executor': [executorId: string]
   'task-confirm': [taskId: string]
@@ -310,6 +313,19 @@ const quickTitle = computed(() => {
 function toggleQuickMode() {
   if (quickLocked.value) return
   emit('set-analysis-mode', quickOn.value ? 'strict' : 'quick')
+}
+
+/** 需求澄清挡位(cv-190): 自动=规约有缺口才集中提问 / 强制=先澄清后落卡(明确指令自动跳过)。 */
+const clarifyForced = computed(() => (props.clarifyMode || 'auto') === 'forced')
+const clarifyTitle = computed(() => {
+  if (quickLocked.value) return '澄清挡位需在已有会话中切换 — 发送首条消息创建会话后可用'
+  return clarifyForced.value
+    ? '强制澄清 — 每个需求回合先集中提问补齐要素再落卡（明确指令自动跳过；点击切回自动）'
+    : '自动澄清 — 规约有要素缺口时才集中提问（点击切为强制澄清）'
+})
+function toggleClarifyMode() {
+  if (quickLocked.value) return
+  emit('set-clarify-mode', clarifyForced.value ? 'auto' : 'forced')
 }
 
 // ── 执行器选择(路由钮内, 靠右): 完整名称显示 + 清单选择; 绑定/克隆语义在宿主 ──
@@ -1777,6 +1793,16 @@ onUnmounted(() => {
         @click="toggleQuickMode"
       >
         <BoltIcon class="w-3.5 h-3.5" />
+      </button>
+      <!-- 需求澄清挡位(cv-190): 自动(缺口驱动, 置灰) / 强制(先问后落卡, 高亮) -->
+      <button
+        class="btn btn-xs !px-1.5"
+        :class="clarifyForced ? 'btn-teal' : 'btn-ghost opacity-50 hover:opacity-100'"
+        :disabled="quickLocked"
+        :title="clarifyTitle"
+        @click="toggleClarifyMode"
+      >
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>
       </button>
       <!-- 语境摘要(仅转达语境): 选史 → 生成摘要 → 随转达下发执行器 -->
       <button

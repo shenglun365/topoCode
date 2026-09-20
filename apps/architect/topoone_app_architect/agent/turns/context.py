@@ -119,6 +119,22 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     _hint = element_hint_text(_gear)
     if _hint:
         msgs.insert(1, {"role": "system", "content": _hint})
+    # cv-190 需求澄清挡位: auto(缺口驱动) | forced(先澄清后落卡); 明确指令免澄清。
+    # 规约快照(已绑定需求)供缺口矩阵; 判定失败静默(不阻塞主链)。
+    try:
+        _cm = str((conv or {}).get("clarifyMode") or "auto").strip()
+        _question = str(gate.get("question") or "")
+        _snap = {}
+        _rid = str((conv or {}).get("reqId") or "")
+        if _rid:
+            _active = _store_mod.RequirementsStore.spec_active(_rid) or {}
+            _snap = _active.get("snapshot") or {}
+        from ..requirements.clarify import clarify_directive as _cd_fn
+        _cd = _cd_fn(_cm, _question, _snap)
+        if _cd:
+            msgs.insert(1, {"role": "system", "content": _cd})
+    except Exception:  # noqa: BLE001
+        pass
     return eff_model, msgs, _gear
 
 

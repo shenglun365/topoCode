@@ -782,6 +782,8 @@ def _project_migrations(db) -> None:
         ("roles", "TEXT"),
         ("work_state", "TEXT DEFAULT 'architect'"),
         ("analysis_mode", "TEXT DEFAULT 'strict'"),
+        # cv-190: 需求澄清挡位 auto(有缺口才问) | forced(先澄清后落卡)
+        ("clarify_mode", "TEXT DEFAULT 'auto'"),
     ])
     # v2 统一会话: 消息 agent 标注(''=architect 外循环; cline/opencode/codex=subagent)
     _add_cols(db, "arch_conversation_messages", [

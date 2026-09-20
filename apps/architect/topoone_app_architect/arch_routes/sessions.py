@@ -130,6 +130,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "status": c.get("status") or "active",
             "workState": c.get("workState") or "architect",
             "analysisMode": c.get("analysisMode") or "strict",
+            "clarifyMode": c.get("clarifyMode") or "auto",
             "reviewState": c.get("reviewState") or "read",
             "roles": _roles_of(c),
             "executorId": c.get("executorId") or "",
@@ -587,6 +588,22 @@ async def set_analysis_mode(conv_id: str, request: Request):
     store.ConversationsStore.update(conv_id, {"analysisMode": mode})
     return ok({"conversationId": conv_id, "analysisMode": mode,
                "summary": gear_note(mode)})
+
+
+@router.post("/sessions/{conv_id}/clarify-mode")
+async def set_clarify_mode(conv_id: str, request: Request):
+    """需求澄清挡位: auto(自动, 缺口驱动) | forced(强制, 先澄清后落卡)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    data = await request.json()
+    mode = str(data.get("mode") or "").strip()
+    if mode not in ("auto", "forced"):
+        return err(400, "mode 须为 auto/forced")
+    store.ConversationsStore.update(conv_id, {"clarifyMode": mode})
+    label = ("自动(规约有缺口才集中提问)" if mode == "auto"
+             else "强制(每需求回合先澄清后落卡; 明确指令自动跳过)")
+    return ok({"conversationId": conv_id, "clarifyMode": mode, "summary": label})
 
 
 @router.post("/sessions/{conv_id}/msg-digest")

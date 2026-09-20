@@ -389,9 +389,22 @@ async function maybeHintWeakModel() {
 
 /** 分析挡位(会话级 strict/quick): 本地镜像(即时反馈) + 切换会话时从 activeMeta 同步; 变更上抛 REST 即时生效。 */
 const analysisMode = ref<'strict' | 'quick'>('strict')
+/** 需求澄清挡位(cv-190): auto | forced——随会话打开从真相源同步。 */
+const clarifyMode = ref<'auto' | 'forced'>('auto')
 watch(() => conv.activeId, () => {
   analysisMode.value = ((conv.activeMeta as any)?.analysisMode as 'strict' | 'quick') || 'strict'
+  clarifyMode.value = ((conv.activeMeta as any)?.clarifyMode as 'auto' | 'forced') || 'auto'
 })
+async function onSetClarifyMode(mode: 'auto' | 'forced') {
+  if (!conv.activeId) return
+  clarifyMode.value = mode // 本地即时反馈(不等 REST)
+  try {
+    const r = await apiPost<{ clarifyMode?: 'auto' | 'forced' }>(`/sessions/${conv.activeId}/clarify-mode`, { mode })
+    if (r?.clarifyMode) clarifyMode.value = r.clarifyMode
+    if (conv.activeMeta) (conv.activeMeta as any).clarifyMode = clarifyMode.value
+  } catch { /* REST 失败保留本地值(下轮打开会话时从后端真相源校正) */ }
+}
+
 async function onSetAnalysisMode(mode: 'strict' | 'quick') {
   if (!conv.activeId) return
   analysisMode.value = mode // 本地即时反馈(不等 REST)
@@ -818,10 +831,12 @@ async function pollRunningState() {
         :executors="executorList"
         :executor-model="currentExecutorModel"
         :analysis-mode="analysisMode"
+        :clarify-mode="clarifyMode"
         :has-session="!!conv.activeId"
         :conv-id="conv.activeId || undefined"
         :tasks="conv.tasks"
         @set-analysis-mode="onSetAnalysisMode"
+        @set-clarify-mode="onSetClarifyMode"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
         @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
         @task-ignore="(id: string) => void conv.taskAction(id, 'ignore')"
