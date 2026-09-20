@@ -120,9 +120,15 @@ export const useConversationStore = defineStore('archConversation', () => {
   /** coding subagent 任务清单(arch_tasks, 倒序; SSE task 事件/操作后刷新)。 */
   const tasks = ref<any[]>([])
 
+  // cv-189: 存量历史里的纯占位气泡("(已调用工具)"等, 弱模型模仿产物)不展示;
+  // 新落库的紧凑工具回执(meta.kind=tool_round)保留
+  const _TOOL_PLACEHOLDER_RE = /^[（(]\s*(?:已调用工具|调用知识库检索|调用工具|工具已调用)\s*[)）][。.!！]?\s*$/
+
   function _mapTurns(messages: { id?: string; role: 'user' | 'assistant'; content: string; meta?: any; agent?: string }[] | undefined) {
     return (messages ?? [])
       .filter((m) => m.content?.trim())
+      .filter((m) => !(m.role === 'assistant' && _TOOL_PLACEHOLDER_RE.test(m.content.trim())
+        && (m.meta as any)?.kind !== 'tool_round'))
       .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: m.meta, agent: (m as any).agent || '' }))
       .filter((m, i, all) => !(i > 0 && m.role === 'assistant' && all[i - 1].role === 'assistant' && all[i - 1].content === m.content && (all[i - 1].agent || '') === (m.agent || '')))
   }

@@ -111,3 +111,14 @@ def test_run_arch_tool_blocks_mcp_call_when_degraded(arch_env):
     r = req_agent.run_arch_tool("mcp.call", {"tool": "x", "params": {}},
                                 root=None, project=None)
     assert "未关联知识库" in str(r.get("error")), r
+
+
+def test_placeholder_only_turn_not_landed_as_noise():
+    """cv-189: 弱模型把占位符当正文输出——折叠正则命中各类占位变体;
+    常规正文不受影响。"""
+    from topoone_app_architect.agent.turns.chat import _PLACEHOLDER_ONLY_RE as R
+    for s in ("(已调用工具)", "（已调用工具）。", "(调用知识库检索)",
+              "(已调用工具)!", " (已调用工具) "):
+        assert R.match(s.strip()), s
+    for ok in ("(已调用工具) 结果如下", "确认执行", "🔧 已调用工具: project.ctx", ""):
+        assert not (ok.strip() and R.match(ok.strip())), ok

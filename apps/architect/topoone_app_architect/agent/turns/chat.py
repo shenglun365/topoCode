@@ -18,6 +18,12 @@ from ..cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
 logger = logging.getLogger(__name__)
 
 
+# 弱模型模仿上下文占位符把"(已调用工具)"当正文输出(cv-189 实证)——
+# 纯占位正文不进历史: 有工具轨迹落紧凑回执, 无轨迹跳过。
+_PLACEHOLDER_ONLY_RE = _re.compile(
+    r"^[（(]\s*(?:已调用工具|调用知识库检索|调用工具|工具已调用)\s*[)）][。.!！]?\s*$")
+
+
 def _propose_dup_text() -> str:
     """cv-174: 同回合重复提案回执(三处工具执行分支共用)。"""
     return ("重复的 req.propose 已忽略——本回合已创建规约(以首个为准)；"
@@ -155,10 +161,18 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
         io, conv_id, msgs, root, project, eff_model, model_id, conv,
         tools_used, tool_errors, final_content, request_id)
 
+    tool_round_meta = None
+    if final_content and _PLACEHOLDER_ONLY_RE.match(final_content.strip()):
+        # cv-189: 占位正文折叠——有工具轨迹落紧凑回执(调用清单可追溯), 无则跳过
+        final_content = ("🔧 已调用工具: " + "、".join(sorted(tools_used))
+                         if tools_used else "")
+        tool_round_meta = {"kind": "tool_round", "tools": sorted(tools_used)}
     if final_content:
         assistant_msg_id = store.next_id("m")
         msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
                    "role": "assistant", "time": _ts(), "content": final_content}
+        if tool_round_meta:
+            msg_row["meta"] = tool_round_meta
         store.ConversationsStore.append_message(msg_row)
         try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
