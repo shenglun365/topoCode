@@ -33,10 +33,6 @@ const props = defineProps<{
   diagramSkill?: boolean
   /** 归档只读: 禁用输入与发送(读取/复制/提炼仍可用)。 */
   readOnly?: boolean
-  /** 期望固化(🧾)：开启后 agent 把可验证期望固化为契约条目草稿。 */
-  contractSkill?: boolean
-  /** 是否显示 🧾 开关(仅需求方案对话显示；资产管理/工作台不显示)。 */
-  showContractSkill?: boolean
   /** running 归属(S2): {role:'coding', executorId, status} 有活跃作业时非空。 */
   jobState?: { role: string; executorId?: string; status?: string; progress?: { toolCount?: number; msgCount?: number; at?: number } } | null
   /** 已绑定执行器 id(S2/S3): 空=未绑定——Coding 切换钮首击触发分配(bind-coding)。 */
@@ -81,7 +77,6 @@ const emit = defineEmits<{
   'feed-turn': [p: { index: number; id?: string; summarize?: boolean }]
   'refresh-asset': [assetId: string]
   'toggle-diagram-skill': [enabled: boolean]
-  'toggle-contract-skill': [enabled: boolean]
   'contract-confirm': [id: string]
   'contract-delete': [id: string]
   'contract-edit-save': [id: string, patch: Record<string, unknown>]
@@ -483,7 +478,6 @@ const LOCAL_CMD_LIST = [
   { name: '摘要', desc: '生成会话标题与摘要' },
   { name: '提炼', desc: '提炼会话为数据资产' },
   { name: '归档', desc: '结束会话(有可提炼内容时提示)' },
-  { name: '引导', desc: '显示会话使用引导(本地提示)' },
   { name: '选摘', desc: '选取历史生成摘要转达执行器' },
 ]
 const cmdMenuOpen = ref(false)
@@ -1821,24 +1815,6 @@ onUnmounted(() => {
         <SparklesIcon class="w-3.5 h-3.5" />
       </button>
       <slot name="toolbar-extra" />
-      <button
-        v-if="props.showContractSkill"
-        class="btn btn-xs !px-1.5"
-        :class="props.contractSkill ? 'btn-green' : 'btn-ghost'"
-        :disabled="busy"
-        :title="t('requirement.chat.contractSkillHint')"
-        @click="emit('toggle-contract-skill', !props.contractSkill)"
-      >
-        <svg
-          class="w-3.5 h-3.5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        ><path d="M9 12h6" /><path d="M9 16h6" /><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-      </button>
       <!-- v2 语境路由(发起者感知自动变 + 菜单单次翻转): 靠右加宽, 同钮显示当前执行器完整名称 -->
       <div class="relative shrink-0 ml-auto">
         <button

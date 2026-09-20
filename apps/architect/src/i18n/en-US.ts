@@ -630,8 +630,6 @@ export default {
       deleteTurnOk: 'Delete',
       diagramSkill: 'Diagram Assist',
       diagramSkillHint: 'Agent generates diagrams via IR to avoid syntax errors from small models',
-      contractSkill: 'Solidify Expectations',
-      contractSkillHint: 'When on, the agent solidifies verifiable expectations into contract item drafts',
       contractStatus: {
         draft: 'Pending',
         confirmed: 'Confirmed',

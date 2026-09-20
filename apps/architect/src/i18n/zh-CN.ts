@@ -656,8 +656,6 @@ export default {
       deleteTurnOk: '删除',
       diagramSkill: '绘图增强',
       diagramSkillHint: '开启后 agent 用 IR 生成语法正确的图(避免小模型绘图出错)',
-      contractSkill: '期望固化',
-      contractSkillHint: '开启后 agent 把可验证期望固化为契约条目草稿',
       contractStatus: {
         draft: '待确认',
         confirmed: '已确认',

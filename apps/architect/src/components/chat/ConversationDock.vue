@@ -229,7 +229,6 @@ function onLocalCmd(name: string) {
   if (name === '摘要') { void summarizeTitle() }
   else if (name === '提炼') { void mineActive() }
   else if (name === '归档') { void archiveActive() }
-  else if (name === '引导') { showGuide() }
 }
 function onConversationRemoved(e: Event) {
   const id = (e as CustomEvent).detail as string
