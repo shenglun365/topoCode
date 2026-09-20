@@ -33,7 +33,9 @@ def stop(conv_id: str, reason: str = "") -> str:
     if not jobs:
         return "当前会话没有运行中的作业。"
     for j in jobs:
-        _eb()._client().finish(str(j["jobId"]), keep_worktree=True, timeout=30.0)
+        from ..governance.timeouts import get as _timeout_of
+        _eb()._client().finish(str(j["jobId"]), keep_worktree=True,
+                               timeout=_timeout_of("runner_finish"))
         _eb()._job_upsert(conv_id, {"jobId": j["jobId"], "status": "stopped",
                               "endedAt": _eb()._ts()})
     _eb()._aggregate_work_state(conv_id)
@@ -480,6 +482,7 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
     (role=user, meta.kind=task_input_echo)——「发出→落地」可对账; 投喂等
     已自带落流的调用方传 echo=False 防双写。
     """
+    from ..governance.timeouts import get as _timeout_of
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") not in (ST.TASK_WAITING_INPUT, "running"):
         if task and (task.get("status") or "") == ST.TASK_SAVED:
@@ -523,7 +526,7 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
     # runner 侧不支持的执行器自动回退排队
     steer = (task.get("status") or "") == "running"
     res = _eb()._client().input(str(task.get("runnerJobId") or ""), stripped[:12000],
-                          steer=steer, timeout=15.0)
+                          steer=steer, timeout=_timeout_of("runner_steer"))
     if res.ok:
         if (task.get("status") or "") == ST.TASK_WAITING_INPUT:
             store.TasksStore.update(task_id, {"status": "running"})
@@ -587,7 +590,9 @@ def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
         t = store.TasksStore.get(task_id) or {}
         _publish_task(task["conversationId"], t)
         return {"ok": True, "task": t}
-    _eb()._client().finish(str(task.get("runnerJobId") or ""), keep_worktree=True, timeout=30.0)
+    from ..governance.timeouts import get as _timeout_of
+    _eb()._client().finish(str(task.get("runnerJobId") or ""), keep_worktree=True,
+                           timeout=_timeout_of("runner_finish"))
     store.TasksStore.finish(task_id, "cancelled", reason or "用户停止")
     for fut in (_eb()._TASK_PUMPS.pop(task["conversationId"], None) or {}).values():
         fut.cancel()

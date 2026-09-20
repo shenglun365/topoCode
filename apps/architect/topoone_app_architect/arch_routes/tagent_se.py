@@ -30,7 +30,8 @@ from topocode_agent.profiles.architect_se import ArchitectSEAgent
 logger = logging.getLogger(__name__)
 
 # llm 调用超时（秒）——与 req_agent._LLM_CALL_TIMEOUT 同量级
-_LLM_TIMEOUT = 180.0
+from ..agent.governance.timeouts import get as _timeout_of
+_LLM_TIMEOUT = _timeout_of("se_llm")
 
 # tAgent TextFallback 工具调用标记正则为 `(\w+)`，不含点号；architect 领域工具
 # 惯用点号命名（kb.asset.search）→ 注册进 SE 大脑时净化为下划线安全名，

@@ -79,7 +79,7 @@ def run_confirm(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
     return {"ok": True, "task": res.get("task") or {}}
 
 
-def run_extract_req(conv: Dict[str, Any]) -> Dict[str, Any]:
+def run_extract_req(conv: Dict[str, Any], on_phase=None) -> Dict[str, Any]:
     """直通 /提取需求：从对话历史 LLM 结构化提取需求 → 确定性落库(需求卡 ready)。
 
     系统未自动识别需求类型时的用户主动通道; 已绑定需求 → 走 amend 更新(新 ver)。"""
@@ -151,7 +151,8 @@ def run_extract_req(conv: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "receipt": f"需求卡 {rid} 已提取(ready)，可 `/执行`。"}
 
 
-def run_execute(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
+def run_execute(conv: Dict[str, Any], executor_id: str = "",
+                skip_plan: bool = False, on_phase=None) -> Dict[str, Any]:
     """直通 /执行：绑定 ready 规约 → 服务端建任务卡(待用户卡片确认)。
 
     executor_id(@cline 前缀)显式指定执行器——查注册表, 查不到显式失败不降级。"""
@@ -184,15 +185,24 @@ def run_execute(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
     instruction = _instruction_from_snapshot(snap)
     if not instruction.strip():
         return {"ok": False, "receipt": "规约内容为空，无法建卡。请 `/调整` 完善后重试。"}
-    # 任务计划(环节十四): T2+ 挡位生成/续发有序计划; None = 单卡路径
-    from ..planning.task_plan import maybe_plan_and_propose
-    plan_res = maybe_plan_and_propose(
-        conv, req_id,
-        "\n".join(str(x) for x in (title, snap.get("desc"),
-                                   snap.get("designMd")) if x),
-        title, instruction, executor_hint=hint)
-    if plan_res is not None:
-        return plan_res
+    # 任务计划(环节十四): T2+ 挡位生成/续发有序计划; None = 单卡路径。
+    # cv-199: 拆步是 LLM 长调用(LLM_SYNC_TIMEOUT 上限 300s)——按钮合成路径
+    # (skip_plan)直接单卡; 带相位回调供直通链状态透出。
+    if skip_plan:
+        pass
+    else:
+        if on_phase:
+            on_phase("plan")
+        from ..planning.task_plan import maybe_plan_and_propose
+        plan_res = maybe_plan_and_propose(
+            conv, req_id,
+            "\n".join(str(x) for x in (title, snap.get("desc"),
+                                       snap.get("designMd")) if x),
+            title, instruction, executor_hint=hint)
+        if plan_res is not None:
+            return plan_res
+    if on_phase:
+        on_phase("card")
     # P0 审计修复(A1): 直通单卡路径豁免图门禁——本路径无 LLM 在环,
     # "回炉 nudge architect"无从发生; 图门禁仅适用于 chat task.propose 路径
     # (architect LLM 可收到拒绝错误并补图重发)。

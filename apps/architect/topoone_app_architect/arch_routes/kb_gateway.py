@@ -31,10 +31,13 @@ class KbError(Exception):
 
 
 class KbGateway:
-    def __init__(self, base_url: str = None, mcp_url: str = None, timeout: float = 10.0):
+    def __init__(self, base_url: str = None, mcp_url: str = None,
+                 timeout: float = None):
+        from ..agent.governance.timeouts import get as _timeout_of
         self.base_url = (base_url or os.environ.get("KB_BASE_URL") or "http://127.0.0.1:3459").rstrip("/")
         self.mcp_url = (mcp_url or os.environ.get("MCP_BASE_URL") or "http://127.0.0.1:3460").rstrip("/")
-        self.timeout = timeout
+        # cv-199: 默认超时走统一单源(TOPO_TIMEOUT_KB_RPC 可覆盖)
+        self.timeout = float(timeout) if timeout is not None else _timeout_of("kb_rpc")
 
     @staticmethod
     def _internal_token() -> str:

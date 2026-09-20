@@ -34,6 +34,8 @@ export function useChatProgress() {
   }
 
   function statusLabel(ev: ChatStreamEvent): string {
+    // cv-199: 后端直通链自带中文相位文案(拆步/提取等长阻塞段)优先透出
+    if ((ev as any).label) return String((ev as any).label)
     if (ev.phase === 'sync') return t('requirement.chat.phaseSync')
     if (ev.phase === 'sync_llm') return t('requirement.chat.phaseSyncLlm', { round: ev.round ?? 1 })
     if (ev.phase === 'sync_tool') {

@@ -105,6 +105,8 @@ export interface ChatStreamEvent {
   messageId?: string
   /** 本回合助手消息元数据(done 携带, 如守卫标记 meta.guard)。 */
   meta?: Record<string, any>
+  /** 状态事件(cv-199): 后端直通链中文相位文案(拆步/提取等长阻塞段)。 */
+  label?: string
   /** 工具进度(tool_call/tool_result)：工具名。 */
   tool?: string
   /** 工具进度(tool_result)：执行是否成功。 */
@@ -217,6 +219,7 @@ export async function chatStream(
       onEvent({
         type: 'status', phase: ev?.phase, round: ev?.round,
         tool: ev?.tool, idx: ev?.idx, total: ev?.total, message: ev?.message,
+        label: ev?.label,
         conversationId: ev?.conversationId,
       })
     })

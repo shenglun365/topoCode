@@ -157,7 +157,9 @@ def _post_merge_cleanup(task: dict, root: str) -> str:
         try:
             # 调用期解析: 保持 eb._runner/eb._client 测试打桩接缝
             from ...arch_routes import exec_bridge as _eb
-            _eb._client().finish(job_id, keep_worktree=False, timeout=30.0)
+            from ..governance.timeouts import get as _timeout_of
+            _eb._client().finish(job_id, keep_worktree=False,
+                                 timeout=_timeout_of("runner_finish"))
             notes.append("runner 资源已释放")
         except Exception:  # noqa: BLE001
             notes.append("runner 资源释放失败(可稍后任务清理)")

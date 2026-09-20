@@ -16,6 +16,7 @@ import json
 import logging
 from typing import Any, Callable, Optional
 
+from ..governance.timeouts import get as _timeout_of
 logger = logging.getLogger("arch.execution.pumps")
 
 POLL_INTERVAL = 2.5
@@ -39,7 +40,7 @@ async def ws_connect(base: str, job_id: str, since: int,
         url = (base.replace("https://", "wss://").replace("http://", "ws://")
                + f"/api/implement/{job_id}/events?since={since}")
         return await asyncio.wait_for(
-            websockets.connect(url, open_timeout=3.0, max_size=4 * 1024 * 1024), timeout)
+            websockets.connect(url, open_timeout=_timeout_of("pump_ws_open"), max_size=4 * 1024 * 1024), timeout)
     except Exception:  # noqa: BLE001
         return None
 

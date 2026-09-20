@@ -66,7 +66,8 @@ def check_mutex(conv: dict, root: str, boundary_files: List[str],
     返回 None=通过; 冲突时返回说明文本。
     声明级互斥(越界写靠验收简报事后检测, 裁决#2)。
     """
-    running = runner("/api/implement/running", timeout=8.0) if runner else None
+    from .timeouts import get as _timeout_of
+    running = runner("/api/implement/running", timeout=_timeout_of("runner_snapshot")) if runner else None
     if not running or not running.get("ok"):
         return None           # runner 不可达 → 无法校验(不阻塞, 风险自担)
     for j in running.get("jobs") or []:

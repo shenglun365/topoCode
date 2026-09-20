@@ -65,7 +65,8 @@ async def _run_direct_confirm(conv: dict, send: SendFn, store,
 
 
 async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
-                              user_msg_id: str, executor: str = "") -> None:
+                              user_msg_id: str, executor: str = "",
+                              skip_plan: bool = False) -> None:
     """会话指令直通(v2): /提取需求 → 历史提取需求卡; /执行 → ready 规约建任务卡。
     @执行器 前缀显式指定执行器; 回执落库+done 事件与常规回合同形;
     specReady meta 供前端渲染[一键建卡]动作。"""
@@ -74,21 +75,37 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
     conv_id = conv["id"]
     # cv-197: 直通链可含 LLM 拆步(最长 LLM_SYNC_TIMEOUT=300s)——零反馈即
     # 「卡死」观感; 状态事件 + 首尾日志补齐可观测性。
-    logger.info("[direct-cmd] %s conv=%s 开始", cmd, conv_id)
+    logger.info("[direct-cmd] %s conv=%s 开始 (skip_plan=%s)", cmd, conv_id, skip_plan)
     try:
         await send({"type": "status", "phase": "direct_cmd", "cmd": cmd})
     except Exception:  # noqa: BLE001
         pass
+    # cv-199: 直通链内含 LLM 长调用(拆步/提取, 上限 TOPO_TIMEOUT_LLM_CALL=300s)
+    # ——相位回调线程安全桥接 send, 前端 busyLabel 实时透出("正在生成任务计划…")
+    _loop = asyncio.get_running_loop()
+
+    def _on_phase(phase: str) -> None:
+        _labels = {"plan": "正在生成任务计划（拆步编排，最长可达数分钟）…",
+                   "extract": "正在从对话历史提取需求…",
+                   "card": "正在创建任务卡…"}
+        try:
+            asyncio.run_coroutine_threadsafe(
+                send({"type": "status", "phase": f"cmd_{phase}",
+                      "label": _labels.get(phase, phase)}), _loop)
+        except Exception:  # noqa: BLE001
+            pass
+
     meta = None
     if cmd == "提取需求":
-        res = _cmds.run_extract_req(conv)
+        res = _cmds.run_extract_req(conv, on_phase=_on_phase)
         logger.info("[direct-cmd] 提取需求 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or res.get('error') or '提取失败'}"
         else:
             content = res.get("receipt") or "需求卡已提取。"
     elif cmd == "执行":
-        res = _cmds.run_execute(conv, executor_id=executor)
+        res = _cmds.run_execute(conv, executor_id=executor,
+                                skip_plan=skip_plan, on_phase=_on_phase)
         logger.info("[direct-cmd] 执行 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or '建卡失败'}"
@@ -295,9 +312,12 @@ async def _chat_route(data: dict, gate: dict, send: SendFn):
         from .perception.commands import match_command as _cmd_match
         _cmd = _cmd_match(question)
         if _cmd:
+            # cv-199: 提案卡「运行」按钮的合成 /执行 跳过 LLM 拆步——
+            # 点按钮期望即时建卡; 手打 /执行 保留计划编排(带相位反馈)
             await _run_direct_command(_cmd["cmd"], gate["conv"], send, store,
                                       gate["last_user_msg_id"],
-                                      executor=_cmd.get("executor") or "")
+                                      executor=_cmd.get("executor") or "",
+                                      skip_plan=bool(data.get("synthetic")))
             return True, decision
         # 文字确认(卡片确认同义路径): 有待确认卡才拦——否则「确认」是普通对话
         from .perception.commands import match_confirm as _confirm_match, \

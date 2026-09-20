@@ -369,7 +369,8 @@ def _mcp_tool_list() -> List[Dict[str, Any]]:
     now = time.time()
     if _MCP_TOOLS_CACHE["tools"] and now - _MCP_TOOLS_CACHE["ts"] <= _MCP_TOOLS_TTL:
         return _MCP_TOOLS_CACHE["tools"]
-    tools = _kb_gateway().tools(timeout=5) or []
+    from ..agent.governance.timeouts import get as _timeout_of
+    tools = _kb_gateway().tools(timeout=_timeout_of("kb_mcp_tools")) or []
     if tools:
         _MCP_TOOLS_CACHE["ts"] = now
         _MCP_TOOLS_CACHE["tools"] = tools
@@ -396,7 +397,8 @@ def _mcp_doc() -> str:
 def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if not tool:
         return {"ok": False, "error": "缺少 MCP 工具名(tool)"}
-    result = _kb_gateway().query(tool, timeout=30, **(params or {}))
+    from ..agent.governance.timeouts import get as _timeout_of
+    result = _kb_gateway().query(tool, timeout=_timeout_of("kb_mcp_call"), **(params or {}))
     if result is None:
         return {"ok": False, "tool": tool, "error": "MCP 不可达或超时"}
     return result

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Request
 from .common import _ts, ok, err, build_architecture_model
 from . import store
 
+from ..agent.governance.timeouts import get as _timeout_of
 router = APIRouter()
 
 _DEFAULT_CONFIG = {"estMinMin": 60, "estMinMax": 480, "acceptanceMax": 4, "p0SubsetMax": 5}
@@ -159,7 +160,7 @@ def _git_origin(path: str) -> str:
     try:
         r = subprocess.run(
             ["git", "-C", path, "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=_timeout_of("git_status"),
         )
         return (r.stdout or "").strip()
     except Exception:

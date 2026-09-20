@@ -47,7 +47,8 @@ _avail_cache: dict = {"ts": 0.0, "data": None}
 _AVAIL_TTL = 300.0
 _INSTALLING = False
 _INSTALL_TIMEOUT = 600.0
-_BUILD_TIMEOUT = 300.0
+from ..agent.governance.timeouts import get as _timeout_of
+_BUILD_TIMEOUT = _timeout_of("build_engine")
 
 
 def engines_root() -> str:
@@ -157,7 +158,7 @@ def available_versions(force: bool = False) -> dict:
     data: dict = {}
     try:
         req = urllib.request.Request(_REGISTRY_URL, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=8) as r:
+        with urllib.request.urlopen(req, timeout=_timeout_of("engine_inspect")) as r:
             payload = json.loads(r.read().decode("utf-8")[:2_000_000])
         times = payload.get("time") or {}
         vers = [v for v in payload.get("versions", {})
@@ -177,7 +178,7 @@ def available_versions(force: bool = False) -> dict:
 def _node_version() -> str:
     try:
         out = subprocess.run(["node", "--version"], capture_output=True,
-                             text=True, timeout=10)
+                             text=True, timeout=_timeout_of("engine_inspect"))
         return (out.stdout or "").strip()
     except Exception:  # noqa: BLE001
         return ""

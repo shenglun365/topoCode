@@ -19,7 +19,8 @@ _MIN_CHAT_MAX_TOKENS = 8192
 # 自由对话流式(ZMQ SUB)空闲超时：连续这么久收不到本 requestId 的任何事件(chunk/done/error)
 # 即判定流中断(主后端/llm 服务重启、任务取消、瞬时断连)，降级 llm.sync 一次性收尾，
 # 避免前端「知识库检索中…」永久挂起、内容始终不返回。
-_STREAM_IDLE_TIMEOUT_S = 60.0
+from ..governance.timeouts import get as _timeout_of
+_STREAM_IDLE_TIMEOUT_S = _timeout_of("stream_idle")
 
 
 class _TurnIO:

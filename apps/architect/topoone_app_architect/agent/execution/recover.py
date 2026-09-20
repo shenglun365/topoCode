@@ -100,7 +100,8 @@ def recover_conv_tasks(conv_id: str) -> dict:
         job_id = t.get("runnerJobId") or ""
         if not job_id:
             continue
-        snap = _eb._client().snapshot(job_id, timeout=8.0)
+        from ..governance.timeouts import get as _timeout_of
+        snap = _eb._client().snapshot(job_id, timeout=_timeout_of("runner_snapshot"))
         if snap is None or not snap.ok:
             if snap is not None and "作业不存在" in (snap.error or ""):
                 err = "runner 作业已丢失(执行器服务重启)——无法续跑, 请重新发起任务。"

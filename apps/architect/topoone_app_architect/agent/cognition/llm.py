@@ -32,7 +32,10 @@ class ModelNotConfigured(RuntimeError):
 
 # LLM 同步调用超时(秒)：本地大模型结构化提取/工具循环耗时可能远超 KB 默认 10s，
 # 与 model_configs.timeout 对齐(默认 300s)，可用 LLM_SYNC_TIMEOUT 覆盖。
-_LLM_CALL_TIMEOUT = float(os.environ.get("LLM_SYNC_TIMEOUT", "300"))
+from ..governance.timeouts import get as _timeout_of
+# 统一超时单源(governance.timeouts); 应急覆盖可用 TOPO_TIMEOUT_LLM_CALL 或遗留 LLM_SYNC_TIMEOUT
+_LLM_CALL_TIMEOUT = float(os.environ.get("LLM_SYNC_TIMEOUT")
+                          or _timeout_of("llm_call"))
 
 
 def _now_ms() -> int:
@@ -137,7 +140,7 @@ def probe_context_window(url: str, model_hint: str = "") -> Optional[int]:
 
     def _fetch(path: str):
         req = urllib.request.Request(base + path, method="GET")
-        with urllib.request.urlopen(req, timeout=2.0) as r:
+        with urllib.request.urlopen(req, timeout=_timeout_of("probe_ping")) as r:
             return _json.loads(r.read().decode("utf-8", "replace"))
 
     n_ctx: Optional[int] = None

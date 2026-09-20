@@ -98,7 +98,9 @@ async def git_push(request: Request):
     proj = _resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     branch = body.get("branch") or arch_git.repo_status(root).get("branch") or "main"
-    arch_git._git(["push", "-u", "origin", branch], cwd=root, timeout=300)
+    from ..agent.governance.timeouts import get as _timeout_of
+    arch_git._git(["push", "-u", "origin", branch], cwd=root,
+                  timeout=_timeout_of("git_push"))
     return ok({"branch": branch, "pushed": True, "remote": "origin"})
 
 
