@@ -19,6 +19,7 @@ from typing import Optional
 
 from .base import _delete, _fetchall_routed, _get, _insert, _row_to_api, _scan_dbs, _update, next_id
 from .states import (
+    TASK_SAVED,
     TASK_PENDING_CONFIRM, TASK_RUNNING, TASK_WAITING_INPUT,
     TRACK_CANCELLED, TRACK_DONE, TRACK_FAILED, TRACK_RUNNING, TRACK_WAITING,
 )
@@ -270,8 +271,8 @@ def emit(*, category: str, title: str, content: str = "", action_type: str = "",
 
 def _task_state_of(status: str) -> tuple[str, str]:
     """任务状态 → 台账 (state, waitingFor) 映射(单向同步)。"""
-    if status == TASK_PENDING_CONFIRM:
-        return TRACK_WAITING, "user"          # 等用户确认(轻门禁)
+    if status in (TASK_PENDING_CONFIRM, TASK_SAVED):
+        return TRACK_WAITING, "user"          # 等用户启动(默认保存: saved=待开跑)
     if status == TASK_RUNNING:
         return TRACK_RUNNING, ""
     if status == TASK_WAITING_INPUT:
