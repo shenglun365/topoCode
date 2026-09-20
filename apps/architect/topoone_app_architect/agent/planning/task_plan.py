@@ -123,7 +123,7 @@ def propose_task_tool(title: str, instruction: str,
     if not task.get("id"):
         return {"error": str(task.get("error") or "任务卡创建失败")}
     return {"ok": True, "taskId": task["id"], "status": task.get("status"),
-            "hint": "任务卡已生成, 等待用户确认后执行; 请告知用户可确认/取消/调整。"}
+            "hint": "任务卡已保存; 用户点「开始执行」启动, 可对话调整或忽略——请告知用户。"}
 
 
 def assemble_task_instruction(task: dict, prior_brief: str = "",
@@ -425,7 +425,7 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
             deps = plan[idx].get("depends") or []
             dep_note = f"（依赖 {', '.join('#' + str(d) for d in deps)} 已完成）" if deps else ""
             out["receipt"] = (f"📋 计划步骤 {idx + 1}/{len(plan)} 已{retried}"
-                              f"{dep_note}，待确认执行。")
+                              f"{dep_note}，已保存待启动。")
         return out or {"ok": False, "receipt": "计划步骤下发失败"}
 
     steps = split_tasks_llm(req_text, policy=policy)
@@ -449,8 +449,8 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
     _land_plan_card(conv, rid, plan)
     out = propose_plan_step(conv, rid, 0, executor_hint=_hint)
     if out.get("ok"):
-        out["receipt"] = (f"📋 已生成任务计划({len(plan)} 步)并下发第一步，"
-                          "待确认执行; 后续步骤完成后自动预填。")
+        out["receipt"] = (f"📋 已生成任务计划({len(plan)} 步)并保存第一步，"
+                          "点「开始执行」启动; 后续步骤完成后自动预填。")
     return out
 
 

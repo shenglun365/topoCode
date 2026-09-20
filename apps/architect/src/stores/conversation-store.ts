@@ -134,7 +134,7 @@ export const useConversationStore = defineStore('archConversation', () => {
   }
 
   /** 任务操作(轻门禁确认/取消/停止/转达)。 */
-  async function taskAction(taskId: string, action: 'confirm' | 'cancel' | 'input', text?: string) {
+  async function taskAction(taskId: string, action: 'confirm' | 'cancel' | 'input' | 'ignore', text?: string) {
     const { apiPost } = await import('@/services/api-client')
     try {
       if (action === 'input') {

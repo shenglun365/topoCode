@@ -350,9 +350,9 @@ def test_task_lifecycle_e2e(tmp_path, monkeypatch):
     """v2 全链: propose(任务卡) → confirm(running+单流消息) → 事件(输入/完成)
     → 状态迁移 + agent 标注 + workState 联动。"""
     conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
-    # ① propose: 任务卡落单流(pending_confirm)
+    # ① propose: 任务卡落单流(saved 默认保存)
     task = eb.propose_task(conv, "实现 X", "目标: X\n方案: Y", {"executorType": "opencode"})
-    assert task["status"] == "pending_confirm"
+    assert task["status"] == "saved"
     msgs = store.ConversationsStore.messages(conv["id"])
     card = [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_card"]
     assert card and card[-1]["meta"]["taskId"] == task["id"]
@@ -451,7 +451,7 @@ def test_task_chain_brief_injection(tmp_path, monkeypatch):
     store.TasksStore.finish(t1["id"], "done", "完成: 改了 src/a.py, 结论可复用")
     t2 = eb.propose_task(conv, "任务二", "y")
     store.TasksStore.finish(t2["id"], "failed", "失败: 依赖缺失")
-    t3 = eb.propose_task(conv, "任务三", "z")                 # 当前任务(pending_confirm)
+    t3 = eb.propose_task(conv, "任务三", "z")                 # 当前任务(saved)
     brief = eb._task_chain_brief(conv["id"], t3["id"])
     assert "任务一" in brief and "完成: 改了 src/a.py" in brief
     assert "任务二" in brief and "失败: 依赖缺失" in brief
@@ -483,12 +483,22 @@ def test_task_chain_brief_empty_and_truncate(tmp_path, monkeypatch):
 
 
 def test_active_task_of_priority(tmp_path, monkeypatch):
-    """active_task_of: running/waiting_input 优先于 pending_confirm。"""
+    """active_task_of: running/waiting_input 优先于 pending_confirm(存量直建行);
+    saved(默认保存)不算活跃——不吸收转达、不算执行中。"""
     conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
-    t1 = eb.propose_task(conv, "待确认", "a")
+    # saved 卡(新语义): 不活跃
+    s1 = eb.propose_task(conv, "已保存卡", "a")
+    assert s1["status"] == "saved"
+    assert eb.active_task_of(conv["id"]) is None
+    # 存量 pending_confirm(直建): 计入活跃
+    t1 = store.TasksStore.create({
+        "conversationId": conv["id"], "title": "存量待确认", "instruction": "x",
+        "status": "pending_confirm", "executorType": "opencode"})
     assert eb.active_task_of(conv["id"])["id"] == t1["id"]
     assert eb.confirm_task(t1["id"])["ok"]
-    t2 = eb.propose_task(conv, "新的待确认", "b")
+    t2 = store.TasksStore.create({
+        "conversationId": conv["id"], "title": "存量二", "instruction": "y",
+        "status": "pending_confirm", "executorType": "opencode"})
     assert eb.active_task_of(conv["id"])["id"] == t1["id"]   # running 优先
     eb.task_stop(t1["id"])
     assert eb.active_task_of(conv["id"])["id"] == t2["id"]
@@ -505,7 +515,7 @@ def test_task_tool_propose_and_retired_req(tmp_path, monkeypatch):
                                 {"title": "工具建卡", "instruction": "实现 Q",
                                  "executorType": "cline"},
                                 root=None, project=None)
-    assert r["ok"] and r["status"] == "pending_confirm"
+    assert r["ok"] and r["status"] == "saved"
     t = store.TasksStore.get(r["taskId"])
     assert t["executorType"] == "cline-sdk"  # 别名归一(P5)
     # 模型面 req.propose 无挡位拦截(需求卡按需出现, cv-175)

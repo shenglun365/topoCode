@@ -332,3 +332,16 @@ apps/architect/tests/          # §7 四门禁 + 既有 28 个测试文件回归
 - **B2 D12 未收口**：`llm_sync` 白名单 7 项（探测套件 §5.7 范围外 / reflection 通用机制 / chat 循环 / sem M 级 tAgent SE 域）——按规格"链 3 全量收编后仅 turns/call"未实现为硬门禁，现为带理由冻结。
 - **req_agent 门面（§8.2-④）**：工具实现部分已溶解；余量 1207 行为 A 轴 chat 管线 + mcp/规约工具 + re-export 的**永久驻留**形态，建议验收时确认此结论并更新 §8.2。
 - **C 项低危**：`llm.py` 317 行（目标 ≤300 边际未收）；harness `degraded` 未透出 REST；R3.2 拒绝文案前端卡片化呈现未验证；`_eb()` 间接 30+ 处（DispatchTurn 重构时收敛）。
+
+### 14.3 卡片默认保存(2026-09-20 产品裁决落地)
+
+| 决策 | 结论 |
+|---|---|
+| 任务卡 | `propose_task` 创建即 `saved`(默认保存, 可多张并存, 不阻塞互斥/转达); 执行=手动触发(卡片「开始执行」/`/执行`/REST confirm, `confirm_task` 接受 saved\|pending_confirm) |
+| 对话更新 | 同需求重复 `task.propose` → **改写**最近一张 saved 卡(v2 修订卡追加, 不产生重复卡——较 cv-174 去重更上游) |
+| 主动忽略 | REST `POST /tasks/{id}/ignore`(仅 saved, 409 otherwise)/`POST /requirements/{id}/ignore`; 软删终态 `ignored`(置灰可追溯), 卡片词汇表 +`task_ignored`/`req_ignored` |
+| 保留门禁 | 合并确认 / 里程碑 NEED_INPUT / 运行互斥 / R3.2 图门禁(propose 校验不变) |
+| 存量 | pending_confirm 行原状(确认/取消按钮照旧); 新卡不再产生该状态 |
+| 语义排除 | saved 不入 `ACTIVE_STATES`: 不吸收转达、不算执行中、`active_task_of` 不返回; `task_input` 对 saved 明确指引先启动 |
+| 前端 | TaskCard: saved=[开始执行|忽略]、ignored=置灰终态; `taskAction` 动作面 +`ignore` |
+| 需求忽略 UI | REST 就绪; 台账面板按钮列后续批次(当前无需求卡独立组件) |

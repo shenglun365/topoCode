@@ -132,7 +132,7 @@ def test_full_pipeline_task_fence_autoland(pipeline):
             ev = _recv_until(ws, "done")
     tasks = store.TasksStore.of_conv(ev["conversationId"])
     assert len(tasks) == 1
-    assert tasks[0]["status"] == "pending_confirm"
+    assert tasks[0]["status"] == "saved"        # 默认保存(2026-09-20 裁决)
     assert tasks[0]["executorType"] == "cline-sdk"
     assert tasks[0]["executorId"] == "cline"     # id/配置同源(cv-158 回归)
     msgs = store.ConversationsStore.messages(ev["conversationId"], limit=20)

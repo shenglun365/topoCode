@@ -25,15 +25,18 @@ REQ_DRAFT = "draft"
 REQ_READY = "ready"
 REQ_DONE = "done"
 REQ_CANCELLED = "cancelled"
+REQ_IGNORED = "ignored"     # 用户主动忽略(软删置灰)
 REQ_OPEN_STATES = (REQ_DRAFT, REQ_READY)
 
 # 任务
-TASK_PENDING_CONFIRM = "pending_confirm"
+TASK_SAVED = "saved"        # 默认保存(2026-09-20 产品裁决): 建卡即登记, 手动触发执行
+TASK_PENDING_CONFIRM = "pending_confirm"   # 存量确认门禁态(仅存量卡, 新卡不再产生)
 TASK_RUNNING = "running"
 TASK_WAITING_INPUT = "waiting_input"
 TASK_DONE = "done"
 TASK_FAILED = "failed"
 TASK_CANCELLED = "cancelled"
+TASK_IGNORED = "ignored"    # 用户主动忽略(软删终态: 流内置灰, 可追溯)
 ACTIVE_STATES = (TASK_PENDING_CONFIRM, TASK_RUNNING, TASK_WAITING_INPUT)
 
 # 规约版本

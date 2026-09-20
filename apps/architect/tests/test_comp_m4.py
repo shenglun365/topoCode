@@ -39,7 +39,7 @@ def test_r32_gate_passes_with_diagram(arch_env):
     r = eb.propose_task(conv, "T", "实现功能\n" + _DIAGRAM,
                         executor_hint={"executorType": "cline-sdk"})
     assert "error" not in r and r.get("id"), r
-    assert r["status"] == "pending_confirm"
+    assert r["status"] == "saved"               # 默认保存
 
 
 def test_r32_plan_steps_exempt(arch_env):

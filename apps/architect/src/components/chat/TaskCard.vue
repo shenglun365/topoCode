@@ -18,8 +18,8 @@
         :title="`消息 ×${progress.msgCount ?? 0} · ${new Date(progress.at || 0).toLocaleTimeString()}`"
       >⚙ ×{{ progress.toolCount ?? 0 }}</span>
       <span class="flex-1" />
-      <!-- 执行器设定(待确认时可换): cline/opencode/codex -->
-      <span v-if="task.status === 'pending_confirm'" class="flex items-center gap-0.5">
+      <!-- 执行器设定(未开始时可换): cline/opencode/codex -->
+      <span v-if="task.status === 'pending_confirm' || task.status === 'saved'" class="flex items-center gap-0.5">
         <button
           v-for="ex in ['opencode', 'cline', 'codex']"
           :key="ex"
@@ -30,8 +30,18 @@
           @click="$emit('set-executor', task.id, ex)"
         >{{ ex }}</button>
       </span>
-      <!-- 轻门禁: 待确认 → 确认/取消 -->
-      <template v-if="task.status === 'pending_confirm'">
+      <!-- 默认保存: saved → 开始执行/忽略; 存量 pending_confirm → 确认/取消 -->
+      <template v-if="task.status === 'saved'">
+        <button
+          class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30"
+          @click="$emit('confirm', task.id)"
+        >▶ 开始执行</button>
+        <button
+          class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25"
+          @click="$emit('ignore', task.id)"
+        >✕ 忽略</button>
+      </template>
+      <template v-else-if="task.status === 'pending_confirm'">
         <button
           class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30"
           @click="$emit('confirm', task.id)"
@@ -52,7 +62,7 @@
       分支 {{ task.branch }}
     </div>
     <!-- 验收配置(V1): 待确认态可设 P0 显式命令/超时/修复轮次 -->
-    <div v-if="task.status === 'pending_confirm'" class="mt-1.5">
+    <div v-if="task.status === 'pending_confirm' || task.status === 'saved'" class="mt-1.5">
       <button
         class="flex items-center gap-1 text-[10px] text-ctp-overlay1 hover:text-ctp-subtext1"
         @click="vcOpen = !vcOpen"
@@ -175,7 +185,7 @@ import { apiPost } from '@/services/api-client'
 import StreamItems from './StreamItems.vue'
 
 const props = defineProps<{ task: Record<string, any>; convId?: string }>()
-defineEmits<{ (e: 'confirm' | 'cancel', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
+defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
 
 // ── 验收配置(V1): 仅 pending_confirm 可写, 启动时随 start payload 下发 ──
 const vcOpen = ref(false)
@@ -212,14 +222,16 @@ async function saveVc() {
 
 const STATUS_TEXT: Record<string, string> = {
   pending_confirm: '待确认',
+  saved: '已保存',
   running: '执行中',
   waiting_input: '等待输入',
   done: '已完成',
   failed: '失败',
   cancelled: '已取消',
+  ignored: '已忽略',
 }
 const statusText = computed(() => STATUS_TEXT[props.task.status] || props.task.status)
-const isTerminal = computed(() => ['done', 'failed', 'cancelled'].includes(props.task.status))
+const isTerminal = computed(() => ['done', 'failed', 'cancelled', 'ignored'].includes(props.task.status))
 const progress = computed(() => (typeof props.task.progress === 'object' && props.task.progress) || null)
 const isLive = computed(() => ['running', 'waiting_input'].includes(props.task.status))
 const processTail = computed(() => ((props.task.progress?.process) || []).slice(-8))

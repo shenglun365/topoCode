@@ -460,3 +460,23 @@ def _match_assets(text, preferred=None, root=None, project=None):
 @router.post("/requirements/merge")
 async def merge_requirements(request: Request):
     return ok({"merged": True})
+
+
+@router.post("/requirements/{req_id}/ignore")
+async def requirement_ignore(req_id: str):
+    """主动忽略需求卡(2026-09-20 裁决): 软删置灰(ignored), 可追溯。"""
+    req = store.RequirementsStore.get(req_id)
+    if not req:
+        return err(404, "需求不存在")
+    if (req.get("status") or "") == "ignored":
+        return ok({"requirement": req, "ignored": True})
+    req = store.RequirementsStore.update(req_id, {"status": "ignored"}) or req
+    conv_id = req.get("ownerConv") or ""
+    if conv_id:
+        try:
+            from ..agent.collab import cards as _cards
+            _cards.land(conv_id, f"🚫 **需求已忽略**：{req.get('title')}",
+                        kind="req_ignored")
+        except Exception:  # noqa: BLE001 — 回执失败不影响忽略
+            pass
+    return ok({"requirement": req, "ignored": True})

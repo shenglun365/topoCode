@@ -825,6 +825,7 @@ async function pollRunningState() {
         @set-analysis-mode="onSetAnalysisMode"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
         @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
+        @task-ignore="(id: string) => void conv.taskAction(id, 'ignore')"
         @task-executor="(p: any) => void onTaskExecutor(p)"
         @local-cmd="onLocalCmd"
         @bind-coding="openRoles"

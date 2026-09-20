@@ -223,6 +223,7 @@ def _files_intersect(a: List[str], b: List[str]) -> List[str]:
 # ── 下发域(M4 拆分): propose/confirm/task_input/setters/stop 迁
 # agent/execution/dispatch.py(与 DispatchTurn 协作); re-export 保持 REST/测试接缝。
 from ..agent.execution.dispatch import (_last_failed_branch, _last_failed_task,
+                                        ignore_task,
                                         _publish_task, _task_reaggregate_work_state,
                                         active_task_of, confirm_task, propose_task,
                                         stop, task_input, task_set_executor,

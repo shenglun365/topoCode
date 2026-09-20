@@ -147,13 +147,37 @@ def propose_task(conv: dict, title: str, instruction: str,
                         f"({', '.join(_moved[:5])})——续跑基于旧基点, 合并前请先检视冲突。")
             except Exception:  # noqa: BLE001
                 pass
+    # ── 默认保存(2026-09-20 产品裁决): 建卡即登记, 手动触发执行 ──
+    # 同需求已有未开始(saved)卡 → 改写而非新建(对话补充 → agent 更新通道;
+    # 同时天然消化弱模型重复提案——比 cv-174 去重更上游)
+    _saved = next((t for t in reversed(store.TasksStore.of_conv(conv_id))
+                   if _rid and t.get("reqId") == _rid
+                   and (t.get("status") or "") == ST.TASK_SAVED), None)
+    if _saved is not None:
+        task = store.TasksStore.update(_saved["id"], {
+            "title": (title or "").strip()[:120] or _saved.get("title") or "实施任务",
+            "instruction": instruction,
+            "executorType": etype,
+            "executorId": _eid,
+            "specVer": _spec_ver,
+        }) or _saved
+        task = {**task, "ok": True, "revised": True}
+        _eb()._append(conv_id, "assistant",
+                f"📝 **任务卡已修订**（{task['title']}，按对话补充更新）\n"
+                f"执行器 `{etype}`\n\n"
+                + (instruction or "")[:2000]
+                + "\n\n---\n已保存，可开始执行 / 继续对话调整 / 忽略。",
+                msg_meta={"kind": "task_card", "taskId": task["id"]},
+                project_id=_pid)
+        _publish_task(conv_id, task)
+        return task
     task = store.TasksStore.create({
         "conversationId": conv_id,
         "projectId": _pid,
         "reqId": _rid,
         "title": (title or "").strip()[:120] or "实施任务",
         "instruction": instruction,
-        "status": ST.TASK_PENDING_CONFIRM,
+        "status": ST.TASK_SAVED,
         "executorType": etype,
         "executorId": _eid,
         "specVer": _spec_ver,
@@ -181,14 +205,14 @@ def propose_task(conv: dict, title: str, instruction: str,
             _snap = (store.RequirementsStore.spec_active(_rid) or {}).get("snapshot") or {}
             if not (_snap.get("allowedScope") or []):
                 _no_scope_note = ("\n\n> ⚠️ 该需求未声明修改边界(allowedScope 为空)——"
-                                  "确认执行时将自动运行范围探针补全；"
+                                  "开始执行时将自动运行范围探针补全；"
                                   "补全失败则本次执行**无互斥保护**。")
         except Exception:  # noqa: BLE001
             pass
     _eb()._append(conv_id, "assistant",
-            f"📋 **任务待确认**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
+            f"📋 **任务已保存**\n\n**{task['title']}**\n执行器 `{etype}`\n\n"
             + instruction[:2000]
-            + "\n\n---\n确认后开始执行; 可取消或要求 architect 调整。"
+            + "\n\n---\n点「开始执行」启动; 可继续对话调整, 或忽略本卡。"
             + _resume_note + _stale_note + _no_scope_note + _unmerged_note,
             msg_meta={"kind": "task_card", "taskId": task["id"]},
             project_id=_pid)
@@ -197,11 +221,14 @@ def propose_task(conv: dict, title: str, instruction: str,
 
 
 def confirm_task(task_id: str) -> dict:
-    """用户确认任务卡 → runner 建作业 + 泵启动(pending_confirm→running)。"""
+    """开始执行(2026-09-20 语义: saved|pending_confirm → running)。
+
+    原用户确认门禁已按产品裁决取消(默认保存/手动触发/主动忽略)——
+    本函数即「开始执行」动作; 存量 pending_confirm 卡沿用同门。"""
     task = store.TasksStore.get(task_id)
     if not task:
         return {"ok": False, "error": "task-not-found"}
-    if (task.get("status") or "") != ST.TASK_PENDING_CONFIRM:
+    if (task.get("status") or "") not in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM):
         return {"ok": False, "error": f"task-status={task.get('status')}"}
     conv = store.ConversationsStore.get(task["conversationId"])
     if not conv:
@@ -398,10 +425,11 @@ def confirm_task(task_id: str) -> dict:
 
 
 def task_set_verify_config(task_id: str, cfg: dict) -> Optional[dict]:
-    """设定任务验收门禁配置(V1 P0 最高权威来源; 仅 pending_confirm 可改——
-    running 任务配置已随 start payload 下发, 再改不生效)。白名单收敛+越界钳制。"""
+    """设定任务验收门禁配置(V1 P0 最高权威来源; 未开始(saved|pending_confirm)
+    可改——running 配置已随 start payload 下发, 再改不生效)。白名单收敛+越界钳制。"""
     task = store.TasksStore.get(task_id)
-    if not task or (task.get("status") or "") != ST.TASK_PENDING_CONFIRM:
+    if not task or (task.get("status") or "") not in (ST.TASK_SAVED,
+                                                      ST.TASK_PENDING_CONFIRM):
         return None
     clean: dict = {}
     for k in ("maxAttempts", "autoRepair", "timeoutMul", "build", "test"):
@@ -433,7 +461,8 @@ def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
     from ...arch_routes.agent_executors import normalize_executor_type
     from ...agent.execution.capabilities import is_valid_type
     task = store.TasksStore.get(task_id)
-    if not task or (task.get("status") or "") != ST.TASK_PENDING_CONFIRM:
+    if not task or (task.get("status") or "") not in (ST.TASK_SAVED,
+                                                      ST.TASK_PENDING_CONFIRM):
         return None
     etype = normalize_executor_type(executor_type)
     if not is_valid_type(etype):        # B1 单源: 替代散落元组成员判断
@@ -452,6 +481,9 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
     """
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") not in (ST.TASK_WAITING_INPUT, "running"):
+        if task and (task.get("status") or "") == ST.TASK_SAVED:
+            return {"ok": False, "error":
+                    "任务未开始(已保存)——请在任务卡点「开始执行」后再投递输入。"}
         return {"ok": False, "error": "task-not-active"}
     stripped = (text or "").strip()
     approve = stripped.startswith("/approve ")
@@ -524,12 +556,32 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
 
 
 
+def ignore_task(task_id: str) -> Dict[str, Any]:
+    """用户主动忽略(软删置灰, 2026-09-20 产品裁决): 仅未开始(saved)卡可忽略。
+
+    终态 ignored: 排除互斥/恢复, 流内卡片置灰可追溯; 同需求可重新建卡。"""
+    task = store.TasksStore.get(task_id)
+    if not task:
+        return {"ok": False, "error": "task-not-found", "code": 404}
+    if (task.get("status") or "") != ST.TASK_SAVED:
+        return {"ok": False, "error":
+                f"仅未开始(saved)任务可忽略(当前 {task.get('status')})——"
+                "运行中请先停止, 已完成/已忽略无需忽略。", "code": 409}
+    task = store.TasksStore.update(task_id, {"status": ST.TASK_IGNORED}) or task
+    conv_id = task.get("conversationId") or ""
+    _eb()._append(conv_id, "assistant",
+                  f"🚫 **任务已忽略**：{task.get('title')}",
+                  msg_meta={"kind": "task_ignored", "taskId": task_id})
+    _publish_task(conv_id, task)
+    return {"ok": True, "task": task}
+
+
 def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
     """停止任务(保留 worktree/分支)。"""
     task = store.TasksStore.get(task_id)
     if not task or (task.get("status") or "") in _eb()._TASK_TERMINAL:
         return {"ok": False, "error": "task-not-active"}
-    if (task.get("status") or "") == ST.TASK_PENDING_CONFIRM:
+    if (task.get("status") or "") in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM):
         store.TasksStore.finish(task_id, "cancelled", reason or "用户取消")
         t = store.TasksStore.get(task_id) or {}
         _publish_task(task["conversationId"], t)

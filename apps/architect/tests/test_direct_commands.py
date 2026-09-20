@@ -206,7 +206,7 @@ def test_slash_execute_autoconfirms_legacy_draft(tmp_path, monkeypatch):
             ev, _ = _recv_until(ws, "done")
     assert captured["calls"] == 0
     assert "任务卡" in ev["content"]
-    assert any((t.get("status") or "") == "pending_confirm"
+    assert any((t.get("status") or "") == "saved"
                for t in store.TasksStore.of_conv(conv["id"]))
 
 

@@ -1089,6 +1089,15 @@ async def task_cleanup(task_id: str, request: Request):
     return ok({"taskId": task_id, "cleaned": True, "keptWorktree": keep})
 
 
+@router.post("/tasks/{task_id}/ignore")
+async def task_ignore(task_id: str):
+    """主动忽略(2026-09-20 裁决: 默认保存/对话更新/主动忽略): 仅 saved 态。"""
+    res = await asyncio.to_thread(exec_bridge.ignore_task, task_id)
+    if not res.get("ok"):
+        return err(res.get("code") or 400, str(res.get("error") or "忽略失败"))
+    return ok({"task": res.get("task")})
+
+
 @router.post("/tasks/{task_id}/confirm")
 async def task_confirm(task_id: str, request: Request):
     """确认任务卡 → 拉起 runner(轻门禁唯一入口)。

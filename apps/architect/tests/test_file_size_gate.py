@@ -24,8 +24,9 @@ NEW_FILE_WHITELIST: dict = {
     # M3 ChatTurn 接缝重构时按 structured 轮/降级通道/落库再拆。
     "agent/turns/chat.py": 560,
     # M4 自 exec_bridge 机械搬迁的下发域(propose/confirm/task_input/停止/恢复
-    # 衔接; 接缝 _eb() 调用期绑定占据行数); DispatchTurn 接缝重构时再拆。
-    "agent/execution/dispatch.py": 590,
+    # 衔接; 接缝 _eb() 调用期绑定占据行数); 2026-09-20 默认保存裁决 +saved/ignored
+    # 生命周期与 ignore/改写通道随行; DispatchTurn 接缝重构时再拆。
+    "agent/execution/dispatch.py": 700,
 }
 
 with open(BASELINE_PATH, encoding="utf-8") as f:

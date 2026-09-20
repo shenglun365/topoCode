@@ -44,7 +44,7 @@ def test_a1_t2_execute_single_card_not_gated(arch_env, monkeypatch, tmp_path):
     conv = store.ConversationsStore.get(conv["id"])   # 重取(带 reqId)
     res = run_execute(conv, executor_id="")
     assert res.get("ok") is True, res
-    assert res["task"].get("id") and res["task"]["status"] == ST.TASK_PENDING_CONFIRM
+    assert res["task"].get("id") and res["task"]["status"] == ST.TASK_SAVED  # 默认保存
 
 
 def test_a1_chat_propose_still_gated_at_t2(arch_env):
