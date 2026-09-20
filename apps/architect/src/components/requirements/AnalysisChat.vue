@@ -697,7 +697,9 @@ async function ensureProposalState(m: KbAnalysisTurn) {
     if (st === 'ready' || st === 'done') p.confirmed = true   // 已存入: 抑制存入按钮
   } catch { /* 状态获取失败不阻塞卡片展示 */ }
 }
-watch(() => props.turns.length, () => {
+// cv-188: 追踪 proposal 挂载本身——attachProposal 在回合已存在时写入,
+// turns.length 不变, 旧 watcher(只看长度)永不触发 → 实时卡漏判「已存入」
+watch(() => props.turns.map((t) => t.proposal?.id || '').join(','), () => {
   for (const m of props.turns) if (m.proposal) void ensureProposalState(m)
 }, { immediate: true })
 /** 已存入(ready): 本地确认态或后端状态任一即可; done=已完成(不可再跑)。 */

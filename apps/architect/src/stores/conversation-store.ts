@@ -101,6 +101,10 @@ export const useConversationStore = defineStore('archConversation', () => {
         last.proposal = {
           id: row.id, title: row.title, desc: row.desc, priority: row.priority,
           analysis: row.analysis,
+          // cv-188: propose 即 ready(门禁已拆)——实时卡按后端状态出「已存入」,
+          // 与刷新后 rehydrateProposals 同口径(此前实时卡误显「确认存入」按钮)
+          confirmed: ['ready', 'done'].includes(row.status)
+            || ((row.location ?? 'proposal') === 'pool' && row.status === 'analyzed'),
         }
       }
     } catch { /* 提案卡失败不影响对话 */ }

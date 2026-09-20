@@ -322,8 +322,13 @@ TOOL_PARAM_DOCS: Dict[str, str] = {
         "acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)",
     "mcp.call": '{"tool": "<mcp工具名>", "params": {…}}',
     "req.propose":
-        '参数形状见上方能力清单(reqId 同样勿传; "newRequirement": true 强制新建)',
-    "req.amend": "参数形状见上方能力清单(reqId 勿传)",
+        '{"title": "需求标题(必填)", "requirementMd": "需求目标(全文)", '
+        '"designMd": "选型与结构方案", "priority": "P1", "estMin": 30, '
+        '"acceptanceMd": "验收条目(md)", "newRequirement": false(同会话已建卡时'
+        '强制新建才传)} —— reqId 勿传',  # noqa: E501
+    "req.amend": '{"requirementMd": "修订后需求目标", "designMd": "修订后方案", '
+                 '"acceptance": ["验收条目"], "reasoning": "原因"} —— 只传要调整的'
+                 '字段; 标题修订用 {"title": "新标题"}(reqId 勿传, 自动取会话绑定)',  # noqa: E501
     "capability.evaluate": '{"target": "plan|execution", "execId"?: "ex-…(execution 时必填)}',
     "capability.mine": '{"conversation"?: "cv-…(缺省当前会话)}',
 }

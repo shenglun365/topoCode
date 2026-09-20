@@ -279,6 +279,17 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
     t0 = _now_ms()
     try:
         result = fn(**kwargs)
+    except TypeError as e:
+        # cv-188: 模型乱传参数名(如 req.amend 传 title)——裸 TypeError 空转回合,
+        # 给出支持的参数清单让模型一轮自纠。
+        import re as _re
+        m = _re.search(r"unexpected keyword argument '(\w+)'", str(e))
+        supported = ", ".join(params) + "（root/project 自动注入, 无需传）"
+        bad = f"参数 {m.group(1)} 不受支持" if m else f"参数形状错误({e})"
+        record_tool_audit(name, arguments, False, str(e),
+                          latency_ms=_now_ms() - t0, project=project or "")
+        return {"error": f"{name} {bad}。支持的参数: {supported}"}
+    try:
         ok = not (isinstance(result, dict) and result.get("error"))
         record_tool_audit(name, arguments, ok,
                           tool_result_text(name, result, limit=200),
@@ -546,6 +557,11 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     "参数：reqId(可选)、designMd(调整后完整方案)、allowedScope[str]、forbiddenScope[str]、"
     "acceptance[str]、functionalScope[str]、requirementMd(需求目标)、"
     "assessmentSummary(str)、reasoning(修订理由, 版本留痕)。",
+    params_doc='{"requirementMd": "修订后需求目标(全文, 可选)", '
+               '"designMd": "修订后方案(可选)", "acceptance": ["验收条目"], '
+               '"allowedScope": ["目录"], "forbiddenScope": ["目录"], '
+               '"reasoning": "修订原因"} —— 只传要调整的字段; '
+               '标题修订用 {"title": "新标题"}',
 )
 def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                    allowedScope: Optional[List[str]] = None,
@@ -554,7 +570,50 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                    functionalScope: Optional[List[str]] = None,
                    assessmentSummary: str = "", reasoning: str = "",
                    root: Optional[str] = None,
-                   project: Optional[str] = None) -> Dict[str, Any]:
+                   project: Optional[str] = None,
+                   **extra) -> Dict[str, Any]:
+    # cv-188 别名折叠: 小模型对 amend 形状不稳(实测 title/items/patch/
+    # amendmentMd 四种误传), 确定性收编而非裸 TypeError 空转回合。
+    ignored: List[str] = []
+    for alias in ("amendmentMd", "md", "desc", "content"):
+        if extra.get(alias) and not requirementMd:
+            requirementMd = str(extra.pop(alias))
+        elif alias in extra:
+            extra.pop(alias)
+            ignored.append(alias)
+    if isinstance(extra.get("title"), str) and extra.get("title").strip():
+        extra["_title"] = extra.pop("title").strip()
+    if isinstance(extra.get("items"), list) and not acceptance:
+        acceptance = [str(x) for x in extra.pop("items")]
+    elif "items" in extra:
+        extra.pop("items")
+        ignored.append("items")
+    patch = extra.pop("patch", None)
+    if isinstance(patch, dict):
+        _known = {"title", "desc", "designMd", "assessmentSummary",
+                  "acceptance", "allowedScope", "forbiddenScope", "functionalScope"}
+        ignored.extend(k for k in patch if k not in _known)
+        if isinstance(patch.get("title"), str) and patch["title"].strip():
+            extra["_title"] = patch["title"].strip()
+        if isinstance(patch.get("desc"), str) and patch["desc"].strip() and not requirementMd:
+            requirementMd = patch["desc"]
+        if isinstance(patch.get("designMd"), str) and patch["designMd"].strip() and not designMd:
+            designMd = patch["designMd"]
+        if (isinstance(patch.get("assessmentSummary"), str)
+                and patch["assessmentSummary"].strip() and not assessmentSummary):
+            assessmentSummary = patch["assessmentSummary"]
+        if isinstance(patch.get("acceptance"), list) and acceptance is None:
+            acceptance = patch["acceptance"]
+        if isinstance(patch.get("allowedScope"), list) and allowedScope is None:
+            allowedScope = patch["allowedScope"]
+        if isinstance(patch.get("forbiddenScope"), list) and forbiddenScope is None:
+            forbiddenScope = patch["forbiddenScope"]
+        if isinstance(patch.get("functionalScope"), list) and functionalScope is None:
+            functionalScope = patch["functionalScope"]
+    extra.pop("title", None)
+    for k in list(extra):
+        if k != "_title":
+            ignored.append(k)
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
@@ -576,6 +635,9 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     active = store.RequirementsStore.spec_active(req_id) or {}
     snap = dict(active.get("snapshot") or {})
     changed = []
+    if extra.get("_title"):
+        snap["title"] = str(extra["_title"])[:200]
+        changed.append("标题")
     if requirementMd:
         snap["desc"] = requirementMd
         changed.append("需求目标")
@@ -616,8 +678,11 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                              "ver": entry["ver"], "updated": True})
     except Exception:  # noqa: BLE001
         pass
+    hint = "修订已就绪(ready)；`/执行` 按新版本执行"
+    if ignored:
+        hint += f"；已忽略不支持的参数: {','.join(sorted(set(ignored)))}"
     return {"ok": True, "reqId": req_id, "ver": entry["ver"], "amended": changed,
-            "hint": "修订已就绪(ready)；`/执行` 按新版本执行"}
+            "hint": hint}
 
 
 # ── 会话只读工具(PR-D: 归档会话可被 agent 读取/引用; 不在任何动作黑名单) ──
@@ -992,7 +1057,10 @@ _CAPABILITY_DOC = (
     '- convention.propose: {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}\n'
     '- contract.propose: {"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)\n'
     '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
-    '- req.propose / req.amend: 参数形状见上方能力清单(reqId 同样勿传)\n'
+    '- req.propose: {"title": "标题", "requirementMd": "需求目标", '
+    '"designMd": "方案", "priority": "P1", "acceptanceMd": "验收"}\n'
+    '- req.amend: {"requirementMd": "修订后目标", "designMd": "修订后方案", '
+    '"acceptance": [...], "reasoning": "原因"} 只传要调整的字段; 标题用 {"title": …}\n'
     '- capability.evaluate: {"target": "plan|execution", "execId"?: "ex-…(execution 时必填)}\n'
     '- capability.mine: {"conversation"?: "cv-…(缺省当前会话)}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
