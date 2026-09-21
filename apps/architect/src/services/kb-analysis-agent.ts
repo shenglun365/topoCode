@@ -113,6 +113,9 @@ export interface ChatStreamEvent {
   messageId?: string
   /** 本回合助手消息元数据(done 携带, 如守卫标记 meta.guard)。 */
   meta?: Record<string, any>
+  /** 落卡收尾(cv-205): 卡片即回合产物, 服务端不落占位消息——前端同步移除
+   * 空占位回合, 避免空白气泡。 */
+  cardClosed?: boolean
   /** 状态事件(cv-199): 后端直通链中文相位文案(拆步/提取等长阻塞段)。 */
   label?: string
   /** 工具进度(tool_call/tool_result)：工具名。 */
@@ -206,7 +209,8 @@ export async function chatStream(
       const content = ev?.content ?? full
       full = content
       onEvent({ type: 'done', content, conversationId: ev?.conversationId,
-                messageId: ev?.messageId, meta: ev?.meta })
+                messageId: ev?.messageId, meta: ev?.meta,
+                cardClosed: !!ev?.cardClosed })
       finish()
       resolveDone(content)
     })

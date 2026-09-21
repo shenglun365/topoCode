@@ -339,9 +339,18 @@ export const useConversationStore = defineStore('archConversation', () => {
         } else if (ev.type === 'reasoning') {
           arr[idx].reasoning = (arr[idx].reasoning ?? '') + (ev.delta ?? '')
         } else if (ev.type === 'done') {
-          arr[idx].content = ev.content ?? arr[idx].content
-          if (ev.messageId) arr[idx].id = ev.messageId
-          if (ev.meta) arr[idx].meta = ev.meta   // 守卫标记等元数据(卡片渲染用)
+          if (ev.cardClosed) {
+            // cv-205 落卡收尾: 卡片即回合产物, 服务端不落占位消息——
+            // 本地空占位回合同步移除(否则空白气泡; 刷新即消失=数据库本无此行)。
+            // 已流出的叙述文本保留(有价值, 尽管刷新后不回放)。
+            if (!(arr[idx].content || '').trim() && !arr[idx].reasoning) {
+              arr.splice(idx, 1)
+            }
+          } else {
+            arr[idx].content = ev.content ?? arr[idx].content
+            if (ev.messageId) arr[idx].id = ev.messageId
+            if (ev.meta) arr[idx].meta = ev.meta   // 守卫标记等元数据(卡片渲染用)
+          }
           // 用户正观看的会话流式完成 → 保持已读(后端落库时置了 unread)
           if (ev.conversationId && ev.conversationId === activeId.value) {
             sessionService.update(ev.conversationId, { reviewState: 'read' }).catch(() => { /* 无碍 */ })
