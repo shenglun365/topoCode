@@ -480,6 +480,9 @@ export default {
     tabs: { list: 'Sessions', assets: 'Requirement Tracking', switch: 'Switch view' },
     tracking: {
       title: 'Requirement Tracking',
+      convAll: 'All sessions',
+      convFilter: 'Filter by session',
+      noProject: 'No project selected — tracking is project-scoped; pick a project first',
       add: 'Add',
       titlePh: 'Item title…',
       contentPh: 'Description…',

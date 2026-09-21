@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Optional
 
-from .base import _delete, _fetchall_routed, _get, _insert, _row_to_api, _scan_dbs, _update, next_id
+from .base import _db, _delete, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _scan_dbs, _update, next_id
 from .states import (
     TASK_SAVED,
     TASK_PENDING_CONFIRM, TASK_RUNNING, TASK_WAITING_INPUT,
@@ -120,12 +121,26 @@ class TrackingItemsStore:
             "created_at": data.get("createdAt") or _now(),
             "updated_at": _now(),
         }
-        # 项目归属兜底: 缺省时从主会话行推导(任务表同款防分裂约定)
+        # 项目归属兜底: 缺省时从主会话行推导(任务表同款防分裂约定);
+        # 会话行缺失(旧数据/跨库) → 再从 ref 需求行推导(cv-204: 推导必须
+        # 跨库——会话/需求住在项目库, 只查单桶会误落主库默认桶)
         if not payload["project_id"] and payload["main_conversation_id"]:
             try:
                 from .conv import ConversationsStore
                 payload["project_id"] = ((ConversationsStore.get(
                     payload["main_conversation_id"]) or {}).get("projectId") or "")
+            except Exception:  # noqa: BLE001
+                pass
+        if not payload["project_id"] and payload["ref_id"]:
+            # cv-204 台账写入路由: 需求表无 project_id 列——需求项目归属按库位置表达
+            # (architect/<pid>/arch.db)。经 _locate_db 拿到所在库 → 解析 pid。
+            try:
+                rdb, found = _locate_db("arch_requirements", payload["ref_id"])
+                if found:
+                    _m = re.search(r"architect[/\\]([^/\\]+)[/\\]arch\.db$",
+                                   getattr(rdb, "db_path", "") or "")
+                    if _m:
+                        payload["project_id"] = _m.group(1)
             except Exception:  # noqa: BLE001
                 pass
         _insert(cls.TABLE, payload)
@@ -214,17 +229,33 @@ class TrackingItemsStore:
 
     @classmethod
     def all(cls, category: str = "", state: str = "", assignee_role: str = "",
-            q: str = "", project_id: str = None, limit: int = 200) -> list[dict]:
-        """按请求项目上下文路由读(scan 模式归并不重排 → 统一重排)。"""
+            q: str = "", project_id: str = None, conversation_id: str = "",
+            limit: int = 200) -> list[dict]:
+        """按项目读取(cv-204 项目硬隔离裁决): architect 无全局视角——
+
+        project_id 缺省回落请求上下文; 两皆无 → [](不跨库扫描, 退役 scope=all
+        语义)。conversation_id: 按会话过滤(双 ID 语义: 直接会话 | 主线会话)。
+        """
+        from .. import ctx as _ctx
+        pid = project_id or _ctx.get_project()
+        if not pid:
+            return []            # 无项目上下文 → 空结果(硬隔离, 不扫描)
+        conds, cparams = ["project_id = ?"], [pid]
+        if conversation_id:
+            conds.append("(conversation_id = ? OR main_conversation_id = ?)")
+            cparams.extend([conversation_id, conversation_id])
         where, params = cls._conds(category, state, assignee_role, q)
-        if project_id:
-            conds = ["project_id = ?"]
-            params = [project_id] + params
-            if where:
-                conds.append(where[len(" WHERE "):])
-            where = " WHERE " + " AND ".join(conds)
-        sql = f"SELECT * FROM {cls.TABLE}{where} ORDER BY created_at DESC LIMIT ?"
-        rows, mode = _fetchall_routed(cls.TABLE, sql, (*params, int(limit)), project_id)
+        if where:
+            conds.append(where[len(" WHERE "):])
+            cparams.extend(params)
+        sql = (f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+               "ORDER BY created_at DESC LIMIT ?")
+        rows, mode = _fetchall_routed(cls.TABLE, sql, (*cparams, int(limit)), pid)
+        if mode == "empty":
+            # 项目库未建 → 条目在主库默认桶(推导路由的目标)——同过滤读主库,
+            # 硬隔离语义不变(project_id = ? 恒在 WHERE)
+            rows = _db().fetchall(sql, (*cparams, int(limit)))
+            mode = "one"
         out = [_row_to_api(r) for r in rows]
         if mode == "scan":
             out.sort(key=lambda r: (r.get("createdAt") is None,

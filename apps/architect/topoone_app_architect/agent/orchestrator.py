@@ -98,7 +98,10 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
 
     meta = None
     if cmd == "提取需求":
-        res = _cmds.run_extract_req(conv, on_phase=_on_phase)
+        # cv-204 探活根修: 直通链内含 CallTurn LLM 同步调用(上限 300s)+git/DB
+        # 同步操作——事件循环上直跑会饿死 /health(supervisor 5×(5+2)s 判挂死
+        # kill, cv-201 实证)→ 与 run_confirm(:50) 同规 to_thread。
+        res = await asyncio.to_thread(_cmds.run_extract_req, conv, on_phase=_on_phase)
         logger.info("[direct-cmd] 提取需求 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or res.get('error') or '提取失败'}"
@@ -106,9 +109,11 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
             content = res.get("receipt") or "需求卡已提取。"
     elif cmd == "执行":
         # cv-200: 按钮合成路径建卡即启动(「运行」=直接开跑)
-        res = _cmds.run_execute(conv, executor_id=executor,
-                                skip_plan=skip_plan, on_phase=_on_phase,
-                                auto_start=skip_plan)
+        # cv-204: 同上 to_thread——LLM 拆步/建卡/git 链不得阻塞事件循环
+        res = await asyncio.to_thread(
+            _cmds.run_execute, conv, executor_id=executor,
+            skip_plan=skip_plan, on_phase=_on_phase,
+            auto_start=skip_plan)
         logger.info("[direct-cmd] 执行 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
         if not res.get("ok"):
             content = f"⚠️ {res.get('receipt') or '建卡失败'}"

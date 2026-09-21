@@ -27,12 +27,13 @@ def _setup_env(tmp_path, monkeypatch):
 
 
 def _mk_app():
-    from fastapi import FastAPI
+    # cv-204: 用生产 build_app——带 ?project= 项目上下文中间件(裸 router 没有,
+    # 跨线程 contextvar 不复制 → 路由内项目解析失真)
+    import os as _os
     from fastapi.testclient import TestClient
-    from topoone_app_architect.arch_routes import router as arch_router
-    app = FastAPI()
-    app.include_router(arch_router)
-    return TestClient(app, raise_server_exceptions=False)
+    from topoone_app_architect.server import build_app
+    return TestClient(build_app(data_dir=_os.environ["ARCH_DATA_DIR"]),
+                      raise_server_exceptions=False)
 
 
 def test_crud_and_main_sub_conversation(tmp_path, monkeypatch):
@@ -100,19 +101,20 @@ def test_task_lifecycle_sync(tmp_path, monkeypatch):
 def test_rest_items_manual_and_vocab(tmp_path, monkeypatch):
     _setup_env(tmp_path, monkeypatch)
     with _mk_app() as client:
-        # 手动挂账(创建者恒 user)
+        # 手动挂账(创建者恒 user; cv-204 项目硬隔离: 带项目作用域)
         res = client.post("/api/architect/tracking/items", json={
             "category": "方案", "title": "重写网关方案", "content": "设计要点…",
-            "actionType": "设计", "assigneeRole": "architect"})
+            "actionType": "设计", "assigneeRole": "architect",
+            "projectId": "pj-rest"})
         assert res.status_code == 200
         row = res.json()["data"]
         assert row["creatorRole"] == "user" and row["state"] == "waiting"
         # 缺 title 拒绝
         assert client.post("/api/architect/tracking/items",
                            json={"category": "方案"}).status_code == 400
-        # 清单(scope=all + 筛选)
+        # 清单(项目作用域 + 筛选)
         rows = client.get(
-            "/api/architect/tracking/items?scope=all&category=方案").json()["data"]["items"]
+            "/api/architect/tracking/items?projectId=pj-rest&category=方案").json()["data"]["items"]
         assert [r["title"] for r in rows] == ["重写网关方案"]
         # 流转: 标记完成 + 作废
         res = client.patch(f"/api/architect/tracking/items/{row['id']}",
@@ -139,26 +141,32 @@ def test_rest_delete_item(tmp_path, monkeypatch):
     _setup_env(tmp_path, monkeypatch)
     with _mk_app() as client:
         r1 = client.post("/api/architect/tracking/items",
-                         json={"title": "条目A"}).json()["data"]
+                         json={"title": "条目A", "projectId": "pj-del"}).json()["data"]
         r2 = client.post("/api/architect/tracking/items",
-                         json={"title": "条目B"}).json()["data"]
+                         json={"title": "条目B", "projectId": "pj-del"}).json()["data"]
         assert client.delete(f"/api/architect/tracking/items/{r1['id']}").status_code == 200
-        rows = client.get("/api/architect/tracking/items?scope=all").json()["data"]["items"]
+        rows = client.get("/api/architect/tracking/items?projectId=pj-del").json()["data"]["items"]
         assert [r["id"] for r in rows] == [r2["id"]]
         # 重复删除 → 404
         assert client.delete(f"/api/architect/tracking/items/{r1['id']}").status_code == 404
 
 
 def test_manual_requirement_emits_entry(tmp_path, monkeypatch):
-    """手工登记需求(draft) → 自动挂「需求」条目(等待用户完善)。"""
+    """手工登记需求(draft) → 自动挂「需求」条目(等待用户完善)。
+
+    cv-204 项目硬隔离: 请求带项目上下文 → 条目可按 projectId 查得;
+    无项目上下文产生的条目(主库默认桶)项目视图不可见(非全局视角)。"""
     _setup_env(tmp_path, monkeypatch)
     with _mk_app() as client:
-        res = client.post("/api/architect/requirements", json={
+        # 项目须先注册(?project= 经 _resolve_project 解析; 未注册 id → None)
+        from topoone_app_architect.arch_routes.project import _resolve_project
+        pid = _resolve_project(str(tmp_path / "proj-root"), "")["id"]
+        res = client.post(f"/api/architect/requirements?projectId={pid}", json={
             "title": "手工登记的需求", "desc": "描述"})
         assert res.status_code == 200
         rid = res.json()["data"]["id"]
         rows = client.get(
-            "/api/architect/tracking/items?scope=all&category=需求").json()["data"]["items"]
+            f"/api/architect/tracking/items?projectId={pid}&category=需求").json()["data"]["items"]
         assert len(rows) == 1
         assert rows[0]["refType"] == "requirement"
         assert rows[0]["refId"] == rid
@@ -178,8 +186,62 @@ def test_session_delete_cascades_tracking(tmp_path, monkeypatch):
     TR.emit(category="任务", title="别的会话条目", conversation_id=other["id"])
     with _mk_app() as client:
         assert client.delete(f"/api/architect/sessions/{main['id']}").status_code == 200
-        rows = client.get("/api/architect/tracking/items?scope=all").json()["data"]["items"]
+        rows = client.get("/api/architect/tracking/items?projectId=pj-a").json()["data"]["items"]
         titles = {r["title"] for r in rows}
         assert "主线任务" not in titles          # 主会话直接条目清除
         assert "子会话回执" not in titles        # 子会话条目经 main_conversation_id 清除
         assert "别的会话条目" in titles          # 无关会话不受影响
+
+
+def test_project_isolation_and_conversation_filter(tmp_path, monkeypatch):
+    """cv-204 裁决: 台账项目硬隔离 + 按会话过滤(双 ID)。
+
+    - projectId 过滤: 只见本项目条目; 无项目上下文 → 空结果(不跨库扫描)。
+    - conversationId: 双 ID 命中(直接会话 | 主线会话)。"""
+    _setup_env(tmp_path, monkeypatch)
+    ca = store.ConversationsStore.create({"title": "A 主", "projectId": "pj-a"})
+    sub = store.ConversationsStore.create({"title": "A 子", "projectId": "pj-a",
+                                           "parentConvId": ca["id"]})
+    cb = store.ConversationsStore.create({"title": "B 主", "projectId": "pj-b"})
+    TR.emit(category="任务", title="A 主线条目", conversation_id=ca["id"])
+    TR.emit(category="回执", title="A 子会话条目", conversation_id=sub["id"])
+    TR.emit(category="任务", title="B 条目", conversation_id=cb["id"])
+    with _mk_app() as client:
+        rows_a = client.get(
+            "/api/architect/tracking/items?projectId=pj-a").json()["data"]["items"]
+        assert {r["title"] for r in rows_a} == {"A 主线条目", "A 子会话条目"}
+        # 按会话过滤: 主线 ID 命中直接条目 + 子会话条目(双 ID)
+        rows_main = client.get(
+            "/api/architect/tracking/items?projectId=pj-a&conversationId="
+            + ca["id"]).json()["data"]["items"]
+        assert {r["title"] for r in rows_main} == {"A 主线条目", "A 子会话回执条目"} or \
+               {r["title"] for r in rows_main} == {"A 主线条目", "A 子会话条目"}
+        # 子会话 ID: 只命中子会话条目
+        rows_sub = client.get(
+            "/api/architect/tracking/items?projectId=pj-a&conversationId="
+            + sub["id"]).json()["data"]["items"]
+        assert [r["title"] for r in rows_sub] == ["A 子会话条目"]
+        # B 项目隔离
+        rows_b = client.get(
+            "/api/architect/tracking/items?projectId=pj-b").json()["data"]["items"]
+        assert [r["title"] for r in rows_b] == ["B 条目"]
+        # 无项目上下文 → 空(硬隔离, 不扫描)
+        assert client.get(
+            "/api/architect/tracking/items").json()["data"]["items"] == []
+
+
+def test_emit_without_project_routes_by_ref(tmp_path, monkeypatch):
+    """cv-204 T3: emit 未带 projectId → 会话行缺失时从 ref 需求行推导,
+    不再误落主库默认桶。"""
+    _setup_env(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes.store import base as _sbase
+    # 需求表无 project_id 列——项目归属按库位置表达: 直插 pj-ref 项目库
+    rdb = _sbase._target_db("arch_requirements", data={"projectId": "pj-ref"})
+    _sbase._insert_into(rdb, "arch_requirements", {
+        "id": "RQ-T3", "title": "推导源需求", "status": "ready"})
+    req = store.RequirementsStore.get("RQ-T3")
+    assert req, "需求行应可在项目库中定位"
+    TR.emit(category="需求", title="推导条目", ref_type="requirement",
+            ref_id="RQ-T3", conversation_id="")
+    got = TR.TrackingItemsStore.find_by_ref("requirement", "RQ-T3", category="需求")
+    assert got and got[0]["projectId"] == "pj-ref"

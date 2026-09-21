@@ -29,6 +29,8 @@ const props = defineProps<{
   refreshNonce?: number
   /** 字典(顶栏一次拉取, 传引用): 分类/操作类型/角色/状态。 */
   vocab?: TrackingVocab | null
+  /** 项目作用域(cv-204 裁决: 项目硬隔离, 无全局视角)——缺省取当前项目。 */
+  projectId?: string
 }>()
 
 const emit = defineEmits<{
@@ -43,6 +45,8 @@ const conv = useConversationStore()
 const loading = ref(false)
 const loadError = ref(false)
 const items = ref<TrackingItem[]>([])
+/** 会话筛选(cv-204: 按会话显示需求)——'' = 本项目全部会话。 */
+const convFilter = ref('')
 
 const STATE_CLS: Record<string, string> = {
   running: 'bg-ctp-blue/15 text-ctp-blue',
@@ -83,7 +87,9 @@ async function load() {
       state: props.state || undefined,
       assignee: props.assignee || undefined,
       q: (props.q || '').trim() || undefined,
-      scope: 'all',
+      // cv-204 项目硬隔离: 无项目上下文 → 后端返回空(不再 scope=all 跨库扫描)
+      projectId: props.projectId || undefined,
+      conversationId: convFilter.value || undefined,
       limit: 300,
     })
     items.value = r?.items || []
@@ -93,6 +99,12 @@ async function load() {
     emit('loading', false)
   }
 }
+
+watch(() => [props.projectId, convFilter.value], () => { void load() })
+
+/** 会话筛选选项: 当前项目会话(主会话)——来自会话中心已加载列表。 */
+const convOptions = computed(() =>
+  (props.sessions ?? []).filter((c) => !props.projectId || c.projectId === props.projectId))
 
 // ── 联动: 打开主会话(子会话不在会话列表时回退主会话) ──
 function convTitle(id?: string): string {
@@ -193,9 +205,21 @@ function fmtTime(ts: unknown): string {
 
 <template>
   <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden panel">
-    <!-- 头行: 挂账入口 -->
+    <!-- 头行: 会话筛选(按会话显示需求) + 挂账入口 -->
     <div class="flex shrink-0 items-center gap-1.5 border-b border-ctp-surface0 px-2 py-1.5">
       <span class="text-[10px] font-medium text-ctp-subtext1">{{ t('session.tracking.title') }}</span>
+      <select
+        v-model="convFilter"
+        class="input !w-auto !py-0.5 !px-1.5 !text-[10px] max-w-40"
+        :title="t('session.tracking.convFilter')"
+      >
+        <option value="">{{ t('session.tracking.convAll') }}</option>
+        <option
+          v-for="c in convOptions"
+          :key="c.id"
+          :value="c.id"
+        >{{ c.title || c.id }}</option>
+      </select>
       <span class="flex-1" />
       <button
         class="btn btn-xs"
@@ -205,6 +229,14 @@ function fmtTime(ts: unknown): string {
       >
         <PlusIcon class="w-3 h-3" />{{ t('session.tracking.add') }}
       </button>
+    </div>
+
+    <!-- 无项目上下空态(项目硬隔离): 引导先选项目 -->
+    <div
+      v-if="!projectId"
+      class="flex flex-1 items-center justify-center px-4 text-center text-[11px] text-ctp-overlay0"
+    >
+      {{ t('session.tracking.noProject') }}
     </div>
 
     <!-- 手动挂账表单 -->

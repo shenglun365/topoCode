@@ -37,7 +37,10 @@ export interface TrackingVocab {
 }
 
 export interface TrackingListParams {
-  scope?: string                 // 'all' = 跨全库
+  /** 项目作用域(cv-204 硬隔离): 缺省取请求项目上下文; 两皆无 → 空结果。 */
+  projectId?: string
+  /** 按会话过滤(双 ID: 直接会话 | 主线会话)。 */
+  conversationId?: string
   category?: string
   state?: string
   assignee?: string
@@ -55,7 +58,8 @@ function qs(params?: Record<string, string | number | undefined>): string {
 export const trackingService = {
   async list(params?: TrackingListParams): Promise<{ items: TrackingItem[] }> {
     return apiGet<{ items: TrackingItem[] }>(`/tracking/items${qs({
-      scope: params?.scope, category: params?.category, state: params?.state,
+      projectId: params?.projectId, conversationId: params?.conversationId,
+      category: params?.category, state: params?.state,
       assignee: params?.assignee, q: params?.q, limit: params?.limit,
     })}`)
   },

@@ -158,7 +158,23 @@ async def update_conversation(conv_id: str, request: Request):
 
 
 @router.post("/requirements")
-async def create_requirement(request: Request):
+async def create_requirement(request: Request, projectId: str = ""):
+    body = await request.json()
+    # cv-204: 显式 projectId 直设请求级项目上下文(中间件 ?project= 依赖
+    # _resolve_project 的 root 联动; 前端 projectStore 直传 id 更可靠)
+    _p_token = None
+    if (projectId or "").strip():
+        from . import ctx as _ctx
+        _p_token = _ctx.set_project(projectId.strip())
+    try:
+        return await _create_requirement_impl(request, body)
+    finally:
+        if _p_token:
+            from . import ctx as _ctx
+            _ctx.reset_project(_p_token)
+
+
+async def _create_requirement_impl(request: Request, body: dict):
     body = await request.json()
     # S5：资产地图对话来源（对话中形成的提案卡提交时携带）
     src_type = (body.get("sourceType") or "").strip()

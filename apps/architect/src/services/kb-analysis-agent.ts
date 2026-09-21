@@ -229,6 +229,17 @@ export async function chatStream(
       rejectDone(new Error(ev?.message || '对话失败'))
     })
 
+    // cv-204 R2: 后端重启/网络断 → 连接关闭且 done 永不到达——busy 挂死直到
+    // 手动刷新(实证)。断线即收口: 错误事件驱动 useChatProgress.reset(),
+    // 会话/任务卡已在服务端落库, 重连后重拉可见。
+    ws.onClose(() => {
+      if (settled) return
+      onEvent({ type: 'error', message: '连接已断开(服务可能重启)——状态已保存, 可直接重试。',
+                conversationId: opts.conversationId })
+      finish()
+      rejectDone(new Error('ws closed before done'))
+    })
+
     ws.send('chat', {
       messages,
       ...currentProjectParams(),

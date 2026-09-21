@@ -22,23 +22,26 @@ _PATCH_FIELDS = ("category", "title", "content", "actionType",
 
 
 @router.get("/tracking/items")
-async def list_items(scope: str = "", category: str = "", state: str = "",
-                     assignee: str = "", q: str = "",
+async def list_items(projectId: str = "", conversationId: str = "",
+                     category: str = "", state: str = "", assignee: str = "",
+                     q: str = "",
                      limit: int = fastapi.Query(200, alias="limit")):
-    """跟踪条目清单。?scope=all 跨全库(主库+各项目库)汇总——会话中心统一视图。
+    """跟踪条目清单(cv-204 项目硬隔离裁决): architect 无全局视角——
+
+    - projectId 缺省取请求项目上下文; 两皆无 → 空结果(不再全库扫描)。
+    - conversationId: 按会话过滤(双 ID: 直接会话 | 主线会话)——按会话显示需求。
+    - scope=all 已退役(跨库汇总视图与项目隔离冲突)。
 
     每条携带 mainConversationId + conversationId(主/子会话双 ID)与
     conversationId→会话标题由前端按会话列表映射。
     """
     cap = max(1, min(limit, 500))
-    if scope == "all":
-        rows = TR.TrackingItemsStore.all_across(
-            category=category or "", state=state or "",
-            assignee_role=assignee or "", q=q.strip() or "", limit=cap)
-    else:
-        rows = TR.TrackingItemsStore.all(
-            category=category or "", state=state or "",
-            assignee_role=assignee or "", q=q.strip() or "", limit=cap)
+    rows = TR.TrackingItemsStore.all(
+        category=category or "", state=state or "",
+        assignee_role=assignee or "", q=q.strip() or "",
+        project_id=(projectId or "").strip() or None,
+        conversation_id=(conversationId or "").strip() or None,
+        limit=cap)
     return ok({"items": rows})
 
 

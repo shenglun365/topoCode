@@ -18,9 +18,18 @@ from typing import List, Optional, Tuple
 logger = logging.getLogger("arch.governance.boundary")
 
 
-def _git_run(args: List[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=check)
+def _git_run(args: List[str], cwd: str, check: bool = True,
+             timeout: float = 15.0) -> subprocess.CompletedProcess:
+    """git 子进程有界执行(cv-204 探活根修): 就地模式下执行器 sidecar 与此处
+    同目录并发, index.lock 争用可无限阻塞——超时 kill 并降级为失败进程
+    (returncode=124), 调用方按既有非零/异常分支优雅退出, 不再悬置。"""
+    try:
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                              text=True, check=check, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args, returncode=124, stdout="",
+            stderr=f"git 超时(>{timeout}s, 疑似 index.lock 争用)——已中止")
 
 
 def resolve_boundary_files(rid: str, root: str, project: Optional[str]) -> List[str]:

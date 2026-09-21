@@ -494,10 +494,11 @@ function reviewClass(rs?: string) {
       </div>
     </section>
 
-      <!-- 需求跟踪(左栏标签页): 六维度工作台账, 跨会话统一视图, 与会话/对话联动 -->
+      <!-- 需求跟踪(左栏标签页): 六维度工作台账——项目硬隔离(cv-204), 跟随当前项目 -->
       <SessionTrackingPanel
         v-else
         :sessions="list"
+        :project-id="currentProjectId"
         :category="trackingCategory"
         :state="trackingState"
         :assignee="trackingAssignee"

@@ -504,6 +504,9 @@ export default {
     tabs: { list: '会话列表', assets: '需求跟踪', switch: '切换视图' },
     tracking: {
       title: '需求跟踪',
+      convAll: '全部会话',
+      convFilter: '按会话筛选',
+      noProject: '未选择项目——需求跟踪按项目隔离，请先选择项目',
       add: '挂账',
       titlePh: '条目标题…',
       contentPh: '内容描述…',

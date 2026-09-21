@@ -94,11 +94,24 @@ def recover_conv_tasks(conv_id: str) -> dict:
     from ...arch_routes import exec_bridge as _eb
     from ...arch_routes.store import states as ST
     out = {"finished": 0, "repump": []}
+    now_ms = int(__import__("time").time() * 1000)
     for t in _eb.store.TasksStore.of_conv(conv_id):
         if (t.get("status") or "") not in ("running", ST.TASK_WAITING_INPUT):
             continue
         job_id = t.get("runnerJobId") or ""
         if not job_id:
+            # cv-204 补窗: confirm 链中被重启截断的任务(status 已 running 但
+            # start POST 未回)——原实现静默跳过 → 永久 running 锁死会话互斥。
+            # 按更新时间防误伤在途请求(2 分钟内视为仍在进行, 交下轮再判)。
+            _upd = int(t.get("updatedAt") or t.get("createdAt") or 0)
+            if now_ms - _upd > 2 * 60 * 1000:
+                _eb._handle_task_event(
+                    {"kind": "failed",
+                     "text": "服务重启中断了任务启动(未获得执行作业)——请重新发起。"},
+                    _eb._task_ctx(conv_id, t["id"], "",
+                                  t.get("reqId") or "",
+                                  t.get("executorType") or ""))
+                out["finished"] += 1
             continue
         from ..governance.timeouts import get as _timeout_of
         snap = _eb._client().snapshot(job_id, timeout=_timeout_of("runner_snapshot"))

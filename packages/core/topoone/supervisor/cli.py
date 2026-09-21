@@ -322,6 +322,9 @@ def _health_url(name: str) -> str:
 _PROBE_POLICY = {
     "llm": (10.0, 15),    # ≈ 15 × (5+10) = 225s
     "agent": (5.0, 15),   # ≈ 15 × (5+5) = 150s
+    # cv-204: architect 同有合法长作业面(to_thread 化后的直通链/工作线程 DB
+    # 队列/git)——放宽至 ≈120s, 防未来新增阻塞点重演误杀(cv-201 实证)
+    "architect": (5.0, 12),
 }
 
 
