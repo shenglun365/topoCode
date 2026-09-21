@@ -484,16 +484,25 @@ function reqActiveTask(reqId?: string) {
 }
 
 /** 需求卡渲染载荷(方案 A): spec 消息卡 = 唯一宿主, 提案数据(m.proposal,
- * attach/rehydrate 供给)降级为载荷——标题/优先级/正文; 正文兜底播报原文。
- * active: 需求已有进行中任务(执行按钮禁用, 与后端防重守卫同口径)。 */
+ * attach/rehydrate 供给)降级为载荷——标题/优先级/完整正文(desc+实现方案+
+ * 验收标准, 不截断; 兜底播报原文)。active: 需求已有进行中任务(执行按钮
+ * 禁用, 与后端防重守卫同口径)。 */
+const specCollapsed = reactive<Record<string, boolean>>({})
 function specCard(m: any) {
   const p = m.proposal || {}
   const active = reqActiveTask(m.item?.payload?.requirementId)
-  const desc = String(p.desc || m.content || '')
+  const sections: string[] = []
+  const desc = String(p.desc || m.content || '').trim()
+  if (desc) sections.push(desc)
+  const design = String(p.design || '').trim()
+  if (design) sections.push(`## 实现方案\n${design}`)
+  const acc: string[] = Array.isArray(p.acceptance) ? p.acceptance : []
+  if (acc.length) sections.push(`## 验收标准\n${acc.map((a, i) => `${i + 1}. ${a}`).join('\n')}`)
   return {
     title: String(p.title || ''),
     priority: String(p.priority || ''),
-    desc: desc.slice(0, 600) + (desc.length > 600 ? '…' : ''),
+    body: sections.join('\n\n'),
+    hasBody: sections.length > 0,
     active: !!active,
     activeStatus: active ? String(active.status) : '',
   }
@@ -1309,8 +1318,18 @@ onUnmounted(() => {
             class="mt-2 rounded-lg border border-ctp-blue/30 bg-ctp-blue/5 px-3 py-2.5"
           >
             <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
-              <svg class="w-3.5 h-3.5 text-ctp-blue shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.6L19 9.4V19a2 2 0 0 1-2 2Z" /><path d="M14 3v6h5" /></svg>
-              <span class="text-[11px] font-medium text-ctp-blue">需求卡</span>
+              <button
+                class="flex items-center gap-1 shrink-0"
+                :title="specCollapsed[String(m.item.payload?.requirementId)] ? '展开需求内容' : '收起需求内容'"
+                @click="specCollapsed[String(m.item.payload?.requirementId)] = !specCollapsed[String(m.item.payload?.requirementId)]"
+              >
+                <svg
+                  class="w-3.5 h-3.5 text-ctp-blue transition-transform"
+                  :class="specCollapsed[String(m.item.payload?.requirementId)] ? '' : 'rotate-90'"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                ><path d="m9 18 6-6-6-6" /></svg>
+                <span class="text-[11px] font-medium text-ctp-blue">需求卡</span>
+              </button>
               <span class="font-mono text-[10px] text-ctp-overlay1">{{ m.item.payload?.requirementId }}</span>
               <span
                 v-if="specCard(m).title"
@@ -1337,7 +1356,10 @@ onUnmounted(() => {
                 class="text-[10px] text-ctp-yellow"
               >⚠️ 缺实现方案</span>
             </div>
-            <div class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-40 overflow-auto markdown-body" style="white-space: pre-wrap">{{ specCard(m).desc }}</div>
+            <div
+              v-show="!specCollapsed[String(m.item.payload?.requirementId)]"
+              class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-72 overflow-auto markdown-body whitespace-pre-wrap"
+            >{{ specCard(m).body }}</div>
             <div class="mt-2 flex items-center gap-2">
               <button
                 class="btn btn-xs btn-primary"

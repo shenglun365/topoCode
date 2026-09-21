@@ -753,3 +753,24 @@ def test_instruction_follows_isolated_toggle(tmp_path, monkeypatch):
     payload = [pl for p, pl in calls["implement"] if p == "/api/implement"][-1]
     assert payload.get("worktree") is True
     assert "worktree 分支" in payload["instruction"]
+
+
+def test_instruction_full_content_reaches_executor(tmp_path, monkeypatch):
+    """cv-205: 需求卡内容完整转入执行器——desc/designMd/acceptance 全量进
+    start payload.instruction(显示层与执行层同源, 无截断; 历史显示层曾
+    600 字截断, 本用例锁定执行链不截断)。"""
+    conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.agent.perception.commands import _instruction_from_snapshot
+    long_desc = "需求目标正文, 覆盖中间层抽象与渲染适配。" * 60    # ≫600 字
+    design = "## 方案细节\n" + "实现要点: 渲染器适配层与指令总线。\n" * 80
+    acc = [f"验收点 {i}: 可独立观测的结果" for i in range(1, 21)]
+    instr = _instruction_from_snapshot({
+        "desc": long_desc, "designMd": design,
+        "allowedScope": ["packages/**"], "forbiddenScope": [],
+        "acceptance": acc})
+    task = eb.propose_task(conv, "完整内容任务", instr, gate_diagram=False)
+    assert eb.confirm_task(task["id"])["ok"]
+    payload = [pl for p, pl in calls["implement"] if p == "/api/implement"][-1]
+    assert long_desc in payload["instruction"]       # 全量 desc(历史截断长度远小于此)
+    assert design in payload["instruction"]          # 方案全量
+    assert acc[-1] in payload["instruction"]         # 验收末条在(非截断尾部)

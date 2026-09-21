@@ -101,6 +101,9 @@ export const useConversationStore = defineStore('archConversation', () => {
       if (last && last.role === 'assistant') {
         last.proposal = {
           id: row.id, title: row.title, desc: row.desc, priority: row.priority,
+          // cv-205: 完整需求内容——需求卡全文展示并原样转入执行器
+          design: String(row.design || ''),
+          acceptance: _jsonArr(row.acceptance),
           analysis: row.analysis,
           // cv-188: propose 即 ready(门禁已拆)——实时卡按后端状态出「已存入」,
           // 与刷新后 rehydrateProposals 同口径(此前实时卡误显「确认存入」按钮)
@@ -128,6 +131,15 @@ export const useConversationStore = defineStore('archConversation', () => {
   // 富组件承载(任务清单 TaskCard/需求提案卡)不再重复渲染(落库不动, 真相源保留)
   const _TOOL_PLACEHOLDER_RE = /^[（(]\s*(?:已调用工具|调用知识库检索|调用工具|工具已调用)\s*[)）][。.!！]?\s*$/
   const _CARD_BUBBLE_KINDS = new Set(['task_card', 'specReady', 'task_status'])
+  /** acceptance 列(TEXT JSON string[])安全解析——字符串/数组皆容。 */
+  function _jsonArr(v: unknown): string[] {
+    if (Array.isArray(v)) return v.map(String)
+    if (typeof v === 'string' && v.trim()) {
+      try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(String) : [] }
+      catch { return v ? v.split('\n').filter(Boolean) : [] }
+    }
+    return []
+  }
   /** 卡片消息保留条件: 有 A6.2 投影(item) → 交卡片分支渲染(需求卡/状态条/
    * TaskCard, cv-205 重进会话与实时同构); 无投影(旧数据/投影失败) → 维持
    * 气泡过滤兜底。 */
@@ -227,6 +239,9 @@ export const useConversationStore = defineStore('archConversation', () => {
       for (const r of mine) {
         const proposal = {
           id: r.id, title: r.title, desc: r.desc || '', priority: r.priority || 'P1',
+          // cv-205: 完整需求内容——需求卡全文展示并原样转入执行器
+          design: String(r.design || ''),
+          acceptance: _jsonArr(r.acceptance),
           analysis: r.analysis || {},
           // 确认态: 新生命周期 ready/done 即已存入; 兼容旧 analyzed(池化)
           confirmed: ['ready', 'done'].includes(r.status)
