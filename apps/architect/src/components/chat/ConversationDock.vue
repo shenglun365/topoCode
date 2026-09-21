@@ -204,17 +204,17 @@ function connectConvEvents() {
     const tok = getToken()
     const qs = tok ? `?token=${encodeURIComponent(tok)}` : ''
     evtSource = new EventSource(`${apiBaseUrl()}/events${qs}`)
-    console.debug('[arch-live] SSE connecting')
-    evtSource.onopen = () => console.debug('[arch-live] SSE open')
+    console.info('[arch-live] SSE connecting')
+    evtSource.onopen = () => console.info('[arch-live] SSE open')
     evtSource.onmessage = (ev) => {
       try {
         const d = JSON.parse(ev.data)
-        console.debug('[arch-live] SSE event', d?.type, d?.conversationId)
+        console.info('[arch-live] SSE event', d?.type, d?.conversationId)
         onConvEvent(d)
       } catch { /* 非事件帧忽略 */ }
     }
     evtSource.onerror = () => {
-      console.debug('[arch-live] SSE error → 5s 重连')
+      console.info('[arch-live] SSE error → 5s 重连')
       disconnectConvEvents()
       evtReconnect = setTimeout(connectConvEvents, 5000)
     }

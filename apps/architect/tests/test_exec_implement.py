@@ -407,7 +407,11 @@ def test_task_progress_sse_no_message(tmp_path, monkeypatch):
     eb._handle_task_event({"kind": "progress", "toolCount": 7, "msgCount": 2}, ctx)
     t = store.TasksStore.get(task["id"])
     assert t["progress"]["toolCount"] == 7
-    assert broadcast and broadcast[-1]["type"] == "progress" and broadcast[-1]["taskId"] == task["id"]
+    # cv-205 修复后: progress 广播 + 状态卡 conv-message 通知(此前 emit 形状
+    # 错误 TypeError 被静默吞掉, 通知从未真正发出——mock 固化了坏形状)
+    progress_ev = [e for e in broadcast if e["type"] == "progress"]
+    assert progress_ev and progress_ev[-1]["taskId"] == task["id"]
+    assert broadcast[-1]["type"] == "conv-message"
     n_before = len(store.ConversationsStore.messages(conv["id"]))
     eb._handle_task_event({"kind": "progress", "toolCount": 9, "msgCount": 3}, ctx)
     assert len(store.ConversationsStore.messages(conv["id"])) == n_before  # 不落消息

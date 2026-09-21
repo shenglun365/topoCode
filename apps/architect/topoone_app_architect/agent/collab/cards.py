@@ -105,8 +105,7 @@ def land(conv_id: str, text: str, kind: Optional[str] = None, *,
         try:
             logger.info("[cards] land conv=%s kind=%s id=%s → emit conv-message",
                         conv_id, kind or "", row["id"])
-            emit("conv-message", conv_id, msgId=row["id"], agent=agent or "",
-                 kind=kind or "")
+            emit(conv_id, row["id"], agent=agent or "", kind=kind or "")
         except Exception:  # noqa: BLE001
             logger.exception("[cards] conv-message emit 失败 conv=%s", conv_id)
         return row
@@ -132,7 +131,7 @@ def land_status(conv_id: str, text: str, task_id: str, *, status: str = "",
              "time": int(__import__("time").time() * 1000)})
         if upd:
             try:
-                emit("conv-message", conv_id, msgId=upd["id"],
+                emit(conv_id, upd["id"],
                      agent=agent or "", kind=KIND_TASK_STATUS)
             except Exception:  # noqa: BLE001
                 pass

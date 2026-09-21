@@ -339,7 +339,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         } else if (ev.type === 'reasoning') {
           arr[idx].reasoning = (arr[idx].reasoning ?? '') + (ev.delta ?? '')
         } else if (ev.type === 'done') {
-          console.debug('[arch-live] done', { cardClosed: (ev as any).cardClosed,
+          console.info('[arch-live] done', { cardClosed: (ev as any).cardClosed,
             content: (ev.content || '').slice(0, 40), turnHasText: !!arr[idx]?.content })
           if (ev.cardClosed) {
             // cv-205 落卡收尾: 卡片即回合产物, 服务端不落占位消息——
@@ -442,11 +442,11 @@ export const useConversationStore = defineStore('archConversation', () => {
   let pendingMsgRefresh = false
   async function refreshActiveMessages() {
     if (!activeId.value) return
-    if (busy.value) { pendingMsgRefresh = true; console.debug('[arch-live] refresh 推迟(busy)'); return }
+    if (busy.value) { pendingMsgRefresh = true; console.info('[arch-live] refresh 推迟(busy)'); return }
     try {
       const detail = await sessionService.messages(activeId.value)
       const _cards = (detail?.messages ?? []).filter((m: any) => m?.meta?.kind || m?.item)
-      console.debug('[arch-live] refresh 拉到', (detail?.messages ?? []).length, '条, 卡片',
+      console.info('[arch-live] refresh 拉到', (detail?.messages ?? []).length, '条, 卡片',
         _cards.map((m: any) => m?.meta?.kind || m?.item?.type).join(','))
       if (activeId.value && !busy.value) {
         applyConversation({ ...detail, reqId: activeReqId.value, title: activeTitle.value } as any)
@@ -461,7 +461,7 @@ export const useConversationStore = defineStore('archConversation', () => {
   function flushPendingMsgRefresh() {
     if (!pendingMsgRefresh) return
     pendingMsgRefresh = false
-    console.debug('[arch-live] flush 挂起刷新(250ms 后)')
+    console.info('[arch-live] flush 挂起刷新(250ms 后)')
     setTimeout(() => { if (!busy.value) void refreshActiveMessages() }, 250)
   }
 

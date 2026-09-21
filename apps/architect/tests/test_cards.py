@@ -30,7 +30,7 @@ def test_land_appends_meta_review_and_sse(arch_env, monkeypatch):
     from topoone_app_architect.agent.collab import cards
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     sse = []
-    monkeypatch.setattr(cards, "emit", lambda _t, cid, msgId="", agent="", kind="": sse.append((cid, msgId, kind)))
+    monkeypatch.setattr(cards, "emit", lambda cid, mid, agent="", kind="": sse.append((cid, mid, kind)))
     row = cards.land(conv["id"], "卡内容", kind=cards.KIND_REQUIREMENT,
                      requirementId="RQ-1", ver=1)
     assert row and row["id"]
@@ -69,7 +69,7 @@ def test_legacy_wrappers_delegate_to_land(arch_env, monkeypatch):
     from topoone_app_architect.agent.collab import cards
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     sse = []
-    monkeypatch.setattr(cards, "emit", lambda _t, cid, msgId="", agent="", kind="": sse.append(kind))
+    monkeypatch.setattr(cards, "emit", lambda cid, mid, agent="", kind="": sse.append(kind))
     # log_conv_event 委托
     from topoone_app_architect.arch_routes import req_agent
     req_agent.log_conv_event(conv["id"], "需求卡", meta={"kind": "specReady",
