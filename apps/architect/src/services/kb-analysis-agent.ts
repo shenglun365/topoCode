@@ -61,6 +61,9 @@ export interface KbAnalysisTurn {
     design?: string
     /** 验收标准(string[])。 */
     acceptance?: string[]
+    /** 允许/禁止改动范围——需求卡与执行器指令同构(五段)。 */
+    allowedScope?: string[]
+    forbiddenScope?: string[]
     analysis?: Record<string, any>; confirmed?: boolean }
   /** 后端持久化消息 id(对话流单条删除用)。 */
   id?: string

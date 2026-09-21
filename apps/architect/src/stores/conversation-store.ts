@@ -104,6 +104,8 @@ export const useConversationStore = defineStore('archConversation', () => {
           // cv-205: 完整需求内容——需求卡全文展示并原样转入执行器
           design: String(row.design || ''),
           acceptance: _jsonArr(row.acceptance),
+          allowedScope: _jsonArr(row.allowedScope),
+          forbiddenScope: _jsonArr(row.forbiddenScope),
           analysis: row.analysis,
           // cv-188: propose 即 ready(门禁已拆)——实时卡按后端状态出「已存入」,
           // 与刷新后 rehydrateProposals 同口径(此前实时卡误显「确认存入」按钮)
@@ -242,6 +244,8 @@ export const useConversationStore = defineStore('archConversation', () => {
           // cv-205: 完整需求内容——需求卡全文展示并原样转入执行器
           design: String(r.design || ''),
           acceptance: _jsonArr(r.acceptance),
+          allowedScope: _jsonArr(r.allowedScope),
+          forbiddenScope: _jsonArr(r.forbiddenScope),
           analysis: r.analysis || {},
           // 确认态: 新生命周期 ready/done 即已存入; 兼容旧 analyzed(池化)
           confirmed: ['ready', 'done'].includes(r.status)

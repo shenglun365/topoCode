@@ -484,20 +484,30 @@ function reqActiveTask(reqId?: string) {
 }
 
 /** 需求卡渲染载荷(方案 A): spec 消息卡 = 唯一宿主, 提案数据(m.proposal,
- * attach/rehydrate 供给)降级为载荷——标题/优先级/完整正文(desc+实现方案+
- * 验收标准, 不截断; 兜底播报原文)。active: 需求已有进行中任务(执行按钮
- * 禁用, 与后端防重守卫同口径)。 */
+ * attach/rehydrate 供给)降级为载荷。正文 = 五段 MD(与执行器指令同构:
+ * 需求目标/方案/允许改动范围/禁止改动/验收标准——所见即所得), 不截断;
+ * 兜底播报原文。active: 需求已有进行中任务(执行按钮禁用)。 */
 const specCollapsed = reactive<Record<string, boolean>>({})
 function specCard(m: any) {
   const p = m.proposal || {}
   const active = reqActiveTask(m.item?.payload?.requirementId)
   const sections: string[] = []
   const desc = String(p.desc || m.content || '').trim()
-  if (desc) sections.push(desc)
+  if (desc) sections.push(`## 需求目标\n\n${desc}`)
   const design = String(p.design || '').trim()
-  if (design) sections.push(`## 实现方案\n${design}`)
+  if (design) sections.push(`## 方案\n\n${design}`)
+  const allowed: string[] = Array.isArray(p.allowedScope) ? p.allowedScope : []
+  if (allowed.length) {
+    sections.push('## 允许改动范围\n\n' + allowed.map((x) => `- ${x}`).join('\n'))
+  }
+  const forbidden: string[] = Array.isArray(p.forbiddenScope) ? p.forbiddenScope : []
+  if (forbidden.length) {
+    sections.push('## 禁止改动\n\n' + forbidden.map((x) => `- ${x}`).join('\n'))
+  }
   const acc: string[] = Array.isArray(p.acceptance) ? p.acceptance : []
-  if (acc.length) sections.push(`## 验收标准\n${acc.map((a, i) => `${i + 1}. ${a}`).join('\n')}`)
+  if (acc.length) {
+    sections.push('## 验收标准\n\n' + acc.map((a, i) => `${i + 1}. ${a}`).join('\n'))
+  }
   return {
     title: String(p.title || ''),
     priority: String(p.priority || ''),
@@ -1358,8 +1368,10 @@ onUnmounted(() => {
             </div>
             <div
               v-show="!specCollapsed[String(m.item.payload?.requirementId)]"
-              class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-72 overflow-auto markdown-body whitespace-pre-wrap"
-            >{{ specCard(m).body }}</div>
+              class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-72 overflow-auto [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-[11px] [&_h2]:font-semibold [&_p]:my-1 [&_ul]:my-1 [&_li]:ml-4"
+            >
+              <ChatMessageBlocks :content="specCard(m).body" />
+            </div>
             <div class="mt-2 flex items-center gap-2">
               <button
                 class="btn btn-xs btn-primary"
