@@ -126,7 +126,11 @@ export const useConversationStore = defineStore('archConversation', () => {
   // cv-194/cv-196: 展示层过滤——纯占位气泡隐藏; task_card/specReady 气泡由
   // 富组件承载(任务清单 TaskCard/需求提案卡)不再重复渲染(落库不动, 真相源保留)
   const _TOOL_PLACEHOLDER_RE = /^[（(]\s*(?:已调用工具|调用知识库检索|调用工具|工具已调用)\s*[)）][。.!！]?\s*$/
-  const _CARD_BUBBLE_KINDS = new Set(['task_card', 'specReady'])
+  const _CARD_BUBBLE_KINDS = new Set(['task_card', 'specReady', 'task_status'])
+  /** 卡片消息保留条件: 有 A6.2 投影(item) → 交卡片分支渲染(需求卡/状态条/
+   * TaskCard, cv-205 重进会话与实时同构); 无投影(旧数据/投影失败) → 维持
+   * 气泡过滤兜底。 */
+  const _card_kept = (m: any) => !_CARD_BUBBLE_KINDS.has(m?.meta?.kind || '') || !!m?.item
 
   /** 任务刷新(会话打开/操作后/SSE task 事件)。 */
   async function refreshTasks() {
@@ -165,8 +169,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
     // 旧会话可能累积了重复的页面引导消息——相邻同文 assistant 消息折叠为一条
     turns.value = msgs
-      .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: (m as any).meta, agent: (m as any).agent || '' }))
-      .filter((m) => !_CARD_BUBBLE_KINDS.has(((m.meta as any)?.kind) || ''))
+      .map((m) => ({ role: m.role, content: m.content, id: m.id, meta: (m as any).meta, agent: (m as any).agent || '', item: (m as any).item }))
+      .filter(_card_kept)
       .filter((m) => !(m.role === 'assistant' && m.content && _TOOL_PLACEHOLDER_RE.test(m.content.trim())
         && (m.meta as any)?.kind !== 'tool_round'))
       .filter((m) => !(m.role === 'user' && (m.meta as any)?.synthetic))

@@ -473,6 +473,16 @@ function taskById(id?: string) {
   return (props.tasks || []).find((t) => t.id === id) || null
 }
 
+/** 需求卡的执行按钮状态检测(cv-205): 需求已有进行中任务(running/
+ * waiting_input/pending_confirm) → 禁用一键建卡执行(后端同守卫兜底,
+ * cv-203 防重复执行); saved 不算进行中(建卡走修订分支); 终态可重试。 */
+const _ACTIVE_TASK_STATUS = new Set(['running', 'waiting_input', 'pending_confirm'])
+function reqActiveTask(reqId?: string) {
+  if (!reqId) return null
+  return (props.tasks || []).find((t: any) => (t.reqId || '') === reqId
+    && _ACTIVE_TASK_STATUS.has(String(t.status || ''))) || null
+}
+
 // ── 模型 chip: 随选随生效(下次执行; 进行中作业模型已固化) ──
 const modelMenuOpen = ref(false)
 function onModelClick() {
@@ -1299,11 +1309,20 @@ onUnmounted(() => {
             <div class="mt-2 flex items-center gap-2">
               <button
                 class="btn btn-xs btn-primary"
-                :disabled="busy"
-                title="从已定稿规约生成待确认任务卡"
+                :disabled="busy || !!reqActiveTask(m.item.payload?.requirementId)"
+                :title="reqActiveTask(m.item.payload?.requirementId)
+                  ? `该需求已有进行中的任务（${reqActiveTask(m.item.payload?.requirementId)?.status}）——不可重复执行`
+                  : '从已定稿规约生成待确认任务卡'"
                 @click="emit('send', { text: '/执行' })"
-              >一键建卡执行</button>
-              <span class="text-[10px] text-ctp-overlay0">卡上确认后 coding subagent 启动</span>
+              >{{ reqActiveTask(m.item.payload?.requirementId) ? '执行中' : '一键建卡执行' }}</button>
+              <span
+                v-if="reqActiveTask(m.item.payload?.requirementId)"
+                class="text-[10px] text-ctp-overlay0"
+              >任务卡见下方/任务清单——完成后可再次发起</span>
+              <span
+                v-else
+                class="text-[10px] text-ctp-overlay0"
+              >卡上确认后 coding subagent 启动</span>
             </div>
           </div>
 
