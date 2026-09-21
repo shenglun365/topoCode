@@ -17,6 +17,7 @@ import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import SessionOutlineWindow from '@/components/chat/SessionOutlineWindow.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
+import { currentProjectParams } from '@/services/project-service'
 import { namingService } from '@/services/naming-service'
 import { apiBaseUrl, apiGet, apiPost, getToken } from '@/services/api-client'
 import { readModelPref } from '@topo/web-core/shell'
@@ -52,6 +53,10 @@ const mining = ref(false)
 function activeProject(): string {
   return ((conv.activeMeta as any)?.projectId || '') as string
 }
+/** 项目作用域(cv-204 硬隔离): 活动会话项目 → URL 项目; 皆无 → ''(空态, 不发全局查询)。 */
+function scopePid(): string {
+  return activeProject() || currentProjectParams().project || ''
+}
 async function mineActive() {
   const pid = activeProject()
   if (!conv.activeId || !pid || mining.value) return
@@ -77,8 +82,10 @@ async function archiveActive() {
 
 async function loadRecent() {
   try {
-    // scope=all: 跨全库汇总 — 与会话中心同口径(会话管理+资产管理统一视图)
-    recent.value = await sessionService.list({ limit: 30, scope: 'all' })
+    // cv-205 项目硬隔离: 只拉当前项目会话(无项目上下文 → 空列表, 不发 scope=all)
+    const pid = scopePid()
+    if (!pid) { recent.value = []; return }
+    recent.value = await sessionService.list({ limit: 30, project: pid })
   } catch { /* 列表失败保持旧值 */ }
 }
 
@@ -579,8 +586,10 @@ async function stopExec() {
 async function syncRunningState(force = false) {
   if (!conv.activeId) return
   if (!force && !isRunning.value) return
+  if (!scopePid()) return   // cv-205: 无项目上下文不查询(硬隔离)
   try {
-    const list = await sessionService.list({ limit: 400, scope: 'all' })
+    // cv-205: 活动会话必属当前项目——按项目查(不发 scope=all)
+    const list = await sessionService.list({ limit: 400, project: scopePid() })
     const meta = list.find((c) => c.id === conv.activeId)
     if (meta) {
       const prev = workState.value

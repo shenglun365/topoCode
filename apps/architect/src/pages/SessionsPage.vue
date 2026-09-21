@@ -121,7 +121,14 @@ async function load() {
   loading.value = true
   try {
     const pid = currentProjectId.value
-    const allMode = includeAllProjects.value || !pid
+    // cv-204/205 项目硬隔离裁决: 全局视角不存在——scope=all 仅显式「全部项目」
+    // 开关可达; 无项目上下文 → 空态引导, 不发全局查询
+    if (!pid && !includeAllProjects.value) {
+      list.value = []
+      groupsInfo.value = { groups: [], modules: [] }
+      return
+    }
+    const allMode = includeAllProjects.value
     const [l, g] = await Promise.all([
       allMode
         ? sessionService.list({ limit: 400, scope: 'all' })
