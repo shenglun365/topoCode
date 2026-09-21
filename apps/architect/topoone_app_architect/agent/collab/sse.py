@@ -19,22 +19,31 @@ def bind_loop() -> None:
     """绑定当前事件循环(应用启动时调用)。"""
     global _loop
     _loop = asyncio.get_running_loop()
+    logger.info("[sse] loop bound, queues=%d", len(_queues))
 
 
 def subscribe() -> "asyncio.Queue[dict]":
     q: asyncio.Queue = asyncio.Queue(maxsize=64)
     _queues.add(q)
+    logger.info("[sse] subscribe queues=%d", len(_queues))
     return q
 
 
 def unsubscribe(q: "asyncio.Queue[dict]") -> None:
     _queues.discard(q)
+    logger.info("[sse] unsubscribe queues=%d", len(_queues))
 
 
 def publish(event: dict) -> None:
     """广播事件到全部订阅者(满队列丢弃——SSE 客户端重拉兜底)。"""
     if _loop is None:
+        logger.warning("[sse] publish dropped(loop unbound): %s", event.get("type"))
         return
+    if not _queues:
+        # cv-205 诊断: 事件无人接收(前端 SSE 未挂/被网关断开)——落卡不可见的
+        # 根因定位口(实证: keep-alive 到达而 conv-message 为零)
+        logger.warning("[sse] publish dropped(no subscriber): type=%s conv=%s",
+                       event.get("type"), event.get("conversationId"))
 
     def _fan() -> None:
         for q in list(_queues):

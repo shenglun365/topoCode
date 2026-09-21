@@ -103,10 +103,12 @@ def land(conv_id: str, text: str, kind: Optional[str] = None, *,
             except Exception:  # noqa: BLE001
                 pass
         try:
+            logger.info("[cards] land conv=%s kind=%s id=%s → emit conv-message",
+                        conv_id, kind or "", row["id"])
             emit("conv-message", conv_id, msgId=row["id"], agent=agent or "",
                  kind=kind or "")
         except Exception:  # noqa: BLE001
-            pass
+            logger.exception("[cards] conv-message emit 失败 conv=%s", conv_id)
         return row
     except ValueError:
         raise
