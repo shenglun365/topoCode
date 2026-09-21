@@ -1863,16 +1863,15 @@ onUnmounted(() => {
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>
       </button>
       <!-- worktree 隔离挡位(cv-202/cv-203): 关(缺省, 置灰) / 开(高亮)——
-           文案显式标注开关状态, 不用模式名(就地)暗示另一形态 -->
+           开关状态走悬停 tooltip(直显文字占工具栏空间, 用户裁决) -->
       <button
-        class="btn btn-xs gap-1 !pr-2"
+        class="btn btn-xs !px-1.5"
         :class="isolatedOn ? 'btn-blue' : 'btn-ghost opacity-50 hover:opacity-100'"
         :disabled="quickLocked"
         :title="isolatedTitle"
         @click="toggleIsolated"
       >
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5" /><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5" /><path d="M21 3l-9 9" /></svg>
-        <span class="text-[10px] font-medium whitespace-nowrap">隔离模式 {{ isolatedOn ? '开' : '关' }}</span>
       </button>
       <!-- 语境摘要(仅转达语境): 选史 → 生成摘要 → 随转达下发执行器 -->
       <button
