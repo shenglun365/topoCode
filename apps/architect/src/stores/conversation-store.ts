@@ -86,7 +86,9 @@ export const useConversationStore = defineStore('archConversation', () => {
     insertDraft.value = { text, nonce: ++draftNonce }
   }
 
-  /** 提案卡: tool_result(req.propose) → 拉取需求详情挂到当前助手回合(arr=流式回合所在数组, 场景切换安全)。 */
+  /** 提案卡: tool_result(req.propose) → 拉取需求详情挂到当前助手回合(arr=流式回合所在数组, 场景切换安全)。
+   * cv-205 方案 A: 提案卡渲染已退役——需求唯一宿主是 specReady 消息卡(会话
+   * 刷新链 rehydrateProposals 供给载荷)。本函数只保留 会话↔需求绑定 语义。 */
   async function attachProposal(ev: ChatStreamEvent, arr: KbAnalysisTurn[]) {
     try {
       const m = String(ev.summary || '').match(/RQ-\d+/)
@@ -97,22 +99,6 @@ export const useConversationStore = defineStore('archConversation', () => {
       if (!row?.id) return
       // 绑定会话↔需求：自然语言「确认存入」经 agent req.finalize 时依赖此绑定
       activeReqId.value = row.id
-      const last = arr[arr.length - 1]
-      if (last && last.role === 'assistant') {
-        last.proposal = {
-          id: row.id, title: row.title, desc: row.desc, priority: row.priority,
-          // cv-205: 完整需求内容——需求卡全文展示并原样转入执行器
-          design: String(row.design || ''),
-          acceptance: _jsonArr(row.acceptance),
-          allowedScope: _jsonArr(row.allowedScope),
-          forbiddenScope: _jsonArr(row.forbiddenScope),
-          analysis: row.analysis,
-          // cv-188: propose 即 ready(门禁已拆)——实时卡按后端状态出「已存入」,
-          // 与刷新后 rehydrateProposals 同口径(此前实时卡误显「确认存入」按钮)
-          confirmed: ['ready', 'done'].includes(row.status)
-            || ((row.location ?? 'proposal') === 'pool' && row.status === 'analyzed'),
-        }
-      }
     } catch { /* 提案卡失败不影响对话 */ }
   }
 
@@ -251,11 +237,20 @@ export const useConversationStore = defineStore('archConversation', () => {
           confirmed: ['ready', 'done'].includes(r.status)
             || ((r.location ?? 'proposal') === 'pool' && r.status === 'analyzed'),
         }
-        // 挂到内容中提到该 RQ 编号的最后一条助手消息; 没提到则兜底最后一条空位助手消息
+        // 挂载目标(方案 A): 优先 spec 消息卡(item.type==='spec' 同需求)——
+        // 需求卡唯一宿主吃这份载荷; 兜底 内容含 RQ 编号的最后一条助手消息
+        // → 最后一条空位助手消息(非 spec 流/旧数据)
         let target = -1
         for (let i = turns.value.length - 1; i >= 0; i--) {
           const t = turns.value[i]
-          if (t.role === 'assistant' && (t.content || '').includes(r.id)) { target = i; break }
+          if (t.role === 'assistant' && (t as any).item?.type === 'spec'
+            && (t as any).item?.payload?.requirementId === r.id) { target = i; break }
+        }
+        if (target < 0) {
+          for (let i = turns.value.length - 1; i >= 0; i--) {
+            const t = turns.value[i]
+            if (t.role === 'assistant' && (t.content || '').includes(r.id)) { target = i; break }
+          }
         }
         if (target < 0) {
           for (let i = turns.value.length - 1; i >= 0; i--) {

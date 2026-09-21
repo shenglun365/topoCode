@@ -483,6 +483,13 @@ function reqActiveTask(reqId?: string) {
     && _ACTIVE_TASK_STATUS.has(String(t.status || ''))) || null
 }
 
+/** 同需求是否已有 spec 消息卡(唯一宿主存在 → S5 提案卡让位, 实时/刷新同构)。 */
+function hasSpecCardFor(reqId?: string) {
+  if (!reqId) return false
+  return props.turns.some((t: any) =>
+    t.item?.type === 'spec' && t.item?.payload?.requirementId === reqId)
+}
+
 /** 需求卡渲染载荷(方案 A): spec 消息卡 = 唯一宿主, 提案数据(m.proposal,
  * attach/rehydrate 供给)降级为载荷。正文 = 五段 MD(与执行器指令同构:
  * 需求目标/方案/允许改动范围/禁止改动/验收标准——所见即所得), 不截断;
@@ -1665,10 +1672,10 @@ onUnmounted(() => {
           </div>
 
           <!-- S5 需求提案卡（req.propose 产出：需求+方案+评估 → 前往需求方案）
-               cv-205 方案 A: spec 消息卡为需求唯一宿主——同消息不再叠渲染提案卡;
-               非消息形态(资产对话流等)照旧 -->
+               cv-205 方案 A: 需求唯一宿主 = spec 消息卡——同需求存在 spec 卡时
+               提案卡不渲染(含实时挂载时序窗口); 仅非 spec 流/旧数据兜底 -->
           <div
-            v-if="m.proposal && m.item?.type !== 'spec'"
+            v-if="m.proposal && m.item?.type !== 'spec' && !hasSpecCardFor(m.proposal.id)"
             class="mt-2 border border-ctp-green/30 bg-ctp-green/5 rounded-lg overflow-hidden"
           >
             <div class="flex items-center gap-1.5 px-2 py-1.5">
