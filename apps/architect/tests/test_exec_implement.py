@@ -653,3 +653,79 @@ def test_task_create_same_db_as_conversation(tmp_path, monkeypatch):
     assert proj.fetchall("SELECT id FROM arch_tasks WHERE id=?", (t["id"],))
     assert not _db().fetchall("SELECT id FROM arch_tasks WHERE id=?", (t["id"],))
     assert len(store.TasksStore.of_conv(conv["id"])) == 1
+
+
+# ══════════════════════════════════════════════════════════════════
+# cv-203: 防重复执行 + 状态卡单卡原位更新 + 回执降级/标签
+# ══════════════════════════════════════════════════════════════════
+
+def test_propose_task_duplicate_guard(tmp_path, monkeypatch):
+    """同需求存在进行中任务(running/waiting_input) → 拒绝建新卡;
+    终态(done)不拦; saved 不算进行中(走改写分支)。"""
+    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    store.ConversationsStore.update(conv["id"], {"reqId": "RQ-DUP"})
+    t = store.TasksStore.create({"conversationId": conv["id"], "projectId": "proj-v2",
+                                 "reqId": "RQ-DUP", "title": "先行任务",
+                                 "instruction": "x", "status": "running",
+                                 "executorType": "opencode"})
+    res = eb.propose_task(conv, "第二个任务", "y", gate_diagram=False)
+    assert not res.get("ok") and "不可重复执行" in str(res.get("error")), res
+    store.TasksStore.update(t["id"], {"status": "done"})
+    res2 = eb.propose_task(conv, "重试任务", "y", gate_diagram=False)
+    assert res2.get("ok"), res2   # 终态可重试
+
+
+def test_status_card_upsert_single_row(tmp_path, monkeypatch):
+    """状态卡(cv-203): 同 taskId 多次 land_status → 单行原位更新, 不追加。"""
+    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.agent.collab import cards
+    r1 = cards.land_status(conv["id"], "🔄 执行中", "t-st", status="running")
+    assert r1
+    n1 = len([m for m in store.ConversationsStore.messages(conv["id"])
+              if (m.get("meta") or {}).get("kind") == "task_status"])
+    r2 = cards.land_status(conv["id"], "✅ 已完成", "t-st", status="done")
+    msgs = store.ConversationsStore.messages(conv["id"])
+    st = [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_status"]
+    assert len(st) == 1, "同 taskId 状态卡必须单卡"
+    assert st[0]["content"] == "✅ 已完成" and st[0]["meta"]["status"] == "done"
+    assert r1["id"] == r2["id"]   # 原位更新同一行
+    # 不同 taskId → 各自独立一卡
+    cards.land_status(conv["id"], "另一任务", "t-st2", status="running")
+    st2 = [m for m in store.ConversationsStore.messages(conv["id"])
+           if (m.get("meta") or {}).get("kind") == "task_status"]
+    assert len(st2) == 2
+
+
+def test_done_receipt_suspect_summary_and_inplace_label(tmp_path, monkeypatch):
+    """cv-203 P2/P3: suspect 摘要降级展示 + 就地任务不显示分支标签。"""
+    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    task = eb.propose_task(conv, "就地任务", "x", gate_diagram=False)
+    eb.confirm_task(task["id"])
+    ctx = eb._task_ctx(conv["id"], task["id"], "job-v2-1", "", "opencode")
+    plan_text = "[[NEED_INPUT]] ## 里程碑计划 M1~M5 " * 3 + "[[IMPLEMENT_DONE]]"
+    eb._handle_task_event({"kind": "done", "text": plan_text,
+                           "summaryQuality": "suspect",
+                           "changedFiles": ["a.py", "b.ts"]}, ctx)
+    msgs = store.ConversationsStore.messages(conv["id"])
+    done = [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_done"][-1]
+    assert "未附规范完成摘要" in done["content"]
+    assert "就地模式" in done["content"]
+    assert "分支" not in done["content"], "就地任务不应显示分支标签"
+    assert "a.py" in done["content"] and "b.ts" in done["content"]
+    # 台账 result_md 同步降级(不存计划重印)
+    assert "里程碑计划" not in (store.TasksStore.get(task["id"]).get("resultMd") or "")
+
+
+def test_input_required_strips_tool_echo_json(tmp_path, monkeypatch):
+    """cv-203 P4: 执行器 outcome-recorded 工具回声 JSON 不入转达正文。"""
+    conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
+    task = eb.propose_task(conv, "回声任务", "x", gate_diagram=False)
+    eb.confirm_task(task["id"])
+    ctx = eb._task_ctx(conv["id"], task["id"], "job-v2-1", "", "opencode")
+    eb._handle_task_event({"kind": "input_required",
+                           "text": '[[NEED_INPUT]] {"result":"outcome recorded: need_input","success":true}\n选哪个库?'},
+                          ctx)
+    msgs = store.ConversationsStore.messages(conv["id"])
+    ask = [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_input"][-1]
+    assert "outcome recorded" not in ask["content"]
+    assert "选哪个库?" in ask["content"]

@@ -63,8 +63,37 @@ _COLLAB_PROTOCOL = """
 - 需要用户操作/确认/澄清/补充时：在回合输出中写 `[[NEED_INPUT]]` 并附具体问题，然后结束回合等待用户。
 - 开发+单元测试+整体编译验收全部完成时：在回合输出中写 `[[IMPLEMENT_DONE]]`，附摘要(变更文件/单测结果/编译结果/遗留项)，然后结束回合。
 - 严禁在未完成上述三项交付时输出 `[[IMPLEMENT_DONE]]`。
+- DONE 消息**只写完成摘要**——禁止重复里程碑计划、历史讨论或待确认问题(cv-203:
+  计划重印会被识别为无效摘要, 回执降级展示)。
 - 除上述两个标记外不要输出其他 [[...]] 标记。
 """
+
+# 非 git 变更清点(cv-203): 就地主战场常无 git(status 不可用 → 变更恒空,
+# 验收链失效)。基线快照差集兜底——排除重目录, 封顶防失控。
+_DIFF_EXCLUDES = {".git", "node_modules", "dist", "build", "out", ".next",
+                  "target", "__pycache__", ".venv", "venv", ".pnpm-store",
+                  "coverage", ".cache", ".turbo", ".nuxt", ".output", "vendor"}
+_DIFF_MAX_FILES = 20000
+_DIFF_MAX_LIST = 500
+
+
+def _snapshot_files(root: str) -> Dict[str, float]:
+    """root → {relpath: mtime}(变更清点基线; 排除重目录/数量封顶)。"""
+    out: Dict[str, float] = {}
+    base = os.path.abspath(root)
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in _DIFF_EXCLUDES]
+        for fn in filenames:
+            p = os.path.join(dirpath, fn)
+            try:
+                out[os.path.relpath(p, base)] = os.path.getmtime(p)
+            except OSError:      # 竞态删除/权限——跳过
+                continue
+            if len(out) >= _DIFF_MAX_FILES:
+                return out
+        if len(out) >= _DIFF_MAX_FILES:
+            break
+    return out
 
 
 def _git(args: list, cwd: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -108,6 +137,17 @@ class ImplementJob:
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.status = "starting"      # starting/running/waiting_input/done/failed/stopped
         self.error = ""
+        # 非 git 变更清点基线(cv-203): git 目录不快照(status 路径够用);
+        # 无 git 目录在作业启动前留底, 收尾差集=新增/修改/删除
+        _wd = (self.wt if os.path.isdir(self.wt)
+               else (self.root if os.path.isdir(self.root) else ""))
+        if _wd:
+            _gh = _git(["rev-parse", "--git-dir"], cwd=_wd, check=False)
+            self._file_baseline: Optional[Dict[str, float]] = (
+                _snapshot_files(_wd) if _gh.returncode != 0 else None)
+        else:
+            self._file_baseline = None
+        self._started_mono: float = time.time()
         # 事件环 + 实时扇出(P3 schema 化: 形状单源 events.EventBus)
         from .events import EventBus
         self.bus = EventBus()
@@ -402,7 +442,8 @@ class ImplementJob:
                 self.done_mismatch_streak = 0
                 self.status = "done"
                 self._commit_progress()
-                self.emit("done", output, changedFiles=changed)
+                self.emit("done", output, changedFiles=changed,
+                          summaryQuality=self._summary_quality(output))
             elif _MARK_NEED in output or True:
                 # 兜底: 无标记的回合结束也归为等待输入(agent 提问/未守约)
                 self.status = "waiting_input"
@@ -573,17 +614,35 @@ class ImplementJob:
     # ── diff ──
 
     def _diff_files(self) -> List[str]:
-        """变更文件清单(就地只读视图): status --porcelain 列改动, 不碰索引。
+        """变更文件清单(就地只读视图)。
 
-        (原实现 `add -A -N`+diff 基点——就地模式下会污染用户索引并卷入其
-        未提交工作, cv-200 教训。)"""
+        git 仓库: status --porcelain 列改动, 不碰索引(原 `add -A -N`+diff 基点
+        会污染用户索引并卷入其未提交工作, cv-200 教训)。
+        非 git 目录: 启动基线差集——新增=不在基线, 修改=mtime 晚于作业启动,
+        删除=基线有而现无(cv-201 实证: 无 git 时恒空 → 验收链失效)。"""
         try:
             st = _git(["status", "--porcelain"], cwd=self.wt, check=False)
-            if st.returncode != 0:
-                return []
-            return [ln[3:].strip() for ln in st.stdout.splitlines() if ln.strip()]
+            if st.returncode == 0:
+                return [ln[3:].strip() for ln in st.stdout.splitlines()
+                        if ln.strip()][: _DIFF_MAX_LIST]
         except Exception:  # noqa: BLE001
+            pass
+        base = self._file_baseline
+        if base is None:
             return []
+        cur = _snapshot_files(self.wt)
+        started = self._started_mono - 1.0
+        changed = [p for p, m in cur.items()
+                   if p not in base or m >= started]
+        removed = [p for p in base if p not in cur]
+        return (changed + removed)[:_DIFF_MAX_LIST]
+
+    def _summary_quality(self, output: str) -> str:
+        """DONE 摘要质量(cv-203): 计划重印/空摘要 → suspect, 回执降级展示。"""
+        body = output.replace(_MARK_DONE, "").strip()
+        if _MARK_NEED in output or len(body) < 16:
+            return "suspect"
+        return "ok"
 
     def diff(self) -> Dict[str, Any]:
         """就地只读差异: 变更文件清单(不碰用户索引, 不产 diff 正文)。"""

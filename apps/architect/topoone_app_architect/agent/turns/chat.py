@@ -24,20 +24,20 @@ _PLACEHOLDER_ONLY_RE = _re.compile(
     r"^[（(]\s*(?:已调用工具|调用知识库检索|调用工具|工具已调用)\s*[)）][。.!！]?\s*$")
 
 # cv-196 收尾短路: 落卡工具的产物已由回执/卡片承载——整回合无可见正文且本轮
-# 全为落卡工具时, 跳过模型叙述轮, 用回执合成收尾(消灭车轱辘话 + 省一轮 LLM)。
+# 全为落卡工具时, 跳过模型叙述轮(省一轮 LLM)。cv-203 裁决: 卡片是独立消息,
+# 合成收尾文案 = 与卡片重复的第二条文本 → 不再落, 以 card_closed 标记收尾。
 _CARD_LANDING_TOOLS = frozenset({"req.propose", "req.amend", "task.propose"})
 
 
-def _card_round_closing(results: List[Dict[str, str]]) -> str:
-    """落卡轮的确定性收尾(文案经 compensation.providers 单源 R1.1;
-    按本轮工具去重合成; 空串=不适用)。"""
+def _card_round_closing(results: List[Dict[str, str]]) -> bool:
+    """落卡轮判定(原合成收尾, cv-203 起只判不落): 本轮全为落卡工具 → True。
+
+    卡片(specReady/task_card)已由工具执行落流——独立成卡, 不再追加收尾文本。"""
     from ..compensation.providers.builtin import card_closing_text
-    seen: List[str] = []
     for r in results:
-        c = card_closing_text(r.get("name", ""))
-        if c and c not in seen:
-            seen.append(c)
-    return "\n".join(seen)
+        if card_closing_text(r.get("name", "")):
+            return True
+    return False
 
 
 def _propose_dup_text() -> str:
@@ -207,6 +207,12 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
         except Exception:  # noqa: BLE001
             pass
     else:
+        # cv-203: 落卡工具产卡后的有意空收尾 → 卡片即回合产物, 不落消息也不报
+        # turnError——只发 done 事件收口前端 busy 态。
+        if loop.get("card_closed") and not tool_errors:
+            await io.send_ev({"type": "done", "conversationId": conv_id,
+                              "content": "", "cardClosed": True})
+            return
         # 空返回: 带上失败上下文落库(turnError)+回传——错误必须完整可见且可刷新
         detail = "LLM 未返回内容"
         if tool_errors:
@@ -237,8 +243,8 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
     """管线阶段④ LLM 工具循环: 流式/降级/工具轮/预算门禁(行为等价抽取)。
 
     max_tool_rounds: 工具轮次上限按挡下发(M4-B, gear.tool_rounds);
-    返回 {request_id, assistant_text, visible, tool_round, loop_fell_back};
-    msgs/tools_used/tool_errors 原地变更(守卫与遥测依赖)。"""
+    返回 {request_id, assistant_text, visible, tool_round, loop_fell_back,
+    card_closed}; msgs/tools_used/tool_errors 原地变更(守卫与遥测依赖)。"""
     from ...arch_routes import req_agent
     max_rounds = max(1, int(max_tool_rounds or _MAX_TOOL_ROUNDS))
     structured_on = True    # M4-A: 受限生成通道开关(逐轮按支持位判定+失败降级)
@@ -247,6 +253,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
     visible = ""
     tool_round = 0
     loop_fell_back = False
+    card_closed = False     # cv-203: 落卡工具已产卡, 空文本收尾(≠空返回错误)
     while tool_round <= max_rounds:
         # 回合总预算: 超时终止(不再续流式轮/降级/nudge), 详因落 turnError
         if io.budget_left() <= 0:
@@ -294,9 +301,8 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 msgs.append({"role": "assistant", "content": "(已调用工具)"})
                 msgs.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
                 if not visible.strip():
-                    _closing = _card_round_closing(results)
-                    if _closing:
-                        assistant_text = _closing
+                    if _card_round_closing(results):
+                        card_closed = True   # 卡片已落流, 空文本收尾(非错误)
                         break
             continue
         rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
@@ -305,6 +311,8 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             loop_fell_back = True
             await io.ensure_chat_start()
             assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
+            if not assistant_text and tools_used and tools_used <= _CARD_LANDING_TOOLS:
+                card_closed = True   # cv-203: 落卡工具已产卡, 空文本≠空返回错误
             break
         request_id = rid
         await io.send_ev({"type": "chat_start", "conversationId": conv_id,
@@ -405,11 +413,11 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                 msgs.append({"role": "user", "content": f"{_TOOL_FEED_PREFIX}{tool_feed}"})
-                # cv-196 收尾短路: 整回合无可见正文且本轮全为落卡工具 → 不再要
-                # 一轮叙述(车轱辘话源头), 用回执合成收尾直接结束。
-                _closing = _card_round_closing(results)
-                if not visible.strip() and _closing:
-                    assistant_text = _closing
+                # cv-196 收尾短路 + cv-203 卡片独立: 整回合无可见正文且本轮全为
+                # 落卡工具 → 不再要一轮叙述(车轱辘话源头), 也不落合成收尾文本
+                # (与卡片重复)——卡片即本回合产物, 空文本收尾。
+                if not visible.strip() and _card_round_closing(results):
+                    card_closed = True
                     break
             # 工具结果回喂后的再生成无任何信号会让前端进度条「卡死」观感——显式报相
             await io.send_ev({"type": "status", "phase": "llm_round",
@@ -422,10 +430,12 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
 
     # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
     # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
-    if (not loop_fell_back and not assistant_text and not visible
-            and io.budget_left() > 0):
+    if (not loop_fell_back and not card_closed and not assistant_text
+            and not visible and io.budget_left() > 0):
         await io.ensure_chat_start()
         assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
+        if not assistant_text and tools_used and tools_used <= _CARD_LANDING_TOOLS:
+            card_closed = True   # 降级通道同样以卡收尾(空文本≠错误)
 
     # 降级通道(llm.sync / 断流收尾)无逐字流 → 假流式补发；实时转发路径
     # visible 已含全部内容，跳过避免重复。断流后收尾的极端场景 partial
@@ -440,7 +450,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
 
     return {"request_id": request_id, "assistant_text": assistant_text,
             "visible": visible, "tool_round": tool_round,
-            "loop_fell_back": loop_fell_back}
+            "loop_fell_back": loop_fell_back, "card_closed": card_closed}
 
 
 async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
@@ -530,13 +540,11 @@ async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_roun
         on_progress=on_progress,
     )
     content = res.get("content", "") if isinstance(res, dict) else ""
-    # cv-196 收尾短路(降级通道同规): 模型零可见正文且本回合并发的全是落卡
-    # 工具 → 用回执合成收尾(消灭车轱辘话)。流式主路径在轮内短路(省一轮)。
+    # cv-196 收尾短路(降级通道同规) + cv-203 卡片独立: 模型零可见正文且本回合
+    # 全为落卡工具 → 空文本返回(卡片已落流即本回合产物; 调用方以 card_closed
+    # 区分"有意空收尾"与"空返回错误")。
     if not content.strip() and tools_used and tools_used <= _CARD_LANDING_TOOLS:
-        from ..compensation.providers.builtin import card_closing_text
-        closing = "\n".join(c for c in (card_closing_text(t) for t in sorted(tools_used)) if c)
-        if closing:
-            return closing
+        return ""
     return content
 
 

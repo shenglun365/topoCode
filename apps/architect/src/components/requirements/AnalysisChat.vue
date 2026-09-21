@@ -373,6 +373,15 @@ const digestBusy = ref(false)
 const digestDraft = ref<string | null>(null)   // 非空=草稿卡(可编辑)
 const digestSentOpen = reactive<Record<number, boolean>>({})
 
+/** 任务状态卡样式映射(cv-203): running/waiting/done/failed → 图标+配色。 */
+function statusStrip(it: any): { icon: string; cls: string } {
+  const s = String(it?.payload?.status || it?.status || 'running')
+  if (s === 'done') return { icon: '✅', cls: 'border-ctp-green/30 bg-ctp-green/5 text-ctp-subtext1' }
+  if (s === 'failed') return { icon: '❌', cls: 'border-ctp-red/30 bg-ctp-red/5 text-ctp-subtext1' }
+  if (s === 'waiting') return { icon: '⏸', cls: 'border-ctp-yellow/30 bg-ctp-yellow/5 text-ctp-subtext1' }
+  return { icon: '🔄', cls: 'border-ctp-sky/30 bg-ctp-sky/5 text-ctp-subtext1' }
+}
+
 // ── 工具审批操作条(task_approval 消息) ──
 const approvalDone = reactive<Record<string, 'approved' | 'rejected'>>({})
 async function respondApproval(m: any, approved: boolean) {
@@ -1262,22 +1271,53 @@ onUnmounted(() => {
             >{{ m.content }}</div>
           </div>
           <ChatMessageBlocks
-            v-else
+            v-else-if="m.item?.type !== 'spec' && m.item?.type !== 'task_status'"
             :content="m.content"
           />
 
-          <!-- 需求卡动作(创建即 ready): [一键建卡执行]——点击发 /指令 后端直通 -->
+          <!-- 需求卡(cv-203 裁决): 独立卡片消息——不再与正文气泡混排,
+               卡内承载规约摘要 + [一键建卡执行] 动作 -->
           <div
             v-if="m.item?.type === 'spec'"
-            class="mt-2 flex items-center gap-2"
+            class="mt-2 rounded-lg border border-ctp-blue/30 bg-ctp-blue/5 px-3 py-2.5"
           >
-            <button
-              class="btn btn-xs btn-primary"
-              :disabled="busy"
-              title="从已定稿规约生成待确认任务卡"
-              @click="emit('send', { text: '/执行' })"
-            >一键建卡执行</button>
-            <span class="text-[10px] text-ctp-overlay0">卡上确认后 coding subagent 启动</span>
+            <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
+              <svg class="w-3.5 h-3.5 text-ctp-blue shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.6L19 9.4V19a2 2 0 0 1-2 2Z" /><path d="M14 3v6h5" /></svg>
+              <span class="text-[11px] font-medium text-ctp-blue">需求卡</span>
+              <span class="font-mono text-[10px] text-ctp-overlay1">{{ m.item.payload?.requirementId }}</span>
+              <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-ctp-green/15 text-ctp-green font-medium">ready</span>
+              <span
+                v-if="m.item.payload?.updated"
+                class="text-[10px] text-ctp-overlay0"
+              >已更新 → v{{ m.item.payload?.ver }}</span>
+              <span
+                v-if="m.item.payload?.noDesign"
+                class="text-[10px] text-ctp-yellow"
+              >⚠️ 缺实现方案</span>
+            </div>
+            <div class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-40 overflow-auto whitespace-pre-wrap">{{ m.content }}</div>
+            <div class="mt-2 flex items-center gap-2">
+              <button
+                class="btn btn-xs btn-primary"
+                :disabled="busy"
+                title="从已定稿规约生成待确认任务卡"
+                @click="emit('send', { text: '/执行' })"
+              >一键建卡执行</button>
+              <span class="text-[10px] text-ctp-overlay0">卡上确认后 coding subagent 启动</span>
+            </div>
+          </div>
+
+          <!-- 任务状态卡(cv-203 裁决): 状态/进度独立专用消息——单卡原位更新,
+               不与文本回执混流(启动/进度/终态共用同一张卡) -->
+          <div
+            v-if="m.item?.type === 'task_status'"
+            class="mt-1.5 rounded-md border px-2.5 py-1.5 flex items-start gap-2"
+            :class="statusStrip(m.item).cls"
+          >
+            <span class="text-[13px] leading-5 shrink-0">{{ statusStrip(m.item).icon }}</span>
+            <div class="flex-1 min-w-0 text-[11px] leading-relaxed [&_p]:my-0">
+              <ChatMessageBlocks :content="m.content" />
+            </div>
           </div>
 
           <!-- 规约 JSON 落库按钮(字段签名识别, 任何含载荷的助手消息) -->

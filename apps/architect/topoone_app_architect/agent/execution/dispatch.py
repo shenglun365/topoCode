@@ -155,6 +155,19 @@ def propose_task(conv: dict, title: str, instruction: str,
     _saved = next((t for t in reversed(store.TasksStore.of_conv(conv_id))
                    if _rid and t.get("reqId") == _rid
                    and (t.get("status") or "") == ST.TASK_SAVED), None)
+    if _saved is None:
+        # cv-203 防重复执行: 同需求存在进行中任务 → 拒绝新建(终态可重试;
+        # saved 不算进行中——可被新卡修订替换, 见上方改写分支)
+        _busy = next((t for t in reversed(store.TasksStore.of_conv(conv_id))
+                      if _rid and t.get("reqId") == _rid
+                      and (t.get("status") or "") in (
+                          ST.TASK_RUNNING, ST.TASK_WAITING_INPUT,
+                          ST.TASK_PENDING_CONFIRM)), None)
+        if _busy is not None:
+            return {"ok": False, "error":
+                    f"同一需求已有进行中的任务（{_busy['id']} "
+                    f"「{( _busy.get('title') or '')[:40]}」· {_busy.get('status')}）"
+                    "——不可重复执行; 请等待完成, 或先停止/忽略现有任务。"}
     if _saved is not None:
         task = store.TasksStore.update(_saved["id"], {
             "title": (title or "").strip()[:120] or _saved.get("title") or "实施任务",
@@ -421,14 +434,16 @@ def confirm_task(task_id: str) -> dict:
         pass
     agent = task.get("executorType") or _etype
     pid = (conv or {}).get("projectId") or ""
-    _loc = (f"分支 `{branch}`(隔离 worktree)"
-            if (sr.workspace or "inplace") == "worktree"
+    # cv-203: 启动状态独立专用状态卡(原位更新), 不再落 🚀 文本回执——
+    # 状态/进度不与文本混流; 就地/隔离形态与回落提示进状态卡附注
+    _loc = ("隔离 worktree" if (sr.workspace or "inplace") == "worktree"
             else "就地模式(直接写入项目目录)")
-    _note = str((sr.raw or {}).get("notice") or "")
-    _eb()._append(conv_id, "user",
-            f"🚀 **{task['title']}** 启动（`{sr.job_id}` · {_loc}）"
-            + (f"\n> ⚠️ {_note}" if _note else ""),
-            msg_meta={"kind": "task_start", "taskId": task_id}, project_id=pid)
+    _note = f"`{sr.job_id}` · {_loc}"
+    _warn = str((sr.raw or {}).get("notice") or "")
+    if _warn:
+        _note += f"\n\n> ⚠️ {_warn}"
+    _eb().task_status_card(conv_id, task_id, "running", agent=agent, pid=pid,
+                           note=_note)
     _eb()._start_task_pump(conv_id, task_id, sr.job_id, rid, agent)
     t = store.TasksStore.get(task_id) or {}
     _publish_task(conv_id, t)

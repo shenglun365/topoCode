@@ -283,8 +283,9 @@ def test_resolve_context_budget_priority(monkeypatch):
 
 
 def test_card_round_short_circuit_skips_narration(pipeline):
-    """cv-196 收尾短路: 整回合无可见正文 + 全为落卡工具 → 跳过叙述轮
-    (车轱辘话源头), 用回执合成收尾; 只烧一轮 llm.sync。"""
+    """cv-196 收尾短路 + cv-203 卡片独立: 整回合无可见正文 + 全为落卡工具
+    → 跳过叙述轮(只烧一轮 llm.sync), 且**不再落合成收尾文本**——需求卡
+    (specReady)是独立一条消息, 合成文案 = 与卡片重复的第二条文本(cv-203 裁决)。"""
     client, gw, _tmp = pipeline
     gw.sync_script = [
         '[TOOL_CALL]{"tool":"req.propose","arguments":{"title":"短路验证",'
@@ -294,9 +295,14 @@ def test_card_round_short_circuit_skips_narration(pipeline):
         with client.websocket_connect(WS_PATH) as ws:
             _chat(ws, "帮我做一个短路验证的小需求")
             ev = _recv_until(ws, "done")
-    # 降级通道(llm.chat 不可用)在 run_tools_loop 后短路合成——叙述轮的
-    # 产出被替换为回执收尾(流式主路径则整轮省去)
-    assert "需求卡已创建" in ev["content"]
-    assert "需求分析已完成" not in ev["content"]   # 无模型复述
+    # 落卡轮空文本收尾(cardClosed), 不再合成"需求卡已创建"重复文本
+    assert ev.get("content") == "" and ev.get("cardClosed") is True
     msgs = store.ConversationsStore.messages(ev["conversationId"], limit=10)
     assert not [m for m in msgs if m["content"].strip() == "(已调用工具)"]
+    # 需求卡独立落流(单条 specReady 卡), 且无第二条重复宣告文本
+    specs = [m for m in msgs if (m.get("meta") or {}).get("kind") == "specReady"]
+    assert len(specs) == 1
+    dupes = [m for m in msgs if m["role"] == "assistant"
+             and (m.get("meta") or {}).get("kind") != "specReady"
+             and "需求卡已创建" in (m.get("content") or "")]
+    assert dupes == [], "落卡轮不得再落合成收尾文本(cv-203)"

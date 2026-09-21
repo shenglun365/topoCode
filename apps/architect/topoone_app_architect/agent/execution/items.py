@@ -169,6 +169,7 @@ STREAM_PERSIST_TYPES = ("tool_call", "file_change", "notice")
 # meta.kind → (item.type, 覆盖字段); 未列出 = 非卡片消息(纯 markdown)
 CARD_ITEM_MAP: Dict[str, Dict[str, Any]] = {
     "task_card": {"type": "task", "payload": "meta"},
+    "task_status": {"type": "task_status", "payload": "meta"},   # cv-203 状态卡
     "task_start": {"type": "task_status", "status": "running"},
     "task_approval_done": {"type": "task_status", "status": "approved"},
     "task_done": {"type": "turn_completed", "status": "done"},

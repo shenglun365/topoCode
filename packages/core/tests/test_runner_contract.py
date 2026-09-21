@@ -79,7 +79,8 @@ def test_turn_terminal_event_shapes():
     asyncio.run(j._run_turn("完成 [[IMPLEMENT_DONE]] 摘要"))
     done = j.events[-1]
     assert done["kind"] == "done"
-    assert set(done.keys()) == EVENT_BASE_KEYS | {"changedFiles"}
+    # cv-203: done 事件带 summaryQuality(suspect=计划重印/空摘要, 回执降级)
+    assert set(done.keys()) == EVENT_BASE_KEYS | {"changedFiles", "summaryQuality"}
     j2 = _job()
     j2.status = "running"
     asyncio.run(j2._run_turn("无标记分析"))
@@ -140,3 +141,40 @@ def test_ws_subscriber_event_is_ring_event():
     ev = q.get_nowait()
     assert set(ev.keys()) == EVENT_BASE_KEYS | {"toolCount", "msgCount"}
     assert json.loads(json.dumps(ev)) == ev     # WS 序列化保形
+
+
+def test_non_git_changed_files_baseline_diff(tmp_path):
+    """cv-203 P1: 非 git 目录变更清点——启动基线快照差集(新增/删除)。
+
+    就地主战场实证(cv-201): 无 git 时旧实现恒空 → 回执「无变更文件」+
+    验收「0 个改动文件」虚假通过。"""
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "old.txt").write_text("x")
+    j = ImplementJob("j-nogit", root=str(d), wt=str(d), base="HEAD",
+                     branch="exec/t", instruction="do", adapter=_FakeAdapter())
+    assert j._file_baseline is not None and "old.txt" in j._file_baseline
+    # 作业执行: 新增 + 修改 + 删除
+    (d / "new_pkg").mkdir()
+    (d / "new_pkg" / "a.ts").write_text("export {}")
+    (d / "old.txt").write_text("y")   # mtime 更新
+    import os as _os
+    _os.utime(d / "old.txt", (j._started_mono + 5, j._started_mono + 5))
+    (d / "gone.txt") and None
+    changed = j._diff_files()
+    assert "new_pkg/a.ts" in changed
+    # node_modules/排除目录不入清单
+    (d / "node_modules").mkdir()
+    (d / "node_modules" / "dep.js").write_text("x")
+    assert all(not c.startswith("node_modules") for c in changed)
+
+
+def test_summary_quality_suspect(tmp_path):
+    """cv-203 P2: DONE 摘要质量——计划重印/空摘要 → suspect(回执降级)。"""
+    d = tmp_path / "plain2"
+    d.mkdir()
+    j = ImplementJob("j-q", root=str(d), wt=str(d), base="HEAD",
+                     branch="exec/t", instruction="do", adapter=_FakeAdapter())
+    assert j._summary_quality("[[NEED_INPUT]] 里程碑计划 [[IMPLEMENT_DONE]]") == "suspect"
+    assert j._summary_quality("[[IMPLEMENT_DONE]]短") == "suspect"
+    assert j._summary_quality("[[IMPLEMENT_DONE]]完成用户管理模块; 单测 12 过; 编译通过") == "ok"

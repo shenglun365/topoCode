@@ -297,6 +297,59 @@ def _task_ctx(conv_id: str, task_id: str, job_id: str, rid: str, agent: str) -> 
 _PROGRESS_SSE_LAST: dict = {}   # task_id → 上次 SSE progress 发送时刻(文本节流)
 
 
+_STATUS_CARD_LAST: Dict[str, float] = {}
+
+
+def _status_card_refresh(conv_id: str, task_id: str, agent: str, pid: str,
+                         min_interval: float = 30.0) -> None:
+    """running 态状态卡节流刷新(进度事件高频——30s 一拍足够"状态在动";
+    终态/等待态由对应分支即时更新, 不走此节流)。"""
+    now = time.time()
+    if now - _STATUS_CARD_LAST.get(task_id, 0.0) < min_interval:
+        return
+    _STATUS_CARD_LAST[task_id] = now
+    task_status_card(conv_id, task_id, "running", agent=agent, pid=pid)
+
+
+def task_status_card(conv_id: str, task_id: str, status: str,
+                     agent: str = "", pid: str = "",
+                     note: str = "") -> Optional[dict]:
+    """任务状态卡(cv-203 裁决): 状态/进度独立专用消息, 同 taskId 单卡原位更新。
+
+    running/waiting/done/failed 四态 + 进度行(变更文件数/工具数/耗时);
+    内容型回执(计划/摘要/验收)仍是独立文本消息——状态不与正文混流。"""
+    try:
+        t = store.TasksStore.get(task_id) or {}
+        prog = t.get("progress") or {}
+        title = (t.get("title") or "任务")[:40]
+        from ..agent.collab import cards as _cards
+        _AGENT = {"icon": agent or "architect"}
+        marks = {"running": "🔄 **执行中**", "waiting": "⏸ **等待你的输入**",
+                 "done": "✅ **已完成**", "failed": "❌ **失败**",
+                 "starting": "🚀 **启动中**"}
+        lines = [f"{marks.get(status, '🔄 **执行中**')}「{title}」 · `{agent or 'architect'}`"]
+        if t.get("startedAt") or t.get("createdAt"):
+            _t0 = int(t.get("startedAt") or t.get("createdAt") or 0)
+            if _t0:
+                _el = max(0, int(_ts() * 1000 - _t0) // 1000)
+                lines.append(f"耗时 {_el // 60}m{_el % 60:02d}s")
+        _n = len(prog.get("changedFiles") or [])
+        if _n:
+            lines.append(f"变更文件 {_n}")
+        if prog.get("toolCount"):
+            lines.append(f"工具调用 {prog['toolCount']}")
+        if note:
+            lines.append(str(note)[:200])
+        elif prog.get("lastNote"):
+            lines.append(f"最近：{str(prog['lastNote'])[:160]}")
+        return _cards.land_status(conv_id, "\n\n".join(lines), task_id,
+                                  status=status, project_id=pid,
+                                  agent=agent or "architect")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[exec-bridge] 状态卡更新失败 task=%s: %s", task_id, e)
+        return None
+
+
 def _publish_progress(conv_id: str, task_id: str, prog: dict,
                       throttle: float = 0.0) -> None:
     """任务进度实时推送（WS/SSE 单一出口）。
@@ -478,6 +531,9 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
     title = task.get("title") or "任务"
     if kind == "input_required":
         clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
+        # cv-203 P4: 执行器工具回声 JSON 不入正文(实证: outcome recorded 泄漏)
+        clean = re.sub(r'\{"result"\s*:\s*"outcome recorded[^}]*\}', "", clean)
+        clean = clean.strip() or "(等待你的输入)"
         # 里程碑报告识别(环节十一): R3.3 双轨——JSON 块契约优先, 固定三行文本
         # 兼容降级(architect 侧解析层, D4 不动 runner); 改动文件并回需求边界
         ms_files = _milestone_report_payload(clean)
@@ -533,26 +589,42 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                                task_id, e)
         store.TasksStore.update(task_id, {"status": ST.TASK_WAITING_INPUT})
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+        task_status_card(conv_id, task_id, "waiting", agent=agent, pid=pid)
     elif kind == "done":
         clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()
+        clean = re.sub(r'\{"result"\s*:\s*"outcome recorded[^}]*\}', "", clean).strip()
+        # cv-203 P2: 摘要质量降级——计划重印/空摘要(与上轮待输入正文同文或
+        # 混入 [[NEED_INPUT]])不作为完成正文展示, 以变更文件与验收为准
+        if (str(ev.get("summaryQuality") or "") == "suspect"
+                or "[[NEED_INPUT]]" in clean):
+            clean = ("⚠️ 执行器未附规范完成摘要(完成消息混入计划/待输入正文)——"
+                     "以变更文件与验收简报为准。")
         changed = ev.get("changedFiles") or []
         brief = _acceptance_brief(conv_id, ctx["rid"], changed)
         # 复制实现检测(验证有效性): 测试对象须是真实生产代码
-        _wt = (store.TasksStore.get(task_id) or {}).get("worktree") or ""
+        _trow = store.TasksStore.get(task_id) or {}
+        _wt = _trow.get("worktree") or ""
         copy_note = _copy_impl_flag(_wt, changed, clean)
         if copy_note:
             brief += copy_note
         files = ("\n".join(f"- `{f}`" for f in changed[:20])
                  if changed else "- (无变更文件)")
-        branch = (store.TasksStore.get(task_id) or {}).get("branch") or ""
+        # cv-203 P3: 形态标签按任务 workspace 分叉(就地任务无分支, 分支名是
+        # 建卡提案字段——展示它会误导)
+        _loc = (f"分支 `{_trow.get('branch') or ''}`(隔离)"
+                if (_trow.get("workspace") or "") == "worktree" else "就地模式")
         _append(conv_id, "assistant",
-                f"✅ **任务完成**「{title}」（分支 `{branch}`）\n\n{clean}\n\n"
+                f"✅ **任务完成**「{title}」· {_loc}\n\n{clean}\n\n"
                 f"**变更文件**：\n{files}\n\n---\n**验收简报**\n{brief}",
-                msg_meta={"kind": "task_done", "taskId": task_id, "branch": branch},
+                msg_meta={"kind": "task_done", "taskId": task_id,
+                          "branch": _trow.get("branch") or "",
+                          "workspace": _trow.get("workspace") or "inplace"},
                 project_id=pid, agent=agent)
         store.TasksStore.finish(task_id, "done", clean[:2000])
         _task_reaggregate_work_state(conv_id)
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+        task_status_card(conv_id, task_id, "done", agent=agent, pid=pid,
+                         note=f"变更 {len(changed)} 文件")
         # 任务计划(环节十四): 步骤完成 → 回填 + 预填下一步 / 汇总
         try:
             from ..agent.planning.task_plan import on_plan_task_done
@@ -562,17 +634,20 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         # 知识沉淀: 任务回执 → execution_report 单元(会话派生记忆)
         try:
             _sediment_task_receipt(conv_id, task_id, ctx.get("rid") or "", "done",
-                                   title, clean or text, changed, branch, pid)
+                                   title, clean or text, changed,
+                                   _trow.get("branch") or "", pid)
         except Exception as e:  # noqa: BLE001
             logger.warning("[exec-bridge] 回执沉淀失败 task=%s: %s", task_id, e)
     elif kind == "failed":
         _append(conv_id, "assistant",
-                f"❌ **任务失败**「{title}」：{text}\n分支已保留, 可重新发起。",
+                f"❌ **任务失败**「{title}」：{text}\n可重新发起。",
                 msg_meta={"kind": "task_failed", "taskId": task_id},
                 project_id=pid, agent=agent)
         store.TasksStore.finish(task_id, "failed", text[:2000])
         _task_reaggregate_work_state(conv_id)
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+        task_status_card(conv_id, task_id, "failed", agent=agent, pid=pid,
+                         note=text[:160])
         # 任务计划(环节十四): 步骤标 failed(下次 /执行 自动重发)
         try:
             from ..agent.planning.task_plan import on_plan_task_failed
@@ -594,6 +669,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 "msgCount": int(ev.get("msgCount") or 0), "at": _ts()}
         store.TasksStore.set_progress(task_id, prog)
         _publish_progress(conv_id, task_id, prog)
+        _status_card_refresh(conv_id, task_id, agent, pid)
     elif kind == "text":
         # 准流式执行预览: 滚动文本尾(600 字符)+节流 SSE(0.5s), 不落消息(防刷屏)。
         # UI 过程面板随 progress 事件实时变化, 终态回执仍走 done/failed。
@@ -679,9 +755,11 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
     elif kind in ("aborted", "finished"):
         _append(conv_id, "assistant", f"ℹ️ {text}", project_id=pid, agent=agent)
     elif text:
-        _append(conv_id, "assistant", text,
-                msg_meta={"kind": "task_progress", "taskId": task_id},
-                project_id=pid, agent=agent)
+        # cv-203: 过程类文本不再逐条落消息(与状态/进度混流即刷屏)——
+        # 并入专用状态卡附注(节流原位更新)
+        prev0 = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        store.TasksStore.set_progress(task_id, {**prev0, "lastNote": text[:200]})
+        _status_card_refresh(conv_id, task_id, agent, pid, min_interval=20.0)
 
 
 def _land_stream_items(ev: dict, conv_id: str, task_id: str, job_id: str,

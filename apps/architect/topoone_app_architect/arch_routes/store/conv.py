@@ -295,6 +295,88 @@ class ConversationsStore:
         return cur.rowcount > 0
 
     @classmethod
+    def update_message_by_meta(cls, conv_id: str, match: dict, data: dict) -> Optional[dict]:
+        """单流卡片原位更新(cv-203 状态卡): 同库连接内 定位→改写→回读。
+
+        match: meta 字段相等条件(如 {"kind": "task_status", "taskId": t})。
+        必须用同一 db 句柄完成定位与改写——scan 与 update 分两次路由会落在
+        不同库(项目库注册时序实证), 造成"找到卡却改不中"的静默漂移。
+        返回更新后行(未命中→None, 调用方回落 land 新卡)。"""
+        db, found = _locate_db(cls.TABLE, conv_id)
+        if not found:
+            return None
+        rows = db.fetchall(
+            f"SELECT id, meta FROM {cls.MSG_TABLE} WHERE conversation_id = ? "
+            "ORDER BY time DESC, rowid DESC LIMIT 400", (conv_id,))
+        import json as _json
+        for r in rows:
+            try:
+                meta = _json.loads(r.get("meta") or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(meta, dict):
+                continue
+            if all(meta.get(k) == v for k, v in match.items()):
+                sets, params = [], []
+                if "content" in data:
+                    sets.append("content = ?")
+                    params.append(str(data["content"] or ""))
+                if "meta" in data:
+                    new_meta = {**meta, **(data["meta"] if isinstance(
+                        data["meta"], dict) else {})}
+                    sets.append("meta = ?")
+                    params.append(_dumps(new_meta))
+                if "time" in data:
+                    sets.append("time = ?")
+                    params.append(int(data["time"] or 0))
+                if not sets:
+                    return None
+                cur = db.execute(
+                    f"UPDATE {cls.MSG_TABLE} SET {', '.join(sets)} "
+                    f"WHERE conversation_id = ? AND id = ?",
+                    (*params, conv_id, r["id"]))
+                db.commit()
+                if getattr(cur, "rowcount", 0) <= 0:
+                    return None
+                row = db.fetchone(
+                    f"SELECT * FROM {cls.MSG_TABLE} WHERE id = ?", (r["id"],))
+                return _row_to_api(row) if row else None
+        return None
+
+    @classmethod
+    def update_message(cls, conv_id: str, message_id: str, data: dict) -> Optional[dict]:
+        """原位更新单条消息(cv-203 状态卡): content/meta/time 可更新。
+
+        专用状态/进度消息按 taskId 单卡存在, 事件驱动原位改写(非追加新消息),
+        读侧经既有 SSE conv-message 通知刷新。返回更新后行(找不到→None)。"""
+        db, found = _locate_db(cls.TABLE, conv_id)
+        if not found:
+            return None
+        sets, params = [], []
+        if "content" in data:
+            sets.append("content = ?")
+            params.append(str(data["content"] or ""))
+        if "meta" in data:
+            sets.append("meta = ?")
+            params.append(data["meta"] if isinstance(data["meta"], str)
+                          else _dumps(data["meta"]))
+        if "time" in data:
+            sets.append("time = ?")
+            params.append(int(data["time"] or 0))
+        if not sets:
+            return None
+        params.append(message_id)
+        # 写入经 WriteQueue 串行化(WriteResult.rowcount 不可靠)——以回读验证
+        db.execute(
+            f"UPDATE {cls.MSG_TABLE} SET {', '.join(sets)} "
+            f"WHERE conversation_id = ? AND id = ?", (*params, conv_id))
+        db.commit()
+        row = db.fetchone(
+            f"SELECT * FROM {cls.MSG_TABLE} WHERE conversation_id = ? AND id = ?",
+            (conv_id, message_id))
+        return _row_to_api(row) if row else None
+
+    @classmethod
     def delete_messages_after(cls, conv_id: str, message_id: str) -> int:
         """回退到消息 N(环节十五): 删除其后全部消息(不含自身)。
 

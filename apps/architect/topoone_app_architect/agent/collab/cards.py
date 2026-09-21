@@ -50,6 +50,7 @@ MSG_FLAG_SYNTHETIC = "synthetic"      # 按钮触发的合成用户消息(/执�
 
 KIND_TASK_IGNORED = "task_ignored"    # 2026-09-20: 用户主动忽略任务卡(置灰回执)
 KIND_REQ_IGNORED = "req_ignored"      # 2026-09-20: 用户主动忽略需求卡(置灰回执)
+KIND_TASK_STATUS = "task_status"      # cv-203: 任务执行状态卡(同 taskId 单卡原位更新)
 KIND_TASK_RECEIPTS = (
     "task_start", "task_input", "task_done", "task_failed",
     "task_approval_done", "task_progress",
@@ -58,7 +59,7 @@ KIND_TASK_RECEIPTS = (
 _KNOWN_KINDS = frozenset(
     (KIND_REQUIREMENT, KIND_TASK_CARD, KIND_TASK_APPROVAL, KIND_TURN_ERROR,
      KIND_DIGEST, KIND_TASK_PLAN, KIND_TASK_PLAN_DONE, KIND_TASK_INPUT_ECHO,
-     KIND_TASK_IGNORED, KIND_REQ_IGNORED,
+     KIND_TASK_IGNORED, KIND_REQ_IGNORED, KIND_TASK_STATUS,
      *KIND_TASK_RECEIPTS))
 
 _ERROR_REVIEW_STATE = "error"
@@ -111,6 +112,35 @@ def land(conv_id: str, text: str, kind: Optional[str] = None, *,
         raise
     except Exception as e:  # noqa: BLE001
         logger.warning("[cards] 落流失败 conv=%s kind=%s: %s", conv_id, kind, e)
+        return None
+
+
+def land_status(conv_id: str, text: str, task_id: str, *, status: str = "",
+                project_id: str = "", agent: str = "", **payload) -> Optional[dict]:
+    """任务状态卡(cv-203 裁决): 状态/进度独立为专用消息, 同 taskId 单卡。
+
+    首次落新卡(kind=task_status); 之后原位 UPDATE 同一行(不追加新消息,
+    进度不刷屏)——定位与改写同库连接(update_message_by_meta, 防跨库路由
+    漂移); 读侧经 SSE conv-message 通知刷新。失败返回 None(不阻断)。"""
+    try:
+        from ...arch_routes import store as _store
+        upd = _store.ConversationsStore.update_message_by_meta(
+            conv_id, {"kind": KIND_TASK_STATUS, "taskId": task_id},
+            {"content": text, "meta": {"status": status, **payload},
+             "time": int(__import__("time").time() * 1000)})
+        if upd:
+            try:
+                emit("conv-message", conv_id, msgId=upd["id"],
+                     agent=agent or "", kind=KIND_TASK_STATUS)
+            except Exception:  # noqa: BLE001
+                pass
+            return upd
+        return land(conv_id, text, kind=KIND_TASK_STATUS, role="assistant",
+                    project_id=project_id, agent=agent, taskId=task_id,
+                    status=status, **payload)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[cards] 状态卡落流失败 conv=%s task=%s: %s",
+                       conv_id, task_id, e)
         return None
 
 
