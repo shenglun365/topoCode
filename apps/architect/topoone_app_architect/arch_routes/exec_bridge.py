@@ -331,13 +331,17 @@ def task_status_card(conv_id: str, task_id: str, status: str,
         if t.get("startedAt") or t.get("createdAt"):
             _t0 = int(t.get("startedAt") or t.get("createdAt") or 0)
             if _t0:
-                _el = max(0, int(_ts() * 1000 - _t0) // 1000)
+                # cv-205: _ts() 本身即毫秒——再 ×1000 产出天文数字(实证
+                # 「耗时 29803143334m」)
+                _el = max(0, int(_ts() - _t0) // 1000)
                 lines.append(f"耗时 {_el // 60}m{_el % 60:02d}s")
         _n = len(prog.get("changedFiles") or [])
         if _n:
             lines.append(f"变更文件 {_n}")
         if prog.get("toolCount"):
             lines.append(f"工具调用 {prog['toolCount']}")
+        elif prog.get("lastTool"):
+            lines.append(f"最近工具 `{prog['lastTool']}`")
         if note:
             lines.append(str(note)[:200])
         elif prog.get("lastNote"):
@@ -686,6 +690,9 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         prog = {**prev, "lastTool": name, "process": trail, "at": _ts()}
         store.TasksStore.set_progress(task_id, prog)
         _publish_progress(conv_id, task_id, prog)
+        # cv-205 衔接修复: cline 事件流只发 tool/usage(不发 progress)——
+        # 运行态状态卡刷新必须挂到 tool 活动(节流), 否则卡冻结在启动时刻
+        _status_card_refresh(conv_id, task_id, agent, pid)
     elif kind == "usage":
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
         prog = {**prev,

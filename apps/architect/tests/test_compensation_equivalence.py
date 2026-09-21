@@ -57,7 +57,8 @@ def test_instruction_golden_t2_cap_runtime():
         _TIERS["T2"], cap_note="指令跟随探针未过——封顶 T2(结构化 probeFlags)")
     out = assemble_task_instruction(
         _TASK, prior_brief="前情：已完成基础骨架搭建。", policy=policy,
-        runtime={"branch": "task/demo-1", "root": "/home/u/proj-main"})
+        runtime={"branch": "task/demo-1", "root": "/home/u/proj-main",
+                 "workspace": "worktree"})
     assert out == _golden("task_instruction_T2.txt")
 
 

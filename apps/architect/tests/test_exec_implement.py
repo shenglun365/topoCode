@@ -369,7 +369,7 @@ def test_task_lifecycle_e2e(tmp_path, monkeypatch):
     assert t["branch"] == "task/v2-1"
     _impl_calls = [pl for p, pl in calls["implement"] if p == "/api/implement"]
     assert _impl_calls and _impl_calls[0]["instruction"]          # 指令非空(系统段+正文)
-    assert "隔离 worktree" in _impl_calls[0]["instruction"]        # 环境段注入
+    assert "就地执行" in _impl_calls[0]["instruction"]            # 环境段注入(缺省就地 cv-205)
     assert store.ConversationsStore.get(conv["id"])["workState"] == "running"
     # ③ input_required: 消息 agent=executor + waiting_input
     ctx = eb._task_ctx(conv["id"], task["id"], "job-v2-1", "", "opencode")
@@ -443,7 +443,7 @@ def test_task_instruction_injects_spec_and_env(tmp_path, monkeypatch):
         "instruction": "目标: X\n方案: Y", "status": "pending_confirm"})
     txt = eb._task_instruction(task)
     assert "任务上下文" in txt and "目标: X" in txt          # 正文为主体
-    assert "隔离 worktree 分支" in txt and "[[IMPLEMENT_DONE]]" in txt  # 系统段
+    assert "就地执行" in txt and "[[IMPLEMENT_DONE]]" in txt  # 环境段(缺省就地)+系统段
     assert "modules/x/" in txt and "构建通过" in txt          # 规约补充
     assert "方案Z" in txt                                     # designMd
 
@@ -729,3 +729,27 @@ def test_input_required_strips_tool_echo_json(tmp_path, monkeypatch):
     ask = [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_input"][-1]
     assert "outcome recorded" not in ask["content"]
     assert "选哪个库?" in ask["content"]
+
+
+def test_exec_env_form_aware(tmp_path, monkeypatch):
+    """cv-205: 环境/身份段按执行形态分叉(文案单源 providers.exec_env,
+    事实由执行层 runtime.workspace 传入——本层不推断)。"""
+    from topoone_app_architect.agent.compensation.providers.exec_env import (
+        runtime_identity_section, work_env_section)
+    inplace, wt = work_env_section("inplace"), work_env_section("worktree")
+    assert "就地执行" in inplace and "没有 git 隔离" in inplace
+    assert "worktree 分支" in wt and "就地执行" not in wt
+    assert work_env_section() == inplace               # 缺省 = 就地
+    assert "没有隔离副本" in runtime_identity_section("inplace", "", "/r")
+    assert "不在**主目录工作" in runtime_identity_section("worktree", "task/1", "/r")
+
+
+def test_instruction_follows_isolated_toggle(tmp_path, monkeypatch):
+    """会话隔离开关 → 指令环境段按形态分叉 + payload.worktree 同源。"""
+    conv, eb, calls = _mk_v2_fixture(tmp_path, monkeypatch)
+    store.ConversationsStore.update(conv["id"], {"isolated": 1})
+    task = eb.propose_task(conv, "隔离任务", "x", gate_diagram=False)
+    assert eb.confirm_task(task["id"])["ok"]
+    payload = [pl for p, pl in calls["implement"] if p == "/api/implement"][-1]
+    assert payload.get("worktree") is True
+    assert "worktree 分支" in payload["instruction"]

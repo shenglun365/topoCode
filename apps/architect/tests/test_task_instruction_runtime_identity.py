@@ -10,14 +10,26 @@ from topoone_app_architect.agent.planning.task_plan import assemble_task_instruc
 
 
 def test_runtime_identity_injected():
+    """隔离形态(原 A3 场景): 分支/主仓事实 + 防误验红线。"""
     text = assemble_task_instruction(
         {"title": "T", "instruction": "改一下登录页"},
-        runtime={"branch": "exec/ab12cd34", "root": "/home/u/proj"})
+        runtime={"branch": "exec/ab12cd34", "root": "/home/u/proj",
+                 "workspace": "worktree"})
     assert "## 运行时身份" in text
     assert "`exec/ab12cd34`" in text
     assert "/home/u/proj" in text
     assert "HTTP 探测 200" in text          # 防误验红线
     assert "任务上下文" in text and "改一下登录页" in text   # 正文不受影响
+
+
+def test_runtime_identity_inplace():
+    """cv-205 就地形态: 事实相反——修改直接生效, 谨慎对待用户环境。"""
+    text = assemble_task_instruction(
+        {"title": "T", "instruction": "改一下登录页"},
+        runtime={"root": "/home/u/proj", "workspace": "inplace"})
+    assert "就地执行" in text and "没有隔离副本" in text
+    assert "不在**主目录工作" not in text
+    assert "HTTP 探测 200" not in text      # 该红线仅属隔离形态
 
 
 def test_no_runtime_keeps_backward_compat():
@@ -28,9 +40,10 @@ def test_no_runtime_keeps_backward_compat():
 
 
 def test_runtime_partial_branch_only():
-    """仅知分支（root 未知）→ 身份段只含分支事实, 不含主仓行。"""
+    """仅知分支（root 未知, 隔离形态）→ 身份段只含分支事实, 不含主仓行。"""
     text = assemble_task_instruction({"title": "T", "instruction": "x"},
-                                     runtime={"branch": "exec/r1"})
+                                     runtime={"branch": "exec/r1",
+                                              "workspace": "worktree"})
     assert "任务分支" in text
     assert "主仓位置" not in text
 
@@ -43,7 +56,7 @@ def test_cap_note_wired_into_instruction():
     assert policy.tier == "T2" and policy.cap_note
     text = assemble_task_instruction({"title": "T", "instruction": "做"},
                                      policy=policy,
-                                     runtime={"branch": "exec/c1"})
+                                     runtime={"branch": "exec/c1", "workspace": "worktree"})
     assert "运行时身份" in text and "实测能力边界降档" in text
 
 

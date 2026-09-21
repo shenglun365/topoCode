@@ -114,6 +114,10 @@ const includeAllProjects = ref(false)
 const currentProjectId = computed(() => projectStore.project?.id || '')
 
 async function load() {
+  // cv-205 闪烁根修: 项目上下文异步加载, 就绪前 pid='' 会误判「无项目→全部」
+  // 发 scope=all(其他项目会话闪现后再被过滤掉)。先等项目事实就绪再查询——
+  // 过滤本身是服务端 ?project= 参数, 这里只修时序。
+  if (!projectStore.loaded) await projectStore.load()
   loading.value = true
   try {
     const pid = currentProjectId.value

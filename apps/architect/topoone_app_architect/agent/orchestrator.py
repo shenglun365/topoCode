@@ -88,7 +88,9 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
         _labels = {"plan": "正在生成任务计划（拆步编排，最长可达数分钟）…",
                    "extract": "正在从对话历史提取需求…",
                    "card": "正在创建任务卡…",
-                   "start": "正在启动任务（worktree/执行器拉起）…"}
+                   # cv-205: 去 worktree 措辞——执行形态由启动状态卡标注
+                   # (就地缺省; 隔离仅在会话开关显式开启时)
+                   "start": "正在启动任务（执行器拉起）…"}
         try:
             asyncio.run_coroutine_threadsafe(
                 send({"type": "status", "phase": f"cmd_{phase}",

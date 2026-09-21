@@ -371,9 +371,13 @@ def confirm_task(task_id: str) -> dict:
                               "readOnly": False}}
     # 挡位策略(环节十二a): 指令按挡分叉 + 任务级轮次上限随挡下发
     policy = _eb()._task_gear(task, conv)
+    # cv-205: 执行形态事实(与 payload.worktree 同源——会话隔离开关), 经
+    # runtime 传入指令组装, 环境段/身份段按形态分叉(文案单源 exec_env)
+    _ws = "worktree" if bool((conv or {}).get("isolated")) else "inplace"
     payload["instruction"] = _eb()._task_instruction(task, _eb()._task_chain_brief(conv_id, task_id),
                                                policy=policy,
-                                               runtime={"branch": branch, "root": root},
+                                               runtime={"branch": branch, "root": root,
+                                                        "workspace": _ws},
                                                probe_score=(hint.get("executorConfig") or {})
                                                .get("probeScore")) \
         + probe_note + missing_note

@@ -191,30 +191,18 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
                          "请立即 [[NEED_INPUT]] 报告\"规约为空\", 不要猜测实施。")
     if a.get("functionalScope"):
         parts.append("## 需求目标\n" + "\n".join(f"- {x}" for x in a["functionalScope"]))
-    parts.append(
-        "## 工作环境(重要, 先读)\n"
-        "- 你在项目源码仓库的**隔离 worktree 分支**执行, pwd 即源码树根——"
-        "先浏览仓库(README/构建文件/目录结构)理解项目, 再动手。\n"
-        "- 交付物一律**写入源码树**(新文件/修改/文档, git 分支内); "
-        "**不要写系统路径**(/etc /usr /opt 等运行时部署位置)——环境搭建与部署"
-        "由用户手工执行, 你提供文件与部署说明即可。\n"
-        "- 环境类问题(sudo/依赖/编译工具)先自主查证仓库与 README; "
-        "只对**需求歧义**集中一次性提问, 不要为环境搭建反复提问。")
+    # cv-205: 工作环境段按执行形态分叉, 文案经 compensation.providers 单源
+    # (R1.1; 形态事实由执行层 runtime.workspace 传入, 本层不推断)
+    from ..compensation.providers.exec_env import work_env_section
     runtime = runtime or {}
+    parts.append(work_env_section(str(runtime.get("workspace") or "inplace")))
     _branch = str(runtime.get("branch") or "").strip()
     _root = str(runtime.get("root") or "").strip()
     if _branch or _root:
-        ident = ["## 运行时身份(防误验, 先确认)"]
-        if _branch:
-            ident.append(f"- 任务分支: `{_branch}`——你的 cwd 即该分支的隔离 worktree 根, "
-                         "与用户主目录相互独立。")
-        if _root:
-            ident.append(f"- 主仓位置: `{_root}`(用户主检出)——你**不在**主目录工作; "
-                         "主目录当前运行的服务/端口与你完全无关。")
-        ident.append("- 验收事实约定: 构建/测试/检查一律在你 worktree 内执行; "
-                     "**禁止**把「主目录服务的 HTTP 探测 200」当作完成依据——"
-                     "那不是你的产出。")
-        parts.append("\n".join(ident))
+        # cv-205: 运行时身份段同样按形态分叉(就地/隔离事实相反), 文案经单源
+        from ..compensation.providers.exec_env import runtime_identity_section
+        parts.append(runtime_identity_section(
+            str(runtime.get("workspace") or "inplace"), _branch, _root))
     if a.get("designMd") or a.get("implementationPath"):
         parts.append("## 实现方案(遵循执行)\n"
                      + str(a.get("designMd") or a.get("implementationPath")))
