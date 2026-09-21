@@ -3,6 +3,7 @@ import type { ArchitectureSpec } from '@/types'
 import { apiGet, apiPost } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
 import { currentProjectParams } from '@/services/project-service'
+import { useArchProjectStore } from '@/stores/project-store'
 
 /** 项目上下文(root/project)透传，随请求携带(与其余 KB 路由同一口径)。 */
 function ctx(): string {
@@ -32,6 +33,14 @@ export const useArchSpecStore = defineStore('arch-spec', {
   actions: {
     async load() {
       if (this.loaded || this.loading || this.degraded) return
+      // cv-205: 无 KB 基线项目(工作目录直开)直接降级——不发起注定 400 的
+      // 请求(与后端 kb_degraded 同口径: baselineId 缺失即未关联)
+      const ps = useArchProjectStore()
+      if (ps.loaded && !ps.hasBaseline) {
+        this.degraded = true
+        this.degradedReason = '项目未关联知识库——规约/基线功能不可用（项目概览「查找关联」后刷新重试）'
+        return
+      }
       this.loading = true
       if (!(await backendUp())) {
         this.loading = false
