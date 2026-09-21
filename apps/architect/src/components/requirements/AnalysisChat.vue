@@ -545,6 +545,10 @@ function specCard(m: any) {
   const sections: string[] = []
   const desc = String(p.desc || m.content || '').trim()
   if (desc) sections.push(`## 需求目标\n\n${desc}`)
+  const functional: string[] = Array.isArray(p.functionalScope) ? p.functionalScope : []
+  if (functional.length) {
+    sections.push('## 需求目标清单\n\n' + functional.map((x) => `- ${x}`).join('\n'))
+  }
   const design = String(p.design || '').trim()
   if (design) sections.push(`## 方案\n\n${design}`)
   const allowed: string[] = Array.isArray(p.allowedScope) ? p.allowedScope : []
@@ -559,6 +563,8 @@ function specCard(m: any) {
   if (acc.length) {
     sections.push('## 验收标准\n\n' + acc.map((a, i) => `${i + 1}. ${a}`).join('\n'))
   }
+  const assess = String(p.assessmentSummary || '').trim()
+  if (assess) sections.push(`## 评估摘要\n\n${assess}`)
   return {
     title: String(p.title || ''),
     priority: String(p.priority || ''),

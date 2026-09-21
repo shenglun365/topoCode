@@ -753,15 +753,20 @@ def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None
 
 def _spec_card_payload(snap: dict, priority: str = "") -> dict:
     """spec 卡自包含规约载荷(cv-215): 卡片携带**本版**规约全文——历史版本卡
-    即历史快照(渲染不依赖台账当前版), 前端 specCard 优先读卡内载荷。"""
+    即历史快照(渲染不依赖台账当前版), 前端 specCard 优先读卡内载荷。
+    字段=台账 _spec_snapshot 全量投影(截断口径一致), 快照不缩略。"""
+    s = snap or {}
     return {
-        "title": str((snap or {}).get("title") or ""),
+        "title": str(s.get("title") or ""),
         "priority": str(priority or ""),
-        "desc": str((snap or {}).get("desc") or ""),
-        "design": str((snap or {}).get("designMd") or ""),
-        "allowedScope": list((snap or {}).get("allowedScope") or []),
-        "forbiddenScope": list((snap or {}).get("forbiddenScope") or []),
-        "acceptance": list((snap or {}).get("acceptance") or []),
+        "desc": str(s.get("desc") or ""),
+        "design": str(s.get("designMd") or ""),
+        "allowedScope": list(s.get("allowedScope") or []),
+        "forbiddenScope": list(s.get("forbiddenScope") or []),
+        "acceptance": list(s.get("acceptance") or []),
+        "functionalScope": list(s.get("functionalScope") or []),
+        "assessmentSummary": str(s.get("assessmentSummary") or ""),
+        "estMin": int(s.get("estMin") or 0),
     }
 
 def execute_tool_with_repair(name: str, args: dict, root: Optional[str],
