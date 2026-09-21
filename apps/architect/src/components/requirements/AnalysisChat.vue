@@ -538,7 +538,9 @@ function specSupersededVer(m: any) {
   return max
 }
 function specCard(m: any) {
-  const p = m.proposal || {}
+  // cv-215: 卡自包含规约载荷优先(本版全文——历史版本卡即历史快照);
+  // 旧数据(无 spec 载荷)回落 m.proposal(台账当前版)
+  const p = m.item?.payload?.spec || m.proposal || {}
   const active = reqActiveTask(m.item?.payload?.requirementId)
   const sections: string[] = []
   const desc = String(p.desc || m.content || '').trim()

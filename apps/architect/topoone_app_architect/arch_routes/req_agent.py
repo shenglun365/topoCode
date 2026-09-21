@@ -491,7 +491,9 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
                                f"📝 **需求卡已更新**：`{bound_rid}` → v{entry['ver']}"
                                f"（ready，可直接 `/执行`）",
                                meta={"kind": "specReady", "requirementId": bound_rid,
-                                     "ver": entry["ver"], "updated": True})
+                                     "ver": entry["ver"], "updated": True,
+                                     "spec": _spec_card_payload(
+                                         snapshot, str(row.get("priority") or ""))})
             except Exception:  # noqa: BLE001
                 pass
             return {"ok": True, "requirementId": bound_rid, "ver": entry["ver"],
@@ -542,7 +544,8 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     try:
         log_conv_event(conv_id, receipt,
                        meta={"kind": "specReady", "requirementId": req["id"],
-                             "ver": 1, "noDesign": no_design})
+                             "ver": 1, "noDesign": no_design,
+                             "spec": _spec_card_payload(snapshot, priority)})
     except Exception:  # noqa: BLE001
         pass
     hint = "需求卡已创建(ready)——点卡片「开始执行」启动, 或直接说\"执行\""
@@ -678,7 +681,8 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                        f"✏️ **需求卡已修订**（{req_id} → v{entry['ver']} ready）：{'、'.join(changed)}"
                        + (f" —— {str(reasoning)[:120]}" if reasoning else ""),
                        meta={"kind": "specReady", "requirementId": req_id,
-                             "ver": entry["ver"], "updated": True})
+                             "ver": entry["ver"], "updated": True,
+                             "spec": _spec_card_payload(snap)})
     except Exception:  # noqa: BLE001
         pass
     hint = "修订已就绪(ready)——点「开始执行」按新版本执行"
@@ -745,6 +749,20 @@ def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None
     meta = dict(meta or {})
     _cards.land(conv_id, text, kind=meta.pop("kind", None),
                 project_id="", **meta)
+
+
+def _spec_card_payload(snap: dict, priority: str = "") -> dict:
+    """spec 卡自包含规约载荷(cv-215): 卡片携带**本版**规约全文——历史版本卡
+    即历史快照(渲染不依赖台账当前版), 前端 specCard 优先读卡内载荷。"""
+    return {
+        "title": str((snap or {}).get("title") or ""),
+        "priority": str(priority or ""),
+        "desc": str((snap or {}).get("desc") or ""),
+        "design": str((snap or {}).get("designMd") or ""),
+        "allowedScope": list((snap or {}).get("allowedScope") or []),
+        "forbiddenScope": list((snap or {}).get("forbiddenScope") or []),
+        "acceptance": list((snap or {}).get("acceptance") or []),
+    }
 
 def execute_tool_with_repair(name: str, args: dict, root: Optional[str],
                              project: Optional[str],
