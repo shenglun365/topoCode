@@ -490,11 +490,53 @@ function hasSpecCardFor(reqId?: string) {
     t.item?.type === 'spec' && t.item?.payload?.requirementId === reqId)
 }
 
+/** 规约版本更新后, 旧版卡 = 历史快照(cv-215): 同需求存在更高版本卡 → 本卡
+ * 退役——不渲染执行按钮(防误点旧版启动), 默认收起仅作参考信息;
+ * coding 上下文交接始终取台账最新规约(服务端 dispatch), 与消息卡无关。 */
+function specSuperseded(m: any) {
+  const rid = m.item?.payload?.requirementId
+  const ver = Number(m.item?.payload?.ver || 0)
+  if (!rid || !ver) return false
+  return props.turns.some((t: any) =>
+    t.item?.type === 'spec' && t.item?.payload?.requirementId === rid
+    && Number(t.item?.payload?.ver || 0) > ver)
+}
+
+/** 版本徽标(未带 ver 的历史卡显示 v1 口径)。 */
+function specVer(m: any) {
+  return Number(m.item?.payload?.ver || 0) || 1
+}
+
 /** 需求卡渲染载荷(方案 A): spec 消息卡 = 唯一宿主, 提案数据(m.proposal,
  * attach/rehydrate 供给)降级为载荷。正文 = 五段 MD(与执行器指令同构:
  * 需求目标/方案/允许改动范围/禁止改动/验收标准——所见即所得), 不截断;
  * 兜底播报原文。active: 需求已有进行中任务(执行按钮禁用)。 */
 const specCollapsed = reactive<Record<string, boolean>>({})
+/** 卡片收起键: 按"消息卡"独立(v1/v2 各自收起, 不再按需求共享)。 */
+function _specCardKey(m: any) {
+  return String(m.item?.id || m.id || m.item?.payload?.requirementId || '')
+}
+/** 旧版卡默认收起(历史快照仅参考); 用户手动展开/收起后以手动为准。 */
+function specCardCollapsed(m: any) {
+  const k = _specCardKey(m)
+  return k in specCollapsed ? specCollapsed[k] : specSuperseded(m)
+}
+function toggleSpecCard(m: any) {
+  const k = _specCardKey(m)
+  specCollapsed[k] = !specCardCollapsed(m)
+}
+/** 取代本卡的新版本号(快照徽标用)。 */
+function specSupersededVer(m: any) {
+  const rid = m.item?.payload?.requirementId
+  const ver = Number(m.item?.payload?.ver || 0)
+  let max = ver
+  for (const t of props.turns) {
+    if (t.item?.type === 'spec' && t.item?.payload?.requirementId === rid) {
+      max = Math.max(max, Number(t.item?.payload?.ver || 0))
+    }
+  }
+  return max
+}
 function specCard(m: any) {
   const p = m.proposal || {}
   const active = reqActiveTask(m.item?.payload?.requirementId)
@@ -1337,27 +1379,36 @@ onUnmounted(() => {
             <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
               <button
                 class="flex items-center gap-1 shrink-0"
-                :title="specCollapsed[String(m.item.payload?.requirementId)] ? '展开需求内容' : '收起需求内容'"
-                @click="specCollapsed[String(m.item.payload?.requirementId)] = !specCollapsed[String(m.item.payload?.requirementId)]"
+                :title="specCardCollapsed(m) ? '展开需求内容' : '收起需求内容'"
+                @click="toggleSpecCard(m)"
               >
                 <svg
-                  class="w-3.5 h-3.5 text-ctp-blue transition-transform"
-                  :class="specCollapsed[String(m.item.payload?.requirementId)] ? '' : 'rotate-90'"
+                  class="w-3.5 h-3.5 transition-transform"
+                  :class="specCardCollapsed(m) ? 'text-ctp-overlay0' : 'text-ctp-blue rotate-90'"
                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
                 ><path d="m9 18 6-6-6-6" /></svg>
-                <span class="text-[11px] font-medium text-ctp-blue">需求卡</span>
+                <span class="text-[11px] font-medium" :class="specSuperseded(m) ? 'text-ctp-overlay0' : 'text-ctp-blue'">{{ specSuperseded(m) ? '需求卡·历史快照' : '需求卡' }}</span>
               </button>
               <span class="font-mono text-[10px] text-ctp-overlay1">{{ m.item.payload?.requirementId }}</span>
               <span
+                class="chip !px-1.5 !text-[9px] font-mono shrink-0"
+                :class="specSuperseded(m) ? 'bg-ctp-surface0 text-ctp-overlay0' : 'bg-ctp-mauve/15 text-ctp-mauve'"
+              >v{{ specVer(m) }}</span>
+              <span
                 v-if="specCard(m).title"
                 class="text-xs font-medium truncate max-w-60"
+                :class="specSuperseded(m) ? 'text-ctp-overlay1 line-through decoration-ctp-overlay0/40' : ''"
               >{{ specCard(m).title }}</span>
               <span
-                v-if="specCard(m).priority"
+                v-if="specCard(m).priority && !specSuperseded(m)"
                 class="chip !px-1.5 !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0"
               >{{ specCard(m).priority }}</span>
               <span
-                v-if="specCard(m).active"
+                v-if="specSuperseded(m)"
+                class="text-[9px] px-1.5 py-0.5 rounded-full bg-ctp-overlay0/15 text-ctp-overlay0 font-medium"
+              >已被 v{{ specSupersededVer(m) }} 取代 · 仅参考</span>
+              <span
+                v-else-if="specCard(m).active"
                 class="text-[9px] px-1.5 py-0.5 rounded-full bg-ctp-blue/15 text-ctp-blue font-medium"
               >执行中</span>
               <span
@@ -1365,21 +1416,22 @@ onUnmounted(() => {
                 class="text-[9px] px-1.5 py-0.5 rounded-full bg-ctp-green/15 text-ctp-green font-medium"
               >已存入待执行</span>
               <span
-                v-if="m.item.payload?.updated"
+                v-if="m.item.payload?.updated && !specSuperseded(m)"
                 class="text-[10px] text-ctp-overlay0"
               >已更新 → v{{ m.item.payload?.ver }}</span>
               <span
-                v-if="m.item.payload?.noDesign"
+                v-if="m.item.payload?.noDesign && !specSuperseded(m)"
                 class="text-[10px] text-ctp-yellow"
               >⚠️ 缺实现方案</span>
             </div>
             <div
-              v-show="!specCollapsed[String(m.item.payload?.requirementId)]"
-              class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-72 overflow-auto [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-[11px] [&_h2]:font-semibold [&_p]:my-1 [&_ul]:my-1 [&_li]:ml-4"
+              v-show="!specCardCollapsed(m)"
+              class="text-[11px] leading-relaxed max-h-72 overflow-auto [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-[11px] [&_h2]:font-semibold [&_p]:my-1 [&_ul]:my-1 [&_li]:ml-4"
+              :class="specSuperseded(m) ? 'text-ctp-overlay0' : 'text-ctp-subtext1'"
             >
               <ChatMessageBlocks :content="specCard(m).body" />
             </div>
-            <div class="mt-2 flex items-center gap-2">
+            <div v-if="!specSuperseded(m)" class="mt-2 flex items-center gap-2">
               <button
                 class="btn btn-xs btn-primary"
                 :disabled="busy || specCard(m).active"
@@ -1396,6 +1448,9 @@ onUnmounted(() => {
                 v-else
                 class="text-[10px] text-ctp-overlay0"
               >启动 coding subagent（就地执行）</span>
+            </div>
+            <div v-else class="mt-1.5 text-[10px] text-ctp-overlay0">
+              历史版本快照——执行请使用最新版需求卡（上下文交接始终取台账最新规约）
             </div>
           </div>
 
