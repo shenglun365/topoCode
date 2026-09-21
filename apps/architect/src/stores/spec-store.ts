@@ -18,6 +18,10 @@ export const useArchSpecStore = defineStore('arch-spec', {
     spec: null as ArchitectureSpec | null,
     loading: false,
     loaded: false,
+    /** KB 未关联等场景的降级态(cv-205): 后端 400 显式语义保留(禁静默兜底),
+     * 前端记录降级而非向全局抛未处理拒绝——侧栏每页挂载都会触发 load。 */
+    degraded: false,
+    degradedReason: '',
   }),
   getters: {
     ruleCount: (s): number => {
@@ -27,17 +31,24 @@ export const useArchSpecStore = defineStore('arch-spec', {
   },
   actions: {
     async load() {
-      if (this.loaded) return
+      if (this.loaded || this.loading || this.degraded) return
       this.loading = true
-      if (!(await backendUp())) throw new Error('后端不可达，无法加载架构规约')
+      if (!(await backendUp())) {
+        this.loading = false
+        this.degraded = true
+        this.degradedReason = '后端不可达，无法加载架构规约'
+        return
+      }
       try {
         const ext = ctx()
         this.spec = await apiGet<ArchitectureSpec>(`/spec${ext ? '?' + ext : ''}`)
         this.loaded = true
-        this.loading = false
+        this.degraded = false
       } catch (err) {
+        this.degraded = true
+        this.degradedReason = err instanceof Error ? err.message : String(err)
+      } finally {
         this.loading = false
-        throw err
       }
     },
     async confirm() {
