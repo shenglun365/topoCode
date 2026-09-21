@@ -237,7 +237,7 @@ function toggleAllComps() {
           </div>
           <div class="flex items-start gap-2">
             <dt class="text-ctp-overlay1 shrink-0 w-24">{{ t('overviewHome.headCommit') }}</dt>
-            <dd class="text-ctp-text font-mono text-xs">{{ overview.head.commit?.slice(0, 8) || t('common.na') }}</dd>
+            <dd class="text-ctp-text font-mono text-xs">{{ overview.head.commit?.slice(0, 8) || t('common.none') }}</dd>
           </div>
         </dl>
       </section>
