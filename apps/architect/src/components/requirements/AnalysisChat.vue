@@ -483,6 +483,22 @@ function reqActiveTask(reqId?: string) {
     && _ACTIVE_TASK_STATUS.has(String(t.status || ''))) || null
 }
 
+/** 需求卡渲染载荷(方案 A): spec 消息卡 = 唯一宿主, 提案数据(m.proposal,
+ * attach/rehydrate 供给)降级为载荷——标题/优先级/正文; 正文兜底播报原文。
+ * active: 需求已有进行中任务(执行按钮禁用, 与后端防重守卫同口径)。 */
+function specCard(m: any) {
+  const p = m.proposal || {}
+  const active = reqActiveTask(m.item?.payload?.requirementId)
+  const desc = String(p.desc || m.content || '')
+  return {
+    title: String(p.title || ''),
+    priority: String(p.priority || ''),
+    desc: desc.slice(0, 600) + (desc.length > 600 ? '…' : ''),
+    active: !!active,
+    activeStatus: active ? String(active.status) : '',
+  }
+}
+
 // ── 模型 chip: 随选随生效(下次执行; 进行中作业模型已固化) ──
 const modelMenuOpen = ref(false)
 function onModelClick() {
@@ -1285,8 +1301,9 @@ onUnmounted(() => {
             :content="m.content"
           />
 
-          <!-- 需求卡(cv-203 裁决): 独立卡片消息——不再与正文气泡混排,
-               卡内承载规约摘要 + [一键建卡执行] 动作 -->
+          <!-- 需求卡(cv-203/205 方案 A): 独立卡片消息 = 唯一宿主——
+               标题/优先级/正文取提案载荷(m.proposal), 状态徽标联动任务;
+               同消息的 S5 提案卡不再渲染(去重) -->
           <div
             v-if="m.item?.type === 'spec'"
             class="mt-2 rounded-lg border border-ctp-blue/30 bg-ctp-blue/5 px-3 py-2.5"
@@ -1295,7 +1312,22 @@ onUnmounted(() => {
               <svg class="w-3.5 h-3.5 text-ctp-blue shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.6L19 9.4V19a2 2 0 0 1-2 2Z" /><path d="M14 3v6h5" /></svg>
               <span class="text-[11px] font-medium text-ctp-blue">需求卡</span>
               <span class="font-mono text-[10px] text-ctp-overlay1">{{ m.item.payload?.requirementId }}</span>
-              <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-ctp-green/15 text-ctp-green font-medium">ready</span>
+              <span
+                v-if="specCard(m).title"
+                class="text-xs font-medium truncate max-w-60"
+              >{{ specCard(m).title }}</span>
+              <span
+                v-if="specCard(m).priority"
+                class="chip !px-1.5 !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0"
+              >{{ specCard(m).priority }}</span>
+              <span
+                v-if="specCard(m).active"
+                class="text-[9px] px-1.5 py-0.5 rounded-full bg-ctp-blue/15 text-ctp-blue font-medium"
+              >执行中</span>
+              <span
+                v-else
+                class="text-[9px] px-1.5 py-0.5 rounded-full bg-ctp-green/15 text-ctp-green font-medium"
+              >已存入待执行</span>
               <span
                 v-if="m.item.payload?.updated"
                 class="text-[10px] text-ctp-overlay0"
@@ -1305,24 +1337,24 @@ onUnmounted(() => {
                 class="text-[10px] text-ctp-yellow"
               >⚠️ 缺实现方案</span>
             </div>
-            <div class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-40 overflow-auto whitespace-pre-wrap">{{ m.content }}</div>
+            <div class="text-[11px] text-ctp-subtext1 leading-relaxed max-h-40 overflow-auto markdown-body" style="white-space: pre-wrap">{{ specCard(m).desc }}</div>
             <div class="mt-2 flex items-center gap-2">
               <button
                 class="btn btn-xs btn-primary"
-                :disabled="busy || !!reqActiveTask(m.item.payload?.requirementId)"
-                :title="reqActiveTask(m.item.payload?.requirementId)
-                  ? `该需求已有进行中的任务（${reqActiveTask(m.item.payload?.requirementId)?.status}）——不可重复执行`
-                  : '从已定稿规约生成待确认任务卡'"
+                :disabled="busy || specCard(m).active"
+                :title="specCard(m).active
+                  ? `该需求已有进行中的任务（${specCard(m).activeStatus}）——不可重复执行`
+                  : '按规约启动 coding subagent（就地执行，直接写入项目目录）'"
                 @click="emit('send', { text: '/执行' })"
-              >{{ reqActiveTask(m.item.payload?.requirementId) ? '执行中' : '一键建卡执行' }}</button>
+              >{{ specCard(m).active ? '执行中' : '执行' }}</button>
               <span
-                v-if="reqActiveTask(m.item.payload?.requirementId)"
+                v-if="specCard(m).active"
                 class="text-[10px] text-ctp-overlay0"
-              >任务卡见下方/任务清单——完成后可再次发起</span>
+              >任务进行中——完成后可再次发起</span>
               <span
                 v-else
                 class="text-[10px] text-ctp-overlay0"
-              >卡上确认后 coding subagent 启动</span>
+              >启动 coding subagent（就地执行）</span>
             </div>
           </div>
 
@@ -1598,9 +1630,11 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- S5 需求提案卡（req.propose 产出：需求+方案+评估 → 前往需求方案） -->
+          <!-- S5 需求提案卡（req.propose 产出：需求+方案+评估 → 前往需求方案）
+               cv-205 方案 A: spec 消息卡为需求唯一宿主——同消息不再叠渲染提案卡;
+               非消息形态(资产对话流等)照旧 -->
           <div
-            v-if="m.proposal"
+            v-if="m.proposal && m.item?.type !== 'spec'"
             class="mt-2 border border-ctp-green/30 bg-ctp-green/5 rounded-lg overflow-hidden"
           >
             <div class="flex items-center gap-1.5 px-2 py-1.5">
