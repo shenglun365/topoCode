@@ -11,6 +11,7 @@ import { defineStore } from 'pinia'
 import { chatStream, stageOfTool, type ChatStreamEvent, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { SemanticAsset } from '@/types'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
+import { currentProjectParams } from '@/services/project-service'
 import { requirementService } from '@/services/requirement-service'
 import { outlineAbbrCache } from '@/services/outline-cache'
 import { readModelPref } from '@topo/web-core/shell'
@@ -398,7 +399,10 @@ export const useConversationStore = defineStore('archConversation', () => {
   async function refreshActiveMeta() {
     if (!activeId.value) return
     try {
-      const list = await sessionService.list({ limit: 400 })
+      // cv-204/205 硬隔离: 活动会话必属其项目——按项目查, 不发无参全局列表
+      const pid = (activeMeta.value as any)?.projectId
+        || currentProjectParams().project || ''
+      const list = await sessionService.list({ limit: 400, project: pid })
       activeMeta.value = list.find((c) => c.id === activeId.value) ?? activeMeta.value
       if (activeMeta.value?.title) activeTitle.value = activeMeta.value.title
     } catch { /* 列表刷新失败不影响对话 */ }
