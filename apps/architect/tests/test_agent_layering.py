@@ -65,6 +65,10 @@ _R1_INVENTORY = {
     # (store/execution/req_agent 接缝随行, _eb() 调用期绑定); DispatchTurn
     # 接缝重构时随 runner_client 单源化(G7)清退。
     "execution/dispatch.py",
+    # governance/flow.py(2026-09-21 立条): 会话流程相位机(states 词表 + IO 收口
+    # recompute/recover)——states 单源与 store 访问为相位机本职(recover.py 同款
+    # 调用期解析先例); 策略/任务/自愈三方消费的公共事实轴, 清退随 states 上提。
+    "governance/flow.py",
 }
 
 # 存量违规冻结——低层引高层。

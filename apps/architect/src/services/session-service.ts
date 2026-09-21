@@ -18,6 +18,8 @@ export interface ConversationMeta {
   status: string
   /** 查看状态: read | unread | awaiting_reply | error */
   reviewState?: string
+  /** 流程相位(governance/flow.py 派生缓存): free|clarifying|armed|executing|reviewing|interrupted */
+  flowState?: string
   /** 执行角色(默认 architect) */
   /** 工作相位: architect(常态) | running(外调作业执行中) */
   workState?: 'architect' | 'running'

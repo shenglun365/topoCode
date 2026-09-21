@@ -9,6 +9,21 @@ from . import store
 router = APIRouter()
 
 
+def _recompute_flow_of_req(row: Optional[dict], trigger: str) -> None:
+    """需求生命周期变化 → 来源会话流程相位重算(governance/flow.py)。
+
+    需求状态机(资产契约)与会话相位机解耦——需求事件只触发重算,
+    相位是否迁移由占用事实派生决定(R1 单向: 零反写需求)。fail-soft。"""
+    try:
+        conv_id = str((row or {}).get("sourceConversationId")
+                      or (row or {}).get("ownerConv") or "")
+        if conv_id:
+            from ..agent.governance import flow as _flow
+            _flow.recompute(conv_id, trigger=trigger)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _kb_degraded(root=None, project_id=None) -> bool:
     """是否降级: 无项目 或 项目无 KB 基线(工作目录直开/无 KB 内容支撑)。
 
@@ -250,6 +265,7 @@ async def cancel_requirement(req_id: str):
         req_id,
         {"status": "cancelled" if row["status"] != "cancelled" else "raw", "updatedAt": _ts()},
     )
+    _recompute_flow_of_req(row, "req-cancel")
     return ok(row)
 
 
@@ -261,6 +277,7 @@ async def mark_requirement_done(req_id: str, request: Request):
     row = store.RequirementsStore.mark_done(req_id, bool(body.get("done", True)))
     if not row:
         return err(404, "Not found")
+    _recompute_flow_of_req(row, "req-done")
     return ok(row)
 
 
@@ -284,6 +301,7 @@ async def finalize_requirement(req_id: str):
     elif (row.get("status") or "") != "ready":
         # 无版本行(历史遗留形态) → 行级状态就位
         row = store.RequirementsStore.update(req_id, {"status": "ready"}) or row
+    _recompute_flow_of_req(row, "req-finalize")
     return ok(row)   # 已 ready(无草稿态): 原样返回
 
 

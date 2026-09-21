@@ -169,6 +169,8 @@ ARCH_PROJECT_TABLES_SQL = """
         session_ref TEXT DEFAULT '',          -- 执行器原生会话引用(opencode session id 等; 子会话复活用)
         review_state TEXT DEFAULT 'read',   -- 查看状态: read | unread | awaiting_reply | error
         analysis_mode TEXT DEFAULT 'strict', -- 分析挡位: strict(需求分析→规约→任务) | quick(直出任务卡)
+        flow_state TEXT DEFAULT '',          -- 流程相位缓存(governance/flow.py 派生物化; 事件驱动迁移)
+        flow_state_at INTEGER DEFAULT 0,     -- 相位迁移时间(审计锚)
         roles TEXT,                         -- JSON: 角色集 [architect(恒), ...外调角色id]
         tags TEXT,                          -- JSON: {modules:[], groups:[]} 会话分类(会话中心)
         summary TEXT DEFAULT '',            -- 会话摘要
@@ -259,6 +261,9 @@ ARCH_PROJECT_TABLES_SQL = """
         branch TEXT DEFAULT '',
         progress TEXT,                      -- JSON: {toolCount, msgCount, at}
         result_md TEXT DEFAULT '',          -- 终态产出摘要(done 时)
+        safety_class TEXT DEFAULT 'mutating', -- 安全等级: readonly|mutating|high-stakes(互斥/worktree/门禁)
+        work_tags TEXT,                     -- JSON: 开放工作类型标签(不设枚举, 仅影响提示)
+        dismissed_at INTEGER DEFAULT 0,     -- 回执已阅(reviewing 消化出口, 0=未处理)
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0,
         finished_at INTEGER DEFAULT 0
@@ -626,6 +631,16 @@ def _main_migrations(db) -> None:
         ("merged_at", "INTEGER DEFAULT 0"),
         ("merged_head", "TEXT DEFAULT ''"),
     ])
+    # 流程相位缓存 + 任务安全等级(无项目上下文写主库 → 两库同补, 幂等)
+    _add_cols(db, "arch_conversations", [
+        ("flow_state", "TEXT DEFAULT ''"),
+        ("flow_state_at", "INTEGER DEFAULT 0"),
+    ])
+    _add_cols(db, "arch_tasks", [
+        ("safety_class", "TEXT DEFAULT 'mutating'"),
+        ("work_tags", "TEXT"),
+        ("dismissed_at", "INTEGER DEFAULT 0"),
+    ])
     # 环节十四: 需求任务计划列(需求表无 project_id, 主库/项目库双补)
     _add_cols(db, "arch_requirements", [
         ("task_plan", "TEXT"),
@@ -789,6 +804,9 @@ def _project_migrations(db) -> None:
         ("clarify_mode", "TEXT DEFAULT 'auto'"),
         # cv-202: worktree 隔离模式(0=就地缺省 | 1=显式要求隔离执行)
         ("isolated", "INTEGER DEFAULT 0"),
+        # 流程相位缓存(governance/flow.py derive-on-write; 事件驱动迁移, 可重建)
+        ("flow_state", "TEXT DEFAULT ''"),
+        ("flow_state_at", "INTEGER DEFAULT 0"),
     ])
     # v2 统一会话: 消息 agent 标注(''=architect 外循环; cline/opencode/codex=subagent)
     _add_cols(db, "arch_conversation_messages", [
@@ -807,6 +825,10 @@ def _project_migrations(db) -> None:
         ("merged_head", "TEXT DEFAULT ''"),
         # V1 验收门禁: 任务级 P0 显式配置(verify.py 发现链最高权威)
         ("verify_config", "TEXT"),
+        # 任务安全等级三值轴(互斥/worktree/门禁) + 开放工作类型标签 + 回执已阅
+        ("safety_class", "TEXT DEFAULT 'mutating'"),
+        ("work_tags", "TEXT"),
+        ("dismissed_at", "INTEGER DEFAULT 0"),
     ])
     _migrate_lifecycle_v2(db)
     _add_cols(db, "arch_unit_tests", [

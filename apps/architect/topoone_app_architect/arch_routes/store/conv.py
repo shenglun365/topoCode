@@ -133,6 +133,9 @@ class ConversationsStore:
             "tags": data.get("tags"),
             "summary": data.get("summary") or "",
             "meta": data.get("meta"),
+            # 流程相位缓存(governance/flow.py derive-on-write; 缺省空=待惰性回填)
+            "flow_state": data.get("flowState") or "",
+            "flow_state_at": data.get("flowStateAt") or 0,
             "created_at": data.get("createdAt") or now,
             "updated_at": data.get("updatedAt") or now,
         }
@@ -443,8 +446,12 @@ class StreamItemsStore:
     @classmethod
     def for_conv(cls, conversation_id: str, task_id: str = None,
                  before_ts: int = None, limit: int = 200) -> list[dict]:
-        """会话流 item(新→旧); task_id/before_ts 过滤(分页回载挂点)。"""
-        conds, params = ["conversation_id = ?"], [conversation_id]
+        """会话流 item(新→旧); task_id/before_ts 过滤(分页回载挂点)。
+
+        flow_transition(相位迁移审计, governance/flow.py)不属 UI 信息流,
+        默认排除——审计读取走 transitions()。"""
+        conds, params = ["conversation_id = ?",
+                         "type != 'flow_transition'"], [conversation_id]
         if task_id:
             conds.append("task_id = ?")
             params.append(task_id)
@@ -455,6 +462,17 @@ class StreamItemsStore:
                f"ORDER BY created_at DESC, id DESC LIMIT ?")
         params.append(int(limit))
         rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), None)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def transitions(cls, conversation_id: str, limit: int = 100) -> list[dict]:
+        """相位迁移审计流(flow_transition, 新→旧; 调试/复盘/自愈观测)。"""
+        rows, _ = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE conversation_id = ? "
+            f"AND type = 'flow_transition' "
+            f"ORDER BY created_at DESC, id DESC LIMIT ?",
+            (conversation_id, int(limit)), None)
         return [_row_to_api(r) for r in rows]
 
     @classmethod

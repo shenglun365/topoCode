@@ -73,8 +73,16 @@ def recover_sweep() -> int:
         try:
             rec = recover_conv_tasks(conv_id)
             total += int((rec or {}).get("finished") or 0)
-        except Exception:  # noqa: BLE001
-            logger.warning("[exec-bridge] sweep 恢复失败 conv=%s", conv_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec-bridge] sweep 恢复失败: %s", e)
+        # 流程相位自愈(M6): 恢复无收敛且活跃任务 stale → interrupted
+        # (显式声明卡点并给出恢复动作, 不静默悬置——cv-153/161/204 事故模式收口)
+        try:
+            from ..governance import flow as _flow
+            if _flow.mark_stale_interrupted(conv_id):
+                logger.warning("[exec-bridge] 会话 stale 置 interrupted conv=%s", conv_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec-bridge] 相位自愈失败 conv=%s: %s", conv_id, e)
     return total
 
 
@@ -139,4 +147,10 @@ def recover_conv_tasks(conv_id: str) -> dict:
             # 仍在执行或等待输入: 交还调用方在事件循环内重挂泵
             out["repump"].append((t["id"], job_id, t.get("reqId") or "",
                                   t.get("executorType") or ""))
+    # 流程相位重算(force: 解除 interrupted 粘滞——恢复成功即占用事实已变)
+    try:
+        from ..governance import flow as _flow
+        _flow.recompute(conv_id, trigger="recover", force=True)
+    except Exception:  # noqa: BLE001
+        pass
     return out

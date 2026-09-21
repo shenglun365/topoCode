@@ -28,7 +28,9 @@ router = APIRouter()
 SESSION_KINDS = ["requirement", "asset", "unit-test", "generic"]
 
 # PR1 双维度状态机: 生命周期(status) + 查看状态(review_state)
-LIFECYCLES = ("active", "running", "archived")          # archived 不可逆终态
+# (旧 LIFECYCLES 残留值 "running" 已清退——执行相位语义由 flow_state 承载
+#  [governance/flow.py 派生缓存], status 只管 active/archived 生命周期)
+LIFECYCLES = ("active", "archived")                      # archived 不可逆终态
 REVIEW_STATES = ("read", "unread", "awaiting_reply", "error")
 
 _GROUPS_KEY = "session.groups"      # 用户自定义分组(collab config, JSON 数组)
@@ -133,6 +135,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "clarifyMode": c.get("clarifyMode") or "auto",
             "isolated": bool(c.get("isolated")),
             "reviewState": c.get("reviewState") or "read",
+            "flowState": c.get("flowState") or "",
             "roles": _roles_of(c),
             "executorId": c.get("executorId") or "",
             "executorModel": c.get("executorModel") or "",
@@ -358,6 +361,12 @@ async def session_messages(conv_id: str):
                 _eb._start_task_pump(conv_id, tid, jid, rid, ag)
     except Exception:  # noqa: BLE001
         pass
+    # 流程相位惰性回填/对账(governance/flow.py; 空缓存与漂移在此自修复)
+    try:
+        from ..agent.governance import flow as _flow
+        await asyncio.to_thread(_flow.recompute, conv_id, trigger="open")
+    except Exception:  # noqa: BLE001
+        pass
     msgs = store.ConversationsStore.messages(conv_id, limit=1000)
     # A6.2 UI 守门: 卡片消息读侧投影为 item——前端只渲染 item, 零 meta.kind 分支
     try:
@@ -469,6 +478,8 @@ def _conv_api(conv: dict) -> dict:
         "status": conv.get("status") or "active",
         "workState": conv.get("workState") or "architect",
         "reviewState": conv.get("reviewState") or "read",
+        "flowState": conv.get("flowState") or "",
+        "flowStateAt": conv.get("flowStateAt") or 0,
         "roles": _roles_of(conv),
         "executorId": conv.get("executorId") or "",
         "executorModel": conv.get("executorModel") or "",
@@ -1009,6 +1020,25 @@ async def stop_exec_session(conv_id: str):
     return ok({"message": message, "stoppedTasks": stopped})
 
 
+@router.post("/sessions/{conv_id}/recover")
+async def recover_session_route(conv_id: str):
+    """中断恢复(interrupted 显式出口): 核对执行器实际态收尾任务 + 重算相位。
+
+    幂等; repump 清单在事件循环内重挂泵(同 GET messages 先例)。
+    返回 {recovered: 收尾数, repump: 重挂数, flowState: 相位}。"""
+    if not store.ConversationsStore.get(conv_id):
+        return err(404, "会话不存在")
+    from ..agent.governance import flow as _flow
+    rec = await asyncio.to_thread(_flow.recover_session, conv_id)
+    for tid, jid, rid, ag in (rec or {}).get("repump", []):
+        try:
+            from . import exec_bridge as _eb
+            _eb._start_task_pump(conv_id, tid, jid, rid, ag)
+        except Exception:  # noqa: BLE001
+            pass
+    return ok(rec)
+
+
 @router.post("/sessions/{conv_id}/spec-apply")
 async def session_spec_apply(conv_id: str, request: Request):
     """消息流「写入需求」按钮: 规约 JSON 载荷确定性落库(零 LLM)。
@@ -1040,6 +1070,13 @@ async def session_spec_apply(conv_id: str, request: Request):
                 store.ConversationsStore.update(conv_id, {"meta": cm})
         except Exception:  # noqa: BLE001
             pass
+    # 草稿兑现 → 占用事实变化, 重算流程相位(clarifying 出口; fail-soft)
+    if res.get("ok"):
+        try:
+            from ..agent.governance import flow as _flow
+            await asyncio.to_thread(_flow.recompute, conv_id, trigger="spec-apply")
+        except Exception:  # noqa: BLE001
+            pass
     return ok(res)
 
 
@@ -1050,11 +1087,26 @@ async def session_guide(conv_id: str):
         return err(404, "会话不存在")
 
     msgs = store.ConversationsStore.messages(conv_id, limit=1000)[-10:]
+    # 流程相位事实注入(governance/flow.py): guide 从"LLM 推断阶段"升级为
+    # "确定性相位 + hint 事实 → LLM 措辞增强"(软状态机收编)
+    try:
+        from ..agent.governance import flow as _flow
+        _phase = (await asyncio.to_thread(
+            lambda: (_flow.recompute(conv_id, trigger="guide") or {})
+            .get("flowState") or (conv.get("flowState") or ""))) or (conv.get("flowState") or "")
+        _req_row = store.RequirementsStore.get(conv.get("reqId") or "") \
+            if (conv.get("reqId") or "") else None
+        _hints = _flow.flow_hints(conv, store.TasksStore.of_conv(conv_id) or [],
+                                  _req_row)
+    except Exception:  # noqa: BLE001
+        _phase, _hints = (conv.get("flowState") or ""), []
     state = {
         "title": conv.get("title") or "",
         "kind": conv.get("kind") or "",
         "status": conv.get("status") or "active",
         "workState": conv.get("workState") or "architect",
+        "flowState": _phase,
+        "nextActionHints": _hints,
         "requirement": _guide_req_state(conv.get("reqId") or ""),
         "execJobs": _guide_jobs_state(conv_id),
         "recentMessages": [
@@ -1092,6 +1144,15 @@ async def task_merge(task_id: str, request: Request):
     res = await asyncio.to_thread(exec_bridge.merge_branch, task_id, mode)
     if not res.get("ok"):
         return err(int(res.get("code") or 400), res.get("error") or "merge-failed")
+    # 流程相位重算: merged = 回执已消化(reviewing 出口; force 解除粘滞)
+    try:
+        _t = res.get("task") or {}
+        _cid = _t.get("conversationId") or ""
+        if _cid:
+            from ..agent.governance import flow as _flow
+            await asyncio.to_thread(lambda: _flow.recompute(_cid, trigger="task-merge", force=True))
+    except Exception:  # noqa: BLE001
+        pass
     return ok(res)
 
 
@@ -1156,6 +1217,19 @@ async def task_confirm(task_id: str, request: Request):
     res = await asyncio.to_thread(exec_bridge.confirm_task, task_id)
     if not res.get("ok"):
         return err(400, str(res.get("error") or "confirm-failed"))
+    return ok({"task": res.get("task")})
+
+
+@router.post("/tasks/{task_id}/dismiss")
+async def task_dismiss(task_id: str):
+    """回执已阅(dismiss, reviewing 消化出口): 仅 done 态; 不改终态, 留痕。
+
+    与 ignore 语义区分: ignore=saved 卡不执行; dismiss=done 回执已阅
+    (不合并/不建下张卡的用户显式消化)。"""
+    from ..agent.execution.dispatch import dismiss_task
+    res = await asyncio.to_thread(dismiss_task, task_id)
+    if not res.get("ok"):
+        return err(int(res.get("code") or 400), str(res.get("error") or "dismiss-failed"))
     return ok({"task": res.get("task")})
 
 

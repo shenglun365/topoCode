@@ -156,6 +156,36 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
     await send(done_ev)
 
 
+async def _phase_hard_gate(gate: dict, send: SendFn, store) -> bool:
+    """管线阶段①.5 相位硬闸(G1: 闸门之后/路由之前, 先于直通指令)。
+
+    仅 interrupted 拦下发类意图(词表单源 flow.evaluate_guards); 命中 → 直通
+    回执(零 LLM)。开关 flow_guards_enabled(缺省启用)。其余相位全软(note/hint)。
+    """
+    from .compensation.overrides import override_enabled, read_overrides
+    phase = str((gate.get("conv") or {}).get("flowState") or "")
+    if not phase:
+        return False
+    try:
+        if not override_enabled(read_overrides(store.CollabConfigStore.get),
+                                "flow_guards_enabled"):
+            return False
+    except Exception:  # noqa: BLE001 — 开关读取失败保持守卫启用
+        pass
+    from .governance.flow import evaluate_guards, land_phase_reply
+    reply = evaluate_guards(phase, str(gate.get("question") or ""))
+    if reply is None:
+        return False
+    conv_id = gate["conv_id"]
+    msg_id = await asyncio.to_thread(land_phase_reply, conv_id, reply)
+    await send({"type": "chat_start", "conversationId": conv_id,
+                "requestId": "", "userMessageId": gate.get("last_user_msg_id") or ""})
+    await send({"type": "chunk", "requestId": "", "delta": reply})
+    await send({"type": "done", "conversationId": conv_id,
+                "content": reply, "messageId": msg_id})
+    return True
+
+
 async def handle_chat(data: dict, send: SendFn) -> None:
     """自由对话回合(B3 五段管线编排): 闸门 → 路由 → 上下文 → 执行 → 落库。
 
@@ -185,6 +215,10 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     if gate is None:
         return
     conv_id, conv = gate["conv_id"], gate["conv"]
+
+    # ---- ①.5 相位硬闸(G1 裁决: 闸门之后/路由之前, 先于直通指令) ----
+    if await _phase_hard_gate(gate, send, store):
+        return
 
     # ---- ② 路由: transfer 收尾 / 直通指令 / 文字确认(命中即收束) ----
     handled, decision = await _chat_route(data, gate, send)

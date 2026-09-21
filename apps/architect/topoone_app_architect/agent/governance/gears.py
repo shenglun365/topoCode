@@ -198,13 +198,18 @@ A_AXIS_POLICY = {
 
 def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = None,
                  architect_model_id: str = "",
-                 overrides: Optional[Dict[str, Any]] = None) -> GearPolicy:
-    """解析链单源(三维矩阵): 会话挡位 + 执行器能力(C 轴) + architect 模型(A 轴)。
+                 overrides: Optional[Dict[str, Any]] = None,
+                 flow_state: str = "") -> GearPolicy:
+    """解析链单源(四维矩阵): 会话挡位 + 执行器能力(C 轴) + architect 模型(A 轴)
+    + 流程相位(P 轴, flow_state)。
 
     executor_cfg: 执行器注册表 config(读 capability / tierProbed[十二b]) → C 轴字段。
     architect_model_id: architect 对话模型(A 轴) → schedule_discipline/element_hints;
       无 id 或无档案 → 字段保持中性默认(现行为)。
     overrides: 补偿白名单开关(compensation.overrides, R2.1)。
+    flow_state: 会话流程相位(states.FLOW_*, governance/flow.py 派生缓存) →
+      P 轴对话面指引(R2 面分离: 只叠 architect_note/element_hints 且单调收紧,
+      任务面禁触; 叠加在最终基线之后, 独立于 r2_1_axis_stack)。
     未知值一律落默认 T1(显式优于静默升档)。
     M1: 实测来源(tierProbed)叠加探针硬上限封顶(cap_note 随策略携带);
     人工显式 capability 不封顶(人的意志优先)。
@@ -213,13 +218,14 @@ def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = Non
     """
     mode = normalize_mode(str(session_mode or "").strip())
     if mode == "quick":
-        return _TIERS["T0"]
+        return _apply_p_axis(_TIERS["T0"], flow_state, overrides)
     if mode in _TIERS:
         policy = _TIERS[mode]
         if not _axis_stack_enabled(overrides):
-            return policy          # 旧短路语义(回退开关)
+            return _apply_p_axis(policy, flow_state, overrides)   # 旧短路语义(回退开关) + P 轴
         # R2.1: 显式挡不封顶(人的意志优先), 仅叠加 A 轴补偿
-        return _apply_a_axis(policy, architect_model_id)
+        return _apply_p_axis(_apply_a_axis(policy, architect_model_id),
+                             flow_state, overrides)
     # strict / auto / 未知 → auto 链: 实测档位 > 配置档位 > 默认
     cfg = executor_cfg if isinstance(executor_cfg, dict) else {}
     tier = (_valid_tier(cfg.get("tierProbed"))
@@ -233,7 +239,30 @@ def resolve_gear(session_mode: str, executor_cfg: Optional[Dict[str, Any]] = Non
             if capped != tier:
                 import dataclasses
                 policy = dataclasses.replace(policy, tier=capped, cap_note=note)
-    return _apply_a_axis(policy, architect_model_id)
+    return _apply_p_axis(_apply_a_axis(policy, architect_model_id),
+                         flow_state, overrides)
+
+
+def _apply_p_axis(policy: GearPolicy, flow_state: str,
+                  overrides: Optional[Dict[str, Any]] = None) -> GearPolicy:
+    """P 轴叠加(独立开关 p_axis_phase_overlay)。R2 面分离: 只触对话面字段
+    (architect_note 追加/element_hints 单调收紧), 禁触任务面; 覆盖语义单源
+    flow.p_axis_overlay_fields, 自定义注册 flow.register_phase_overlay。"""
+    if not flow_state:
+        return policy
+    try:
+        from ..compensation.overrides import override_enabled
+        if not override_enabled(overrides or {}, "p_axis_phase_overlay"):
+            return policy
+        from . import flow as _flow
+        fields = _flow.p_axis_overlay_fields(policy, flow_state)
+        fields.update(_flow._custom_overlays.get(flow_state) or {})
+        if not fields:
+            return policy
+        import dataclasses
+        return dataclasses.replace(policy, **fields)
+    except Exception:  # noqa: BLE001 — P 轴故障不阻塞解析链(fail-soft)
+        return policy
 
 
 def _axis_stack_enabled(overrides: Optional[Dict[str, Any]]) -> bool:

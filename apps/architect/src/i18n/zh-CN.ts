@@ -478,6 +478,17 @@ export default {
       runningHint: '外调作业执行中——双收件人可随时讨论/转达; 状态变化自动恢复对话',
       lockedHint: '作业执行中，输入已锁定（等待回合结束 / 停止作业 / 开新会话讨论）',
     },
+    flow: {
+      title: '流程相位',
+      free: '空闲',
+      clarifying: '澄清中',
+      armed: '待执行',
+      executing: '执行中',
+      reviewing: '待验收',
+      interrupted: '已中断',
+      recover: '恢复',
+      recoverHint: '核对执行器实际状态，收尾中断任务并恢复相位',
+    },
     job: {
       stop: '停止作业',
       resume: '/继续 转达',

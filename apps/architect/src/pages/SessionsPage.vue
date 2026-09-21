@@ -297,6 +297,12 @@ function reviewClass(rs?: string) {
   if (rs === 'error') return 'bg-ctp-red/20 text-ctp-red'
   return ''
 }
+/** 流程相位标签(governance/flow.py; 词表缺 key 时回落原值)。 */
+function flowLabel(p?: string): string {
+  if (!p) return ''
+  const k = `session.flow.${p}`
+  return t(k) === k ? p : t(k)
+}
 </script>
 
 <template>
@@ -429,6 +435,14 @@ function reviewClass(rs?: string) {
               :title="t('session.role.roleTitle')"
             >⌨ {{ (c as any).executorId }}</span>
             <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
+            <span
+              v-if="(c as any).flowState && (c as any).flowState !== 'free'"
+              class="chip shrink-0"
+              :class="(c as any).flowState === 'interrupted' ? 'bg-ctp-red/15 text-ctp-red'
+                : (c as any).flowState === 'executing' ? 'bg-ctp-blue/15 text-ctp-blue'
+                : 'bg-ctp-surface0/60 text-ctp-subtext1'"
+              :title="t('session.flow.title')"
+            >◈ {{ flowLabel((c as any).flowState) }}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
                 <input

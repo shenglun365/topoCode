@@ -27,7 +27,9 @@ NEW_FILE_WHITELIST: dict = {
     # M4 自 exec_bridge 机械搬迁的下发域(propose/confirm/task_input/停止/恢复
     # 衔接; 接缝 _eb() 调用期绑定占据行数); 2026-09-20 默认保存裁决 +saved/ignored
     # 生命周期与 ignore/改写通道随行; DispatchTurn 接缝重构时再拆。
-    "agent/execution/dispatch.py": 700,
+    # 2026-09-21 流程相位机接线(+safetyClass 三值轴消费/ dismiss 消化出口/
+    # 收口点 recompute)——G2 补偿矩阵与安全等级为本域职责, 拆分随 DispatchTurn。
+    "agent/execution/dispatch.py": 780,
 }
 
 with open(BASELINE_PATH, encoding="utf-8") as f:

@@ -57,6 +57,13 @@
         class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25"
         @click="$emit('cancel', task.id)"
       >⏹ 停止</button>
+      <!-- 完成 → 已阅(reviewing 消化出口; 幂等) -->
+      <button
+        v-else-if="task.status === 'done' && !task.dismissedAt"
+        class="btn-mini bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1"
+        title="回执已阅——不合并、不建下张卡(留痕可追溯)"
+        @click="$emit('dismiss', task.id)"
+      >✓ 已阅</button>
     </div>
     <div v-if="task.branch" class="mt-1 text-[10px] text-ctp-overlay1 font-mono">
       分支 {{ task.branch }}
@@ -185,7 +192,7 @@ import { apiPost } from '@/services/api-client'
 import StreamItems from './StreamItems.vue'
 
 const props = defineProps<{ task: Record<string, any>; convId?: string }>()
-defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
+defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
 
 // ── 验收配置(V1): 仅 pending_confirm 可写, 启动时随 start payload 下发 ──
 const vcOpen = ref(false)

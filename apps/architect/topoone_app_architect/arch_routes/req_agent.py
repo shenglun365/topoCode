@@ -1233,11 +1233,19 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
 )
 def tool_task_propose(title: str, instruction: str,
                       executorType: Optional[str] = None,
-                      root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
-    """v2 混合触发: architect 整理任务(目标/方案要点/边界/验收) → 用户确认(P4 委托 planning.task_plan)。"""
+                      root: Optional[str] = None, project: Optional[str] = None,
+                      safetyClass: Optional[str] = None,
+                      workTags: Optional[List[str]] = None) -> Dict[str, Any]:
+    """v2 混合触发: architect 整理任务(目标/方案要点/边界/验收) → 用户确认(P4 委托 planning.task_plan)。
+
+    safetyClass: readonly=纯读/分析(豁免互斥, 强制就地) | mutating=会写代码/文件(默认)
+      | high-stakes=高风险(部署/发布/数据迁移/破坏性操作——强制隔离+合并门禁)。
+    workTags: 工作类型开放标签, 如 ["analysis","docs"] / ["deploy"]。"""
     from ..agent.planning.task_plan import propose_task_tool
     return propose_task_tool(title, instruction, executorType=executorType,
-                             root=root, project=project)
+                             root=root, project=project,
+                             safetyClass=safetyClass or "",
+                             workTags=workTags)
 
 
 # ── 会话知识单元工具面(LLM 可读写; 存储归一后落 arch_context_units) ────────

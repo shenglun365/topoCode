@@ -193,6 +193,12 @@ function onConvEvent(d: any) {
     _debounceRefresh()
     return
   }
+  if (d?.type === 'flow-transition') {
+    // 流程相位迁移: 刷新会话元数据(flowState 徽章/相位指引) + 信息流(审计卡)
+    void conv.refreshActiveMeta()
+    _debounceRefresh()
+    return
+  }
   if (d?.type === 'conv-message') {
     _debounceRefresh()
   }
@@ -589,6 +595,35 @@ async function stopExec() {
     stopBusy.value = false
   }
 }
+
+// 流程相位(会话状态机): 徽章展示 + interrupted 恢复动作(governance/flow.py)
+const flowPhase = computed(() => String((conv.activeMeta as any)?.flowState || ''))
+function flowLabel(p: string): string {
+  const k = `session.flow.${p}`
+  return t(k) === k ? p : t(k)
+}
+const flowRecoverBusy = ref(false)
+async function recoverFlow() {
+  if (!conv.activeId || flowRecoverBusy.value) return
+  flowRecoverBusy.value = true
+  try {
+    await apiPost(`/sessions/${conv.activeId}/recover`, {})
+    await conv.refreshActiveMeta()
+    _debounceRefresh()
+  } catch { /* 状态随对账刷新 */ } finally {
+    flowRecoverBusy.value = false
+  }
+}
+
+// 回执已阅(reviewing 消化出口): dismiss → 相位重算(合并/建下张卡之外的显式消化)
+async function onTaskDismiss(id: string) {
+  try {
+    await apiPost(`/tasks/${id}/dismiss`, {})
+    void conv.refreshTasks()
+    void conv.refreshActiveMeta()
+    _debounceRefresh()
+  } catch { /* 状态随对账刷新 */ }
+}
 // running 态准实时同步: 复用 5s 轮询——刷新 workState + 增量消息(泵产物)
 async function syncRunningState(force = false) {
   if (!conv.activeId) return
@@ -872,6 +907,7 @@ async function pollRunningState() {
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
         @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
         @task-ignore="(id: string) => void conv.taskAction(id, 'ignore')"
+        @task-dismiss="(id: string) => void onTaskDismiss(id)"
         @task-executor="(p: any) => void onTaskExecutor(p)"
         @local-cmd="onLocalCmd"
         @bind-coding="openRoles"
@@ -900,6 +936,21 @@ async function pollRunningState() {
         </template>
         <template #header-extra>
           <div v-if="conv.activeId" class="flex shrink-0 items-center gap-1.5">
+            <span
+              v-if="flowPhase && flowPhase !== 'free'"
+              class="chip !text-[10px]"
+              :class="flowPhase === 'interrupted' ? 'bg-ctp-red/15 text-ctp-red'
+                : flowPhase === 'executing' ? 'bg-ctp-blue/15 text-ctp-blue'
+                : 'bg-ctp-surface0/60 text-ctp-subtext1'"
+              :title="t('session.flow.title')"
+            >◈ {{ flowLabel(flowPhase) }}</span>
+            <button
+              v-if="flowPhase === 'interrupted'"
+              class="btn !py-0 !px-1.5 !text-[10px]"
+              :disabled="flowRecoverBusy"
+              :title="t('session.flow.recoverHint')"
+              @click="recoverFlow"
+            >{{ t('session.flow.recover') }}</button>
             <span
               v-if="reqStatus && (conv.activeMeta as any)?.status !== 'archived'"
               class="chip !text-[10px]"

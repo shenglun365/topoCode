@@ -454,6 +454,17 @@ export default {
       runningHint: 'External job running — dual-recipient chat/deliver anytime; auto-resumes on state change',
       lockedHint: 'Job running, input locked (wait for turn end / stop job / new session)',
     },
+    flow: {
+      title: 'Flow phase',
+      free: 'Idle',
+      clarifying: 'Clarifying',
+      armed: 'Ready',
+      executing: 'Executing',
+      reviewing: 'Review',
+      interrupted: 'Interrupted',
+      recover: 'Recover',
+      recoverHint: 'Check executor actual state, settle interrupted tasks and restore phase',
+    },
     job: {
       stop: 'Stop job',
       resume: 'Resume (/继续)',

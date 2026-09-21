@@ -53,6 +53,12 @@ class TasksStore:
             "base_commit": data.get("baseCommit") or "",
             "progress": json.dumps(data.get("progress") or {}, ensure_ascii=False),
             "result_md": data.get("resultMd") or "",
+            # 安全等级三值轴 + 开放工作类型标签(governance/flow.py 词汇单源)
+            "safety_class": (data.get("safetyClass") or "").strip().lower()
+                            or "mutating",
+            "work_tags": json.dumps(data.get("workTags") or [], ensure_ascii=False)
+                         if data.get("workTags") else None,
+            "dismissed_at": data.get("dismissedAt") or 0,
             "verify_config": json.dumps(data.get("verifyConfig") or {},
                                         ensure_ascii=False)
             if data.get("verifyConfig") else None,

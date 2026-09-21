@@ -97,10 +97,17 @@ def _job_upsert(conv_id: str, job: dict) -> None:
 
 
 def _aggregate_work_state(conv_id: str) -> None:
-    """workState 聚合: 非终态作业存在 ⇔ running。"""
+    """workState 聚合: 非终态作业存在 ⇔ running。
+
+    (legacy jobs 兼容面; 流程相位以 arch_tasks 驱动的 flow_state 为准。)"""
     live = [j for j in jobs_of(conv_id) if (j.get("status") or "") not in _TERMINAL]
     try:
         store.ConversationsStore.set_work_state(conv_id, "running" if live else "architect")
+    except Exception:  # noqa: BLE001
+        pass
+    try:   # 流程相位重算(作业账本变化即占用事实变化; fail-soft)
+        from ..agent.governance import flow as _flow
+        _flow.recompute(conv_id, trigger="job-settled")
     except Exception:  # noqa: BLE001
         pass
 def _meta_dict_of(conv: dict) -> dict:

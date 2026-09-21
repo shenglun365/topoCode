@@ -70,6 +70,8 @@ const emit = defineEmits<{
   'bind-executor': [executorId: string]
   'task-confirm': [taskId: string]
   'task-cancel': [taskId: string]
+  'task-ignore': [taskId: string]
+  'task-dismiss': [taskId: string]
   'task-executor': [p: { taskId: string; executorType: string }]
   'local-cmd': [name: string]
   'bind-coding': []
@@ -1186,6 +1188,8 @@ onUnmounted(() => {
             class="mb-2"
             @confirm="(id: string) => emit('task-confirm', id)"
             @cancel="(id: string) => emit('task-cancel', id)"
+            @ignore="(id: string) => emit('task-ignore', id)"
+            @dismiss="(id: string) => emit('task-dismiss', id)"
             @set-executor="(id: string, ex: string) => emit('task-executor', { taskId: id, executorType: ex })"
           />
           <div

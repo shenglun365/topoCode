@@ -104,7 +104,8 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     from ..governance.gears import resolve_gear
     _gear = resolve_gear(_mode, _gear_cfg,
                          architect_model_id=eff_model or model_id or "",
-                         overrides=_overrides)
+                         overrides=_overrides,
+                         flow_state=str((conv or {}).get("flowState") or ""))
     # R3.4(r3_4_dialogue_wiring, 默认启用): 对话面策略消费接线——
     # tool_surface/kb 工具面裁剪 + ctx_budget 预算系数; 开关关闭回退缺省(不变)
     _r34 = override_enabled(_overrides, "r3_4_dialogue_wiring")

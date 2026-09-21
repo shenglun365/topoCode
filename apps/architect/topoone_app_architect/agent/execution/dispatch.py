@@ -72,19 +72,62 @@ def _last_failed_branch(conv_id: str) -> str:
     return str(_last_failed_task(conv_id).get("branch") or "")
 
 
+__all__ = []
+
+
+def _flow_recompute(conv_id: str, *, trigger: str = "",
+                    force: bool = False) -> None:
+    """流程相位重算(governance/flow.py derive-on-write)。fail-soft:
+    相位机任何故障不阻塞任务主链。"""
+    try:
+        from ..governance import flow as _flow
+        _flow.recompute(conv_id, trigger=trigger, force=force)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _telemetry(kind: str, **fields) -> None:
+    """遥测(governance 横切面转发——R2 层序: execution 不直引 reflection)。"""
+    try:
+        from ..governance import flow as _flow
+        _flow.telemetry(kind, **fields)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# 只读声明轻校验(提示不拦截——等级最终由用户/编排裁决)
+_WRITE_HINT_RE = re.compile(
+    r"(写入|修改|删除|重构|新增文件|创建文件|编辑|替换|部署|发布|迁移|安装|卸载|覆写|更新文件)")
+
+
 def propose_task(conv: dict, title: str, instruction: str,
                  executor_hint: Optional[dict] = None,
-                 gate_diagram: bool = True) -> dict:
-    """轻门禁入口: 建任务(pending_confirm) + 任务卡消息落统一流。
+                 gate_diagram: bool = True,
+                 safety_class: str = "", work_tags: Optional[list] = None) -> dict:
+    """轻门禁入口: 建任务(saved) + 任务卡消息落统一流。
 
-    由 LLM 工具 task.propose / architect 编排调用; 用户确认(REST/卡片按钮)
-    后 confirm_task 真正拉起 runner。
+    safety_class/work_tags: 安全等级三值轴(readonly/mutating/high-stakes, 缺省
+    mutating)与开放工作类型标签(governance/flow.py 词汇单源)——安全等级影响
+    互斥/worktree/门禁(confirm 时消费), 标签仅影响提示。
+    由 LLM 工具 task.propose / architect 编排调用; 用户「开始执行」后
+    confirm_task 真正拉起 runner。
     R3.2(r3_2_logic_gate, 默认启用): 弱挡任务指令须附核心逻辑图(ArtifactGate
     确定性校验: 图围栏存在且边≥3)——缺失拒绝建卡, 回执 nudge architect 补图;
     计划步骤卡(plan 下发)豁免(gate_diagram=False), 图随计划首卡/需求上下文。
     """
     conv_id = conv["id"]
     conv = store.ConversationsStore.get(conv_id) or conv   # 取全量行(create 返回值可能缺 reqId 等字段)
+    # 安全等级归一(三值轴; 非法值回落 mutating——显式优于静默升档)
+    from ...arch_routes.store.states import (SAFETY_CLASSES, SAFETY_MUTATING,
+                                             SAFETY_READONLY)
+    _safety = str(safety_class or "").strip().lower() or SAFETY_MUTATING
+    if _safety not in SAFETY_CLASSES:
+        _safety = SAFETY_MUTATING
+    # 轻校验(不硬断): 声明只读但指令疑似含写操作 → 回执复核提示(等级照落)
+    _safety_review = ""
+    if _safety == SAFETY_READONLY and _WRITE_HINT_RE.search(instruction or ""):
+        _safety_review = ("⚠️ 任务声明为只读(readonly)，但指令疑似包含写操作——"
+                          "请复核安全等级；按只读执行将豁免互斥且不建隔离分支。")
     if gate_diagram:
         try:
             from ...agent.compensation.overrides import read_overrides, override_enabled
@@ -169,22 +212,29 @@ def propose_task(conv: dict, title: str, instruction: str,
                     f"「{( _busy.get('title') or '')[:40]}」· {_busy.get('status')}）"
                     "——不可重复执行; 请等待完成, 或先停止/忽略现有任务。"}
     if _saved is not None:
-        task = store.TasksStore.update(_saved["id"], {
+        _upd = {
             "title": (title or "").strip()[:120] or _saved.get("title") or "实施任务",
             "instruction": instruction,
             "executorType": etype,
             "executorId": _eid,
             "specVer": _spec_ver,
-        }) or _saved
+        }
+        if safety_class:
+            _upd["safetyClass"] = _safety      # 修订卡: 仅显式给出才改等级(保留用户裁决)
+        if work_tags is not None:
+            _upd["workTags"] = [str(x)[:40] for x in list(work_tags)[:20]]
+        task = store.TasksStore.update(_saved["id"], _upd) or _saved
         task = {**task, "ok": True, "revised": True}
         _eb()._append(conv_id, "assistant",
                 f"📝 **任务卡已修订**（{task['title']}，按对话补充更新）\n"
                 f"执行器 `{etype}`\n\n"
                 + (instruction or "")[:2000]
+                + ("\n\n" + _safety_review if _safety_review else "")
                 + "\n\n---\n已保存，可开始执行 / 继续对话调整 / 忽略。",
                 msg_meta={"kind": "task_card", "taskId": task["id"]},
                 project_id=_pid)
         _publish_task(conv_id, task)
+        _flow_recompute(conv_id, trigger="task-propose")
         return task
     task = store.TasksStore.create({
         "conversationId": conv_id,
@@ -196,6 +246,8 @@ def propose_task(conv: dict, title: str, instruction: str,
         "executorType": etype,
         "executorId": _eid,
         "specVer": _spec_ver,
+        "safetyClass": _safety,
+        "workTags": [str(x)[:40] for x in list(work_tags or [])[:20]],
         **({"branch": resume_branch} if resume_branch else {}),
     })
     # 错误契约(docs/architect/error-contract.md): 成功形状显式 ok=True
@@ -228,11 +280,17 @@ def propose_task(conv: dict, title: str, instruction: str,
     # 载体; 流内全文即车轱辘话), 一行确认 + 异常附注。
     _eb()._append(conv_id, "assistant",
             f"📋 **任务已保存**：**{task['title']}**（执行器 `{etype}`）"
-            "——点「开始执行」启动; 可继续对话调整, 或忽略本卡。"
+            + (f" · 安全等级 `{_safety}`" if _safety != "mutating" else "")
+            + ("\n\n" + _safety_review if _safety_review else "")
+            + "\n——点「开始执行」启动; 可继续对话调整, 或忽略本卡。"
             + _resume_note + _stale_note + _no_scope_note + _unmerged_note,
             msg_meta={"kind": "task_card", "taskId": task["id"]},
             project_id=_pid)
     _publish_task(conv_id, task)
+    # 外路由遥测(自我完善闭环): task.propose = architect 未承接 → 通用执行器
+    _telemetry("outbound_route", conversationId=conv_id, taskId=task.get("id"),
+               executorType=etype, safetyClass=_safety)
+    _flow_recompute(conv_id, trigger="task-propose")
     return task
 
 
@@ -361,19 +419,34 @@ def confirm_task(task_id: str) -> dict:
                             f"{', '.join(_missing[:8])}。")
     except Exception:  # noqa: BLE001
         pass
-    conflict = _eb()._check_mutex(conv, root, boundary_files)
+    # 安全等级消费(三值轴): readonly 豁免互斥+强制就地; high-stakes worktree 强制
+    _safety = str(task.get("safetyClass") or "").strip().lower() or ST.SAFETY_MUTATING
+    if _safety not in ST.SAFETY_CLASSES:
+        _safety = ST.SAFETY_MUTATING
+    conflict = None
+    if _safety != ST.SAFETY_READONLY:
+        conflict = _eb()._check_mutex(conv, root, boundary_files)
     if conflict:
         store.TasksStore.finish(task_id, "failed", f"边界冲突: {conflict}")
         return {"ok": False, "error": conflict}
     payload = {"root": root,
                "branchName": branch, "projectId": project,
                "boundaries": {"files": boundary_files, "components": [],
-                              "readOnly": False}}
+                              "readOnly": _safety == ST.SAFETY_READONLY}}
     # 挡位策略(环节十二a): 指令按挡分叉 + 任务级轮次上限随挡下发
     policy = _eb()._task_gear(task, conv)
     # cv-205: 执行形态事实(与 payload.worktree 同源——会话隔离开关), 经
     # runtime 传入指令组装, 环境段/身份段按形态分叉(文案单源 exec_env)
-    _ws = "worktree" if bool((conv or {}).get("isolated")) else "inplace"
+    # cv-202: worktree 隔离仅用户显式开启(会话隔离开关)时请求;
+    # 安全等级方向覆盖(G2 补偿矩阵): readonly 强制就地 / high-stakes 强制隔离。
+    # 决策须先于指令组装(runtime.workspace 文案与执行形态同源)。
+    if _safety == ST.SAFETY_READONLY:
+        payload["worktree"] = False
+    elif _safety == ST.SAFETY_HIGH_STAKES:
+        payload["worktree"] = True
+    else:
+        payload["worktree"] = bool((conv or {}).get("isolated"))
+    _ws = "worktree" if bool(payload["worktree"]) else "inplace"
     payload["instruction"] = _eb()._task_instruction(task, _eb()._task_chain_brief(conv_id, task_id),
                                                policy=policy,
                                                runtime={"branch": branch, "root": root,
@@ -418,8 +491,20 @@ def confirm_task(task_id: str) -> dict:
             payload["baseCommit"] = _cb
     except Exception:  # noqa: BLE001 — 基点解析失败回落 HEAD
         pass
-    # cv-202: worktree 隔离仅用户显式开启(会话隔离开关)时请求
-    payload["worktree"] = bool((conv or {}).get("isolated"))
+    # cv-202: worktree 隔离已在指令组装前按安全等级/会话开关决策(上方)
+    # G2 补偿矩阵: high-stakes × 无交互确认能力的执行器(approval=False) →
+    # 门禁失效面以「强制隔离 + 合并 precheck 显式」补偿, 并在指令中明示
+    if _safety == ST.SAFETY_HIGH_STAKES:
+        try:
+            from .capabilities import caps as _xcaps
+            _xc = _xcaps(_etype or "")
+            if not bool(_xc.get("approval", False)):
+                payload["instruction"] += (
+                    "\n\n> 🛡️ **高风险补偿**：该执行器不支持交互确认(approval)——"
+                    "本次执行已强制 worktree 隔离，变更经分支合并(merge precheck)才生效，"
+                    "不直接写入主目录；请在回执中显式列出全部改动文件。")
+        except Exception:  # noqa: BLE001 — 能力矩阵异常不阻塞下发
+            pass
 
     sr = _eb()._client().start_implement(payload, 20.0)
     if not sr.ok:
@@ -451,6 +536,7 @@ def confirm_task(task_id: str) -> dict:
     _eb()._start_task_pump(conv_id, task_id, sr.job_id, rid, agent)
     t = store.TasksStore.get(task_id) or {}
     _publish_task(conv_id, t)
+    _flow_recompute(conv_id, trigger="task-confirm")
     return {"ok": True, "task": t}
 
 
@@ -604,6 +690,29 @@ def ignore_task(task_id: str) -> Dict[str, Any]:
                   f"🚫 **任务已忽略**：{task.get('title')}",
                   msg_meta={"kind": "task_ignored", "taskId": task_id})
     _publish_task(conv_id, task)
+    _flow_recompute(conv_id, trigger="task-ignore")
+    return {"ok": True, "task": task}
+
+
+def dismiss_task(task_id: str) -> Dict[str, Any]:
+    """回执已阅(dismiss, reviewing 消化出口): 仅 done 态。
+
+    与 ignore 语义区分: ignore=saved 卡不执行; dismiss=done 回执已阅
+    (不合并/不建下张卡的用户显式消化)。不改终态, dismissed_at 留痕可追溯。"""
+    task = store.TasksStore.get(task_id)
+    if not task:
+        return {"ok": False, "error": "task-not-found", "code": 404}
+    if (task.get("status") or "") != ST.TASK_DONE:
+        return {"ok": False, "error":
+                f"仅已完成(done)任务可标记已阅(当前 {task.get('status')})——"
+                "未开始卡请用忽略, 运行中请先停止。", "code": 409}
+    if task.get("dismissedAt"):
+        return {"ok": True, "task": task}   # 幂等: 已阅重复标记无副作用
+    task = store.TasksStore.update(task_id, {
+        "dismissedAt": int(time.time() * 1000)}) or task
+    conv_id = task.get("conversationId") or ""
+    _publish_task(conv_id, task)
+    _flow_recompute(conv_id, trigger="task-dismiss", force=True)
     return {"ok": True, "task": task}
 
 
@@ -616,6 +725,7 @@ def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
         store.TasksStore.finish(task_id, "cancelled", reason or "用户取消")
         t = store.TasksStore.get(task_id) or {}
         _publish_task(task["conversationId"], t)
+        _flow_recompute(task["conversationId"], trigger="task-stop")
         return {"ok": True, "task": t}
     from ..governance.timeouts import get as _timeout_of
     _eb()._client().finish(str(task.get("runnerJobId") or ""), keep_worktree=True,
@@ -651,9 +761,12 @@ def _publish_task(conv_id: str, task: dict) -> None:
 
 
 def _task_reaggregate_work_state(conv_id: str) -> None:
-    """任务终态后: 无其它活跃任务 → workState 回 architect 相位。"""
+    """任务终态后: 无其它活跃任务 → workState 回 architect 相位。
+
+    (workState 为兼容读投影; 流程相位以 flow_state 为准——此处顺带重算。)"""
     try:
         if not active_task_of(conv_id):
             store.ConversationsStore.set_work_state(conv_id, "architect")
     except Exception:  # noqa: BLE001
         pass
+    _flow_recompute(conv_id, trigger="task-settled")

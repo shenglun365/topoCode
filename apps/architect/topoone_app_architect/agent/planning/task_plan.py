@@ -90,8 +90,14 @@ def extract_task_fence(text: str) -> Optional[Dict[str, Any]]:
 def propose_task_tool(title: str, instruction: str,
                       executorType: Optional[str] = None,
                       root: Optional[str] = None,
-                      project: Optional[str] = None) -> Dict[str, Any]:
-    """task.propose 工具本体(轻门禁: 用户确认后执行)。"""
+                      project: Optional[str] = None,
+                      safetyClass: str = "",
+                      workTags: Optional[List[str]] = None) -> Dict[str, Any]:
+    """task.propose 工具本体(轻门禁: 用户确认后执行)。
+
+    safetyClass: 安全等级三值轴(readonly|mutating|high-stakes; 缺省 mutating)
+      —— readonly 豁免互斥+强制就地; high-stakes worktree 强制+合并门禁。
+    workTags: 开放工作类型标签(分析/文档/部署…不设枚举; 仅影响提示)。"""
     from ...arch_routes import ctx as _ctx
     from ...arch_routes import exec_bridge
     store = _store()
@@ -119,10 +125,13 @@ def propose_task_tool(title: str, instruction: str,
         return {"error": "instruction 缺少实质内容(为空)——请写实质任务内容(目标/方案/验收)"}
     task = exec_bridge.propose_task(conv, title, instruction,
                                     executor_hint={"executorType": etype,
-                                                   "executorId": conv.get("executorId") or ""})
+                                                   "executorId": conv.get("executorId") or ""},
+                                    safety_class=safetyClass,
+                                    work_tags=workTags)
     if not task.get("id"):
         return {"error": str(task.get("error") or "任务卡创建失败")}
     return {"ok": True, "taskId": task["id"], "status": task.get("status"),
+            "safetyClass": task.get("safetyClass") or "mutating",
             "hint": "任务卡已保存; 用户点「开始执行」启动, 可对话调整或忽略——请告知用户。"}
 
 

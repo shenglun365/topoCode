@@ -28,6 +28,7 @@ _DEFAULTS: Dict[str, tuple] = {
     "build_engine": (300.0, "cline 引擎构建"),
     "engine_inspect": (10.0, "cline 引擎探测/克隆检查"),
     "probe_ping": (2.0, "模型探活(cognition.llm 懒探测)"),
+    "flow_stale_s": (600.0, "流程相位 stale 判定(executing 态活跃任务无进展→interrupted)"),
 }
 
 
