@@ -4,7 +4,7 @@
 > 日期：2026-09-19
 > 性质：整体设计（接口 / 模块切分 / 文件级改动）；实现 [compensation-strategy-requirements-2609.md](compensation-strategy-requirements-2609.md) 的 R1–R3
 > 范围：architect agent 内核——策略（L0）· 补偿（L1）· 回合（L2）；KB chat 内核收敛、MCP 工具面为独立轨道（见 §12）
-> 关联文档：[compensation-strategy-requirements-2609.md](compensation-strategy-requirements-2609.md)（需求规格，本文实现之）· [agent-harness-evaluation-2609.md](agent-harness-evaluation-2609.md) · [orchestration-plan.md](orchestration-plan.md) · [../conventions/CONV-04-API契约与验证门禁.md](../conventions/CONV-04-API契约与验证门禁.md)
+> 关联文档：[compensation-strategy-requirements-2609.md](compensation-strategy-requirements-2609.md)（需求规格，本文实现之）· [agent-harness-evaluation-2609.md](agent-harness-evaluation-2609.md) · [../conventions/CONV-04-API契约与验证门禁.md](../conventions/CONV-04-API契约与验证门禁.md)（orchestration-plan 已于 2026-09-22 清理, 残余转移 tech-debt-ledger）
 
 ---
 

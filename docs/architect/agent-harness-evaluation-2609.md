@@ -7,6 +7,10 @@
 > 偏离本档裁决需回写本文档。
 > 条目整合：docs/ 遗留评估/规划文档的未完成条目已按 §九 归位（排期不接管，只做方向归位、
 > 合流裁决与状态核实）。
+> ⚠️ 2026-09-22 注：文中提到的 `orchestration-plan.md`（环节十一~十五全落地）与
+> `agent-harness-batch5-decisions.md`（拍板项全部收敛）已清理，残余转移
+> `tech-debt-ledger-2609.md`；历史原则引用（如"orchestration-plan 原则 2/4/5/6"）
+> 以 git 历史为准。
 
 ---
 

@@ -1,7 +1,8 @@
 # Agent 会话流转全景（v2 统一会话）
 
-> 状态：2026-09-15 与代码对齐（cv-152~158 实证回归后）。
-> 维护约定：流转变更（直通指令/执行器选定链/泵/守卫）须同步本图。
+> 状态：2026-09-15 与代码对齐（cv-152~158 实证回归后）；**2026-09-22 增补**：流程相位机入图（①.5 相位硬闸 / flowState 派生缓存）——语义单源 `agent/governance/flow.py` + `agent-arch-gap-adoption-2609.md`，本图仅导航。
+> **2026-09-22 补充（实时通道架构, cv-221）**：推送=信号, 拉取=真相——WS 回合流负责交互渲染(不过缓冲)；SSE 通知统一入 store 消息缓冲(单消费者, 消费期判卫/折叠/按任务 150ms progress 折叠)；补偿拉取 4 触发点=回合收尾/SSE 重连/页面可见/切换会话。语义单源 `conversation-store.ts`(EventBuffer)。
+> 维护约定：流转变更（直通指令/执行器选定链/泵/守卫/相位闸/实时通路）须同步本图。
 
 ## 一、总览流程图
 
@@ -13,6 +14,9 @@ flowchart TD
     C -->|无| D
     C1 --> D[用户消息落库]
 
+    D --> D2{①.5 相位硬闸<br/>flow.evaluate_guards<br/>仅 interrupted × 下发意图}
+    D2 -->|命中| G0[⛔直通回执落库<br/>零 LLM + 恢复指引<br/>开关 flow_guards_enabled]
+    D2 -->|放行| E
     D --> E{整条消息是指令?}
     E -->|/定稿| F1[finalize 门禁<br/>designMd 校验+幂等<br/>→ ready + specReady 卡]
     E -->|/执行| F2[ready 规约 → 建任务卡<br/>执行器选定链:显式@ > 会话绑定 > 注册表默认<br/>→ pending_confirm]
@@ -28,9 +32,11 @@ flowchart TD
     G[路由决策 router.decide] --> G1{语境}
     G1 -->|attachTo 转达| G2[task_input → 活跃任务<br/>可选语境摘要拼接<br/>回执 ➡️/📥]
     G1 -->|内联@执行器 assign| G3[指派契约注入<br/>architect 评估建卡]
-    G1 -->|chat| H
+    G1 -->|chat| GU
 
-    H[architect 回合<br/>能力文档+挡位指引 strict/quick<br/>+skill 文档] --> I{LLM 通道}
+    GU{③.5 目标理解 GU<br/>GoalProfile: L0 词表/策略库<br/>+L1 上下文(+L2 受限LLM 缺省关<br/>携带近期对话摘要)<br/>→ policy.goal 决策表<br/>(8 动作含 present-options 候选菜单)} -->|回合指引注入| H
+
+    H[architect 回合<br/>能力文档+posture 判据(静态人格)<br/>+挡位指引 strict/quick+skill 文档] --> I{LLM 通道}
     I -->|流式 llm.chat| I1[逐字 chunk]
     I -->|失败降级 llm.sync| I2[工具循环 run_tools_loop]
     I1 --> J

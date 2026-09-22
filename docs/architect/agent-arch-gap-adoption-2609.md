@@ -1,6 +1,7 @@
 # Architect Agent 架构差距评审·采纳方案与驱动架构细化
 
-> 日期：2026-09-21 · 性质：裁决记录 + 实施方案（已确认待实施）
+> 日期：2026-09-21 · 性质：裁决记录 + 实施方案 · **P0(S0-S3)/P1(#3/#5) 已落地（2026-09-22）**；P2 缓议
+> 待决策清单：`tech-debt-ledger-2609.md`「架构采纳轨道·待决策清单」(单源)
 > 评审源：`agent-arch-gap-review-2609.md`（其 9 处代码主张已逐条事实核查，全部属实，见附录 A）
 > 前置依赖：会话流程相位机已落地（`agent/governance/flow.py` + `test_flow_states.py`，2026-09-21）——本方案在其小内核+行为注册制之上构建。
 > 产品方向基线：D6（探测不动态升挡）/ cv-175（不静默纠错）/ cv-152（指令确定性）/ mining 人审 / 挡位分数解耦（2026-09-18）/ 真相源纪律（cv-194, P6）/ prompt 瘦身纪律（cv-189/196/203）。
@@ -14,8 +15,8 @@
 | 1 | 修复经验回填工作记忆 | **采纳** | P0 (S1) | repair_note 单元按签名去重、限额注入、受统一装配预算裁剪 |
 | 2 | llm_dataset 消费口 | **采纳**（含评审遗漏的吞错计数） | P0 (S2) | 纯读侧；聚合/吞错规则走 policy 配置 |
 | 4 | 工作记忆溢出摘要 | **拆半采纳**：溢出摘要+缓存=采纳；MemoryStore=**退役**；dossier 进主链=缓议 | P0 (S3) | 摘要装配期瞬态注入不落消息流；按溢出锚点缓存 |
-| 3 | 失败数据喂回 gears | 有条件采纳（仅"建议值+人审"） | P1 | tierSuggested 只展示永不自动写（D6 三重防线） |
-| 5 | 意图识别 LLM 兜底 | 有条件采纳（先遥测后兜底） | P1 | LLM 意图只建议不触发不可逆动作；不入硬闸 |
+| 3 | 失败数据喂回 gears | 有条件采纳（仅"建议值+人审"） | P1 ✅ 已落地(2026-09-22) | tierSuggested 只展示永不自动写（D6 三重防线）；采纳=既有 manual 人工端点；规则数值走 policy.tierSuggestion |
+| 5 | 意图识别 LLM 兜底 | 有条件采纳（先遥测后兜底） | P1 ✅ 已落地(2026-09-22)；**GU-5 重构归位**(软提示路径退役→GoalProfile L2 升格, 开关挂 `goal.escalation.llmFallback`)；批丙补**上下文携带**(`classify_intent(q, context)` 近期对话摘要并入缓存键, 仍缺省关) + **候选菜单**(`present-options`, kind/策略级双候选) | intent_misroute 遥测恒开；L2 缺省关；确定性命中永不被 LLM 改写；light:intent 轻任务模型绑定；embedding 分类器评估后撤销(2026-09-22) |
 | 6 | 评估域扩展 | 缓议 | P2 | 依赖 #2 数据先行 |
 | — | 知识图谱层（评审缺陷7） | 不采纳 | — | 接口位保留（`mining.py` 已锚定独立设计文档） |
 | — | 称谓口径（评审 §4.4） | 采纳 | 随文档 | "反思层的纠错子循环（机械域、有界、隔离）" |
@@ -102,10 +103,15 @@ def validate_flow_policy(p) -> (ok, errs)  # 写侧严格: 相位名∈词表/�
 
 ### 3.4 切片 S1-S3
 
+> 实施记录（2026-09-22，P0 已落地）：S1 读侧注入面落点为 `turns/context.py`（原计划
+> `memory/working.py`）——working.py 无会话上下文（conv/unit 检索不可达），context.py
+> 是装配接缝真值所在；working.py 保持纯装配。其余按方案执行；溢出摘要缓存键为
+> `meta.overflowDigest = {anchor, digest}`（anchor=条数+首条溢出内容指纹）。
+
 **S1 = #1 修复经验回填（注入规则走 policy）**
 
 - 写侧 `reflection/repair.py::run_repair_loop` 收尾：`ContextUnitsStore` 落 `type=repair_note`，`refs={sig, tool, ok, count}`；**按错误签名去重**（同签名→原位 update 计数+时间，不增行）；超 `keepLatest` 修剪最旧。
-- 读侧 `memory/working.py` 装配：按 `injections.repairNotes` 注入 system 段（`maxPerTurn`；`model_profile.tier_of ≥ 2` 时收 `weakTierMax`）。
+- 读侧装配（`turns/context.py`，见上方实施记录）：按 `injections.repairNotes` 注入 system 段（`maxPerTurn`；`model_profile.tier_of` 最弱挡时收 `weakTierMax`）。
 - 开关：`agent.comp.overrides` 键 `repair_note_injection`（缺省启用）。
 
 **S2 = #2 消费口 + 吞错计数（聚合规则走 policy）**
@@ -128,7 +134,7 @@ def validate_flow_policy(p) -> (ok, errs)  # 写侧严格: 相位名∈词表/�
 | # | 防守线 | 对应方向 | 测试 |
 |---|---|---|---|
 | 1 | LLM 意图不入硬闸：`evaluate_guards` 仅消费注册的确定性匹配器 | cv-152 确定性路由 | S0 特征测试（#5 落地时同测扩展） |
-| 2 | tierSuggested 永不自动写 tier/capability；人工已设时让位 | D6 + 人的意志优先 | 随 P1 #3 落地 |
+| 2 | tierSuggested 永不自动写 tier/capability；人工已设时让位 | D6 + 人的意志优先 | ✅ 已落地(test_tier_intent.py: suggest 纯读断言 + manualPinned 让位) |
 | 3 | 注入预算统一：超预算裁剪、弱挡更紧、overflowDigest 不入消息表 | prompt 瘦身纪律 + 真相源 | S1/S3 特征测试 |
 | 4 | policy 坏值回落代码缺省（读侧 fail-soft）；写侧严格拒绝 | 单源+fail-soft 纪律 | S0 特征测试 |
 

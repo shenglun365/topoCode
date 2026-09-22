@@ -4,7 +4,7 @@
 > 日期：2026-09-19
 > 性质：现状事实对齐 + 迭代需求规格；**不含实现方案**
 > 范围：architect agent（需求分析 / 架构分析设计 / 组件模块设计职能）对不同能力级别模型的调度与策略补偿
-> 关联文档：[agent-harness-evaluation-2609.md](agent-harness-evaluation-2609.md) · [orchestration-plan.md](orchestration-plan.md) · [../product-iteration-roadmap-2026-09.md](../product-iteration-roadmap-2026-09.md)（L 组四级成本梯度）· [../conventions/CONV-04-API契约与验证门禁.md](../conventions/CONV-04-API契约与验证门禁.md)
+> 关联文档：[agent-harness-evaluation-2609.md](agent-harness-evaluation-2609.md)（orchestration-plan 已于 2026-09-22 清理, 残余转移 tech-debt-ledger）· [../product-iteration-roadmap-2026-09.md](../product-iteration-roadmap-2026-09.md)（L 组四级成本梯度）· [../conventions/CONV-04-API契约与验证门禁.md](../conventions/CONV-04-API契约与验证门禁.md)
 
 ---
 
