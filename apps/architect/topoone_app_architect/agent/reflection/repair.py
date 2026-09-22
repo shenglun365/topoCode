@@ -118,7 +118,7 @@ def summarize_task(*, task_id: str, system: str, material: str,
         llm_dataset.record(dataset_kind, task=task_id, ok=ok, degraded=degraded,
                            model=model_id or "", latencyMs=_now() - t0)
     except Exception:  # noqa: BLE001
-        pass
+        _swallow("repair.telemetry")
     return {"ok": ok, "output": out, "degraded": degraded}
 
 
@@ -170,5 +170,79 @@ def run_repair_loop(task: RepairTask) -> Dict[str, Any]:
                            **({"parsedOut": parsed} if parsed is not None else {}),
                            **(task.meta or {}))
     except Exception:  # noqa: BLE001
-        pass
+        _swallow("repair.dataset_record")
+    _persist_repair_note(task, out)
     return out
+
+
+def _swallow(tag: str) -> None:
+    """S2 吞错计数(装配路径静默降级可观测; 开关 swallow_counters)。"""
+    try:
+        llm_dataset.swallow(tag)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _persist_repair_note(task: "RepairTask", out: Dict[str, Any]) -> None:
+    """S1 修复经验回填(采纳文档 2609): 成功修复 → repair_note 上下文单元。
+
+    按错误签名去重(同签名 → 原位 update 计数+重要度, 不增行); 超 keepLatest
+    修剪最旧。锚定会话: task.anchor_conv 优先, 缺省取 ctx 当前会话。
+    注入侧(turns/context 装配)按 flow_policy.injections.repairNotes 消费。
+    开关: agent.comp.overrides.repair_note_injection(缺省启用)。
+    全程 fail-soft: 回填故障不阻塞修复主链。
+    """
+    try:
+        from ..compensation.overrides import override_enabled, read_overrides
+        from ..governance.flow_policy import load_flow_policy
+        from ...arch_routes import store
+        _get = store.CollabConfigStore.get
+        if not override_enabled(read_overrides(_get), "repair_note_injection"):
+            return
+        pol = load_flow_policy(_get)
+        cfg = (pol.get("injections") or {}).get("repairNotes") or {}
+        if cfg.get("enabled", True) is False:
+            return
+        conv_id = str(task.anchor_conv or "")
+        if not conv_id:
+            try:
+                from ...arch_routes import ctx as _ctx
+                conv_id = str(_ctx.get_conv() or "")
+            except Exception:  # noqa: BLE001
+                conv_id = ""
+        if not (out.get("ok") and conv_id):
+            return
+        content = str(task.anchor_text or out.get("summary") or "").strip()
+        if not content:
+            return
+        conv = store.ConversationsStore.get(conv_id) or {}
+        sig = __import__("hashlib").sha1(
+            f"{task.task_id}|{task.user}".encode("utf-8")).hexdigest()[:12]
+        units = store.ContextUnitsStore.all(
+            conversation_id=conv_id, type_="repair_note", limit=100)
+        dup = next((u for u in units
+                    if (u.get("refs") or {}).get("sig") == sig), None)
+        if dup is not None:
+            refs = dict(dup.get("refs") or {})
+            refs["count"] = int(refs.get("count") or 1) + 1
+            refs["lastAt"] = _now()
+            store.ContextUnitsStore.update(dup["id"], {
+                "content": content[:500],
+                "importance": min(3, int(dup.get("importance") or 1) + 1),
+                "refs": refs})
+            return
+        store.ContextUnitsStore.create({
+            "conversationId": conv_id,
+            "projectId": str(conv.get("projectId") or ""),
+            "type": "repair_note",
+            "title": f"修复经验: {task.task_id}",
+            "content": content[:500],
+            "refs": {"sig": sig, "tool": task.task_id, "ok": True, "count": 1},
+            "importance": 1})
+        keep = int(cfg.get("keepLatest") or 5)
+        if len(units) + 1 > keep:
+            for u in sorted(units, key=lambda x: int(x.get("createdAt") or 0))[
+                    :len(units) + 1 - keep]:
+                store.ContextUnitsStore.delete(u["id"])
+    except Exception:  # noqa: BLE001 — 回填失败不阻塞修复主链
+        _swallow("repair.note_persist")

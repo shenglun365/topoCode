@@ -29,9 +29,15 @@ CROSSCUT = {"collab", "governance"}
 _R1_INVENTORY = {
     "cognition/llm.py", "cognition/model_profile.py", "cognition/prompt.py",
     "cognition/roles.py", "reflection/dataset.py", "reflection/evaluator.py",
-    "reflection/mining.py", "reflection/repair.py", "planning/req_spec.py",
+    "reflection/mining.py", "reflection/repair.py", "reflection/tier_suggest.py",
+    "planning/req_spec.py",
     "planning/scope_probe.py", "planning/task_plan.py", "perception/commands.py",
-    "collab/cards.py", "memory/dossier.py", "memory/store.py",
+    "collab/cards.py", "memory/dossier.py",
+    # memory/store.py 已退役(2026-09-21, 零调用方清退——清单只许缩短的合法剪条)
+    # requirements/clarify.py(2026-09-22 立条): 策略库配置化(D5 偿还)后经
+    # load_strategies 读 CollabConfigStore(惰性导入)——随 dataset 先例,
+    # 清退随策略配置基座上提。
+    "requirements/clarify.py",
     "memory/units.py", "memory/working.py", "governance/boundary.py",
     # memory/distill.py(2026-09-17 P1 立条): 错误提炼编排层, 与 memory/units.py
     # 同款依赖(store/adaptation/agent_roles 惰性导入)——读错误材料 + 轻任务
@@ -40,6 +46,11 @@ _R1_INVENTORY = {
     # turns/{chat,context}.py(2026-09-19 M1 立条): 自 orchestrator(R3 例外层)
     # 机械搬迁的阶段函数, arch_routes 惰性导入随行; ChatTurn 接缝重构时清退。
     "turns/chat.py", "turns/context.py",
+    # turns/intent_llm.py(2026-09-22 立条): 受限 LLM 意图兜底+误路由遥测(#5)——
+    # overrides/policy 读取的 arch_routes 惰性导入随 context.py 同款先例。
+    # turns/goal.py(2026-09-22 立条): GU 目标理解(GoalProfile 产出+决策表解析)——
+    # apply_goal_directive 内 policy 读取的 arch_routes 惰性导入同款先例。
+    "turns/intent_llm.py", "turns/goal.py",
     # execution/{merge,recover}.py(2026-09-19 M2 立条): 自 exec_bridge 机械
     # 迁出的合并域/恢复对账域(store/execution/runner 接缝随行); DispatchTurn
     # 接缝重构时随 runner_client 单源化(G7)清退。
@@ -69,6 +80,10 @@ _R1_INVENTORY = {
     # recompute/recover)——states 单源与 store 访问为相位机本职(recover.py 同款
     # 调用期解析先例); 策略/任务/自愈三方消费的公共事实轴, 清退随 states 上提。
     "governance/flow.py",
+    # governance/flow_policy.py(2026-09-21 立条): 流程驱动配置基座
+    # (agent.flow.policy 缺省单源+读取)——states 词表引用随 flow.py 同款先例;
+    # 行为面数据驱动为本职, 清退随 states 上提。
+    "governance/flow_policy.py",
 }
 
 # 存量违规冻结——低层引高层。

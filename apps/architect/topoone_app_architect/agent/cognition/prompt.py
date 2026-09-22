@@ -97,6 +97,36 @@ def _r_boundary(_ctx: Dict[str, Any]) -> str:
     return _BOUNDARY_TEXT
 
 
+# GU-3 人格统一(2026-09-22, goal-understanding-2609): 静态判据层——身份唯一,
+# 三问定性, 双出口。每回合的具体路线判定由决策表生成的回合指引注入(turns/goal),
+# 本块只定义恒定人格与判断标准(防多轮目标转换的人格抖动)。
+_POSTURE_TEXT = (
+    "## 对话路线(判据)\n"
+    "身份唯一：你是需求分析 agent 兼外循环编排者。知识/分析面由你自己承担，"
+    "动手实现类能力由 coding subagent(cline/opencode/codex)承担。"
+    "收到任何诉求先按三问定性：\n"
+    "1) 产出物会**反复使用/多步执行/需要验收**？(项目级功能/环境搭建/初始化/"
+    "交付组件) → 开发类需求：收敛为需求规约(req.propose)；方案要点/验收等关键"
+    "要素缺失时**先集中提问再立卡**——提问是正当步骤，不是推诿；\n"
+    "2) **单命令即时结果**？(查状态/跑个脚本/统计文件数) → task.propose 单次"
+    "任务卡(默认保存)，勿绕需求流程；\n"
+    "3) 拿不准？→ 先向用户提一个最关键的澄清问题，不落卡。\n"
+    "续接规则：已绑定需求(RQ 编号以系统回执为准)的会话，补充/调整走 req.amend "
+    "新版本；执行期 subagent 的提问/进展会以消息进入会话，用户回复即转达。\n"
+    "回执与卡片(需求卡/任务卡)已自动落流展示——回答中**不要复述**其标题/方案/"
+    "验收等内容，一句话确认或只补充增量说明。"
+)
+
+
+def _r_posture(_ctx: Dict[str, Any]) -> str:
+    return _POSTURE_TEXT
+
+
+def posture_text() -> str:
+    """posture 判据块公开读取(legacy 等价串/测试用)。"""
+    return _POSTURE_TEXT
+
+
 def _r_capability(ctx: Dict[str, Any]) -> str:
     # B4 单源化默认开(双轨漂移消灭); `single_source: false` 覆盖可回退等价模式
     if _overrides().get("single_source", True):
@@ -184,6 +214,7 @@ def _register_defaults() -> None:
     # ir/diagram/mcp/skill), 等价模式下逐字节一致; 裁剪顺序 ir→diagram→mcp→skill
     register_block(PromptBlock("header", _r_header, order=0, priority=0, required=True))
     register_block(PromptBlock("boundary", _r_boundary, order=5, priority=5, required=True))
+    register_block(PromptBlock("posture", _r_posture, order=6, priority=20, required=True))
     register_block(PromptBlock("capability", _r_capability, order=10, priority=10, required=True))
     register_block(PromptBlock("ir_schema", _r_ir_schema, order=12, priority=45))
     register_block(PromptBlock("diagram_skill", _r_diagram_skill, order=14, priority=40))

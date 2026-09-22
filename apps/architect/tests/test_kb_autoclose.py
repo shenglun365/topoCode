@@ -79,11 +79,11 @@ def test_chat_context_cuts_kb_tools_when_unlinked(arch_env):
 
     linked = _sys_text("/tmp/kbL", "proj-kbL")
     assert "kb.asset.search" in linked and "kb.graph" in linked
-    assert "KB 架构资产检索" in linked
+    assert "对话路线(判据)" in linked                   # GU-3 静态人格块恒置
     unlinked = _sys_text("/tmp/kbL", "proj-kbN")     # 项目存在但无基线
     assert "kb.asset.search" not in unlinked and "kb.code_mappings" not in unlinked
-    assert "KB 架构资产检索" not in unlinked          # 路由文案不再引导 KB 检索
-    assert "task.propose" in unlinked                # 路由段其余内容完好
+    assert "KB 已绑定" not in unlinked                # cv-189: KB 叙述整句不注入
+    assert "task.propose" in unlinked                # 双出口教学在判据/工具文档层
 
 
 def test_degraded_prompt_free_of_kb_narrative(arch_env):

@@ -42,7 +42,7 @@ def test_normalize_strips_unknown_keys_and_models():
     out = lt.normalize_light_tasks(
         {"summary": "m-lite", "probe": "ghost", "bogus": "x"},
         known_ids=["m-lite"])
-    assert out == {"summary": "m-lite", "probe": "", "distill": ""}
+    assert out == {"summary": "m-lite", "probe": "", "distill": "", "intent": ""}
     out2 = lt.normalize_light_tasks({"summary": "anything"}, known_ids=[])
     assert out2["summary"] == "anything"    # 目录空 → 校验跳过不误伤
 
@@ -52,12 +52,12 @@ def test_normalize_strips_unknown_keys_and_models():
 def test_adapter_roundtrip_and_strips(tmp_path, monkeypatch):
     _setup_env(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import agent_roles
-    assert agent_roles.get_light_tasks() == {"summary": "", "probe": "", "distill": ""}
+    assert agent_roles.get_light_tasks() == {"summary": "", "probe": "", "distill": "", "intent": ""}
     store.CollabConfigStore.set("llm.models", json.dumps(
         [{"id": "m-lite"}, {"id": "m-mid"}]))
     out = agent_roles.set_light_tasks({"summary": "m-lite", "probe": "ghost"})
-    assert out == {"summary": "m-lite", "probe": "", "distill": ""}
-    assert agent_roles.load_light_tasks_cfg() == {"summary": "m-lite", "probe": "", "distill": ""}
+    assert out == {"summary": "m-lite", "probe": "", "distill": "", "intent": ""}
+    assert agent_roles.load_light_tasks_cfg() == {"summary": "m-lite", "probe": "", "distill": "", "intent": ""}
 
 
 def test_adapter_corrupt_config(tmp_path, monkeypatch):
@@ -65,7 +65,7 @@ def test_adapter_corrupt_config(tmp_path, monkeypatch):
     from topoone_app_architect.arch_routes import agent_roles
     store.CollabConfigStore.set(lt.LIGHT_TASKS_KEY, "{not-json")
     assert agent_roles.load_light_tasks_cfg() == {}
-    assert agent_roles.get_light_tasks() == {"summary": "", "probe": "", "distill": ""}
+    assert agent_roles.get_light_tasks() == {"summary": "", "probe": "", "distill": "", "intent": ""}
 
 
 # ── 接线(消费方注入 cfg) ────────────────────────────────────────────

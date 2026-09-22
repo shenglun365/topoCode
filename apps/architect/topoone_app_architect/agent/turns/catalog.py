@@ -50,6 +50,9 @@ CATALOG: Dict[str, CatalogEntry] = {
     "light:summary": CatalogEntry(Purpose.SUMMARY, _light_route("summary")),
     "light:probe": CatalogEntry(Purpose.PROBE, _light_route("probe")),
     "light:distill": CatalogEntry(Purpose.DISTILL, _light_route("distill")),
+    # intent: 分类类探测调用, 复用 PROBE(D10 词表冻结不加成员; light_tasks
+    # 单独绑定键, 缺省跟随现行为)
+    "light:intent": CatalogEntry(Purpose.PROBE, _light_route("intent")),
     # ── 资产助理工种(cognition.roles 领域) ──
     "role:extract": CatalogEntry(Purpose.ROLE_EXTRACT, _role_route("extract")),
     "role:verify": CatalogEntry(Purpose.ROLE_VERIFY, _role_route("verify")),
@@ -64,6 +67,7 @@ CATALOG: Dict[str, CatalogEntry] = {
 # 词汇别名(裸名 → 目录键; 词汇迁移期兼容)
 ALIASES: Dict[str, str] = {
     "summary": "light:summary", "probe": "light:probe", "distill": "light:distill",
+    "intent": "light:intent",
     "extract": "role:extract", "verify": "role:verify", "induce": "role:induce",
     "pseudo": "role:pseudo", "evaluate": "role:evaluate", "mine": "role:mine",
 }

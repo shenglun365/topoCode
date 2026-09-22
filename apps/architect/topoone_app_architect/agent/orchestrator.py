@@ -215,6 +215,11 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     if gate is None:
         return
     conv_id, conv = gate["conv_id"], gate["conv"]
+    # cv-221: chat_start 即时发送(原惰性=首工具/首 token 才发)——长 LLM 回合
+    # 此前全程零帧, 且 SSE 卡片通知可先于 WS chat_start 处理, 会话守卫丢刷新
+    # → 卡片回合实时不可见(只能整页刷新)。前端依赖早绑定会话 id。
+    io = _TurnIO(send, conv_id, gate["last_user_msg_id"])
+    await io.ensure_chat_start()
 
     # ---- ①.5 相位硬闸(G1 裁决: 闸门之后/路由之前, 先于直通指令) ----
     if await _phase_hard_gate(gate, send, store):
@@ -229,9 +234,16 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     # ---- ③ 上下文: 角色模型路由 + 懒探测 + 挡位 + 消息装配 ----
     eff_model, msgs, gear = _chat_context(data, gate, skill_scenarios, history,
                                           model_id, assign_contract)
+    # ③.5 目标理解(GU, goal-understanding-2609): GoalProfile → 决策表 → 回合指引
+    # 注入。人格=能力文档 posture 静态单源(GU-3 统一, 教学不随回合抖动);
+    # 指引=决策表动态生成(教学=决策); 确定性层(指令直通/相位硬闸)在其之前
+    # 不变(防守线①)。L2 受限 LLM 兜底(GU-5)后续并入 escalation。
+    if decision.action == "chat":
+        from .turns.goal import apply_goal_directive
+        await asyncio.to_thread(apply_goal_directive,
+                                msgs, str(gate.get("question") or ""), conv)
 
     # ---- ④ 执行: 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
-    io = _TurnIO(send, conv_id, gate["last_user_msg_id"])
     tools_used: set = set()
     tool_errors: dict = {}
     loop = await _run_llm_tool_loop(io, conv_id, msgs, root, project,

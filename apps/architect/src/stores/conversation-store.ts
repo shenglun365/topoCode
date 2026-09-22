@@ -11,6 +11,7 @@ import { defineStore } from 'pinia'
 import { chatStream, stageOfTool, type ChatStreamEvent, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { SemanticAsset } from '@/types'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
+import { apiBaseUrl, getToken } from '@/services/api-client'
 import { currentProjectParams } from '@/services/project-service'
 import { requirementService } from '@/services/requirement-service'
 import { outlineAbbrCache } from '@/services/outline-cache'
@@ -188,6 +189,8 @@ export const useConversationStore = defineStore('archConversation', () => {
     activeReqId.value = meta.reqId || ''
     activeTitle.value = meta.title || ''
     activeMeta.value = meta as ConversationMeta
+    dirtyConvs.delete(meta.id)        // cv-221: 切入即视为已拉取(open 自带 pull)
+    scheduleDrain(0)                  // 重放缓冲中挂起的该会话事件(若钻窗内未拉取)
     setDockOpen(true)
     try {
       const detail = await sessionService.messages(meta.id)
@@ -345,6 +348,7 @@ export const useConversationStore = defineStore('archConversation', () => {
             // cv-205 落卡收尾: 卡片即回合产物, 服务端不落占位消息——
             // 本地空占位回合同步移除(否则空白气泡; 刷新即消失=数据库本无此行)。
             // 已流出的叙述文本保留(有价值, 尽管刷新后不回放)。
+            // 卡片实时可见由 turnEnd 收尾补偿拉取保证(cv-221, 消费者统一)。
             if (!(arr[idx].content || '').trim() && !arr[idx].reasoning) {
               arr.splice(idx, 1)
             }
@@ -373,7 +377,9 @@ export const useConversationStore = defineStore('archConversation', () => {
     } finally {
       abortCtl.value = null
       busy.value = false
-      flushPendingMsgRefresh()   // cv-194: 回合中挂起的消息重拉在此补偿
+      // cv-221: 回合收尾补偿拉取泛化到所有回合类型(原仅 cardClosed 分支
+      // 300ms 强拉)——入缓冲走统一消费者, 尾沿刷新一次
+      enqueueEvent({ type: 'turnEnd', conversationId: activeId.value || '' })
     }
   }
 
@@ -465,8 +471,159 @@ export const useConversationStore = defineStore('archConversation', () => {
     setTimeout(() => { if (!busy.value) void refreshActiveMessages() }, 250)
   }
 
+  // ── cv-221 实时通路根修: 消息缓冲区异步消费 + 拉取即真相 ──────────────
+  // 不变量: ①消费期判卫(守卫在 drain 时评估, 接收侧零丢弃——SSE 通知可先于
+  // WS chat_start 绑定到达, 接收侧判卫会被会话守卫丢弃=卡片实时不可见实证);
+  // ②拉取即真相(事件只是信号, 断窗/后台节流由 4 触发点补偿: turnEnd/SSE重连/
+  // visibility/会话切换); ③单消费者(刷新调度收敛于此, busy defer 唯一互斥);
+  // ④通道职责: WS=回合交互流式渲染(不过缓冲), SSE=实体通知(入缓冲),
+  // progress=瞬态 patch(进缓冲, 按任务 150ms 折叠, 微任务级常规延迟)。
+
+  const _REFRESH_FOLD_KINDS = new Set(['conv-message', 'items', 'flow-transition', 'task', 'turnEnd'])
+  const PROGRESS_COALESCE_MS = 150
+  const queue: any[] = []                      // 有序 FIFO(刷新型折叠, 保序)
+  const pendingProgress = new Map<string, { ev: any; at: number }>()  // progress last-wins(按任务)
+  const dirtyConvs = new Set<string>()         // 非活跃会话脏标记(切换时拉取)
+  const lastProgressAt = new Map<string, number>()
+  let drainTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** 事件入队(唯一接收口): 刷新型按 (type+convId) 折叠, progress 按任务 last-wins。 */
+  function enqueueEvent(ev: any) {
+    if (!ev?.type) return
+    if (ev.type === 'progress') {
+      pendingProgress.set(String(ev.taskId || ''), { ev, at: Date.now() })
+      scheduleDrain(0)
+      return
+    }
+    if (_REFRESH_FOLD_KINDS.has(ev.type)) {
+      const i = queue.findIndex((q) => q.type === ev.type && q.conversationId === ev.conversationId)
+      if (i >= 0) queue[i] = ev
+      else queue.push(ev)
+    } else {
+      queue.push(ev)
+    }
+    scheduleDrain(0)
+  }
+
+  function scheduleDrain(delayMs = 0) {
+    if (drainTimer) return
+    drainTimer = setTimeout(() => { drainTimer = null; drain() }, delayMs)
+  }
+
+  function drain() {
+    while (queue.length) {
+      applyBufferedEvent(queue.shift()!)
+    }
+    // progress 挂起面: 距上次生效 ≥150ms 即生效(首到即时, 突发取最新值);
+    // 未到期 → 定时到剩余时间
+    const now = Date.now()
+    let earliest = Infinity
+    for (const [tid, p] of pendingProgress) {
+      const wait = PROGRESS_COALESCE_MS - (now - (lastProgressAt.get(tid) || 0))
+      if (wait <= 0) {
+        lastProgressAt.set(tid, now)
+        pendingProgress.delete(tid)
+        applyProgressPatch(p.ev)
+      } else {
+        earliest = Math.min(earliest, wait)
+      }
+    }
+    if (queue.length) scheduleDrain(0)
+    else if (pendingProgress.size && earliest !== Infinity) scheduleDrain(earliest)
+  }
+
+  function applyBufferedEvent(ev: any) {
+    switch (ev.type) {
+      case 'task':
+        void refreshTasks()
+        void refreshActiveMeta()
+        markDirty(ev.conversationId)
+        return
+      case 'flow-transition':
+        void refreshActiveMeta()
+        markDirty(ev.conversationId)
+        return
+      case 'conv-message':
+      case 'items':
+        markDirty(ev.conversationId)
+        return
+      case 'turnEnd':
+        scheduleRefresh()
+        return
+      default:
+        return
+    }
+  }
+
+  /** 脏标记: 活跃会话 → 调度拉取; 非活跃 → 记账(切换时拉取, 数据零丢失)。 */
+  function markDirty(convId?: string) {
+    if (!convId || convId === activeId.value) scheduleRefresh()
+    else dirtyConvs.add(convId)
+  }
+
+  /** 刷新调度(400ms 尾沿合并; busy 由 refreshActiveMessages 内部 defer)。 */
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  function scheduleRefresh() {
+    if (refreshTimer) return
+    refreshTimer = setTimeout(() => { refreshTimer = null; void refreshActiveMessages() }, 400)
+  }
+
+  /** 执行进展 patch(自 Dock 收编; 瞬态修饰态——任务状态真相走 task 事件+拉取)。 */
+  function applyProgressPatch(d: any) {
+    const patch = {
+      toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now(),
+      lastText: d.lastText ?? '', lastTool: d.lastTool ?? '',
+      process: d.process ?? [], inputTokens: d.inputTokens || 0, outputTokens: d.outputTokens || 0,
+    }
+    const t = (tasks.value || []).find((x: any) => x.id === d.taskId)
+    if (t) t.progress = { ...(t.progress || {}), ...patch }
+    const rr = (activeMeta.value as any)?.runningRole
+    if (rr) rr.progress = { ...(rr.progress || {}), ...patch }
+  }
+
+  // ── SSE 连接(store 单例单连接; 自 Dock 收编) ─────────────────────────
+  let evtSource: EventSource | null = null
+  let evtReconnect: ReturnType<typeof setTimeout> | null = null
+
+  function connectEvents() {
+    if (evtSource || typeof EventSource === 'undefined') return
+    try {
+      const tok = getToken()
+      evtSource = new EventSource(`${apiBaseUrl()}/events${tok ? `?token=${encodeURIComponent(tok)}` : ''}`)
+      // 断窗补偿: 首连/重连成功即拉取活动会话(重连期间丢失的通知由此兜底)
+      evtSource.onopen = () => { void refreshActiveMessages(); void refreshActiveMeta() }
+      evtSource.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data)
+          if (d?.type) enqueueEvent(d)
+        } catch { /* 非事件帧忽略 */ }
+      }
+      evtSource.onerror = () => {
+        disconnectEvents()
+        evtReconnect = setTimeout(connectEvents, 5000)
+      }
+    } catch { /* SSE 不可用(离线) → 退化为手动刷新 */ }
+  }
+
+  function disconnectEvents() {
+    evtSource?.close()
+    evtSource = null
+    if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
+  }
+
+  // 后台标签定时器节流兜底: 回前台即拉取活动会话
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        void refreshActiveMessages()
+        void refreshActiveMeta()
+      }
+    })
+  }
+
   return {
     flushPendingMsgRefresh,
+    enqueueEvent, connectEvents,
     dockOpen, setDockOpen, toggleDock,
     scope, setScope,
     activeId, activeTitle, activeReqId, activeMeta,

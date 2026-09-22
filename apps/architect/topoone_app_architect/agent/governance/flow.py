@@ -15,6 +15,10 @@ meta.jobs 双源覆辙(P6 清退裁决)。缓存可随时重建(幂等纯函数)
   意图匹配复用 perception.intent.GENERIC_EXEC_RE(单源, 不造第二解析器)。
 - 硬闸仅 2 类: archived(既有 gate.py) / interrupted(本模块, 下发类意图)。
   rollback-409 为既有 REST 硬闸(requirements.py)。其余全软(note/hint)。
+- 行为面数据驱动(S0, agent.flow.policy): 相位 note/守卫规则(意图按名引用,
+  确定性单源——LLM 意图不入硬闸)/hint 模板/P 轴 elementHints 全部走
+  flow_policy.load_flow_policy(代码缺省+配置深合并, 坏值回落缺省);
+  迁移面(derive)不配置化——防第二真相源(架构红线)。
 
 拓展面(按需拓展 = 行为注册, 非加状态): register_flow_guard / register_flow_hint /
 register_phase_overlay; 精细化流程在 architect 核心机制内实现(LLM+hint+软守卫),
@@ -23,7 +27,6 @@ register_phase_overlay; 精细化流程在 architect 核心机制内实现(LLM+h
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Callable, Dict, List, Optional
 
 from ...arch_routes.store.states import (
@@ -32,6 +35,13 @@ from ...arch_routes.store.states import (
     FLOW_INTERRUPTED, FLOW_PHASES, FLOW_REVIEWING,
     REQ_DONE, TASK_DONE, TASK_PENDING_CONFIRM, TASK_RUNNING,
     TASK_SAVED, TASK_WAITING_INPUT,
+)
+from .flow_policy import (
+    guard_reply,
+    hint_text,
+    load_flow_policy,
+    phase_guards,
+    phase_note as _policy_note,
 )
 
 __all__ = [
@@ -89,32 +99,29 @@ def drift_check(cached: str, actual: str) -> bool:
     return cached != actual if cached != FLOW_INTERRUPTED else False
 
 
-# 下发意图 = GENERIC_EXEC_RE(单源复用) + 建卡补充式(相位守卫专用, 不污染路由纠偏面)
-_DISPATCH_EXTRA_RE = re.compile(
-    r"(建卡|创建任务|新建任务|任务卡|task\.propose|开始执行|启动任务|下发)")
-
-
-def phase_guard(phase: str, text: str) -> Optional[str]:
+def phase_guard(phase: str, text: str,
+                policy: Optional[dict] = None) -> Optional[str]:
     """相位硬闸(纯函数): 拦截返回引导文案(直通回复, 零 LLM); 放行返回 None。
 
-    仅 interrupted 态拦下发类意图——interrupted 不锁死对话(互斥锁死会话是
-    cv-153 类事故模式), architect 回合照常, 只挡新作业下发。
+    规则面走 flow_policy(意图按名引用, 匹配器=确定性代码单源——LLM 意图
+    不入硬闸, 防守线①); 仅配置了 guards 的相位参与拦截(缺省仅 interrupted)。
+    interrupted 不锁死对话(互斥锁死会话是 cv-153 类事故模式)——只拦新作业下发。
     """
-    if phase != FLOW_INTERRUPTED:
-        return None
-    t = str(text or "")
-    from ..perception.intent import GENERIC_EXEC_RE  # 单源复用(G1 裁决)
-    if GENERIC_EXEC_RE.search(t) or _DISPATCH_EXTRA_RE.search(t):
-        return ("⛔ 会话处于**异常中断**态：存在未能自动恢复的任务，新任务下发已暂停。\n"
-                "请先在会话处理中断任务（工具栏「恢复」自动核对执行器实际状态，"
-                "或「停止」终态化保留 worktree），恢复后再下发。")
+    pol = policy if policy is not None else load_flow_policy()
+    for g in phase_guards(pol, phase):
+        reply = guard_reply(g, text)
+        if reply:
+            return reply
     return None
 
 
 def flow_hints(conv: Optional[dict], tasks: Optional[List[dict]],
-               req: Optional[dict] = None) -> List[str]:
+               req: Optional[dict] = None,
+               policy: Optional[dict] = None) -> List[str]:
     """hint 层(非权威, 随时可算): 下一步建议——原 spec_ready/task_saved/done
-    流水线态在此降级为提示(裁决: 需求/任务正交可选, 不强制流水线)。"""
+    流水线态在此降级为提示(裁决: 需求/任务正交可选, 不强制流水线)。
+    文案模板走 flow_policy.hintTemplates({n} 占位)。"""
+    pol = policy if policy is not None else load_flow_policy()
     rows = [t for t in (tasks or []) if isinstance(t, dict)]
 
     def _st(t: dict) -> str:
@@ -123,13 +130,13 @@ def flow_hints(conv: Optional[dict], tasks: Optional[List[dict]],
     out: List[str] = []
     armed = [t for t in rows if _st(t) in _ARMED_STATES]
     if armed:
-        out.append(f"有 {len(armed)} 张任务卡待执行——可「开始执行」或继续对话调整")
+        out.append(hint_text(pol, "armed", len(armed)))
     done_open = [t for t in rows
                  if _st(t) == TASK_DONE and not t.get("dismissedAt")]
     if done_open:
-        out.append(f"有 {len(done_open)} 份完成回执待处理——合并/验收/标记已阅")
+        out.append(hint_text(pol, "reviewing", len(done_open)))
     if req and (req.get("status") or "") == REQ_DONE:
-        out.append("绑定需求已完结——继续迭代请新建需求")
+        out.append(hint_text(pol, "reqDone", 0))
     for fn in _custom_hints:   # 注册制提示(个性化/项目级; 故障静默跳过)
         try:
             extra = fn(conv, rows, req)
@@ -141,44 +148,30 @@ def flow_hints(conv: Optional[dict], tasks: Optional[List[dict]],
     return out
 
 
-_PHASE_NOTES: Dict[str, str] = {
-    FLOW_CLARIFYING: (
-        "【流程相位：澄清中】存在未兑现的规约草稿卡——聚焦补全要素"
-        "(目标/方案要点/允许范围/禁止改动/验收)，用户确认后再落卡。"),
-    FLOW_ARMED: (
-        "【流程相位：待执行】存在待执行任务卡——用户确认即启动；"
-        "可继续对话调整卡片内容。"),
-    FLOW_EXECUTING: (
-        "【流程相位：执行中】有任务正在执行——回答侧重转达与进展解读，"
-        "不复述回执；需求变更走版本链(amend 产生新版本，不影响运行中契约)；"
-        "新提案排队为建议，不打断执行。"),
-    FLOW_REVIEWING: (
-        "【流程相位：待验收】有已完成回执待处理——引导用户合并/验收"
-        "或标记已阅；确认后自然进入下一步。"),
-    FLOW_INTERRUPTED: (
-        "【流程相位：异常中断】存在未能自动恢复的任务——引导用户先处理"
-        "中断任务(恢复/停止)，暂勿下发新任务。"),
-}
+def phase_note(phase: str, policy: Optional[dict] = None) -> str:
+    """P 轴 architect_note 追加段(对话面指引; 任务面零接触)。文案走 flow_policy。"""
+    pol = policy if policy is not None else load_flow_policy()
+    return _policy_note(pol, phase)
 
 
-def phase_note(phase: str) -> str:
-    """P 轴 architect_note 追加段(对话面指引; 任务面零接触)。"""
-    return _PHASE_NOTES.get(phase or "", "")
+def phase_element_boost(phase: str, policy: Optional[dict] = None) -> bool:
+    """element_hints 单调上调(复用 U 轴要素清单机制)——由 policy.elementHints 驱动。"""
+    from .flow_policy import element_boost as _boost
+    pol = policy if policy is not None else load_flow_policy()
+    return _boost(pol, phase)
 
 
-def phase_element_boost(phase: str) -> bool:
-    """clarifying → element_hints 单调上调(复用 U 轴要素清单机制)。"""
-    return phase == FLOW_CLARIFYING
-
-
-def p_axis_overlay_fields(policy: Any, phase: str) -> dict:
+def p_axis_overlay_fields(policy: Any, phase: str,
+                          fp: Optional[dict] = None) -> dict:
     """P 轴字段覆盖(纯): replace 字段集(空=无叠加); element_hints 只升不降。"""
+    pol = fp if fp is not None else load_flow_policy()
     fields: dict = {}
-    note = phase_note(phase)
+    note = phase_note(phase, pol)
     if note:
         base = str(getattr(policy, "architect_note", "") or "")
         fields["architect_note"] = (base + "\n" + note).strip()
-    if phase_element_boost(phase) and getattr(policy, "element_hints", "") != "high":
+    if phase_element_boost(phase, pol) \
+            and getattr(policy, "element_hints", "") != "high":
         fields["element_hints"] = "high"
     return fields
 
@@ -229,9 +222,10 @@ def _run_custom_guards(phase: str, text: str) -> Optional[str]:
     return None
 
 
-def evaluate_guards(phase: str, text: str) -> Optional[str]:
+def evaluate_guards(phase: str, text: str,
+                    policy: Optional[dict] = None) -> Optional[str]:
     """守卫评估入口(编排器①.5 消费): 内置硬闸 + 注册制自定义守卫(先内置)。"""
-    reply = phase_guard(phase, text)
+    reply = phase_guard(phase, text, policy)
     if reply:
         return reply
     return _run_custom_guards(phase, text)

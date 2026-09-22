@@ -448,6 +448,16 @@ async def get_model_profiles():
                "tiers": model_profile.TIERS})
 
 
+@router.get("/llm/model-profiles/tier-suggestions")
+async def get_tier_suggestions():
+    """挡位建议(#3, 建议值+人审): dataset 失败画像 → tierSuggested 只读展示。
+
+    绝不自动写档案(防守线②, D6); 采纳 = 人工 PUT /llm/model-profiles/{id}
+    (manual 档); 人工已设的模型建议让位(manualPinned)。"""
+    from ..agent.reflection.tier_suggest import suggest_tiers
+    return ok(suggest_tiers())
+
+
 @router.get("/llm/capability-probe/status")
 async def capability_probe_gate_status():
     """探测闸门状态(自省): {running: 在跑模型id, queue: [排队模型id]}——

@@ -92,24 +92,111 @@ def record(kind: str, **fields: Any) -> None:
         logger.debug("[llm_dataset] record %s skipped: %s", kind, e)
 
 
+# ── S2 消费口(采纳文档 2609): 吞错计数 + 失败聚合读口 ──────────────────
+
+_SWALLOWS: Dict[str, int] = {}
+
+
+def swallow(tag: str) -> None:
+    """装配路径静默降级计数(turns/context + reflection 点名路径)。
+
+    进程内计数, stats() 快照暴露; 不写盘。开关: agent.comp.overrides.
+    swallow_counters(缺省启用)。永不抛出。
+    """
+    try:
+        from ..compensation.overrides import override_enabled, read_overrides
+        from ...arch_routes import store
+        if not override_enabled(
+                read_overrides(store.CollabConfigStore.get), "swallow_counters"):
+            return
+    except Exception:  # noqa: BLE001 — 开关判定失败按启用处理
+        pass
+    try:
+        k = str(tag or "?")
+        with _LOCK:
+            _SWALLOWS[k] = _SWALLOWS.get(k, 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _iter_events():
+    """逐行产出已解析事件(坏行跳过); 无文件时不产出。"""
+    p = _path()
+    if not os.path.exists(p):
+        return
+    with open(p, "r", encoding="utf-8") as f:
+        for ln in f:
+            try:
+                yield json.loads(ln)
+            except Exception:  # noqa: BLE001
+                continue
+
+
+def _new_agg() -> Dict[str, Any]:
+    return {"byKind": {}, "byTool": {}, "byModel": {},
+            "repair": {"ok": 0, "fail": 0}}
+
+
+def _agg_slot(agg: Dict[str, Any], r: Dict[str, Any]) -> None:
+    """单事件并入聚合: 按 kind/tool/model 累计成败; 修复类另记修复率。"""
+    k = str(r.get("kind") or "?")
+    ok = bool(r.get("ok"))
+    slot = agg["byKind"].setdefault(k, {"total": 0, "ok": 0, "fail": 0})
+    slot["total"] += 1
+    slot["ok" if ok else "fail"] += 1
+    tool = str(r.get("tool") or "")
+    if tool:
+        ts = agg["byTool"].setdefault(tool, {"total": 0, "fail": 0})
+        ts["total"] += 1
+        if not ok:
+            ts["fail"] += 1
+    model = str(r.get("model") or "")
+    if model:
+        ms = agg["byModel"].setdefault(model, {"total": 0, "fail": 0})
+        ms["total"] += 1
+        if not ok:
+            ms["fail"] += 1
+    if k in ("arg_repair", "repair_loop"):
+        agg["repair"]["ok" if ok else "fail"] += 1
+
+
+def aggregate_failures(window_days: int = None) -> Dict[str, Any]:
+    """失败聚合读口(治理/mining 只读消费; #3 tierSuggested 数据地基)。
+
+    window_days: 只统计近 N 天(缺省全量)。永不抛出。"""
+    out = _new_agg()
+    out["windowDays"] = int(window_days or 0)
+    try:
+        cutoff = (int(time.time() * 1000) - int(window_days) * 86_400_000) \
+            if window_days else 0
+        for r in _iter_events():
+            if cutoff and int(r.get("ts") or 0) < cutoff:
+                continue
+            _agg_slot(out, r)
+        out["swallows"] = {"total": sum(_SWALLOWS.values()),
+                           "byTag": dict(_SWALLOWS)}
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[llm_dataset] aggregate failed: %s", e)
+    return out
+
+
 def stats() -> Dict[str, Any]:
-    """按 kind 统计条数/字节/末次时间(供管理页/CLI 观测采集健康度)。"""
-    out: Dict[str, Any] = {"kinds": {}, "bytes": 0, "path": _path()}
+    """采集健康度 + 失败聚合 + 吞错计数(单遍扫描; 管理页/CLI 观测口)。"""
+    out: Dict[str, Any] = {"kinds": {}, "bytes": 0, "path": _path(),
+                           "failures": _new_agg(),
+                           "swallows": {"total": sum(_SWALLOWS.values()),
+                                        "byTag": dict(_SWALLOWS)}}
     try:
         p = _path()
         if not os.path.exists(p):
             return out
         out["bytes"] = os.path.getsize(p)
-        with open(p, "r", encoding="utf-8") as f:
-            for ln in f:
-                try:
-                    r = json.loads(ln)
-                except Exception:  # noqa: BLE001
-                    continue
-                k = r.get("kind", "?")
-                slot = out["kinds"].setdefault(k, {"count": 0, "lastTs": 0})
-                slot["count"] += 1
-                slot["lastTs"] = max(slot["lastTs"], r.get("ts", 0))
+        for r in _iter_events():
+            k = r.get("kind", "?")
+            slot = out["kinds"].setdefault(k, {"count": 0, "lastTs": 0})
+            slot["count"] += 1
+            slot["lastTs"] = max(slot["lastTs"], r.get("ts", 0))
+            _agg_slot(out["failures"], r)
     except Exception as e:  # noqa: BLE001
         logger.debug("[llm_dataset] stats failed: %s", e)
     return out
@@ -118,3 +205,9 @@ def stats() -> Dict[str, Any]:
 @router.get("/llm-dataset/stats")
 async def llm_dataset_stats():
     return stats()
+
+
+@router.get("/llm-dataset/failures")
+async def llm_dataset_failures(window_days: int = 0):
+    """失败聚合读口(S2): 治理层/mining 消费(#3 数据地基), 管理面观测。"""
+    return aggregate_failures(window_days or None)

@@ -206,6 +206,14 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
                         degraded=loop_fell_back)
         except Exception:  # noqa: BLE001
             pass
+        # 误路由遥测(#5 先行半, 恒开): 回复推诿 ∧ 问题正则未命中 → 记样本
+        # (只观测不改行为; 数据供 LLM 意图兜底的启用决策, 采纳文档 P1)
+        try:
+            from .intent_llm import misroute_telemetry
+            misroute_telemetry(str((gate or {}).get("question") or ""),
+                               final_content)
+        except Exception:  # noqa: BLE001
+            pass
     else:
         # cv-203: 落卡工具产卡后的有意空收尾 → 卡片即回合产物, 不落消息也不报
         # turnError——只发 done 事件收口前端 busy 态。
@@ -364,7 +372,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             break
 
         # 本轮工具调用解析并在 architect 侧执行
-        calls = req_agent.extract_tool_calls(round_text)
+        calls = req_agent._normalize_tool_calls(req_agent.extract_tool_calls(round_text))
         req_agent.record_tool_parse_audit(round_text, calls, surface="chat")
         if calls:
             # 达到最大工具轮次时也要执行本轮工具后用 llm.sync 收尾，避免空答案

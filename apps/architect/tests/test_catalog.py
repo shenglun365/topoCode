@@ -18,22 +18,24 @@ from topoone_app_architect.agent.turns.catalog import (ALIASES, CATALOG,
 
 
 def test_catalog_entries_and_vocab():
-    assert len(CATALOG) == 10
+    assert len(CATALOG) == 11
     assert set(CATALOG) == {
-        "light:summary", "light:probe", "light:distill",
+        "light:summary", "light:probe", "light:distill", "light:intent",
         "role:extract", "role:verify", "role:induce", "role:pseudo",
         "role:evaluate", "role:mine", "design"}
     # D10 词表映射
     assert CATALOG["role:induce"].purpose == Purpose.ROLE_INDUCE
     assert CATALOG["light:probe"].purpose == Purpose.PROBE
+    assert CATALOG["light:intent"].purpose == Purpose.PROBE   # 复用(词表冻结)
     assert CATALOG["design"].purpose == Purpose.DESIGN
 
 
 def test_aliases_naked_names():
     assert resolve_key("induce") == "role:induce"
     assert resolve_key("summary") == "light:summary"
+    assert resolve_key("intent") == "light:intent"
     assert resolve_key("design") == "design"            # 非别名原样
-    assert set(ALIASES) == {"summary", "probe", "distill", "extract",
+    assert set(ALIASES) == {"summary", "probe", "distill", "intent", "extract",
                             "verify", "induce", "pseudo", "evaluate", "mine"}
 
 

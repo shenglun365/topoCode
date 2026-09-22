@@ -429,6 +429,29 @@ def _md_lines(text) -> List[str]:
 
 # ── 规约快照/边界解析(生命周期重构: 版本链语义) ──────────────────────
 
+# ── 占位正文门禁(cv-224) ──────────────────────────────────────────────
+# 模型遵从混乱时会把「先澄清后落卡」执行成落壳卡(requirementMd/designMd
+# 为省略号等占位)——确定性拒绝并回喂错误文案, 走既有工具错误自纠环,
+# 零 LLM 判分。
+_PLACEHOLDER_BODY = {"...", "…", "。。。", "待补充", "待完善", "待定", "todo",
+                     "tbd", "n/a", "na", "无", "-", "—"}
+
+
+def _body_placeholder_error(text: str, label: str, min_len: int = 0) -> str:
+    """字段若提供且为占位 → 错误文案(可回喂自纠); 未提供(空)→放行。
+
+    只拦占位符不拦短正文——「修复登录按钮」是合法需求; 「薄」归 gap_matrix
+    澄清流(缺口驱动), 硬门禁拦之会误伤(cv 实证: 夹具/真实短诉求均合法)。"""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    core = t.rstrip("。.！!？?…").strip()
+    if (not core) or core.lower() in _PLACEHOLDER_BODY:
+        return (f"{label} 为占位内容——禁止用省略号/「待补充」等占位符落卡；"
+                "请给出完整正文，或按澄清指引先向用户提问，不要提交占位卡片。")
+    return ""
+
+
 @register_architect_tool(
     "req.propose",
     "形成/更新需求规约：讨论收敛为明确需求，或设计者要求 生成方案/提炼方案/完善需求 时调用。"
@@ -447,6 +470,8 @@ def _md_lines(text) -> List[str]:
     "acceptanceMd(验收标准，每行一条)、assessmentMd(评估)、estMin(分钟)、priority、"
     "newRequirement(默认 false=更新绑定需求)。",
 )
+
+
 def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "",
                      assessmentMd: str = "", priority: str = "P1",
                      estMin: int = 0,
@@ -459,6 +484,10 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     title = (title or "").strip()
     if not title:
         return {"ok": False, "error": "缺少需求标题"}
+    body_err = _body_placeholder_error(requirementMd, "requirementMd") \
+        or _body_placeholder_error(designMd, "designMd")
+    if body_err:
+        return {"ok": False, "error": body_err}
     conv_id = ""
     try:
         conv_id = ctx.get_conv()
@@ -638,6 +667,10 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
         return {"ok": False, "error": f"需求 {req_id} 不存在"}
     if (row.get("doneMark") or 0) == 1:
         return {"ok": False, "error": f"{req_id} 已完结；补充需求请新建需求(req.propose newRequirement=true)"}
+    body_err = _body_placeholder_error(requirementMd, "requirementMd") \
+        or _body_placeholder_error(designMd, "designMd")
+    if body_err:
+        return {"ok": False, "error": body_err}
     active = store.RequirementsStore.spec_active(req_id) or {}
     snap = dict(active.get("snapshot") or {})
     changed = []
@@ -803,7 +836,7 @@ def record_tool_parse_audit(content: str, calls: list, surface: str = "chat") ->
     """M4-C 失败样例回流: 有工具块但有效调用缺失/部分损坏 → 沉淀探针样本。
 
     落 llm_dataset(kind=tool_parse_fail, events.jsonl); 采集绝不影响业务。
-    样本仅供探针判分用例库(orchestration-plan §7)与人工导出, 不自动改行为。
+    样本仅供探针判分用例库(编排增量轨道, tech-debt-ledger)与人工导出, 不自动改行为。
     """
     try:
         audit = tool_parse_audit(content or "")
@@ -847,6 +880,32 @@ def structured_model_enabled(model_id: str) -> bool:
         return False
 
 
+# ── 工具调用规范化(cv-222) — 判别式=注册表成员资格, 非枚举模型行为 ──────
+# 模型的「无工具」示意形态多样(none/null/no_tool/任意噪声名), 枚举必然不完备。
+# 判别两层:
+#   ① 协议声明值: 空/none/null = 不调用(空即无工具——TOOL_CALL_SCHEMA 声明的
+#     协议语义, 集合仅此两项, 属协议定义而非模型行为枚举);
+#   ② 注册表成员资格: 未注册名 → 空参=模型噪声(不派发, 不烧修复轮);
+#     带参=真名称幻觉 → 保留派发(诚实报错 + repair_tool_call, cv-175 纪律)。
+_NO_TOOL_NAMES = {"none", "null"}
+
+
+def _normalize_tool_calls(calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for c in calls or []:
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("tool") or "").strip()
+        if not name or name.lower() in _NO_TOOL_NAMES:
+            continue                              # 协议声明: 无工具 → 转终稿轮
+        if name not in _ARCH_TOOLS and not (isinstance(c.get("arguments"), dict)
+                                            and c["arguments"]):
+            continue                              # 未注册+空参 = 噪声, 不派发
+        out.append({"tool": name,
+                    "arguments": c.get("arguments") if isinstance(c.get("arguments"), dict) else {}})
+    return out
+
+
 def structured_tool_round(msgs: list, model_id: str = "",
                           schema: Optional[dict] = None,
                           max_tokens: Optional[int] = None) -> Dict[str, Any]:
@@ -867,6 +926,7 @@ def structured_tool_round(msgs: list, model_id: str = "",
         args = out.get("arguments")
         calls = [{"tool": str(out["tool"]).strip(),
                   "arguments": args if isinstance(args, dict) else {}}]
+    calls = _normalize_tool_calls(calls)
     return {"calls": calls, "content": str(res.get("content") or ""),
             "error": err}
 
@@ -973,7 +1033,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
         content = (res or {}).get("content", "") if res else ""
         if not content:
             return {"content": "", "output": None, "error": last_err}
-        calls = extract_tool_calls(content)
+        calls = _normalize_tool_calls(extract_tool_calls(content))
         record_tool_parse_audit(content, calls, surface="sync")
         if not calls:
             return {
@@ -1177,6 +1237,11 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
         "ctx_budget": ctx_budget})
 
 
+def _posture_textLegacy() -> str:
+    from ..agent.cognition.prompt import posture_text
+    return posture_text()
+
+
 def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
                               diagram_skill: bool = False,
                               skill_scenarios: Optional[List[str]] = None) -> str:
@@ -1221,6 +1286,8 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
         "(req.propose 带 title/requirementMd/**designMd**/acceptanceMd)，需求卡就绪后可 /执行。"
         "关联较弱时仅在方案中说明「独立于项目核心资产」并收敛 scope，**不得以此为由拒绝或推诿**。"
         "已创建需求(RQ 编号以系统回执为准)后继续跟进完善，不得再声明该任务不属于职责范围。\n\n"
+        # GU-3 人格统一: posture 判据块与注册表同源(cognition.prompt)
+        f"{_posture_textLegacy()}\n\n"
         f"{_CAPABILITY_DOC}{ir_doc}{extra}{mcp_extra}{skill_extra}"
     )
 

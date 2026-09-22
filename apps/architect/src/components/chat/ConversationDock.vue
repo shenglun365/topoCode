@@ -133,13 +133,12 @@ onMounted(() => {
   // 会话被删除(左侧列表) → 当前对话区若是该会话则清空(左右联动)
   window.addEventListener('arch:conversation-removed', onConversationRemoved)
   syncTimer = setInterval(() => void pollRunningState(), 5000)
-  connectConvEvents()
+  conv.connectEvents()   // cv-221: SSE 连接上移 store(单例单连接, 事件入缓冲统一消费)
 })
 onUnmounted(() => {
   if (syncTimer) clearInterval(syncTimer)
   window.removeEventListener('arch:sessions-changed', onSessionsChanged)
   window.removeEventListener('arch:conversation-removed', onConversationRemoved)
-  disconnectConvEvents()
 })
 function onSessionsChanged() { void loadRecent() }
 watch(() => conv.activeId, () => { if (conv.activeId) void maybeHintWeakModel() })
@@ -150,86 +149,6 @@ async function onTaskExecutor(p: { taskId: string; executorType: string }) {
     await apiPost(`/tasks/${p.taskId}/executor`, { executorType: p.executorType })
     await conv.refreshTasks()
   } catch { conv.pushLocalHint('执行器切换失败(稍后重试)') }
-}
-
-/** ── 会话事件流(SSE): job 消息实时刷新 + coding 子会话未读 badge ── */
-let evtSource: EventSource | null = null
-let evtReconnect: ReturnType<typeof setTimeout> | null = null
-let refreshPending: ReturnType<typeof setTimeout> | null = null
-function _debounceRefresh() {
-  if (refreshPending) clearTimeout(refreshPending)
-  refreshPending = setTimeout(() => {
-    refreshPending = null
-    void conv.refreshActiveMessages()
-  }, 400)
-}
-
-function onConvEvent(d: any) {
-  if (d?.conversationId && d.conversationId !== conv.activeId) return
-  if (d?.type === 'items' && Array.isArray(d.items)) {
-    // A6.2: 流 item(工具轨迹/文件变更/通知) → 按 taskId 解耦广播给 TaskCard 流面板
-    window.dispatchEvent(new CustomEvent('arch:stream-items', {
-      detail: { taskId: d.taskId, items: d.items },
-    }))
-    return
-  }
-  if (d?.type === 'progress') {
-    // v2 执行进展(准流式): 全量 progress 合并(滚动文本尾+工具轨迹) → TaskCard 过程面板
-    const patch = {
-      toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now(),
-      lastText: d.lastText ?? '', lastTool: d.lastTool ?? '',
-      process: d.process ?? [], inputTokens: d.inputTokens ?? 0, outputTokens: d.outputTokens ?? 0,
-    }
-    const t = (conv.tasks || []).find((x: any) => x.id === d.taskId)
-    if (t) t.progress = { ...(t.progress || {}), ...patch }
-    const rr = (conv.activeMeta as any)?.runningRole
-    if (rr) rr.progress = { ...(rr.progress || {}), ...patch }
-    return
-  }
-  if (d?.type === 'task') {
-    // v2 任务状态变更: 任务清单 + 会话元数据(runningRole/workState 实时) + 消息
-    void conv.refreshTasks()
-    void conv.refreshActiveMeta()
-    _debounceRefresh()
-    return
-  }
-  if (d?.type === 'flow-transition') {
-    // 流程相位迁移: 刷新会话元数据(flowState 徽章/相位指引) + 信息流(审计卡)
-    void conv.refreshActiveMeta()
-    _debounceRefresh()
-    return
-  }
-  if (d?.type === 'conv-message') {
-    _debounceRefresh()
-  }
-}
-
-function connectConvEvents() {
-  try {
-    // EventSource 不能带 Authorization header → 网关鉴权走 ?token= (与 WS 同法)
-    const tok = getToken()
-    const qs = tok ? `?token=${encodeURIComponent(tok)}` : ''
-    evtSource = new EventSource(`${apiBaseUrl()}/events${qs}`)
-    console.info('[arch-live] SSE connecting')
-    evtSource.onopen = () => console.info('[arch-live] SSE open')
-    evtSource.onmessage = (ev) => {
-      try {
-        const d = JSON.parse(ev.data)
-        console.info('[arch-live] SSE event', d?.type, d?.conversationId)
-        onConvEvent(d)
-      } catch { /* 非事件帧忽略 */ }
-    }
-    evtSource.onerror = () => {
-      console.info('[arch-live] SSE error → 5s 重连')
-      disconnectConvEvents()
-      evtReconnect = setTimeout(connectConvEvents, 5000)
-    }
-  } catch { /* SSE 不可用(离线) → 退化为手动刷新 */ }
-}
-function disconnectConvEvents() {
-  evtSource?.close()
-  evtSource = null
-  if (evtReconnect) { clearTimeout(evtReconnect); evtReconnect = null }
 }
 
 /** 发送入口(语境路由): attachTo=转达任务卡, agent=一次性指派 subagent(后端注入指派契约), digest=语境摘要。 */
@@ -609,7 +528,7 @@ async function recoverFlow() {
   try {
     await apiPost(`/sessions/${conv.activeId}/recover`, {})
     await conv.refreshActiveMeta()
-    _debounceRefresh()
+    void conv.refreshActiveMessages()
   } catch { /* 状态随对账刷新 */ } finally {
     flowRecoverBusy.value = false
   }
@@ -621,7 +540,7 @@ async function onTaskDismiss(id: string) {
     await apiPost(`/tasks/${id}/dismiss`, {})
     void conv.refreshTasks()
     void conv.refreshActiveMeta()
-    _debounceRefresh()
+    void conv.refreshActiveMessages()
   } catch { /* 状态随对账刷新 */ }
 }
 // running 态准实时同步: 复用 5s 轮询——刷新 workState + 增量消息(泵产物)

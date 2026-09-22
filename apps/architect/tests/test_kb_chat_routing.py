@@ -219,7 +219,7 @@ def test_default_free_chat_persists_and_injects_routing_contract(tmp_path, monke
     roles = [(m["role"], (m.get("agent") or "")) for m in msgs]
     assert ("user", "") in roles and ("assistant", "") in roles, roles
     systems = [m["content"] for m in captured["msgs"] if m["role"] == "system"]
-    assert any("通用 agent 路由" in s for s in systems), "应注入通用路由契约"
+    assert any("目标理解" in s for s in systems), "应注入 GU 回合指引"
     assert any("task.propose" in s for s in systems)
 
 

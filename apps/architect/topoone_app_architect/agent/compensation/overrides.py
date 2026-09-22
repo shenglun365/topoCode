@@ -10,6 +10,16 @@
   flow-blind(相位不进策略)。
 - flow_guards_enabled: 相位硬闸(orchestrator 阶段①.5, 仅 interrupted 拦下发);
   false = 回退无守卫。derive(相位缓存本体)恒开无开关——纯缓存零行为。
+
+反思闭环注入开关(采纳文档 2609 P0, 规则数值走 agent.flow.policy):
+- repair_note_injection: 修复经验回填+装配注入(S1); false = 不落单元不注入。
+- overflow_digest: 工作记忆溢出摘要注入(S3); false = 维持定长截断现状。
+- swallow_counters: 装配路径吞错计数(S2); false = 计数器停走(零行为差异)。
+
+受限 LLM 意图分类(GU-L2, 2026-09-22 归位):
+- ~~intent_llm_fallback~~ **已取代**: 开关迁 `agent.flow.policy → goal.escalation.
+  llmFallback`(缺省关, 与置信/长度门槛同处一键); 本键不再读取。
+  LLM 意图只参与 GoalProfile 升格(回合指引仍走决策表), 永不入相位硬闸(防守线①)。
 本模块零依赖(getter 注入), 供 turns/exec_bridge 等读取点传入 store 取数函数。
 """
 from __future__ import annotations

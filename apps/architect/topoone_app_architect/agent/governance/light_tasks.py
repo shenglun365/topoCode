@@ -23,6 +23,7 @@ LIGHT_TASKS: Dict[str, str] = {
     "summary": "会话标题/摘要生成(memory.units summarize_conversation)",
     "probe": "范围探针 grounding 补全(planning.scope_probe)",
     "distill": "错误提炼: 错误历史 → 归因/修正模式(memory.distill)",
+    "intent": "意图分类兜底(turns.intent_llm 受限兜底, 缺省关)",
 }
 
 LIGHT_TASKS_KEY = "llm.lightTaskModels"
