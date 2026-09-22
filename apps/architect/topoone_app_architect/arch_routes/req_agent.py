@@ -649,6 +649,12 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     for k in list(extra):
         if k != "_title":
             ignored.append(k)
+    # 占位门禁前置于绑定解析(cv-225): 载荷问题(占位)比路由问题(未绑定)
+    # 更具指导性——先拦占位, 避免模型在错误信号间挣扎。
+    body_err = _body_placeholder_error(requirementMd, "requirementMd") \
+        or _body_placeholder_error(designMd, "designMd")
+    if body_err:
+        return {"ok": False, "error": body_err}
     from . import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
@@ -661,16 +667,14 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
         except Exception:  # noqa: BLE001
             pass
     if not req_id:
-        return {"ok": False, "error": "当前会话未绑定需求且未指定 reqId，无法修订"}
+        return {"ok": False, "error":
+                "当前会话未绑定需求，无需修订——若要创建新需求请调用 req.propose "
+                "并给出完整需求内容；若处于澄清轮，请先按指引向用户提问。"}
     row = store.RequirementsStore.get(req_id)
     if not row:
         return {"ok": False, "error": f"需求 {req_id} 不存在"}
     if (row.get("doneMark") or 0) == 1:
         return {"ok": False, "error": f"{req_id} 已完结；补充需求请新建需求(req.propose newRequirement=true)"}
-    body_err = _body_placeholder_error(requirementMd, "requirementMd") \
-        or _body_placeholder_error(designMd, "designMd")
-    if body_err:
-        return {"ok": False, "error": body_err}
     active = store.RequirementsStore.spec_active(req_id) or {}
     snap = dict(active.get("snapshot") or {})
     changed = []

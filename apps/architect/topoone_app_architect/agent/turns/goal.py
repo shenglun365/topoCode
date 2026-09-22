@@ -307,6 +307,11 @@ def plan_goal_directive(question: str, conv: Optional[dict],
                        contextChars=len(ctx))
         except Exception:  # noqa: BLE001 — 遥测不碍主链
             pass
+        # 批丁补丁(cv-225): 规则声明 tools 里的 req.amend 依赖「会话已绑定需求」
+        # ——未绑定时 amend 必然失败(模型会拿它挣扎落卡), 降为纯读面([])。
+        if res.get("tools") and "req.amend" in (res.get("tools") or []) \
+                and not str(prof.get("boundReq") or ""):
+            res["tools"] = [t for t in res["tools"] if t != "req.amend"]
         return {"profile": prof, "action": res.get("action"),
                 "text": res.get("text") or "", "tools": res.get("tools")}
     except Exception:  # noqa: BLE001 — GU 故障回退无指引(正则词表面仍在)

@@ -200,3 +200,32 @@ def test_static_diet_actual_savings():
     full = pr.capability_doc_from_tools()
     sub = pr.capability_doc_from_tools(allowed={"req.propose", "kb.asset.search"})
     assert len(sub) <= len(full) * 0.4
+
+
+# ── 批丁补丁(cv-225): 限面上下文化 + amend 门禁前置 ───────────────────
+
+def test_clarify_first_tools_context_aware(arch_env):
+    """clarify-first 未绑定需求 → tools 剔除 req.amend(纯读问面);
+    绑定需求 → 保留 amend(可回填)。"""
+    plan0 = gu.plan_goal_directive("基于项目的定位，先构建开发环境", {}, None, [])
+    assert plan0["action"] == "clarify-first"
+    assert "req.amend" not in (plan0["tools"] or [])
+    plan1 = gu.plan_goal_directive("基于项目的定位，先构建开发环境",
+                                   {"reqId": "RQ-9"}, None, [])
+    assert plan1["tools"] == ["req.amend"]
+
+
+def test_amend_placeholder_gate_precedes_binding_check(arch_env):
+    """amend 占位载荷在绑定解析前被拦(cv-225: 占位错比未绑定错更具指导性)。"""
+    from topoone_app_architect.arch_routes.req_agent import tool_req_amend
+    r = tool_req_amend(requirementMd="...", title="...")
+    assert r.get("ok") is False and "占位" in str(r.get("error"))
+    assert "未绑定" not in str(r.get("error"))
+
+
+def test_amend_unbound_error_is_route_guidance(arch_env):
+    from topoone_app_architect.arch_routes.req_agent import tool_req_amend
+    r = tool_req_amend(requirementMd="完整内容正文，不是占位符")
+    assert r.get("ok") is False
+    msg = str(r.get("error"))
+    assert "未绑定需求" in msg and "req.propose" in msg   # 路线指引型文案

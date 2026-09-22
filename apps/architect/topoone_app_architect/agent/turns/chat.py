@@ -261,7 +261,7 @@ def _gu_structured_schema(allowed_tools: Optional[set]):
 
 def _allowed_refusal_text(name: str) -> str:
     return (f"工具 {name} 不在本回合可用清单(当前路线限定)——请改用允许的工具，"
-            "或直接基于已有信息作答。")
+            "直接基于已有信息作答，或按回合指引向用户提出澄清问题。")
 
 
 async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
