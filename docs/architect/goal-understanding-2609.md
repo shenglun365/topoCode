@@ -189,3 +189,14 @@ flowchart LR
 | embedding 分类器 | 评估后**撤销**(收益不足; `intent_misroute` 遥测持续攒数据, 词表+策略+L2 足覆盖高频面) |
 
 已知边界更新: 撞车裁决从「单词撞→操作」进化为三判据(独立词/构建标记/score)——菜单只在真歧义时出现; 强信号裁决面(score≥2→需求, 执行词→操作)冻结不变。
+
+### 提示词减载批丁已落地(2026-09-22; 体检驱动: 静态 9.6K/工具 5K 全量/约束 20+ → 中小模型遵从率劣化)
+
+| 件 | 落点 |
+|---|---|
+| A 测量面 | `prompt_sections` 遥测(orchestrator, 每回合): systemBase/systemInjections/history/tier/toolSurface/guAction/guTools——「哪层重→哪层失遵」数据闭环, 关联台账 A4 |
+| B 工具按需注入 | 决策表 rules 增 `tools` 键(写类限定, 校验+fail-soft)+`goal.toolClasses.read`(fnmatch 读类恒供); `plan_goal_directive`/`inject_goal_directive` 拆分(plan 前置于装配参与渲染); allowed 解析注册表交集(零发版容错); 能力文档子集渲染(5.5K→**1.75K**); structured 轮 schema tool **enum**(约束解码层面收敛); 执行面三分支名单外拒绝回喂(refused 不参与落卡轮判定); run_tools_loop 降级通道同规; `tools=null`(未配置)不限面 vs `[]`(显式只读)语义分界 |
+| C 静态面瘦身 | 落卡纪律去重(条 1 与 posture 三问重复→退役, 纪律单源工具面 309→~180 字); 指令符号/边界/范围段压缩; `protocol_doc(slim)`/`prompt_slim`(t2+ 简挡省系统面说明段); 边界段保留「不拒做/designMd」契约关键词(cv-181) |
+| 裁决 | legacy 等价断言(逐字节)退役→回退通道可用性断言: 冻结字面量与注册表渲染早已结构性漂移(新工具只入注册表), 字节对齐=B4 迁移窗口后的双源负债 |
+
+效果对账: 本轮路线能力文档 5,584→1,750 字(−69%); 协议段 731→480; 结构化轮 msgs 预计 12.2K→~8.5K(t2 简 挡再降)。后续以 prompt_sections×A4 遵从率数据复核。

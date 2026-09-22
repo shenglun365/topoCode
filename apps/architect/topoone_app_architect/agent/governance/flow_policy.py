@@ -114,25 +114,41 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
     # 采样门槛与失败率阈值(高失败→建议升档/低失败→建议降档省算力)
     "tierSuggestion": {"minCalls": 10, "failHigh": 0.35, "failLow": 0.1},
     # 目标理解决策表(GU, goal-understanding-2609): 规则顺序匹配首中即停;
-    # then 动作词注册制(代码单源执行器), 配置只选择; 文案模板可覆盖
+    # then 动作词注册制(代码单源执行器), 配置只选择; 文案模板可覆盖;
+    # 批丁: rules.tools 按路线限定写类工具(读类经 toolClasses.read 恒可用)——
+    # 工具面 5K 全量 → 本轮路线子集(提示面+执行面双重收敛, 中小模型注意力聚焦)
     "goal": {
         "decision": [
             {"when": {"kind": "command"}, "then": "passthrough"},
             # 低置信卫兵前置: 理解不可靠 → 先问(合法出口); 正常档位均 ≥0.5 不触发
-            {"when": {"confidence<": 0.5}, "then": "ask-one-question"},
+            {"when": {"confidence<": 0.5}, "then": "ask-one-question",
+             "tools": []},
             # 候选菜单(优先于单判规则; kind 级在前=先定性质再谈澄清):
             # 策略+执行词弱撞 / 策略 top-2 分差≤1 → 请用户定性(GU 重判收敛)
-            {"when": {"candidates": True}, "then": "present-options"},
+            {"when": {"candidates": True}, "then": "present-options",
+             "tools": []},
             {"when": {"kind": "requirement", "strategy": "*"},
-             "then": "clarify-first", "with": "strategy"},
-            {"when": {"kind": "requirement"}, "then": "propose-requirement"},
-            {"when": {"kind": "operation"}, "then": "propose-task"},
-            {"when": {"kind": "continuation"}, "then": "continue"},
-            {"when": {"kind": "inquiry"}, "then": "answer"},
+             "then": "clarify-first", "with": "strategy", "tools": ["req.amend"]},
+            {"when": {"kind": "requirement"}, "then": "propose-requirement",
+             "tools": ["req.propose", "req.amend"]},
+            {"when": {"kind": "operation"}, "then": "propose-task",
+             "tools": ["task.propose"]},
+            {"when": {"kind": "continuation"}, "then": "continue",
+             "tools": ["req.amend", "req.propose"]},
+            {"when": {"kind": "inquiry"}, "then": "answer",
+             "tools": ["req.propose", "task.propose"]},
             # 可配置扩展位(缺省不启用): forced 全量先问(含策略未命中)由运营按需加
             # {"when": {"kind": "inquiry", "clarifyMode": "forced"},
             #  "then": "clarify-first"}——when 支持 clarifyMode/explicit 键。
         ],
+        # 读类工具类(pattern, fnmatch): GU 限面时恒可用(取证/检索面不设限)
+        "toolClasses": {
+            "read": ["kb.*", "map.*", "ctx.*", "conv.*", "code.*",
+                     "project.ctx", "asset.semantic.search",
+                     "asset.semantic.detail", "asset.semantic.stats",
+                     "asset.semantic.mappings", "asset.semantic.reconcile",
+                     "capability.evaluate", "probe.run"],
+        },
         # 澄清策略库(D5 偿还, 2026-09-22 配置化): 引擎在 requirements/clarify.py
         # (match/gap/directive), 条目在此单源——改一条澄清问题 = PUT /flow-policy,
         # 零发版。写侧校验: key 唯一/questions 二元组/要素词表。
@@ -257,7 +273,8 @@ def _validate_goal(goal: Any) -> List[str]:
         return ["goal 须为对象"]
     errs: List[str] = []
     errs += [f"goal 未知键: {k}" for k in goal
-             if k not in ("decision", "directives", "escalation", "strategies")]
+             if k not in ("decision", "directives", "escalation", "strategies",
+                          "toolClasses")]
     decision = goal.get("decision")
     if decision is not None:
         if not isinstance(decision, list):
@@ -268,7 +285,8 @@ def _validate_goal(goal: Any) -> List[str]:
                     errs.append(f"goal.decision[{i}] 须为对象")
                     continue
                 errs += [f"goal.decision[{i}] 未知键: {k}"
-                         for k in rule if k not in ("when", "then", "with")]
+                         for k in rule if k not in ("when", "then", "with",
+                                                    "tools")]
                 when = rule.get("when")
                 if not isinstance(when, dict) or not when:
                     errs.append(f"goal.decision[{i}].when 须为非空对象")
@@ -300,6 +318,11 @@ def _validate_goal(goal: Any) -> List[str]:
                                 f"(可用: {','.join(GOAL_ACTIONS)})")
                 if "with" in rule and rule["with"] not in ("", "strategy"):
                     errs.append(f"goal.decision[{i}].with 非法: {rule['with']}")
+                if "tools" in rule and (
+                        not isinstance(rule["tools"], list)
+                        or any(not isinstance(t, str) or not t.strip()
+                               for t in rule["tools"])):
+                    errs.append(f"goal.decision[{i}].tools 须为非空字符串数组")
     directives = goal.get("directives")
     if directives is not None:
         if not isinstance(directives, dict):
@@ -327,6 +350,22 @@ def _validate_goal(goal: Any) -> List[str]:
                                     or not (20 <= mtc <= 4000)):
                 errs.append("goal.escalation.maxTextChars 须为 20..4000 整数")
     errs += _validate_strategies(goal.get("strategies"))
+    errs += _validate_tool_classes(goal.get("toolClasses"))
+    return errs
+
+
+def _validate_tool_classes(tc: Any) -> List[str]:
+    """GU 工具类校验(批丁): 键 ⊆ {read}, 值为非空字符串数组(fnmatch pattern)。"""
+    if tc is None:
+        return []
+    if not isinstance(tc, dict):
+        return ["goal.toolClasses 须为对象"]
+    errs = [f"goal.toolClasses 未知键: {k}" for k in tc if k != "read"]
+    pats = tc.get("read")
+    if pats is not None and (not isinstance(pats, list)
+                             or any(not isinstance(x, str) or not x.strip()
+                                    for x in pats)):
+        errs.append("goal.toolClasses.read 须为非空字符串数组")
     return errs
 
 

@@ -166,8 +166,10 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
 
 
 def resolve_goal_directive(profile: Dict[str, Any], pol: Dict[str, Any]) -> Dict[str, Any]:
-    """决策表顺序匹配首中即停 → {action, text}(text 可为空=不注入)。
+    """决策表顺序匹配首中即停 → {action, text, tools}(text 可为空=不注入)。
 
+    tools=命中规则的写类工具限定(未配置/未命中 → None=不限面);
+    读类面由 toolClasses.read 恒供(消费方 orchestrator fnmatch 解析)。
     坏规则跳过(fail-soft; 写侧已校验, 读侧兜底); 全不命中 → answer 兜底。
     """
     cfg = (pol.get("goal") or {})
@@ -179,12 +181,17 @@ def resolve_goal_directive(profile: Dict[str, Any], pol: Dict[str, Any]) -> Dict
                 action = str(rule.get("then") or "")
                 if action not in GOAL_ACTIONS:
                     continue
+                tools = rule.get("tools")
+                tools = [str(t) for t in tools] \
+                    if isinstance(tools, list) else None
                 text = _directive_text(pol, action, profile,
                                        str(rule.get("with") or ""))
-                return {"action": action, "text": text}
+                return {"action": action, "text": text, "tools": tools}
         except Exception:  # noqa: BLE001 — 单规则故障不碍决策
             continue
-    return {"action": "answer", "text": _directive_text(pol, "answer", profile, "")}
+    return {"action": "answer",
+            "text": _directive_text(pol, "answer", profile, ""),
+            "tools": None}
 
 
 def _when_hit(when: Dict[str, Any], p: Dict[str, Any]) -> bool:
@@ -265,11 +272,14 @@ def _recent_user_context(msgs: List[dict], question: str, limit: int = 2,
     return "\n".join(f"- {x}" for x in reversed(out))
 
 
-def apply_goal_directive(msgs: List[dict], question: str, conv: Optional[dict],
-                         pol: Optional[dict] = None) -> Optional[dict]:
-    """编排接线(③.5): 产出 profile → 决策 → 指引注入 msgs(index 1) + 遥测。
+def plan_goal_directive(question: str, conv: Optional[dict],
+                        pol: Optional[dict] = None,
+                        msgs: Optional[List[dict]] = None) -> Optional[dict]:
+    """编排接线(③.5 前半, 批丁拆分): 产出 profile → 决策 → 遥测。
 
-    返回 {profile, action}(供编排层/测试复用); 注入失败不碍主链。
+    在上下文装配**之前**调用——tools 限定须参与 system 渲染(工具子集面);
+    msgs/history 可选传入(L2 上下文携带面: 最近用户消息摘要)。
+    返回 {profile, action, text, tools}; 故障回退 None(无指引不限面)。
     """
     try:
         if pol is None:
@@ -281,7 +291,7 @@ def apply_goal_directive(msgs: List[dict], question: str, conv: Optional[dict],
                 import copy as _copy
                 pol = _copy.deepcopy(DEFAULT_FLOW_POLICY)
         esc = ((pol or {}).get("goal") or {}).get("escalation")
-        ctx = _recent_user_context(msgs, question)
+        ctx = _recent_user_context(msgs or [], question)
         prof = build_goal_profile(question, conv, escalation=esc, context=ctx)
         res = resolve_goal_directive(prof, pol or {})
         try:
@@ -293,11 +303,28 @@ def apply_goal_directive(msgs: List[dict], question: str, conv: Optional[dict],
                        action=res.get("action"),
                        conflict=str(prof.get("conflict") or ""),
                        candidates=len(prof.get("candidates") or []),
+                       tools=",".join(res.get("tools") or []) or "",
                        contextChars=len(ctx))
         except Exception:  # noqa: BLE001 — 遥测不碍主链
             pass
-        if res.get("text"):
-            msgs.insert(1, {"role": "system", "content": res["text"]})
-        return {"profile": prof, "action": res.get("action")}
+        return {"profile": prof, "action": res.get("action"),
+                "text": res.get("text") or "", "tools": res.get("tools")}
     except Exception:  # noqa: BLE001 — GU 故障回退无指引(正则词表面仍在)
         return None
+
+
+def inject_goal_directive(msgs: List[dict], plan: Optional[dict]) -> None:
+    """编排接线(③.5 后半): 指引文案注入 msgs(index 1)。失败不碍主链。"""
+    try:
+        if plan and plan.get("text"):
+            msgs.insert(1, {"role": "system", "content": plan["text"]})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def apply_goal_directive(msgs: List[dict], question: str, conv: Optional[dict],
+                         pol: Optional[dict] = None) -> Optional[dict]:
+    """组合入口(= plan + inject; 兼容既有调用面/测试)。"""
+    plan = plan_goal_directive(question, conv, pol, msgs=msgs)
+    inject_goal_directive(msgs, plan)
+    return plan

@@ -32,9 +32,12 @@ _CARD_LANDING_TOOLS = frozenset({"req.propose", "req.amend", "task.propose"})
 def _card_round_closing(results: List[Dict[str, str]]) -> bool:
     """落卡轮判定(原合成收尾, cv-203 起只判不落): 本轮全为落卡工具 → True。
 
-    卡片(specReady/task_card)已由工具执行落流——独立成卡, 不再追加收尾文本。"""
+    卡片(specReady/task_card)已由工具执行落流——独立成卡, 不再追加收尾文本。
+    refused 条目(GU 执法拒绝回喂, 批丁)未实际落卡, 不参与判定。"""
     from ..compensation.providers.builtin import card_closing_text
     for r in results:
+        if r.get("refused"):
+            continue
         if card_closing_text(r.get("name", "")):
             return True
     return False
@@ -244,13 +247,33 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
         await io.send_ev({"type": "error", "requestId": request_id, "message": detail})
 
 
+def _gu_structured_schema(allowed_tools: Optional[set]):
+    """GU 限面 → structured 轮 schema 注入 tool enum(约束解码层面收敛, 批丁)。"""
+    if not allowed_tools:
+        return None
+    import copy as _copy
+    from ..tools.protocol import TOOL_CALL_SCHEMA
+    schema = _copy.deepcopy(TOOL_CALL_SCHEMA)
+    schema.setdefault("properties", {}).setdefault("tool", {})["enum"] = \
+        sorted(allowed_tools)
+    return schema
+
+
+def _allowed_refusal_text(name: str) -> str:
+    return (f"工具 {name} 不在本回合可用清单(当前路线限定)——请改用允许的工具，"
+            "或直接基于已有信息作答。")
+
+
 async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                              root: str, project: str, eff_model: Optional[str],
                              model_id: str, tools_used: set, tool_errors: dict,
-                             max_tool_rounds: int = _MAX_TOOL_ROUNDS) -> dict:
+                             max_tool_rounds: int = _MAX_TOOL_ROUNDS,
+                             allowed_tools: Optional[set] = None) -> dict:
     """管线阶段④ LLM 工具循环: 流式/降级/工具轮/预算门禁(行为等价抽取)。
 
     max_tool_rounds: 工具轮次上限按挡下发(M4-B, gear.tool_rounds);
+    allowed_tools: GU 路线工具限定(批丁)——提示面(能力文档子集+schema enum)
+    与执行面(名单外拒绝回喂)双重收敛。
     返回 {request_id, assistant_text, visible, tool_round, loop_fell_back,
     card_closed}; msgs/tools_used/tool_errors 原地变更(守卫与遥测依赖)。"""
     from ...arch_routes import req_agent
@@ -273,8 +296,10 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
         # structured 失败显式 nudge 后本回合降级文本协议(不静默)。
         _model_key = eff_model or req_agent.get_model_preference()
         if structured_on and req_agent.structured_model_enabled(_model_key):
-            sres = await asyncio.to_thread(req_agent.structured_tool_round,
-                                           msgs, _model_key)
+            sres = await asyncio.to_thread(
+                req_agent.structured_tool_round,
+                msgs, _model_key,
+                schema=_gu_structured_schema(allowed_tools))
             tool_round += 1
             if sres["error"]:
                 logger.info("[kb-chat] structured 轮失败 → 降级文本协议 conv=%s: %s",
@@ -290,6 +315,13 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             await io.ensure_chat_start()
             results: List[Dict[str, str]] = []
             for c in sres["calls"]:
+                # 批丁 GU 执法: 名单外工具拒绝回喂(提示面已收敛, 此为执行面兜底)
+                if allowed_tools and c.get("tool") \
+                        and c.get("tool") not in allowed_tools:
+                    results.append({"name": c.get("tool", ""),
+                                    "text": _allowed_refusal_text(c.get("tool")),
+                                    "refused": True})
+                    continue
                 # cv-174 守卫(structured 轮同样适用——受限生成通道弱模型连发提案
                 # 曾一回合落 4 张重复需求卡, cv-185 实证)
                 if c.get("tool") == "req.propose" and "req.propose" in tools_used:
@@ -318,7 +350,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
             loop_fell_back = True
             await io.ensure_chat_start()
-            assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
+            assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds, allowed_tools=allowed_tools)
             if not assistant_text and tools_used and tools_used <= _CARD_LANDING_TOOLS:
                 card_closed = True   # cv-203: 落卡工具已产卡, 空文本≠空返回错误
             break
@@ -368,7 +400,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             loop_fell_back = True
             if io.budget_left() > 0:
                 await io.ensure_chat_start()
-                assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
+                assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds, allowed_tools=allowed_tools)
             break
 
         # 本轮工具调用解析并在 architect 侧执行
@@ -381,6 +413,12 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 for c in calls:
                     name = c.get("tool", "")
                     args = c.get("arguments", {})
+                    if allowed_tools and name and name not in allowed_tools:
+                        # 批丁 GU 执法(满轮收尾分支同规)
+                        results.append({"name": name,
+                                        "text": _allowed_refusal_text(name),
+                                        "refused": True})
+                        continue
                     if name == "req.propose" and "req.propose" in tools_used:
                         # cv-174 守卫(满轮收尾分支同样适用)
                         results.append({"name": name, "text": _propose_dup_text()})
@@ -397,13 +435,19 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 loop_fell_back = True
                 if io.budget_left() > 0:
                     await io.ensure_chat_start()
-                    assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
+                    assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds, allowed_tools=allowed_tools)
                 break
             tool_round += 1
             results: List[Dict[str, str]] = []
             for c in calls:
                 name = c.get("tool", "")
                 args = c.get("arguments", {})
+                if allowed_tools and name and name not in allowed_tools:
+                    # 批丁 GU 执法: 名单外工具拒绝回喂
+                    results.append({"name": name,
+                                    "text": _allowed_refusal_text(name),
+                                    "refused": True})
+                    continue
                 if name == "req.propose" and "req.propose" in tools_used:
                     # cv-174: 同回合重复提案 → 不再落库, 防止一回合多个需求
                     results.append({"name": name, "text": _propose_dup_text()})
@@ -441,7 +485,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
     if (not loop_fell_back and not card_closed and not assistant_text
             and not visible and io.budget_left() > 0):
         await io.ensure_chat_start()
-        assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds)
+        assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds, allowed_tools=allowed_tools)
         if not assistant_text and tools_used and tools_used <= _CARD_LANDING_TOOLS:
             card_closed = True   # 降级通道同样以卡收尾(空文本≠错误)
 
@@ -515,7 +559,8 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     return final_content, conv, tools_used, tool_errors
 
 async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_rounds: int = 4,
-                           tools_used: Optional[set] = None) -> str:
+                           tools_used: Optional[set] = None,
+                           allowed_tools: Optional[set] = None) -> str:
     """llm.sync 降级通道：走统一工具调用循环(req_agent.run_tools_loop)，
     避免「LLM 输出 [TOOL_CALL] 后无结果」。返回最终纯文本。
 
@@ -545,7 +590,7 @@ async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_roun
         req_agent.run_tools_loop, msgs,
         root=root, project=project, model_id=model_id,
         mode="chat", max_tokens=_chat_max_tokens(), max_rounds=max_rounds,
-        on_progress=on_progress,
+        on_progress=on_progress, allowed=allowed_tools,
     )
     content = res.get("content", "") if isinstance(res, dict) else ""
     # cv-196 收尾短路(降级通道同规) + cv-203 卡片独立: 模型零可见正文且本回合

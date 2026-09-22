@@ -235,11 +235,12 @@ def _apply_assembly_budget(segs: List[str], ctx_budget: float,
 
 
 def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
-                  model_id: str, assign_contract) -> tuple:
+                  model_id: str, assign_contract, gu_allowed=None) -> tuple:
     """管线阶段③ 消息装配(行为等价抽取自 handle_chat)。
 
     角色模型路由(§9/B1 per-call) → 能力档案懒探测 → 分析挡位(十二a) →
     _build_chat_messages + 通用 agent 路由系统段 + assign 契约段。
+    gu_allowed: GU 路线工具限定(批丁, 参与能力文档子集渲染)。
     返回 (eff_model, msgs, gear)——gear.tool_rounds 供执行段轮次按挡(M4-B)。
     """
     conv = gate["conv"]
@@ -299,7 +300,8 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
                                 model_id=eff_model or model_id or "",
                                 tool_surface=_tool_surface,
                                 kb_enabled=_kb_enabled,
-                                ctx_budget=_ctx_budget)
+                                ctx_budget=_ctx_budget,
+                                gu_allowed=gu_allowed)
     # 挡位文案(A 轴 architect note): 注入面 GU-3 后单源化——原「通用 agent 路由
     # 契约」已退役(人格→prompt.posture 静态块; 路线判定→GU 决策表回合指引),
     # 本段只保留挡位系统文案
@@ -331,11 +333,12 @@ def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = F
                          model_id: str = "",
                          tool_surface: str = "full",
                          kb_enabled: bool = True,
-                         ctx_budget: float = 1.0):
+                         ctx_budget: float = 1.0,
+                         gu_allowed=None):
     """组装 prompt(P4 委托 memory.working, 原文保真; R3.4 透传工具面/预算)。"""
     from ..memory.working import build_chat_messages
     return build_chat_messages(root, project, history, cap=cap,
                                diagram_skill=diagram_skill,
                                skill_scenarios=skill_scenarios, model_id=model_id,
                                tool_surface=tool_surface, kb_enabled=kb_enabled,
-                               ctx_budget=ctx_budget)
+                               ctx_budget=ctx_budget, gu_allowed=gu_allowed)

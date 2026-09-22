@@ -231,28 +231,89 @@ async def handle_chat(data: dict, send: SendFn) -> None:
         return
     assign_contract = decision.contract or None
 
+    # ③.5-前半 目标理解 GU plan(批丁前置于装配): profile → 决策表 → tools 限定。
+    # 人格=能力文档 posture 静态单源(GU-3); 指引=决策表动态生成(教学=决策);
+    # 确定性层(指令直通/相位硬闸)在其之前不变(防守线①)。
+    gu_plan = None
+    gu_allowed = None
+    if decision.action == "chat":
+        from .turns.goal import plan_goal_directive
+        gu_plan = await asyncio.to_thread(plan_goal_directive,
+                                          str(gate.get("question") or ""),
+                                          conv, None, history)
+        gu_allowed = _resolve_gu_allowed(gu_plan)
+
     # ---- ③ 上下文: 角色模型路由 + 懒探测 + 挡位 + 消息装配 ----
     eff_model, msgs, gear = _chat_context(data, gate, skill_scenarios, history,
-                                          model_id, assign_contract)
-    # ③.5 目标理解(GU, goal-understanding-2609): GoalProfile → 决策表 → 回合指引
-    # 注入。人格=能力文档 posture 静态单源(GU-3 统一, 教学不随回合抖动);
-    # 指引=决策表动态生成(教学=决策); 确定性层(指令直通/相位硬闸)在其之前
-    # 不变(防守线①)。L2 受限 LLM 兜底(GU-5)后续并入 escalation。
-    if decision.action == "chat":
-        from .turns.goal import apply_goal_directive
-        await asyncio.to_thread(apply_goal_directive,
-                                msgs, str(gate.get("question") or ""), conv)
+                                          model_id, assign_contract,
+                                          gu_allowed=gu_allowed)
+    # ③.5-后半: 回合指引注入(msgs[1])
+    if gu_plan:
+        from .turns.goal import inject_goal_directive
+        inject_goal_directive(msgs, gu_plan)
+    _record_prompt_sections(msgs, gear, gu_plan, gu_allowed)
 
     # ---- ④ 执行: 连续多轮流式(A 管线: 抽至 _run_llm_tool_loop) ----
     tools_used: set = set()
     tool_errors: dict = {}
     loop = await _run_llm_tool_loop(io, conv_id, msgs, root, project,
                                     eff_model, model_id, tools_used, tool_errors,
-                                    max_tool_rounds=gear.tool_rounds)
+                                    max_tool_rounds=gear.tool_rounds,
+                                    allowed_tools=gu_allowed)
 
     # ---- ⑤⑥ 落库 + 终态事件(正常 done / 错误 turnError) ----
     await _chat_land(io, msgs, gate, conv, loop, eff_model, model_id,
                      root, project, tools_used, tool_errors)
+
+
+def _resolve_gu_allowed(plan: Optional[dict]) -> Optional[set]:
+    """GU 路线 → 具体工具名单(批丁): toolClasses.read ∪ rule.tools(fnmatch)。
+
+    tools=None(规则未配置/passthrough/GU 故障)→ 不限面;
+    tools=[](显式只读, 如 present-options/ask-one-question)→ 仅读类面——
+    两者语义不同, 判别用 is None(零发版容错: 名单对注册表取交集)。
+    """
+    if not plan or plan.get("tools") is None:
+        return None
+    import fnmatch as _fm
+    try:
+        from ..arch_routes import req_agent as _ra
+        names = set(_ra._ARCH_TOOLS)
+    except Exception:  # noqa: BLE001
+        return None
+    from .governance.flow_policy import load_flow_policy
+    try:
+        pol = load_flow_policy()
+    except Exception:  # noqa: BLE001
+        return None
+    read_pats = (((pol or {}).get("goal") or {}).get("toolClasses")
+                 or {}).get("read") or []
+    allowed = {n for n in names
+               if any(_fm.fnmatch(n, p) for p in read_pats)}
+    allowed |= {n for n in names
+                if any(_fm.fnmatch(n, p) for p in (plan.get("tools") or []))}
+    return allowed or None
+
+
+def _record_prompt_sections(msgs: list, gear, plan: Optional[dict],
+                            gu_allowed: Optional[set]) -> None:
+    """A 测量面(批丁): 每回合提示分层字数遥测——供「哪层重→哪层失遵」
+    数据闭环(关联台账 A4 遵从率)。只观测, 永不抛出。"""
+    try:
+        from .reflection import dataset as _ds
+        sys_base = len(str((msgs[0] or {}).get("content") or "")) if msgs else 0
+        sys_inj = sum(len(str(m.get("content") or "")) for m in msgs[1:]
+                      if m.get("role") == "system")
+        hist = sum(len(str(m.get("content") or "")) for m in msgs[1:]
+                   if m.get("role") != "system")
+        _ds.record("prompt_sections", systemBase=sys_base,
+                   systemInjections=sys_inj, history=hist,
+                   tier=int(getattr(gear, "tier", 1) or 1),
+                   toolSurface=str(getattr(gear, "tool_surface", "full") or ""),
+                   guAction=str((plan or {}).get("action") or ""),
+                   guTools=len(gu_allowed or ()))
+    except Exception:  # noqa: BLE001 — 遥测不碍主链
+        pass
 
 
 async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:

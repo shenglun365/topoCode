@@ -1211,13 +1211,15 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
                        model_id: str = "",
                        tool_surface: str = "full",
                        kb_enabled: bool = True,
-                       ctx_budget: float = 1.0) -> str:
+                       ctx_budget: float = 1.0,
+                       gu_allowed=None, prompt_slim: Optional[bool] = None) -> str:
     """自由对话系统提示：经 prompt_registry 组装(块化/按模型档案分级/预算裁剪)。
 
     等价模式(默认)下与旧拼接(header/边界/CAPABILITY/IR/📐/MCP/skill)逐字节
     一致; prompt.overrides 可开单源模式(能力文档由工具注册表渲染)与分级预算。
     model_id 非空 → 查模型能力档案取 tier(缺省 t1 保守档)。
     R3.4: tool_surface/kb_enabled 工具面裁剪 + ctx_budget 预算系数(缺省不变)。
+    批丁: gu_allowed(GU 路线工具限定)→能力文档本轮子集; prompt_slim(简挡)。
     """
     from . import model_profile as _mp
     from . import prompt_registry as _pr
@@ -1230,11 +1232,15 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
     except Exception:  # noqa: BLE001
         pass
     tier = _mp.tier_of(model_id or "")
+    # 批丁: prompt_slim 缺省按挡推导(t2+ 简挡——省系统面说明段, 约束密度降载)
+    if prompt_slim is None:
+        prompt_slim = tier >= 2
     return _pr.render_system({
         "root": root, "project": project, "diagram_skill": diagram_skill,
         "skill_scenarios": skill_scenarios, "tier": tier, "model_id": model_id or "",
         "tool_surface": tool_surface, "kb_enabled": kb_enabled,
-        "ctx_budget": ctx_budget})
+        "ctx_budget": ctx_budget, "gu_allowed": gu_allowed,
+        "prompt_slim": prompt_slim})
 
 
 def _posture_textLegacy() -> str:

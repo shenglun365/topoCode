@@ -39,7 +39,7 @@ def test_structured_channel_duplicate_propose_deduped(tmp_path, monkeypatch):
     monkeypatch.setattr(req_agent, "structured_model_enabled", lambda m: True)
     rounds = {"n": 0}
 
-    def _fake_structured_round(msgs, model_id=""):
+    def _fake_structured_round(msgs, model_id="", **kw):
         rounds["n"] += 1
         if rounds["n"] <= 3:
             return {"error": None, "calls": [{
@@ -56,7 +56,7 @@ def test_structured_channel_duplicate_propose_deduped(tmp_path, monkeypatch):
         with client.websocket_connect(WS_PATH) as ws:
             ws.send_json({"type": "chat", "kind": "generic", "title": "t",
                           "conversationId": conv["id"],
-                          "messages": [{"role": "user", "content": "做个动画建模工具"}]})
+                          "messages": [{"role": "user", "content": "新增 动画建模中间层组件"}]})
             ev = None
             for _ in range(30):
                 ev = ws.receive_json()

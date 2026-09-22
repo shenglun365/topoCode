@@ -85,11 +85,10 @@ def _r_header(ctx: Dict[str, Any]) -> str:
 
 _BOUNDARY_TEXT = (
     "## 职责边界(重要)\n"
-    "用户明确表达的需求**一律受理**，不拒做、不引导用户另找工具——包括与当前项目"
-    "关联较弱的通用编程/运维任务(脚本、工具、配置等)：照常收敛为需求规约"
-    "(req.propose 带 title/requirementMd/**designMd**/acceptanceMd)，需求卡就绪后可 /执行。"
-    "关联较弱时仅在方案中说明「独立于项目核心资产」并收敛 scope，**不得以此为由拒绝或推诿**。"
-    "已创建需求(RQ 编号以系统回执为准)后继续跟进完善，不得再声明该任务不属于职责范围。"
+    "用户明确表达的需求一律受理、不拒做(含与项目关联较弱的脚本/工具/配置类)：照常收敛为"
+    "需求规约(req.propose 带 title/requirementMd/**designMd**/acceptanceMd)，关联较弱时"
+    "仅在方案中说明「独立于项目核心资产」并收敛 scope，不得以此推诿。"
+    "已建需求(RQ 以系统回执为准)继续跟进完善。"
 )
 
 
@@ -132,7 +131,9 @@ def _r_capability(ctx: Dict[str, Any]) -> str:
     if _overrides().get("single_source", True):
         doc = capability_doc_from_tools(
             tool_surface=ctx.get("tool_surface") or "full",
-            kb_enabled=ctx.get("kb_enabled", True))
+            kb_enabled=ctx.get("kb_enabled", True),
+            allowed=ctx.get("gu_allowed"),
+            slim=bool(ctx.get("prompt_slim")))
         if doc:
             return doc
     return _legacy_capability_doc()
@@ -412,18 +413,24 @@ def _tool_params_doc(name: str, entry: Dict[str, Any]) -> str:
 
 
 def capability_doc_from_tools(tool_surface: str = "full",
-                              kb_enabled: bool = True) -> str:
+                              kb_enabled: bool = True,
+                              allowed=None, slim: bool = False) -> str:
     """由 _ARCH_TOOLS 注册表渲染能力文档(单源模式, B4 默认)。
 
     结构对齐 _CAPABILITY_DOC: 工具清单(brief 单源) + 层级约定 + 工具调用协议 +
     硬性规则(防编造) + 需求落库纪律 + 会话指令符号 + 参数表(params_doc 单源) +
     可处理范围 + 图表输出纪律。无注册工具时返回空串(调用方回退等价模式)。
     R3.4: tool_surface/kb_enabled 按挡裁剪工具面(缺省 full/True 行为不变)。
+    批丁: allowed(GU 路线限定, 具体名单)→工具面收敛为本轮子集; slim(简挡)→
+    省略系统面说明段(指令符号/可处理范围——挡位系统已确定性处理, 无需模型知)。
     """
     from ...arch_routes import req_agent as _req_agent_mod
     entries = [(n, e) for n, e in _req_agent_mod._ARCH_TOOLS.items()
                if n not in ("diagram.build", "diagram.validate")]
     entries = _filter_tools(entries, tool_surface, kb_enabled)
+    if allowed is not None:
+        allowed = set(allowed)
+        entries = [(n, e) for n, e in entries if n in allowed]
     if not entries:
         return ""
     lines = ["你可以使用以下能力(skills/tools)："]
@@ -437,10 +444,11 @@ def capability_doc_from_tools(tool_surface: str = "full",
         if pd:
             params.append(f"- {name}: {pd}")
     lines.append("")
-    lines.append(_PROTOCOL_DOC)
+    lines.append(protocol_doc(slim=slim))
     if len(params) > 1:
         lines.append("\n".join(params))
-    lines.append(_SCOPE_DOC)
+    if not slim:
+        lines.append(_SCOPE_DOC)
     lines.append(_DIAGRAM_OUTPUT_DOC)
     return "\n".join(lines)
 
@@ -462,21 +470,16 @@ ANTI_FABRICATION = (
     "必须实际调用对应工具拿到同步返回的结果，再如实转述；"
     "严禁不调用工具就输出『已启动/报告/条数/检查结果』等编造结论。\n"
 )
+# 批丁去重: 原条 1(「只有开发类需求才 req.propose」)与 posture 三问定性重复
+# (人格层单源), 本纪律只保留工具面规则(amend/查看/编号管理)。
 REQ_CARD_DISCIPLINE = (
-    "需求卡纪律(必须遵守)：\n"
-    "1. 需求卡按需出现——只有**开发类需求**(要写代码/改代码/交付组件)才调用 req.propose "
-    "落需求卡(创建即 ready)；分析/问答/检索类请求直接回答，不要产卡；\n"
-    "2. 修改既有需求 → 必须用 [TOOL_CALL] 调 req.amend，严禁重复 req.propose；"
-    "用户仅要求**查看/显示**需求卡时，直接概述当前绑定需求内容(或调 conv.read)，"
-    "严禁 req.amend——查看不是修改，不得因此产生新版本；\n"
-    "3. RQ 编号/数据 ID 一律由系统管理：工具调用不传 reqId(系统自动取会话绑定)，"
-    "回复中的编号只来自工具返回，严禁自造编号；\n"
+    "需求卡纪律：修改既有需求必须用 [TOOL_CALL] 调 req.amend，严禁重复 req.propose；"
+    "用户仅要求查看需求卡时直接概述当前绑定内容，严禁 req.amend(查看不是修改)；"
+    "RQ/数据编号由系统管理：调用不传 reqId，回复中的编号只来自工具返回，严禁自造。\n"
 )
 DIRECT_CMD_SYMBOLS = (
-    "会话指令符号(系统直通，与模型无关)：用户消息恰为 /提取需求 或 /执行 时由系统确定性执行"
-    "(提取需求=从历史提取需求卡; 执行=需求卡建任务卡, 用户卡片确认后 subagent 启动)——"
-    "模型不会收到这两类消息，也不要在回复中代用户发出指令；"
-    "/调整 会作为普通消息进入对话(由你整理修订内容)。\n"
+    "会话指令符号：/提取需求、/执行 由系统确定性直通(不经你)，不要代用户发出；"
+    "/调整 作为普通消息进入对话(由你整理修订内容)。\n"
 )
 TOOL_TAIL = (
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
@@ -488,13 +491,16 @@ _PROTOCOL_DOC = (
     + DIRECT_CMD_SYMBOLS + TOOL_TAIL
 )
 
+def protocol_doc(slim: bool = False) -> str:
+    """工具调用协议单源组装(slim=简挡省略系统面说明段)。"""
+    if slim:
+        return (TOOL_PROTOCOL_HEAD + ANTI_FABRICATION
+                + REQ_CARD_DISCIPLINE + TOOL_TAIL)
+    return _PROTOCOL_DOC
+
 _SCOPE_DOC = (
-    "可处理范围：\n"
-    "1. 需求分析/澄清/范围收敛、资产命中与影响评估；\n"
-    "2. 产品设计、软件开发实现建议(非文档化的帮助性建议)；\n"
-    "3. 新项目引导(从零建立开发环境/确立目标)。\n"
-    "越界处理(软拒绝)：对与需求分析无关的通用闲聊/外包式实现请求，礼貌说明能力范围并引导回"
-    "需求分析语境，不深入执行，但允许用户继续提问。\n"
+    "可处理范围：需求分析/澄清/范围收敛、资产命中与影响评估、设计实现建议、新项目引导；"
+    "通用闲聊/外包式实现礼貌引导回需求语境(软拒绝，允许继续提问)。"
     "回复保持简洁、直接、可操作，可输出 Markdown。"
 )
 
