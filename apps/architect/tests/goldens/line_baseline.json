@@ -129,7 +129,7 @@
  "arch_routes/overview.py": 48,
  "arch_routes/project.py": 938,
  "arch_routes/prompt_registry.py": 13,
- "arch_routes/req_agent.py": 1421,
+ "arch_routes/req_agent.py": 1444,
  "arch_routes/requirements.py": 498,
  "arch_routes/sem/__init__.py": 8,
  "arch_routes/sem/anchors.py": 148,
@@ -171,5 +171,5 @@
  "arch_routes/websocket.py": 197,
  "arch_routes/ws_events.py": 5,
  "arch_routes/zmq_stream.py": 101,
- "agent/turns/chat.py": 653
+ "agent/turns/chat.py": 690
 }

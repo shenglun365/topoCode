@@ -133,10 +133,77 @@ def test_chat_loop_refuses_out_of_list(arch_env, monkeypatch):
     assert res["tool_round"] >= 1
 
 
-def test_gu_structured_schema_enum():
+def test_gu_structured_schema_enum_includes_protocol_empty():
+    """标准约束(cv-225 API 日志实证): enum 必须含协议空值 ""——约束域 ⊇ 协议域。
+
+    模型 reasoning 反复起草澄清问题却被 enum 逼着选工具(project.ctx 三连/
+    req.amend 占位)——空值出口是「先澄清后落卡」能发生的结构前提。"""
     schema = ch_gu_schema({"kb.asset.search", "req.amend"})
-    assert schema["properties"]["tool"]["enum"] == ["kb.asset.search", "req.amend"]
+    enum = schema["properties"]["tool"]["enum"]
+    assert "" in enum and set(enum) == {"", "kb.asset.search", "req.amend"}
     assert ch_gu_schema(None) is None
+
+
+from topoone_app_architect.arch_routes import req_agent as ra_mod
+
+
+def test_structured_empty_tool_routes_to_final_round(arch_env, monkeypatch):
+    """cv-225 复放: 模型输出 {"tool":""} → 无调用 → 转终稿轮(澄清问题得以出口)。"""
+    from topoone_app_architect.arch_routes.req_agent import structured_tool_round
+    monkeypatch.setattr(ra_mod, "llm_sync",
+                        lambda *a, **kw: {"output": {"tool": "", "arguments": {}}})
+    res = structured_tool_round([{"role": "user", "content": "x"}])
+    assert res["calls"] == [] and res["error"] == ""
+
+
+def test_dup_call_suppressed_within_turn(arch_env, monkeypatch):
+    """幂等重复抑制(标准环守卫): 同回合 (tool,args) 全同二连 → 第二次拒绝回喂。"""
+    import asyncio
+    import topoone_app_architect.agent.turns.chat as ch
+    executed = []
+    monkeypatch.setattr(ra_mod, "execute_tool_with_repair",
+                        lambda name, args, root, project, model_id="":
+                        executed.append((name, json.dumps(args, sort_keys=True)))
+                        or {"ok": True})
+    monkeypatch.setattr(ra_mod, "structured_model_enabled", lambda m: True)
+    seq = [{"tool": "kb.asset.search", "arguments": {"text": "x"}},
+           {"tool": "kb.asset.search", "arguments": {"text": "x"}},   # 全同 → 拒
+           {"tool": "kb.asset.search", "arguments": {"text": "y"}}]   # 异参 → 执行
+    idx = {"i": 0}
+
+    def _fake_structured(*a, **kw):
+        item = seq[min(idx["i"], len(seq) - 1)]
+        idx["i"] += 1
+        return {"calls": [item], "content": "", "error": ""}
+
+    monkeypatch.setattr(ra_mod, "structured_tool_round", _fake_structured)
+
+    class _IO:
+        t0 = 0.0
+        chat_start_sent = True
+        last_user_msg_id = ""
+
+        def budget_left(self):
+            return 1 if idx["i"] < len(seq) + 1 else 0
+
+        async def ensure_chat_start(self):
+            pass
+
+        async def send(self, ev):
+            return True
+
+        async def send_ev(self, ev):
+            return True
+
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    try:
+        loop.run_until_complete(ch._run_llm_tool_loop(
+            _IO(), "cv-x", [{"role": "user", "content": "q"}], "", "",
+            None, "", set(), {}, max_tool_rounds=5))
+    finally:
+        loop.close()
+    assert executed == [("kb.asset.search", '{"text": "x"}'),
+                        ("kb.asset.search", '{"text": "y"}')]  # 全同二连被拒
 
 
 def ch_gu_schema(allowed):

@@ -248,15 +248,32 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
 
 
 def _gu_structured_schema(allowed_tools: Optional[set]):
-    """GU 限面 → structured 轮 schema 注入 tool enum(约束解码层面收敛, 批丁)。"""
+    """GU 限面 → structured 轮 schema 注入 tool enum(约束解码层面收敛, 批丁)。
+
+    标准约束(cv-225 API 日志实证): enum 必须包含协议声明的空值 ""——
+    TOOL_CALL_SCHEMA 声明「空串=本轮不调用工具」, 约束域若不含它, 想遵从
+    「先澄清后落卡」的模型没有任何合法方式表达"直接提问", 只能在枚举里
+    挑最无害工具打转或退化成占位调用。约束域 ⊇ 协议域, 是单源纪律的
+    组成部分(解析层已实现空串→无调用→转终稿轮, 两层语义同源)。"""
     if not allowed_tools:
         return None
     import copy as _copy
     from ..tools.protocol import TOOL_CALL_SCHEMA
     schema = _copy.deepcopy(TOOL_CALL_SCHEMA)
     schema.setdefault("properties", {}).setdefault("tool", {})["enum"] = \
-        sorted(allowed_tools)
+        sorted(allowed_tools) + [""]
     return schema
+
+
+def _call_key(name: str, args) -> tuple:
+    """回合内重复调用判别键(单源委托 req_agent; async 面薄壳)。"""
+    from ...arch_routes import req_agent as _ra
+    return _ra._call_key(name, args)
+
+
+def _dup_call_text() -> str:
+    from ...arch_routes import req_agent as _ra
+    return _ra._DUP_CALL_TEXT
 
 
 def _allowed_refusal_text(name: str) -> str:
@@ -285,6 +302,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
     tool_round = 0
     loop_fell_back = False
     card_closed = False     # cv-203: 落卡工具已产卡, 空文本收尾(≠空返回错误)
+    seen_calls: set = set()  # 回合内幂等重复抑制(标准环守卫, cv-225 实证)
     while tool_round <= max_rounds:
         # 回合总预算: 超时终止(不再续流式轮/降级/nudge), 详因落 turnError
         if io.budget_left() <= 0:
@@ -322,6 +340,13 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                                     "text": _allowed_refusal_text(c.get("tool")),
                                     "refused": True})
                     continue
+                # 幂等重复抑制: 同回合 (tool, args) 全同的再调用 → 拒绝回喂
+                _ck = _call_key(c.get("tool", ""), c.get("arguments", {}))
+                if _ck in seen_calls:
+                    results.append({"name": c.get("tool", ""),
+                                    "text": _dup_call_text(), "refused": True})
+                    continue
+                seen_calls.add(_ck)
                 # cv-174 守卫(structured 轮同样适用——受限生成通道弱模型连发提案
                 # 曾一回合落 4 张重复需求卡, cv-185 实证)
                 if c.get("tool") == "req.propose" and "req.propose" in tools_used:
@@ -419,6 +444,12 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                                         "text": _allowed_refusal_text(name),
                                         "refused": True})
                         continue
+                    _ck = _call_key(name, args)
+                    if _ck in seen_calls:
+                        results.append({"name": name, "text": _dup_call_text(),
+                                        "refused": True})
+                        continue
+                    seen_calls.add(_ck)
                     if name == "req.propose" and "req.propose" in tools_used:
                         # cv-174 守卫(满轮收尾分支同样适用)
                         results.append({"name": name, "text": _propose_dup_text()})
@@ -448,6 +479,12 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                                     "text": _allowed_refusal_text(name),
                                     "refused": True})
                     continue
+                _ck = _call_key(name, args)
+                if _ck in seen_calls:
+                    results.append({"name": name, "text": _dup_call_text(),
+                                    "refused": True})
+                    continue
+                seen_calls.add(_ck)
                 if name == "req.propose" and "req.propose" in tools_used:
                     # cv-174: 同回合重复提案 → 不再落库, 防止一回合多个需求
                     results.append({"name": name, "text": _propose_dup_text()})

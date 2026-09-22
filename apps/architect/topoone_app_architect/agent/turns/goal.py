@@ -294,6 +294,11 @@ def plan_goal_directive(question: str, conv: Optional[dict],
         ctx = _recent_user_context(msgs or [], question)
         prof = build_goal_profile(question, conv, escalation=esc, context=ctx)
         res = resolve_goal_directive(prof, pol or {})
+        # 上下文感知限面(先于遥测: 记录实际生效面)——规则声明的 req.amend
+        # 依赖「会话已绑定需求」, 未绑定时必败(模型会拿它挣扎落卡), 剔除降纯读。
+        if res.get("tools") and "req.amend" in (res.get("tools") or []) \
+                and not str(prof.get("boundReq") or ""):
+            res["tools"] = [t for t in res["tools"] if t != "req.amend"]
         try:
             from ..reflection import dataset as _ds
             # 注意: record 首参名为 kind, 判定种类改用 goalKind 键(防撞名)
@@ -307,11 +312,6 @@ def plan_goal_directive(question: str, conv: Optional[dict],
                        contextChars=len(ctx))
         except Exception:  # noqa: BLE001 — 遥测不碍主链
             pass
-        # 批丁补丁(cv-225): 规则声明 tools 里的 req.amend 依赖「会话已绑定需求」
-        # ——未绑定时 amend 必然失败(模型会拿它挣扎落卡), 降为纯读面([])。
-        if res.get("tools") and "req.amend" in (res.get("tools") or []) \
-                and not str(prof.get("boundReq") or ""):
-            res["tools"] = [t for t in res["tools"] if t != "req.amend"]
         return {"profile": prof, "action": res.get("action"),
                 "text": res.get("text") or "", "tools": res.get("tools")}
     except Exception:  # noqa: BLE001 — GU 故障回退无指引(正则词表面仍在)

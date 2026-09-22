@@ -893,6 +893,18 @@ def structured_model_enabled(model_id: str) -> bool:
 #     带参=真名称幻觉 → 保留派发(诚实报错 + repair_tool_call, cv-175 纪律)。
 _NO_TOOL_NAMES = {"none", "null"}
 
+_DUP_CALL_TEXT = ("本回合已调用过相同工具与相同参数(结果已在上方回喂)——"
+                  "请基于已有结果直接作答，或向用户提出澄清问题。")
+
+
+def _call_key(name: str, args) -> tuple:
+    """回合内重复调用判别键: (tool, 规范化参数)——幂等抑制单源。"""
+    try:
+        return (name, json.dumps(args or {}, sort_keys=True,
+                                 ensure_ascii=False, default=str))
+    except Exception:  # noqa: BLE001
+        return (name, repr(args))
+
 
 def _normalize_tool_calls(calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
@@ -963,6 +975,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
     work = list(msgs or [])
     last_err = ""
     _proposed: set = set()   # cv-174: 本循环已落库的提案(去重守卫)
+    _seen_calls: set = set()  # 回合内幂等重复抑制(cv-225: 同参 project.ctx 三连)
 
     def _err(msg: str) -> None:
         nonlocal last_err
@@ -1012,6 +1025,11 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                 name = c.get("tool", "")
                 args = c.get("arguments", {})
                 _prog("tool", tool=name, idx=ci + 1, total=len(calls))
+                _ck = _call_key(name, args)
+                if _ck in _seen_calls:
+                    results.append({"name": name, "text": _DUP_CALL_TEXT})
+                    continue
+                _seen_calls.add(_ck)
                 if allowed and name not in allowed:
                     results.append({"name": name,
                                     "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
@@ -1049,6 +1067,11 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
             name = c.get("tool", "")
             args = c.get("arguments", {})
             _prog("tool", tool=name, idx=ci + 1, total=len(calls))
+            _ck = _call_key(name, args)
+            if _ck in _seen_calls:
+                results.append({"name": name, "text": _DUP_CALL_TEXT})
+                continue
+            _seen_calls.add(_ck)
             if allowed and name not in allowed:
                 results.append({"name": name,
                                 "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
