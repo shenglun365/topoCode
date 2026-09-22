@@ -23,8 +23,9 @@ from fastapi.testclient import TestClient
 import topoone_app_architect.arch_routes.ctx as C
 import topoone_app_architect.arch_routes.req_agent as req_agent
 import topoone_app_architect.arch_routes.store as store
-from topoone_app_architect.agent.perception.commands import match_command, match_confirm
+from topoone_app_architect.agent.perception.commands import match_imperative
 from topoone_app_architect.agent.perception import commands as cmds
+from topoone_app_architect.agent.governance.focus import build_focus, resolve_intent
 from topoone_app_architect.arch_routes.asset_skill import _builtin_for, skill_docs
 from topoone_app_architect.server import build_app
 
@@ -80,26 +81,61 @@ def _chat(ws, conv_id, content, **extra):
     ws.send_json(payload)
 
 
-# ── 指令识别 ─────────────────────────────────────────────────────────
+# ── 意图原语分类(批戊: 词表定意图) ───────────────────────────────────
 
-def test_match_command_strict_shape():
-    assert match_command("/提取需求") == {"cmd": "提取需求", "executor": ""}
-    assert match_command(" /执行 ") == {"cmd": "执行", "executor": ""}
-    assert match_command("@cline /执行") == {"cmd": "执行", "executor": "cline"}
-    assert match_command("/提取需求 帮我看看") is None   # 带正文 → 普通消息
-    assert match_command("/调整") is None                 # 保留经 LLM
-    assert match_command("/继续") is None
-    assert match_command("/diff") is None
-    assert match_command("普通话") is None
+def test_match_imperative_intents():
+    assert match_imperative("/提取需求") == {"intent": "extract", "executor": ""}
+    assert match_imperative(" /执行 ") == {"intent": "execute", "executor": ""}
+    assert match_imperative("@cline /执行") == {"intent": "execute", "executor": "cline"}
+    assert match_imperative("确认") == {"intent": "confirm", "executor": ""}
+    assert match_imperative("确认执行") == {"intent": "confirm", "executor": ""}
+    assert match_imperative("@cline 确认") == {"intent": "confirm", "executor": "cline"}
+    assert match_imperative("好的。") == {"intent": "confirm", "executor": ""}
+    assert match_imperative("继续执行") == {"intent": "continue", "executor": ""}
+    assert match_imperative("继续") == {"intent": "continue", "executor": ""}
+    assert match_imperative("重试") == {"intent": "retry", "executor": ""}
+    # 带正文/非指令 → 普通消息
+    for neg in ("/提取需求 帮我看看", "/调整", "/继续", "/diff", "普通话",
+                "确认一下这个方案", "不确认"):
+        assert match_imperative(neg) is None, neg
 
 
-def test_match_confirm_strict_shape():
-    assert match_confirm("确认") == {"executor": ""}
-    assert match_confirm("确认执行") == {"executor": ""}
-    assert match_confirm("@cline 确认") == {"executor": "cline"}
-    assert match_confirm("好的。") == {"executor": ""}
-    assert match_confirm("确认一下这个方案") is None     # 带正文 → 普通对话
-    assert match_confirm("不确认") is None
+# ── 焦点栈就近消解(批戊: 焦点定指代) ─────────────────────────────────
+
+def test_resolve_intent_matrix():
+    """消解矩阵: 意图 × top 帧 → 动作(cv-241 病灶根治面)。"""
+    def _focus(top=None, kinds=(), recent=()):
+        stack = [{"kind": k, "taskId": f"task-{k}", "label": k} for k in kinds]
+        if top:
+            stack.insert(0, {**top})
+        return {"stack": stack, "recent": list(recent),
+                "top": stack[0] if stack else None}
+    # 推进/确认类 × 待确认帧 → 就近启动栈顶(cv-241 复放)
+    step = {"kind": "plan_step_ready", "taskId": "task-38", "label": "步骤 2/4"}
+    r = resolve_intent("continue", _focus(top=step))
+    assert r["action"] == "confirm_task" and r["frame"]["taskId"] == "task-38"
+    r = resolve_intent("confirm", _focus(top=step))
+    assert r["action"] == "confirm_task"
+    r = resolve_intent("execute", _focus(
+        top={"kind": "task_confirm", "taskId": "task-9", "label": ""}))
+    assert r["action"] == "confirm_task"
+    # confirm 无待确认焦点 → 回落 GU(旧行为: 无卡=普通对话)
+    assert resolve_intent("confirm", _focus(kinds=("reviewing",)))["action"] == "fallthrough"
+    assert resolve_intent("confirm", _focus())["action"] == "fallthrough"
+    # execute/continue × spec_ready → 生成计划/单卡; × 无焦点 → 既有路径
+    assert resolve_intent("execute", _focus(kinds=("spec_ready",)))["action"] == "execute"
+    assert resolve_intent("execute", _focus())["action"] == "execute"
+    # 运行占用/等待输入 → 焦点态提示(零 LLM)
+    assert resolve_intent("execute", _focus(
+        top={"kind": "task_running", "taskId": "t", "label": "A 执行中"}))["action"] == "none"
+    r = resolve_intent("continue", _focus(
+        top={"kind": "task_input_wait", "taskId": "t", "label": "A 等待输入"}))
+    assert r["action"] == "relay_hint"
+    # retry: recent.failed 指代; 无失败 → 明确提示
+    r = resolve_intent("retry", _focus(recent=(
+        {"kind": "task_failed", "taskId": "task-f", "ts": 1},)))
+    assert r["action"] == "retry_failed" and r["frame"]["taskId"] == "task-f"
+    assert resolve_intent("retry", _focus())["action"] == "none"
 
 
 def test_slash_text_confirm_starts_task(tmp_path, monkeypatch):

@@ -41,7 +41,8 @@ _BUILD_MARK_RE = re.compile(
 
 def build_goal_profile(question: str, conv: Optional[dict] = None,
                        escalation: Optional[dict] = None,
-                       context: str = "") -> Dict[str, Any]:
+                       context: str = "",
+                       focus: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """L0→L1(→L2) 理解: 输入 → GoalProfile(纯数据, 可遥测)。
 
     L0 优先序: 指令正则 > 显式修改指令(目标值明确) > 目标策略库(记分裁决)
@@ -65,12 +66,13 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
                             "strategyQuestions": [], "boundReq": "",
                             "conflict": None, "confidence": 0.6, "sources": [],
                             "explicit": False, "candidates": [],
+                            "focusTop": "",
                             "contextChars": len(str(context or "")),
                             "clarifyMode": str((conv or {}).get("clarifyMode")
                                                or "auto")}
-    # L0-1 确定性指令/确认(编排层②通常已拦; 此处恒等守护)
-    from ..perception.commands import match_command, match_confirm
-    if match_command(q) or match_confirm(q):
+    # L0-1 确定性指令/确认(编排层②通常已拦; 此处恒等守护——批戊: 意图原语单源)
+    from ..perception.commands import match_imperative
+    if match_imperative(q):
         prof.update(kind="command", confidence=1.0)
         prof["sources"].append("command")
         return prof
@@ -140,9 +142,14 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
         elif prof["kind"] == "requirement":
             prof["target"] = f"req:{rid}"
     # L1 相位冲突(咨询面; 硬拦截仍归相位硬闸——防守线①)
-    if str((conv or {}).get("flowState") or "") == "interrupted" \
+    # 批戊: 相位事实面优先取焦点栈(派生单源), conv.flowState 为兼容回退
+    phase = str((focus or {}).get("phase")
+                or (conv or {}).get("flowState") or "")
+    if phase == "interrupted" \
             and prof["kind"] in ("requirement", "operation"):
         prof["conflict"] = "phase:interrupted"
+    # 焦点摘要(遥测/决策面; 第一版只透传不加 when 键)
+    prof["focusTop"] = str(((focus or {}).get("top") or {}).get("kind") or "")
     # L2 受限 LLM 分类(GU-5): 开关 escalation.llmFallback(缺省关)——仅当 L0
     # 无行动信号(inquiry 兜底)且文本 ≤ maxTextChars 时, 用轻任务分类尝试升格
     # operation(携带 context 近期对话摘要); LLM 失败/低置信 → 原样
@@ -274,7 +281,8 @@ def _recent_user_context(msgs: List[dict], question: str, limit: int = 2,
 
 def plan_goal_directive(question: str, conv: Optional[dict],
                         pol: Optional[dict] = None,
-                        msgs: Optional[List[dict]] = None) -> Optional[dict]:
+                        msgs: Optional[List[dict]] = None,
+                        focus: Optional[Dict[str, Any]] = None) -> Optional[dict]:
     """编排接线(③.5 前半, 批丁拆分): 产出 profile → 决策 → 遥测。
 
     在上下文装配**之前**调用——tools 限定须参与 system 渲染(工具子集面);
@@ -292,7 +300,8 @@ def plan_goal_directive(question: str, conv: Optional[dict],
                 pol = _copy.deepcopy(DEFAULT_FLOW_POLICY)
         esc = ((pol or {}).get("goal") or {}).get("escalation")
         ctx = _recent_user_context(msgs or [], question)
-        prof = build_goal_profile(question, conv, escalation=esc, context=ctx)
+        prof = build_goal_profile(question, conv, escalation=esc, context=ctx,
+                                  focus=focus)
         res = resolve_goal_directive(prof, pol or {})
         # 上下文感知限面(先于遥测: 记录实际生效面)——规则声明的 req.amend
         # 依赖「会话已绑定需求」, 未绑定时必败(模型会拿它挣扎落卡), 剔除降纯读。
@@ -309,6 +318,7 @@ def plan_goal_directive(question: str, conv: Optional[dict],
                        conflict=str(prof.get("conflict") or ""),
                        candidates=len(prof.get("candidates") or []),
                        tools=",".join(res.get("tools") or []) or "",
+                       focusTop=str(prof.get("focusTop") or ""),
                        contextChars=len(ctx))
         except Exception:  # noqa: BLE001 — 遥测不碍主链
             pass

@@ -77,6 +77,11 @@ _R1_INVENTORY = {
     # 接缝重构时随 runner_client 单源化(G7)清退。
     "execution/dispatch.py",
     # governance/flow.py(2026-09-21 立条): 会话流程相位机(states 词表 + IO 收口
+    # governance/focus.py(2026-09-22 批戊立条): 焦点栈派生单源(工作记忆显式化)——
+    # 与相位机同源同族(states 词表引用随 flow.py 同款先例); flow 降级为
+    # 纯配置消费者后, 判别派生单源收敛于此。
+    "governance/focus.py",
+    # governance/flow.py(2026-09-21 立条续): 相位机本职含 states 词表 +
     # recompute/recover)——states 单源与 store 访问为相位机本职(recover.py 同款
     # 调用期解析先例); 策略/任务/自愈三方消费的公共事实轴, 清退随 states 上提。
     "governance/flow.py",

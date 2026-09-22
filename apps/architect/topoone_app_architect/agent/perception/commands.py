@@ -1,9 +1,10 @@
-"""会话指令直通(感知层)：/提取需求 /执行 确定性执行，不经 LLM。
+"""会话指令直通(感知层) — 意图原语分类器 + 直通动作执行器(批戊收编)。
 
+三层判别模型的本层职责: **词表定意图**——match_imperative 把整条消息分类为
+五原语(execute/confirm/continue/retry/extract); 指代消解归焦点栈
+(memory/focus.resolve_intent), 动作执行为下方 run_* 执行器。
 v2 流程(无草稿态)：需求卡按需出现——开发类需求由模型/围栏 req.propose
-直接落 ready 卡；系统未识别时用户点工具栏「提取需求」(或发 /提取需求)
-从对话历史确定性提取。/执行 → exec_bridge.propose_task 建任务卡
-(pending_confirm) → 卡片确认 → coding subagent。
+直接落 ready 卡；系统未识别时用户点工具栏「提取需求」(或发 /提取需求)。
 非开发类需求(分析型问答等)不产需求卡, 纯对话回答。
 """
 from __future__ import annotations
@@ -11,72 +12,33 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
-from ...arch_routes.store import states as ST
+# 意图原语词表(整条消息恰为该词, 可带 @执行器 前缀——确定性直通不经 LLM,
+# 弱模型自由轮会输出"(调用xx工具)"占位文本而不真调, cv-181 实证)。
+_IMPERATIVE_RE = re.compile(
+    r"^(?:@(?P<executor>\S+)\s+)?"
+    r"(?:(?:/(?P<extract>提取需求)|/(?P<execute>执行))|"
+    r"(?P<confirm>确认执行|确认任务|确认|同意|开始执行|开始吧|开始|ok|OK|好的?)|"
+    r"(?P<cont>继续执行|继续)|(?P<retry>重试))[。.!！]?\s*$")
 
-# 继续执行/继续/重试: 无斜杠别名(整条消息恰为该词)——确定性直通 /执行,
-# 不经 LLM(弱模型自由轮会输出"(调用xx工具)"占位文本而不真调, cv-181 实证)
-_COMMAND_RE = re.compile(
-    r"^(?:@(?P<executor>\S+)\s+)?(?:/(?P<slash>提取需求|执行)|"
-    r"(?P<plain>继续执行|继续|重试))[。.!！]?\s*$")
-_CONFIRM_RE = re.compile(
-    r"^(?:@(?P<executor>\S+)\s+)?(?:确认执行|确认任务|确认|同意|开始执行|开始吧|开始|ok|OK|好的?)[。.!！]?\s*$")
+_INTENT_OF = {"extract": "extract", "execute": "execute",
+              "confirm": "confirm", "cont": "continue", "retry": "retry"}
 
 
-def match_command(question: str) -> Optional[Dict[str, str]]:
-    """整条消息恰为指令(可带 @执行器 前缀)时返回 {cmd, executor}；其余 None。
+def match_imperative(question: str) -> Optional[Dict[str, str]]:
+    """意图原语分类(整条消息恰为指令/确认/继续/重试语): {intent, executor}。
 
-    @cline /执行 → {"cmd": "执行", "executor": "cline"}(显式执行器直通建卡)。
+    只分类**意图**, 不裁决指代/动作——"继续执行"在计划步骤待确认场景=确认
+    该步(cv-241), 在无焦点场景=回落 GU; 指代由 focus.resolve_intent 就近消解。
+    @cline /执行 → {"intent": "execute", "executor": "cline"}。
     (2026-09-20 处置: 直通链保留为前端按钮通道+确定性兜底(cv-152/181), 用户面
     收敛到自然语言+按钮——回执/引导文案不再宣传斜杠语法。)"""
-    m = _COMMAND_RE.match((question or "").strip())
+    m = _IMPERATIVE_RE.match((question or "").strip())
     if not m:
         return None
-    cmd = m.group("slash") or ("执行" if m.group("plain") else "")
-    if not cmd:
+    intent = next((v for g, v in _INTENT_OF.items() if m.group(g)), "")
+    if not intent:
         return None
-    return {"cmd": cmd, "executor": (m.group("executor") or "").strip()}
-
-
-def match_confirm(question: str) -> Optional[Dict[str, str]]:
-    """文字确认(任务卡确认按钮的同义路径): 整条消息恰为确认语 → {executor}。
-
-    cv-153 教训: 用户打「确认」被当普通消息进 LLM → 模型谎报已启动。"""
-    m = _CONFIRM_RE.match((question or "").strip())
-    if not m:
-        return None
-    return {"executor": (m.group("executor") or "").strip()}
-
-
-def has_pending_task(conv_id: str) -> bool:
-    from ...arch_routes import store
-    return any((t.get("status") or "") == ST.TASK_PENDING_CONFIRM
-               for t in store.TasksStore.of_conv(conv_id))
-
-
-def run_confirm(conv: Dict[str, Any], executor_id: str = "") -> Dict[str, Any]:
-    """直通文字确认: 恰有一张待确认任务卡 → confirm_task(@执行器 可换引擎)。
-
-    无待确认卡返回 {noPending: True}(调用方回落普通对话, 不拦)。"""
-    from ...arch_routes import exec_bridge, store
-    pending = [t for t in store.TasksStore.of_conv(conv["id"])
-               if (t.get("status") or "") == ST.TASK_PENDING_CONFIRM]
-    if not pending:
-        return {"ok": False, "noPending": True}
-    if len(pending) > 1:
-        names = "、".join(f"「{(t.get('title') or '')[:24]}」" for t in pending[:5])
-        return {"ok": False, "receipt":
-                f"有 {len(pending)} 张待确认任务卡（{names}）——请在具体卡片上点确认，"
-                "或先取消多余任务。"}
-    executor_id = (executor_id or "").strip()
-    if executor_id:
-        t2 = exec_bridge.task_set_executor(pending[0]["id"], executor_id)
-        if not t2:
-            return {"ok": False, "receipt":
-                    f"执行器 `{executor_id}` 不可用（不在注册表或类型不支持）。"}
-    res = exec_bridge.confirm_task(pending[0]["id"])
-    if not res.get("ok"):
-        return {"ok": False, "receipt": str(res.get("error") or "确认失败")}
-    return {"ok": True, "task": res.get("task") or {}}
+    return {"intent": intent, "executor": (m.group("executor") or "").strip()}
 
 
 def run_extract_req(conv: Dict[str, Any], on_phase=None) -> Dict[str, Any]:

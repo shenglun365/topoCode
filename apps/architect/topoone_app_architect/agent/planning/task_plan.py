@@ -391,40 +391,9 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
 
     plan = get_plan(rid)
     if plan:
-        from . import task_graph as _tg
-        cand = [i for i, s in enumerate(plan)
-                if s.get("status") in ("pending", "failed")]
-        if not cand:
-            return {"ok": False,
-                    "receipt": "📋 任务计划已全部完成。如需继续演进, "
-                               "直接在对话中说明要调整的内容后再说\"执行\"。"}
-        norm = _tg.normalize_plan(plan)
-        by_seq = {s.get("seq"): s for s in norm}
-
-        def _sat(i: int) -> bool:
-            for d in norm[i].get("depends") or []:
-                row = by_seq.get(d)
-                if not row or row.get("status") != "done":
-                    return False
-            return True
-
-        ready = [i for i in cand if _sat(i)]   # failed 重试亦需依赖满足
-        if not ready:
-            # fail-fast: 失败步骤阻塞后继等人工(不自动跳过)
-            overview = _tg.blocked_summary(plan)
-            return {"ok": False,
-                    "receipt": f"📋 计划暂无可就绪步骤（{overview}）。"
-                               "处理失败步骤后再 `/执行` 重发。"}
-        idx = ready[0]
-        out = propose_plan_step(conv, rid, idx, executor_hint=_hint)
-        if out.get("ok"):
-            retried = "重发" if plan[idx].get("status") == "failed" else "下发"
-            deps = plan[idx].get("depends") or []
-            dep_note = f"（依赖 {', '.join('#' + str(d) for d in deps)} 已完成）" if deps else ""
-            out["receipt"] = (f"📋 计划步骤 {idx + 1}/{len(plan)} 已{retried}"
-                              f"{dep_note}，已保存待启动。")
-        return out or {"ok": False, "receipt": "计划步骤下发失败"}
-
+        # 批戊收编: 「已有计划→推进」半边迁焦点栈(resolve_intent.confirm_task
+        # 就近启动预填卡)——本路径只做**无副作用诊断**(三分态), 不再暗推进。
+        return {"ok": False, "receipt": _plan_diagnosis(plan)}
     steps = split_tasks_llm(req_text, policy=policy)
     if not steps:
         return None
@@ -462,6 +431,63 @@ def _land_plan_card(conv: dict, rid: str, plan: list) -> None:
                msg_meta={"kind": "taskPlan", "requirementId": rid,
                          "total": len(plan)},
                project_id=(conv or {}).get("projectId") or "")
+
+
+def _plan_diagnosis(plan: list) -> str:
+    """计划现状三分态诊断(批戊: 替代旧 fail-fast 单文案——待确认/失败/依赖未满)。
+
+    步骤态读**绑定任务的实际状态**(plan 行 status 只记账推进, 卡片真态在
+    任务行——cv-241 实证: 预填后 plan 行仍 pending 而任务已 saved)。
+    推进动作本身归焦点栈(resolve_intent.confirm_task)。"""
+    from ...arch_routes import store as _s
+    pending_confirm, failed = [], []
+    for s in plan:
+        tid = s.get("taskId")
+        st = str(((_s.TasksStore.get(tid) or {}).get("status"))
+                 if tid else (s.get("status") or ""))
+        if st in ("saved", "pending_confirm"):
+            pending_confirm.append(s)
+        elif st == "failed":
+            failed.append(s)
+    if pending_confirm:
+        names = "、".join(f"步骤 {s.get('seq')}" for s in pending_confirm[:3])
+        return (f"📋 计划有已预填待确认的步骤（{names}）——点对应任务卡"
+                "「开始执行」，或直接回复「确认/继续执行」即可启动。")
+    if failed:
+        names = "、".join(f"#{s.get('seq')}" for s in failed[:3])
+        return (f"📋 计划存在失败步骤（{names}）——回复「重试」重新下发，"
+                "或在对话中说明调整要求。")
+    blocked = [s for s in plan if (s.get("status") or "") == "pending"]
+    if not blocked:
+        return ("📋 任务计划已全部完成。如需继续演进, "
+                "直接在对话中说明要调整的内容后再说\"执行\"。")
+    from . import task_graph as _tg
+    overview = _tg.blocked_summary(plan)
+    return f"📋 计划步骤存在未满足的依赖（{overview}）——完成前置步骤后自动预填。"
+
+
+def retry_failed_step(conv: dict, task_id: str) -> Dict[str, Any]:
+    """焦点动作执行器: 重发失败步骤(retry_failed 指代的落地; 批戊)。
+
+    指代(taskId)由焦点 recent.task_failed 就近给出; 依赖满足性沿用
+    propose_plan_step 内部校验。"""
+    from ...arch_routes import store as _s
+    task = _s.TasksStore.get(task_id) or {}
+    rid = str(task.get("reqId") or "")
+    plan = get_plan(rid)
+    if not plan:
+        return {"ok": False, "receipt": "该任务不在任何计划中，无法按步骤重发。"}
+    for s in plan:
+        if s.get("taskId") == task_id:
+            if (s.get("status") or "") != "failed":
+                return {"ok": False, "receipt":
+                        f"步骤 {s.get('seq')} 当前状态为 {s.get('status')}，仅失败步骤可重发。"}
+            out = propose_plan_step(conv, rid, plan.index(s))
+            if out.get("ok"):
+                out["receipt"] = (f"🔁 计划步骤 {s.get('seq')}/{len(plan)} "
+                                  f"「{(s.get('title') or '')[:24]}」已重发，待确认执行。")
+            return out
+    return {"ok": False, "receipt": "计划与任务不一致——请以最新任务卡为准。"}
 
 
 def on_plan_task_done(conv_id: str, task_id: str) -> None:

@@ -41,22 +41,45 @@ def _register_session_tools() -> None:
     _cap_mining.register_mining_tools()
 
 
-async def _run_direct_confirm(conv: dict, send: SendFn, store,
-                              user_msg_id: str, executor: str = "") -> None:
-    """文字确认直通(P2): 确认语 → confirm_task(零 LLM), 与卡片按钮同门禁链。"""
-    from .perception import commands as _cmds
-    from ..arch_routes.common import _ts
+async def _confirm_focus_task(conv: dict, send: SendFn, store,
+                              user_msg_id: str, task_id: str,
+                              executor: str = "", label: str = "") -> None:
+    """焦点动作执行器(批戊): 就近确认焦点帧指代的任务卡(替代 run_confirm 全量
+    扫描/多卡逐张提示——指代由焦点帧给出, 与卡片按钮同门禁链)。"""
+    from ..arch_routes import exec_bridge as _eb
     conv_id = conv["id"]
-    res = await asyncio.to_thread(_cmds.run_confirm, conv, executor)
-    if res.get("noPending"):
-        # 无待确认卡: 回落普通对话(此处不该发生——调用方已查过, 竞态兜底)
-        return
+    executor = (executor or "").strip()
+
+    async def _done(content: str) -> None:
+        msg_id = store.next_id("m")
+        await send({"type": "chat_start", "conversationId": conv_id,
+                    "requestId": "", "userMessageId": user_msg_id})
+        await send({"type": "done", "conversationId": conv_id,
+                    "content": content, "messageId": msg_id})
+
+    if executor:
+        t2 = await asyncio.to_thread(_eb.task_set_executor, task_id, executor)
+        if not t2:
+            await _done(f"⚠️ 执行器 `{executor}` 不可用（不在注册表或类型不支持）。")
+            return
+    res = await asyncio.to_thread(_eb.confirm_task, task_id)
     if res.get("ok"):
         t = res.get("task") or {}
-        content = (f"🚀 已确认任务「{t.get('title')}」（执行器 `{t.get('executorType')}`）"
-                   "——开始执行，进展将在本会话同步。")
+        await _done(f"🚀 已确认任务「{t.get('title')}」（执行器 "
+                    f"`{t.get('executorType')}`）——开始执行，进展将在本会话同步。")
     else:
-        content = f"⚠️ {res.get('receipt') or '确认失败'}"
+        await _done(f"⚠️ {res.get('error') or '确认失败'}")
+
+
+async def _retry_focus_task(conv: dict, send: SendFn, store,
+                            user_msg_id: str, task_id: str) -> None:
+    """焦点动作执行器(批戊): 重发失败步骤(retry_failed 指代落地)。"""
+    from ..arch_routes.common import _ts
+    from .planning.task_plan import retry_failed_step
+    conv_id = conv["id"]
+    res = await asyncio.to_thread(retry_failed_step, conv, task_id)
+    content = (f"🔁 {res.get('receipt')}" if res.get("ok")
+               else f"⚠️ {res.get('receipt') or '重发失败'}")
     msg_id = store.next_id("m")
     await send({"type": "chat_start", "conversationId": conv_id,
                 "requestId": "", "userMessageId": user_msg_id})
@@ -236,11 +259,16 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     # 确定性层(指令直通/相位硬闸)在其之前不变(防守线①)。
     gu_plan = None
     gu_allowed = None
+    gu_focus = None
     if decision.action == "chat":
+        from .governance.focus import build_focus
         from .turns.goal import plan_goal_directive
-        gu_plan = await asyncio.to_thread(plan_goal_directive,
-                                          str(gate.get("question") or ""),
-                                          conv, None, history)
+        gu_focus = await asyncio.to_thread(
+            build_focus, conv_id, None,
+            cached_phase=str(conv.get("flowState") or ""))
+        gu_plan = await asyncio.to_thread(
+            plan_goal_directive, str(gate.get("question") or ""),
+            conv, None, history, gu_focus)
         gu_allowed = _resolve_gu_allowed(gu_plan)
 
     # ---- ③ 上下文: 角色模型路由 + 懒探测 + 挡位 + 消息装配 ----
@@ -426,27 +454,56 @@ async def _chat_route(data: dict, gate: dict, send: SendFn):
                                    "content": final_b, "messageId": assistant_msg_id_b})
         return True, decision
 
-    # ── 会话指令直通(v2): /定稿 /执行 确定性执行不经 LLM(cv-152 教训: 指令落回
-    #    模型会引用 v1 旧契约(coding.task.execute)死胡同)。仅 chat 路由生效——
-    #    转达/指派消息里的 /文本 是发给 subagent 的内容, 不拦。 ──
+    # ── 会话指令直通(批戊收编): 意图原语 × 焦点栈就近消解, 单一分派点。
+    #    词表定意图(match_imperative)/焦点定指代(build_focus)/实体定状态。
+    #    仅 chat 路由生效——转达/指派消息里的 /文本 是发给 subagent 的内容, 不拦。 ──
     if decision.action == "chat":
-        from .perception.commands import match_command as _cmd_match
-        _cmd = _cmd_match(question)
-        if _cmd:
-            # cv-199: 提案卡「运行」按钮的合成 /执行 跳过 LLM 拆步——
-            # 点按钮期望即时建卡; 手打 /执行 保留计划编排(带相位反馈)
-            await _run_direct_command(_cmd["cmd"], gate["conv"], send, store,
-                                      gate["last_user_msg_id"],
-                                      executor=_cmd.get("executor") or "",
-                                      skip_plan=bool(data.get("synthetic")))
-            return True, decision
-        # 文字确认(卡片确认同义路径): 有待确认卡才拦——否则「确认」是普通对话
-        from .perception.commands import match_confirm as _confirm_match, \
-            has_pending_task as _cmds_has_pending
-        _conf = _confirm_match(question)
-        if _conf and _cmds_has_pending(conv_id):
-            await _run_direct_confirm(gate["conv"], send, store,
-                                      gate["last_user_msg_id"],
-                                      executor=_conf.get("executor") or "")
-            return True, decision
+        from .governance.focus import build_focus, resolve_intent
+        from .perception.commands import match_imperative
+        imp = match_imperative(question)
+        if imp:
+            conv = gate["conv"]
+            focus = await asyncio.to_thread(
+                build_focus, conv_id, None,
+                cached_phase=str(conv.get("flowState") or ""))
+            res = resolve_intent(imp["intent"], focus)
+            act = res.get("action")
+            if act == "extract":
+                await _run_direct_command("提取需求", conv, send, store,
+                                          gate["last_user_msg_id"])
+                return True, decision
+            if act == "execute":
+                # cv-199: 提案卡「运行」按钮的合成 /执行 跳过 LLM 拆步——
+                # 点按钮期望即时建卡; 手打 /执行 保留计划编排(带相位反馈)
+                await _run_direct_command("执行", conv, send, store,
+                                          gate["last_user_msg_id"],
+                                          executor=imp.get("executor") or "",
+                                          skip_plan=bool(data.get("synthetic")))
+                return True, decision
+            if act == "confirm_task":
+                frame = res.get("frame") or {}
+                await _confirm_focus_task(conv, send, store,
+                                          gate["last_user_msg_id"],
+                                          str(frame.get("taskId") or ""),
+                                          executor=imp.get("executor") or "",
+                                          label=str(frame.get("label") or ""))
+                return True, decision
+            if act == "retry_failed":
+                frame = res.get("frame") or {}
+                await _retry_focus_task(conv, send, store,
+                                        gate["last_user_msg_id"],
+                                        str(frame.get("taskId") or ""))
+                return True, decision
+            # relay_hint / none: 焦点态提示(直通回执, 零 LLM)
+            note = str(res.get("note") or "")
+            if note:
+                from ..arch_routes.common import _ts as _tsn
+                msg_id = store.next_id("m")
+                await send({"type": "chat_start",
+                            "conversationId": conv_id, "requestId": "",
+                            "userMessageId": gate["last_user_msg_id"]})
+                await send({"type": "done", "conversationId": conv_id,
+                            "content": note, "messageId": msg_id})
+                return True, decision
+            # fallthrough: 焦点无指代(如确认语无待确认卡) → 落 GU 对话链
     return False, decision

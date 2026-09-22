@@ -34,7 +34,13 @@ flowchart TD
     G1 -->|内联@执行器 assign| G3[指派契约注入<br/>architect 评估建卡]
     G1 -->|chat| GU
 
-    GU{③.5 目标理解 GU<br/>GoalProfile: L0 词表/策略库<br/>+L1 上下文(+L2 受限LLM 缺省关<br/>携带近期对话摘要)<br/>→ policy.goal 决策表<br/>(8 动作含 present-options 候选菜单)} -->|回合指引注入| H
+    DX{② 直通: 意图原语 match_imperative<br/>× 焦点栈 resolve_intent 就近消解<br/>(确认/推进→栈顶步骤卡; spec_ready→执行<br/>retry→recent.failed; 无指代→回落 GU)}
+    G1 -->|chat| DX
+    DX -->|"确认/推进类+焦点帧"| D1[confirm_task 零 LLM]
+    DX -->|"execute+spec_ready"| D2[run_execute]
+    DX -->|"无意图原语"| GU
+
+    GU{③.5 目标理解 GU<br/>GoalProfile: L0 词表/策略库<br/>+L1 上下文(+L2 受限LLM 缺省关<br/>携带近期对话摘要+焦点事实面)<br/>→ policy.goal 决策表<br/>(8 动作含 present-options 候选菜单)} -->|回合指引注入| H
 
     H[architect 回合<br/>能力文档+posture 判据(静态人格)<br/>+挡位指引 strict/quick+skill 文档] --> I{LLM 通道}
     I -->|流式 llm.chat| I1[逐字 chunk]
@@ -165,3 +171,16 @@ draft ──/定稿(designMd 门禁, 幂等)──▶ ready ──/执行──�
 | cv-154/156 | 错误零反馈；流式通道停用两天(`_req_chat_stream` 函数体丢失) | turnError 落库全文回传；流式入口恢复+回归锁 |
 | cv-157 | `_ws_send` 幻影引用 NameError | 幻影清扫（5 处）+ AST 扫描回归 |
 | cv-158 | cline-sdk 启动即失败(空 model) | 默认执行器 id/配置同源 + hint 透传补 models 等 |
+
+### 焦点栈(工作记忆/情景记忆显式化, 批戊 2026-09-22)
+
+直通判别从"词表直判动作"升级为三层模型：**词表定意图**(`match_imperative`
+五原语: execute/confirm/continue/retry/extract) → **焦点定指代**
+(`governance/focus.build_focus` 派生栈帧投影: task_input_wait > task_running >
+plan_step_ready > task_confirm > spec_ready > reviewing, 同级时间就近) →
+**实体定状态**(任务/需求/计划行, 焦点栈零新存储零写点, 每回合重算)。
+消费点: 直通分派(resolve_intent 单一矩阵, cv-241「继续执行」病灶根治)、
+GU 事实面(focus.phase/focusTop)、flow_hints 帧计数、相位派生单源
+(flow.derive_flow_state 迁入 focus.derive_phase, flow.py 降级纯配置消费者)。
+命令式 push/pop 退场: 帧生灭=谓词真伪, 实体状态迁移即进出栈(崩溃自愈,
+无幽灵帧/泄漏面)。事件栈=实体时间戳近窗投影(60min/10 条), retry 指代用。

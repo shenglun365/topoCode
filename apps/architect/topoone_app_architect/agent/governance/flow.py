@@ -70,28 +70,13 @@ def _meta_of(conv: Optional[dict]) -> dict:
 def derive_flow_state(conv: Optional[dict], tasks: Optional[List[dict]],
                       req: Optional[dict] = None, *, cached: str = "",
                       force: bool = False) -> str:
-    """占用相位派生(纯函数, 幂等): 输入领域实体行 → 相位词表值。
+    """相位派生(批戊收编): 单源迁 memory.focus.derive_phase——薄委托回退点。
 
-    cached=interrupted 时粘滞(仅 force=True 的自愈/恢复路径可解除)——
-    中断态下无关事件不得把异常态洗白成 executing。
-    """
-    if cached == FLOW_INTERRUPTED and not force:
-        return FLOW_INTERRUPTED
-    rows = [t for t in (tasks or []) if isinstance(t, dict)]
-
-    def _st(t: dict) -> str:
-        return str(t.get("status") or "")
-
-    if any(_st(t) in _RUN_STATES for t in rows):
-        return FLOW_EXECUTING
-    if any(_st(t) in _ARMED_STATES for t in rows):
-        return FLOW_ARMED
-    if any(_st(t) == TASK_DONE and not t.get("dismissedAt") for t in rows) \
-            and not (req and (req.get("status") or "") == REQ_DONE):
-        return FLOW_REVIEWING
-    if _meta_of(conv).get("specDraft") is not None:
-        return FLOW_CLARIFYING
-    return FLOW_FREE
+    判定序/interrupted 粘滞语义逐条保留(用户可见行为零变化);
+    全量绿后本委托由焦点栈直连替代(两步提交策略第一步)。"""
+    from .focus import derive_phase, frames_from_entities
+    frames = frames_from_entities(conv, tasks, req)
+    return derive_phase(frames, conv, cached=cached, force=force)
 
 
 def drift_check(cached: str, actual: str) -> bool:
@@ -120,26 +105,27 @@ def flow_hints(conv: Optional[dict], tasks: Optional[List[dict]],
                policy: Optional[dict] = None) -> List[str]:
     """hint 层(非权威, 随时可算): 下一步建议——原 spec_ready/task_saved/done
     流水线态在此降级为提示(裁决: 需求/任务正交可选, 不强制流水线)。
-    文案模板走 flow_policy.hintTemplates({n} 占位)。"""
+    文案模板走 flow_policy.hintTemplates({n} 占位)。
+    批戊: 计数改读焦点帧(派生单源; armed 提示口径=预填/待确认帧,
+    不含 spec_ready——"任务卡"文案语义不变)。"""
     pol = policy if policy is not None else load_flow_policy()
-    rows = [t for t in (tasks or []) if isinstance(t, dict)]
-
-    def _st(t: dict) -> str:
-        return str(t.get("status") or "")
+    from .focus import frames_from_entities
+    frames = [f for f in frames_from_entities(conv, tasks, req)
+              if isinstance(f, dict)]
 
     out: List[str] = []
-    armed = [t for t in rows if _st(t) in _ARMED_STATES]
+    armed = [f for f in frames
+             if f.get("kind") in ("plan_step_ready", "task_confirm")]
     if armed:
         out.append(hint_text(pol, "armed", len(armed)))
-    done_open = [t for t in rows
-                 if _st(t) == TASK_DONE and not t.get("dismissedAt")]
+    done_open = [f for f in frames if f.get("kind") == "reviewing"]
     if done_open:
         out.append(hint_text(pol, "reviewing", len(done_open)))
     if req and (req.get("status") or "") == REQ_DONE:
         out.append(hint_text(pol, "reqDone", 0))
     for fn in _custom_hints:   # 注册制提示(个性化/项目级; 故障静默跳过)
         try:
-            extra = fn(conv, rows, req)
+            extra = fn(conv, tasks, req)
         except Exception:  # noqa: BLE001
             continue
         for h in extra or []:

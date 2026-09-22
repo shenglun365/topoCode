@@ -128,19 +128,19 @@ def test_copy_impl_flag_ignores_non_test(tmp_path):
     assert _copy_impl_flag(wt, ["src/helper.c"]) == ""
 
 
-# ── 修复3: 继续执行别名 ──────────────────────────────────────────────
+# ── 修复3: 继续执行别名(批戊收编: 意图原语化) ────────────────────────
 
 def test_command_aliases():
-    from topoone_app_architect.agent.perception.commands import match_command as mc
-    assert mc("继续执行") == {"cmd": "执行", "executor": ""}
-    assert mc("继续") == {"cmd": "执行", "executor": ""}
-    assert mc("重试") == {"cmd": "执行", "executor": ""}
-    assert mc("@cline 继续执行") == {"cmd": "执行", "executor": "cline"}
-    assert mc("/执行") == {"cmd": "执行", "executor": ""}
+    from topoone_app_architect.agent.perception.commands import match_imperative as mi
+    assert mi("继续执行") == {"intent": "continue", "executor": ""}
+    assert mi("继续") == {"intent": "continue", "executor": ""}
+    assert mi("重试") == {"intent": "retry", "executor": ""}
+    assert mi("@cline 继续执行") == {"intent": "continue", "executor": "cline"}
+    assert mi("/执行") == {"intent": "execute", "executor": ""}
     # 自然语言不误触
-    assert mc("继续讨论这个方案") is None
-    assert mc("我们继续吧") is None
-    assert mc("重试了三次都失败") is None
+    assert mi("继续讨论这个方案") is None
+    assert mi("我们继续吧") is None
+    assert mi("重试了三次都失败") is None
 
 
 # ── 修复4: 指令双标题 ────────────────────────────────────────────────

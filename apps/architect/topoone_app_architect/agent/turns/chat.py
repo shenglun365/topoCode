@@ -563,14 +563,15 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
                 model_id=eff_model)
             tools_used.add("req.propose")
             if res.get("ok"):
+                # 批戊: 成功不再追加通知文本——specReady 卡即单源回执
+                # (旧「已从提案围栏自动落库」与卡双发+JSON 透传, cv-241 实证)
                 final_content = req_agent.strip_proposal_fence(final_content)
             else:
                 tool_errors["req.propose"] = str(res.get("text", ""))[:200]
-            notice = (f"\n\n✅ 已从提案围栏自动落库：{str(res.get('text', ''))[:140]}"
-                      if res.get("ok") else
-                      f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}")
-            final_content += notice
-            await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
+                # 失败保留诚实错误(cv-175 纪律)
+                notice = f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}"
+                final_content += notice
+                await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
             logger.warning("[kb-chat] 围栏代落库失败: %s", e)
 

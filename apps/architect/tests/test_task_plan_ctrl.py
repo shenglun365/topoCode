@@ -127,9 +127,17 @@ def test_failed_step_redispatches_on_next_execute(arch_env, tmp_path, monkeypatc
          "agent": "cline", "rid": "RQ-tp"})
     plan = store.RequirementsStore.get("RQ-tp")["taskPlan"]
     assert plan[0]["status"] == "failed"
-    # 再次 /执行 → 重发失败步骤(不问 LLM, 不推进到 B)
+    # 批戊: 再次 /执行 → 三分态诊断(失败态指引「重试」), 不再暗推进
     r2 = cmds.run_execute(conv)
-    assert r2["ok"] and "重发" in r2["receipt"]
+    assert r2["ok"] is False and "重试" in r2["receipt"]
+    # 重试走焦点动作执行器: recent.failed 指代 → retry_failed_step
+    from topoone_app_architect.agent.governance.focus import build_focus, resolve_intent
+    focus = build_focus(conv["id"])
+    res = resolve_intent("retry", focus)
+    assert res["action"] == "retry_failed" and res["frame"]["taskId"] == t1
+    from topoone_app_architect.agent.planning.task_plan import retry_failed_step
+    r3 = retry_failed_step(conv, t1)
+    assert r3["ok"] and "已重发" in r3["receipt"]
     plan2 = store.RequirementsStore.get("RQ-tp")["taskPlan"]
     assert plan2[0]["status"] == "proposed" and plan2[0]["taskId"] != t1
     assert plan2[1]["status"] == "pending"
