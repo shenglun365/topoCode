@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { assembleReply, groupKey, requiredMissing } from '@/services/choices-reply'
 import type { ChoiceGroup } from '@/services/choices-reply'
 
@@ -26,6 +26,19 @@ const customs = reactive<Record<string, string>>({})
 const skipped = reactive<Record<string, boolean>>({})
 const extra = reactive({ note: '' })
 const answered = reactive({ done: false })
+// 缩略收起(cv-248): 已答自动收起; 未答可手动收起/展开——收起态只留摘要行
+const collapsed = ref(false)
+watch(() => answered.done, (d) => { if (d) collapsed.value = true })
+
+const groupSummary = computed(() => {
+  const total = groups.value.length
+  if (answered.done) return replyText.value || '已回复'
+  const done = groups.value.filter((_g, i) => {
+    const k = gid(_g, i)
+    return skipped[k] || selections[k] || customs[k]?.trim()
+  }).length
+  return `${total} 个问题${done ? ` · 已答 ${done}` : ' · 待回答'}`
+})
 
 function pick(gidv: string, optId: string) {
   if (props.disabled || answered.done || skipped[gidv]) return
@@ -73,13 +86,24 @@ defineExpose({ markAnswered })
     :class="answered.done ? 'border-ctp-surface0 opacity-75' : 'border-ctp-surface1'"
   >
     <div class="mb-1.5 flex items-center gap-2">
-      <span class="font-semibold text-ctp-text">{{ payload.title || '请确认以下问题' }}</span>
+      <button
+        class="flex flex-1 items-center gap-2 text-left"
+        data-test="choices-collapse"
+        :title="collapsed ? '展开问询卡' : '收起问询卡'"
+        @click="collapsed = !collapsed"
+      >
+        <span class="font-semibold text-ctp-text">{{ payload.title || '请确认以下问题' }}</span>
+        <span class="text-[10px] text-ctp-overlay0">{{ collapsed ? groupSummary : '' }}</span>
+        <span class="flex-1" />
+        <span class="text-[10px] text-ctp-overlay0">{{ collapsed ? '▼' : '▲' }}</span>
+      </button>
       <span
         v-if="answered.done"
         class="chip !text-[9px] bg-ctp-green/15 text-ctp-green"
       >已回复</span>
     </div>
 
+    <template v-if="!collapsed">
     <div
       v-for="(g, i) in groups"
       :key="gid(g, i)"
@@ -155,7 +179,9 @@ defineExpose({ markAnswered })
       data-test="choices-extra"
     >
 
-    <div class="mt-2 flex items-center gap-2">
+    </template>
+
+    <div v-if="!collapsed" class="mt-2 flex items-center gap-2">
       <button
         class="btn-mini bg-ctp-blue/20 text-ctp-blue hover:bg-ctp-blue/30 disabled:opacity-40"
         :disabled="disabled || answered.done || !replyText"

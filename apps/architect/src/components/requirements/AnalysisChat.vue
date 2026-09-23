@@ -1390,7 +1390,8 @@ onUnmounted(() => {
             >{{ m.content }}</div>
           </div>
           <ChatMessageBlocks
-            v-else-if="m.item?.type !== 'spec' && m.item?.type !== 'task_status'"
+            v-else-if="m.item?.type !== 'spec' && m.item?.type !== 'task_status'
+              && m.item?.type !== 'choices'"
             :content="m.content"
           />
 

@@ -86,4 +86,28 @@ describe('ChoicesCard 组件守门(A6.2 同思路, 静态断言)', () => {
     expect(src.includes('markAnswered')).toBe(true)
     expect(src.includes("(e: 'reply', text: string)")).toBe(true)
   })
+
+  it('缩略收起(cv-248): 收起开关+摘要行+已答自动收起', () => {
+    expect(src.includes('data-test="choices-collapse"')).toBe(true)
+    expect(src.includes('collapsed')).toBe(true)
+    expect(src.includes("watch(() => answered.done")).toBe(true)
+    expect(src.includes('groupSummary')).toBe(true)
+  })
+})
+
+describe('会话流持久化守门(cv-248)', () => {
+  it('choices 卡单渲染: 正文分支排除 choices(卡片即全部, 无标题文本双显)', () => {
+    const chat = readFileSync(`${root}/src/components/requirements/AnalysisChat.vue`, 'utf-8')
+    expect(chat.includes("m.item?.type !== 'choices'")).toBe(true)
+    expect(chat.includes("m.item?.type === 'choices'")).toBe(true)
+  })
+
+  it('applyConversation 保留 item(choices 卡随会话消息持久化加载)', () => {
+    const store = readFileSync(`${root}/src/stores/conversation-store.ts`, 'utf-8')
+    // turns 映射显式保留 item(丢 item = 刷新后卡片降级为正文)
+    expect(store.includes("item: (m as any).item")).toBe(true)
+    // choices 不在气泡过滤集合(必须保留交卡片分支渲染)
+    expect(store.includes("_CARD_BUBBLE_KINDS = new Set(['task_card', 'specReady', 'task_status'])")).toBe(true)
+    expect(store.includes("'choices', 'task_card'")).toBe(false)
+  })
 })
