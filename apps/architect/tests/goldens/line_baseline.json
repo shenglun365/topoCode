@@ -51,7 +51,7 @@
  "agent/perception/intent.py": 15,
  "agent/perception/router.py": 68,
  "agent/planning/__init__.py": 8,
- "agent/planning/req_spec.py": 440,
+ "agent/planning/req_spec.py": 486,
  "agent/planning/scope_probe.py": 194,
  "agent/planning/task_graph.py": 121,
  "agent/planning/task_plan.py": 645,

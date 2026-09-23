@@ -110,15 +110,52 @@ def _norm_scope_list(v: Any) -> List[str]:
     return []
 
 
+def _plan_delivered(rid: str) -> bool:
+    """绑定需求任务计划是否已交付完结(非空且全部 done; cv-248 归属三分判据)。
+
+    taskPlan 从需求行直读(与 task_plan.get_plan 同源列, 避免内核反向依赖)。
+    含非 done 步骤(进行中/失败待处理)=未交付完结 → 活跃需求走修订。"""
+    if not rid:
+        return False
+    plan = (_store().RequirementsStore.get(rid) or {}).get("taskPlan") or []
+    if isinstance(plan, str):
+        try:
+            plan = json.loads(plan)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(plan, list) or not plan:
+        return False
+    return all(str((s or {}).get("status") or "") == "done"
+               for s in plan if isinstance(s, dict))
+
+
+def _fallback_title() -> str:
+    """新建命名兜底链(cv-248): 会话标题·需求 → 需求——人不必想标题, 语义不丢。
+
+    载荷 title 仍优先; 仅当载荷未给标题时兜底(需求是项目资产, RQ 编号唯一
+    可辨识, 会话标题提供扫读语义)。"""
+    try:
+        from ...arch_routes import ctx as _ctx
+        conv = (_store().ConversationsStore.get(str(_ctx.get_conv() or "")) or {})
+        t = str(conv.get("title") or "").strip()
+        if t:
+            return f"{t[:40]}·需求"
+    except Exception:  # noqa: BLE001 — ctx 未设置/库不可达, 兜底到纯语义名
+        pass
+    return "需求"
+
+
 def apply_spec_payload(payload: Dict[str, Any], req_id: str = "",
                        project: str = "", root: str = "") -> Dict[str, Any]:
     """规约载荷 → 确定性落库(零 LLM)。三级降级:
 
     L0 归一化自愈(别名/类型/围栏/兜底合并) → L1 字段降级(可选缺失忽略,
     ignored 报告) → L2 LLM 格式修复(repair_spec_payload_format, 产物再过本
-    函数 L0/L1 + reqId 校验) → L3 如实失败。落库目标: 绑定需求未完结 →
-    req.amend; 无绑定 → req.propose 新建(成功后工具内部回写会话绑定)。
-    载荷内 reqId 字段一律丢弃(防编造编号混入)。
+    函数 L0/L1 + reqId 校验) → L3 如实失败。落库目标归属三分(cv-248 裁决):
+    绑定需求**交付完结**(计划非空且全部 done / doneMark) → req.propose 新建
+    (新编号/新 v1/载荷标题生效——内容互斥, 已完结旧内容不污染新需求; 会话
+    绑定由 propose 内部翻页回写); 活跃需求(计划进行中/打磨期) → req.amend
+    修订。载荷内 reqId 字段一律丢弃(防编造编号混入)。
     """
     ignored: List[str] = []
     errors: List[str] = []
@@ -167,12 +204,15 @@ def apply_spec_payload(payload: Dict[str, Any], req_id: str = "",
     allowed = _norm_scope_list(norm.get("allowedScope"))
     forbidden = _norm_scope_list(norm.get("forbiddenScope"))
     acceptance = _norm_scope_list(norm.get("acceptance"))
-    # 落库目标判定
+    # 落库目标判定(cv-248 归属三分): 交付完结的需求是已交付历史——新载荷
+    # 立新需求(新编号/v1/标题生效); 活跃需求(计划进行中/打磨期)→ 修订演进。
     rid = (req_id or "").strip()
     row = _store().RequirementsStore.get(rid) if rid else None
-    can_amend = bool(row and (row.get("doneMark") or 0) != 1)
-    if not title:
-        # L2: 格式/信息破损 → LLM 修复后重过确定性映射(一次); repaired 标记传播
+    delivered = _plan_delivered(rid)
+    can_amend = bool(row and (row.get("doneMark") or 0) != 1 and not delivered)
+    if not title and not (reqmd or design or allowed or acceptance):
+        # L2: 载荷实质缺失(标题+内容全空)才触发 LLM 修复; title 缺失但内容
+        # 完整不再烧修复通道(修订不更名/新建走命名兜底链)
         fixed = _ra().repair_spec_payload_format(
             json.dumps(payload, ensure_ascii=False)[:6000], req_id=rid)
         if isinstance(fixed, dict):
@@ -238,6 +278,10 @@ def apply_spec_payload(payload: Dict[str, Any], req_id: str = "",
         args.setdefault("reasoning", "消息流「写入需求」确定性落库")
     else:
         args["newRequirement"] = True
+        if not title:
+            title = _fallback_title()
+            aliased.append(f"兜底标题({title})")
+            args["title"] = title
     # v2: 系统确定性落库路径(写入需求按钮/守卫代落)——internal 放行退役拦截。
     result = _ra().run_arch_tool("req.amend" if can_amend else "req.propose",
                            args, root=root, project=project, internal=True)
@@ -251,6 +295,8 @@ def apply_spec_payload(payload: Dict[str, Any], req_id: str = "",
     notes = []
     if repaired:
         notes.append("格式已由修复通道修正")
+    if delivered:
+        notes.append("前需求计划已交付完结, 新目标立新需求")
     if aliased:
         notes.append("字段归一: " + ", ".join(aliased[:6]))
     if ignored:
