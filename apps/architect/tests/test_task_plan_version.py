@@ -31,10 +31,17 @@ def _mk_req(rid="RQ-V1", active_ver=1):
     return rid
 
 
-def _v1_done_plan():
-    return [{"seq": 1, "title": "S1", "instruction": "x", "taskId": "t1",
+def _v1_done_plan(conv_id):
+    """v1 全 done 计划(taskId 指向真实任务行——cv-248 I2: 非空 taskId 必有行)。"""
+    t1 = store.TasksStore.create({"conversationId": conv_id, "title": "S1",
+                                  "instruction": "x", "status": "done",
+                                  "executorType": "cline-sdk"})
+    t2 = store.TasksStore.create({"conversationId": conv_id, "title": "S2",
+                                  "instruction": "y", "status": "done",
+                                  "executorType": "cline-sdk"})
+    return [{"seq": 1, "title": "S1", "instruction": "x", "taskId": t1["id"],
              "status": "done"},
-            {"seq": 2, "title": "S2", "instruction": "y", "taskId": "t2",
+            {"seq": 2, "title": "S2", "instruction": "y", "taskId": t2["id"],
              "status": "done"}]
 
 
@@ -63,7 +70,7 @@ def test_stale_plan_rebuild_on_spec_version_bump(arch, monkeypatch):
     """v1 计划全 done(存量行, 无 specVer 记账) + active ver=2 → 重建非拒绝。"""
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     rid = _mk_req("RQ-STALE", active_ver=2)
-    tp.save_plan(rid, _v1_done_plan())
+    tp.save_plan(rid, _v1_done_plan(conv["id"]))
     proposed = _patch_rebuild(monkeypatch)
 
     out = tp.maybe_plan_and_propose(conv, rid, "新目标文本", "T", "instr",
@@ -80,7 +87,7 @@ def test_same_version_completed_plan_still_diagnosed(arch):
     """同版本(v1)全 done → 诊断提示保留(「先说明调整」语义仍正确)。"""
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     rid = _mk_req("RQ-SAME", active_ver=1)
-    tp.save_plan(rid, _v1_done_plan())
+    tp.save_plan(rid, _v1_done_plan(conv["id"]))
 
     out = tp.maybe_plan_and_propose(conv, rid, "x", "T", "i", spec_ver=1)
     assert out.get("ok") is False
@@ -102,7 +109,7 @@ def test_legacy_rows_default_ver1_not_stale(arch, monkeypatch):
     """存量行(无 specVer)默认 v1: spec_ver=1 时不重建(回归——不误判过期)。"""
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     rid = _mk_req("RQ-LEG", active_ver=1)
-    tp.save_plan(rid, _v1_done_plan())
+    tp.save_plan(rid, _v1_done_plan(conv["id"]))
     rebuilt = []
     _patch_rebuild(monkeypatch)
     real_split = tp.split_tasks_llm

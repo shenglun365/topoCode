@@ -39,12 +39,16 @@ def test_plan_anchor_upsert_single_row(arch):
     """同 requirementId 多次刷新 → 消息表仅 1 条 taskPlan 行, content 原位变。"""
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     rid = _mk_req()
+    _tx = store.TasksStore.create({"id": "task-x", "conversationId": conv["id"],
+                                   "title": "配置", "instruction": "y",
+                                   "status": "saved", "executorType": "cline-sdk",
+                                   "reqId": rid})
     tp._refresh_plan_anchor(conv["id"], rid, [
         {"seq": 1, "title": "初始化", "taskId": "", "status": "done"},
         {"seq": 2, "title": "配置", "taskId": "", "status": "pending"}])
     tp._refresh_plan_anchor(conv["id"], rid, [
         {"seq": 1, "title": "初始化", "taskId": "", "status": "done"},
-        {"seq": 2, "title": "配置", "taskId": "task-x", "status": "saved"}])
+        {"seq": 2, "title": "配置", "taskId": _tx["id"], "status": "saved"}])
     rows = [m for m in store.ConversationsStore.messages(conv["id"])
             if (m.get("meta") or "") and "taskPlan" in str(m.get("meta"))]
     assert len(rows) == 1, f"进度锚应单行原位, got {len(rows)}"
@@ -148,16 +152,25 @@ def test_split_prompt_requires_chinese_titles(arch):
 def test_plan_diagnosis_three_states(arch):
     from topoone_app_architect.arch_routes import store as _s
     rid = _mk_req("RQ-IF2")
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+    # cv-248 I2: taskId 非空必须指向真实任务行(悬空=failed 降级语义)
+    def _task(tid, status):
+        return _s.TasksStore.create({"id": tid, "conversationId": conv["id"],
+                                     "title": tid, "instruction": "x",
+                                     "status": status,
+                                     "executorType": "cline-sdk",
+                                     "reqId": rid})["id"]
+    _ta = _task("task-a", "done")
+    _tb = _task("task-b", "saved")
     plan = [
-        {"seq": 1, "title": "A", "taskId": "task-a", "status": "done"},
-        {"seq": 2, "title": "B", "taskId": "task-b", "status": "pending"},
+        {"seq": 1, "title": "A", "taskId": _ta, "status": "done"},
+        {"seq": 2, "title": "B", "taskId": _tb, "status": "pending"},
     ]
-    _s.TasksStore.create({"id": "task-b", "conversationId": "cv-d", "title": "B",
-                          "instruction": "y", "status": "saved",
-                          "executorType": "cline-sdk", "reqId": rid})
     d = _plan_diagnosis(plan)
     assert "待确认" in d
-    plan2 = [{"seq": 1, "title": "A", "taskId": "task-x", "status": "failed"}]
+    _tx = _task("task-x", "failed")
+    plan2 = [{"seq": 1, "title": "A", "taskId": _tx, "status": "failed"}]
     assert "重试" in _plan_diagnosis(plan2)
-    plan3 = [{"seq": 1, "title": "A", "taskId": "task-y", "status": "done"}]
+    _ty = _task("task-y", "done")
+    plan3 = [{"seq": 1, "title": "A", "taskId": _ty, "status": "done"}]
     assert "全部完成" in _plan_diagnosis(plan3)

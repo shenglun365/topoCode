@@ -463,7 +463,10 @@ def _refresh_plan_anchor(conv_id: str, rid: str, plan: list) -> None:
     conv = _store().ConversationsStore.get(conv_id) or {}
 
     def _mark(s: dict) -> str:
-        t = _store().TasksStore.get(s.get("taskId")) if s.get("taskId") else None
+        tid = s.get("taskId")
+        t = _store().TasksStore.get(tid) if tid else None
+        if tid and not t:
+            return "❌"   # cv-248 I2: 指涉任务行已删 → failed 语义(非「待就绪」)
         st = str((t or {}).get("status") or (s.get("status") or ""))
         if st == "done":
             return "✅"
@@ -511,6 +514,11 @@ def _plan_diagnosis(plan: list) -> str:
     for s in plan:
         tid = s.get("taskId")
         t = _s.TasksStore.get(tid) if tid else None
+        if tid and not t:
+            # cv-248 I2 惰性失效: 步骤指涉的任务行已删(会话回退/清理)——
+            # 降级 failed(重试出路可达), 不静默沿用旧记账误判「全部完成」。
+            failed.append(s)
+            continue
         st = str((t or {}).get("status") or s.get("status") or "")
         if st in ("saved", "pending_confirm"):
             pending_confirm.append(s)

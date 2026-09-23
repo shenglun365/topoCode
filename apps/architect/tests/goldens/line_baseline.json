@@ -54,7 +54,7 @@
  "agent/planning/req_spec.py": 440,
  "agent/planning/scope_probe.py": 194,
  "agent/planning/task_graph.py": 121,
- "agent/planning/task_plan.py": 637,
+ "agent/planning/task_plan.py": 645,
  "agent/reflection/__init__.py": 11,
  "agent/reflection/dataset.py": 213,
  "agent/reflection/evaluator.py": 293,
