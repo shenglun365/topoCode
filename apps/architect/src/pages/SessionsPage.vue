@@ -109,31 +109,24 @@ const statusFilter = ref('all')      // 生命周期重构: all | active | runni
 // PR3 角色徽标: 会话列表显示 executor 角色名
 async function loadRoles() { /* 角色目录已退役(执行器直绑); 保留空挂点防引用 */ }
 
-// ── 项目隔离(cv-187 反馈): 默认只看当前项目会话; 显式切「全部项目」跨库统一视图 ──
-const includeAllProjects = ref(false)
+// ── 项目隔离(cv-204/205 + 批戊收编裁决): 会话不存在跨项目访问需求——
+// 「全部项目」开关退役, 列表恒为当前项目; 无项目上下文 → 空态引导。
 const currentProjectId = computed(() => projectStore.project?.id || '')
 
 async function load() {
-  // cv-205 闪烁根修: 项目上下文异步加载, 就绪前 pid='' 会误判「无项目→全部」
-  // 发 scope=all(其他项目会话闪现后再被过滤掉)。先等项目事实就绪再查询——
-  // 过滤本身是服务端 ?project= 参数, 这里只修时序。
+  // cv-205: 项目上下文异步加载, 就绪后再查询(过滤=服务端 ?project= 参数)
   if (!projectStore.loaded) await projectStore.load()
   loading.value = true
   try {
     const pid = currentProjectId.value
-    // cv-204/205 项目硬隔离裁决: 全局视角不存在——scope=all 仅显式「全部项目」
-    // 开关可达; 无项目上下文 → 空态引导, 不发全局查询
-    if (!pid && !includeAllProjects.value) {
+    if (!pid) {
       list.value = []
       groupsInfo.value = { groups: [], modules: [] }
       return
     }
-    const allMode = includeAllProjects.value
     const [l, g] = await Promise.all([
-      allMode
-        ? sessionService.list({ limit: 400, scope: 'all' })
-        : sessionService.list({ limit: 400, project: pid }),
-      allMode ? sessionService.groups('all') : sessionService.groups(undefined, pid),
+      sessionService.list({ limit: 400, project: pid }),
+      sessionService.groups(undefined, pid),
     ])
     void loadRoles()
     list.value = l
@@ -142,7 +135,7 @@ async function load() {
     loading.value = false
   }
 }
-watch([currentProjectId, includeAllProjects], () => { void load() })
+watch(currentProjectId, () => { void load() })
 onMounted(async () => {
   // 会话集合变更(右栏对话新建/更新会话) → 左侧列表同步刷新(免手动刷新页面)
   window.addEventListener('arch:sessions-changed', onSessionsChanged)
@@ -260,9 +253,10 @@ async function editTags(c: ConversationMeta) {
   await sessionService.update(c.id, { tags })
   c.tags = tags
   const pid = currentProjectId.value
-  const allMode = includeAllProjects.value || !pid
-  void (allMode ? sessionService.groups('all') : sessionService.groups(undefined, pid))
-    .then((g) => { groupsInfo.value = g })
+  if (pid) {
+    void sessionService.groups(undefined, pid)
+      .then((g) => { groupsInfo.value = g })
+  }
 }
 async function removeSession(c: ConversationMeta) {
   if (!(await dialog.confirm(t('session.actions.deleteConfirm', { title: c.title }), { danger: true }))) return
@@ -339,12 +333,6 @@ function flowLabel(p?: string): string {
           <option value="running">{{ t('session.status.running') }}</option>
           <option value="archived">{{ t('session.status.archived') }}</option>
         </select>
-        <button
-          class="btn btn-sm shrink-0"
-          :class="includeAllProjects ? 'btn-blue' : 'btn-ghost'"
-          :title="t('session.scope.allProjectsTip')"
-          @click="includeAllProjects = !includeAllProjects"
-        >{{ t('session.scope.allProjects') }}</button>
         <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
           <option value="">{{ t('session.group.all') }}</option>
           <optgroup v-if="groupsInfo.groups.length" :label="t('session.group.custom')">
