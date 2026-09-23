@@ -30,6 +30,10 @@ specDraft、task_* 旧语义变体。
 - 新卡三步注册(缺一即渲染面断裂): ①本词汇表登记 kind ②items.CARD_ITEM_MAP
   读侧投影(漏投影=刷新后卡片降级为正文——一致性由测试守门) ③前端 m.item
   分支渲染器。
+- **删除策略(cv-248 liveness 裁决)**: 消息删除是正常操作, 卡的删除安全
+  由读取面自愈兜底(I2 惰性失效)——锚位卡删后由 update-by-meta 失败回落
+  land 自动重建; 回执卡删除无状态影响。新卡登记 kind 时须同时在
+  DELETE_POLICY 声明策略(守门: 词汇表全覆盖), 缺省 receipt。
 
 ## 规范(cv-175/177 裁决)
 - 卡片落流唯一入口 land(): 库路由 / reviewState / meta 序列化 / SSE 通知
@@ -73,6 +77,28 @@ _KNOWN_KINDS = frozenset(
      KIND_DIGEST, KIND_TASK_PLAN, KIND_TASK_PLAN_DONE, KIND_TASK_INPUT_ECHO,
      KIND_TASK_IGNORED, KIND_REQ_IGNORED, KIND_TASK_STATUS,
      *KIND_TASK_RECEIPTS, KIND_CHOICES))
+
+# ── 删除策略(cv-248 liveness): kind → 删除后状态语义(守门全覆盖) ──────
+# rebuildable = 结构投影卡: 删除安全——读取面自愈(update-by-meta 回落 land
+#               重建 / 焦点帧零写点派生 / 进度锚原位重落), 事实层独立不受影响
+# receipt     = 回执/通知卡: 删除无状态影响(纯展示)
+DELETE_REBUILDABLE = "rebuildable"
+DELETE_RECEIPT = "receipt"
+DELETE_POLICY = {
+    KIND_REQUIREMENT: DELETE_REBUILDABLE,   # specReady: 事实层=需求/规约版本行
+    KIND_TASK_PLAN: DELETE_REBUILDABLE,     # 进度锚: 下次刷新原位重落
+    KIND_TASK_STATUS: DELETE_REBUILDABLE,   # 状态卡: 下次状态推进原位重落
+    KIND_CHOICES: DELETE_REBUILDABLE,       # 问询卡: 帧源零写点派生, 跟踪条目独立
+    KIND_TASK_CARD: DELETE_RECEIPT,
+    KIND_TASK_APPROVAL: DELETE_RECEIPT,
+    KIND_TURN_ERROR: DELETE_RECEIPT,
+    KIND_DIGEST: DELETE_RECEIPT,
+    KIND_TASK_PLAN_DONE: DELETE_RECEIPT,
+    KIND_TASK_INPUT_ECHO: DELETE_RECEIPT,
+    KIND_TASK_IGNORED: DELETE_RECEIPT,
+    KIND_REQ_IGNORED: DELETE_RECEIPT,
+    **{k: DELETE_RECEIPT for k in KIND_TASK_RECEIPTS},
+}
 
 _ERROR_REVIEW_STATE = "error"
 

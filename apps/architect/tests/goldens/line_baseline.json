@@ -7,7 +7,7 @@
  "agent/cognition/prompt.py": 512,
  "agent/cognition/roles.py": 141,
  "agent/collab/__init__.py": 0,
- "agent/collab/cards.py": 296,
+ "agent/collab/cards.py": 322,
  "agent/collab/sse.py": 77,
  "agent/compensation/__init__.py": 22,
  "agent/compensation/carriers.py": 89,

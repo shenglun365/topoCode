@@ -106,6 +106,42 @@ def test_clarify_frame_dies_with_action_message(arch):
     assert not any(f.get("kind") == "clarify_pending" for f in _frames())
 
 
+# ── 阶段三: 删除策略契约(词汇表全覆盖, 新卡漏注册即红) ────────────────
+
+def test_delete_policy_covers_all_kinds():
+    """每个登记 kind 必须声明删除策略(缺省不允许——显式注册防新卡漏审)。"""
+    from topoone_app_architect.agent.collab import cards as cards_mod
+    missing = cards_mod._KNOWN_KINDS - set(cards_mod.DELETE_POLICY)
+    extra = set(cards_mod.DELETE_POLICY) - cards_mod._KNOWN_KINDS
+    assert not missing, f"kind 未声明删除策略: {sorted(missing)}"
+    assert not extra, f"删除策略引用未登记 kind: {sorted(extra)}"
+    assert set(cards_mod.DELETE_POLICY.values()) <= {
+        cards_mod.DELETE_REBUILDABLE, cards_mod.DELETE_RECEIPT}
+
+
+def test_rebuildable_kinds_are_self_healing(arch):
+    """rebuildable 承诺的行为兑现: 进度锚删除后, 下次刷新原位重落(自愈)。"""
+    from topoone_app_architect.agent.collab import cards as cards_mod
+    from topoone_app_architect.agent.planning import task_plan as tp
+    assert cards_mod.DELETE_POLICY[cards_mod.KIND_TASK_PLAN] \
+        == cards_mod.DELETE_REBUILDABLE
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+    rid = store.RequirementsStore.create({"id": "RQ-RB", "kind": "user-story",
+                                          "status": "ready", "title": "T",
+                                          "activeVer": 1})["id"]
+    plan = [{"seq": 1, "title": "S1", "instruction": "x", "taskId": "",
+             "status": "pending"}]
+    store.RequirementsStore.update(rid, {"taskPlan": plan})
+    tp._refresh_plan_anchor(conv["id"], rid, plan)
+    anchor = [m for m in store.ConversationsStore.messages(conv["id"])
+              if "taskPlan" in str(m.get("meta") or "")][0]
+    store.ConversationsStore.delete_message(conv["id"], anchor["id"])  # 删锚
+    tp._refresh_plan_anchor(conv["id"], rid, plan)                     # 下次刷新
+    anchors = [m for m in store.ConversationsStore.messages(conv["id"])
+               if "taskPlan" in str(m.get("meta") or "")]
+    assert len(anchors) == 1 and "S1" in anchors[0]["content"]   # 自愈重落
+
+
 def _plan_of(rid: str) -> list:
     rows = store.RequirementsStore.get(rid) or {}
     return rows.get("taskPlan") or []
