@@ -60,7 +60,8 @@ def _land(content, allowed, conv_id="conv-t"):
         finally:
             _ctx.reset_conv(token)
 
-    fc, _conv, used, errs, _landed = _run()
+    fc, _conv, used, errs, landed = _run()
+    io.card_landed = landed    # cv-253: 代落标记(空收尾豁免依据)供断言
     return fc, used, errs, io
 
 
@@ -101,8 +102,9 @@ def test_pure_read_surface_never_lands_cards(arch_env):
     """纯读面(allowed_tools 不含写工具)不代落——载荷按模型原文诚实保留
     +rejected 遥测(cv-242「落卡权=确定性意图命中专属」的执法闭环)。"""
     from topoone_app_architect.arch_routes import store
-    fc, used, errs, _io = _land(f"说明\n{SPEC_JSON}", allowed=set())
+    fc, used, errs, io = _land(f"说明\n{SPEC_JSON}", allowed=set())
     assert used == set()                       # 未代落
+    assert io.card_landed is False             # 未落卡 → 无空收尾豁免
     assert "requirementMd" in fc               # 载荷原文保留(不吞不改)
     assert "已从上文载荷" not in fc and "落库失败" not in fc
     assert store.RequirementsStore.all() == []  # 零卡
@@ -112,9 +114,10 @@ def test_pure_read_surface_never_lands_cards(arch_env):
 def test_authorized_surface_lands_and_strips(arch_env):
     """授权面代落: 需求卡落库 + 载荷正文剥离 + 零合成通知(卡即回执)。"""
     from topoone_app_architect.arch_routes import store
-    fc, used, errs, _io = _land(f"按确认立卡。\n{SPEC_JSON}",
-                                allowed={"req.propose", "req.amend"})
+    fc, used, errs, io = _land(f"按确认立卡。\n{SPEC_JSON}",
+                               allowed={"req.propose", "req.amend"})
     assert used == {"req.propose"} and not errs
+    assert io.card_landed is True              # 代落标记(空收尾豁免, cv-253)
     assert "requirementMd" not in fc           # 载荷剥离
     assert "已从上文载荷" not in fc and "已从提案围栏" not in fc
     reqs = store.RequirementsStore.all()

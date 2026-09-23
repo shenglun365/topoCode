@@ -576,8 +576,9 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     代落成功=卡即回执(cv-203): 剥载荷正文, 不合成任何通知文本;
     失败保留诚实错误(cv-175 纪律)。
     返回 (final_content, conv, tools_used, tool_errors, card_landed)——
-    card_landed=问询卡代落成功(cv-253): 正文剥空时与工具轮 card_closed
-    同规「卡即产物, 空收尾≠空返回错误」。"""
+    card_landed=围栏代落通道本回合成功落卡(choices/规约/任务任一;
+    cv-253): 正文剥空时与工具轮 card_closed 同规「卡即产物,
+    空收尾≠空返回错误」。"""
     from ...arch_routes import req_agent
 
     card_landed = False
@@ -600,7 +601,7 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
             card_landed = True
 
     async def _fence_land(tool: str, args: dict, strip_fn) -> bool:
-        nonlocal final_content
+        nonlocal final_content, card_landed
         if allowed_tools is not None and tool not in allowed_tools:
             # 执法点: 名单外不代落(与工具轮三分支拒绝同规; 载荷原文保留)
             try:
@@ -619,6 +620,7 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
             tools_used.add(tool)
             if res.get("ok"):
                 final_content = strip_fn(final_content)  # 卡即回执(cv-203)
+                card_landed = True                       # 空收尾豁免(cv-253 同规)
                 return True
             tool_errors[tool] = str(res.get("text", ""))[:200]
             notice = f"\n\n⚠️ {tool} 落库失败：{str(res.get('text', ''))[:140]}"
