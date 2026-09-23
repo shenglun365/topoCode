@@ -44,7 +44,7 @@ from ..agent.planning.task_plan import (  # noqa: F401,E402
     extract_task_fence, strip_task_fence)
 from ..agent.collab.cards import (  # noqa: F401,E402
     extract_choices_fence, strip_choices_fence,
-    extract_choices_json_fence, strip_choices_json_fence)
+    extract_choices_json_fence, resolve_choices_payload)
 
 from ..agent.tools.protocol import (  # noqa: F401,E402
     _FENCE,

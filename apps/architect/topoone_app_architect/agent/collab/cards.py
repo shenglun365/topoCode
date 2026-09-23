@@ -214,8 +214,11 @@ def land_plan_progress(conv_id: str, rid: str, text: str, *, total: int = 0,
 # 校验); 选择题组恒带自定义输入与跳过(前端语义, 协议无开关); 开放题组
 # (无 options)纯输入——策略库开放式问题与模型临场问题同构适配。
 
-_CHOICES_FENCE_RE = re.compile(r"```choices\s*\n?(\{.*?\})\s*```", re.DOTALL)
-_CHOICES_JSON_FENCE_RE = re.compile(r"```json\s*\n?(\{.*?\})\s*```", re.DOTALL)
+# 围栏标记词汇(choices=协议显式标记 cv-247; json=漂移形态 cv-252 兜底):
+# 单一模板派生——提取/剥离零复制, 标记互斥由字面天然隔离(零围栏竞争)
+_CHOICES_FENCE_RES = {
+    _m: re.compile(rf"```{_m}\s*\n?(\{{.*?\}})\s*```", re.DOTALL)
+    for _m in ("choices", "json")}
 
 
 def valid_choices_payload(payload: Any) -> bool:
@@ -248,31 +251,39 @@ def extract_choices_fence(text: str) -> Optional[dict]:
 
     只认显式标记——不进 json 候选扫描(cv-246 教训: 围栏竞争致误归属);
     坏载荷返回 None(调用方保留正文, 信息不丢)。"""
-    m = _CHOICES_FENCE_RE.search(text or "")
-    if not m:
-        return None
-    try:
-        d = json.loads(m.group(1))
-    except Exception:  # noqa: BLE001
-        return None
-    return d if valid_choices_payload(d) else None
-
-
-def strip_choices_fence(text: str) -> str:
-    """移除 choices 围栏(落卡成功后卡即回执, 正文复述 JSON 属垃圾——cv-174 同规)。"""
-    if not text or "```choices" not in text:
-        return text or ""
-    return re.sub(r"```choices\s*\n?\{.*?\}\s*```", "", text,
-                  flags=re.DOTALL).strip()
+    return _extract_fence_payload(text, "choices")
 
 
 def extract_choices_json_fence(text: str) -> Optional[dict]:
     """```json 围栏兜底识别(cv-252): 模型漂移到 ```json 标记的问询载荷归一。
 
-    只在问询意图佐证下由调用方启用(GU 判 clarify-first——意图+schema 双门,
-    规避 cv-246「无差别 json 扫描致误归属」教训); 载荷校验与显式标记同一把
-    尺(valid_choices_payload), 协议单源仍是 ```choices(cv-247)。"""
-    m = _CHOICES_JSON_FENCE_RE.search(text or "")
+    只在问询意图佐证下由调用方启用(见 resolve_choices_payload——意图+schema
+    双门); 载荷校验与显式标记同一把尺。"""
+    return _extract_fence_payload(text, "json")
+
+
+def resolve_choices_payload(text: str, *,
+                            intent_clarify: bool = False
+                            ) -> "tuple[Optional[dict], str]":
+    """问询载荷识别单源入口(cv-247 协议 + cv-252 兜底汇一)。
+
+    显式 ```choices 标记优先(协议); 未命中且调用方持问询意图佐证
+    (GU 判 CLARIFY_ACTION——意图+schema 双门, 调用方把关)时对 ```json
+    围栏做同尺兜底, 不做无差别扫描(cv-246)。
+    返回 (payload, marker): marker 供落卡成功后按命中标记精确剥离。"""
+    d = _extract_fence_payload(text, "choices")
+    if d is not None:
+        return d, "choices"
+    if intent_clarify:
+        d = _extract_fence_payload(text, "json")
+        if d is not None:
+            return d, "json"
+    return None, ""
+
+
+def _extract_fence_payload(text: str, marker: str) -> Optional[dict]:
+    """单一提取路径: 按标记取围栏 JSON → valid_choices_payload 同尺校验。"""
+    m = _CHOICES_FENCE_RES[marker].search(text or "")
     if not m:
         return None
     try:
@@ -282,11 +293,15 @@ def extract_choices_json_fence(text: str) -> Optional[dict]:
     return d if valid_choices_payload(d) else None
 
 
-def strip_choices_json_fence(text: str) -> str:
-    """移除命中的 ```json 问询围栏(与 strip_choices_fence 同规: 卡即回执)。"""
-    if not text or "```json" not in text:
-        return text or ""
-    return _CHOICES_JSON_FENCE_RE.sub("", text).strip()
+def strip_choices_fence(text: str, marker: str = "choices") -> str:
+    """移除命中标记的问询围栏(落卡成功后卡即回执, 正文复述 JSON 属垃圾
+    ——cv-174 同规); marker 与 resolve_choices_payload 返回值配对。"""
+    if not text:
+        return ""
+    rx = _CHOICES_FENCE_RES.get(marker)
+    if not rx or not rx.search(text):
+        return text
+    return rx.sub("", text).strip()
 
 
 def land_choices(conv_id: str, payload: dict, *, fingerprint: str = "",

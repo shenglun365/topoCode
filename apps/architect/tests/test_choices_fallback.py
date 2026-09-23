@@ -18,7 +18,7 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect.agent.collab.cards import (
     extract_choices_fence, extract_choices_json_fence,
-    strip_choices_fence, strip_choices_json_fence, valid_choices_payload)
+    resolve_choices_payload, strip_choices_fence, valid_choices_payload)
 
 GOOD = {"title": "基础工作台UI需求澄清",
         "groups": [{"label": "技术栈", "question": "技术栈是什么？",
@@ -62,31 +62,44 @@ def test_explicit_choices_fence_takes_priority():
     assert extract_choices_json_fence(json_text) == GOOD
 
 
-# ── 剥离: 卡即回执 ────────────────────────────────────────────────────
+# ── 剥离: 卡即回执(按命中标记精确剥离) ────────────────────────────────
 
-def test_strip_json_fence_keeps_surrounding_prose():
+def test_strip_by_marker_keeps_surrounding_prose():
     text = "引导语。\n\n" + _fence(GOOD) + "\n\n尾注。"
-    out = strip_choices_json_fence(text)
+    out = strip_choices_fence(text, marker="json")
     assert "```" not in out and "技术栈" not in out
     assert "引导语" in out and "尾注" in out
 
 
 def test_strip_choices_fence_untouched():
-    """原显式剥离不受影响(回归)。"""
+    """原显式剥离不受影响(回归, marker 默认值)。"""
     text = "前文\n\n" + _fence(GOOD, "choices")
     out = strip_choices_fence(text)
     assert "```choices" not in out and out == "前文"
 
 
-# ── 意图门: chat 层传参语义(cards 纯 schema, 门在调用方) ──────────────
+# ── 识别单源入口: 显式优先 + 意图门 ───────────────────────────────────
+
+def test_resolve_explicit_priority_and_marker():
+    """显式 ```choices 优先(协议单源); marker 随命中标记返回。"""
+    both = _fence({"title": "x", "groups": [{"label": "g"}]}, "json") \
+        + _fence(GOOD, "choices")
+    payload, marker = resolve_choices_payload(both)
+    assert (payload, marker) == (GOOD, "choices")
+
+
+def test_resolve_intent_gate_guards_json_fallback():
+    """```json 兜底仅意图佐证(intent_clarify=True)时启用——双门在入口单源。"""
+    text = _fence(GOOD, "json")
+    assert resolve_choices_payload(text) == (None, "")          # 无意图不兜底
+    payload, marker = resolve_choices_payload(text, intent_clarify=True)
+    assert (payload, marker) == (GOOD, "json")
+
 
 def test_intent_gate_is_caller_side():
-    """兜底识别函数本身无意图概念; 双门由调用方把关——本例固化
-    chat.py 的启用条件等价语义: 非 clarify-first 回合不启用兜底。"""
+    """chat 层门条件等价语义固化: 非 clarify-first 回合不启用兜底。"""
     text = _fence(GOOD)
-    # cards 层只回答「是不是合法问询载荷」
     assert valid_choices_payload(extract_choices_json_fence(text))
-    # 门条件(与 chat.py 同式): gu_action == "clarify-first" 才调用兜底
     for gu_action in ("", "propose-plan", "task-status"):
         assert (gu_action == "clarify-first") is False
 

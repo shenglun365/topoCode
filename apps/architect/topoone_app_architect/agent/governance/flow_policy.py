@@ -208,7 +208,8 @@ _TOP_KEYS = ("version", "phases", "hintTemplates", "injections", "aggregation",
 
 GOAL_KINDS = ("command", "requirement", "operation", "inquiry", "continuation",
               "help")
-GOAL_ACTIONS = ("passthrough", "clarify-first", "propose-requirement",
+CLARIFY_ACTION = "clarify-first"  # 澄清优先动作(词汇单源: goal 判别/焦点帧/chat 兜底门同引)
+GOAL_ACTIONS = ("passthrough", CLARIFY_ACTION, "propose-requirement",
                 "propose-task", "continue", "answer", "ask-one-question",
                 "present-options", "provide-help")
 _PHASE_KEYS = ("note", "elementHints", "guards")

@@ -20,7 +20,8 @@ import re
 
 from typing import Any, Dict, List, Optional
 
-from ..governance.flow_policy import DEFAULT_FLOW_POLICY, GOAL_ACTIONS
+from ..governance.flow_policy import (CLARIFY_ACTION, DEFAULT_FLOW_POLICY,
+                                      GOAL_ACTIONS)
 
 __all__ = ["build_goal_profile", "resolve_goal_directive", "apply_goal_directive"]
 
@@ -240,7 +241,7 @@ def resolve_goal_directive(profile: Dict[str, Any], pol: Dict[str, Any]) -> Dict
                     out["choices"] = choices
                     out["choicesFingerprint"] = (
                         f"strategy:{profile.get('strategy')}"
-                        if action == "clarify-first" else "candidates")
+                        if action == CLARIFY_ACTION else "candidates")
                 return out
         except Exception:  # noqa: BLE001 — 单规则故障不碍决策
             continue
@@ -283,7 +284,7 @@ def _gu_choices_payload(action: str, p: Dict[str, Any]) -> Optional[Dict[str, An
     clarify-first(带策略问题集) → 开放题组(要素=组, 问题=question);
     present-options → 候选选项组(单组单选)。模型围栏源(①)与此同卡型——
     通用结构只有一个问询实体。"""
-    if action == "clarify-first":
+    if action == CLARIFY_ACTION:
         qs = [str(q).strip() for q in p.get("strategyQuestions") or []
               if str(q).strip()]
         if not qs:
@@ -318,14 +319,14 @@ def _directive_text(pol: dict, action: str, p: Dict[str, Any],
     templates = (pol.get("goal") or {}).get("directives") or {}
     defaults = (DEFAULT_FLOW_POLICY.get("goal") or {}).get("directives") or {}
     key = action
-    if action == "clarify-first" and with_strategy == "strategy" \
+    if action == CLARIFY_ACTION and with_strategy == "strategy" \
             and p.get("strategyQuestions"):
         key = "clarify-first"
-    elif action == "clarify-first":
+    elif action == CLARIFY_ACTION:
         key = "clarify-first-generic"
     tpl = str(templates.get(key) if templates.get(key) is not None
               else defaults.get(key, ""))
-    if action == "clarify-first" and with_strategy == "strategy" \
+    if action == CLARIFY_ACTION and with_strategy == "strategy" \
             and not p.get("strategyQuestions"):
         tpl = str(templates.get("clarify-first-generic")
                   or defaults.get("clarify-first-generic", ""))

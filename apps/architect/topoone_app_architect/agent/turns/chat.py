@@ -15,6 +15,7 @@ from .base import (_MAX_TOOL_ROUNDS, _MIN_CHAT_MAX_TOKENS, _STREAM_IDLE_TIMEOUT_
                    _TURN_BUDGET_S, SendFn, _TurnIO)
 
 from ..cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
+from ..governance.flow_policy import CLARIFY_ACTION
 logger = logging.getLogger(__name__)
 
 
@@ -578,21 +579,18 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     # ── 结构化问询卡(choices 交互卡, cv-247): 非实体写卡——不落
     # Requirements/Tasks, 故不经 GU 写权验权(执法点管「写实体权力」);
     # 每回合最多 1 张; 坏载荷不落卡, 正文原样保留(信息不丢)。
-    # ```json 兜底(cv-252): GU 判 clarify-first(意图佐证)而模型漂移到
-    # ```json 标记——schema 同尺校验后落卡, 裸 JSON 不再漏到前端。
-    choices_payload = req_agent.extract_choices_fence(final_content)
-    json_fallback = False
-    if not choices_payload and str(gu_action or "") == "clarify-first":
-        choices_payload = req_agent.extract_choices_json_fence(final_content)
-        json_fallback = choices_payload is not None
+    # 识别单源(cards.resolve_choices_payload): 显式 ```choices 优先;
+    # GU 判 CLARIFY_ACTION(意图佐证)时对 ```json 漂移形态同尺兜底(cv-252)。
+    choices_payload, choices_marker = req_agent.resolve_choices_payload(
+        final_content,
+        intent_clarify=(str(gu_action or "") == CLARIFY_ACTION))
     if choices_payload and "choices" not in tools_used:
         from ..collab import cards as _cards
         landed = await asyncio.to_thread(
             _cards.land_choices, conv_id, choices_payload)
-        if landed:
-            final_content = (_cards.strip_choices_json_fence(final_content)
-                             if json_fallback
-                             else _cards.strip_choices_fence(final_content))
+        if landed:  # 按命中标记精确剥离(卡即回执, cv-203)
+            final_content = _cards.strip_choices_fence(
+                final_content, marker=choices_marker)
 
     async def _fence_land(tool: str, args: dict, strip_fn) -> bool:
         nonlocal final_content
