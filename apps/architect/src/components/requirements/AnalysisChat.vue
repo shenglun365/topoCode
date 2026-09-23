@@ -9,9 +9,12 @@ import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
 import ChoicesCard from '@/components/chat/ChoicesCard.vue'
-import { parseSpecPayload, assembleSpecView } from '@/services/spec-view'
 import AssetsPanel from '@/components/chat/AssetsPanel.vue'
 import CtxUsageChip from '@/components/chat/CtxUsageChip.vue'
+import CollapseChevron from '@/components/chat/CollapseChevron.vue'
+import ChevronSvg from '@/components/chat/ChevronSvg.vue'
+import { useCardCollapse } from '@/composables/useCardCollapse'
+import { parseSpecPayload, assembleSpecView } from '@/services/spec-view'
 import { apiPost, apiGet } from '@/services/api-client'
 import type { CtxUsage, SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
@@ -311,15 +314,15 @@ function pickRoute(r: RouteTarget) {
   routeMenuOpen.value = false
   routeOverride.value = r
 }
-/** 快捷挡直切开关(闪电 icon): 标准=关(暗, 按执行器能力档位自动适配) / 快捷=开(高亮, T0 直通车), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
+/** 快捷挡直切开关(闪电 icon): architect 模式=关(暗, 需求分析→规约→任务完整链, 按执行器能力档位自动适配) / coding 执行器模式=开(高亮, 直出任务卡·关 KB), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
 const quickOn = computed(() => (props.analysisMode || 'strict') === 'quick')
 /** 空白对话(会话未创建)锁定: 挡位是会话级字段, 无 conv_id 可写。 */
 const quickLocked = computed(() => props.hasSession === false)
 const quickTitle = computed(() => {
-  if (quickLocked.value) return '快捷挡需在已有会话中切换 — 发送首条消息创建会话后可用'
+  if (quickLocked.value) return '模式切换需在已有会话中进行 — 发送首条消息创建会话后可用'
   return quickOn.value
-    ? 'T0 直通车已开启 — 直出任务卡·关 KB（点击关闭回到标准挡）'
-    : '标准挡 — 按执行器能力档位自动适配（点击开启 T0 直通车）'
+    ? 'coding 执行器模式 — 直出任务卡·关 KB（点击切回 architect 模式）'
+    : 'architect 模式 — 需求分析→规约→任务，按执行器能力档位自动适配（点击切至 coding 执行器模式）'
 })
 function toggleQuickMode() {
   if (quickLocked.value) return
@@ -379,7 +382,6 @@ const digestMode = ref(false)
 const selIds = ref<Set<string>>(new Set())
 const digestBusy = ref(false)
 const digestDraft = ref<string | null>(null)   // 非空=草稿卡(可编辑)
-const digestSentOpen = reactive<Record<number, boolean>>({})
 
 /** 任务状态卡样式映射(cv-203): running/waiting/done/failed → 图标+配色。 */
 function statusStrip(it: any): { icon: string; cls: string } {
@@ -457,10 +459,6 @@ function onAutoSendToggle(e: Event) {
   localStorage.setItem(DIGEST_AUTO_KEY, digestAutoSend.value ? '1' : '0')
 }
 watch(canDigest, (ok) => { if (!ok && digestMode.value) exitDigest() })
-/** 转达摘要回执折叠卡展开态。 */
-function toggleDigestSent(i: number) {
-  digestSentOpen[i] = !digestSentOpen[i]
-}
 /** 草稿卡标题: 当前转达目标任务。 */
 const digestTargetTitle = computed(() => {
   const r = effectiveRoute.value
@@ -519,21 +517,26 @@ function specVer(m: any) {
  * attach/rehydrate 供给)降级为载荷。正文 = 五段 MD(与执行器指令同构:
  * 需求目标/方案/允许改动范围/禁止改动/验收标准——所见即所得), 不截断;
  * 兜底播报原文。active: 需求已有进行中任务(执行按钮禁用)。 */
-const specCollapsed = reactive<Record<string, boolean>>({})
-/** 卡片收起键: 按"消息卡"独立(v1/v2 各自收起, 不再按需求共享)。 */
-function _specCardKey(m: any) {
-  return String(m.item?.id || m.id || m.item?.payload?.requirementId || '')
+// ── 信息卡收起/展开(统一状态源 useCardCollapse; 用户覆盖持久化 localStorage) ──
+const { isCollapsed: cardIsCollapsed, toggle: cardToggle } = useCardCollapse()
+/** 卡键: 消息 id 为稳定持久键(可选子键区分同消息多卡, 如 conventions 多条)。 */
+function _cardKey(m: any, sub = '') {
+  const base = String(m.item?.id || m.id || m.proposal?.id || m.item?.payload?.requirementId || '')
+  return sub ? `${base}:${sub}` : base
 }
-/** 旧版卡默认收起(历史快照仅参考); 用户手动展开/收起后以手动为准。 */
+function mCollapsed(m: any, auto = false, sub = '') {
+  return cardIsCollapsed(_cardKey(m, sub), auto)
+}
+function toggleM(m: any, auto = false, sub = '') {
+  cardToggle(_cardKey(m, sub), auto)
+}
+/** 需求卡: 旧版快照默认收起; 用户手动展开/收起后以手动为准(持久化)。 */
 function specCardCollapsed(m: any) {
-  const k = _specCardKey(m)
-  return k in specCollapsed ? specCollapsed[k] : specSuperseded(m)
+  return mCollapsed(m, specSuperseded(m))
 }
 function toggleSpecCard(m: any) {
-  const k = _specCardKey(m)
-  specCollapsed[k] = !specCardCollapsed(m)
-}
-/** 取代本卡的新版本号(快照徽标用)。 */
+  toggleM(m, specSuperseded(m))
+}/** 取代本卡的新版本号(快照徽标用)。 */
 function specSupersededVer(m: any) {
   const rid = m.item?.payload?.requirementId
   const ver = Number(m.item?.payload?.ver || 0)
@@ -1164,7 +1167,8 @@ onUnmounted(() => {
             v-if="m.item?.type === 'choices'"
             class="mb-2"
             :payload="(m.item!.payload || {}) as any"
-            :disabled="props.readOnly || props.busy || choicesAnswered.has(String(m.id || m.item?.id || ''))"
+            :disabled="props.readOnly || props.busy"
+            :used="choicesAnswered.has(String(m.id || m.item?.id || ''))"
             @reply="(text: string) => onChoicesReply(String(m.id || m.item?.id || ''), text)"
           />
           <TaskCard
@@ -1344,21 +1348,21 @@ onUnmounted(() => {
             <span v-else class="text-[10px] text-ctp-green">✓ 已合并</span>
             <span v-if="mergeBusyIdx === i" class="text-[10px] text-ctp-overlay0">处理中…</span>
           </div>
-          <!-- 转达摘要回执: 折叠卡(留"给执行器发过什么"的感知, 点开看全文) -->
+          <!-- 转达摘要回执: 折叠卡(留"给执行器发过什么"的感知, 点开看全文; 默认收起) -->
           <div
             v-if="m.item?.type === 'digest'"
             class="rounded-md border border-ctp-teal/25 bg-ctp-teal/5 px-2.5 py-1.5"
           >
-            <button
-              class="flex items-center gap-1.5 text-[10px] text-ctp-teal"
-              @click="toggleDigestSent(i)"
+            <div
+              class="flex items-center gap-1.5 text-[10px] text-ctp-teal cursor-pointer select-none"
+              @click="toggleM(m, true)"
             >
               <ClipboardDocumentIcon class="w-3 h-3" />
               转达摘要 · {{ m.item.payload?.chars ?? m.content.length }} 字
-              <span>{{ digestSentOpen[i] ? '▲ 收起' : '▼ 展开' }}</span>
-            </button>
+              <ChevronSvg class="ml-auto" :collapsed="mCollapsed(m, true)" />
+            </div>
             <div
-              v-if="digestSentOpen[i]"
+              v-if="!mCollapsed(m, true)"
               class="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-ctp-subtext1"
             >{{ m.content }}</div>
           </div>
@@ -1375,8 +1379,11 @@ onUnmounted(() => {
                 class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach"
               >{{ specDraftView(i).priority }}</span>
               <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay0">未落库</span>
+              <CollapseChevron class="ml-auto" :collapsed="mCollapsed(m)" @toggle="toggleM(m)" />
             </div>
-            <ChatMessageBlocks :content="specDraftView(i).body" />
+            <div v-show="!mCollapsed(m)">
+              <ChatMessageBlocks :content="specDraftView(i).body" />
+            </div>
           </div>
           <ChatMessageBlocks
             v-else-if="!(m.role === 'assistant' && !m.item && specDraftIdx.has(i))
@@ -1398,11 +1405,6 @@ onUnmounted(() => {
                 :title="specCardCollapsed(m) ? '展开需求内容' : '收起需求内容'"
                 @click="toggleSpecCard(m)"
               >
-                <svg
-                  class="w-3.5 h-3.5 transition-transform"
-                  :class="specCardCollapsed(m) ? 'text-ctp-overlay0' : 'text-ctp-blue rotate-90'"
-                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
-                ><path d="m9 18 6-6-6-6" /></svg>
                 <span class="text-[11px] font-medium" :class="specSuperseded(m) ? 'text-ctp-overlay0' : 'text-ctp-blue'">{{ specSuperseded(m) ? '需求卡·历史快照' : '需求卡' }}</span>
               </button>
               <span class="font-mono text-[10px] text-ctp-overlay1">{{ m.item.payload?.requirementId }}</span>
@@ -1439,6 +1441,11 @@ onUnmounted(() => {
                 v-if="m.item.payload?.noDesign && !specSuperseded(m)"
                 class="text-[10px] text-ctp-yellow"
               >⚠️ 缺实现方案</span>
+              <CollapseChevron
+                class="ml-auto"
+                :collapsed="specCardCollapsed(m)"
+                @toggle="toggleSpecCard(m)"
+              />
             </div>
             <div
               v-show="!specCardCollapsed(m)"
@@ -1478,9 +1485,17 @@ onUnmounted(() => {
             :class="statusStrip(m.item).cls"
           >
             <span class="text-[13px] leading-5 shrink-0">{{ statusStrip(m.item).icon }}</span>
-            <div class="flex-1 min-w-0 text-[11px] leading-relaxed [&_p]:my-0">
+            <div
+              v-show="!mCollapsed(m)"
+              class="flex-1 min-w-0 text-[11px] leading-relaxed [&_p]:my-0"
+            >
               <ChatMessageBlocks :content="m.content" />
             </div>
+            <CollapseChevron
+              class="ml-auto"
+              :collapsed="mCollapsed(m)"
+              @toggle="toggleM(m)"
+            />
           </div>
 
           <!-- 规约 JSON 落库按钮(字段签名识别, 任何含载荷的助手消息) -->
@@ -1502,6 +1517,14 @@ onUnmounted(() => {
             v-if="m.assets?.length"
             class="mt-2 space-y-1.5"
           >
+            <div class="flex items-center gap-1.5">
+              <span class="text-[10px] uppercase tracking-wide text-ctp-mauve">{{ t('requirement.chat.assetsGroup', { n: m.assets.length }) }}</span>
+              <CollapseChevron class="ml-auto" :collapsed="mCollapsed(m)" @toggle="toggleM(m)" />
+            </div>
+            <div
+              v-show="!mCollapsed(m)"
+              class="space-y-1.5"
+            >
             <div
               v-for="(a, ai) in m.assets"
               :key="a.id"
@@ -1622,6 +1645,7 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+            </div>
           </div>
 
           <!-- 契约条目固化卡（🧾 期望固化：逐条确认/修改/删；判定动作在验收区块） -->
@@ -1629,6 +1653,14 @@ onUnmounted(() => {
             v-if="m.contracts?.length"
             class="mt-2 space-y-1.5"
           >
+            <div class="flex items-center gap-1.5">
+              <span class="text-[10px] uppercase tracking-wide text-ctp-teal">{{ t('requirement.chat.contractsGroup', { n: m.contracts.length }) }}</span>
+              <CollapseChevron class="ml-auto" :collapsed="mCollapsed(m, false, 'contracts')" @toggle="toggleM(m, false, 'contracts')" />
+            </div>
+            <div
+              v-show="!mCollapsed(m, false, 'contracts')"
+              class="space-y-1.5"
+            >
             <div
               v-for="c in m.contracts"
               :key="c.id"
@@ -1688,17 +1720,18 @@ onUnmounted(() => {
                     <button class="btn btn-xs btn-ghost" @click="contractEditOpen[c.id] = false">{{ t('common.cancel') }}</button>
                   </div>
                 </div>
-                <!-- 操作（仅 draft：确认/修改/删——判定统一在验收区块） -->
-                <div v-else-if="c.status === 'draft' && !busy" class="flex gap-1.5 pt-0.5">
-                  <button class="btn btn-xs btn-green" @click="onContractConfirm(c)">
-                    <CheckIcon class="w-3 h-3" />{{ t('requirement.chat.contractConfirm') }}
-                  </button>
-                  <button class="btn btn-xs btn-ghost" @click="openContractEdit(c)">{{ t('requirement.chat.contractEdit') }}</button>
-                  <button class="btn btn-xs btn-ghost text-ctp-red" @click="onContractDelete(c)">
-                    <TrashIcon class="w-3 h-3" />{{ t('requirement.chat.contractDelete') }}
-                  </button>
-                </div>
-              </div>
+                 <!-- 操作（仅 draft：确认/修改/删——判定统一在验收区块） -->
+                 <div v-else-if="c.status === 'draft' && !busy" class="flex gap-1.5 pt-0.5">
+                   <button class="btn btn-xs btn-green" @click="onContractConfirm(c)">
+                     <CheckIcon class="w-3 h-3" />{{ t('requirement.chat.contractConfirm') }}
+                   </button>
+                   <button class="btn btn-xs btn-ghost" @click="openContractEdit(c)">{{ t('requirement.chat.contractEdit') }}</button>
+                   <button class="btn btn-xs btn-ghost text-ctp-red" @click="onContractDelete(c)">
+                     <TrashIcon class="w-3 h-3" />{{ t('requirement.chat.contractDelete') }}
+                   </button>
+                 </div>
+               </div>
+             </div>
             </div>
           </div>
 
@@ -1722,8 +1755,12 @@ onUnmounted(() => {
                 <span class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0">
                   {{ t('naming.status.pending') }}
                 </span>
+                <CollapseChevron :collapsed="mCollapsed(m, false, cv.id)" @toggle="toggleM(m, false, cv.id)" />
               </div>
-              <div class="px-2 pb-1.5 space-y-1 text-[11px]">
+              <div
+                v-show="!mCollapsed(m, false, cv.id)"
+                class="px-2 pb-1.5 space-y-1 text-[11px]"
+              >
                 <div class="text-ctp-text">{{ cv.ruleText }}</div>
                 <div class="flex flex-wrap items-center gap-1.5">
                   <span
@@ -1789,8 +1826,10 @@ onUnmounted(() => {
               >
                 <CheckIcon class="w-3 h-3" />{{ confirmingProposalId === m.proposal.id ? t('assetChat.extractPlan.confirming') : t('assetChat.extractPlan.confirm') }}
               </button>
+              <CollapseChevron :collapsed="mCollapsed(m)" @toggle="toggleM(m)" />
             </div>
             <div
+              v-show="!mCollapsed(m)"
               class="px-2 pb-2 text-[11px] text-ctp-subtext1 max-h-40 overflow-auto markdown-body"
               style="white-space: pre-wrap"
             >{{ (m.proposal.desc || '').slice(0, 600) }}{{ (m.proposal.desc || '').length > 600 ? '…' : '' }}</div>
@@ -1815,8 +1854,12 @@ onUnmounted(() => {
               <button class="btn btn-xs btn-blue" @click="onGotoAcceptance">
                 <ArrowTopRightOnSquareIcon class="w-3 h-3" />{{ t('requirement.chat.gotoAcceptance') }}
               </button>
+              <CollapseChevron :collapsed="mCollapsed(m)" @toggle="toggleM(m)" />
             </div>
-            <div class="px-2 pb-2 space-y-1.5 text-[11px]">
+            <div
+              v-show="!mCollapsed(m)"
+              class="px-2 pb-2 space-y-1.5 text-[11px]"
+            >
               <div class="flex items-center gap-3">
                 <span class="text-ctp-subtext0">
                   L1/L2 {{ t('requirement.chat.passRate') }}:
@@ -1854,39 +1897,45 @@ onUnmounted(() => {
           >
             <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-ctp-blue">
               <QuestionMarkCircleIcon class="w-3 h-3" />{{ t('requirement.chat.questions') }}
+              <CollapseChevron class="ml-auto" :collapsed="mCollapsed(m)" @toggle="toggleM(m)" />
             </div>
             <div
-              v-for="(q, qi) in m.questions"
-              :key="q.key"
-              class="space-y-1"
+              v-show="!mCollapsed(m)"
+              class="space-y-2"
             >
-              <label class="text-[11px] font-medium text-ctp-text">{{ qi + 1 }}. {{ q.label }}</label>
-              <input
-                v-if="q.type === 'text'"
-                v-model="answers[q.key]"
-                class="input !py-1 !text-xs"
-                :placeholder="q.hint"
-              >
               <div
-                v-else-if="q.type === 'select' && q.options?.length"
-                class="flex flex-wrap gap-1"
+                v-for="(q, qi) in m.questions"
+                :key="q.key"
+                class="space-y-1"
               >
-                <button
-                  v-for="o in q.options"
-                  :key="o"
-                  class="btn btn-xs"
-                  :class="answers[q.key] === o ? 'btn-blue' : 'btn-ghost'"
-                  @click="answers[q.key] = o"
+                <label class="text-[11px] font-medium text-ctp-text">{{ qi + 1 }}. {{ q.label }}</label>
+                <input
+                  v-if="q.type === 'text'"
+                  v-model="answers[q.key]"
+                  class="input !py-1 !text-xs"
+                  :placeholder="q.hint"
                 >
-                  {{ o }}
-                </button>
+                <div
+                  v-else-if="q.type === 'select' && q.options?.length"
+                  class="flex flex-wrap gap-1"
+                >
+                  <button
+                    v-for="o in q.options"
+                    :key="o"
+                    class="btn btn-xs"
+                    :class="answers[q.key] === o ? 'btn-blue' : 'btn-ghost'"
+                    @click="answers[q.key] = o"
+                  >
+                    {{ o }}
+                  </button>
+                </div>
+                <p
+                  v-if="q.hint && q.type !== 'text'"
+                  class="text-[10px] text-ctp-overlay0"
+                >
+                  {{ q.hint }}
+                </p>
               </div>
-              <p
-                v-if="q.hint && q.type !== 'text'"
-                class="text-[10px] text-ctp-overlay0"
-              >
-                {{ q.hint }}
-              </p>
             </div>
             <button
               class="btn btn-sm btn-blue !py-1"
@@ -1903,7 +1952,9 @@ onUnmounted(() => {
           >
             <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-ctp-green">
               <ClipboardDocumentCheckIcon class="w-3 h-3" />{{ t('requirement.chat.draftTitle') }}
+              <CollapseChevron class="ml-auto" :collapsed="mCollapsed(m)" @toggle="toggleM(m)" />
             </div>
+            <div v-show="!mCollapsed(m)" class="space-y-1.5">
             <p class="text-[11px] text-ctp-text font-medium">
               {{ m.formDraft.title }}
             </p>
@@ -1928,6 +1979,7 @@ onUnmounted(() => {
             >
               <CheckIcon class="w-3 h-3" />{{ t('requirement.chat.confirmDraft') }}
             </button>
+            </div>
           </div>
         </div>
       </div>
@@ -2180,24 +2232,27 @@ onUnmounted(() => {
         @input="autoResize"
         @keydown="onInputKeydown"
       />
-      <CtxUsageChip v-if="ctxUsage && (ctxUsage.used || 0) > 0" :usage="ctxUsage" />
-      <button
-        v-if="busy"
-        class="btn btn-red !py-2.5 shrink-0 whitespace-nowrap"
-        :title="t('requirement.chat.stop')"
-        @click="emit('stop')"
-      >
-        <StopIcon class="w-4 h-4" />{{ t('requirement.chat.stop') }}
-      </button>
-      <button
-        v-else
-        class="btn btn-primary !py-2.5 shrink-0 whitespace-nowrap"
-        :disabled="!input.trim() || props.readOnly"
-        :title="t('coding.sendHint')"
-        @click="send"
-      >
-        <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}
-      </button>
+      <div class="flex flex-col items-end gap-1 shrink-0">
+        <!-- 空态也显示(裁决): 发送按钮正上方, 新会话 used=0 即可见 -->
+        <CtxUsageChip v-if="ctxUsage" :usage="ctxUsage" />
+        <button
+          v-if="busy"
+          class="btn btn-red !py-2.5 whitespace-nowrap"
+          :title="t('requirement.chat.stop')"
+          @click="emit('stop')"
+        >
+          <StopIcon class="w-4 h-4" />{{ t('requirement.chat.stop') }}
+        </button>
+        <button
+          v-else
+          class="btn btn-primary !py-2.5 whitespace-nowrap"
+          :disabled="!input.trim() || props.readOnly"
+          :title="t('coding.sendHint')"
+          @click="send"
+        >
+          <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}
+        </button>
+      </div>
     </div>
 
     <!-- 删除消息确认弹窗(DOM) -->

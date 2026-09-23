@@ -3,6 +3,7 @@
  * 裁决对齐: 无流程实体；分类=元数据(标题/时间/模块/自定义分组)；备案文档随时提取。
  */
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from './api-client'
+import type { CtxUsage } from '@/types'
 
 export interface SessionTags {
   modules: string[]
@@ -23,7 +24,7 @@ export interface ConversationMeta {
   /** 执行角色(默认 architect) */
   /** 工作相位: architect(常态) | running(外调作业执行中) */
   workState?: 'architect' | 'running'
-  /** 分析挡位: strict(需求分析→规约→任务) | quick(轻整理直出任务卡)。缺省 strict。 */
+  /** 分析挡位: strict(architect 模式: 需求分析→规约→任务) | quick(coding 执行器模式: 直出任务卡)。缺省 strict。 */
   analysisMode?: 'strict' | 'quick'
   /** 角色集(能力声明; architect 恒在) */
   roles?: string[]
@@ -36,6 +37,8 @@ export interface ConversationMeta {
   updatedAt?: number
   /** 归属项目(scope=all 跨库列表用于能力提案等项目级操作)。 */
   projectId?: string
+  /** 特性状态账(后端 conv.meta 整体透传; 各特性自管键, 如 ctxUsage 上下文用量)。 */
+  meta?: { ctxUsage?: CtxUsage } & Record<string, unknown>
 }
 
 export interface ConversationDetail {

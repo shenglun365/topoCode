@@ -72,11 +72,14 @@ DEFAULT_HELP_TOPICS: List[Dict[str, Any]] = [
               "配置入口：设置面板「执行器配置」(注册表管理 id/类型/参数)。\n"
               "指定方式：任务卡上切换，或消息前缀 `@执行器id`(如 `@cline /执行`)。\n"
               "架构师(architect)只做理解/编排，动手实现一律由执行器承担。")},
-    {"key": "gears", "title": "分析挡位", "updated": "2026-09-22",
-     "kws": ["挡位", "strict", "quick", "分析模式", "预算"],
-     "body": ("会话级 analysisMode 决定分析深度：strict(标准, 默认)/quick(快速简挡)。\n"
+    {"key": "gears", "title": "分析挡位", "updated": "2026-09-23",
+     "kws": ["挡位", "strict", "quick", "分析模式", "预算", "architect 模式",
+             "coding 执行器模式"],
+     "body": ("会话级 analysisMode 决定分析深度：strict(architect 模式, 默认:"
+              "需求分析→规约→任务)/quick(coding 执行器模式: 直出任务卡·关 KB)。\n"
               "挡位影响：拆步与否、工具面宽窄、提示预算、重试策略。\n"
-              "切换入口：会话设置「分析模式」。")},
+              "切换入口：会话输入框上方闪电钮(前端展示名 architect 模式/"
+              "coding 执行器模式)或会话设置「分析模式」。")},
     {"key": "sessions", "title": "会话管理与项目隔离", "updated": "2026-09-22",
      "kws": ["会话", "项目", "分组", "过滤", "隔离", "列表"],
      "body": ("会话按项目硬隔离：列表只显示当前项目的会话(无跨项目访问)。\n"
