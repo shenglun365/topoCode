@@ -22,6 +22,15 @@
 历史遗留(仅存在于旧数据, 渲染层兼容降级, 不再产生): specCreated、guard、
 specDraft、task_* 旧语义变体。
 
+## 持久化契约(cv-248 固化, 通用性承诺)
+- **所有卡 = 会话消息行**(land 单点落 arch_conversation_messages)——持久化
+  与随会话级联删除对全部卡型天然成立, 无例外; 用户填入信息类卡(问询
+  choices/决策 task_approval/等待输入 task_input)与回执类卡同一路径。
+  禁止任何「前端本地状态卡」(不落库即不可持久, 违例=架构缺陷)。
+- 新卡三步注册(缺一即渲染面断裂): ①本词汇表登记 kind ②items.CARD_ITEM_MAP
+  读侧投影(漏投影=刷新后卡片降级为正文——一致性由测试守门) ③前端 m.item
+  分支渲染器。
+
 ## 规范(cv-175/177 裁决)
 - 卡片落流唯一入口 land(): 库路由 / reviewState / meta 序列化 / SSE 通知
   全部单点实现; 禁止再手写 append_message+meta 组合(四实现漂移是
@@ -259,8 +268,26 @@ def land_choices(conv_id: str, payload: dict, *, fingerprint: str = "",
                 return upd
         except Exception as e:  # noqa: BLE001
             logger.warning("[cards] 问询卡原位更新失败 conv=%s: %s", conv_id, e)
-    return land(conv_id, title, kind=KIND_CHOICES, role="assistant",
-                project_id=project_id, agent=agent, **meta_payload)
+    row = land(conv_id, title, kind=KIND_CHOICES, role="assistant",
+               project_id=project_id, agent=agent, **meta_payload)
+    # 需求跟踪资产条目(cv-248 裁决): 问询发出即挂账留档(用户填入的信息
+    # 收集在台账可溯); 仅新卡挂账(原位更新不重复)。
+    if row:
+        try:
+            from ...arch_routes.store import tracking as _tr
+            summary = "；".join(
+                f"{(g.get('label') or g.get('question') or '')[:24]}"
+                for g in (payload.get("groups") or [])[:6])
+            _tr.emit(category="问询", title=title[:120],
+                     content=summary, action_type="澄清",
+                     creator_role="architect", state=_tr.TRACK_DONE,
+                     result="问询卡已落流，待用户答复",
+                     result_state="ok", ref_type="choices_card",
+                     ref_id=str(row.get("id") or ""),
+                     conversation_id=conv_id, project_id=project_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[cards] 问询卡挂账失败 conv=%s: %s", conv_id, e)
+    return row
 
 
 def emit(conv_id: str, msg_id: str, agent: str = "", kind: str = "") -> None:

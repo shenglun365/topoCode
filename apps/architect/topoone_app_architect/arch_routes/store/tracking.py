@@ -30,7 +30,7 @@ logger = logging.getLogger("arch.store.tracking")
 # ── 可配置字典(collab config; UI 可增改, 不改代码拓展) ──────────────────
 VOCAB_CATEGORIES_KEY = "tracking.categories"
 VOCAB_ACTION_TYPES_KEY = "tracking.actionTypes"
-DEFAULT_CATEGORIES = ["需求", "方案", "任务", "回执", "决策", "异常"]
+DEFAULT_CATEGORIES = ["需求", "方案", "任务", "回执", "决策", "异常", "问询"]
 DEFAULT_ACTION_TYPES = ["编码", "设计", "分析", "决策"]
 
 

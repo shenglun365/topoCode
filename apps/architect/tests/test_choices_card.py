@@ -170,3 +170,59 @@ def test_directive_templates_carry_protocol():
     d = DEFAULT_FLOW_POLICY["goal"]["directives"]
     for k in ("clarify-first", "clarify-first-generic", "present-options"):
         assert "choices" in d[k], k
+
+
+# ── 通用持久化契约(cv-248 裁决固化) ──────────────────────────────────
+
+def test_card_vocabulary_projected_registry_consistent():
+    """架构完整性守门: 词汇表**结构卡/交互卡**必须有读侧投影(CARD_ITEM_MAP)——
+    漏投影 = 刷新后卡片降级为正文(持久化观感断裂, cv-248 实证根因);
+    **文本回执类**显式豁免登记(正文渲染即预期形态, 但豁免必须列出——
+    静默缺失与显式豁免在测试上可区分)。
+    反向: 投影注册表不得出现词汇表外 kind(遗留白名单除外)。"""
+    from topoone_app_architect.agent.collab.cards import _KNOWN_KINDS
+    from topoone_app_architect.agent.execution.items import CARD_ITEM_MAP
+    # 文本回执类(显式豁免: 正文渲染即预期; 新增豁免须在此登记并注明理由)
+    TEXT_RECEIPT_KINDS = {
+        "task_ignored", "req_ignored",      # 置灰回执(文本即形态)
+        "task_progress",                    # 进度回执(cv-203 前遗产, 文本)
+        "task_start", "task_input", "task_done", "task_failed",
+        "task_approval_done", "taskPlanDone",
+        "turnError", "digest_sent",
+    }
+    structural = [k for k in _KNOWN_KINDS if k not in TEXT_RECEIPT_KINDS]
+    missing = [k for k in structural if k not in CARD_ITEM_MAP]
+    assert not missing, f"结构卡缺读侧投影(刷新后降级正文): {missing}"
+    legacy = {"specCreated", "task_verify"}          # 历史遗留(仅旧数据)
+    unknown = [k for k in CARD_ITEM_MAP
+               if k not in _KNOWN_KINDS and k not in legacy]
+    assert not unknown, f"投影注册表出现词汇表外 kind: {unknown}"
+
+
+def test_choices_card_tracking_entry(arch_env):
+    """需求跟踪资产条目: 问询发出即挂账留档(category=问询, ref=卡消息行);
+    原位更新不重复挂账。"""
+    from topoone_app_architect.agent.collab.cards import land_choices
+    from topoone_app_architect.arch_routes import store
+    store.ConversationsStore.create({"id": "conv-tr", "kind": "generic",
+                                     "title": "t"})
+    pay = {"title": "选型确认", "groups": [{"label": "后端框架",
+                                            "question": "用哪个？"}]}
+    land_choices("conv-tr", pay, fingerprint="strategy:env_setup")
+    rows = _tracking_all()
+    hit = [r for r in rows if (r.get("refType") or "") == "choices_card"
+           and (r.get("title") or "") == "选型确认"]
+    assert hit, "问询卡落流必须挂跟踪条目"
+    assert hit[0].get("state") == "done"
+    # 原位更新 → 不重复挂账
+    pay2 = {"title": "选型确认 v2", "groups": pay["groups"]}
+    land_choices("conv-tr", pay2, fingerprint="strategy:env_setup")
+    rows2 = _tracking_all()
+    hit2 = [r for r in rows2 if (r.get("refType") or "") == "choices_card"]
+    assert len(hit2) == 1, "原位更新不得重复挂账"
+
+
+def _tracking_all():
+    from topoone_app_architect.arch_routes.store import tracking as _tr
+    # all() 项目硬隔离(无请求上下文→[]); 测试面走 all_across
+    return _tr.TrackingItemsStore.all_across(category="问询")
