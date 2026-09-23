@@ -8,10 +8,12 @@ import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/ser
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
-import ChoicesCard from '@/components/chat/ChoicesCard.vue' 
+import ChoicesCard from '@/components/chat/ChoicesCard.vue'
+import { parseSpecPayload, assembleSpecView } from '@/services/spec-view'
 import AssetsPanel from '@/components/chat/AssetsPanel.vue'
+import CtxUsageChip from '@/components/chat/CtxUsageChip.vue'
 import { apiPost, apiGet } from '@/services/api-client'
-import type { SemanticAsset } from '@/types'
+import type { CtxUsage, SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
 import { copyText } from '@/utils/clipboard'
 
@@ -58,6 +60,8 @@ const props = defineProps<{
   showAssetsPanel?: boolean
   /** v2 coding subagent 任务清单(arch_tasks, 倒序; TaskCard 渲染 + 语境路由用)。 */
   tasks?: Array<Record<string, any>>
+  /** 上下文用量账目(宿主自 activeMeta.meta.ctxUsage 下发; 空=从未对话不渲染)。 */
+  ctxUsage?: CtxUsage | null
 }>()
 
 const emit = defineEmits<{
@@ -140,28 +144,22 @@ async function confirmMerge(i: number, taskId: string) {
   }
 }
 
-// ── 规约 JSON 识别(字段签名): 「写入需求」按钮的显示条件与载荷提取 ──
-const SPEC_FIELDS = [
-  'title', 'requirementMd', 'designMd', 'allowedScope', 'allowedScopeMd',
-  'forbiddenScope', 'forbiddenScopeMd', 'acceptance', 'acceptanceMd',
-  'assessmentMd', 'estMin', 'priority',
-]
-function parseSpecPayload(content: string): Record<string, unknown> | null {
-  if (!content) return null
-  const fences = [...content.matchAll(/```json\s*(\{[\s\S]*?})\s*```/g)]
-  for (const f of fences) {
-    try {
-      const obj = JSON.parse(f[1])
-      if (obj && typeof obj === 'object') {
-        const hits = SPEC_FIELDS.filter((k) => k in obj).length
-        if (hits >= 3) return obj
-      }
-    } catch { /* 下一个围栏 */ }
-  }
-  return null
-}
+// ── 规约 JSON 识别(字段签名): 单源在 services/spec-view(识别/归一/分节
+// 组装一体)——「写入需求」按钮与正文规约草稿视图(cv-248)共用。 ──
 function specPayloadOf(index: number): Record<string, unknown> | null {
   return parseSpecPayload(props.turns[index]?.content || '')
+}
+// 正文规约草稿视图(cv-248): 规约 schema 载荷按 MD 分节渲染(载荷形态决定
+// 渲染形态), 不再代码块原样显示。computed 集合(识别含正则, 避免逐帧重跑)。
+const specDraftIdx = computed(() => {
+  const set = new Set<number>()
+  ;(props.turns || []).forEach((m: any, i: number) => {
+    if (m.role === 'assistant' && !m.item && specPayloadOf(i)) set.add(i)
+  })
+  return set
+})
+function specDraftView(i: number) {
+  return assembleSpecView(specPayloadOf(i) || {}, '')
 }
 const specBusyIdx = ref(-1)
 // cv-248: 已写入态(本地)——写入成功后按钮禁用防重复(后端另有指纹幂等兜底)
@@ -549,37 +547,12 @@ function specSupersededVer(m: any) {
 }
 function specCard(m: any) {
   // cv-215: 卡自包含规约载荷优先(本版全文——历史版本卡即历史快照);
-  // 旧数据(无 spec 载荷)回落 m.proposal(台账当前版)
+  // 旧数据(无 spec 载荷)回落 m.proposal(台账当前版)。
+  // 分节组装单源=services/spec-view(与正文规约草稿视图共用, cv-248)。
   const p = m.item?.payload?.spec || m.proposal || {}
   const active = reqActiveTask(m.item?.payload?.requirementId)
-  const sections: string[] = []
-  const desc = String(p.desc || m.content || '').trim()
-  if (desc) sections.push(`## 需求目标\n\n${desc}`)
-  const functional: string[] = Array.isArray(p.functionalScope) ? p.functionalScope : []
-  if (functional.length) {
-    sections.push('## 需求目标清单\n\n' + functional.map((x) => `- ${x}`).join('\n'))
-  }
-  const design = String(p.design || '').trim()
-  if (design) sections.push(`## 方案\n\n${design}`)
-  const allowed: string[] = Array.isArray(p.allowedScope) ? p.allowedScope : []
-  if (allowed.length) {
-    sections.push('## 允许改动范围\n\n' + allowed.map((x) => `- ${x}`).join('\n'))
-  }
-  const forbidden: string[] = Array.isArray(p.forbiddenScope) ? p.forbiddenScope : []
-  if (forbidden.length) {
-    sections.push('## 禁止改动\n\n' + forbidden.map((x) => `- ${x}`).join('\n'))
-  }
-  const acc: string[] = Array.isArray(p.acceptance) ? p.acceptance : []
-  if (acc.length) {
-    sections.push('## 验收标准\n\n' + acc.map((a, i) => `${i + 1}. ${a}`).join('\n'))
-  }
-  const assess = String(p.assessmentSummary || '').trim()
-  if (assess) sections.push(`## 评估摘要\n\n${assess}`)
   return {
-    title: String(p.title || ''),
-    priority: String(p.priority || ''),
-    body: sections.join('\n\n'),
-    hasBody: sections.length > 0,
+    ...assembleSpecView(p, String(m.content || '').slice(0, 60)),
     active: !!active,
     activeStatus: active ? String(active.status) : '',
   }
@@ -1389,8 +1362,25 @@ onUnmounted(() => {
               class="mt-1.5 whitespace-pre-wrap text-[11px] leading-relaxed text-ctp-subtext1"
             >{{ m.content }}</div>
           </div>
+          <!-- 规约草稿视图(cv-248): 正文规约 schema 载荷按 MD 分节渲染——
+               载荷形态决定渲染形态, 与 specReady 卡同源(spec-view)。 -->
+          <div
+            v-if="specDraftIdx.has(i)"
+            class="rounded-lg border border-ctp-surface1 bg-ctp-mantle/60 px-3 py-2"
+          >
+            <div class="mb-1 flex items-center gap-2">
+              <span class="font-semibold text-ctp-text">{{ specDraftView(i).title || '需求规约（未落库）' }}</span>
+              <span
+                v-if="specDraftView(i).priority"
+                class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach"
+              >{{ specDraftView(i).priority }}</span>
+              <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay0">未落库</span>
+            </div>
+            <ChatMessageBlocks :content="specDraftView(i).body" />
+          </div>
           <ChatMessageBlocks
-            v-else-if="m.item?.type !== 'spec' && m.item?.type !== 'task_status'
+            v-else-if="!(m.role === 'assistant' && !m.item && specDraftIdx.has(i))
+              && m.item?.type !== 'spec' && m.item?.type !== 'task_status'
               && m.item?.type !== 'choices'"
             :content="m.content"
           />
@@ -2190,6 +2180,7 @@ onUnmounted(() => {
         @input="autoResize"
         @keydown="onInputKeydown"
       />
+      <CtxUsageChip v-if="ctxUsage && (ctxUsage.used || 0) > 0" :usage="ctxUsage" />
       <button
         v-if="busy"
         class="btn btn-red !py-2.5 shrink-0 whitespace-nowrap"
