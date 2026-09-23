@@ -185,10 +185,11 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
         pass
 
     # ---- 回合后落库通道(仅确定性围栏, 缓解守卫已按用户裁决拆除 cv-175) ----
-    final_content, conv, tools_used, tool_errors = await _post_turn_land(
-        io, conv_id, msgs, root, project, eff_model, model_id, conv,
-        tools_used, tool_errors, final_content, request_id,
-        allowed_tools=allowed_tools, gu_action=gu_action)
+    final_content, conv, tools_used, tool_errors, card_landed = \
+        await _post_turn_land(
+            io, conv_id, msgs, root, project, eff_model, model_id, conv,
+            tools_used, tool_errors, final_content, request_id,
+            allowed_tools=allowed_tools, gu_action=gu_action)
 
     tool_round_meta = None
     if final_content and _PLACEHOLDER_ONLY_RE.match(final_content.strip()):
@@ -233,8 +234,9 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
             pass
     else:
         # cv-203: 落卡工具产卡后的有意空收尾 → 卡片即回合产物, 不落消息也不报
-        # turnError——只发 done 事件收口前端 busy 态。
-        if loop.get("card_closed") and not tool_errors:
+        # turnError——只发 done 事件收口前端 busy 态。问询卡围栏代落成功
+        # (card_landed, cv-253)同规: 模型只输出围栏无正文时剥空≠空返回错误。
+        if (loop.get("card_closed") or card_landed) and not tool_errors:
             await io.send_ev({"type": "done", "conversationId": conv_id,
                               "content": "", "cardClosed": True})
             return
@@ -573,8 +575,12 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     task.propose), 不由围栏标记/正则竞争决定。
     代落成功=卡即回执(cv-203): 剥载荷正文, 不合成任何通知文本;
     失败保留诚实错误(cv-175 纪律)。
-    返回 (final_content, conv, tools_used, tool_errors)。"""
+    返回 (final_content, conv, tools_used, tool_errors, card_landed)——
+    card_landed=问询卡代落成功(cv-253): 正文剥空时与工具轮 card_closed
+    同规「卡即产物, 空收尾≠空返回错误」。"""
     from ...arch_routes import req_agent
+
+    card_landed = False
 
     # ── 结构化问询卡(choices 交互卡, cv-247): 非实体写卡——不落
     # Requirements/Tasks, 故不经 GU 写权验权(执法点管「写实体权力」);
@@ -591,6 +597,7 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
         if landed:  # 按命中标记精确剥离(卡即回执, cv-203)
             final_content = _cards.strip_choices_fence(
                 final_content, marker=choices_marker)
+            card_landed = True
 
     async def _fence_land(tool: str, args: dict, strip_fn) -> bool:
         nonlocal final_content
@@ -633,7 +640,7 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
             await _fence_land("task.propose", task_fence,
                               req_agent.strip_task_fence)
 
-    return final_content, conv, tools_used, tool_errors
+    return final_content, conv, tools_used, tool_errors, card_landed
 
 async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_rounds: int = 4,
                            tools_used: Optional[set] = None,

@@ -121,3 +121,41 @@ def test_json_fallback_lands_choices_card(arch_env):
     assert meta.get("kind") == "choices"
     assert meta.get("title") == GOOD["title"]
     assert meta.get("groups") == GOOD["groups"]
+
+
+# ── cv-253: 正文只有围栏 → 代落成功后剥空 ≠ 空返回错误 ────────────────
+
+def test_bare_fence_turn_returns_card_landed(arch_env):
+    """模型只输出 json 围栏(无正文)时, 问询卡代落成功即回合产物——
+    代落通道必须上抛 card_landed(与工具轮 card_closed 同规, cv-203),
+    否则空收尾被误判 turnError(cv-253 实弹: 问询卡+假❌同时出现)。"""
+    import asyncio
+    from types import SimpleNamespace
+    from topoone_app_architect.agent.turns.chat import _post_turn_land
+    from topoone_app_architect.arch_routes import ctx as _ctx, store
+    store.ConversationsStore.create({"id": "conv-bare", "kind": "generic",
+                                     "title": "t"})
+
+    async def _send(ev):
+        pass
+
+    token = _ctx.set_conv("conv-bare")
+    try:
+        fc, _c, _u, _e, landed = asyncio.run(_post_turn_land(
+            SimpleNamespace(send=_send), "conv-bare", [], None, None, None,
+            None, {}, set(), {}, _fence(GOOD), None,
+            allowed_tools=set(), gu_action="clarify-first"))
+    finally:
+        _ctx.reset_conv(token)
+    assert landed is True                 # 代落标记上抛(空收尾豁免依据)
+    assert fc == ""                       # 正文剥空——卡即回合产物
+    # 无意图佐证(非 clarify-first)时同载荷不代落、正文诚实保留
+    token = _ctx.set_conv("conv-bare")
+    try:
+        fc2, _c2, _u2, _e2, landed2 = asyncio.run(_post_turn_land(
+            SimpleNamespace(send=_send), "conv-bare", [], None, None, None,
+            None, {}, set(), {}, _fence(GOOD), None,
+            allowed_tools=set(), gu_action="propose-requirement"))
+    finally:
+        _ctx.reset_conv(token)
+    assert landed2 is False and "```json" in fc2

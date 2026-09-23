@@ -171,7 +171,7 @@
  "arch_routes/websocket.py": 197,
  "arch_routes/ws_events.py": 5,
  "arch_routes/zmq_stream.py": 101,
- "agent/turns/chat.py": 730,
+ "agent/turns/chat.py": 737,
  "agent/execution/dispatch.py": 813,
  "agent/turns/help_docs.py": 141,
  "agent/governance/focus.py": 309

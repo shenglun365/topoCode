@@ -60,7 +60,7 @@ def _land(content, allowed, conv_id="conv-t"):
         finally:
             _ctx.reset_conv(token)
 
-    fc, _conv, used, errs = _run()
+    fc, _conv, used, errs, _landed = _run()
     return fc, used, errs, io
 
 
