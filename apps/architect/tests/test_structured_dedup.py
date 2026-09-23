@@ -111,7 +111,7 @@ def test_final_round_branch_duplicate_propose_deduped(tmp_path, monkeypatch):
         with client.websocket_connect(WS_PATH) as ws:
             ws.send_json({"type": "chat", "kind": "generic", "title": "t",
                           "conversationId": conv["id"],
-                          "messages": [{"role": "user", "content": "建卡"}]})
+                          "messages": [{"role": "user", "content": "建需求卡"}]})
             ev = None
             for _ in range(40):
                 ev = ws.receive_json()

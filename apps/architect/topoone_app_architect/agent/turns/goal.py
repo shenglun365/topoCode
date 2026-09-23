@@ -37,6 +37,8 @@ _KIND_CANDIDATES = [
 # 「帮我跑个脚本看看」(纯执行框架)维持操作单判——防菜单滥用回归僵硬。
 _BUILD_MARK_RE = re.compile(
     r"(做一个|做个|写个|写一个|开发|实现|封装|新建|新增|加一个|添加|搭一个)")
+# 显式建卡请求(cv-242 对偶面): 字面要求创建需求卡 → requirement 面(propose 权)
+_CARD_ASK_RE = re.compile(r"(建需求卡|创建需求卡|生成需求卡)")
 
 
 def build_goal_profile(question: str, conv: Optional[dict] = None,
@@ -82,6 +84,27 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
         prof.update(kind="requirement", confidence=0.85, explicit=True)
         prof["sources"].append("explicit-instruction")
     else:
+        # L0-2.5 帮助意图(批戊补): 产品使用咨询(帮助/怎么用/配置方法…) →
+        # kind=help → provide-help(help.lookup 读类)。构建标记排除(「写个
+        # 使用手册」是开发诉求, 走需求路线); 先于策略/执行词表(「执行器」
+        # 的「执行」字不得把使用咨询拖成任务)。
+        from .help_docs import match_help
+        if match_help(q):
+            prof.update(kind="help", confidence=0.85)
+            prof["sources"].append("help")
+            return prof
+        # L0-2.6 显式建卡请求(批戊补, cv-242 对偶面): 「建需求卡/创建/生成需求卡」
+        # → requirement 面(req.propose 可达)。纯读兜底(cv-242 修复)的对偶纪律:
+        # 明确动作诉求不落兜底。排除已由 help 的构建标记先行覆盖。
+        m_card = _CARD_ASK_RE.search(q)
+        if m_card:
+            prof.update(kind="requirement", confidence=0.8)
+            prof["sources"].append("card-ask")
+            rid0 = str((conv or {}).get("reqId") or "")
+            if rid0:
+                prof["boundReq"] = rid0
+                prof["target"] = f"req:{rid0}"
+            return prof
         # L0-3/L0-4 边界裁决 + 候选面: 策略库(需求知识) vs 通用执行词表
         # (操作原型)。强命中/单信号 → 现状单判; 独立弱撞 → 双候选菜单。
         from ..requirements.clarify import match_strategy, \

@@ -293,7 +293,7 @@ def test_card_round_short_circuit_skips_narration(pipeline):
     ]
     with client:
         with client.websocket_connect(WS_PATH) as ws:
-            _chat(ws, "帮我做一个短路验证的小需求")
+            _chat(ws, "帮我建需求卡：短路验证")
             ev = _recv_until(ws, "done")
     # 落卡轮空文本收尾(cardClosed), 不再合成"需求卡已创建"重复文本
     assert ev.get("content") == "" and ev.get("cardClosed") is True

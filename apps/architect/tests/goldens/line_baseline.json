@@ -33,7 +33,7 @@
  "agent/execution/runner_client.py": 183,
  "agent/governance/boundary.py": 142,
  "agent/governance/flow.py": 380,
- "agent/governance/flow_policy.py": 597,
+ "agent/governance/flow_policy.py": 641,
  "agent/governance/gears.py": 312,
  "agent/governance/goal_defaults.py": 73,
  "agent/governance/light_tasks.py": 62,
@@ -81,7 +81,7 @@
  "agent/turns/call.py": 162,
  "agent/turns/catalog.py": 89,
  "agent/turns/context.py": 344,
- "agent/turns/goal.py": 345,
+ "agent/turns/goal.py": 368,
  "agent/turns/intent_llm.py": 118,
  "arch_routes/__init__.py": 59,
  "arch_routes/acceptance.py": 533,
@@ -172,5 +172,6 @@
  "arch_routes/ws_events.py": 5,
  "arch_routes/zmq_stream.py": 101,
  "agent/turns/chat.py": 691,
- "agent/execution/dispatch.py": 774
+ "agent/execution/dispatch.py": 774,
+ "agent/turns/help_docs.py": 141
 }

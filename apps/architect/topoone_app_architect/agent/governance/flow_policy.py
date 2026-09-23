@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ...arch_routes.store.states import FLOW_PHASES
 from .goal_defaults import DEFAULT_GOAL_STRATEGIES
+from ..turns.help_docs import DEFAULT_HELP_TOPICS
 
 logger = logging.getLogger("arch.flow_policy")
 
@@ -135,8 +136,11 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
              "tools": ["task.propose"]},
             {"when": {"kind": "continuation"}, "then": "continue",
              "tools": ["req.amend", "req.propose"]},
-            {"when": {"kind": "inquiry"}, "then": "answer",
-             "tools": ["req.propose", "task.propose"]},
+            {"when": {"kind": "help"}, "then": "provide-help",
+             "tools": ["help.lookup"]},
+            # cv-242: 兜底轮纯读(零写面)——落卡权=确定性意图命中的专属权利;
+            # 诉求收敛靠下一回合重判(每回合重判原则), 不靠兜底轮脑补
+            {"when": {"kind": "inquiry"}, "then": "answer", "tools": []},
             # 可配置扩展位(缺省不启用): forced 全量先问(含策略未命中)由运营按需加
             # {"when": {"kind": "inquiry", "clarifyMode": "forced"},
             #  "then": "clarify-first"}——when 支持 clarifyMode/explicit 键。
@@ -147,7 +151,7 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
                      "project.ctx", "asset.semantic.search",
                      "asset.semantic.detail", "asset.semantic.stats",
                      "asset.semantic.mappings", "asset.semantic.reconcile",
-                     "capability.evaluate", "probe.run"],
+                     "capability.evaluate", "probe.run", "help.*"],
         },
         # 澄清策略库(D5 偿还, 2026-09-22 配置化): 引擎在 requirements/clarify.py
         # (match/gap/directive), 条目在此单源——改一条澄清问题 = PUT /flow-policy,
@@ -176,8 +180,12 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
                 "【目标理解(本回合)】续接既有需求({reqId})——补充/调整按 "
                 "req.amend 收敛为新版本；用户提问直接回答"),
             "answer": (
-                "【目标理解(本回合)】咨询/讨论——直接回答；若对话中浮现开发类"
-                "诉求，收敛为需求规约(req.propose)"),
+                "【目标理解(本回合)】咨询/讨论——直接回答；本回合不落任何卡"
+                "(用户后续表达开发诉求时系统会自动识别并放开建卡工具)"),
+            "provide-help": (
+                "【目标理解(本回合)】产品使用咨询——调用 help.lookup 检索使用文档"
+                "主题并基于内容回答；文档内容可能滞后于当前版本，以系统实际行为为准；"
+                "本回合不落任何卡。"),
             "ask-one-question": (
                 "【目标理解】意图不确定——先向用户提一个最关键的澄清问题，"
                 "本回合不落任何卡"),
@@ -189,16 +197,20 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
         },
         "escalation": {"llmFallback": False, "minConfidence": 0.7,
                        "maxTextChars": 200},
+        # 帮助主题缺省表(批戊补: 产品使用咨询内容供给)——非最终版, 随迭代
+        # 更新(配置全量覆盖: PUT /flow-policy 零发版); 校验见 _validate_help_topics
+        "helpTopics": DEFAULT_HELP_TOPICS,
     },
 }
 
 _TOP_KEYS = ("version", "phases", "hintTemplates", "injections", "aggregation",
              "tierSuggestion", "goal")
 
-GOAL_KINDS = ("command", "requirement", "operation", "inquiry", "continuation")
+GOAL_KINDS = ("command", "requirement", "operation", "inquiry", "continuation",
+              "help")
 GOAL_ACTIONS = ("passthrough", "clarify-first", "propose-requirement",
                 "propose-task", "continue", "answer", "ask-one-question",
-                "present-options")
+                "present-options", "provide-help")
 _PHASE_KEYS = ("note", "elementHints", "guards")
 _ELEMENTS = ("low", "mid", "high")   # phases.elementHints 档位词表
 
@@ -274,7 +286,7 @@ def _validate_goal(goal: Any) -> List[str]:
     errs: List[str] = []
     errs += [f"goal 未知键: {k}" for k in goal
              if k not in ("decision", "directives", "escalation", "strategies",
-                          "toolClasses")]
+                          "toolClasses", "helpTopics")]
     decision = goal.get("decision")
     if decision is not None:
         if not isinstance(decision, list):
@@ -351,6 +363,38 @@ def _validate_goal(goal: Any) -> List[str]:
                 errs.append("goal.escalation.maxTextChars 须为 20..4000 整数")
     errs += _validate_strategies(goal.get("strategies"))
     errs += _validate_tool_classes(goal.get("toolClasses"))
+    errs += _validate_help_topics(goal.get("helpTopics"))
+    return errs
+
+
+def _validate_help_topics(rows: Any) -> List[str]:
+    """帮助主题校验(批戊补): key 唯一/title/kws 数组/body 非空/updated 日期串。"""
+    if rows is None:
+        return []
+    if not isinstance(rows, list) or not rows:
+        return ["goal.helpTopics 须为非空数组"]
+    errs: List[str] = []
+    seen = set()
+    for i, t in enumerate(rows):
+        if not isinstance(t, dict):
+            errs.append(f"goal.helpTopics[{i}] 须为对象")
+            continue
+        errs += [f"goal.helpTopics[{i}] 未知键: {k}" for k in t
+                 if k not in ("key", "title", "kws", "body", "updated")]
+        key = str(t.get("key") or "")
+        if not key:
+            errs.append(f"goal.helpTopics[{i}].key 不能为空")
+        elif key in seen:
+            errs.append(f"goal.helpTopics[{i}].key 重复: {key}")
+        seen.add(key)
+        if not str(t.get("title") or "").strip():
+            errs.append(f"goal.helpTopics[{i}].title 不能为空")
+        kws = t.get("kws")
+        if not isinstance(kws, list) or not kws \
+                or any(not isinstance(x, str) or not x for x in kws):
+            errs.append(f"goal.helpTopics[{i}].kws 须为非空字符串数组")
+        if not str(t.get("body") or "").strip():
+            errs.append(f"goal.helpTopics[{i}].body 不能为空")
     return errs
 
 

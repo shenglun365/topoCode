@@ -1351,6 +1351,23 @@ def tool_task_propose(title: str, instruction: str,
 # ── 会话知识单元工具面(LLM 可读写; 存储归一后落 arch_context_units) ────────
 
 @register_architect_tool(
+    "help.lookup",
+    "检索产品使用指南/帮助手册主题(会话基本流/指令确认/需求卡澄清/任务计划/"
+    "执行器配置/分析挡位/会话管理/失败重试/常见问题)。产品使用咨询时调用并"
+    "基于返回内容回答; 文档内容可能滞后于当前版本，以系统实际行为为准。",
+    brief="检索使用指南/帮助手册主题(产品怎么用类咨询先查这里)",
+    params_doc='{"query": "主题关键词(如: 执行器/需求卡/计划/确认; 空=返回主题清单)"}',
+)
+def tool_help_lookup(query: str = "", topic: str = "") -> Dict[str, Any]:
+    from ..agent.governance.flow_policy import load_flow_policy
+    from ..agent.turns.help_docs import lookup_topics
+    rows = ((load_flow_policy().get("goal") or {}).get("helpTopics")) or None
+    res = lookup_topics(str(query or topic or ""), rows=rows)
+    res["ok"] = True
+    return res
+
+
+@register_architect_tool(
     "asset.upsert",
     "沉淀/更新会话知识单元(artifact 类型: 结论、约定、待办、可复用片段等分析性知识)。"
     "任务回执与里程碑报告系统已自动沉淀(execution_report/analysis), "
