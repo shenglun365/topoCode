@@ -381,11 +381,13 @@ def propose_plan_step(conv: dict, rid: str, idx: int,
 
 def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: str,
                            fallback_instruction: str,
-                           executor_hint: Optional[dict] = None) -> Optional[dict]:
+                           executor_hint: Optional[dict] = None,
+                           spec_ver: int = 1) -> Optional[dict]:
     """/执行 计划入口: T2+ 挡位生成/续发计划; None = 走原单卡路径。
 
     - 挡位 pre_split=none(T0/T1) → None
-    - 已有计划: 有待发/失败步骤 → 续发下一步; 全部完成 → 汇总提示(None 由调用方回落? 不, 直接返回提示)
+    - 已有计划: 版本对齐(cv-248)——规约版本晚于计划记账版本(specVer) → 计划
+      过期, 视同无计划重建; 同版本才做无副作用诊断(三分态, 全部完成 → 提示)
     - 无计划: LLM 拆步 ≥2 → 建计划 + taskPlan 卡 + 下发第一步; 否则 None
     """
     from ...arch_routes.agent_executors import normalize_executor_type
@@ -406,10 +408,20 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
         return None
 
     plan = get_plan(rid)
+    stale = False
     if plan:
-        # 批戊收编: 「已有计划→推进」半边迁焦点栈(resolve_intent.confirm_task
-        # 就近启动预填卡)——本路径只做**无副作用诊断**(三分态), 不再暗推进。
-        return {"ok": False, "receipt": _plan_diagnosis(plan)}
+        # 版本对齐(cv-248): 计划为其规约版本而生, 版本演进使计划过期——
+        # active ver 晚于计划记账版本 → 视同无计划重建; 「先说明调整」提示
+        # 仅在同版本语义下成立(与 cv-215 历史快照原则同构)。存量计划行无
+        # specVer 记账 → 默认 1(与任务行 spec_ver=1 时代对齐, 向后兼容)。
+        plan_ver = int((plan[0] or {}).get("specVer") or 1)
+        if int(spec_ver) > plan_ver:
+            stale = True
+            plan = []
+        else:
+            # 批戊收编: 「已有计划→推进」半边迁焦点栈(resolve_intent.confirm_task
+            # 就近启动预填卡)——本路径只做**无副作用诊断**(三分态), 不再暗推进。
+            return {"ok": False, "receipt": _plan_diagnosis(plan)}
     steps = split_tasks_llm(req_text, policy=policy)
     if not steps:
         return None
@@ -427,11 +439,15 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
     else:
         plan = _tg.linear_depends(plan)     # 弱挡: LLM 不产边, 编排层线性链
     plan = _tg.normalize_plan(plan)
+    for s in plan:                          # 版本记账(normalize 后注入, 不依赖行构造)
+        s["specVer"] = int(spec_ver)
     save_plan(rid, plan)
     _land_plan_card(conv, rid, plan)
     out = propose_plan_step(conv, rid, 0, executor_hint=_hint)
     if out.get("ok"):
-        out["receipt"] = (f"📋 已生成任务计划({len(plan)} 步)并保存第一步，"
+        prefix = (f"♻️ 规约已更新至 v{int(spec_ver)}，已重建任务计划"
+                  if stale else "📋 已生成任务计划")
+        out["receipt"] = (f"{prefix}({len(plan)} 步)并保存第一步，"
                           "点「开始执行」启动; 后续步骤完成后自动预填。")
     return out
 

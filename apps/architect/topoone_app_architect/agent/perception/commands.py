@@ -161,7 +161,8 @@ def run_execute(conv: Dict[str, Any], executor_id: str = "",
             conv, req_id,
             "\n".join(str(x) for x in (title, snap.get("desc"),
                                        snap.get("designMd")) if x),
-            title, instruction, executor_hint=hint)
+            title, instruction, executor_hint=hint,
+            spec_ver=int(active.get("ver") or 1))   # cv-248: 版本对齐记账
         if plan_res is not None:
             return plan_res
     if on_phase:
