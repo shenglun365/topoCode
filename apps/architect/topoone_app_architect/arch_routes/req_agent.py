@@ -40,7 +40,8 @@ from ..agent.planning.req_spec import (  # noqa: F401,E402
     repair_spec_payload_format,
     strip_proposal_fence,
 )
-from ..agent.planning.task_plan import extract_task_fence  # noqa: F401,E402
+from ..agent.planning.task_plan import (  # noqa: F401,E402
+    extract_task_fence, strip_task_fence)
 
 from ..agent.tools.protocol import (  # noqa: F401,E402
     _FENCE,

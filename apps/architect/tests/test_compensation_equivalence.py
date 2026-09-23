@@ -71,10 +71,15 @@ def test_task_fence_explicit_block():
 
 
 def test_task_fence_json_candidate_and_diagram_excluded():
-    # json 候选围栏: 需实质任务字段(instruction/requirementMd ≥10 字, 防误判)
+    # 归属排斥(cv-246 架构裁决): 规约 schema 载荷归 req.propose 域——
+    # 任务域不再把 requirementMd 折叠成 instruction 误落任务卡
+    assert extract_task_fence(
+        '```json\n{"title": "任务B", "requirementMd": "为导出模块补充批量导出能力"}\n```'
+    ) is None
+    # 纯任务形态 json(instruction)仍认领
     d = extract_task_fence(
-        '```json\n{"title": "任务B", "requirementMd": "为导出模块补充批量导出能力"}\n```')
-    assert d and d["title"] == "任务B" and "批量导出" in d["instruction"]
+        '```json\n{"title": "任务C", "instruction": "统计各目录文件数量并输出清单"}\n```')
+    assert d and d["title"] == "任务C" and "文件数量" in d["instruction"]
     # 图 IR 不认领(diagram.build 产物形态)
     assert extract_task_fence(
         '```json\n{"type": "flow", "version": 1, "nodes": [], "edges": []}\n```'

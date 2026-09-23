@@ -560,13 +560,12 @@ def test_extract_task_fence_forms():
     # 显式 task 围栏
     t = extract_task_fence('前置说明\n```task\n{"title": "T", "instruction": "实现 X"}\n```')
     assert t and t["title"] == "T" and "实现 X" in t["instruction"]
-    # ```json 规约形态(cv-150[3] 实证): title+requirementMd/designMd/acceptance → 拼装
-    t2 = extract_task_fence(
+    # 规约形态 json 归属排斥(cv-246 架构裁决): requirementMd 载荷归
+    # req.propose 域(req_spec.extract_proposal_fence 认领), 任务域不认领
+    assert extract_task_fence(
         '我将调用 task.propose:\n```json\n{"title": "Lua Hello", "requirementMd": "访问 /hello",'
-        '"designMd": "content_by_lua_block", "acceptance": ["curl 返回 Hello World"]}\n```')
-    assert t2 and t2["title"] == "Lua Hello"
-    assert "访问 /hello" in t2["instruction"] and "content_by_lua_block" in t2["instruction"]
-    assert "curl 返回" in t2["instruction"]
+        '"designMd": "content_by_lua_block", "acceptance": ["curl 返回 Hello World"]}\n```'
+    ) is None
     # 图 IR 不认领(cv-147: version+type+nodes)
     g = extract_task_fence('```json\n{"version": 1, "type": "component", "title": "图", '
                            '"nodes": [{"id": "a"}]}\n```')

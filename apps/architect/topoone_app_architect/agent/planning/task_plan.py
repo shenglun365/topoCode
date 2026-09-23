@@ -48,6 +48,13 @@ def extract_task_fence(text: str) -> Optional[Dict[str, Any]]:
             continue
 
     def _norm(d: Dict[str, Any], explicit: bool = False) -> Optional[Dict[str, str]]:
+        # 归属排斥(schema 单源判别, cv-246 架构裁决): 需求规约载荷归 req.propose
+        # 域(req_spec.extract_proposal_fence 认领)——本域不再把规约字段折叠成
+        # instruction 误落任务卡(历史行为 cv-150[3] 已随「需求卡→确认→任务」
+        # 标准流程退役)。
+        if any(str(d.get(k) or "").strip() for k in
+               ("requirementMd", "allowedScopeMd", "forbiddenScopeMd")):
+            return None
         # 图 IR 排除(diagram.build 产物形态)
         t = str(d.get("type") or "").lower()
         if d.get("nodes") and d.get("type") and t in ("component", "flow", "graph", "diagram"):
@@ -60,11 +67,8 @@ def extract_task_fence(text: str) -> Optional[Dict[str, Any]]:
         instr = str(d.get("instruction") or d.get("instructionMd") or "").strip()
         _min_len = 0 if explicit else 10   # 显式 task 围栏=明确意图, 不卡长度
         if not instr:
-            req_md = str(d.get("requirementMd") or d.get("requirement") or "").strip()
             design = str(d.get("designMd") or d.get("implementationPath") or "").strip()
             parts = []
-            if req_md:
-                parts.append("## 需求目标\n" + req_md)
             if design:
                 parts.append("## 实现方案\n" + design)
             acc = d.get("acceptance") or d.get("acceptanceMd")
@@ -85,6 +89,15 @@ def extract_task_fence(text: str) -> Optional[Dict[str, Any]]:
         if out:
             return out
     return None
+
+
+def strip_task_fence(text: str) -> str:
+    """移除显式 ```task 围栏(代落成功后卡即回执, 正文复述载荷属垃圾——
+    cv-174 同规; json 候选形态不剥——防误伤其它 json, 规约形态已归 req 域)。"""
+    if not text or "```task" not in text:
+        return text or ""
+    return re.sub(r"```task\s*\n?\{.*?\}\s*```", "", text,
+                  flags=re.DOTALL).strip()
 
 
 def propose_task_tool(title: str, instruction: str,

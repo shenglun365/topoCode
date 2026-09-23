@@ -295,22 +295,63 @@ def repair_spec_payload_format(text: str, req_id: str = "") -> Optional[Dict[str
     return out.get("parsed") if isinstance(out.get("parsed"), dict) else None
 
 
+# 需求规约 schema 特征字段(载荷归属判别的本域认领谓词——cv-246 架构裁决:
+# 载荷归属由内容 schema 单源判别, 不由围栏标记/正则竞争决定)
+_SPEC_SCHEMA_KEYS = ("requirementMd", "allowedScopeMd", "forbiddenScopeMd")
+
+_JSON_FENCE_RE = re.compile(r"```(?:proposal|json)\s*\n?(\{.*?\})\s*```",
+                            re.DOTALL)
+
+
+def _is_spec_payload(d: Any) -> bool:
+    """载荷是否需求规约形态(规约 schema 字段命中 ≥1)。"""
+    return isinstance(d, dict) and any(
+        str(d.get(k) or "").strip() for k in _SPEC_SCHEMA_KEYS)
+
+
+def _iter_spec_payloads(text: str):
+    """候选 JSON 围栏 → 规约形态载荷(提取与剥离共用的同源扫描)。"""
+    for m in _JSON_FENCE_RE.finditer(text or ""):
+        try:
+            d = json.loads(m.group(1))
+        except Exception:  # noqa: BLE001
+            continue
+        if _is_spec_payload(d):
+            yield d
+
+
 def strip_proposal_fence(text: str) -> str:
-    """移除 ```proposal 围栏整体(服务端已代落库时, 正文复述 JSON 属垃圾——cv-174)。"""
-    if not text or "```proposal" not in text:
+    """移除规约载荷围栏整体——与认领同源判定, 只剥规约 schema 载荷的围栏
+    (不误伤图 IR/任务载荷等其它 json; proposal 显式围栏保持旧语义全剥)。"""
+    if not text or "```" not in text:
         return text or ""
-    return re.sub(r"```proposal\s*\n?\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
+    out, hit = text, False
+    for m in reversed(list(_JSON_FENCE_RE.finditer(text))):
+        try:
+            d = json.loads(m.group(1))
+        except Exception:  # noqa: BLE001
+            continue
+        if _is_spec_payload(d):
+            out, hit = out[:m.start()] + out[m.end():], True
+    if not hit and "```proposal" in text:
+        return re.sub(r"```proposal\s*\n?\{.*?\}\s*```", "",
+                      text, flags=re.DOTALL).strip()
+    return out.strip()
 
 
 def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
-    """提取 ```proposal JSON 围栏(方案生成的确定性落库通道)。
+    """提取需求规约载荷(方案生成的确定性落库通道; cv-246 归属判别)。
 
     生成类动作(产出提案)对部分模型而言"不需要工具"——它们更愿意直接把提案写成
     JSON 输出而非发 [TOOL_CALL]。围栏协议把这一行为变成可靠路径：模型写围栏，
     服务端解析后代为执行 req.propose 落库(WS 层发 tool_result 事件 → 前端方案卡)。
+    认领谓词=内容 schema(规约字段命中), 不限围栏标记形态——```proposal 显式
+    围栏与 json 围栏中的规约载荷同权; 任务形态载荷不认领(归 task 域)。
     """
-    if not text or "```proposal" not in text:
+    if not text or "```" not in text:
         return None
+    for d in _iter_spec_payloads(text):
+        return d
     m = re.search(r"```proposal\s*\n?(\{.*?\})\s*```", text, re.DOTALL)
     if not m:
         try:

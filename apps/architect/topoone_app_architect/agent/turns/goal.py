@@ -39,6 +39,9 @@ _BUILD_MARK_RE = re.compile(
     r"(做一个|做个|写个|写一个|开发|实现|封装|新建|新增|加一个|添加|搭一个)")
 # 显式建卡请求(cv-242 对偶面): 字面要求创建需求卡 → requirement 面(propose 权)
 _CARD_ASK_RE = re.compile(r"(建需求卡|创建需求卡|生成需求卡)")
+# 显式委托执行(cv-246 同款纪律): 把活交给 coding/执行器 → operation 面(task.propose 权)
+_DELEGATE_RE = re.compile(r"(交给|转给|交给来|丢给)\s*[^,，。;；]{0,12}"
+                          r"(coding|执行器|cline|opencode|subagent|干活|去干|来干)")
 
 
 def build_goal_profile(question: str, conv: Optional[dict] = None,
@@ -105,6 +108,11 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
                 prof["boundReq"] = rid0
                 prof["target"] = f"req:{rid0}"
             return prof
+        # L0-2.7 显式委托执行: 「把这个活交给 coding 干」→ operation 面
+        if _DELEGATE_RE.search(q):
+            prof.update(kind="operation", confidence=0.75)
+            prof["sources"].append("delegate")
+            return prof
         # L0-3/L0-4 边界裁决 + 候选面: 策略库(需求知识) vs 通用执行词表
         # (操作原型)。强命中/单信号 → 现状单判; 独立弱撞 → 双候选菜单。
         from ..requirements.clarify import match_strategy, \
@@ -164,6 +172,15 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
             prof["sources"].append("context")
         elif prof["kind"] == "requirement":
             prof["target"] = f"req:{rid}"
+    # L1 焦点消解: 澄清答复(cv-246 架构裁决)——澄清在飞(clarify_pending 帧)
+    # 且本回合无行动信号 → 续答面(continuation, 决策表既有行 [req.amend,
+    # req.propose]): 对问询的答复获得立卡权, 任意自然语言答复均覆盖(非词表)。
+    # 优先序: 绑定需求(context)优先; L0 确定性命中(sources 非空)不动。
+    if prof["sources"] == [] and not rid \
+            and str(((focus or {}).get("top") or {}).get("kind") or "") \
+            == "clarify_pending":
+        prof.update(kind="continuation", target="clarify", confidence=0.55)
+        prof["sources"].append("focus-clarify")
     # L1 相位冲突(咨询面; 硬拦截仍归相位硬闸——防守线①)
     # 批戊: 相位事实面优先取焦点栈(派生单源), conv.flowState 为兼容回退
     phase = str((focus or {}).get("phase")

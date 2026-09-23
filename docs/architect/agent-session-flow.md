@@ -172,7 +172,17 @@ draft ──/定稿(designMd 门禁, 幂等)──▶ ready ──/执行──�
 | cv-157 | `_ws_send` 幻影引用 NameError | 幻影清扫（5 处）+ AST 扫描回归 |
 | cv-158 | cline-sdk 启动即失败(空 model) | 默认执行器 id/配置同源 + hint 透传补 models 等 |
 
-### 信息流组织(批戊同批: 计划进度锚 + 消息降噪)
+### 澄清答复与围栏代落(cv-246, 2026-09-23)
+
+- **澄清答复消解**: 澄清在飞=焦点栈 clarify_pending 帧(回合产物 meta.guAction
+  派生, 零写点)→ 答复轮无行动信号时消解到续答面(continuation, req.propose
+  可达)——「全部确认」等任意自然语言答复均可立卡; L0 确定性命中优先。
+- **围栏代落=执法点统一**: 正文 JSON 载荷与工具轮 tool_calls 同一验权关卡
+  (GU allowed_tools); 纯读面不代落(载荷原文保留+rejected 遥测); 归属由内容
+  schema 判别(规约字段→req.propose, 任务形态→task.propose); 代落成功剥载荷
+  零通知(卡即回执)。详见 goal-understanding-2609「回合权力模型」。
+
+## 信息流组织(批戊同批: 计划进度锚 + 消息降噪)
 
 - **进度锚(L3)**: 计划总览卡(kind=taskPlan)按 requirementId **单卡原位更新**
   ——每步完成/预填刷新为 ✅/➡️/❌/⬚ 进度视图, N 步计划信息流只占 1 个锚位;

@@ -291,7 +291,9 @@ async def handle_chat(data: dict, send: SendFn) -> None:
 
     # ---- ⑤⑥ 落库 + 终态事件(正常 done / 错误 turnError) ----
     await _chat_land(io, msgs, gate, conv, loop, eff_model, model_id,
-                     root, project, tools_used, tool_errors)
+                     root, project, tools_used, tool_errors,
+                     allowed_tools=gu_allowed,
+                     gu_action=str((gu_plan or {}).get("action") or ""))
 
 
 def _resolve_gu_allowed(plan: Optional[dict]) -> Optional[set]:

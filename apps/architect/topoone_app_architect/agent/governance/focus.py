@@ -51,6 +51,7 @@ _KIND_PRIORITY = {
     "task_confirm": 3,
     "spec_ready": 4,
     "reviewing": 5,
+    "clarify_pending": 6,   # 澄清在飞垫底: 与运行/待确认态同现时不抢顶(cv-246)
 }
 _CONFIRM_KINDS = ("plan_step_ready", "task_confirm")
 _RUN_FRAME_KINDS = ("task_input_wait", "task_running")
@@ -72,8 +73,13 @@ def _ts(row: dict, *names: str) -> int:
 
 def frames_from_entities(conv: Optional[dict], tasks: Optional[List[dict]],
                          req: Optional[dict] = None,
-                         plan: Optional[List[dict]] = None) -> List[Dict[str, Any]]:
-    """实体行 → 栈帧(纯函数; phase 派生与 build_focus 共用的唯一造帧点)。"""
+                         plan: Optional[List[dict]] = None,
+                         pending: Optional[Dict[str, Any]] = None
+                         ) -> List[Dict[str, Any]]:
+    """实体行 → 栈帧(纯函数; phase 派生与 build_focus 共用的唯一造帧点)。
+
+    pending: 回合产物 meta 派生面({action, since})——澄清在飞帧源(cv-246)。
+    """
     frames: List[Dict[str, Any]] = []
     for t in tasks or []:
         if not isinstance(t, dict):
@@ -121,6 +127,13 @@ def frames_from_entities(conv: Optional[dict], tasks: Optional[List[dict]],
             frames.append({"kind": "spec_ready", "reqId": rid,
                            "since": _ts(req, "updated_at", "updatedAt"),
                            "label": f"需求 {rid} 就绪待执行"})
+    # clarify_pending: 澄清在飞(cv-246)——上回合 GU 动作为 clarify-first
+    # (回合产物 meta, 零写点派生) → 本回合输入默认是对问询的答复, 消解到
+    # 续答面。帧源=最近 assistant 回合动作; 新回合动作自然覆盖(生灭自驱)。
+    if str((pending or {}).get("action") or "") == "clarify-first":
+        frames.append({"kind": "clarify_pending",
+                       "since": int(pending.get("since") or 0),
+                       "label": "澄清问询待答复"})
     return frames
 
 
@@ -189,6 +202,35 @@ def _recent_events(tasks: List[dict], now: int) -> List[Dict[str, Any]]:
     return evs[:RECENT_LIMIT]
 
 
+def _pending_action(store_mod, conv_id: str, now: int) -> Dict[str, Any]:
+    """近窗最近 assistant 回合的 GU 动作(澄清在飞帧源; cv-246)。
+
+    读既有消息行 meta.guAction(回合产物元数据, 零写点); 近窗外/无记录 → {}。
+    只看最近一条 assistant——任何新回合动作自然覆盖旧状态(生灭自驱)。
+    """
+    try:
+        msgs = store_mod.ConversationsStore.messages(conv_id, limit=6) or []
+    except Exception:  # noqa: BLE001
+        return {}
+    lo = now - RECENT_WINDOW_MS
+    for m in reversed(msgs):
+        if not isinstance(m, dict) or str(m.get("role") or "") != "assistant":
+            continue
+        ts = _ts(m, "time")
+        if ts and ts < lo:
+            return {}
+        meta = m.get("meta")
+        if isinstance(meta, str):
+            try:
+                import json as _j
+                meta = _j.loads(meta or "{}")
+            except (TypeError, ValueError):
+                meta = {}
+        act = str((meta or {}).get("guAction") or "") if isinstance(meta, dict) else ""
+        return {"action": act, "since": ts} if act else {}
+    return {}
+
+
 def build_focus(conv_id: str, now: Optional[int] = None, *,
                 cached_phase: str = "", force: bool = False) -> Dict[str, Any]:
     """会话焦点上下文(派生单源入口): 实体行 → {stack, recent, top, phase}。
@@ -209,7 +251,8 @@ def build_focus(conv_id: str, now: Optional[int] = None, *,
         req = dict(req)
         active = _s.RequirementsStore.spec_active(rid) or {}
         req["specConfirmed"] = (active.get("state") == "confirmed")
-    frames = frames_from_entities(conv, tasks, req, plan)
+    pending = _pending_action(_s, conv_id, now)
+    frames = frames_from_entities(conv, tasks, req, plan, pending=pending)
     frames.sort(key=lambda f: (_KIND_PRIORITY.get(f.get("kind") or "", 99),
                                -(f.get("since") or 0)))
     phase = derive_phase(frames, conv, cached=cached_phase, force=force)

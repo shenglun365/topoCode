@@ -157,7 +157,8 @@ def _model_health_hint(model_id: str) -> str:
 async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
                      loop: dict, eff_model: Optional[str], model_id: str,
                      root: str, project: str, tools_used: set,
-                     tool_errors: dict) -> None:
+                     tool_errors: dict, allowed_tools: Optional[set] = None,
+                     gu_action: str = "") -> None:
     """管线阶段⑤⑥ 回合落库 + 终态事件(行为等价抽取自 handle_chat)。
 
     正常: 确定性围栏代落(_post_turn_land) → assistant 单流落库 → done 事件;
@@ -178,7 +179,8 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
     # ---- 回合后落库通道(仅确定性围栏, 缓解守卫已按用户裁决拆除 cv-175) ----
     final_content, conv, tools_used, tool_errors = await _post_turn_land(
         io, conv_id, msgs, root, project, eff_model, model_id, conv,
-        tools_used, tool_errors, final_content, request_id)
+        tools_used, tool_errors, final_content, request_id,
+        allowed_tools=allowed_tools)
 
     tool_round_meta = None
     if final_content and _PLACEHOLDER_ONLY_RE.match(final_content.strip()):
@@ -190,8 +192,12 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
         assistant_msg_id = store.next_id("m")
         msg_row = {"id": assistant_msg_id, "conversationId": conv_id,
                    "role": "assistant", "time": _ts(), "content": final_content}
-        if tool_round_meta:
-            msg_row["meta"] = tool_round_meta
+        meta_row = dict(tool_round_meta) if tool_round_meta else {}
+        if gu_action:
+            # 回合产物元数据(cv-246): GU 动作入 meta——焦点栈澄清在飞帧源
+            meta_row["guAction"] = gu_action
+        if meta_row:
+            msg_row["meta"] = meta_row
         store.ConversationsStore.append_message(msg_row)
         try:  # PR1 双维度: 助手回合落库 → 正常未读(前端打开会话时回 read)
             store.ConversationsStore.update(conv_id, {"reviewState": "unread"})
@@ -546,53 +552,61 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
                           root: str, project: str, eff_model: Optional[str],
                           model_id: str, conv: dict,
                           tools_used: set, tool_errors: dict,
-                          final_content: str, request_id: Optional[str]):
+                          final_content: str, request_id: Optional[str],
+                          allowed_tools: Optional[set] = None):
     """管线阶段⑤ 回合后确定性落库通道(仅围栏, 缓解守卫已拆除 cv-175)。
 
-    模型愿发工具块则工具直落; 直接写 JSON 围栏也接受——服务端代执行,
-    产物即需求卡/任务卡。不做任何"纠正模型"的启发式判断。
+    写卡执法点统一(cv-246 架构裁决「回合权力单源授予, 回合产物统一执法」):
+    围栏代落**不是独立通道**——它只是模型输出的一种调用形态, 与工具轮
+    tool_calls 走同一验权关卡(allowed_tools=GU 本回合授权面): 纯读面
+    (面不含写工具)不代落, 载荷按模型原文诚实保留+rejected 遥测。
+    载荷归属由内容 schema 单源判别(规约字段→req.propose; 任务形态→
+    task.propose), 不由围栏标记/正则竞争决定。
+    代落成功=卡即回执(cv-203): 剥载荷正文, 不合成任何通知文本;
+    失败保留诚实错误(cv-175 纪律)。
     返回 (final_content, conv, tools_used, tool_errors)。"""
     from ...arch_routes import req_agent
-    # ── proposal 围栏 → req.propose 代落(需求卡) ──
-    fence_args = req_agent.extract_proposal_fence(final_content)
-    if fence_args and "req.propose" not in tools_used:
-        logger.info("[kb-chat] proposal 围栏命中, 服务端代落库 conv=%s", conv_id)
-        try:
-            res = await _run_tool_with_progress(
-                io.send, request_id, "req.propose", fence_args, root, project,
-                model_id=eff_model)
-            tools_used.add("req.propose")
-            if res.get("ok"):
-                # 批戊: 成功不再追加通知文本——specReady 卡即单源回执
-                # (旧「已从提案围栏自动落库」与卡双发+JSON 透传, cv-241 实证)
-                final_content = req_agent.strip_proposal_fence(final_content)
-            else:
-                tool_errors["req.propose"] = str(res.get("text", ""))[:200]
-                # 失败保留诚实错误(cv-175 纪律)
-                notice = f"\n\n⚠️ 提案围栏落库失败：{str(res.get('text', ''))[:140]}"
-                final_content += notice
-                await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[kb-chat] 围栏代落库失败: %s", e)
 
-    # ── 任务载荷围栏 → task.propose 代落(执行卡) ──
-    task_fence = req_agent.extract_task_fence(final_content)
-    if task_fence and "task.propose" not in tools_used:
-        logger.info("[kb-chat] 任务载荷围栏命中, 服务端代落卡 conv=%s", conv_id)
+    async def _fence_land(tool: str, args: dict, strip_fn) -> bool:
+        nonlocal final_content
+        if allowed_tools is not None and tool not in allowed_tools:
+            # 执法点: 名单外不代落(与工具轮三分支拒绝同规; 载荷原文保留)
+            try:
+                from ...arch_routes import llm_dataset as _lds
+                _lds.record("fence_rejected", tool=tool, convId=conv_id)
+            except Exception:  # noqa: BLE001
+                pass
+            return False
+        if tool in tools_used:
+            return False
+        logger.info("[kb-chat] 载荷围栏命中(%s), 服务端代落 conv=%s", tool, conv_id)
         try:
             res = await _run_tool_with_progress(
-                io.send, request_id, "task.propose", task_fence, root, project,
+                io.send, request_id, tool, args, root, project,
                 model_id=eff_model)
-            tools_used.add("task.propose")
-            if not res.get("ok"):
-                tool_errors["task.propose"] = str(res.get("text", ""))[:200]
-            notice = (f"\n\n📋 已从上文载荷自动创建**任务卡**（待确认）：{str(res.get('text', ''))[:160]}"
-                      if res.get("ok") else
-                      f"\n\n⚠️ 任务卡自动创建失败：{str(res.get('text', ''))[:160]}")
+            tools_used.add(tool)
+            if res.get("ok"):
+                final_content = strip_fn(final_content)  # 卡即回执(cv-203)
+                return True
+            tool_errors[tool] = str(res.get("text", ""))[:200]
+            notice = f"\n\n⚠️ {tool} 落库失败：{str(res.get('text', ''))[:140]}"
             final_content += notice
             await io.send_ev({"type": "chunk", "requestId": request_id, "delta": notice})
         except Exception as e:  # noqa: BLE001
-            logger.warning("[kb-chat] 任务围栏代落失败: %s", e)
+            logger.warning("[kb-chat] 围栏代落失败 %s: %s", tool, e)
+        return False
+
+    # 归属判别: 规约 schema 载荷(req 域认领, 不限围栏形态) 优先;
+    # 任务形态载荷归 task 域(规约形态已被其认领谓词排斥)
+    fence_args = req_agent.extract_proposal_fence(final_content)
+    if fence_args:
+        await _fence_land("req.propose", fence_args,
+                          req_agent.strip_proposal_fence)
+    else:
+        task_fence = req_agent.extract_task_fence(final_content)
+        if task_fence:
+            await _fence_land("task.propose", task_fence,
+                              req_agent.strip_task_fence)
 
     return final_content, conv, tools_used, tool_errors
 
