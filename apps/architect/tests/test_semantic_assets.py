@@ -2696,3 +2696,30 @@ def test_codegraph_cli_missing_cached(monkeypatch):
     monkeypatch.setattr(_sem_codegraph.shutil, "which", lambda *a: called.__setitem__("n", called["n"] + 1))
     assert _sem_codegraph.ensure_synced("/tmp/x") is False
     assert called["n"] == 0, "CLI 识别应命中缓存不再 which"
+
+
+def test_unowned_no_symbol_source_maps_424(tmp_path, monkeypatch):
+    """无符号源(.topocode/.codegraph 双缺) → 错误带 reason=no_symbol_source，
+    路由按 error-contract 映射 424(依赖未满足)；参数类错误(无 root)仍 400。"""
+    _ctx(tmp_path, monkeypatch)
+    monkeypatch.delenv("ARCH_CODEGRAPH", raising=False)
+    monkeypatch.setattr(_sem_codegraph, "_mode_cache", None)
+    monkeypatch.setattr(_sem_codegraph, "_cli_cache", (None, __import__("time").time()))
+    import time as _time
+    from topoone_app_architect.arch_routes.sem import unowned as _uo
+    from topoone_app_architect.arch_routes.sem import symbols as _sym
+    monkeypatch.setattr(_sym, "_core_pid_cache", {})
+    root = str(tmp_path / "noindex")
+    os.makedirs(root, exist_ok=True)
+    res = _uo.unowned_files(root, None, limit=10)
+    assert res.get("error") and "符号库不可用" in res["error"]
+    assert res.get("reason") == "no_symbol_source"
+    res2 = _uo.unowned_cross_links(root, None)
+    assert res2.get("reason") == "no_symbol_source"
+    body = _run_coro(_sem_engine.api_unowned_files(root=root, project=None, limit=10))
+    assert body["code"] == 424 and "符号库不可用" in body["message"]
+    body2 = _run_coro(_sem_engine.api_unowned_cross_links(root=root, project=None,
+                                                          file=None, limit=10))
+    assert body2["code"] == 424
+    body3 = _run_coro(_sem_engine.api_unowned_files(root=None, project=None, limit=10))
+    assert body3["code"] == 400, "无 root 属参数错误，不升级为 424"

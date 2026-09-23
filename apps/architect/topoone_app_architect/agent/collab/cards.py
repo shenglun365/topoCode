@@ -145,6 +145,32 @@ def land_status(conv_id: str, text: str, task_id: str, *, status: str = "",
         return None
 
 
+def land_plan_progress(conv_id: str, rid: str, text: str, *, total: int = 0,
+                       project_id: str = "", agent: str = "") -> Optional[dict]:
+    """计划进度锚(L3, 批戊信息流优化): 同 requirementId 单卡原位更新。
+
+    计划总览卡落首卡(kind=taskPlan); 之后每步完成/预填原位 UPDATE 为进度
+    视图——信息流中 N 步计划只占 1 个锚位。失败返回 None(不阻断)。"""
+    try:
+        from ...arch_routes import store as _store
+        upd = _store.ConversationsStore.update_message_by_meta(
+            conv_id, {"kind": KIND_TASK_PLAN, "requirementId": rid},
+            {"content": text, "meta": {"total": total}})
+        if upd:
+            try:
+                emit(conv_id, upd["id"], agent=agent or "", kind=KIND_TASK_PLAN)
+            except Exception:
+                pass
+            return upd
+        return land(conv_id, text, kind=KIND_TASK_PLAN, role="assistant",
+                    project_id=project_id or "", agent=agent,
+                    requirementId=rid, total=total)
+    except Exception as e:
+        logger.warning("[cards] 进度锚更新失败 conv=%s rid=%s: %s",
+                       conv_id, rid, e)
+        return None
+
+
 def emit(conv_id: str, msg_id: str, agent: str = "", kind: str = "") -> None:
     """SSE conv-message 通知(前端按会话刷新 → 卡片即时渲染)。测试可 patch。"""
     from .sse import emit as _emit

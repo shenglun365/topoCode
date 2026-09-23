@@ -7,7 +7,7 @@
  "agent/cognition/prompt.py": 512,
  "agent/cognition/roles.py": 141,
  "agent/collab/__init__.py": 0,
- "agent/collab/cards.py": 150,
+ "agent/collab/cards.py": 177,
  "agent/collab/sse.py": 77,
  "agent/compensation/__init__.py": 22,
  "agent/compensation/carriers.py": 89,
@@ -54,7 +54,7 @@
  "agent/planning/req_spec.py": 399,
  "agent/planning/scope_probe.py": 194,
  "agent/planning/task_graph.py": 121,
- "agent/planning/task_plan.py": 577,
+ "agent/planning/task_plan.py": 608,
  "agent/reflection/__init__.py": 11,
  "agent/reflection/dataset.py": 213,
  "agent/reflection/evaluator.py": 293,
@@ -112,7 +112,7 @@
  "arch_routes/dirs.py": 217,
  "arch_routes/docs.py": 90,
  "arch_routes/evaluator.py": 5,
- "arch_routes/exec_bridge.py": 1008,
+ "arch_routes/exec_bridge.py": 1030,
  "arch_routes/exec_cline.py": 88,
  "arch_routes/execution.py": 73,
  "arch_routes/flow_policy.py": 51,
@@ -171,5 +171,6 @@
  "arch_routes/websocket.py": 197,
  "arch_routes/ws_events.py": 5,
  "arch_routes/zmq_stream.py": 101,
- "agent/turns/chat.py": 691
+ "agent/turns/chat.py": 691,
+ "agent/execution/dispatch.py": 774
 }

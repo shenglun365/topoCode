@@ -318,6 +318,14 @@ def _status_card_refresh(conv_id: str, task_id: str, agent: str, pid: str,
     task_status_card(conv_id, task_id, "running", agent=agent, pid=pid)
 
 
+def land_plan_progress(conv_id: str, rid: str, text: str, *,
+                       total: int = 0, project_id: str = "") -> Optional[dict]:
+    """计划进度锚(L3): cards.land_plan_progress 桥(planning 经此落锚, 单源)。"""
+    from ..agent.collab import cards as _cards
+    return _cards.land_plan_progress(conv_id, rid, text, total=total,
+                                     project_id=project_id)
+
+
 def task_status_card(conv_id: str, task_id: str, status: str,
                      agent: str = "", pid: str = "",
                      note: str = "") -> Optional[dict]:

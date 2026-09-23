@@ -92,7 +92,8 @@ def unowned_files(root: Optional[str], project: Optional[str],
     from .symbols import open_symbol_conn, close_symbol_conn
     conn, src = open_symbol_conn(rid, project)
     if conn is None:
-        return {"error": f"符号库不可用(source={src})：请先建立代码图谱索引"}
+        return {"error": f"符号库不可用(source={src})：请先建立代码图谱索引",
+            "reason": "no_symbol_source"}
     try:
         all_files = _symbol_files(conn)
         # 每文件可提取符号预判：无 class/func 等可锚定符号 → 结构性无产出
@@ -239,7 +240,8 @@ def unowned_cross_links(root: Optional[str], project: Optional[str],
     from .symbols import open_symbol_conn, close_symbol_conn
     conn, src = open_symbol_conn(rid, project)
     if conn is None:
-        return {"error": f"符号库不可用(source={src})：请先建立代码图谱索引"}
+        return {"error": f"符号库不可用(source={src})：请先建立代码图谱索引",
+            "reason": "no_symbol_source"}
     try:
         if file:
             targets = [file.strip()]

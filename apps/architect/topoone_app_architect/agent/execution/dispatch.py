@@ -103,7 +103,8 @@ _WRITE_HINT_RE = re.compile(
 def propose_task(conv: dict, title: str, instruction: str,
                  executor_hint: Optional[dict] = None,
                  gate_diagram: bool = True,
-                 safety_class: str = "", work_tags: Optional[list] = None) -> dict:
+                 safety_class: str = "", work_tags: Optional[list] = None,
+                 card_tail: str = "full") -> dict:
     """轻门禁入口: 建任务(saved) + 任务卡消息落统一流。
 
     safety_class/work_tags: 安全等级三值轴(readonly/mutating/high-stakes, 缺省
@@ -282,7 +283,8 @@ def propose_task(conv: dict, title: str, instruction: str,
             f"📋 **任务已保存**：**{task['title']}**（执行器 `{etype}`）"
             + (f" · 安全等级 `{_safety}`" if _safety != "mutating" else "")
             + ("\n\n" + _safety_review if _safety_review else "")
-            + "\n——点「开始执行」启动; 可继续对话调整, 或忽略本卡。"
+            + ("\n——待确认执行。" if card_tail == "plan"
+               else "\n——点「开始执行」启动; 可继续对话调整, 或忽略本卡。")
             + _resume_note + _stale_note + _no_scope_note + _unmerged_note,
             msg_meta={"kind": "task_card", "taskId": task["id"]},
             project_id=_pid)

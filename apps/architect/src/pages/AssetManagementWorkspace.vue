@@ -748,6 +748,7 @@ async function extractPendingAndRecompare() {
 const unownedFiles = ref<UnownedFileEntry[]>([])
 const unownedMeta = ref<{ unownedCount: number; ownedCount: number; totalFiles: number; truncated: boolean } | null>(null)
 const unownedLoading = ref(false)
+const unownedError = ref('')
 /** 文件(norm path) → 跨组件关联(计数 + 按组件聚合 + 样本)。 */
 const unownedLinks = ref<Map<string, UnownedCrossLink>>(new Map())
 
@@ -757,9 +758,11 @@ async function loadUnownedFiles() {
     const r = await semanticAssetService.unownedFiles()
     unownedFiles.value = r.files
     unownedMeta.value = { unownedCount: r.unownedCount, ownedCount: r.ownedCount, totalFiles: r.totalFiles, truncated: !!r.truncated }
-  } catch {
+    unownedError.value = ''
+  } catch (err: any) {
     unownedFiles.value = []
     unownedMeta.value = null
+    unownedError.value = err?.message || ''
   } finally {
     unownedLoading.value = false
   }
@@ -2093,6 +2096,27 @@ onUnmounted(() => {
           ref="semScrollEl"
           class="flex-1 min-h-0 overflow-auto p-2.5 space-y-1.5"
         >
+          <!-- 未归属清单加载失败横幅：后端错误文案本身可行动(如建索引指引)，不静默吞掉 -->
+          <div
+            v-if="tab === 'semantic' && unownedError"
+            class="flex items-center gap-2 rounded-lg border border-ctp-red/30 bg-ctp-red/10 px-3 py-2 text-[11px] text-ctp-red"
+          >
+            <span class="flex-1 min-w-0 break-all">{{ unownedError || t('assetMgmt.unowned.loadFailed') }}</span>
+            <button
+              class="shrink-0 text-ctp-subtext0 hover:text-ctp-text"
+              :title="t('assetMgmt.unowned.retry')"
+              @click="loadUnownedFiles()"
+            >
+              <ArrowPathIcon class="w-3.5 h-3.5" />
+            </button>
+            <button
+              class="shrink-0 text-ctp-overlay0 hover:text-ctp-red"
+              :title="t('assetMgmt.unowned.dismiss')"
+              @click="unownedError = ''"
+            >
+              <XMarkIcon class="w-3.5 h-3.5" />
+            </button>
+          </div>
           <!-- 资产概览：作用说明 + 分类/粒度/标签 + 现有资产数量 -->
           <template v-if="tab === 'overview'">
             <div class="panel overflow-hidden">

@@ -307,7 +307,8 @@ def split_tasks_llm(req_text: str, policy: Optional[Any] = None) -> Optional[lis
         [{"role": "system",
           "content": "你是任务计划器。把需求拆成**有序的实施步骤**(每步单一模块级"
                      "目标、可独立构建验证)。规则: 2-5 步; 若需求足够单一一步可完成,"
-                     "返回单步; 步骤 instruction 写实质内容(目标/涉及文件/验证方式)。"
+                     "返回单步; 步骤 title 用简体中文动宾短语(≤16 字); "
+                     "步骤 instruction 写实质内容(目标/涉及文件/验证方式)。"
                      "只输出结构化结果。"},
          {"role": "user", "content": f"需求文本:\n{req_text[:6000]}"}],
         tier=str(getattr(policy, "tier", "") or "T1"),
@@ -354,11 +355,13 @@ def propose_plan_step(conv: dict, rid: str, idx: int,
     task = eb.propose_task(
         conv, f"{base_title} · 步骤{idx + 1}/{len(plan)} {step.get('title')}",
         _step_instruction(plan, idx), executor_hint=executor_hint,
-        gate_diagram=False)   # R3.2: 计划步骤卡豁免图门禁(图随计划上下文)
+        gate_diagram=False,      # R3.2: 计划步骤卡豁免图门禁(图随计划上下文)
+        card_tail="plan")        # L1④: 步骤卡尾精简(流转说明归计划锚)
     if task.get("id"):
         plan[idx]["taskId"] = task["id"]
         plan[idx]["status"] = "proposed"
         save_plan(rid, plan)
+        _refresh_plan_anchor(str(conv.get("id") or ""), rid, plan)
     return {"ok": bool(task.get("id")), "task": task,
             "error": str(task.get("error") or "")}
 
@@ -420,6 +423,41 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
     return out
 
 
+def _refresh_plan_anchor(conv_id: str, rid: str, plan: list) -> None:
+    """L3 进度锚原位更新(批戊): 每步完成/预填后把计划总览卡刷新为进度视图。
+
+    状态标记: ✅ 完成 / ➡️ 已预填待确认 / ❌ 失败 / ⬚ 待就绪。
+    零新增消息行(upsert 同 requirementId 单卡)。"""
+    if not plan:
+        return
+    from ...arch_routes import exec_bridge as eb
+    conv = _store().ConversationsStore.get(conv_id) or {}
+
+    def _mark(s: dict) -> str:
+        t = _store().TasksStore.get(s.get("taskId")) if s.get("taskId") else None
+        st = str((t or {}).get("status") or (s.get("status") or ""))
+        if st == "done":
+            return "✅"
+        if st in ("saved", "pending_confirm", "proposed"):
+            return "➡️"
+        if st == "failed":
+            return "❌"
+        return "⬚"
+
+    lines = []
+    for i, s_ in enumerate(plan):
+        lines.append(f"{_mark(s_)} {i + 1}. **{(s_.get('title') or '')[:30]}**")
+    ready = next((i for i, s_ in enumerate(plan)
+                  if lines[i].startswith("➡️")), None)
+    tail = (f"——步骤 {ready + 1} 已预填待确认。" if ready is not None
+            else "——依赖就绪自动预填下一步。")
+    eb.land_plan_progress(
+        conv_id, rid,
+        f"📋 **任务计划进度**（{rid} · {len(plan)} 步）\n\n" + "\n".join(lines)
+        + f"\n\n{tail}",
+        total=len(plan), project_id=str(conv.get("projectId") or ""))
+
+
 def _land_plan_card(conv: dict, rid: str, plan: list) -> None:
     from ...arch_routes import exec_bridge as eb
     lines = "\n".join(
@@ -427,7 +465,7 @@ def _land_plan_card(conv: dict, rid: str, plan: list) -> None:
         for i, s in enumerate(plan))
     eb._append(conv["id"], "assistant",
                f"📋 **任务计划**（{len(plan)} 步, 需求 {rid}）\n\n{lines}\n\n"
-               "---\n顺序下发: 每步完成确认后自动预填下一步; 全部完成后出汇总。",
+               "---\n依赖就绪自动预填下一步; 本卡原位更新为进度视图; 全部完成后出汇总。",
                msg_meta={"kind": "taskPlan", "requirementId": rid,
                          "total": len(plan)},
                project_id=(conv or {}).get("projectId") or "")
@@ -443,8 +481,8 @@ def _plan_diagnosis(plan: list) -> str:
     pending_confirm, failed = [], []
     for s in plan:
         tid = s.get("taskId")
-        st = str(((_s.TasksStore.get(tid) or {}).get("status"))
-                 if tid else (s.get("status") or ""))
+        t = _s.TasksStore.get(tid) if tid else None
+        st = str((t or {}).get("status") or s.get("status") or "")
         if st in ("saved", "pending_confirm"):
             pending_confirm.append(s)
         elif st == "failed":
@@ -505,22 +543,15 @@ def on_plan_task_done(conv_id: str, task_id: str) -> None:
                 s["result"] = str(task.get("resultMd") or "")[:400]
         save_plan(rid, plan)
         from . import task_graph as _tg
+        _refresh_plan_anchor(conv_id, rid, plan)
         ready = [i for i in _tg.ready_indices(plan)
                  if plan[i].get("status") == "pending"]
         if ready:
             conv = _s.ConversationsStore.get(conv_id) or {}
-            out = propose_plan_step(conv, rid, ready[0])
-            if out.get("ok"):
-                from ...arch_routes import exec_bridge as eb
-                deps = plan[ready[0]].get("depends") or []
-                dep_note = (f"（依赖 {', '.join('#' + str(d) for d in deps)}"
-                            "已完成）" if deps else "")
-                eb._append(conv_id, "assistant",
-                           f"➡️ 计划步骤 {ready[0] + 1}/{len(plan)} 已预填"
-                           f"{dep_note}（含前情简报），待确认执行。",
-                           msg_meta={"kind": "taskPlan", "requirementId": rid,
-                                     "total": len(plan)},
-                           project_id=(conv or {}).get("projectId") or "")
+            # L1①(批戊): 独立「➡️ 已预填」receipt 删除——预填状态由进度锚
+            # 原位承载; 指引用户的确认动作即消息流本身的待确认卡。
+            propose_plan_step(conv, rid, ready[0])
+            _refresh_plan_anchor(conv_id, rid, get_plan(rid) or plan)
         else:
             blocked = [s for s in plan if s.get("status") == "pending"]
             failed = [s for s in plan if s.get("status") == "failed"]

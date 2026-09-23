@@ -4711,7 +4711,7 @@ async def api_unowned_files(root: Optional[str] = None, project: Optional[str] =
     from . import unowned as _uo
     res = await asyncio.to_thread(_uo.unowned_files, root, project, limit)
     if isinstance(res, dict) and res.get("error"):
-        return err(400, res["error"])
+        return err(424 if res.get("reason") == "no_symbol_source" else 400, res["error"])
     return ok(res)
 
 
@@ -4722,7 +4722,7 @@ async def api_unowned_cross_links(root: Optional[str] = None, project: Optional[
     from . import unowned as _uo
     res = await asyncio.to_thread(_uo.unowned_cross_links, root, project, file, limit)
     if isinstance(res, dict) and res.get("error"):
-        return err(400, res["error"])
+        return err(424 if res.get("reason") == "no_symbol_source" else 400, res["error"])
     return ok(res)
 
 
