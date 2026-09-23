@@ -215,6 +215,7 @@ def land_plan_progress(conv_id: str, rid: str, text: str, *, total: int = 0,
 # (无 options)纯输入——策略库开放式问题与模型临场问题同构适配。
 
 _CHOICES_FENCE_RE = re.compile(r"```choices\s*\n?(\{.*?\})\s*```", re.DOTALL)
+_CHOICES_JSON_FENCE_RE = re.compile(r"```json\s*\n?(\{.*?\})\s*```", re.DOTALL)
 
 
 def valid_choices_payload(payload: Any) -> bool:
@@ -263,6 +264,29 @@ def strip_choices_fence(text: str) -> str:
         return text or ""
     return re.sub(r"```choices\s*\n?\{.*?\}\s*```", "", text,
                   flags=re.DOTALL).strip()
+
+
+def extract_choices_json_fence(text: str) -> Optional[dict]:
+    """```json 围栏兜底识别(cv-252): 模型漂移到 ```json 标记的问询载荷归一。
+
+    只在问询意图佐证下由调用方启用(GU 判 clarify-first——意图+schema 双门,
+    规避 cv-246「无差别 json 扫描致误归属」教训); 载荷校验与显式标记同一把
+    尺(valid_choices_payload), 协议单源仍是 ```choices(cv-247)。"""
+    m = _CHOICES_JSON_FENCE_RE.search(text or "")
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(1))
+    except Exception:  # noqa: BLE001
+        return None
+    return d if valid_choices_payload(d) else None
+
+
+def strip_choices_json_fence(text: str) -> str:
+    """移除命中的 ```json 问询围栏(与 strip_choices_fence 同规: 卡即回执)。"""
+    if not text or "```json" not in text:
+        return text or ""
+    return _CHOICES_JSON_FENCE_RE.sub("", text).strip()
 
 
 def land_choices(conv_id: str, payload: dict, *, fingerprint: str = "",

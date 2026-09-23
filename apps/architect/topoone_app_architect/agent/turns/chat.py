@@ -176,11 +176,18 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
     loop_fell_back = loop["loop_fell_back"]
     final_content = visible or assistant_text
 
+    # ---- 回合账目(上下文用量观测): 装配体估算 + 可用预算 → conv.meta(fail-soft) ----
+    try:
+        from ..cognition.ctx_usage import record_turn
+        record_turn(conv_id, msgs, eff_model or model_id)
+    except Exception:  # noqa: BLE001
+        pass
+
     # ---- 回合后落库通道(仅确定性围栏, 缓解守卫已按用户裁决拆除 cv-175) ----
     final_content, conv, tools_used, tool_errors = await _post_turn_land(
         io, conv_id, msgs, root, project, eff_model, model_id, conv,
         tools_used, tool_errors, final_content, request_id,
-        allowed_tools=allowed_tools)
+        allowed_tools=allowed_tools, gu_action=gu_action)
 
     tool_round_meta = None
     if final_content and _PLACEHOLDER_ONLY_RE.match(final_content.strip()):
@@ -553,7 +560,8 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
                           model_id: str, conv: dict,
                           tools_used: set, tool_errors: dict,
                           final_content: str, request_id: Optional[str],
-                          allowed_tools: Optional[set] = None):
+                          allowed_tools: Optional[set] = None,
+                          gu_action: str = ""):
     """管线阶段⑤ 回合后确定性落库通道(仅围栏, 缓解守卫已拆除 cv-175)。
 
     写卡执法点统一(cv-246 架构裁决「回合权力单源授予, 回合产物统一执法」):
@@ -570,13 +578,21 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     # ── 结构化问询卡(choices 交互卡, cv-247): 非实体写卡——不落
     # Requirements/Tasks, 故不经 GU 写权验权(执法点管「写实体权力」);
     # 每回合最多 1 张; 坏载荷不落卡, 正文原样保留(信息不丢)。
+    # ```json 兜底(cv-252): GU 判 clarify-first(意图佐证)而模型漂移到
+    # ```json 标记——schema 同尺校验后落卡, 裸 JSON 不再漏到前端。
     choices_payload = req_agent.extract_choices_fence(final_content)
+    json_fallback = False
+    if not choices_payload and str(gu_action or "") == "clarify-first":
+        choices_payload = req_agent.extract_choices_json_fence(final_content)
+        json_fallback = choices_payload is not None
     if choices_payload and "choices" not in tools_used:
         from ..collab import cards as _cards
         landed = await asyncio.to_thread(
             _cards.land_choices, conv_id, choices_payload)
         if landed:
-            final_content = _cards.strip_choices_fence(final_content)
+            final_content = (_cards.strip_choices_json_fence(final_content)
+                             if json_fallback
+                             else _cards.strip_choices_fence(final_content))
 
     async def _fence_land(tool: str, args: dict, strip_fn) -> bool:
         nonlocal final_content
