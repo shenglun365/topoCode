@@ -233,7 +233,14 @@ def resolve_goal_directive(profile: Dict[str, Any], pol: Dict[str, Any]) -> Dict
                     if isinstance(tools, list) else None
                 text = _directive_text(pol, action, profile,
                                        str(rule.get("with") or ""))
-                return {"action": action, "text": text, "tools": tools}
+                out = {"action": action, "text": text, "tools": tools}
+                choices = _gu_choices_payload(action, profile)
+                if choices:
+                    out["choices"] = choices
+                    out["choicesFingerprint"] = (
+                        f"strategy:{profile.get('strategy')}"
+                        if action == "clarify-first" else "candidates")
+                return out
         except Exception:  # noqa: BLE001 — 单规则故障不碍决策
             continue
     return {"action": "answer",
@@ -267,6 +274,41 @@ def _when_hit(when: Dict[str, Any], p: Dict[str, Any]) -> bool:
         else:
             return False          # 未知条件键 → 规则不命中
     return True
+
+
+def _gu_choices_payload(action: str, p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """GU 确定性问询卡 payload(源②③; cv-247 三源汇一)。
+
+    clarify-first(带策略问题集) → 开放题组(要素=组, 问题=question);
+    present-options → 候选选项组(单组单选)。模型围栏源(①)与此同卡型——
+    通用结构只有一个问询实体。"""
+    if action == "clarify-first":
+        qs = [str(q).strip() for q in p.get("strategyQuestions") or []
+              if str(q).strip()]
+        if not qs:
+            return None
+        groups = []
+        for i, q in enumerate(qs, 1):
+            el, _, question = q.partition(":")
+            groups.append({"id": str(i),
+                           "label": (el.strip() or f"问题{i}")[:24],
+                           "question": (question.strip() or el.strip())})
+        return {"title": f"「{p.get('strategyLabel') or '开发'}」需求澄清",
+                "groups": groups,
+                "note": "可直接点选/输入回复，也可逐项跳过；回复后系统将收敛为需求卡"}
+    if action == "present-options":
+        cands = p.get("candidates") or []
+        if not cands:
+            return None
+        return {"title": "请先定性你的诉求",
+                "groups": [{"id": "1", "label": "诉求路径", "question":
+                            "这个诉求属于哪一类？",
+                            "options": [{"id": c.get("id") or str(i),
+                                         "label": str(c.get("label") or ""),
+                                         "hint": str(c.get("hint") or "")}
+                                        for i, c in enumerate(cands, 1)]}],
+                "note": "选择后系统按对应路径推进；也可在输入区直接补充描述"}
+    return None
 
 
 def _directive_text(pol: dict, action: str, p: Dict[str, Any],

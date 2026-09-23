@@ -163,12 +163,12 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
                 "【目标理解(本回合)】判定为「{label}」类开发诉求，关键要素待明确"
                 "——本回合先澄清后落卡：按以下问题集中编号提问，每问先给出你基于"
                 "上下文的推断默认值请用户确认或补全，禁止开放式泛问：\n{questions}\n"
-                "用户答复后用 req.propose/req.amend 回填再建卡；首轮禁止直接落需求卡。"),
+                "用户答复后用 req.propose/req.amend 回填再建卡；首轮禁止直接落需求卡。\n问询/选项清单须以 ```choices 围栏输出(JSON: title/groups[{{label,question,options[{{id,label,hint,recommended}}]}}]/note)，开放问题不设 options；围栏之外正文只做简述，勿复述清单。"),
             "clarify-first-generic": (
                 "【目标理解(本回合)】开发类诉求但要素待明确——本回合先澄清后落卡："
                 "按五要素框架(①目标 ②方案要点 ③允许范围 ④禁止改动 ⑤验收标准)"
                 "逐项给出推断默认值请用户确认，禁止开放式泛问；用户答复后 "
-                "req.propose/req.amend 回填再建卡，首轮禁止直接落需求卡。"),
+                "req.propose/req.amend 回填再建卡，首轮禁止直接落需求卡。\n问询/选项清单须以 ```choices 围栏输出(JSON: title/groups[{{label,question,options[{{id,label,hint,recommended}}]}}]/note)，开放问题不设 options；围栏之外正文只做简述，勿复述清单。"),
             "propose-requirement": (
                 "【目标理解(本回合)】判定为明确的开发类需求——收敛为需求规约"
                 "(req.propose: title/requirementMd/designMd)；"
@@ -193,7 +193,7 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
                 "【目标理解(本回合)】用户诉求的路径存在歧义——本回合先请用户定性，"
                 "禁止落任何卡：把下列候选编号列出请用户选择，或请用户直接补充一句描述；"
                 "用户答复后按其选择推进(需求→req.propose/req.amend；"
-                "操作→task.propose)。\n{options}"),
+                "操作→task.propose)。\n{options}\n问询/选项清单须以 ```choices 围栏输出(JSON: title/groups[{{label,question,options[{{id,label,hint,recommended}}]}}]/note)，开放问题不设 options；围栏之外正文只做简述，勿复述清单。"),
         },
         "escalation": {"llmFallback": False, "minConfidence": 0.7,
                        "maxTextChars": 200},

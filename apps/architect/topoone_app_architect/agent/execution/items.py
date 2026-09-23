@@ -184,6 +184,7 @@ CARD_ITEM_MAP: Dict[str, Dict[str, Any]] = {
     "digest_sent": {"type": "digest"},
     "specCreated": {"type": "spec", "status": "created", "payload": "meta"},
     "specReady": {"type": "spec", "status": "ready", "payload": "meta"},
+    "choices": {"type": "choices", "payload": "meta"},   # cv-247 问询卡
 }
 
 

@@ -172,7 +172,24 @@ draft ──/定稿(designMd 门禁, 幂等)──▶ ready ──/执行──�
 | cv-157 | `_ws_send` 幻影引用 NameError | 幻影清扫（5 处）+ AST 扫描回归 |
 | cv-158 | cline-sdk 启动即失败(空 model) | 默认执行器 id/配置同源 + hint 透传补 models 等 |
 
-### 澄清答复与围栏代落(cv-246, 2026-09-23)
+### 结构化问询卡(cv-247, 2026-09-23)
+
+- **choices 卡=可交互选项一等实体**(卡片词汇表成员, collab/cards 单源):
+  三源汇入同一卡型——①模型 ```choices 显式围栏(不进 json 候选扫描);
+  ②GU present-options 候选(确定性落卡, fingerprint=candidates); ③
+  clarify-first 策略问题集(开放题组, fingerprint=strategy:<key>, 同源
+  原位更新单锚位)。
+- **通用性约束**: 问题自由度不设模板(最小可渲染校验 fail-soft, 坏载荷
+  不落卡正文保留); 开放题与选择题同卡混排(无 options=纯输入组)。
+- **交互模型**: 每题三态(点选/自定义恒驻/跳过显式表达「弃权也是答案」);
+  全局补充恒在; 模板可整体弃用——对话输入区自由回复(发送后卡片置已答)。
+- **回复=普通文本消息**(组装「1: X， 2: 跳过（由你决定）—— 补充」)走既有
+  发送通道, 与手打等价——GU/执法点/澄清续答面(clarify_pending)全部照旧,
+  零新协议。
+- choices 交互卡**非实体写卡**(不落 Requirements/Tasks)——不经 GU 写权
+  验权(执法点管「写实体权力」), 每回合最多 1 张。
+
+## 澄清答复与围栏代落(cv-246, 2026-09-23)
 
 - **澄清答复消解**: 澄清在飞=焦点栈 clarify_pending 帧(回合产物 meta.guAction
   派生, 零写点)→ 答复轮无行动信号时消解到续答面(continuation, req.propose

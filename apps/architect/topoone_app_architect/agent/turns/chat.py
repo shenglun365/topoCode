@@ -567,6 +567,17 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     返回 (final_content, conv, tools_used, tool_errors)。"""
     from ...arch_routes import req_agent
 
+    # ── 结构化问询卡(choices 交互卡, cv-247): 非实体写卡——不落
+    # Requirements/Tasks, 故不经 GU 写权验权(执法点管「写实体权力」);
+    # 每回合最多 1 张; 坏载荷不落卡, 正文原样保留(信息不丢)。
+    choices_payload = req_agent.extract_choices_fence(final_content)
+    if choices_payload and "choices" not in tools_used:
+        from ..collab import cards as _cards
+        landed = await asyncio.to_thread(
+            _cards.land_choices, conv_id, choices_payload)
+        if landed:
+            final_content = _cards.strip_choices_fence(final_content)
+
     async def _fence_land(tool: str, args: dict, strip_fn) -> bool:
         nonlocal final_content
         if allowed_tools is not None and tool not in allowed_tools:

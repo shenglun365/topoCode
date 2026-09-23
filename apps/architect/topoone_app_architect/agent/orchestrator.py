@@ -295,6 +295,21 @@ async def handle_chat(data: dict, send: SendFn) -> None:
                      allowed_tools=gu_allowed,
                      gu_action=str((gu_plan or {}).get("action") or ""))
 
+    # ⑤.5 GU 确定性问询卡(cv-247 源②③): clarify-first(策略问题集)/
+    # present-options(候选)落 choices 卡——正文之后落流(阅读序), 同
+    # fingerprint 原位更新(多回合澄清单锚位, 不刷屏)。模型围栏源(①)
+    # 已在 _post_turn_land 落流。交互卡非实体写卡, 不经验权(执法点管
+    # 「写实体权力」)。
+    gu_choices = (gu_plan or {}).get("choices")
+    if gu_choices:
+        try:
+            from .collab.cards import land_choices
+            await asyncio.to_thread(
+                land_choices, conv_id, gu_choices,
+                fingerprint=str((gu_plan or {}).get("choicesFingerprint") or ""))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[orch] GU 问询卡落流失败 conv=%s: %s", conv_id, e)
+
 
 def _resolve_gu_allowed(plan: Optional[dict]) -> Optional[set]:
     """GU 路线 → 具体工具名单(批丁): toolClasses.read ∪ rule.tools(fnmatch)。

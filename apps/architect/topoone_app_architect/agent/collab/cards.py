@@ -16,6 +16,7 @@
 | turnError          | 错误卡   | —                                       | ❌ 文本(review=error) |
 | digest_sent        | 转达存证 | chars                                   | 折叠卡                |
 | taskPlan           | 计划卡   | requirementId, total                    | 文本(步骤清单)        |
+| choices            | 问询卡   | title, groups[], note, fingerprint?     | ChoicesCard(点选/自定义/跳过) |
 | taskPlanDone       | 汇总回执 | requirementId, total                    | 文本(合并提醒)        |
 
 历史遗留(仅存在于旧数据, 渲染层兼容降级, 不再产生): specCreated、guard、
@@ -32,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger("arch.collab.cards")
@@ -51,6 +53,7 @@ MSG_FLAG_SYNTHETIC = "synthetic"      # 按钮触发的合成用户消息(/执�
 KIND_TASK_IGNORED = "task_ignored"    # 2026-09-20: 用户主动忽略任务卡(置灰回执)
 KIND_REQ_IGNORED = "req_ignored"      # 2026-09-20: 用户主动忽略需求卡(置灰回执)
 KIND_TASK_STATUS = "task_status"      # cv-203: 任务执行状态卡(同 taskId 单卡原位更新)
+KIND_CHOICES = "choices"              # cv-247: 结构化问询卡(可交互选项/开放题, 三源汇一)
 KIND_TASK_RECEIPTS = (
     "task_start", "task_input", "task_done", "task_failed",
     "task_approval_done", "task_progress",
@@ -60,7 +63,7 @@ _KNOWN_KINDS = frozenset(
     (KIND_REQUIREMENT, KIND_TASK_CARD, KIND_TASK_APPROVAL, KIND_TURN_ERROR,
      KIND_DIGEST, KIND_TASK_PLAN, KIND_TASK_PLAN_DONE, KIND_TASK_INPUT_ECHO,
      KIND_TASK_IGNORED, KIND_REQ_IGNORED, KIND_TASK_STATUS,
-     *KIND_TASK_RECEIPTS))
+     *KIND_TASK_RECEIPTS, KIND_CHOICES))
 
 _ERROR_REVIEW_STATE = "error"
 
@@ -169,6 +172,95 @@ def land_plan_progress(conv_id: str, rid: str, text: str, *, total: int = 0,
         logger.warning("[cards] 进度锚更新失败 conv=%s rid=%s: %s",
                        conv_id, rid, e)
         return None
+
+
+# ── 结构化问询卡(cv-247): 协议解析+落流单源 ──────────────────────────
+# 通用性约束(用户裁决): 问题自由度不设模板(组数/选项数/措辞自由, 最小可渲染
+# 校验); 选择题组恒带自定义输入与跳过(前端语义, 协议无开关); 开放题组
+# (无 options)纯输入——策略库开放式问题与模型临场问题同构适配。
+
+_CHOICES_FENCE_RE = re.compile(r"```choices\s*\n?(\{.*?\})\s*```", re.DOTALL)
+
+
+def valid_choices_payload(payload: Any) -> bool:
+    """最小可渲染校验(fail-soft): groups 非空、组有 label/question、
+    选项有 label。不校验语义/数量——问题自由度不设模板(cv-247)。"""
+    if not isinstance(payload, dict):
+        return False
+    groups = payload.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return False
+    for g in groups:
+        if not isinstance(g, dict):
+            return False
+        if not (str(g.get("label") or "").strip()
+                or str(g.get("question") or "").strip()):
+            return False
+        opts = g.get("options")
+        if opts is not None:
+            if not isinstance(opts, list):
+                return False
+            for o in opts:
+                if not isinstance(o, dict) \
+                        or not str(o.get("label") or "").strip():
+                    return False
+    return True
+
+
+def extract_choices_fence(text: str) -> Optional[dict]:
+    """提取显式 ```choices 围栏(结构化问询卡协议; cv-247)。
+
+    只认显式标记——不进 json 候选扫描(cv-246 教训: 围栏竞争致误归属);
+    坏载荷返回 None(调用方保留正文, 信息不丢)。"""
+    m = _CHOICES_FENCE_RE.search(text or "")
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(1))
+    except Exception:  # noqa: BLE001
+        return None
+    return d if valid_choices_payload(d) else None
+
+
+def strip_choices_fence(text: str) -> str:
+    """移除 choices 围栏(落卡成功后卡即回执, 正文复述 JSON 属垃圾——cv-174 同规)。"""
+    if not text or "```choices" not in text:
+        return text or ""
+    return re.sub(r"```choices\s*\n?\{.*?\}\s*```", "", text,
+                  flags=re.DOTALL).strip()
+
+
+def land_choices(conv_id: str, payload: dict, *, fingerprint: str = "",
+                 project_id: str = "", agent: str = "") -> Optional[dict]:
+    """问询卡落流: 校验通过才落; fingerprint 非空时同源卡**原位更新**
+    (GU 确定性源每回合重判, 多回合澄清只占一个锚位——进度锚同款)。
+    模型围栏源 fingerprint 留空(每回合独立卡)。坏载荷返回 None。"""
+    if not valid_choices_payload(payload):
+        return None
+    title = str(payload.get("title") or "").strip() or "请确认以下问题"
+    meta_payload = {"title": title,
+                    "groups": payload.get("groups") or [],
+                    "note": str(payload.get("note") or "")}
+    if fingerprint:
+        meta_payload["fingerprint"] = fingerprint
+    if fingerprint:
+        try:
+            from ...arch_routes import store as _store
+            upd = _store.ConversationsStore.update_message_by_meta(
+                conv_id, {"kind": KIND_CHOICES, "fingerprint": fingerprint},
+                {"content": title, "meta": meta_payload,
+                 "time": int(__import__("time").time() * 1000)})
+            if upd:
+                try:
+                    emit(conv_id, upd["id"], agent=agent or "",
+                         kind=KIND_CHOICES)
+                except Exception:  # noqa: BLE001
+                    pass
+                return upd
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[cards] 问询卡原位更新失败 conv=%s: %s", conv_id, e)
+    return land(conv_id, title, kind=KIND_CHOICES, role="assistant",
+                project_id=project_id, agent=agent, **meta_payload)
 
 
 def emit(conv_id: str, msg_id: str, agent: str = "", kind: str = "") -> None:

@@ -8,6 +8,7 @@ import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/ser
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
+import ChoicesCard from '@/components/chat/ChoicesCard.vue' 
 import AssetsPanel from '@/components/chat/AssetsPanel.vue'
 import { apiPost, apiGet } from '@/services/api-client'
 import type { SemanticAsset } from '@/types'
@@ -218,6 +219,10 @@ watch(() => props.insertDraft?.nonce ?? 0, (n) => {
 })
 const scrollRef = ref<HTMLElement | null>(null)
 const answers = reactive<Record<string, string>>({})
+// cv-247 问询卡已答态(本地): 卡内回复或输入区自由回复后均置已答(防重复)
+const choicesAnswered = reactive(new Set<string>())
+const choicesCards = computed(() =>
+  (props.turns || []).filter((m: any) => m.item?.type === 'choices'))
 
 watch(
   () => props.turns.length,
@@ -587,6 +592,12 @@ function pickModel(m: string) {
   if (m !== (props.executorModel || '')) emit('set-model', m)
 }
 
+/** 问询卡回复: 组装文本走既有发送通道(与手打等价, cv-247)。 */
+function onChoicesReply(msgId: string, text: string) {
+  choicesAnswered.add(msgId)
+  emit('send', { text })
+}
+
 function send() {
   if (!input.value.trim()) return
   if (props.busy) return
@@ -610,6 +621,8 @@ function send() {
     agent: r.kind === 'assign' ? r.agent : undefined,
   })
   routeOverride.value = null // 单次翻转复位(避免持久模式陷阱)
+  // 自由回复消化在飞问询卡(cv-247: 模板可整体弃用)
+  for (const m of choicesCards.value) choicesAnswered.add(String(m.id || m.item?.id || ''))
   input.value = ''
   cmdMenuOpen.value = false
   resetInputHeight()
@@ -732,24 +745,14 @@ function resetInputHeight() {
   manualHeight = false
   autoResize()
 }
-/** Enter 发送；Ctrl/Cmd+Enter 手动插入换行(保证各浏览器一致)。 */
+/** Enter 换行(不拦截, textarea 原生插入且不干扰 IME)；Ctrl/Cmd+Enter 发送。 */
 function onInputKeydown(e: KeyboardEvent) {
   onCmdMenuKeydown(e)
   if (e.key !== 'Enter') return
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault()
-    const el = e.target as HTMLTextAreaElement
-    const start = el.selectionStart
-    const end = el.selectionEnd
-    input.value = input.value.slice(0, start) + '\n' + input.value.slice(end)
-    nextTick(() => {
-      el.selectionStart = el.selectionEnd = start + 1
-      autoResize()
-    })
-    return
+    send()
   }
-  e.preventDefault()
-  send()
 }
 
 function submitAnswers() {
@@ -1181,6 +1184,13 @@ onUnmounted(() => {
             <span class="font-mono">{{ (m as any).agent || 'architect' }}</span>
           </div>
           <!-- A6.2 守门: 渲染只经统一投影(m.item), 禁历史卡片键/执行器类型分支 -->
+          <ChoicesCard
+            v-if="m.item?.type === 'choices'"
+            class="mb-2"
+            :payload="(m.item!.payload || {}) as any"
+            :disabled="props.readOnly || props.busy || choicesAnswered.has(String(m.id || m.item?.id || ''))"
+            @reply="(text: string) => onChoicesReply(String(m.id || m.item?.id || ''), text)"
+          />
           <TaskCard
             v-if="m.item?.type === 'task' && taskById(m.item.payload?.taskId)"
             :conv-id="convId"
@@ -2187,6 +2197,7 @@ onUnmounted(() => {
         v-else
         class="btn btn-primary !py-2.5 shrink-0 whitespace-nowrap"
         :disabled="!input.trim() || props.readOnly"
+        :title="t('coding.sendHint')"
         @click="send"
       >
         <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}
