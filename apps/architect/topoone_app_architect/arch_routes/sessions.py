@@ -1054,18 +1054,51 @@ async def session_spec_apply(conv_id: str, request: Request):
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
+    # 幂等(cv-248): 载荷指纹窗口内重复提交直接返回既有结果——防连点重复
+    # 建需求(apply_spec_payload 的 propose/amend 均非幂等操作)。指纹=
+    # title+requirementMd; 窗口 10min(超窗视为新一轮修订, 走 amend)。
+    import hashlib as _h
+    import time as _time
+    fp = _h.sha1((str(payload.get("title") or "") + "\n"
+                  + str(payload.get("requirementMd") or "")).encode("utf-8")
+                 ).hexdigest()[:16]
+    cm = conv.get("meta") if isinstance(conv.get("meta"), dict) else {}
+    prev_fp = str((cm or {}).get("specApplyFp") or "")
+    prev_ts = int((cm or {}).get("specApplyTs") or 0)
+    prev_rid = str((cm or {}).get("specApplyRid") or "")
+    if prev_fp and prev_fp == fp and prev_rid \
+            and _time.time() * 1000 - prev_ts < 10 * 60 * 1000:
+        return ok({"ok": True, "requirementId": prev_rid,
+                   "idempotent": True,
+                   "summary": f"需求 {prev_rid} 已写入（重复提交已幂等跳过）——"
+                              "点需求卡「一键建卡执行」发起执行"})
     from .req_agent import apply_spec_payload
-    res = await asyncio.to_thread(
-        apply_spec_payload, payload,
-        req_id=str(conv.get("reqId") or ""),
-        project=str(conv.get("projectId") or ""),
-        root="")
-    # 落库成功 → 清除会话草稿卡暂存(草稿已兑现为真实需求)
+    from . import ctx as _ctx
+
+    def _apply():
+        # ctx 会话上下文(cv-248 根因): spec-apply 原先未设置 conv 上下文——
+        # req.propose 内部 conv_id 为空 → ①specReady 卡不落流(无「一键建卡
+        # 执行」按钮) ②conv.reqId 绑定回写跳过 → 重复点击重复新建
+        token = _ctx.set_conv(conv_id)
+        try:
+            return apply_spec_payload(
+                payload, req_id=str(conv.get("reqId") or ""),
+                project=str(conv.get("projectId") or ""), root="")
+        finally:
+            _ctx.reset_conv(token)
+
+    res = await asyncio.to_thread(_apply)
+    # 落库成功 → 清除会话草稿卡暂存(草稿已兑现为真实需求) + 登记幂等指纹
     if res.get("ok"):
         try:
             cm = conv.get("meta") if isinstance(conv.get("meta"), dict) else {}
-            if isinstance(cm, dict) and cm.get("specDraft"):
-                cm = dict(cm)
+            cm = dict(cm or {})
+            cm["specApplyFp"] = fp
+            cm["specApplyTs"] = int(_time.time() * 1000)
+            cm["specApplyRid"] = str(res.get("requirementId")
+                                     or res.get("reqId") or prev_rid or "")
+            store.ConversationsStore.update(conv_id, {"meta": cm})
+            if cm.get("specDraft"):
                 cm.pop("specDraft", None)
                 store.ConversationsStore.update(conv_id, {"meta": cm})
         except Exception:  # noqa: BLE001

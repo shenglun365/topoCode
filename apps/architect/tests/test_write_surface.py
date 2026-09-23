@@ -191,12 +191,17 @@ def test_clarify_frame_pure_read_without_focus():
     assert p["kind"] == "inquiry" and r["action"] == "answer" and r["tools"] == []
 
 
-def test_clarify_frame_yield_to_deterministic_hit():
-    """答复偏题(策略词命中) → L0 确定性优先, 澄清帧不覆盖。"""
+def test_clarify_frame_takes_priority_over_vocab():
+    """cv-248 裁决重写: 澄清答复天然含主题词(答复内容=澄清主题), 词表重判
+    会把答复误判为新澄清/候选菜单 → 澄清帧优先于 strategy/exec 判定;
+    command/help 仍在其前(显式意图优先)。"""
     from topoone_app_architect.agent.turns.goal import build_goal_profile
     focus = {"top": {"kind": "clarify_pending"}, "phase": ""}
     p = build_goal_profile("环境搭建用什么包管理器", focus=focus)
-    assert p["kind"] == "requirement" and "strategy" in p["sources"]
+    assert p["kind"] == "continuation" and "focus-clarify" in p["sources"]
+    # help 仍优先于澄清消解
+    p2 = build_goal_profile("怎么配置执行器？", focus=focus)
+    assert p2["kind"] == "help"
 
 
 def test_focus_clarify_frame_derivation():
@@ -209,3 +214,71 @@ def test_focus_clarify_frame_derivation():
     assert frames_from_entities({}, [], None, [],
                                 pending={"action": "answer", "since": now}) == []
     assert frames_from_entities({}, [], None, []) == []
+
+
+# ── cv-248 复放: spec-apply 上下文/幂等/澄清帧遮蔽 ────────────────────
+
+def test_clarify_frame_not_shadowed_by_card_messages(arch_env):
+    """choices 卡等落流产物不得遮蔽回合产物的 guAction(cv-248: 围栏源问询卡
+    后落流 → 澄清帧丢失 → 答复误判新澄清 → 面缺 req.propose → 代落被拒)。"""
+    from topoone_app_architect.agent.governance.focus import _pending_action
+    from topoone_app_architect.arch_routes import store
+    store.ConversationsStore.create({"id": "conv-sh", "kind": "generic",
+                                     "title": "t"})
+    now = 1_800_000_000_000
+    store.ConversationsStore.append_message({
+        "id": "m1", "conversationId": "conv-sh", "role": "assistant",
+        "time": now - 5000, "content": "请确认",
+        "meta": {"guAction": "clarify-first"}})
+    # 卡片消息后落流(无 guAction, 有 kind)——不得遮蔽
+    store.ConversationsStore.append_message({
+        "id": "m2", "conversationId": "conv-sh", "role": "assistant",
+        "time": now - 3000, "content": "问询卡",
+        "meta": {"kind": "choices", "title": "x", "groups": []}})
+    pend = _pending_action(store, "conv-sh", now)
+    assert pend.get("action") == "clarify-first"
+    # 答复轮 GU: 续答面(req.propose 可达)
+    from topoone_app_architect.agent.governance.flow_policy import (
+        DEFAULT_FLOW_POLICY)
+    from topoone_app_architect.agent.turns.goal import (
+        build_goal_profile, resolve_goal_directive)
+    focus = {"top": {"kind": "clarify_pending"}, "phase": ""}
+    p = build_goal_profile("技术栈版本确认: Vue3 + Vite，Monorepo", focus=focus)
+    r = resolve_goal_directive(p, DEFAULT_FLOW_POLICY)
+    assert r["action"] == "continue" and "req.propose" in r["tools"]
+
+
+def test_spec_apply_lands_card_binds_and_idempotent(arch_env):
+    """spec-apply 三缺陷终审(cv-248): ①ctx 设置→specReady 卡落流+
+    conv.reqId 回写 ②载荷指纹幂等(重复提交不再新建)。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import sessions as _sess, store
+    from fastapi import Request
+
+    conv = store.ConversationsStore.create({"id": "conv-sa", "kind": "generic",
+                                            "title": "t"})
+
+    def _post():
+        async def _body():
+            return {"payload": {
+                "title": "cv-248 规约", "requirementMd": "从零初始化开发环境xx",
+                "allowedScopeMd": "根目录", "acceptanceMd": "安装成功"}}
+        req = SimpleNamespace(json=_body)
+        return asyncio.run(_sess.session_spec_apply("conv-sa", req))
+
+    r1 = (_post() or {}).get("data") or {}
+    assert r1.get("ok") and not r1.get("idempotent")
+    rid1 = r1.get("requirementId") or r1.get("reqId")
+    assert rid1
+    # ① specReady 卡落流
+    cards = [m for m in store.ConversationsStore.messages("conv-sa")
+             if (m.get("meta") or {}).get("kind") == "specReady"]
+    assert cards, "spec-apply 必须落 specReady 卡(一键建卡执行入口)"
+    # ① conv.reqId 回写
+    assert (store.ConversationsStore.get("conv-sa") or {}).get("reqId") == rid1
+    # ② 同载荷重复提交 → 幂等跳过(不再新建)
+    r2 = (_post() or {}).get("data") or {}
+    assert r2.get("ok") and r2.get("idempotent")
+    rows = [r for r in store.RequirementsStore.all()
+            if (r.get("title") or "") == "cv-248 规约"]
+    assert len(rows) == 1, f"重复提交不得新建需求, 实落 {len(rows)} 条"

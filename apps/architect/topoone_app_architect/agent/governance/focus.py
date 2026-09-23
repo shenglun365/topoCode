@@ -209,16 +209,13 @@ def _pending_action(store_mod, conv_id: str, now: int) -> Dict[str, Any]:
     只看最近一条 assistant——任何新回合动作自然覆盖旧状态(生灭自驱)。
     """
     try:
-        msgs = store_mod.ConversationsStore.messages(conv_id, limit=6) or []
+        msgs = store_mod.ConversationsStore.messages(conv_id, limit=12) or []
     except Exception:  # noqa: BLE001
         return {}
     lo = now - RECENT_WINDOW_MS
     for m in reversed(msgs):
         if not isinstance(m, dict) or str(m.get("role") or "") != "assistant":
             continue
-        ts = _ts(m, "time")
-        if ts and ts < lo:
-            return {}
         meta = m.get("meta")
         if isinstance(meta, str):
             try:
@@ -226,7 +223,17 @@ def _pending_action(store_mod, conv_id: str, now: int) -> Dict[str, Any]:
                 meta = _j.loads(meta or "{}")
             except (TypeError, ValueError):
                 meta = {}
-        act = str((meta or {}).get("guAction") or "") if isinstance(meta, dict) else ""
+        if not isinstance(meta, dict):
+            meta = {}
+        # 卡片消息(choices/specReady/回执…)是落流产物非回合产物——跳过,
+        # 继续向前找最近一个带 guAction 的回合(cv-248 实证: 围栏源问询卡
+        # 后落流遮蔽正文回合的 guAction → 澄清帧丢失 → 答复误判新澄清)
+        if meta.get("kind"):
+            continue
+        ts = _ts(m, "time")
+        if ts and ts < lo:
+            return {}
+        act = str(meta.get("guAction") or "")
         return {"action": act, "since": ts} if act else {}
     return {}
 

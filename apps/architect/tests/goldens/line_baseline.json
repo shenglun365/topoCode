@@ -81,7 +81,7 @@
  "agent/turns/call.py": 162,
  "agent/turns/catalog.py": 89,
  "agent/turns/context.py": 344,
- "agent/turns/goal.py": 427,
+ "agent/turns/goal.py": 428,
  "agent/turns/intent_llm.py": 118,
  "arch_routes/__init__.py": 59,
  "arch_routes/acceptance.py": 533,
@@ -147,7 +147,7 @@
  "arch_routes/semantic_assets.py": 112,
  "arch_routes/session_docs.py": 235,
  "arch_routes/session_guide.py": 57,
- "arch_routes/sessions.py": 1365,
+ "arch_routes/sessions.py": 1398,
  "arch_routes/store/__init__.py": 21,
  "arch_routes/store/base.py": 464,
  "arch_routes/store/blueprint.py": 95,
@@ -174,5 +174,5 @@
  "agent/turns/chat.py": 716,
  "agent/execution/dispatch.py": 813,
  "agent/turns/help_docs.py": 141,
- "agent/governance/focus.py": 302
+ "agent/governance/focus.py": 309
 }

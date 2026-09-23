@@ -99,6 +99,16 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
         # L0-2.6 显式建卡请求(批戊补, cv-242 对偶面): 「建需求卡/创建/生成需求卡」
         # → requirement 面(req.propose 可达)。纯读兜底(cv-242 修复)的对偶纪律:
         # 明确动作诉求不落兜底。排除已由 help 的构建标记先行覆盖。
+        # L0-2.8 澄清答复消解(cv-248): 澄清在飞时, 非指令/帮助类输入一律
+        # 续答面——答复文本天然含主题词(澄清主题就是需求主题), 词表重判会把
+        # 答复误判为新澄清/候选菜单(链路断裂实证)。新话题由模型在续答面内
+        # 自然处理(面含 propose 权≠必用, 指引仍是对话)。
+        if str(((focus or {}).get("top") or {}).get("kind") or "") \
+                == "clarify_pending":
+            prof.update(kind="continuation", target="clarify",
+                        confidence=0.55)
+            prof["sources"].append("focus-clarify")
+            return prof
         m_card = _CARD_ASK_RE.search(q)
         if m_card:
             prof.update(kind="requirement", confidence=0.8)
@@ -172,15 +182,6 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
             prof["sources"].append("context")
         elif prof["kind"] == "requirement":
             prof["target"] = f"req:{rid}"
-    # L1 焦点消解: 澄清答复(cv-246 架构裁决)——澄清在飞(clarify_pending 帧)
-    # 且本回合无行动信号 → 续答面(continuation, 决策表既有行 [req.amend,
-    # req.propose]): 对问询的答复获得立卡权, 任意自然语言答复均覆盖(非词表)。
-    # 优先序: 绑定需求(context)优先; L0 确定性命中(sources 非空)不动。
-    if prof["sources"] == [] and not rid \
-            and str(((focus or {}).get("top") or {}).get("kind") or "") \
-            == "clarify_pending":
-        prof.update(kind="continuation", target="clarify", confidence=0.55)
-        prof["sources"].append("focus-clarify")
     # L1 相位冲突(咨询面; 硬拦截仍归相位硬闸——防守线①)
     # 批戊: 相位事实面优先取焦点栈(派生单源), conv.flowState 为兼容回退
     phase = str((focus or {}).get("phase")

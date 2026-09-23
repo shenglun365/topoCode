@@ -164,13 +164,16 @@ function specPayloadOf(index: number): Record<string, unknown> | null {
   return parseSpecPayload(props.turns[index]?.content || '')
 }
 const specBusyIdx = ref(-1)
+// cv-248: 已写入态(本地)——写入成功后按钮禁用防重复(后端另有指纹幂等兜底)
+const specAppliedIdx = reactive(new Set<number>())
 function onSpecApply(index: number) {
-  if (specBusyIdx.value >= 0) return
+  if (specBusyIdx.value >= 0 || specAppliedIdx.has(index)) return
   const payload = specPayloadOf(index)
   if (!payload) return
   specBusyIdx.value = index
   try {
     emit('spec-apply', { index, payload })
+    specAppliedIdx.add(index)
   } finally {
     setTimeout(() => { specBusyIdx.value = -1 }, 800)
   }
@@ -1495,11 +1498,12 @@ onUnmounted(() => {
             class="mt-2 flex items-center gap-2"
           >
             <button
-              class="btn btn-xs btn-primary"
-              :disabled="specBusyIdx === i"
+              class="btn btn-xs"
+              :class="specAppliedIdx.has(i) ? 'btn-green' : 'btn-primary'"
+              :disabled="specBusyIdx === i || specAppliedIdx.has(i)"
               title="按原文确定性落库为需求(零模型转写)"
               @click="onSpecApply(i)"
-            >{{ specBusyIdx === i ? '…' : t('session.actions.applySpec') }}</button>
+            >{{ specAppliedIdx.has(i) ? '✓ ' + t('session.actions.applySpec') : (specBusyIdx === i ? '…' : t('session.actions.applySpec')) }}</button>
             <span class="text-[10px] text-ctp-overlay0">{{ t('session.actions.applySpecHint') }}</span>
           </div>
 
