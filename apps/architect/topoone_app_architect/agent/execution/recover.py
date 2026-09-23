@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 _SWEEP_TASK: Optional[asyncio.Task] = None
 
+# cv-248 liveness 补口: runner 持续不可达的容忍时限(分钟, env 可覆写)。
+# 「跳过(可能在重启)」只在短暂窗口成立; runner 进程级死亡时任务必须按时限
+# 显式终态化——无出路状态(永久 running 锁死会话互斥)不允许存在(liveness
+# 不变式: 任何判定不可操作的状态必须有一条不依赖丢失对象的出路)。
+_UNREACHABLE_LIMIT_MIN = float(os.environ.get("ARCH_RUNNER_UNREACHABLE_MIN", "15"))
+
 
 def start_recover_sweep(interval: float = 45.0) -> None:
     """C 定时对账: 主循环周期任务——扫描默认库+全部项目库的假 running 任务。
@@ -126,6 +132,19 @@ def recover_conv_tasks(conv_id: str) -> dict:
         if snap is None or not snap.ok:
             if snap is not None and "作业不存在" in (snap.error or ""):
                 err = "runner 作业已丢失(执行器服务重启)——无法续跑, 请重新发起任务。"
+                _eb._handle_task_event({"kind": "failed", "text": err},
+                                       _eb._task_ctx(conv_id, t["id"], job_id,
+                                                     t.get("reqId") or "",
+                                                     t.get("executorType") or ""))
+                out["finished"] += 1
+                continue
+            # cv-248 liveness 补口: 不可达超出容忍时限(45s sweep × 多轮确认,
+            # 避开重启窗口)→ 显式 failed——变更保留在工作区, 重试/重新发起
+            # 出路可达; 绝不因悬空 running 永久锁死执行互斥。
+            _upd = int(t.get("updatedAt") or t.get("createdAt") or 0)
+            if now_ms - _upd > _UNREACHABLE_LIMIT_MIN * 60 * 1000:
+                err = ("执行器持续不可达(对账超时)——任务终止。"
+                       "已产生的变更保留在工作区, 可重试或重新发起。")
                 _eb._handle_task_event({"kind": "failed", "text": err},
                                        _eb._task_ctx(conv_id, t["id"], job_id,
                                                      t.get("reqId") or "",
