@@ -75,7 +75,9 @@ def build_goal_profile(question: str, conv: Optional[dict] = None,
                             "focusTop": "",
                             "contextChars": len(str(context or "")),
                             "clarifyMode": str((conv or {}).get("clarifyMode")
-                                               or "auto")}
+                                               or "auto"),
+                            "analysisMode": str((conv or {}).get("analysisMode")
+                                                or "strict")}
     # L0-1 确定性指令/确认(编排层②通常已拦; 此处恒等守护——批戊: 意图原语单源)
     from ..perception.commands import match_imperative
     if match_imperative(q):
@@ -266,6 +268,9 @@ def _when_hit(when: Dict[str, Any], p: Dict[str, Any]) -> bool:
                 return False
         elif k == "clarifyMode":
             if str(p.get("clarifyMode") or "auto") != v:
+                return False
+        elif k == "analysisMode":
+            if str(p.get("analysisMode") or "strict") != v:
                 return False
         elif k == "explicit":
             if bool(p.get("explicit")) != bool(v):

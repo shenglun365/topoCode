@@ -128,6 +128,12 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
             # 策略+执行词弱撞 / 策略 top-2 分差≤1 → 请用户定性(GU 重判收敛)
             {"when": {"candidates": True}, "then": "present-options",
              "tools": []},
+            # 快捷挡直通(cv-254): analysisMode=quick → 跳过需求分析/澄清,
+            # 直接任务化——与 gears.resolve_gear 的 quick(直通车·关 KB)
+            # 同源单值: 执行挡位与流程路由消费同一会话字段。
+            # 规则序=优先级: 前置抢占 clarify-first/propose-requirement。
+            {"when": {"kind": "requirement", "analysisMode": "quick"},
+             "then": "propose-task", "tools": ["task.propose"]},
             {"when": {"kind": "requirement", "strategy": "*"},
              "then": "clarify-first", "with": "strategy", "tools": ["req.amend"]},
             {"when": {"kind": "requirement"}, "then": "propose-requirement",
@@ -307,8 +313,8 @@ def _validate_goal(goal: Any) -> List[str]:
                     errs += [f"goal.decision[{i}].when 未知条件键: {k}"
                              for k in when
                              if k not in ("kind", "strategy", "confidence<",
-                                          "clarifyMode", "explicit",
-                                          "candidates")]
+                                          "clarifyMode", "analysisMode",
+                                          "explicit", "candidates")]
                     if "kind" in when and when["kind"] not in GOAL_KINDS:
                         errs.append(f"goal.decision[{i}].when.kind 非法: "
                                     f"{when['kind']}(可用: {','.join(GOAL_KINDS)})")
