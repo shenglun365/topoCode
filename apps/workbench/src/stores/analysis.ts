@@ -1,8 +1,8 @@
 /** Analysis Store - 分析任务管理 */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AnalysisTask, AnalysisResult, FileStatsResult, ScanOptions, TaskRun } from '@topo/web-core/types/ipc'
-import { ipc } from '@topo/web-core/services/ipc'
+import type { AnalysisTask, AnalysisResult, FileStatsResult, ScanOptions, TaskRun } from '@/types/ipc'
+import { ipc } from '@/services/ipc'
 import { createLogger } from '@topo/web-core/utils/logger'
 
 const logger = createLogger('analysis')

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ipc } from '@topo/web-core/services/ipc'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { ipc } from '@/services/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 

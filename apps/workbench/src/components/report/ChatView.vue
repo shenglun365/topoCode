@@ -12,7 +12,7 @@ import {
   StopIcon, CubeIcon, DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
 import { isLLMConfigured, chat, type ChatOptions } from '@/services/llmClient'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 
 const props = defineProps<{

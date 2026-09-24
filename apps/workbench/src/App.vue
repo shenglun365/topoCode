@@ -6,7 +6,7 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useModelConfigStore } from '@/stores/model-config-store'
 import { useProjectStore } from '@/stores/project'
 import AppShell from '@/components/shell/AppShell.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const themeStore = useThemeStore()

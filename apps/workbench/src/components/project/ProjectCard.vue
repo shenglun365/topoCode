@@ -17,16 +17,16 @@ import {
   DocumentMinusIcon,
 } from '@heroicons/vue/24/outline'
 import { StarIcon, ArrowUpOnSquareIcon } from '@heroicons/vue/24/solid'
-import type { Project, GroupNode } from '@topo/web-core/types/ipc'
-import { ipc } from '@topo/web-core/services/ipc'
-import { getProjectStatusBadge } from '@topo/web-core/utils/statusBadge'
+import type { Project, GroupNode } from '@/types/ipc'
+import { ipc } from '@/services/ipc'
+import { getProjectStatusBadge } from '@/utils/statusBadge'
 import { languageBadge } from '@/utils/languageBadge'
 import ProjectContextMenu from './ProjectContextMenu.vue'
 import { useProjectStore } from '@/stores/project'
-import ConfirmDialog from '@topo/web-core/components/ConfirmDialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ClearCacheDialog from './ClearCacheDialog.vue'
 import VersionUpdateDialog from './VersionUpdateDialog.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-002')
 const { t } = useI18n()

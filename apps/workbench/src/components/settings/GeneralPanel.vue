@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ipc } from '../../services/ipc'
-import { LocaleToggle } from '../../shell'
-import { authHeaders } from '../../services/api'
+import { ipc } from '@/services/ipc'
+import { LocaleToggle } from '@topo/web-core/shell'
+import { authHeaders } from '@topo/web-core/services/api'
 
 const { t } = useI18n()
 

@@ -14,7 +14,7 @@ import {
   SparklesIcon,
 } from '@heroicons/vue/24/outline'
 import { isLLMConfigured, explainSymbol } from '@/services/llmClient'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('RP-018')
 const { t } = useI18n()

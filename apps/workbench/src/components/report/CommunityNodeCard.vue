@@ -7,7 +7,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Squares2X2Icon, SparklesIcon } from '@heroicons/vue/24/outline'
 import { isLLMConfigured, explainCommunity } from '@/services/llmClient'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('RP-016')
 const { t } = useI18n()

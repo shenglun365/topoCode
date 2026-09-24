@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ModelConfigDTO } from '@topo/web-core/types/ipc'
-import { ipc } from '@topo/web-core/services/ipc'
+import type { ModelConfigDTO } from '@/types/ipc'
+import { ipc } from '@/services/ipc'
 
 export const useModelConfigStore = defineStore('modelConfig', () => {
   const models = ref<ModelConfigDTO[]>([])

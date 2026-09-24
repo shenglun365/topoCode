@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import type { SupportedLocale } from '@/i18n'
 import { useStatusStore } from '@/stores/status'
 import { useAnalysisStore } from '@/stores/analysis'
-import { ipc } from '@topo/web-core/services/ipc'
+import { ipc } from '@/services/ipc'
 import { readLocale, writeLocale, readFontSize, setFontSize as applyFontSize } from '@topo/web-core/shell'
 import i18n from '@/i18n'
 

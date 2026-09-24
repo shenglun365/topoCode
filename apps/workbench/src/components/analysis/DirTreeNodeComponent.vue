@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { ChevronRightIcon } from '@heroicons/vue/24/outline'
-import type { DirTreeNode } from '@topo/web-core/types/ipc'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import type { DirTreeNode } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('AN-006')
 const props = withDefaults(defineProps<{

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { ipc } from '@topo/web-core/services/ipc'
+import { ipc } from '@/services/ipc'
 import { useAnalysisStore } from './analysis'
 import { useProjectStore } from './project'
 

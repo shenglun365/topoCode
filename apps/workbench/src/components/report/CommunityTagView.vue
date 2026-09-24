@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { useFuncGroupStore } from '@/stores/funcGroup'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 import { communityLabel } from '@/utils/communityLabel'
 
 const { t } = useI18n()

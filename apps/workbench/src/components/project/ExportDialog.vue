@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
-import { ipc } from '@topo/web-core/services/ipc'
+import { ipc } from '@/services/ipc'
 
 const { t } = useI18n()
 

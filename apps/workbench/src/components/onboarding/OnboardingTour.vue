@@ -8,7 +8,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useOnboardingStore } from '@/stores/onboarding'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('OT-003')
 const { t } = useI18n()

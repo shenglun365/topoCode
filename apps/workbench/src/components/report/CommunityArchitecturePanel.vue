@@ -9,7 +9,7 @@ import {
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import CommunityTagView from './CommunityTagView.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()

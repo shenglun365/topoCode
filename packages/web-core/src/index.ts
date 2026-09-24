@@ -18,8 +18,6 @@ export type {
 } from './types/domain'
 
 // 传输层
-export { ipc } from './services/ipc'
-export { createBrowserAPI, installBrowserAPI } from './services/browser-api'
 
 // HTTP 客户端
 export { get, post, put, del } from './services/api'
@@ -40,4 +38,3 @@ export { useDialog } from './composables/useDialog'
 export type { DialogState } from './composables/useDialog'
 export { useToast } from './composables/useToast'
 export { useFloatDrag } from './composables/useFloatDrag'
-export { useComponentId } from './composables/useComponentId'

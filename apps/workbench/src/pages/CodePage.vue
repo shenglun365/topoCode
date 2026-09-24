@@ -19,7 +19,7 @@ import ClearCacheDialog from '@/components/project/ClearCacheDialog.vue'
 import ExportDialog from '@/components/project/ExportDialog.vue'
 import ImportDialog from '@/components/project/ImportDialog.vue'
 import FileVerifyDialog from '@/components/project/FileVerifyDialog.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 import { useCommunityStore } from '@/stores/community-store'
 
 const { showId, componentId } = useComponentId('PG-002')

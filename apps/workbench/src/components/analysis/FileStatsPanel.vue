@@ -7,9 +7,9 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
-import type { FileStatsResult, DirTreeNode } from '@topo/web-core/types/ipc'
+import type { FileStatsResult, DirTreeNode } from '@/types/ipc'
 import DirTreeNodeComponent from './DirTreeNodeComponent.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 // 解析器支持的语言（与 backend EXTRACTORS 注册表同步）
 // scanFileStats 返回的 extensions key 是语言名，非文件后缀

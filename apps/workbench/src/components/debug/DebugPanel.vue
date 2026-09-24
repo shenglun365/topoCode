@@ -4,7 +4,7 @@ import { useDebugStore } from '@/stores/debug'
 import { useI18n } from 'vue-i18n'
 import { WrenchScrewdriverIcon, TrashIcon, DocumentDuplicateIcon, CheckIcon } from '@heroicons/vue/24/outline'
 import { ref, onMounted } from 'vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('OT-002')
 const { t } = useI18n()

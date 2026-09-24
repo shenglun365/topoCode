@@ -19,7 +19,7 @@ const routes: RouteRecordRaw[] = [
         {
           path: '/settings',
           name: 'PortalSettings',
-          component: () => import('@topo/web-core/portal/settings/SettingsPage.vue'),
+          component: () => import('@/components/settings/SettingsPage.vue'),
           meta: { title: 'nav.settings', hideShell: true },
         },
         {

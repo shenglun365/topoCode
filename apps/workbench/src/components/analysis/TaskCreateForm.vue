@@ -14,9 +14,9 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
 import FileStatsPanel from './FileStatsPanel.vue'
 import TaskDetailDialog from './TaskDetailDialog.vue'
-import type { AnalysisTask } from '@topo/web-core/types/ipc'
+import type { AnalysisTask } from '@/types/ipc'
 import { createLogger } from '@topo/web-core/utils/logger'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('AN-004')
 const logger = createLogger('TaskCreateForm')

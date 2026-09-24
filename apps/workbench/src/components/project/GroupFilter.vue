@@ -7,10 +7,10 @@ import {
   XMarkIcon,
   FunnelIcon,
 } from '@heroicons/vue/24/outline'
-import type { GroupNode } from '@topo/web-core/types/ipc'
-import { ipc } from '@topo/web-core/services/ipc'
+import type { GroupNode } from '@/types/ipc'
+import { ipc } from '@/services/ipc'
 import { useProjectStore } from '@/stores/project'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-005')
 const { t } = useI18n()

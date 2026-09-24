@@ -3,8 +3,8 @@ import { ref, computed, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { XMarkIcon, ClockIcon, DocumentTextIcon } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
-import type { AnalysisTask, TaskLogEntry, TaskRun } from '@topo/web-core/types/ipc'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import type { AnalysisTask, TaskLogEntry, TaskRun } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 import { displayDispatcher } from '@/services/display-dispatcher'
 
 const { showId, componentId } = useComponentId('AN-003')

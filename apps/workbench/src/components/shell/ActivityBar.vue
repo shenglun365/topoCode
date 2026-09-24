@@ -11,7 +11,7 @@ import {
 import { useNavigationStore } from '@/stores/navigation'
 import { usePanelStore } from '@/stores/panel'
 import type { PageType } from '@/types'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-002')
 const { t } = useI18n()

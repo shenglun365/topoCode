@@ -15,7 +15,7 @@
   */
 
 /** 读取 token：单一源 ./token（F2 修正，原此处有一份逐字拷贝） */
-import { readToken } from './token'
+import { readToken } from '@topo/web-core/services/token'
 
 function getToken(): string {
   return readToken()

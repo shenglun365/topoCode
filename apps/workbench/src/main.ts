@@ -8,7 +8,7 @@ import { useSettingsStore } from './stores/settings-store'
 import '@topo/web-core/styles/global.scss'
 
 // 注入 window.api（HTTP /api/rpc + /ws/events）；已存在则跳过（防御）
-import { installBrowserAPI } from '@topo/web-core/services/browser-api'
+import { installBrowserAPI } from '@/services/browser-api'
 installBrowserAPI()
 
 const app = createApp(App)

@@ -22,8 +22,8 @@ import { useNavigationStore } from '@/stores/navigation'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { useChatSession, type SessionPage } from '@/stores/chat-session-store'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
-import { ipc } from '@topo/web-core/services/ipc'
+import { useComponentId } from '@/composables/useComponentId'
+import { ipc } from '@/services/ipc'
 import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 
 const { showId, componentId } = useComponentId('SH-004')

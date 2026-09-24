@@ -14,12 +14,12 @@ import { useAnalysisStore } from '@/stores/analysis'
 
 import { useReportStore } from '@/stores/report-store'
 import { useCommunityStore, type CommunityItem, agentCompletedSignal } from '@/stores/community-store'
-import { ipc } from '@topo/web-core/services/ipc'
+import { ipc } from '@/services/ipc'
 import { displayDispatcher } from '@/services/display-dispatcher'
 import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
 import CommunitySection from '@/components/report/CommunitySection.vue'
 import CommunityArchitecturePanel from '@/components/report/CommunityArchitecturePanel.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()

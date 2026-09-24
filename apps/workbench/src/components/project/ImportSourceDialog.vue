@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FolderOpenIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
-import { ipc } from '@topo/web-core/services/ipc'
+import { ipc } from '@/services/ipc'
 import ServerDirPickerDialog from './ServerDirPickerDialog.vue'
 
 const { t } = useI18n()

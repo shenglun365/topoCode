@@ -19,7 +19,7 @@ import ProjectCard from '@/components/project/ProjectCard.vue'
 import GroupFilter from '@/components/project/GroupFilter.vue'
 import GroupManager from '@/components/project/GroupManager.vue'
 import ImportSourceDialog from '@/components/project/ImportSourceDialog.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 const { showId, componentId } = useComponentId('PG-001')
 const { t } = useI18n()
 const router = useRouter()

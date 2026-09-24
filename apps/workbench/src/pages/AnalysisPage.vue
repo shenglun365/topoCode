@@ -13,7 +13,7 @@ import ReportHome from '@/components/report/ReportHome.vue'
 import ChatView from '@/components/report/ChatView.vue'
 import PreSummaryFileList from '@/components/report/PreSummaryFileList.vue'
 import { usePanelStore } from '@/stores/panel'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-002')
 const { t } = useI18n()

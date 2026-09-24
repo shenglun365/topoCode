@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { CrashReport } from '@topo/web-core/types/ipc'
+import type { CrashReport } from '@/types/ipc'
 
 export const useCrashReportStore = defineStore('crashReport', () => {
   const crashes = ref<CrashReport[]>([])

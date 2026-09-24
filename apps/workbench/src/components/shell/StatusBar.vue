@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useStatusStore } from '@/stores/status'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useModelConfigStore } from '@/stores/model-config-store'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 import { useCrashReportStore } from '@/stores/crashReport'
 
 const { showId, componentId } = useComponentId('SH-006')

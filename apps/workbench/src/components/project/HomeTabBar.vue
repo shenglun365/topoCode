@@ -12,7 +12,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { HomeTab } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-007')
 const props = defineProps<{

@@ -18,7 +18,7 @@ import { useProjectStore } from '@/stores/project'
 import SymbolDetailCard from './SymbolDetailCard.vue'
 import EdgeDetailCard from './EdgeDetailCard.vue'
 import CommunityNodeCard from './CommunityNodeCard.vue'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('RP-012')
 const { t } = useI18n()

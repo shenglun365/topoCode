@@ -1,13 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import i18n from '@/i18n'
-import { ipc } from '@topo/web-core/services/ipc'
+import { ipc } from '@/services/ipc'
 import { isLLMConfigured } from '@/services/llmClient'
 import { controlDispatcher } from '@/services/control-dispatcher'
 import { playSuccessSound, playFailureSound } from '@/services/sound'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
-import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult } from '@topo/web-core/types/ipc'
+import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult } from '@/types/ipc'
 import type { ComponentRef } from '@/stores/component-selection-store'
 
 export interface CommunityItem {

@@ -2,8 +2,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CheckCircleIcon } from '@heroicons/vue/24/outline'
-import { ipc } from '@topo/web-core/services/ipc'
-import type { UpdateRequest, VersionPreview } from '@topo/web-core/types/ipc'
+import { ipc } from '@/services/ipc'
+import type { UpdateRequest, VersionPreview } from '@/types/ipc'
 
 const { t } = useI18n()
 

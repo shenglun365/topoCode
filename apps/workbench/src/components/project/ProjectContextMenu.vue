@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { PencilIcon, TrashIcon, MagnifyingGlassIcon, ArchiveBoxXMarkIcon } from '@heroicons/vue/24/outline'
 import { StarIcon } from '@heroicons/vue/24/solid'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const { showId, componentId } = useComponentId('PC-001')

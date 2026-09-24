@@ -11,7 +11,7 @@ import {
   PlusIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import { ipc } from '@topo/web-core/services/ipc'
+import { ipc } from '@/services/ipc'
 
 const emit = defineEmits<{ close: []; saved: [path: string] }>()
 

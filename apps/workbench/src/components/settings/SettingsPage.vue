@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AppToolbar, readFontSize } from '../../shell'
+import { AppToolbar, readFontSize } from '@topo/web-core/shell'
 import ModelsPanel from './ModelsPanel.vue'
 import GeneralPanel from './GeneralPanel.vue'
 import ThemesPanel from './ThemesPanel.vue'

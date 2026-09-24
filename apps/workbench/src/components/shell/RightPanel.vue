@@ -9,7 +9,7 @@ import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
 import { useProjectStore } from '@/stores/project'
 import { RIGHT_PANEL_COMPONENTS } from './rightPanelRegistry'
-import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-004')
 const { t } = useI18n()
