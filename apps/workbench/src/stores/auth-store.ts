@@ -1,3 +1,4 @@
+import { migrateLegacyAuthKeys } from '@topo/web-core/services/token'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import i18n from '@/i18n'
@@ -37,8 +38,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function loadSession() {
-    const savedToken = localStorage.getItem('topocode_token')
-    const savedUser = localStorage.getItem('topocode_user')
+    migrateLegacyAuthKeys()
+    const savedToken = localStorage.getItem('topocode:token')
+    const savedUser = localStorage.getItem('topocode:user')
     if (savedToken && savedUser) {
       token.value = savedToken
       try {
@@ -60,8 +62,8 @@ export const useAuthStore = defineStore('auth', () => {
     referralCode.value = u.referral_code || ''
     points.value = u.points || 0
     balance.value = u.balance || 0
-    localStorage.setItem('topocode_token', t)
-    localStorage.setItem('topocode_user', JSON.stringify(u))
+    localStorage.setItem('topocode:token', t)
+    localStorage.setItem('topocode:user', JSON.stringify(u))
   }
 
   function clearSession() {
@@ -78,8 +80,8 @@ export const useAuthStore = defineStore('auth', () => {
     transactionPage.value = 1
       referralStats.value = { total_referred: 0, total_earned: 0 }
     shareLink.value = ''
-    localStorage.removeItem('topocode_token')
-    localStorage.removeItem('topocode_user')
+    localStorage.removeItem('topocode:token')
+    localStorage.removeItem('topocode:user')
   }
 
   async function login(account: string, password: string): Promise<boolean> {
@@ -141,7 +143,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = profile
       referralCode.value = profile.referral_code || ''
       points.value = profile.points || 0
-      localStorage.setItem('topocode_user', JSON.stringify(profile))
+      localStorage.setItem('topocode:user', JSON.stringify(profile))
     } catch {
       clearSession()
     }

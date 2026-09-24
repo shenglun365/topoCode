@@ -1,5 +1,6 @@
 /** 用户中心（基础服务）认证状态 —— 模块级单例 composable（门户无 pinia，reactive 自动解包 ref） */
 import { ref, computed, reactive } from 'vue'
+import { migrateLegacyAuthKeys } from '../../services/token'
 import type { UserProfile, TransactionRecord } from './types'
 import { authService } from './auth-service'
 
@@ -35,8 +36,9 @@ function setupAuthListener() {
 }
 
 function loadSession() {
-  const savedToken = localStorage.getItem('topocode_token')
-  const savedUser = localStorage.getItem('topocode_user')
+  migrateLegacyAuthKeys()
+  const savedToken = localStorage.getItem('topocode:token')
+  const savedUser = localStorage.getItem('topocode:user')
   if (savedToken && savedUser) {
     token.value = savedToken
     try {
@@ -58,8 +60,8 @@ function saveSession(t: string, u: any) {
   referralCode.value = u.referral_code || ''
   points.value = u.points || 0
   balance.value = u.balance || 0
-  localStorage.setItem('topocode_token', t)
-  localStorage.setItem('topocode_user', JSON.stringify(u))
+  localStorage.setItem('topocode:token', t)
+  localStorage.setItem('topocode:user', JSON.stringify(u))
 }
 
 function clearSession() {
@@ -76,8 +78,8 @@ function clearSession() {
   transactionPage.value = 1
   referralStats.value = { total_referred: 0, total_earned: 0 }
   shareLink.value = ''
-  localStorage.removeItem('topocode_token')
-  localStorage.removeItem('topocode_user')
+  localStorage.removeItem('topocode:token')
+  localStorage.removeItem('topocode:user')
 }
 
 async function login(account: string, password: string): Promise<boolean> {
@@ -124,7 +126,7 @@ async function fetchProfile() {
     user.value = profile
     referralCode.value = profile.referral_code || ''
     points.value = profile.points || 0
-    localStorage.setItem('topocode_user', JSON.stringify(profile))
+    localStorage.setItem('topocode:user', JSON.stringify(profile))
   } catch {
     clearSession()
   }

@@ -9,7 +9,7 @@ interface ApiResponse<T> {
 }
 
 function getToken(): string | null {
-  return localStorage.getItem('topocode_token')
+  return localStorage.getItem('topocode:token')
 }
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -28,7 +28,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   // 懒续期：服务端通过 X-Refresh-Token 下发新 token
   const refreshedToken = res.headers.get('X-Refresh-Token')
   if (refreshedToken) {
-    localStorage.setItem('topocode_token', refreshedToken)
+    localStorage.setItem('topocode:token', refreshedToken)
     window.dispatchEvent(new CustomEvent('auth:token-refreshed', { detail: { token: refreshedToken } }))
   }
 
@@ -36,8 +36,8 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     const body = await res.json().catch(() => ({}))
     const msg = body.message || `HTTP ${res.status}`
     if (res.status === 401 || /(未登录|token.*过期|登录.*过期|token.*invalid)/i.test(msg)) {
-      localStorage.removeItem('topocode_token')
-      localStorage.removeItem('topocode_user')
+      localStorage.removeItem('topocode:token')
+      localStorage.removeItem('topocode:user')
       window.dispatchEvent(new CustomEvent('auth:expired', { detail: { message: msg } }))
     }
     throw new Error(msg)
@@ -46,8 +46,8 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   if (!json.success) {
     const msg = json.message || '请求失败'
     if (/(未登录|token.*过期|登录.*过期|token.*invalid)/i.test(msg)) {
-      localStorage.removeItem('topocode_token')
-      localStorage.removeItem('topocode_user')
+      localStorage.removeItem('topocode:token')
+      localStorage.removeItem('topocode:user')
       window.dispatchEvent(new CustomEvent('auth:expired', { detail: { message: msg } }))
     }
     throw new Error(msg)

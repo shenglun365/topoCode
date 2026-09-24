@@ -27,3 +27,21 @@ export function authHeaders(): Record<string, string> {
   const tok = readToken()
   return tok ? { Authorization: `Bearer ${tok}` } : {}
 }
+
+/** MS3-U3 一次性迁移：旧下划线鉴权键（topocode_token/topocode_user）→ 冒号键。
+ *  幂等：新键已有值则只清理旧键；旧键不存在则零操作。 */
+export function migrateLegacyAuthKeys(): void {
+  try {
+    const legacyToken = localStorage.getItem('topocode_token')
+    if (!legacyToken) return
+    if (!localStorage.getItem('topocode:token')) {
+      localStorage.setItem('topocode:token', legacyToken)
+      const legacyUser = localStorage.getItem('topocode_user')
+      if (legacyUser && !localStorage.getItem('topocode:user')) {
+        localStorage.setItem('topocode:user', legacyUser)
+      }
+    }
+    localStorage.removeItem('topocode_token')
+    localStorage.removeItem('topocode_user')
+  } catch {}
+}
