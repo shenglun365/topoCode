@@ -1,6 +1,6 @@
 // @topo/web-core — TopoCode 前端核心基础框架
 // 单一契约源 + 传输层 + HTTP 客户端 + i18n 基建 + 共享组件。
-// 各 app 通常通过深路径引用（@topo/web-core/types/ipc 等），此聚合导出为便捷入口。
+// 各 app 通常通过深路径引用，此聚合导出为便捷入口。（MS3-U5/U6 注：ipc/browser-api/useComponentId 已下沉 workbench）
 
 // 契约类型
 export type {

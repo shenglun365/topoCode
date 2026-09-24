@@ -7,15 +7,15 @@
 
 | 路径 | 职责 |
 |---|---|
-| `src/services/browser-api.ts` | **RPC + 鉴权客户端（全前端唯一权威实现）**：`POST /api/rpc/{method}`、token 读取（`#token=` 首粘 → localStorage `topocode:token` → Bearer 头 / WS `?token=`）、401 提示 |
+| `src/services/token.ts` | token 单一源（`topocode:token`，含旧键一次性迁移 `migrateLegacyAuthKeys`，MS3-U3 后全前端唯一鉴权键） |
 | `src/services/api.ts` | 轻量 API 封装（同 token 逻辑） |
 | `src/services/token.ts` | token 单一源（R2 修正：browser-api/api 共同 import，勿再复制） |
 | `src/services/chat-stream.ts` | chat SSE 流消费助手（R2 修正：`data:` 行协议统一解析） |
-| `src/services/ipc.ts` | 历史 IPC 兼容层（Electron 移除后的浏览器实现） |
 
-**传输边界（R2 厘清）**：KB 系（workbench/docs/chat）访问 gateway 一律经 `browser-api`/`api.ts`（token 单一源 `services/token.ts`）；`utils/http.ts` 是 **portal 认证域专用客户端**（独立后端 `VITE_API_BASE`、独立 token `topocode_token` + 懒续期），与 gateway 传输**分域并存、禁止合并**；architect 自带传输（`api-client.ts`）属独立战略范围（见 F3/A5）。`window.api`（`installBrowserAPI`）定位 = web-core IPC 契约的浏览器实现层，KB 系组件/服务可经其订阅事件（`/ws/events`）。
-| `src/components/` | 共享组件：`MermaidViewer`、`PlantUmlViewer`、`AppDialog`、`ConfirmDialog`、`StarLogoMark` 等 |
-| `src/composables/` | `useDialog`/`useToast`/`useFloatDrag`/`useComponentId` 等 |
+
+**传输边界（R2 厘清，MS3 更新）**：KB 系（workbench/docs/chat）访问 gateway 一律经 `api.ts`（token 单一源 `services/token.ts`，全前端统一 `topocode:token`）；`utils/http.ts` 是 **portal 认证域专用客户端**（独立后端 `VITE_API_BASE` + 懒续期），与 gateway 传输**分域并存、禁止合并**；architect 传输彻底自持（`api-client.ts`，裁决①已独立，零 web-core 依赖）。`browser-api`/`ipc`/`types/ipc`/`useComponentId`/`statusBadge`/`ConfirmDialog` 已下沉 workbench（MS3-U5/U6 案A），portal settings 六件随迁——web-core 不再承载 workbench 单消费者大件。`window.api` 全局声明随 ipc.ts 居 workbench `types/ipc.ts:903`。
+| `src/components/` | 共享组件：`DiagramViewer`、`PlantUmlViewer`、`AppDialog`、`StarLogoMark` 等（MermaidViewer 已删、ConfirmDialog 已下沉 workbench，MS3） |
+| `src/composables/` | `useDialog`（MS3-U4 扩展 choices）/`useToast`/`useFloatDrag`/`useTopoRender` 等（useComponentId 已下沉） |
 | `src/i18n/` | 双语资源 + `setup`/`web-locales`（zh-CN / en-US） |
 | `src/portal/` | 门户首页（home.html 源：`AppHome.vue` 等） |
 | `src/types/` `src/utils/` `src/assets/` `src/styles/` | 类型/工具/静态资源/共享样式 |
@@ -25,9 +25,9 @@
 
 ```ts
 // 深导入（当前约定，不经 index.ts 中转）
-import { createBrowserAPI, installBrowserAPI } from '@topo/web-core/services/browser-api'
-import MermaidViewer from '@topo/web-core/components/MermaidViewer.vue'
 import { setupI18n } from '@topo/web-core/i18n/setup'
+import { useDialog } from '@topo/web-core/composables/useDialog'
+import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 ```
 
 - 依赖声明：app 的 `package.json` 加 `"@topo/web-core": "*"`（workspace 解析，无版本漂移）。
