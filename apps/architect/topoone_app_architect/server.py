@@ -135,7 +135,7 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
             pass
         # P5: 定时批量提炼后台循环(异常自吞, 不影响主服务)
         try:
-            from .arch_routes.capability_mining import start_periodic_mine
+            from .agent.reflection.mining import start_periodic_mine
             start_periodic_mine()
         except Exception:
             pass

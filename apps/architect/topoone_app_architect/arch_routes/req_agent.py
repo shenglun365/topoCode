@@ -214,7 +214,7 @@ def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
             continue
     if coerced:
         try:
-            from . import llm_dataset
+            from ..agent.reflection import dataset as llm_dataset
             llm_dataset.record("arg_coerce", tool=getattr(fn, "__name__", "?"),
                                items=[{"param": k, "from": a, "to": b}
                                       for k, a, b in coerced])
@@ -300,7 +300,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
                           tool_result_text(name, result, limit=200),
                           latency_ms=_now_ms() - t0, project=project or "")
         try:
-            from . import llm_dataset as _lds
+            from ..agent.reflection import dataset as _lds
             _lds.record("tool_call", tool=name, ok=ok, args=arguments,
                         result=tool_result_text(name, result, limit=1200),
                         latencyMs=_now_ms() - t0, project=project or "")
@@ -312,7 +312,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
         record_tool_audit(name, arguments, False, str(e),
                           latency_ms=_now_ms() - t0, project=project or "")
         try:
-            from . import llm_dataset as _lds
+            from ..agent.reflection import dataset as _lds
             _lds.record("tool_call", tool=name, ok=False, args=arguments,
                         error=str(e), latencyMs=_now_ms() - t0,
                         project=project or "")
@@ -1252,8 +1252,8 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
     R3.4: tool_surface/kb_enabled 工具面裁剪 + ctx_budget 预算系数(缺省不变)。
     批丁: gu_allowed(GU 路线工具限定)→能力文档本轮子集; prompt_slim(简挡)。
     """
-    from . import model_profile as _mp
-    from . import prompt_registry as _pr
+    from ..agent.cognition import model_profile as _mp
+    from ..agent.cognition import prompt as _pr
     # cv-189 注入层硬控制(入口强制): 未关联 KB → 无论调用方传什么, kb_enabled
     # 恒 False(能力文档无 kb.*/mcp.call; MCP 块/skill/路由段各自另有降级门)。
     try:

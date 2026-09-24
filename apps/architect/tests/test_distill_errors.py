@@ -32,7 +32,7 @@ def _mk_conv(title="错误提炼会话"):
 
 def _fake_llm(patterns):
     """monkeypatch summarize_task 通道(经 adaptation.summarize_task 注入)。"""
-    from topoone_app_architect.arch_routes import adaptation
+    import topoone_app_architect.agent.reflection.repair as adaptation
 
     def fake_summarize_task(*args, **kw):
         return {"ok": True, "output": {"patterns": patterns}}
@@ -63,7 +63,7 @@ def test_distill_end_to_end_and_dedup(tmp_path, monkeypatch):
     record_turn_error(conv_id, "LLM 空返回；预算 30s")
     fake = _fake_llm([{"signature": "LLM 空返回", "cause": "模型 hang/超预算",
                        "fix": "收紧轮次预算"}])
-    import topoone_app_architect.arch_routes.adaptation as adapt
+    import topoone_app_architect.agent.reflection.repair as adapt
     monkeypatch.setattr(adapt, "summarize_task", fake)
 
     out1 = distill.distill_errors(conv_id)
@@ -97,7 +97,7 @@ def test_build_failure_returns_error(tmp_path, monkeypatch):
     conv_id = _mk_conv()
     record_turn_error(conv_id, "boom")
 
-    import topoone_app_architect.arch_routes.adaptation as adapt
+    import topoone_app_architect.agent.reflection.repair as adapt
 
     def fake_fail(*a, **kw):
         return {"ok": False, "detail": "model down"}
@@ -114,7 +114,7 @@ def test_rest_endpoint(tmp_path, monkeypatch):
     _setup_env(tmp_path, monkeypatch)
     conv_id = _mk_conv()
     record_turn_error(conv_id, "工具调用失败: 未知工具 foo")
-    import topoone_app_architect.arch_routes.adaptation as adapt
+    import topoone_app_architect.agent.reflection.repair as adapt
     monkeypatch.setattr(adapt, "summarize_task", _fake_llm(
         [{"signature": "工具调用失败", "cause": "工具名幻觉",
           "fix": "隔离修复循环已纠正"}]))

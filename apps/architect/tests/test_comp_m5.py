@@ -99,7 +99,7 @@ def test_m5_comp_gap_telemetry(arch_env, monkeypatch):
     mp.set_manual_tier("m-gap", 0)                        # A 强挡基线
     gaps = []
     monkeypatch.setattr(
-        "topoone_app_architect.arch_routes.llm_dataset.record",
+        "topoone_app_architect.agent.reflection.dataset.record",
         lambda kind, **kw: gaps.append(kind) if kind == "comp_gap" else None)
     # 直接构造档案 caps(弱需求分)——绕过探测, 只验遥测判定
     import json as _j

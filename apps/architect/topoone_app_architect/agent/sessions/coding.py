@@ -31,7 +31,7 @@ async def _summarize_for_coding(text: str) -> tuple:
     返回 (文本, 是否经摘要)。LLM 不可达/空产出 → 原文 + False。
     """
     import asyncio
-    from ...arch_routes.adaptation import summarize_task
+    from ..reflection.repair import summarize_task
     sys_prompt = (
         "你是架构师到执行工程师的信息中继。把下面的分析内容压缩成给 coding agent "
         "的直接结论段：\n"

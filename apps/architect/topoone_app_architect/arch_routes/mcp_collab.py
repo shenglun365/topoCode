@@ -443,7 +443,7 @@ async def probe_llm_model_route(request: Request):
 @router.get("/llm/model-profiles")
 async def get_model_profiles():
     """全部模型能力档案(tier/caps/探测历史; 无档案模型不出现在列表)。"""
-    from . import model_profile
+    from ..agent.cognition import model_profile
     return ok({"profiles": list(model_profile.all_profiles().values()),
                "tiers": model_profile.TIERS})
 
@@ -471,7 +471,7 @@ async def capability_probe_gate_status():
 async def capability_probe_route(model_id: str):
     """能力探测(~10 次小调用): 工具协议/JSON 围栏/指令边界 → tier 档案。
     并发治理: 全局互斥串行 + FIFO 排队 + 同模型滤重(重复点击立即回执)。"""
-    from . import model_profile
+    from ..agent.cognition import model_profile
     import asyncio
     res = await asyncio.to_thread(model_profile.probe_model_gated, model_id)
     return ok(res["profile"])
@@ -499,7 +499,7 @@ async def set_model_profile_route(model_id: str, request: Request):
         tier = int(body.get("tier"))
     except (TypeError, ValueError):
         return err(400, "缺少整数 tier (0-2)")
-    from . import model_profile
+    from ..agent.cognition import model_profile
     return ok(model_profile.set_manual_tier(model_id, tier))
 
 

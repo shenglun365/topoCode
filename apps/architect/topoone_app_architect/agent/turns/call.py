@@ -77,7 +77,7 @@ def retry_for(tier: str) -> RetryPolicy:
 
 def _telemetry(event: str, **data: Any) -> None:
     try:
-        from ...arch_routes import llm_dataset as _lds
+        from ..reflection import dataset as _lds
         _lds.record(event, **data)
     except Exception:  # noqa: BLE001 — 遥测失败不阻塞主链
         pass

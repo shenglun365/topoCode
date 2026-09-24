@@ -77,7 +77,7 @@ async def outline_abbreviate(request: Request):
         short, deg = text[:16], True
         if text:
             try:
-                from .adaptation import summarize_task
+                from ..agent.reflection.repair import summarize_task
                 from .agent_roles import load_light_tasks_cfg
                 from ..agent.governance.light_tasks import resolve_light_task_model
                 r = summarize_task(
@@ -210,7 +210,7 @@ async def doc_from_conversation(conv_id: str, request: Request):
     if not transcript:
         return err(400, "会话无消息, 无法提取")
     title, content = "", ""
-    from .adaptation import summarize_task
+    from ..agent.reflection.repair import summarize_task
     out = summarize_task(
         task_id="doc_from_conversation",
         system="你是需求归档助手。把对话中的需求与方案讨论整理为一份备案文档"

@@ -104,7 +104,7 @@ async def generate_digest(request: Request):
         return err(400, f"近 {since_days} 天无可用素材(会话摘要/落地执行/备案文档)")
 
     overview_md, entries_md, attention_md = "", "", ""
-    from .adaptation import summarize_task
+    from ..agent.reflection.repair import summarize_task
     out = summarize_task(
         task_id="dev_digest",
         system="你是项目开发简报助手。基于素材总结本期开发走向：概览 3-5 行；"

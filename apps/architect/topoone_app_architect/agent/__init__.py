@@ -15,9 +15,8 @@
 边界纪律:
   - 分层单向依赖; ⑦⑧⑨ 为横切面(经接口/回调注入 orchestrator)
   - arch_routes/*.py 保留为 REST/WS 适配层(契约冻结, CONV-04);
-    兼容 shim(ws_events/llm_dataset/model_profile/prompt_registry/agent_roles/
-    adaptation/context_registry/capability_mining/evaluator + req_agent 内
-    re-export)保持存量 import 与测试 monkeypatch 接缝, 撤除待外圈调用方迁移
+    8 个纯兼容 shim 已于 MS2(K1) 撤除——全部调用方(含测试 monkeypatch 接缝)
+    已改直达 agent/ 真身; agent_roles.py 保留(自带端点, 非纯 shim)
   - agent 包内模块禁止 import 期触发 arch_routes 初始化(store/ctx 等一律
     函数级惰性引用, 循环导入防线)
 

@@ -76,7 +76,7 @@ def test_wiring_summarize_uses_light_model(tmp_path, monkeypatch):
     from topoone_app_architect.arch_routes import agent_roles
     agent_roles.set_light_tasks({"summary": "m-lite", "probe": ""})
     from topoone_app_architect.agent.memory import units
-    from topoone_app_architect.arch_routes import adaptation
+    import topoone_app_architect.agent.reflection.repair as adaptation
     captured = {}
 
     def fake_summarize_task(**kw):

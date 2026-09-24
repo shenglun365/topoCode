@@ -19,8 +19,8 @@ from . import contracts
 from . import acceptance
 from . import naming
 from . import mainkb
-from . import capability_mining
-from . import llm_dataset
+from ..agent.reflection import mining as capability_mining
+from ..agent.reflection import dataset as llm_dataset
 from . import flow_policy
 from . import tracking
 

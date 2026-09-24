@@ -48,7 +48,7 @@ class TestProbeAndDossier(unittest.TestCase):
         return store.ConversationsStore.create({"kind": "design", "title": title})
 
     def test_run_probe_records_artifact_unit(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import units as cr
         conv = self._conv()
         result = cr.run_probe(conv["id"], "为支付模块生成重构方案草稿", "/tmp")
         self.assertTrue(result.get("ok"), result)
@@ -58,7 +58,7 @@ class TestProbeAndDossier(unittest.TestCase):
         self.assertEqual(units[0]["refs"]["files"], ["a.py", "b.py"])
 
     def test_run_probe_failure_no_unit(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import units as cr
         conv = self._conv()
         result = cr.run_probe(conv["id"], "失败场景", "/tmp")
         self.assertFalse(result.get("ok"))
@@ -66,14 +66,15 @@ class TestProbeAndDossier(unittest.TestCase):
         self.assertEqual(len(units), 0)
 
     def test_run_probe_runner_down(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import units as cr
         os.environ["RUNNER_BASE_URL"] = "http://127.0.0.1:1"
         conv = self._conv()
         result = cr.run_probe(conv["id"], "x", "/tmp", timeout_s=5)
         self.assertIn("error", result)
 
     def test_assemble_dossier_sections_and_budget(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import units as cr
+        from topoone_app_architect.agent.memory import dossier as dossier_mod
         conv = self._conv(title="登录重构")
         store.ConversationsStore.update(conv["id"], {
             "summary": "决定用 JWT 替换 session",
@@ -83,19 +84,19 @@ class TestProbeAndDossier(unittest.TestCase):
             "contentMd": "# 需求\n登录改为 JWT\n\n## 方案\n改造 auth 模块"})
         cr.record_tool_call(conv["id"], "req.propose", {}, True, "已创建需求 RQ-9")
         reqs = [{"id": "RQ-9", "title": "JWT 登录", "desc": "## 需求\nJWT 改造"}]
-        dossier = cr.assemble_dossier(conv["id"], reqs=reqs)
+        dossier = dossier_mod.assemble_dossier(conv["id"], reqs=reqs)
         self.assertIsNotNone(dossier)
         self.assertIn("决定用 JWT", dossier)
         self.assertIn("需求快照", dossier)
         self.assertIn("JWT 登录", dossier)
         self.assertIn("artifact", dossier)
-        self.assertLessEqual(len(dossier), cr._DOSSIER_BUDGET + 200)
+        self.assertLessEqual(len(dossier), dossier_mod._DOSSIER_BUDGET + 200)
         # execution_brief 单元留痕
         units = store.ContextUnitsStore.all(conversation_id=conv["id"], type_="execution_brief")
         self.assertEqual(len(units), 1)
 
     def test_assemble_dossier_missing_conv(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import dossier as cr
         self.assertIsNone(cr.assemble_dossier("cv-none"))
 
 

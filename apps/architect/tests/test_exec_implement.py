@@ -223,7 +223,8 @@ def test_chat_system_prompt_registry_equivalence(monkeypatch):
     import topoone_app_architect.arch_routes.project as _proj_mod
     monkeypatch.setattr(_proj_mod, "kb_degraded",
                         lambda root=None, project_id=None: False)
-    from topoone_app_architect.arch_routes import req_agent, prompt_registry
+    from topoone_app_architect.arch_routes import req_agent
+    import topoone_app_architect.agent.cognition.prompt as prompt_registry
     prompt_registry.set_overrides({"single_source": False})
     try:
         for kw in ({}, {"diagram_skill": True}, {"skill_scenarios": ["plan"]}):
@@ -242,7 +243,7 @@ def test_chat_system_prompt_registry_equivalence(monkeypatch):
 
 def test_prompt_registry_budget_trim():
     """预算裁剪: 小预算淘汰条件块(skill/ir), 恒置块(协议/边界)保留。"""
-    from topoone_app_architect.arch_routes import prompt_registry as pr
+    import topoone_app_architect.agent.cognition.prompt as pr
     s = pr.render_system({"root": None, "project": None, "tier": 4,
                           "skill_scenarios": ["plan"]})
     assert "职责边界" in s and "[TOOL_CALL]" in s, "恒置块永不裁剪"

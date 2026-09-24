@@ -216,7 +216,7 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
                    "content": final_content, "messageId": assistant_msg_id}
         await io.send_ev(done_ev)
         try:
-            from ...arch_routes import llm_dataset as _lds
+            from ..reflection import dataset as _lds
             _lds.record("llm_stream_done", ok=True,
                         chars=len(final_content),
                         latencyMs=int((__import__("time").time() - io.t0) * 1000),
@@ -612,7 +612,7 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
         if allowed_tools is not None and tool not in allowed_tools:
             # 执法点: 名单外不代落(与工具轮三分支拒绝同规; 载荷原文保留)
             try:
-                from ...arch_routes import llm_dataset as _lds
+                from ..reflection import dataset as _lds
                 _lds.record("fence_rejected", tool=tool, convId=conv_id)
             except Exception:  # noqa: BLE001
                 pass
@@ -703,7 +703,8 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
     这里在工具执行前后各推一条状态，前端据此显示实时进度而非静态等待。
     参数自动修复已按 cv-175 裁决拆除——错误如实返回(明确报错优于静默纠偏)。
     """
-    from ...arch_routes import context_registry, req_agent
+    from ..memory import units as context_registry
+    from ...arch_routes import req_agent
     await send({"type": "tool_call", "requestId": request_id, "tool": name})
     result = await asyncio.to_thread(
         req_agent.execute_tool_with_repair, name, args, root, project,

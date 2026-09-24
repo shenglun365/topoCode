@@ -217,7 +217,7 @@ def test_repair_notes_injection_cap_and_weak_tier(arch_env, monkeypatch):
     _mk_units(cid, 4)
     sys_text = _chat(conv)
     assert sys_text.count("• 修复经验") == 3     # maxPerTurn=3
-    from topoone_app_architect.arch_routes import model_profile as mp
+    from topoone_app_architect.agent.cognition import model_profile as mp
     monkeypatch.setattr(mp, "tier_of", lambda mid: 2)   # 弱挡 → weakTierMax=1
     sys_text = _chat(conv)
     assert sys_text.count("• 修复经验") == 1

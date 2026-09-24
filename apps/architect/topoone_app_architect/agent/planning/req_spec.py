@@ -323,7 +323,7 @@ def repair_spec_payload_format(text: str, req_id: str = "") -> Optional[Dict[str
                                  for c, a in _SPEC_FIELD_ALIASES.items()) + "\n"
         + (f"会话绑定需求编号: {req_id}(载荷内其它 reqId 编号一律丢弃)\n" if req_id else "")
         + "只输出一个 ```json 围栏，内容为规约对象本身，不要任何其他文字。")
-    from ...arch_routes.adaptation import RepairTask, run_repair_loop
+    from ..reflection.repair import RepairTask, run_repair_loop
 
     def _parse(raw: str):
         m = re.search(r"```json\s*(\{.*?})\s*```", raw, re.DOTALL)
@@ -401,7 +401,7 @@ def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
     m = re.search(r"```proposal\s*\n?(\{.*?\})\s*```", text, re.DOTALL)
     if not m:
         try:
-            from ...arch_routes import llm_dataset as _lds
+            from ..reflection import dataset as _lds
             _lds.record("fence_parse", reason="未闭合/无JSON体",
                         tail=text[text.index("```proposal"):][:600])
         except Exception:  # noqa: BLE001
@@ -412,7 +412,7 @@ def extract_proposal_fence(text: str) -> Optional[Dict[str, Any]]:
         return data if isinstance(data, dict) else None
     except Exception:  # noqa: BLE001
         try:
-            from ...arch_routes import llm_dataset as _lds
+            from ..reflection import dataset as _lds
             _lds.record("fence_parse", reason="JSON解析失败",
                         tail=m.group(1)[:600])
         except Exception:  # noqa: BLE001

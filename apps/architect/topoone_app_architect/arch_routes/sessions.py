@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from .common import _ts, ok, err
 from . import store
 from .store import states as ST
-from . import ws_events
+from ..agent.collab import sse as ws_events
 
 router = APIRouter()
 
@@ -463,7 +463,7 @@ async def summarize_session(conv_id: str, force: int = 0):
 
     force=1: 用户显式触发(悬停按钮) → 总是重新生成标题; 默认(系统自动)尊重手改标题。
     """
-    from . import context_registry
+    from ..agent.memory import units as context_registry
     conv = context_registry.summarize_conversation(conv_id, force=bool(force))
     if not conv:
         return err(404, "会话不存在")
@@ -733,7 +733,7 @@ async def msg_digest(conv_id: str, request: Request):
         "- 保持具体数值与技术术语, 不泛化、不新增推断\n"
         "- 输出纯文本可含短列表, 不加标题不加解释, 500 字以内"
         + (f"\n用户特别关注: {hint[:200]}" if hint else ""))
-    from .adaptation import summarize_task
+    from ..agent.reflection.repair import summarize_task
     out = await asyncio.to_thread(
         summarize_task, task_id="msg_digest", system=sys_prompt,
         material=material, max_tokens=800,
@@ -781,7 +781,7 @@ def _clone_seed_summary(conv_id: str) -> str:
         summary = (conv.get("summary") or "").strip()
         if summary:
             return summary
-        from .context_registry import summarize_conversation
+        from ..agent.memory.units import summarize_conversation
         summary = ((summarize_conversation(conv_id, force=True) or {})
                    .get("summary") or "").strip()
         return summary
@@ -994,7 +994,7 @@ async def feed_to_coding(conv_id: str, request: Request):
 @router.post("/sessions/{conv_id}/probe")
 async def probe_session(conv_id: str, request: Request):
     """会话内发起方案草图(probe): worktree 快照 + coding agent + 伪 diff，产物落单元。"""
-    from . import context_registry
+    from ..agent.memory import units as context_registry
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
@@ -1024,7 +1024,7 @@ async def probe_session(conv_id: str, request: Request):
 @router.post("/sessions/{conv_id}/assemble")
 async def assemble_session(conv_id: str):
     """前置上下文构造: 收集→裁剪→装配 dossier(裁决3)，落 execution_brief 单元。"""
-    from . import context_registry
+    from ..agent.memory import dossier as context_registry
     reqs = []
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
@@ -1209,7 +1209,7 @@ async def session_guide(conv_id: str):
     def _fallback():
         return ok({"text": "", "fallback": True})
 
-    from .adaptation import summarize_task
+    from ..agent.reflection.repair import summarize_task
     out = summarize_task(
         task_id="session_guide", system=_GUIDE_SYSTEM,
         material=json.dumps(state, ensure_ascii=False), max_tokens=500)

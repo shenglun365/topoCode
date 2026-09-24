@@ -43,7 +43,7 @@ def _kb_face_enabled(gear, r34: bool, root: str, project: str) -> bool:
 def _record_comp_gap(gear, model_id: str) -> None:
     """M5 探测-策略闭环遥测: 只记差距, 不动态升挡(D6)。失败不阻塞主链。"""
     try:
-        from ...arch_routes import model_profile as _mp2
+        from ..cognition import model_profile as _mp2
         from ..compensation.ctx import (PURPOSE_WEAK_SCORE, CapabilityScores,
                                 Purpose as _Purpose)
         _caps = ((_mp2.get_profile(model_id or "") or {}).get("caps") or {})
@@ -53,7 +53,7 @@ def _record_comp_gap(gear, model_id: str) -> None:
         _ps = _scores.dimension(_Purpose.REQUIREMENT)
         from ..governance.gears import WEAKEST_TIER as _weakest
         if _ps is not None and _ps < PURPOSE_WEAK_SCORE and gear.tier != _weakest:
-            from ...arch_routes import llm_dataset as _lds
+            from ..reflection import dataset as _lds
             _lds.record("comp_gap", purpose="requirement", tier=gear.tier,
                         score=_ps, model=model_id or "")
     except Exception:  # noqa: BLE001
@@ -111,7 +111,7 @@ def _repair_notes_msg(conv: dict, model_id: str, pol: dict) -> str:
     maxPerTurn 每回合上限; 最弱挡(模型档案 tier 判定)收紧至 weakTierMax; 最新优先。
     开关: repair_note_injection ∧ policy.enabled。失败静默(计数)。"""
     try:
-        from ...arch_routes import model_profile as _mp
+        from ..cognition import model_profile as _mp
         from ...arch_routes import store as _s
         from ..compensation.overrides import override_enabled, read_overrides
         _get = _s.CollabConfigStore.get
@@ -254,7 +254,7 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     # 模型能力档案懒探测(后台执行不阻塞): 无档案模型首轮触发, 探测落档后
     # 后续回合 system 按 tier 分级(小模型收紧预算, 大模型放开)
     try:
-        from ...arch_routes import model_profile as _mp
+        from ..cognition import model_profile as _mp
         _mp.get_profile_or_lazy(eff_model or model_id or "")
     except Exception:  # noqa: BLE001
         _swallow("ctx.model_probe")

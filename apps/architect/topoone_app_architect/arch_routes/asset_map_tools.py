@@ -291,7 +291,7 @@ def run_tool(name: str, args: dict) -> str:
                                         args.get("project")),
     }
     if name.startswith("ctx."):
-        from . import context_registry
+        from ..agent.memory import units as context_registry
         _record(name, f"{name} {args}")
         return context_registry.run_tool(name, args)
     fn = handlers.get(name)

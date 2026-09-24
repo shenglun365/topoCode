@@ -94,7 +94,7 @@ def build_error_patterns(material: List[Dict[str, Any]],
     """轻任务提炼(提炼即沉淀的 build 半程)。失败返回 [](调用方如实回执)。"""
     if not material:
         return []
-    from ...arch_routes.adaptation import summarize_task
+    from ..reflection.repair import summarize_task
     from ...arch_routes.agent_roles import load_light_tasks_cfg
     from ..governance.light_tasks import resolve_light_task_model
     lines = []

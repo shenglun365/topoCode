@@ -162,7 +162,7 @@ def summarize_conversation(conv_id: str, force: bool = False) -> Optional[dict]:
     title, summary = "", ""
     need_title = force or not title_edited
     if transcript:
-        from ...arch_routes.adaptation import summarize_task
+        from ..reflection.repair import summarize_task
         from ...arch_routes.agent_roles import load_light_tasks_cfg
         from ..governance.light_tasks import resolve_light_task_model
         out = summarize_task(

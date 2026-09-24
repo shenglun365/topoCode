@@ -32,12 +32,12 @@ logger = logging.getLogger(__name__)
 
 # P2/P3: 会话 agent 的 ctx.* + probe.run/评估/提炼工具注册(幂等; P4 起延迟到首回合)
 def _register_session_tools() -> None:
-    from ..arch_routes import context_registry as _context_registry
+    from .memory import units as _context_registry
     _context_registry.register_chat_tools()
     _context_registry.register_probe_tool()
-    from ..arch_routes import evaluator as _evaluator
+    from .reflection import evaluator as _evaluator
     _evaluator.register_evaluator_tools()
-    from ..arch_routes import capability_mining as _cap_mining
+    from .reflection import mining as _cap_mining
     _cap_mining.register_mining_tools()
 
 

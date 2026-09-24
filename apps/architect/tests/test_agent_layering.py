@@ -18,7 +18,9 @@ import os
 AGENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                          "topoone_app_architect", "agent")
 ORDER = ["perception", "compensation", "cognition", "planning", "memory",
-         "tools", "execution", "reflection", "requirements", "turns"]
+         "tools", "execution", "reflection", "requirements", "turns", "sessions"]
+# sessions(2026-09-24 MS2 补刻度): 会话落库域此前仅引 app.arch_routes(shim),
+# 对层序扫描不可见; shim 撤除后出现真实层依赖, 入刻度接受门禁。
 RANK = {name: i for i, name in enumerate(ORDER)}
 CROSSCUT = {"collab", "governance"}
 # M1(2026-09-19): compensation=L1 补偿内核(设计 §3, 供各层引), turns=L2 回合引擎
@@ -102,6 +104,10 @@ _R2_INVENTORY = {
     "requirements/harness.py": {"turns"},
     "cognition/llm.py": {"reflection"},
     "cognition/model_profile.py": {"reflection"},
+    "planning/req_spec.py": {"reflection"},  # MS2(2026-09-24) shim 撤除显形——原经 arch_routes.adaptation 规避扫描, 语义依赖本就存在; MS4 断环清退
+    "memory/units.py": {"reflection"},       # MS2 显形(原经 shim); memory→reflection 摘要回路, MS4 断环清退
+    "memory/distill.py": {"reflection"},     # MS2 显形(原经 shim); 蒸馏经 repair 摘要, MS4 断环清退
+    "sessions/coding.py": {"reflection"},    # MS2 显形(原经 shim); coding 回合摘要, MS4 断环清退
     "perception/commands.py": {"planning", "turns", "compensation"},
     "planning/task_plan.py": {"turns"},
     "planning/scope_probe.py": {"turns"},

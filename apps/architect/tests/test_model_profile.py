@@ -28,7 +28,7 @@ def _setup(tmp_path, monkeypatch):
 
 def test_heuristic_tier_retired():
     """参数规模猜档已退役(2026-09-18: 判档纯用例结果)——函数保留仅供兼容。"""
-    from topoone_app_architect.arch_routes import model_profile as mp
+    from topoone_app_architect.agent.cognition import model_profile as mp
     assert mp.guess_params_b("qwen3.5-9b-mtp") == 9.0
     assert mp.heuristic_tier("Qwen2.5-72B-Instruct") == 0
     assert mp.heuristic_tier("unknown-model") == 1     # 不可判断 → 保守 t1
@@ -38,7 +38,7 @@ def test_heuristic_tier_retired():
 
 def test_profile_store_and_manual_override(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import model_profile as mp
+    from topoone_app_architect.agent.cognition import model_profile as mp
     # 无档案 → 未探测缺省(中性 T1, 参数规模不参与; source=未探测标记)
     assert mp.get_profile("m-x").get("source") == "heuristic"
     assert mp.get_profile("qwen2.5-72b-instruct")["tier"] == 1   # 不按名称猜档
@@ -88,7 +88,7 @@ MOD_OK = ('```json\n{"interface": {"fn": "cancel", "params": ["id"], "returns": 
 def test_probe_model_good_small_model(tmp_path, monkeypatch):
     """探测满分的小模型: 纯用例结果判档——参数规模不参与, 满分即 T0。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import model_profile as mp
+    from topoone_app_architect.agent.cognition import model_profile as mp
 
     def smart_sync(messages, mode="chat", model_id=None, max_tokens=None, **kw):
         sys0 = str(messages[0]["content"]) if messages else ""
@@ -133,7 +133,7 @@ def test_probe_model_good_small_model(tmp_path, monkeypatch):
 def test_probe_model_degrades_tier(tmp_path, monkeypatch):
     """探测差 → tier 只降不升(名字大也降档, 启用兜底)。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import model_profile as mp
+    from topoone_app_architect.agent.cognition import model_profile as mp
     _mock_llm(["我不会调用工具, 直接回答: 无法完成该任务"], monkeypatch)
     prof = mp.probe_model("m-72b")
     assert prof["tier"] >= 2                    # 差 → 至少 t2
@@ -143,7 +143,7 @@ def test_probe_model_degrades_tier(tmp_path, monkeypatch):
 def test_probe_unreachable_keeps_profile(tmp_path, monkeypatch):
     """模型不可达 → reachable=False 且不覆盖既有档案。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import model_profile as mp
+    from topoone_app_architect.agent.cognition import model_profile as mp
     mp.set_manual_tier("m-down", 2)
 
     def boom(*a, **kw):
@@ -157,7 +157,7 @@ def test_probe_unreachable_keeps_profile(tmp_path, monkeypatch):
 def test_probe_compensation_recheck(tmp_path, monkeypatch):
     """T2 补偿复核: 补偿救不回 → insufficient(模型能力不足); 救得回 → weak(补偿可修正)。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import model_profile as mp
+    from topoone_app_architect.agent.cognition import model_profile as mp
     # 全程摆烂: 常规探测掉 T2, 补偿形态也救不回 → insufficient + 复核率 0
     _mock_llm(["我不会调用工具, 直接回答: 无法完成该任务"], monkeypatch)
     prof = mp.probe_model("m-dumb")
@@ -186,7 +186,7 @@ def test_probe_compensation_recheck(tmp_path, monkeypatch):
 def test_repair_loop_parse_only(tmp_path, monkeypatch):
     """纯解析任务(execute=None): 解析成功 ok, 失败 failed 不抛出。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import adaptation as ad
+    import topoone_app_architect.agent.reflection.repair as ad
 
     def parse_ok(raw):
         return {"x": 1} if "json" in raw else None

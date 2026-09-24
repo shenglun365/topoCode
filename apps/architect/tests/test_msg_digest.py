@@ -73,7 +73,7 @@ def _mk_msgs(conv_id):
 def test_msg_digest_summarized(tmp_env, monkeypatch):
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     ids = _mk_msgs(conv["id"])
-    import topoone_app_architect.arch_routes.adaptation as ad
+    import topoone_app_architect.agent.reflection.repair as ad
     seen = {}
 
     def _fake_summarize(**kw):

@@ -19,7 +19,7 @@ class TestContextRegistry(unittest.TestCase):
         return store.ConversationsStore.create({"kind": kind, "title": title})
 
     def test_tool_call_and_artifact_units(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import units as cr
         conv = self._conv()
         cr.record_tool_call(conv["id"], "kb.asset.search", {"query": "支付"}, True,
                             "命中 3 条资产")
@@ -41,7 +41,7 @@ class TestContextRegistry(unittest.TestCase):
         真 LLM 标题, 如「订单流程…」)——本测试验证的是降级路径, 显式断开 LLM。
         """
         from unittest.mock import patch
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import units as cr
         import topoone_app_architect.arch_routes.req_agent as _ra
         conv = self._conv(kind="design", title="")
         store.ConversationsStore.append_message({
@@ -57,7 +57,7 @@ class TestContextRegistry(unittest.TestCase):
         self.assertEqual(units[0]["importance"], 1)
 
     def test_ctx_search_across_units_messages_docs(self):
-        from topoone_app_architect.arch_routes import context_registry as cr
+        from topoone_app_architect.agent.memory import units as cr
         conv = self._conv(title="支付模块资产讨论")
         cr.record_tool_call(conv["id"], "kb.asset.search", {"query": "支付"}, True,
                             "支付网关资产命中")
@@ -76,7 +76,8 @@ class TestContextRegistry(unittest.TestCase):
         self.assertIn("支付需求快照", md)
 
     def test_mcp_run_tool_dispatch(self):
-        from topoone_app_architect.arch_routes import asset_map_tools, context_registry as cr
+        from topoone_app_architect.arch_routes import asset_map_tools
+        from topoone_app_architect.agent.memory import units as cr
         conv = self._conv(title="登录会话")
         cr.record_tool_call(conv["id"], "kb.asset.search", {}, True, "登录鉴权资产")
         md = asset_map_tools.run_tool("ctx.search", {"query": "登录"})
@@ -85,7 +86,8 @@ class TestContextRegistry(unittest.TestCase):
         self.assertIn("未知工具", unknown)
 
     def test_chat_tools_registered(self):
-        from topoone_app_architect.arch_routes import context_registry, req_agent
+        from topoone_app_architect.agent.memory import units as context_registry
+        from topoone_app_architect.arch_routes import req_agent
         context_registry.register_chat_tools()
         names = [t["name"] for t in req_agent.architect_tools()]
         self.assertIn("ctx.search", names)

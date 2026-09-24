@@ -60,7 +60,7 @@ class TestSessionsCenter(unittest.TestCase):
         断言不可预测)——故显式钳死 summarize_task 失败, 锁定纯兜底路径。"""
         from unittest import mock
         conv = self._mk(kind="design", title="")
-        import topoone_app_architect.arch_routes.adaptation as _adapt
+        import topoone_app_architect.agent.reflection.repair as _adapt
         _patcher = mock.patch.object(
             _adapt, "summarize_task",
             lambda **kw: {"ok": False, "output": None, "error": "test: llm down"})
