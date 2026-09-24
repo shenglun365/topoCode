@@ -7,7 +7,7 @@
  "agent/cognition/prompt.py": 512,
  "agent/cognition/roles.py": 141,
  "agent/collab/__init__.py": 0,
- "agent/collab/cards.py": 361,
+ "agent/collab/cards.py": 368,
  "agent/collab/sse.py": 77,
  "agent/compensation/__init__.py": 22,
  "agent/compensation/carriers.py": 89,
@@ -44,7 +44,7 @@
  "agent/memory/glossary_map.py": 44,
  "agent/memory/units.py": 493,
  "agent/memory/working.py": 41,
- "agent/orchestrator.py": 511,
+ "agent/orchestrator.py": 527,
  "agent/perception/__init__.py": 5,
  "agent/perception/commands.py": 223,
  "agent/perception/gate.py": 87,
@@ -171,8 +171,8 @@
  "arch_routes/websocket.py": 197,
  "arch_routes/ws_events.py": 5,
  "arch_routes/zmq_stream.py": 101,
- "agent/turns/chat.py": 739,
+ "agent/turns/chat.py": 746,
  "agent/execution/dispatch.py": 813,
  "agent/turns/help_docs.py": 141,
- "agent/governance/focus.py": 309
+ "agent/governance/focus.py": 314
 }

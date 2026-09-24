@@ -305,16 +305,23 @@ def strip_choices_fence(text: str, marker: str = "choices") -> str:
 
 
 def land_choices(conv_id: str, payload: dict, *, fingerprint: str = "",
-                 project_id: str = "", agent: str = "") -> Optional[dict]:
+                 project_id: str = "", agent: str = "",
+                 gu_action: str = "") -> Optional[dict]:
     """问询卡落流: 校验通过才落; fingerprint 非空时同源卡**原位更新**
     (GU 确定性源每回合重判, 多回合澄清只占一个锚位——进度锚同款)。
-    模型围栏源 fingerprint 留空(每回合独立卡)。坏载荷返回 None。"""
+    模型围栏源 fingerprint 留空(每回合独立卡)。坏载荷返回 None。
+
+    gu_action: 回合管线写入的回合动作记账(cv-254)——围栏代落+空收尾豁免
+    后回合只有卡, guAction 载体随卡归位(供焦点帧 clarify_pending 派生);
+    空缺省=调用方无记账语义(向后兼容)。"""
     if not valid_choices_payload(payload):
         return None
     title = str(payload.get("title") or "").strip() or "请确认以下问题"
     meta_payload = {"title": title,
                     "groups": payload.get("groups") or [],
                     "note": str(payload.get("note") or "")}
+    if gu_action:
+        meta_payload["guAction"] = gu_action
     if fingerprint:
         meta_payload["fingerprint"] = fingerprint
     if fingerprint:

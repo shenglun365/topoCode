@@ -306,7 +306,8 @@ async def handle_chat(data: dict, send: SendFn) -> None:
             from .collab.cards import land_choices
             await asyncio.to_thread(
                 land_choices, conv_id, gu_choices,
-                fingerprint=str((gu_plan or {}).get("choicesFingerprint") or ""))
+                fingerprint=str((gu_plan or {}).get("choicesFingerprint") or ""),
+                gu_action=str((gu_plan or {}).get("action") or ""))
         except Exception as e:  # noqa: BLE001
             logger.warning("[orch] GU 问询卡落流失败 conv=%s: %s", conv_id, e)
 

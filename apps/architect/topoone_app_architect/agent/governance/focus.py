@@ -225,9 +225,14 @@ def _pending_action(store_mod, conv_id: str, now: int) -> Dict[str, Any]:
                 meta = {}
         if not isinstance(meta, dict):
             meta = {}
-        # 卡片消息(choices/specReady/回执…)是落流产物非回合产物——跳过,
-        # 继续向前找最近一个带 guAction 的回合(cv-248 实证: 围栏源问询卡
-        # 后落流遮蔽正文回合的 guAction → 澄清帧丢失 → 答复误判新澄清)
+        # 卡片消息是落流产物; 但回合管线代落问询卡时会把回合动作记账
+        # 写入卡 meta(cv-254: 代落+空收尾豁免后回合只有卡, 卡即回合产物)——
+        # 有 guAction 记账即取(记账载体归位), 无则跳过向前找正文回合
+        # (cv-248 实证: 落流卡遮蔽正文回合的 guAction → 向前找)。
+        act = str(meta.get("guAction") or "")
+        if act:
+            ts = _ts(m, "time")
+            return {"action": act, "since": ts} if ts and ts >= lo else {}
         if meta.get("kind"):
             continue
         ts = _ts(m, "time")

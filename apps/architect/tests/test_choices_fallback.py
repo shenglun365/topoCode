@@ -104,6 +104,58 @@ def test_intent_gate_is_caller_side():
         assert (gu_action == "clarify-first") is False
 
 
+# ── cv-254: 回合动作记账随卡归位 → 澄清循环可收敛 ─────────────────────
+
+def test_land_choices_carries_gu_action(arch_env):
+    """代落问询卡 meta 携带回合 guAction(记账载体=回合产物); 空缺省兼容。"""
+    from topoone_app_architect.agent.collab import cards as _cards
+    from topoone_app_architect.arch_routes import store
+    store.ConversationsStore.create({"id": "conv-ga", "kind": "generic",
+                                     "title": "t"})
+    _cards.land_choices("conv-ga", GOOD, gu_action="clarify-first")
+    meta = (store.ConversationsStore.messages("conv-ga")[-1].get("meta")
+            or {})
+    assert meta.get("guAction") == "clarify-first"
+    _cards.land_choices("conv-ga", GOOD)     # 空缺省: 不写记账(向后兼容)
+    meta2 = (store.ConversationsStore.messages("conv-ga")[-1].get("meta")
+             or {})
+    assert "guAction" not in meta2
+
+
+def test_focus_clarify_pending_from_card_ledger(arch_env):
+    """全链: 代落+空收尾(回合只有卡) → 焦点帧 clarify_pending 由卡上
+    记账派生 → 下回合 L0-2.8 消解为 continuation(澄清循环收敛出口)。"""
+    from topoone_app_architect.agent.collab import cards as _cards
+    from topoone_app_architect.agent.governance.focus import _pending_action
+    from topoone_app_architect.arch_routes import store
+    conv_id = "conv-ledger"
+    store.ConversationsStore.create({"id": conv_id, "kind": "generic",
+                                     "title": "t"})
+    store.ConversationsStore.append_message(
+        {"id": "m-u", "conversationId": conv_id, "role": "user",
+         "time": 0, "content": "需求"})
+    _cards.land_choices(conv_id, GOOD, gu_action="clarify-first")
+    # 记账在卡上(最近 assistant) → 帧源可得
+    pend = _pending_action(store, conv_id,
+                           int(__import__("time").time() * 1000))
+    assert pend.get("action") == "clarify-first"
+    # 无记账卡: 最近无记账 → 向前找更早记账(cv-248 语义, 澄清仍在飞=有效);
+    # 全会话无任何记账 → 不产生假帧(回归)
+    store.ConversationsStore.append_message(
+        {"id": "m-u2", "conversationId": conv_id, "role": "user",
+         "time": 1, "content": "答复"})
+    _cards.land_choices(conv_id, GOOD)       # 新卡无记账(如非 GU/兜底源)
+    pend2 = _pending_action(store, conv_id,
+                            int(__import__("time").time() * 1000))
+    assert pend2.get("action") == "clarify-first"   # 向前找到第一张的记账
+    conv2 = "conv-ledger2"
+    store.ConversationsStore.create({"id": conv2, "kind": "generic",
+                                     "title": "t"})
+    _cards.land_choices(conv2, GOOD)
+    assert _pending_action(store, conv2,
+                           int(__import__("time").time() * 1000)) == {}
+
+
 # ── 集成: 落流点(land_choices 消费同一 payload) ───────────────────────
 
 def test_json_fallback_lands_choices_card(arch_env):

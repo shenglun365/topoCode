@@ -247,6 +247,10 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
                 f"{k}: {str(v)[:160]}" for k, v in list(tool_errors.items())[:3])
         if loop_fell_back:
             detail += "（流式通道中断，已走同步降级通道仍未产出）"
+        elif int(loop.get("tool_round") or 0) >= _MAX_TOOL_ROUNDS:
+            # cv-254: 工具轮烧尽预算与真空返回是不同故障——诚实区分供诊断
+            detail += (f"；工具轮耗尽({loop.get('tool_round')}/"
+                       f"{_MAX_TOOL_ROUNDS})，预算多耗于多轮工具调用")
         elapsed = int(__import__("time").time() - io.t0)
         detail += f"；回合耗时 {elapsed}s（总预算 {int(_TURN_BUDGET_S)}s）"
         hint = _model_health_hint(eff_model or req_agent.get_model_preference())
@@ -593,8 +597,11 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
         intent_clarify=(str(gu_action or "") == CLARIFY_ACTION))
     if choices_payload and "choices" not in tools_used:
         from ..collab import cards as _cards
+        # 回合动作记账随卡归位(cv-254): 代落+空收尾后回合只有卡——
+        # guAction 是焦点帧 clarify_pending 的唯一派生源
         landed = await asyncio.to_thread(
-            _cards.land_choices, conv_id, choices_payload)
+            _cards.land_choices, conv_id, choices_payload,
+            gu_action=str(gu_action or ""))
         if landed:  # 按命中标记精确剥离(卡即回执, cv-203)
             final_content = _cards.strip_choices_fence(
                 final_content, marker=choices_marker)
