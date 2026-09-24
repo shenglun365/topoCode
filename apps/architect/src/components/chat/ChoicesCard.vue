@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { assembleReply, groupKey, requiredMissing } from '@/services/choices-reply'
-import type { ChoiceGroup } from '@/services/choices-reply'
+import type { ChoiceGroup, ReplyState } from '@/services/choices-reply'
+import ChevronSvg from './ChevronSvg.vue'
 
 /**
  * 结构化问询卡(cv-247) — 卡片词汇表 choices 的前端通用渲染器。
@@ -14,21 +15,31 @@ import type { ChoiceGroup } from '@/services/choices-reply'
 const props = defineProps<{
   payload: { title?: string; groups?: ChoiceGroup[]; note?: string }
   disabled?: boolean
+  /** 宿主已答标记(cv-247: 卡内回复或自由回复消费)——true → 本卡锁定为静态展示。 */
+  used?: boolean
+  /** 草稿回填(cv-254): conv.meta.choicesDraft[cardId]——填写态随会话落库,
+   * 刷新/断线后原样恢复(用户输入=工作产物, 不因呈现层销毁而丢失)。 */
+  draft?: Partial<ReplyState> & { note?: string }
 }>()
-const emit = defineEmits<{ (e: 'reply', text: string): void }>()
+const emit = defineEmits<{
+  (e: 'reply', text: string): void
+  (e: 'draft-change', draft: { selections: Record<string, string>; customs: Record<string, string>; skipped: Record<string, boolean>; note: string }): void
+}>()
 
 const groups = computed(() => props.payload?.groups ?? [])
 const gid = (g: ChoiceGroup, i: number) => groupKey(g, i)
 
 // 三态互斥: selections(点选) / customs(自定义) / skipped(跳过)
-const selections = reactive<Record<string, string>>({})
-const customs = reactive<Record<string, string>>({})
-const skipped = reactive<Record<string, boolean>>({})
-const extra = reactive({ note: '' })
+const selections = reactive<Record<string, string>>({ ...(props.draft?.selections ?? {}) })
+const customs = reactive<Record<string, string>>({ ...(props.draft?.customs ?? {}) })
+const skipped = reactive<Record<string, boolean>>({ ...(props.draft?.skipped ?? {}) })
+const extra = reactive({ note: props.draft?.note ?? '' })
 const answered = reactive({ done: false })
 // 缩略收起(cv-248): 已答自动收起; 未答可手动收起/展开——收起态只留摘要行
 const collapsed = ref(false)
 watch(() => answered.done, (d) => { if (d) collapsed.value = true })
+// 宿主已答 → 同步本地已答态(与卡内回复同一出口: 已回复徽标+自动收起+正文锁定)
+watch(() => props.used, (v) => { if (v) answered.done = true }, { immediate: true })
 
 const groupSummary = computed(() => {
   const total = groups.value.length
@@ -64,6 +75,15 @@ function toggleSkip(gidv: string) {
 const missingCount = computed(() => requiredMissing(groups.value, {
   selections, customs, skipped, note: extra.note }))
 
+// 填写快照上抛(宿主防抖落库): 回复组装不依赖快照, 快照只服务断线恢复
+watch(() => JSON.stringify({ selections, customs, skipped, note: extra.note }),
+  () => {
+    if (answered.done || props.disabled) return
+    emit('draft-change', {
+      selections: { ...selections }, customs: { ...customs },
+      skipped: { ...skipped }, note: extra.note })
+  })
+
 const replyText = computed(() => assembleReply(groups.value, {
   selections, customs, skipped, note: extra.note }))
 
@@ -83,11 +103,13 @@ defineExpose({ markAnswered })
 <template>
   <div
     class="mt-1 rounded-lg border bg-ctp-mantle/60 px-3 py-2.5 text-[12px]"
-    :class="answered.done ? 'border-ctp-surface0 opacity-75' : 'border-ctp-surface1'"
+    :class="answered.done
+      ? 'border-ctp-surface0 opacity-75 pointer-events-none select-none'
+      : 'border-ctp-surface1'"
   >
     <div class="mb-1.5 flex items-center gap-2">
       <button
-        class="flex flex-1 items-center gap-2 text-left"
+        class="flex flex-1 items-center gap-2 text-left pointer-events-auto"
         data-test="choices-collapse"
         :title="collapsed ? '展开问询卡' : '收起问询卡'"
         @click="collapsed = !collapsed"
@@ -95,7 +117,7 @@ defineExpose({ markAnswered })
         <span class="font-semibold text-ctp-text">{{ payload.title || '请确认以下问题' }}</span>
         <span class="text-[10px] text-ctp-overlay0">{{ collapsed ? groupSummary : '' }}</span>
         <span class="flex-1" />
-        <span class="text-[10px] text-ctp-overlay0">{{ collapsed ? '▼' : '▲' }}</span>
+        <ChevronSvg :collapsed="collapsed" />
       </button>
       <span
         v-if="answered.done"
@@ -183,18 +205,17 @@ defineExpose({ markAnswered })
 
     <div v-if="!collapsed" class="mt-2 flex items-center gap-2">
       <button
+        v-if="!answered.done"
         class="btn-mini bg-ctp-blue/20 text-ctp-blue hover:bg-ctp-blue/30 disabled:opacity-40"
         :disabled="disabled || answered.done || !replyText"
         data-test="choices-send"
         @click="sendReply"
       >发送回复</button>
       <span
-        v-if="missingCount > 0 && !answered.done"
+        v-if="answered.done"
         class="text-[10px] text-ctp-overlay0"
-      >{{ missingCount }} 个建议回答项未填（可跳过）</span>
-      <span v-else-if="answered.done" class="text-[10px] text-ctp-overlay0">
-        {{ replyText }}
-      </span>
+      >{{ replyText }}</span>
+      <span v-else-if="missingCount > 0" class="text-[10px] text-ctp-overlay0">{{ missingCount }} 个建议回答项未填（可跳过）</span>
     </div>
   </div>
 </template>

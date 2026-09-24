@@ -142,6 +142,8 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "parentConvId": c.get("parentConvId") or "",
             "runningRole": _running_role_of(c),
             "tags": _tags_of(c),
+            # meta 透传(通用契约): 各特性落 conv.meta 的状态(如 ctxUsage)自动可达前端
+            "meta": c.get("meta") or {},
             "summary": c.get("summary") or "",
             "msgCount": c.get("msgCount") or 0,
             "preview": (c.get("preview") or "").strip()[:160],
@@ -231,6 +233,62 @@ async def create_session(request: Request):
     })
     # create 返回 snake_case payload; 回显统一取 API 形状行
     return ok(_conv_api(store.ConversationsStore.get(conv["id"]) or conv))
+
+
+@router.get("/sessions/{conv_id}/choices-draft")
+async def get_choices_draft(conv_id: str):
+    """问询卡填写草稿读取(呈现层恢复源; 无草稿 → 空表)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    try:
+        meta = json.loads(conv.get("meta") or "{}") \
+            if isinstance(conv.get("meta"), str) else (conv.get("meta") or {})
+    except (TypeError, ValueError):
+        meta = {}
+    drafts = meta.get("choicesDraft") if isinstance(meta, dict) else None
+    return ok({"conversationId": conv_id,
+               "drafts": drafts if isinstance(drafts, dict) else {}})
+
+
+@router.put("/sessions/{conv_id}/choices-draft")
+async def save_choices_draft(conv_id: str, request: Request):
+    """问询卡填写草稿随会话落库(cv-254: 用户输入=工作产物, 不得因呈现层
+    销毁而丢失——specDraft 同类 conv.meta 草稿, 非事实写点)。
+
+    body: {cardId, draft}——draft=null 清除该卡草稿(回复提交成功/卡消费);
+    draft={selections, customs, skipped, note}(ChoicesCard 填写快照)。
+    cardId 级幂等 upsert, 多卡互不覆盖。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    data = await request.json()
+    card_id = str(data.get("cardId") or "").strip()
+    if not card_id:
+        return err(400, "缺少 cardId")
+    try:
+        meta = json.loads(conv.get("meta") or "{}") \
+            if isinstance(conv.get("meta"), str) else (conv.get("meta") or {})
+    except (TypeError, ValueError):
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    drafts = meta.get("choicesDraft")
+    drafts = dict(drafts) if isinstance(drafts, dict) else {}
+    draft = data.get("draft")
+    if draft is None:
+        drafts.pop(card_id, None)
+    else:
+        if not isinstance(draft, dict):
+            return err(400, "draft 须为对象或 null")
+        drafts[card_id] = draft
+    if drafts:
+        meta["choicesDraft"] = drafts
+    else:
+        meta.pop("choicesDraft", None)
+    store.ConversationsStore.update(conv_id, {"meta": meta})
+    return ok({"conversationId": conv_id, "cardId": card_id,
+               "saved": draft is not None})
 
 
 @router.patch("/sessions/{conv_id}")

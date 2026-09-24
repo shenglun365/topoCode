@@ -15,7 +15,7 @@ import CollapseChevron from '@/components/chat/CollapseChevron.vue'
 import ChevronSvg from '@/components/chat/ChevronSvg.vue'
 import { useCardCollapse } from '@/composables/useCardCollapse'
 import { parseSpecPayload, assembleSpecView } from '@/services/spec-view'
-import { apiPost, apiGet } from '@/services/api-client'
+import { apiPost, apiGet, apiPut } from '@/services/api-client'
 import type { CtxUsage, SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
 import { copyText } from '@/utils/clipboard'
@@ -225,6 +225,49 @@ const scrollRef = ref<HTMLElement | null>(null)
 const answers = reactive<Record<string, string>>({})
 // cv-247 问询卡已答态(本地): 卡内回复或输入区自由回复后均置已答(防重复)
 const choicesAnswered = reactive(new Set<string>())
+// 已答态零写点派生(cv-254): 协议保证问询卡与答复交替(cv-247——卡内回复
+// 与输入区自由回复同答语义)——卡之后的首条 user 消息即其答复, 刷新后
+// 由会话流时间序派生, 不回退不丢真
+const answeredByFlow = computed(() => {
+  const set = new Set<string>()
+  let pending = ''
+  for (const m of (props.turns || []) as any[]) {
+    if (m.item?.type === 'choices') pending = String(m.id || '')
+    else if (m.role === 'user' && pending) { set.add(pending); pending = '' }
+  }
+  return set
+})
+// 问询卡填写草稿(cv-254): 用户输入=工作产物, 随会话落库——刷新/断线/
+// 前端重启后原样恢复(specDraft 同类 conv.meta 草稿, 非事实写点)
+const choiceDrafts = ref<Record<string, any>>({})
+const draftTimers = new Map<string, ReturnType<typeof setTimeout>>()
+async function loadChoiceDrafts() {
+  if (!props.convId) return
+  try {
+    const r: any = await apiGet(`/sessions/${props.convId}/choices-draft`)
+    choiceDrafts.value = (r as any)?.drafts || (r as any)?.data?.drafts || {}
+  } catch { /* fail-soft: 草稿不可得=空白填写 */ }
+}
+function scheduleDraftSave(cardId: string, draft: any) {
+  if (!props.convId || answeredByFlow.value.has(cardId)
+      || choicesAnswered.has(cardId)) return
+  clearTimeout(draftTimers.get(cardId))
+  draftTimers.set(cardId, setTimeout(() => {
+    void apiPut(`/sessions/${props.convId}/choices-draft`,
+                { cardId, draft }).catch(() => {})
+  }, 800))
+}
+function clearChoiceDraft(cardId: string) {
+  clearTimeout(draftTimers.get(cardId))
+  draftTimers.delete(cardId)
+  if (!props.convId) return
+  void apiPut(`/sessions/${props.convId}/choices-draft`,
+              { cardId, draft: null }).catch(() => {})
+}
+watch(() => props.turns.length, () => {
+  if ((props.turns || []).some((m: any) => m.item?.type === 'choices')
+      && !Object.keys(choiceDrafts.value).length) void loadChoiceDrafts()
+}, { immediate: true })
 const choicesCards = computed(() =>
   (props.turns || []).filter((m: any) => m.item?.type === 'choices'))
 
@@ -574,6 +617,7 @@ function pickModel(m: string) {
 /** 问询卡回复: 组装文本走既有发送通道(与手打等价, cv-247)。 */
 function onChoicesReply(msgId: string, text: string) {
   choicesAnswered.add(msgId)
+  clearChoiceDraft(msgId)               // 答复已提交, 草稿使命完成
   emit('send', { text })
 }
 
@@ -1168,7 +1212,10 @@ onUnmounted(() => {
             class="mb-2"
             :payload="(m.item!.payload || {}) as any"
             :disabled="props.readOnly || props.busy"
-            :used="choicesAnswered.has(String(m.id || m.item?.id || ''))"
+            :used="choicesAnswered.has(String(m.id || m.item?.id || ''))
+              || answeredByFlow.has(String(m.id || m.item?.id || ''))"
+            :draft="choiceDrafts[String(m.id || m.item?.id || '')]"
+            @draft-change="(d: any) => scheduleDraftSave(String(m.id || m.item?.id || ''), d)"
             @reply="(text: string) => onChoicesReply(String(m.id || m.item?.id || ''), text)"
           />
           <TaskCard

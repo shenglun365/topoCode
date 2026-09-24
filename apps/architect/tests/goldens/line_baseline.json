@@ -147,7 +147,7 @@
  "arch_routes/semantic_assets.py": 112,
  "arch_routes/session_docs.py": 235,
  "arch_routes/session_guide.py": 57,
- "arch_routes/sessions.py": 1398,
+ "arch_routes/sessions.py": 1456,
  "arch_routes/store/__init__.py": 21,
  "arch_routes/store/base.py": 464,
  "arch_routes/store/blueprint.py": 95,

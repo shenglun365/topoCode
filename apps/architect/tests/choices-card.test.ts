@@ -87,6 +87,18 @@ describe('ChoicesCard 组件守门(A6.2 同思路, 静态断言)', () => {
     expect(src.includes("(e: 'reply', text: string)")).toBe(true)
   })
 
+  it('使用后锁定为静态展示: answered prop 同步 + 正文 pointer-events 锁 + 开关可点', () => {
+    // 宿主已答标记(cv-247 自由回复/卡内回复消费)单向同步本地已答态
+    expect(src.includes('used?: boolean')).toBe(true)
+    expect(src.includes('watch(() => props.used')).toBe(true)
+    // 正文锁定: 根节点 pointer-events-none + select-none(不可交互仅展示)
+    expect(src.includes('pointer-events-none select-none')).toBe(true)
+    // 收起/展开开关是视图控制, 锁定态仍可点(pointer-events-auto 豁免)
+    expect(src.includes('pointer-events-auto')).toBe(true)
+    // 已答后操作行收敛: 发送按钮 v-if 卸下, 仅展示回复文本
+    expect(src.includes('v-if="!answered.done"')).toBe(true)
+  })
+
   it('缩略收起(cv-248): 收起开关+摘要行+已答自动收起', () => {
     expect(src.includes('data-test="choices-collapse"')).toBe(true)
     expect(src.includes('collapsed')).toBe(true)
@@ -109,5 +121,34 @@ describe('会话流持久化守门(cv-248)', () => {
     // choices 不在气泡过滤集合(必须保留交卡片分支渲染)
     expect(store.includes("_CARD_BUBBLE_KINDS = new Set(['task_card', 'specReady', 'task_status'])")).toBe(true)
     expect(store.includes("'choices', 'task_card'")).toBe(false)
+  })
+})
+
+// ── cv-254: 草稿回填 + 变化上抛(静态断言——项目无 mount 依赖同规) ──
+
+const cardSrc = readFileSync(
+  resolve(root, 'src/components/chat/ChoicesCard.vue'), 'utf-8')
+const chatSrc = readFileSync(
+  resolve(root, 'src/components/requirements/AnalysisChat.vue'), 'utf-8')
+
+describe('问询卡草稿随会话落库(cv-254)', () => {
+  it('ChoicesCard: draft prop 回填三态+note; 变化经 draft-change 上抛', () => {
+    expect(cardSrc).toContain("draft?: Partial<ReplyState>")
+    expect(cardSrc).toContain('props.draft?.selections')
+    expect(cardSrc).toContain('props.draft?.customs')
+    expect(cardSrc).toContain("props.draft?.note")
+    expect(cardSrc).toContain("emit('draft-change'")
+    // 已答/禁用不再上抛(草稿使命已毕)
+    expect(cardSrc).toContain('if (answered.done || props.disabled) return')
+  })
+
+  it('AnalysisChat: 防抖落库+恢复读取+提交清除+已答时间序派生', () => {
+    expect(chatSrc).toContain('choices-draft')            // 端点(存+清)
+    expect(chatSrc).toContain('loadChoiceDrafts')         // 恢复读取
+    expect(chatSrc).toContain('clearChoiceDraft')         // 提交清除
+    expect(chatSrc).toContain('answeredByFlow')           // 时间序派生
+    // 派生语义: 卡后首条 user 消息即答复(卡内/自由回复同答, cv-247)
+    expect(chatSrc).toContain("m.item?.type === 'choices'")
+    expect(chatSrc).toContain("m.role === 'user'")
   })
 })
