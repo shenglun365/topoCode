@@ -655,7 +655,6 @@ function send() {
 /** 本地命令(前端拦截, 不发后端): 会话操作/状态切换——与工具条按钮同动作。 */
 const LOCAL_CMD_LIST = [
   { name: '绘图', desc: '切换绘图增强(IR→代码)' },
-  { name: '提取需求', desc: '从对话历史提取需求卡(ready)，系统未自动识别时用' },
   { name: '摘要', desc: '生成会话标题与摘要' },
   { name: '提炼', desc: '提炼会话为数据资产' },
   { name: '归档', desc: '结束会话(有可提炼内容时提示)' },
@@ -690,13 +689,10 @@ function onCmdMenuKeydown(e: KeyboardEvent) {
     e.preventDefault()
   }
 }
-/** 本地命令分发: 绘图/方案/选摘在组件内执行; 摘要/提炼/归档上抛宿主(与工具条同动作)。 */
+/** 本地命令分发: 绘图/选摘在组件内执行; 摘要/提炼/归档上抛宿主(与工具条同动作)。 */
 function runLocalCmd(name: string) {
   if (name === '绘图') {
     emit('toggle-diagram-skill', !props.diagramSkill)
-  } else if (name === '提取需求') {
-    emit('send', { text: '/提取需求' })
-    return
   } else if (name === '选摘') {
     toggleDigestMode()
   } else {
@@ -839,11 +835,6 @@ function showToast(text: string) {
   toastVisible.value = true
   if (toastTimer) clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2000)
-}
-
-/** 工具栏「提取需求」: 发 /提取需求 直通(系统确定性提取, 同对话指令路径)。 */
-function sendExtractReq() {
-  emit('send', { text: '/提取需求' })
 }
 
 // ── 提案卡确认存入：finalize 入池(待执行)；按钮自带 reqId, 多提案各自独立确认 ──
@@ -2165,14 +2156,6 @@ onUnmounted(() => {
           stroke-linecap="round"
           stroke-linejoin="round"
         ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
-      </button>
-      <button
-        class="btn btn-xs btn-ghost !px-1.5"
-        :disabled="busy"
-        title="提取需求 — /提取需求(从对话历史提取需求卡)"
-        @click="sendExtractReq"
-      >
-        <SparklesIcon class="w-3.5 h-3.5" />
       </button>
       <slot name="toolbar-extra" />
       <!-- v2 语境路由(发起者感知自动变 + 菜单单次翻转): 靠右加宽, 同钮显示当前执行器完整名称 -->

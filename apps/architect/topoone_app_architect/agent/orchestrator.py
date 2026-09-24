@@ -90,7 +90,7 @@ async def _retry_focus_task(conv: dict, send: SendFn, store,
 async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
                               user_msg_id: str, executor: str = "",
                               skip_plan: bool = False) -> None:
-    """会话指令直通(v2): /提取需求 → 历史提取需求卡; /执行 → ready 规约建任务卡。
+    """会话指令直通(v2): /执行 → ready 规约建任务卡。
     @执行器 前缀显式指定执行器; 回执落库+done 事件与常规回合同形;
     specReady meta 供前端渲染[一键建卡]动作。"""
     from .perception import commands as _cmds
@@ -109,7 +109,6 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
 
     def _on_phase(phase: str) -> None:
         _labels = {"plan": "正在生成任务计划（拆步编排，最长可达数分钟）…",
-                   "extract": "正在从对话历史提取需求…",
                    "card": "正在创建任务卡…",
                    # cv-205: 去 worktree 措辞——执行形态由启动状态卡标注
                    # (就地缺省; 隔离仅在会话开关显式开启时)
@@ -122,17 +121,7 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
             pass
 
     meta = None
-    if cmd == "提取需求":
-        # cv-204 探活根修: 直通链内含 CallTurn LLM 同步调用(上限 300s)+git/DB
-        # 同步操作——事件循环上直跑会饿死 /health(supervisor 5×(5+2)s 判挂死
-        # kill, cv-201 实证)→ 与 run_confirm(:50) 同规 to_thread。
-        res = await asyncio.to_thread(_cmds.run_extract_req, conv, on_phase=_on_phase)
-        logger.info("[direct-cmd] 提取需求 conv=%s 完成 ok=%s", conv_id, res.get("ok"))
-        if not res.get("ok"):
-            content = f"⚠️ {res.get('receipt') or res.get('error') or '提取失败'}"
-        else:
-            content = res.get("receipt") or "需求卡已提取。"
-    elif cmd == "执行":
+    if cmd == "执行":
         # cv-200: 按钮合成路径建卡即启动(「运行」=直接开跑)
         # cv-204: 同上 to_thread——LLM 拆步/建卡/git 链不得阻塞事件循环
         res = await asyncio.to_thread(
@@ -486,10 +475,6 @@ async def _chat_route(data: dict, gate: dict, send: SendFn):
                 cached_phase=str(conv.get("flowState") or ""))
             res = resolve_intent(imp["intent"], focus)
             act = res.get("action")
-            if act == "extract":
-                await _run_direct_command("提取需求", conv, send, store,
-                                          gate["last_user_msg_id"])
-                return True, decision
             if act == "execute":
                 # cv-199: 提案卡「运行」按钮的合成 /执行 跳过 LLM 拆步——
                 # 点按钮期望即时建卡; 手打 /执行 保留计划编排(带相位反馈)

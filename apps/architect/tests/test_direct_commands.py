@@ -84,7 +84,6 @@ def _chat(ws, conv_id, content, **extra):
 # ── 意图原语分类(批戊: 词表定意图) ───────────────────────────────────
 
 def test_match_imperative_intents():
-    assert match_imperative("/提取需求") == {"intent": "extract", "executor": ""}
     assert match_imperative(" /执行 ") == {"intent": "execute", "executor": ""}
     assert match_imperative("@cline /执行") == {"intent": "execute", "executor": "cline"}
     assert match_imperative("确认") == {"intent": "confirm", "executor": ""}
@@ -94,6 +93,8 @@ def test_match_imperative_intents():
     assert match_imperative("继续执行") == {"intent": "continue", "executor": ""}
     assert match_imperative("继续") == {"intent": "continue", "executor": ""}
     assert match_imperative("重试") == {"intent": "retry", "executor": ""}
+    # extract 退役(cv-254): 词表不再识别——自然语言(GU requirement 面)为兜底
+    assert match_imperative("/提取需求") is None
     # 带正文/非指令 → 普通消息
     for neg in ("/提取需求 帮我看看", "/调整", "/继续", "/diff", "普通话",
                 "确认一下这个方案", "不确认"):
@@ -178,44 +179,6 @@ def test_text_confirm_without_pending_falls_to_llm(tmp_path, monkeypatch):
             ev, _ = _recv_until(ws, "done")
     assert captured["calls"] == 1                        # 进了 LLM 回合
     assert ev["content"] == "ok-reply"
-
-
-# ── /定稿 直通 ───────────────────────────────────────────────────────
-
-def test_slash_extract_req_direct(tmp_path, monkeypatch):
-    """/提取需求: LLM 结构化提取 → apply_spec_payload 落需求卡(ready)。"""
-    client, captured = _client(tmp_path, monkeypatch)
-    conv = _mk_conv()
-    store.ConversationsStore.append_message({
-        "id": store.next_id("m"), "conversationId": conv["id"],
-        "role": "user", "time": 1, "content": "给项目写一个连通性探测脚本"})
-    from topoone_app_architect.arch_routes import req_agent as _ra
-    monkeypatch.setattr(_ra, "llm_sync",
-                        lambda *a, **k: {"output": {"title": "连通性探测脚本",
-                                                    "requirementMd": "实现探测"}, "content": ""})
-    with client:
-        with client.websocket_connect(WS_PATH) as ws:
-            _chat(ws, conv["id"], "/提取需求")
-            ev, _ = _recv_until(ws, "done")
-    assert captured["calls"] == 0                        # 零额外 LLM(llm_sync 已 mock)
-    assert "已提取" in ev["content"]
-    assert (store.ConversationsStore.get(conv["id"]) or {}).get("reqId")
-    # cv-177 回归: 卡片(specReady)只由 apply 路径落一条 + 文本回执一条 = 共 2 条
-    tail = store.ConversationsStore.messages(conv["id"])[-4:]
-    ready_cards = [m for m in tail
-                   if (m.get("meta") or "") and "specReady" in str(m.get("meta"))]
-    assert len(ready_cards) == 1, f"specReady 卡应仅 1 条, got {len(ready_cards)}"
-
-
-def test_slash_extract_req_without_content_guides(tmp_path, monkeypatch):
-    """空会话 → 明确引导, 不调 LLM。"""
-    client, captured = _client(tmp_path, monkeypatch)
-    conv = _mk_conv()
-    with client:
-        with client.websocket_connect(WS_PATH) as ws:
-            _chat(ws, conv["id"], "/提取需求")
-            ev, _ = _recv_until(ws, "done")
-    assert "还没有内容" in ev["content"]
 
 
 def test_slash_execute_autoconfirms_legacy_draft(tmp_path, monkeypatch):

@@ -279,14 +279,12 @@ def resolve_intent(intent: str, focus: Dict[str, Any]) -> Dict[str, Any]:
     """意图原语 → 焦点指代消解(纯函数)。
 
     返回 {action, frame?, note?}: action ∈ confirm_task / execute /
-    retry_failed / extract / relay_hint / none / fallthrough。
+    retry_failed / relay_hint / none / fallthrough。
     fallthrough = 焦点无对应指代 → 调用方回落 GU 对话链(旧行为的"回落"
     由消解矩阵自然表达, 无独立分支)。
     """
     top = focus.get("top") or {}
     kinds = {f.get("kind") for f in focus.get("stack") or []}
-    if intent == "extract":
-        return {"action": "extract"}
     if intent == "retry":
         failed = next((e for e in focus.get("recent") or []
                        if e.get("kind") == "task_failed"), None)
