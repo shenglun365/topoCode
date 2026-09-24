@@ -44,7 +44,7 @@ def _mk_conv_task(arch_env, tmp_path, monkeypatch, rid="RQ-mg", status="done",
                                     "executorType": "cline-sdk", "branch": branch,
                                     "workspace": "worktree",
                                     "baseCommit": base or ""})
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(tmp_path / "proj"), ""))
@@ -196,7 +196,7 @@ def test_propose_card_warns_unmerged(arch_env, tmp_path, monkeypatch, git_projec
                              "instruction": "x", "status": "done",
                              "executorType": "cline-sdk", "branch": "task/1",
                              "baseCommit": base})
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(repo), ""))

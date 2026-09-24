@@ -26,7 +26,7 @@ def _mk_env(arch_env, tmp_path, monkeypatch, mode="T2", split=None):
         "specVersions": [{"ver": 1, "state": "confirmed",
                           "snapshot": {"allowedScope": ["src/"], "designMd": "方案"},
                           "source": {}, "reason": "", "createdAt": 0}]})
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     from topoone_app_architect.arch_routes import agent_executors as ae
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",

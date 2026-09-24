@@ -19,7 +19,7 @@ sys.path.insert(0, _repo)
 
 import topoone_app_architect.ctx as C
 import topoone_app_architect.store as store
-from topoone_app_architect.arch_routes import exec_bridge as eb
+from topoone_app_architect.agent.execution import exec_bridge as eb
 
 
 def _env(tmp_path, monkeypatch):
@@ -167,7 +167,7 @@ def test_confirm_mutex_self_heals_via_recovery(tmp_path, monkeypatch):
 
 def test_recover_sweep_converges_stale_tasks(tmp_path, monkeypatch):
     """C 定时对账: 目录扫描发现默认库+项目库的假 running 任务并收尾。"""
-    from topoone_app_architect.arch_routes.exec_bridge import recover_sweep
+    from topoone_app_architect.agent.execution.exec_bridge import recover_sweep
     _env(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     t = _mk_running_task(conv["id"])

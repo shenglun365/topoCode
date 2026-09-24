@@ -146,7 +146,7 @@ def test_flow_policy_rest_roundtrip(client):
 # ── S1: 修复经验回填(写侧去重 + 读侧注入) ─────────────────────────────
 
 def _stub_llm(monkeypatch, payload='{"fix": 1}', counter=None):
-    import topoone_app_architect.arch_routes.req_agent as ra
+    import topoone_app_architect.agent.tools.req_agent as ra
 
     def _fake(*a, **kw):
         if counter is not None:
@@ -291,7 +291,7 @@ def test_overflow_digest_injected_and_cached(arch_env, monkeypatch):
 
 
 def test_overflow_digest_llm_fail_keeps_truncation(arch_env, monkeypatch):
-    import topoone_app_architect.arch_routes.req_agent as ra
+    import topoone_app_architect.agent.tools.req_agent as ra
     from topoone_app_architect import store
 
     def _boom(*a, **kw):

@@ -11,7 +11,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-from topoone_app_architect.arch_routes.req_agent import (
+from topoone_app_architect.agent.tools.req_agent import (
     extract_tool_calls, strip_tool_blocks, tool_parse_audit)
 
 

@@ -59,7 +59,7 @@ def _mk_active_task(conv_id, status="running", executor_type="opencode"):
 
 
 def test_feed_records_sub_and_reports_no_job(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(eb, "active_task_of", lambda cid: None)
     client, h = _client(tmp_path, monkeypatch)
     conv, sub = _mk_main_with_sub()
@@ -78,7 +78,7 @@ def test_feed_records_sub_and_reports_no_job(tmp_path, monkeypatch):
 
 
 def test_feed_delivered_and_queued_flags(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, h = _client(tmp_path, monkeypatch)
     conv, sub = _mk_main_with_sub()
     task = _mk_active_task(conv["id"], status="running")
@@ -154,7 +154,7 @@ def test_running_role_legacy_jobs_fallback(tmp_path, monkeypatch):
 
 def test_running_role_v2_task_priority(tmp_path, monkeypatch):
     """arch_tasks 活跃任务优先; 任务终态后回落 jobs/缺省。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     from topoone_app_architect.arch_routes import sessions as S
     _setup(tmp_path, monkeypatch)
     root = tmp_path / "proj"

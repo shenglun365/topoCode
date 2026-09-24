@@ -21,12 +21,12 @@ import re
 import typing
 from typing import Any, Callable, Dict, List, Optional
 
-from .. import store
+from ... import store
 
-from ..agent.cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
+from ...agent.cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
 logger = logging.getLogger(__name__)
 
-from ..agent.planning.req_spec import (  # noqa: F401,E402
+from ...agent.planning.req_spec import (  # noqa: F401,E402
     _SPEC_FIELD_ALIASES,
     _norm_scope_list,
     _repair_json_like,
@@ -40,13 +40,13 @@ from ..agent.planning.req_spec import (  # noqa: F401,E402
     repair_spec_payload_format,
     strip_proposal_fence,
 )
-from ..agent.planning.task_plan import (  # noqa: F401,E402
+from ...agent.planning.task_plan import (  # noqa: F401,E402
     extract_task_fence, strip_task_fence)
-from ..agent.collab.cards import (  # noqa: F401,E402
+from ...agent.collab.cards import (  # noqa: F401,E402
     extract_choices_fence, strip_choices_fence,
     extract_choices_json_fence, resolve_choices_payload)
 
-from ..agent.tools.protocol import (  # noqa: F401,E402
+from ...agent.tools.protocol import (  # noqa: F401,E402
     _FENCE,
     _TOOL_CALL_BLOCK,
     _TOOL_CALL_CLOSE,
@@ -59,7 +59,7 @@ from ..agent.tools.protocol import (  # noqa: F401,E402
     strip_tool_blocks,
     tool_parse_audit,
 )
-from ..agent.tools.registry import (  # noqa: F401,E402
+from ...agent.tools.registry import (  # noqa: F401,E402
     _ARCHIVED_DENY_TOOLS,
     _ARCH_SKILLS,
     _ARCH_TOOLS,
@@ -87,7 +87,7 @@ def record_tool_audit(name: str, arguments: Dict[str, Any], ok: bool,
                       project: str = "") -> Dict[str, Any]:
     """工具调用审计记录(结构接口预留)。当前仅 debug 日志, 不落存储。"""
     try:
-        from .. import ctx as _actx
+        from ... import ctx as _actx
         conv_id = _actx.get_conv() or ""
         req_id = _actx.get_req() or ""
     except Exception:
@@ -102,7 +102,7 @@ def record_tool_audit(name: str, arguments: Dict[str, Any], ok: bool,
     }
     logger.debug("[tool-audit] %s", json.dumps(rec, ensure_ascii=False)[:400])
     try:
-        from ..store.base import _insert_into, _db
+        from ...store.base import _insert_into, _db
         _insert_into(_db(), "arch_tool_audit", {
             "ts": rec["ts"], "tool": name,
             "argsDigest": rec["argsDigest"], "ok": rec["ok"],
@@ -214,7 +214,7 @@ def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
             continue
     if coerced:
         try:
-            from ..agent.reflection import dataset as llm_dataset
+            from ...agent.reflection import dataset as llm_dataset
             llm_dataset.record("arg_coerce", tool=getattr(fn, "__name__", "?"),
                                items=[{"param": k, "from": a, "to": b}
                                       for k, a, b in coerced])
@@ -253,10 +253,10 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
     # PR1 归档只读: 归档会话上拒绝动作类工具(落库/定稿/指派); 检索/读取/提炼放行
     if name in _ARCHIVED_DENY_TOOLS:
         try:
-            from .. import ctx as _ctx
+            from ... import ctx as _ctx
             conv_id = _ctx.get_conv()
             if conv_id:
-                from .. import store as _store
+                from ... import store as _store
                 conv = _store.ConversationsStore.get(conv_id)
                 if conv and (conv.get("status") or "active") == "archived":
                     return {"error": f"会话已归档(只读)：{name} 不可执行。可读取/复制/提炼。"}
@@ -300,7 +300,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
                           tool_result_text(name, result, limit=200),
                           latency_ms=_now_ms() - t0, project=project or "")
         try:
-            from ..agent.reflection import dataset as _lds
+            from ...agent.reflection import dataset as _lds
             _lds.record("tool_call", tool=name, ok=ok, args=arguments,
                         result=tool_result_text(name, result, limit=1200),
                         latencyMs=_now_ms() - t0, project=project or "")
@@ -312,7 +312,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
         record_tool_audit(name, arguments, False, str(e),
                           latency_ms=_now_ms() - t0, project=project or "")
         try:
-            from ..agent.reflection import dataset as _lds
+            from ...agent.reflection import dataset as _lds
             _lds.record("tool_call", tool=name, ok=False, args=arguments,
                         error=str(e), latencyMs=_now_ms() - t0,
                         project=project or "")
@@ -336,15 +336,15 @@ def tool_result_text(name: str, result: Any, limit: int = 3000) -> str:
 # ── 工具实现(M3 拆分): 按域迁 agent/tools/impl/*(注册随定义点, 行为等价) ──
 # 保留名 re-export: 既有内部调用(scope_probe._kb_hits 等)与测试接缝不断;
 # mcp 出向三件套留驻本文件(_kb_gateway 打桩接缝)。
-from ..agent.tools.impl.kb import (_model, _model_assets, _model_code_mappings,
+from ...agent.tools.impl.kb import (_model, _model_assets, _model_code_mappings,
                                    _project_degraded, tool_kb_asset_search,
                                    tool_kb_baseline, tool_kb_code_mappings,
                                    tool_kb_graph, tool_project_ctx)
-from ..agent.cognition.prompt import KB_FACE_TOOLS
-from ..agent.tools.impl.map import (tool_map_assets, tool_map_component,
+from ...agent.cognition.prompt import KB_FACE_TOOLS
+from ...agent.tools.impl.map import (tool_map_assets, tool_map_component,
                                     tool_map_graph, tool_map_overview,
                                     tool_map_rules)
-from ..agent.tools.impl.semantic import (tool_code_read_symbols,
+from ...agent.tools.impl.semantic import (tool_code_read_symbols,
                                          tool_semantic_detail,
                                          tool_semantic_extract,
                                          tool_semantic_mappings,
@@ -352,13 +352,13 @@ from ..agent.tools.impl.semantic import (tool_code_read_symbols,
                                          tool_semantic_refresh,
                                          tool_semantic_search,
                                          tool_semantic_stats)
-from ..agent.tools.impl.asset import (tool_asset_semantic_merge,
+from ...agent.tools.impl.asset import (tool_asset_semantic_merge,
                                       tool_asset_semantic_save,
                                       tool_asset_semantic_split,
                                       tool_asset_semantic_update,
                                       tool_contract_propose,
                                       tool_convention_propose)
-from ..agent.tools.impl.diagram import tool_diagram_build, tool_diagram_validate
+from ...agent.tools.impl.diagram import tool_diagram_build, tool_diagram_validate
 
 
 # ── MCP 出向工具(经 MCP server 转发，供 plan agent 调用开放/外部 MCP 工具) ──
@@ -373,7 +373,7 @@ def _mcp_tool_list() -> List[Dict[str, Any]]:
     now = time.time()
     if _MCP_TOOLS_CACHE["tools"] and now - _MCP_TOOLS_CACHE["ts"] <= _MCP_TOOLS_TTL:
         return _MCP_TOOLS_CACHE["tools"]
-    from ..agent.governance.timeouts import get as _timeout_of
+    from ...agent.governance.timeouts import get as _timeout_of
     tools = _kb_gateway().tools(timeout=_timeout_of("kb_mcp_tools")) or []
     if tools:
         _MCP_TOOLS_CACHE["ts"] = now
@@ -401,7 +401,7 @@ def _mcp_doc() -> str:
 def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if not tool:
         return {"ok": False, "error": "缺少 MCP 工具名(tool)"}
-    from ..agent.governance.timeouts import get as _timeout_of
+    from ...agent.governance.timeouts import get as _timeout_of
     result = _kb_gateway().query(tool, timeout=_timeout_of("kb_mcp_call"), **(params or {}))
     if result is None:
         return {"ok": False, "tool": tool, "error": "MCP 不可达或超时"}
@@ -483,9 +483,9 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
                      acceptanceMd: str = "", newRequirement: bool = False,
                      root: Optional[str] = None,
                      project: Optional[str] = None) -> Dict[str, Any]:
-    from .. import ctx
-    from .. import store as _store
-    from ..common import _ts
+    from ... import ctx
+    from ... import store as _store
+    from ...common import _ts
     title = (title or "").strip()
     if not title:
         return {"ok": False, "error": "缺少需求标题"}
@@ -550,8 +550,8 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     _sync_analysis_cache(req["id"], snapshot)
     # 需求跟踪台账: 需求落库即挂账(生成=done), 失败不阻断需求流
     try:
-        from ..store.tracking import emit as _tr_emit
-        from ..store.states import TRACK_DONE
+        from ...store.tracking import emit as _tr_emit
+        from ...store.states import TRACK_DONE
         _tr_emit(category="需求",
                  title=str(req.get("title") or req["id"])[:200],
                  content=str(snapshot.get("desc") or "")[:2000],
@@ -660,7 +660,7 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
         or _body_placeholder_error(designMd, "designMd")
     if body_err:
         return {"ok": False, "error": body_err}
-    from .. import ctx
+    from ... import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
         # 回退读会话绑定: req.propose 与 amend 同轮调用时 ctx.req 尚未回写(下一轮生效)
@@ -743,7 +743,7 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     "参数：convId(会话 id)、limit?(消息条数, 默认 20)。",
 )
 def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
-    from .. import store as _store
+    from ... import store as _store
     cid = (convId or "").strip()
     if not cid:
         return {"error": "缺少 convId"}
@@ -769,9 +769,9 @@ def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
 
 # ── LLM 通道: 实现迁至 agent.cognition.llm(P1), 此处 re-export 兼容存量引用 ──
 
-from ..store import states as ST
-from ..agent.cognition import prompt as _disc  # noqa: F401,E402
-from ..agent.cognition.llm import (  # noqa: F401,E402
+from ...store import states as ST
+from ...agent.cognition import prompt as _disc  # noqa: F401,E402
+from ...agent.cognition.llm import (  # noqa: F401,E402
     _LLM_CALL_TIMEOUT,
     _MAX_TOKENS_KEY,
     _MODEL_KEY,
@@ -787,7 +787,7 @@ from ..agent.cognition.llm import (  # noqa: F401,E402
 
 def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None:
     """委托 collab.cards.land(卡片落流唯一出口, cv-175 规范化)。"""
-    from ..agent.collab import cards as _cards
+    from ...agent.collab import cards as _cards
     meta = dict(meta or {})
     _cards.land(conv_id, text, kind=meta.pop("kind", None),
                 project_id="", **meta)
@@ -827,7 +827,7 @@ def execute_tool_with_repair(name: str, args: dict, root: Optional[str],
     if not err.startswith("未知工具"):
         return result
     try:
-        from ..agent.reflection.repair_tasks import run_tool_call_repair
+        from ...agent.reflection.repair_tasks import run_tool_call_repair
         fixed = run_tool_call_repair(name, args if isinstance(args, dict) else {},
                                      err, list(_ARCH_TOOLS), model_id=model_id)
     except Exception:  # noqa: BLE001 — 修复通道故障不影响既有错误返回
@@ -851,7 +851,7 @@ def record_tool_parse_audit(content: str, calls: list, surface: str = "chat") ->
         audit = tool_parse_audit(content or "")
         if not audit["regions"] or audit["valid"] >= audit["regions"]:
             return
-        from ..agent.reflection.dataset import record
+        from ...agent.reflection.dataset import record
         record("tool_parse_fail", surface=surface,
                regions=audit["regions"], valid=audit["valid"],
                sample=(content or "")[-500:])
@@ -875,7 +875,7 @@ def structured_model_enabled(model_id: str) -> bool:
     if not mid:
         return False
     try:
-        from ..agent.cognition import model_profile as _mp
+        from ...agent.cognition import model_profile as _mp
         prof = _mp.get_profile(mid)
         if isinstance(prof, dict) and prof.get("structured") is True:
             return True
@@ -935,7 +935,7 @@ def structured_tool_round(msgs: list, model_id: str = "",
     返回 {'calls': [{tool, arguments}], 'content': str, 'error': str|''}。
     calls 为空且无 error = 模型未调用工具(空 tool)——调用方转终稿轮。
     """
-    from ..agent.tools.protocol import TOOL_CALL_SCHEMA
+    from ...agent.tools.protocol import TOOL_CALL_SCHEMA
     res = llm_sync(msgs, mode="structured",
                    output_schema=schema or TOOL_CALL_SCHEMA,
                    max_tokens=max_tokens, model_id=model_id)
@@ -1009,7 +1009,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                                          max_tokens=max_tokens)
             if sres["error"]:
                 # 失败显式不静默: 一次性 nudge 后本循环降级文本协议
-                from ..agent.reflection.dataset import record
+                from ...agent.reflection.dataset import record
                 record("tool_parse_fail", surface="structured",
                        sample=sres["error"][:300])
                 work.append({"role": "user", "content":
@@ -1253,8 +1253,8 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
     R3.4: tool_surface/kb_enabled 工具面裁剪 + ctx_budget 预算系数(缺省不变)。
     批丁: gu_allowed(GU 路线工具限定)→能力文档本轮子集; prompt_slim(简挡)。
     """
-    from ..agent.cognition import model_profile as _mp
-    from ..agent.cognition import prompt as _pr
+    from ...agent.cognition import model_profile as _mp
+    from ...agent.cognition import prompt as _pr
     # cv-189 注入层硬控制(入口强制): 未关联 KB → 无论调用方传什么, kb_enabled
     # 恒 False(能力文档无 kb.*/mcp.call; MCP 块/skill/路由段各自另有降级门)。
     try:
@@ -1276,7 +1276,7 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
 
 
 def _posture_textLegacy() -> str:
-    from ..agent.cognition.prompt import posture_text
+    from ...agent.cognition.prompt import posture_text
     return posture_text()
 
 
@@ -1346,7 +1346,7 @@ def tool_task_propose(title: str, instruction: str,
     safetyClass: readonly=纯读/分析(豁免互斥, 强制就地) | mutating=会写代码/文件(默认)
       | high-stakes=高风险(部署/发布/数据迁移/破坏性操作——强制隔离+合并门禁)。
     workTags: 工作类型开放标签, 如 ["analysis","docs"] / ["deploy"]。"""
-    from ..agent.planning.task_plan import propose_task_tool
+    from ...agent.planning.task_plan import propose_task_tool
     return propose_task_tool(title, instruction, executorType=executorType,
                              root=root, project=project,
                              safetyClass=safetyClass or "",
@@ -1364,8 +1364,8 @@ def tool_task_propose(title: str, instruction: str,
     params_doc='{"query": "主题关键词(如: 执行器/需求卡/计划/确认; 空=返回主题清单)"}',
 )
 def tool_help_lookup(query: str = "", topic: str = "") -> Dict[str, Any]:
-    from ..agent.governance.flow_policy import load_flow_policy
-    from ..agent.turns.help_docs import lookup_topics
+    from ...agent.governance.flow_policy import load_flow_policy
+    from ...agent.turns.help_docs import lookup_topics
     rows = ((load_flow_policy().get("goal") or {}).get("helpTopics")) or None
     res = lookup_topics(str(query or topic or ""), rows=rows)
     res["ok"] = True
@@ -1382,8 +1382,8 @@ def tool_asset_upsert(title: str, content: str,
                       unitId: Optional[str] = None,
                       conversationId: Optional[str] = None,
                       reqId: Optional[str] = None) -> Dict[str, Any]:
-    from .. import ctx as _ctx
-    from ..store import ContextUnitsStore
+    from ... import ctx as _ctx
+    from ...store import ContextUnitsStore
     conv_id = conversationId or _ctx.get_conv() or ""
     if not conv_id:
         return {"ok": False, "error": "no-conversation"}
@@ -1406,8 +1406,8 @@ def tool_asset_upsert(title: str, content: str,
 def tool_asset_list(type: Optional[str] = None, q: Optional[str] = None,
                     limit: int = 50,
                     conversationId: Optional[str] = None) -> Dict[str, Any]:
-    from .. import ctx as _ctx
-    from ..store import ContextUnitsStore
+    from ... import ctx as _ctx
+    from ...store import ContextUnitsStore
     conv_id = conversationId or _ctx.get_conv() or ""
     if not conv_id:
         return {"ok": False, "error": "no-conversation"}
@@ -1426,7 +1426,7 @@ def tool_asset_list(type: Optional[str] = None, q: Optional[str] = None,
     "删除会话知识单元(误沉淀/过期知识清理)。",
 )
 def tool_asset_delete(unitId: str) -> Dict[str, Any]:
-    from ..store import ContextUnitsStore
+    from ...store import ContextUnitsStore
     removed = ContextUnitsStore.delete(unitId)
     return {"ok": bool(removed), "deleted": bool(removed)}
 
@@ -1457,7 +1457,7 @@ def _skill_plan():
 
 
 # ── 需求 Harness(M3 拆分): 实现迁 agent/requirements/harness.py, re-export 接缝 ──
-from ..agent.requirements.harness import (_SYSTEM_PROMPT, _build_assessment,
+from ...agent.requirements.harness import (_SYSTEM_PROMPT, _build_assessment,
                                           _build_changes, _build_steps,
                                           _kb_hits, _merge_assets,
                                           req_harness_clarify,

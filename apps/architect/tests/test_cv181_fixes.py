@@ -30,7 +30,7 @@ def _mk_env(arch_env, tmp_path, monkeypatch, failed_branch="task/17"):
                                  "instruction": "x", "status": "failed",
                                  "executorType": "cline-sdk", "branch": failed_branch,
                                  "baseCommit": ""})
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(tmp_path / "proj"), ""))
@@ -95,14 +95,14 @@ def _mk_wt(tmp_path, rel, content):
 
 
 def test_copy_impl_flag_detects_selfcontained(tmp_path):
-    from topoone_app_architect.arch_routes.exec_bridge import _copy_impl_flag
+    from topoone_app_architect.agent.execution.exec_bridge import _copy_impl_flag
     wt = _mk_wt(tmp_path, "tests/unit/test_x.c", C_SELF_CONTAINED)
     note = _copy_impl_flag(wt, ["tests/unit/test_x.c"])
     assert "疑似复制实现" in note and "未触及真实代码" in note
 
 
 def test_copy_impl_flag_passes_production_linked(tmp_path):
-    from topoone_app_architect.arch_routes.exec_bridge import _copy_impl_flag
+    from topoone_app_architect.agent.execution.exec_bridge import _copy_impl_flag
     wt_dir = tmp_path / "wt"
     (wt_dir / "src").mkdir(parents=True)
     (wt_dir / "src" / "calc.h").write_text("int add(int,int);\n")
@@ -115,7 +115,7 @@ int main(void) { return add(1, 2) == 3 ? 0 : 1; }
 
 
 def test_copy_impl_flag_declared_downgrades(tmp_path):
-    from topoone_app_architect.arch_routes.exec_bridge import _copy_impl_flag
+    from topoone_app_architect.agent.execution.exec_bridge import _copy_impl_flag
     wt = _mk_wt(tmp_path, "tests/test_y.c", C_SELF_CONTAINED)
     note = _copy_impl_flag(wt, ["tests/test_y.c"],
                            turn_text="内部函数未导出, 采用复制实现, 原因是无法链接")
@@ -123,7 +123,7 @@ def test_copy_impl_flag_declared_downgrades(tmp_path):
 
 
 def test_copy_impl_flag_ignores_non_test(tmp_path):
-    from topoone_app_architect.arch_routes.exec_bridge import _copy_impl_flag
+    from topoone_app_architect.agent.execution.exec_bridge import _copy_impl_flag
     wt = _mk_wt(tmp_path, "src/helper.c", C_SELF_CONTAINED)
     assert _copy_impl_flag(wt, ["src/helper.c"]) == ""
 

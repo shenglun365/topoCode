@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from topoone_app_architect.agent.cognition import prompt as disc  # noqa: E402
-from topoone_app_architect.arch_routes import req_agent
+from topoone_app_architect.agent.tools import req_agent
 
 
 def test_protocol_doc_composed_from_constants():
@@ -138,7 +138,7 @@ def test_record_tool_parse_fail_samples(tmp_path, monkeypatch):
     C.reset_project(C._project_var.set(None)); C.reset_req(C._req_var.set(None))
     C.setup(data_dir=data)
     from topoone_app_architect.agent.reflection import dataset as ds
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     good = '[TOOL_CALL]{"tool":"kb.baseline","arguments":{}}[/TOOL_CALL]'
     req_agent.record_tool_parse_audit(good, [{"tool": "kb.baseline"}])
     bad = ('前文\n[TOOL_CALL]{"tool": "kb.baseline", "arguments": }'

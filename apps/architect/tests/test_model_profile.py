@@ -66,7 +66,7 @@ def _mock_llm(responses, monkeypatch):
         idx = min(calls["n"], len(responses) - 1)
         calls["n"] += 1
         return {"content": responses[idx]}
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_sync)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_sync)
     return calls
 
 
@@ -108,7 +108,7 @@ def test_probe_model_good_small_model(tmp_path, monkeypatch):
         if "整理为规约" in sys0 or "```json" in sys0:
             return {"content": JSON_OK}
         return {"content": "好的, 我来整理该脚本需求并给出方案。"}
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", smart_sync)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", smart_sync)
     seen_budgets: list = []
     real_smart = smart_sync
 
@@ -116,7 +116,7 @@ def test_probe_model_good_small_model(tmp_path, monkeypatch):
         seen_budgets.append(max_tokens)
         return real_smart(messages, mode=mode, model_id=model_id,
                           max_tokens=max_tokens, **kw)
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", budget_spy)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", budget_spy)
     prof = mp.probe_model("m-8b")
     # 胜任容量分层: 8B → 8K 预算(全部用例统一)
     assert seen_budgets and set(seen_budgets) == {8192}
@@ -148,7 +148,7 @@ def test_probe_unreachable_keeps_profile(tmp_path, monkeypatch):
 
     def boom(*a, **kw):
         raise RuntimeError("network down")
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", boom)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", boom)
     out = mp.probe_model("m-down")
     assert out.get("reachable") is False
     assert mp.tier_of("m-down") == 2            # 原档案未破坏
@@ -174,7 +174,7 @@ def test_probe_compensation_recheck(tmp_path, monkeypatch):
         if "结构化指令" in sys:
             return {"content": '```json\n{"title": "T", "designMd": "1. a\\n2. b\\n3. c"}\n```'}
         return {"content": "普通回答"}
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", comp_only)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", comp_only)
     prof2 = mp.probe_model("m-weak-but-guided")
     assert prof2["tier"] == 2
     assert prof2["admission"]["level"] == "weak"

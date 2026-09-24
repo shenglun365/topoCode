@@ -35,14 +35,14 @@ def test_instruction_dod_aligned_with_verification_boundary():
 # ── 里程碑报告解析 ───────────────────────────────────────────────────
 
 def test_milestone_report_files_parse():
-    from topoone_app_architect.arch_routes.exec_bridge import _milestone_report_files
+    from topoone_app_architect.agent.execution.exec_bridge import _milestone_report_files
     text = ("里程碑 1 完成。\n改动文件: src/a.c, `src/http/b.h`, conf/x.conf\n"
             "验证: 编译通过\n下一里程碑: 配置集成")
     assert _milestone_report_files(text) == ["src/a.c", "src/http/b.h", "conf/x.conf"]
 
 
 def test_milestone_report_files_absent():
-    from topoone_app_architect.arch_routes.exec_bridge import _milestone_report_files
+    from topoone_app_architect.agent.execution.exec_bridge import _milestone_report_files
     assert _milestone_report_files("普通提问: 需要端口号?") == []
     assert _milestone_report_files("") == []
 
@@ -63,7 +63,7 @@ def _mk_req_spec(arch_env, tmp_path, monkeypatch, with_spec=True):
 
 
 def test_merge_req_scope_into_active_snapshot(arch_env, tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes.exec_bridge import _merge_req_scope
+    from topoone_app_architect.agent.execution.exec_bridge import _merge_req_scope
     rid = _mk_req_spec(arch_env, tmp_path, monkeypatch, with_spec=True)
     n = _merge_req_scope(rid, ["src/existing/", "src/new/a.c", "src/new/b.c"])
     assert n == 2
@@ -74,7 +74,7 @@ def test_merge_req_scope_into_active_snapshot(arch_env, tmp_path, monkeypatch):
 
 
 def test_merge_req_scope_fallback_to_analysis(arch_env, tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes.exec_bridge import _merge_req_scope
+    from topoone_app_architect.agent.execution.exec_bridge import _merge_req_scope
     rid = _mk_req_spec(arch_env, tmp_path, monkeypatch, with_spec=False)
     assert _merge_req_scope(rid, ["docs/x.md"]) == 1
     assert store.RequirementsStore.get(rid)["analysis"]["allowedScope"] == \
@@ -82,14 +82,14 @@ def test_merge_req_scope_fallback_to_analysis(arch_env, tmp_path, monkeypatch):
 
 
 def test_merge_req_scope_no_req(arch_env, tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes.exec_bridge import _merge_req_scope
+    from topoone_app_architect.agent.execution.exec_bridge import _merge_req_scope
     assert _merge_req_scope("RQ-none", ["a.py"]) == 0
 
 
 # ── 事件链路: input_required 携里程碑报告 → 回执 + 回写 ─────────────
 
 def _mk_conv_task_fixture(arch_env, tmp_path, monkeypatch, rid=""):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "proj"
     root.mkdir(exist_ok=True)
     conv = store.ConversationsStore.create({

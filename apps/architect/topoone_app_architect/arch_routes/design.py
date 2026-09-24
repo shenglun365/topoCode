@@ -131,7 +131,7 @@ def req_harness_scope(req: Dict[str, Any], root: Optional[str], project: Optiona
                       model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向1: 按业务需求圈定需要迭代的数据资产范围(核心/相关 + 业务理由)。"""
     from ..agent.turns.catalog import catalog_call
-    from .req_agent import get_max_tokens_preference
+    from ..agent.tools.req_agent import get_max_tokens_preference
     catalog = data_asset_catalog(root, project)
     items = catalog["items"]
     title = req.get("title", "")
@@ -400,7 +400,7 @@ def req_harness_design(req: Dict[str, Any], analysis: Dict[str, Any],
                        model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向2: 基于需求 + 已圈定范围生成设计方案(数据层/接口流程层/语义层)。"""
     from ..agent.turns.catalog import catalog_call
-    from .req_agent import get_max_tokens_preference
+    from ..agent.tools.req_agent import get_max_tokens_preference
     catalog = data_asset_catalog(root, project)
     model = catalog["model"]
     before = [_norm_table(t) for t in (model.get("erTables") or [])]
@@ -531,7 +531,7 @@ async def api_scope(request: Request):
     req = body.get("req") or {}
     if not req.get("title"):
         return err(400, "需求标题不能为空")
-    from .req_agent import llm_sync  # noqa: F401  (确保通道就绪即抛错)
+    from ..agent.tools.req_agent import llm_sync  # noqa: F401  (确保通道就绪即抛错)
     try:
         res = req_harness_scope(req, body.get("root"), body.get("project"),
                                 model_id=body.get("modelId") or req.get("modelId"))

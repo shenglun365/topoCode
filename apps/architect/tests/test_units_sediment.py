@@ -101,7 +101,7 @@ def test_turn_error_empty_conv_noop(tmp_path, monkeypatch):
 # ── 工具面（asset.upsert / list / delete → 单元）───────────────────
 
 def test_asset_tools_roundtrip_on_units(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     _setup_env(tmp_path, monkeypatch)
     up = req_agent.run_arch_tool(
         "asset.upsert", {"title": "结论", "content": "缓存必须失效",

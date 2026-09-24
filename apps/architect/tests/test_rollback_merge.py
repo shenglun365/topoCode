@@ -41,7 +41,7 @@ def test_delete_messages_after_truncates(arch_env, tmp_path):
 
 
 def test_rollback_route_guards_running_task(arch_env, tmp_path, monkeypatch, client):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv_id, ids = _mk_conv(arch_env, tmp_path)
     monkeypatch.setattr(eb, "active_task_of",
                         lambda cid: {"id": "task-1", "status": "running"})
@@ -85,7 +85,7 @@ def _mk_done_task(arch_env, tmp_path, monkeypatch, base, branch="task/9"):
                                     "executorType": "cline-sdk", "branch": branch,
                                     "workspace": "worktree",
                                     "baseCommit": base, "resultMd": "ok"})
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(tmp_path / "proj"), ""))

@@ -20,7 +20,7 @@ import topoone_app_architect.store as store
 from topoone_app_architect.agent.perception import commands as cmds
 from topoone_app_architect.agent.planning.task_plan import propose_task_tool
 from topoone_app_architect.arch_routes import agent_executors as ae
-from topoone_app_architect.arch_routes import exec_bridge as eb
+from topoone_app_architect.agent.execution import exec_bridge as eb
 
 
 def _env(tmp_path, monkeypatch):

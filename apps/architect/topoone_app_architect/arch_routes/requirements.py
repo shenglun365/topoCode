@@ -143,7 +143,7 @@ async def rollback_conversation_messages(conv_id: str, message_id: str):
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "Conversation not found")
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     active = exec_bridge.active_task_of(conv_id)
     if active and (active.get("status") or "") in ("running", "waiting_input"):
         return err(409, "有运行中/待输入任务——请先停止任务再回退")
@@ -327,7 +327,7 @@ async def analyze_clarify(request: Request):
     if mode != "greenfield" and degraded:
         return err(400, KB_NOTE)
 
-    from .req_agent import req_harness_clarify
+    from ..agent.tools.req_agent import req_harness_clarify
     from ..common import KbUnavailableError
     tier = "T1"
     try:
@@ -378,7 +378,7 @@ async def analyze_collect(request: Request):
     if mode != "greenfield" and degraded:
         return err(400, KB_NOTE)
 
-    from .req_agent import req_harness_collect
+    from ..agent.tools.req_agent import req_harness_collect
     from ..common import KbUnavailableError
     tier = "T1"
     try:

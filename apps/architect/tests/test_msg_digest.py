@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import topoone_app_architect.ctx as C  # noqa: E402
 from topoone_app_architect import store  # noqa: E402
-from topoone_app_architect.arch_routes import req_agent
+from topoone_app_architect.agent.tools import req_agent
 from topoone_app_architect.arch_routes import sessions
 from topoone_app_architect.common import _ts  # noqa: E402
 
@@ -153,7 +153,7 @@ def _recv_until(ws, *types):
 
 
 def test_transfer_with_digest_and_receipt(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client = _ws_client(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     task = store.TasksStore.create({
@@ -187,7 +187,7 @@ def test_transfer_with_digest_and_receipt(tmp_path, monkeypatch):
 
 def test_transfer_without_digest_unchanged(tmp_path, monkeypatch):
     """不带 digest 的转达行为不变(回归: 无摘要段、无回执卡)。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client = _ws_client(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     task = store.TasksStore.create({

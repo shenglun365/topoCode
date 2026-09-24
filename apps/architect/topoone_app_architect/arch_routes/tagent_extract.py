@@ -109,7 +109,7 @@ def _serialize_result(fn):
 def _extraction_registry(root: Optional[str], project: Optional[str]):
     """提取工具注册表：5 个 asset.* 工具，同线程同步执行（thread-local facts 亲和）。"""
     from topocode_agent.core.tool.base import ToolRegistry
-    from . import req_agent
+    from ..agent.tools import req_agent
 
     reg = ToolRegistry()
     for name in EXTRACT_TOOLS:

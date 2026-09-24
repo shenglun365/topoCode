@@ -32,7 +32,7 @@ def build_chat_messages(root, project, history, cap=20, diagram_skill: bool = Fa
     R3.4: tool_surface/kb_enabled/ctx_budget 透传 chat_system_prompt(缺省不变)。
     批丁: gu_allowed(GU 路线工具限定)透传能力文档子集渲染。
     """
-    from ...arch_routes.req_agent import chat_system_prompt
+    from ...agent.tools.req_agent import chat_system_prompt
     msgs: List[dict] = [{"role": "system", "content": chat_system_prompt(
         root, project, diagram_skill=diagram_skill, skill_scenarios=skill_scenarios,
         model_id=model_id, tool_surface=tool_surface, kb_enabled=kb_enabled,

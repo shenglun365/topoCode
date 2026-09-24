@@ -21,7 +21,7 @@ sys.path.insert(0, _repo)
 from fastapi.testclient import TestClient
 
 import topoone_app_architect.ctx as C
-import topoone_app_architect.arch_routes.req_agent as req_agent
+import topoone_app_architect.agent.tools.req_agent as req_agent
 import topoone_app_architect.store as store
 from topoone_app_architect.agent.perception.commands import match_imperative
 from topoone_app_architect.agent.perception import commands as cmds
@@ -146,7 +146,7 @@ def test_slash_text_confirm_starts_task(tmp_path, monkeypatch):
     task = store.TasksStore.create({
         "conversationId": conv["id"], "title": "T卡", "instruction": "x",
         "status": "pending_confirm", "executorType": "opencode"})
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "proj"
     root.mkdir(exist_ok=True)
     (root / "README.md").write_text("# P\n")
@@ -191,7 +191,7 @@ def test_slash_execute_autoconfirms_legacy_draft(tmp_path, monkeypatch):
     root.mkdir(exist_ok=True)
     (root / "README.md").write_text("# P\n")
     monkeypatch.setattr(ex, "conv_root_project", lambda c: (str(root), "proj-x"))
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
     monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
     monkeypatch.setattr(eb, "_runner",
@@ -224,7 +224,7 @@ def test_slash_execute_without_req_guides(tmp_path, monkeypatch):
 # ── 转达语境不拦截 ───────────────────────────────────────────────────
 
 def test_slash_in_transfer_not_intercepted(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, captured = _client(tmp_path, monkeypatch)
     conv = _mk_conv()
     task = store.TasksStore.create({
@@ -289,7 +289,7 @@ def test_error_contract_shapes(tmp_path, monkeypatch):
     res = cmds.run_execute(conv)
     assert res["ok"] is False and "receipt" in res and "error" not in res
     # ② 执行器成功形状: 任务 dict 显式 ok=True
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     r = eb.propose_task(conv, "T-契约", "目标: x")
     assert r.get("ok") is True and r.get("id")
     # ③ REST err: HTTP 状态码与 body.code 一致(前端只解析 body.code, 修正透明)

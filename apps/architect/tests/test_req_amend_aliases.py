@@ -35,7 +35,7 @@ def _mk_ready_req(conv_id, title="原标题"):
 
 def _amend(rid, args):
     from topoone_app_architect import ctx
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     tok = ctx.set_req(rid)
     tok2 = ctx.set_conv("cv-am")
     try:
@@ -82,7 +82,7 @@ def test_amend_real_fields_unchanged(arch_env):
 
 def test_run_arch_tool_readable_type_error(arch_env):
     """任意工具误传参数名 → 可读「参数不受支持 + 支持的参数清单」。"""
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     r = req_agent.run_arch_tool("project.ctx", {"bogusKw": 1},
                                 root=None, project=None)
     assert "bogusKw 不受支持" in str(r.get("error")), r

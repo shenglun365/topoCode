@@ -79,7 +79,7 @@ def test_split_llm_declares_depends_for_llm_source(tmp_path, monkeypatch):
             {"title": "C", "instruction": "c", "depends": [1]},
         ]}}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync",
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync",
                         fake_llm_sync)
     steps = tp.split_tasks_llm("需求")
     assert steps[1]["depends"] == [1] and steps[2]["depends"] == [1]

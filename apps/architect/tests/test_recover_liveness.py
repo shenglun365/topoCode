@@ -52,7 +52,7 @@ def _stub_client(snapshot):
 
 
 def _patch_client(monkeypatch, snapshot):
-    import topoone_app_architect.arch_routes.exec_bridge as eb
+    import topoone_app_architect.agent.execution.exec_bridge as eb
     monkeypatch.setattr(eb, "_client", lambda: _stub_client(snapshot))
 
 

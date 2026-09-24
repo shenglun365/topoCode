@@ -1537,7 +1537,7 @@ def _aggregate_one_batch(leaf: dict, batch: str, model_id: Optional[str],
 
     失败(LLM 不可达/解析失败)返回空列表，由调用方决定隔离策略。
     """
-    from ..arch_routes.req_agent import llm_sync, get_max_tokens_preference
+    from ..agent.tools.req_agent import llm_sync, get_max_tokens_preference
     cname = leaf.get("name") or leaf.get("id") or ""
     cdesc = (leaf.get("desc") or "").strip().replace("\n", " ")[:400]
     owns = (leaf.get("owns") or [])[:6]
@@ -2528,7 +2528,7 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
     pseudo, degraded = "", True
     if snippet:
         try:
-            from ..arch_routes.req_agent import get_max_tokens_preference
+            from ..agent.tools.req_agent import get_max_tokens_preference
             from ..agent.turns.catalog import catalog_call
             # tAgent 角色模型路由(§9/B1)：伪码解释走 pseudo 角色；显式传入优先
             sys_prompt = (
@@ -2580,7 +2580,7 @@ def generate_desc(asset_id: str, root: Optional[str] = None,
     desc, degraded = "", True
     if snippet:
         try:
-            from ..arch_routes.req_agent import get_max_tokens_preference
+            from ..agent.tools.req_agent import get_max_tokens_preference
             from ..agent.turns.catalog import catalog_call
             # 名称解析走 extract 角色；摘要同样跟随(显式传入优先; 目录路由解析)
             detail_txt = json.dumps(a.get("detail") or {}, ensure_ascii=False)[:800]
@@ -2737,7 +2737,7 @@ def generate_node_brief(a: dict, root: Optional[str], project: Optional[str],
                 "只输出简介正文。"
             )
             user_prompt = "\n".join(ctx_lines) + f"\n\n真实源码片段:\n{snippet}\n\n请输出简介。"
-            from ..arch_routes.req_agent import get_max_tokens_preference
+            from ..agent.tools.req_agent import get_max_tokens_preference
             from ..agent.turns.catalog import catalog_call
             res = catalog_call("role:pseudo",
                                [{"role": "system", "content": sys_prompt},
@@ -2800,7 +2800,7 @@ def generate_node_briefs_batch(pid: str, file: str, assets: List[dict],
     user_prompt = (terms_txt + "\n" if terms_txt else "") + (conv_txt + "\n" if conv_txt else "") \
         + "\n\n".join(ctx_blocks) + "\n\n请输出 JSON。"
     try:
-        from ..arch_routes.req_agent import get_max_tokens_preference
+        from ..agent.tools.req_agent import get_max_tokens_preference
         from ..agent.turns.catalog import catalog_call
         res = catalog_call("role:pseudo",
                            [{"role": "system", "content": sys_prompt},
@@ -2913,7 +2913,7 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
             + "\n\ntarget 资产清单:\n" + "\n".join(tgt_blocks) + "\n\n请输出 JSON。")
     notes: Dict[str, str] = {}
     try:
-        from ..arch_routes.req_agent import get_max_tokens_preference
+        from ..agent.tools.req_agent import get_max_tokens_preference
         from ..agent.turns.catalog import catalog_call
         res = catalog_call("role:pseudo",
                            [{"role": "system", "content": sys_prompt},
@@ -3157,7 +3157,7 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
     )
     sys_prompt = (skill_txt + "\n\n" if skill_txt else "") + base_prompt + tools_doc
 
-    from ..arch_routes.req_agent import run_tools_loop, get_max_tokens_preference
+    from ..agent.tools.req_agent import run_tools_loop, get_max_tokens_preference
     from ..arch_routes.agent_roles import resolve_role_model
     # 逐行解读与伪码走查同属 pseudo 角色(查询期轻量解读)；
     # 多轮工具调用(白名单只读工具，封顶 3 轮)允许模型补读符号/检索资产后再给注解。

@@ -51,7 +51,7 @@ def gather_grounding(root: str, project: Optional[str], req_text: str,
     # kb: 架构资产检索命中(名称/描述, 组件级线索)
     kb: List[str] = []
     try:
-        from ...arch_routes.req_agent import tool_kb_asset_search
+        from ...agent.tools.req_agent import tool_kb_asset_search
         for a in tool_kb_asset_search(root, project, req_text)[:6]:
             kb.append(f"{a.get('id')} {a.get('name')}: {str(a.get('desc') or '')[:80]}")
     except Exception as e:  # noqa: BLE001

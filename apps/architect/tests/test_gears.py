@@ -93,7 +93,7 @@ def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2"):
         "projectId": "proj-g", "title": "g", "meta": {"root": str(tmp_path / "p")},
         "analysisMode": mode})
     (tmp_path / "p").mkdir(exist_ok=True)
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(tmp_path / "p"), "proj-g"))

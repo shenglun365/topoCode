@@ -27,7 +27,7 @@ def _patch_all(monkeypatch, name, value):
 from topoone_app_architect.arch_routes import semantic_assets as S
 from topoone_app_architect.sem import context as _sem_context
 from topoone_app_architect.arch_routes import asset_framework as F
-from topoone_app_architect.arch_routes.req_agent import (
+from topoone_app_architect.agent.tools.req_agent import (
     tool_asset_semantic_save, tool_code_read_symbols)
 from topoone_app_architect.store import (
     NameTombstoneStore, SemanticAssetsStore)

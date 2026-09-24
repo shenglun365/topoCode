@@ -383,7 +383,7 @@ def run_tool(name: str, args: dict) -> str:
 
 def register_chat_tools() -> None:
     """注册 ctx.* 为会话 agent 工具(幂等)。"""
-    from ...arch_routes.req_agent import register_architect_tool
+    from ...agent.tools.req_agent import register_architect_tool
 
     @register_architect_tool("ctx.search", "跨会话检索历史上下文(单元/消息/备案文档)")
     def _ctx_search(query: str, type: str = "", conversation: str = "",  # noqa: A002
@@ -456,7 +456,7 @@ from .dossier import _DOSSIER_BUDGET, _clip, assemble_dossier  # noqa: F401
 
 def register_probe_tool() -> None:
     """注册 probe.run 会话 agent 工具(L2 方案草图: 对话中调 coding agent)。"""
-    from ...arch_routes.req_agent import register_architect_tool
+    from ...agent.tools.req_agent import register_architect_tool
 
     @register_architect_tool(
         "probe.run",

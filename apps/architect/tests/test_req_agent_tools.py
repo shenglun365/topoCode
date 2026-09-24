@@ -10,7 +10,7 @@ sys.path.insert(0, _repo)
 
 import topoone_app_architect.ctx as C
 import topoone_app_architect.store as store
-from topoone_app_architect.arch_routes import req_agent
+from topoone_app_architect.agent.tools import req_agent
 
 
 def _setup(tmp_path, monkeypatch):

@@ -99,7 +99,7 @@ def call(purpose: Purpose, messages: List[Dict[str, str]], *, tier: str = DEFAUL
     等需要 KB 工具面的调用点), 否则 llm_sync 直连。
     返回 {ok, output, content, attempts, degraded, modelId}。
     """
-    from ...arch_routes import req_agent as _ra   # 调用期解析(测试打桩接缝)
+    from ...agent.tools import req_agent as _ra   # 调用期解析(测试打桩接缝)
     msgs = list(messages)
     scaffold = scaffold_for(purpose, tier)
     if scaffold:

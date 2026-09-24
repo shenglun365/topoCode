@@ -113,7 +113,7 @@ class TestConventions:
     def test_propose_convention_tool(self, tmp_path, monkeypatch):
         """A4: agent 工具 convention.propose → pending 提案（设计者确认才生效）。"""
         _ctx_setup(tmp_path, monkeypatch)
-        from topoone_app_architect.arch_routes.req_agent import run_arch_tool
+        from topoone_app_architect.agent.tools.req_agent import run_arch_tool
         out = run_arch_tool("convention.propose",
                             {"ruleText": "服务以 XxxService 结尾",
                              "scenarios": ["naming"]},
@@ -361,7 +361,7 @@ class TestCognitiveEdit:
                          "startLine": 1, "endLine": 10}]},
         ])
         aid = res["saved"][0]["id"]
-        from topoone_app_architect.arch_routes.req_agent import run_arch_tool
+        from topoone_app_architect.agent.tools.req_agent import run_arch_tool
         out = run_arch_tool("asset.semantic.update",
                             {"assetId": aid, "patch": {"name": "下单"}},
                             str(tmp_path), None)

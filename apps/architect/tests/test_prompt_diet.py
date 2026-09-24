@@ -78,7 +78,7 @@ def test_chat_loop_refuses_out_of_list(arch_env, monkeypatch):
     """执行面执法: allowed 名单外工具拒绝回喂(不派发), 名单内正常。"""
     import asyncio
     import topoone_app_architect.agent.turns.chat as ch
-    from topoone_app_architect.arch_routes import req_agent as ra
+    from topoone_app_architect.agent.tools import req_agent as ra
 
     executed = []
 
@@ -144,12 +144,12 @@ def test_gu_structured_schema_enum_includes_protocol_empty():
     assert ch_gu_schema(None) is None
 
 
-from topoone_app_architect.arch_routes import req_agent as ra_mod
+from topoone_app_architect.agent.tools import req_agent as ra_mod
 
 
 def test_structured_empty_tool_routes_to_final_round(arch_env, monkeypatch):
     """cv-225 复放: 模型输出 {"tool":""} → 无调用 → 转终稿轮(澄清问题得以出口)。"""
-    from topoone_app_architect.arch_routes.req_agent import structured_tool_round
+    from topoone_app_architect.agent.tools.req_agent import structured_tool_round
     monkeypatch.setattr(ra_mod, "llm_sync",
                         lambda *a, **kw: {"output": {"tool": "", "arguments": {}}})
     res = structured_tool_round([{"role": "user", "content": "x"}])
@@ -284,14 +284,14 @@ def test_clarify_first_tools_context_aware(arch_env):
 
 def test_amend_placeholder_gate_precedes_binding_check(arch_env):
     """amend 占位载荷在绑定解析前被拦(cv-225: 占位错比未绑定错更具指导性)。"""
-    from topoone_app_architect.arch_routes.req_agent import tool_req_amend
+    from topoone_app_architect.agent.tools.req_agent import tool_req_amend
     r = tool_req_amend(requirementMd="...", title="...")
     assert r.get("ok") is False and "占位" in str(r.get("error"))
     assert "未绑定" not in str(r.get("error"))
 
 
 def test_amend_unbound_error_is_route_guidance(arch_env):
-    from topoone_app_architect.arch_routes.req_agent import tool_req_amend
+    from topoone_app_architect.agent.tools.req_agent import tool_req_amend
     r = tool_req_amend(requirementMd="完整内容正文，不是占位符")
     assert r.get("ok") is False
     msg = str(r.get("error"))

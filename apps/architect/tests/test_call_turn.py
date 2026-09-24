@@ -12,7 +12,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.req_agent as _ra
+import topoone_app_architect.agent.tools.req_agent as _ra
 from topoone_app_architect.agent.compensation.ctx import Purpose
 from topoone_app_architect.agent.turns.call import call, retry_for, scaffold_for
 

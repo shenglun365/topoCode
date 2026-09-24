@@ -108,7 +108,7 @@ def run_mine(conversation_id: str, root: Optional[str] = None,
     """提炼入口: 材料 → LLM(role=mine) → 提案(pending)。返回 {proposals, markdown}。"""
     from ... import store
     from ...semantic_assets import project_id_for
-    from ...arch_routes.req_agent import llm_sync
+    from ...agent.tools.req_agent import llm_sync
     from ...arch_routes.agent_roles import resolve_role_model
 
     pid = project_id_for(root, project)
@@ -213,7 +213,7 @@ def decide_proposal(project_id: str, proposal_id: str, action: str) -> Dict[str,
 
 def register_mining_tools() -> None:
     """注册 capability.mine 会话 agent 工具(WS7)。"""
-    from ...arch_routes.req_agent import register_architect_tool
+    from ...agent.tools.req_agent import register_architect_tool
 
     @register_architect_tool(
         "capability.mine",
@@ -426,7 +426,7 @@ def promote_to_global(project: str, kind: str, ref_id: str,
 
 def register_promote_tools() -> None:
     """注册 capability.promote 会话 agent 工具(WS8-S2)。"""
-    from ...arch_routes.req_agent import register_architect_tool
+    from ...agent.tools.req_agent import register_architect_tool
 
     @register_architect_tool(
         "capability.promote",

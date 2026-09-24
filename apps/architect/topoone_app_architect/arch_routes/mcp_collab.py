@@ -113,14 +113,14 @@ async def set_collab_mode(request: Request):
 @router.get("/llm/model")
 async def get_model_preference_route():
     """LLM 模型偏好(空 = 主后端默认模型兜底)。"""
-    from .req_agent import get_model_preference
+    from ..agent.tools.req_agent import get_model_preference
     return ok({"modelId": get_model_preference()})
 
 
 @router.put("/llm/model")
 async def set_model_preference_route(request: Request):
     """设置 LLM 模型偏好。Body: { modelId: string }"""
-    from .req_agent import set_model_preference
+    from ..agent.tools.req_agent import set_model_preference
     body = await request.json() or {}
     model_id = str(body.get("modelId") or "").strip()
     set_model_preference(model_id)
@@ -130,14 +130,14 @@ async def set_model_preference_route(request: Request):
 @router.get("/llm/max-tokens")
 async def get_max_tokens_preference_route():
     """LLM max_tokens 偏好(空 = 主后端按 model_configs.max_tokens)。"""
-    from .req_agent import get_max_tokens_preference
+    from ..agent.tools.req_agent import get_max_tokens_preference
     return ok({"maxTokens": get_max_tokens_preference()})
 
 
 @router.put("/llm/max-tokens")
 async def set_max_tokens_preference_route(request: Request):
     """设置 LLM max_tokens 偏好。Body: { maxTokens: number }；0/空清除(回退模型配置)。"""
-    from .req_agent import set_max_tokens_preference
+    from ..agent.tools.req_agent import set_max_tokens_preference
     body = await request.json() or {}
     raw = body.get("maxTokens")
     try:

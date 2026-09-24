@@ -28,7 +28,7 @@ def _names(hits: List[Dict[str, Any]]) -> List[str]:
 def _kb_hits(root: Optional[str], project: Optional[str],
              text: str, preferred: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """组件资产 + 语义数据资产合并命中(需求分析收敛的候选来源)。"""
-    from ...arch_routes import req_agent as _ra   # 调用期解析(接缝/避免初始化环)
+    from ...agent.tools import req_agent as _ra   # 调用期解析(接缝/避免初始化环)
     hits = _ra.tool_kb_asset_search(root, project, text, preferred)
     try:
         from ...arch_routes import semantic_assets as S
@@ -58,7 +58,7 @@ def req_harness_clarify(req: Dict[str, Any], root: Optional[str] = None,
     model_id: 本次对话选择的模型(可选)；空则回退全局 llm.modelId → 主后端默认。
     tier: 会话挡位(R3.1 链3② D7-②): 弱挡附问题模板槽位脚手架 + 兜底静态三问。
     """
-    from ...arch_routes import req_agent as _ra   # 调用期解析(run_tools_loop/打桩接缝)
+    from ...agent.tools import req_agent as _ra   # 调用期解析(run_tools_loop/打桩接缝)
     from ..compensation.ctx import Purpose
     from ..turns import call as _call_turn
     title = req.get("title", "")
@@ -134,7 +134,7 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
     model_id: 本次对话选择的模型(可选)；空则回退全局 llm.modelId → 主后端默认。
     tier: 会话挡位(R3.1 链3② D7-②): 弱挡附八字段逐项脚手架; 兜底维持 None(502)。
     """
-    from ...arch_routes import req_agent as _ra   # 调用期解析(run_tools_loop/打桩接缝)
+    from ...agent.tools import req_agent as _ra   # 调用期解析(run_tools_loop/打桩接缝)
     base = ctx.get("base") or {}
     answers = {k: str(v) for k, v in (ctx.get("answers") or {}).items() if v and str(v).strip()}
     note = (ctx.get("note") or "").strip()
@@ -265,7 +265,7 @@ def _build_assessment(hits: List[Dict[str, Any]]):
 def _merge_assets(llm_assets: List[Dict[str, Any]], manual: List[Dict[str, Any]],
                   hits: List[Dict[str, Any]],
                   root: Optional[str] = None, project: Optional[str] = None) -> List[Dict[str, Any]]:
-    from ...arch_routes import req_agent as _ra   # 调用期解析
+    from ...agent.tools import req_agent as _ra   # 调用期解析
     merged: Dict[str, Dict[str, Any]] = {}
     for m in manual:
         merged[m["assetId"]] = dict(m)

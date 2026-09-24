@@ -16,7 +16,7 @@ class TestReqPropose(unittest.TestCase):
 
     def test_propose_creates_requirement_with_source(self):
         from topoone_app_architect import store
-        from topoone_app_architect.arch_routes import req_agent
+        from topoone_app_architect.agent.tools import req_agent
         # 模拟资产对话上下文（会话 id）
         token = ctx.set_conv("conv-test-1")
         try:

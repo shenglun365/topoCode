@@ -37,7 +37,7 @@ _CAP_PROBE_RUNNING: set = set()
 
 def _runner_transport(path: str, payload=None, timeout: float = 12.0):
     """runner 访问端(probes.py transport 形; 惰性导入防环)。"""
-    from .exec_bridge import _runner
+    from ..agent.execution.exec_bridge import _runner
     return _runner(path, payload, timeout)
 router = APIRouter()
 

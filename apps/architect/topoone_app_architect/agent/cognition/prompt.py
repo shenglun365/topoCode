@@ -71,7 +71,7 @@ def register_block(block: PromptBlock) -> None:
 
 
 def _r_header(ctx: Dict[str, Any]) -> str:
-    from ...arch_routes import req_agent as _req_agent_mod
+    from ...agent.tools import req_agent as _req_agent_mod
     p = _req_agent_mod.tool_project_ctx(ctx.get("root"), ctx.get("project"))
     mode = "greenfield(从零)" if not ctx.get("project") else "existing(既有)"
     degraded = p.get("degraded", False)
@@ -174,19 +174,19 @@ def _filter_tools(entries, tool_surface: str, kb_enabled: bool):
 
 
 def _legacy_capability_doc() -> str:
-    from ...arch_routes import req_agent as _req2
+    from ...agent.tools import req_agent as _req2
     return _req2._CAPABILITY_DOC
 
 
 def _r_ir_schema(_ctx: Dict[str, Any]) -> str:
-    from ...arch_routes import req_agent as _req3
+    from ...agent.tools import req_agent as _req3
     return _req3._ir_schema_doc()
 
 
 def _r_diagram_skill(ctx: Dict[str, Any]) -> str:
     if not ctx.get("diagram_skill"):
         return ""
-    from ...arch_routes import req_agent as _req4
+    from ...agent.tools import req_agent as _req4
     return _req4._diagram_skill_doc()
 
 
@@ -198,7 +198,7 @@ def _r_mcp(_ctx: Dict[str, Any]) -> str:
             return ""
     except Exception:  # noqa: BLE001 — 判定失败保持原状
         pass
-    from ...arch_routes import req_agent as _req5
+    from ...agent.tools import req_agent as _req5
     return _req5._mcp_doc()
 
 
@@ -424,7 +424,7 @@ def capability_doc_from_tools(tool_surface: str = "full",
     批丁: allowed(GU 路线限定, 具体名单)→工具面收敛为本轮子集; slim(简挡)→
     省略系统面说明段(指令符号/可处理范围——挡位系统已确定性处理, 无需模型知)。
     """
-    from ...arch_routes import req_agent as _req_agent_mod
+    from ...agent.tools import req_agent as _req_agent_mod
     entries = [(n, e) for n, e in _req_agent_mod._ARCH_TOOLS.items()
                if n not in ("diagram.build", "diagram.validate")]
     entries = _filter_tools(entries, tool_surface, kb_enabled)

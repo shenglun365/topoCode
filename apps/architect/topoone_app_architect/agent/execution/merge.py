@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def _TASK_TERMINAL_ref():
-    from ...arch_routes.exec_bridge import _TASK_TERMINAL
+    from ...agent.execution.exec_bridge import _TASK_TERMINAL
     return _TASK_TERMINAL
 
 
@@ -161,7 +161,7 @@ def _post_merge_cleanup(task: dict, root: str) -> str:
     if job_id:
         try:
             # 调用期解析: 保持 eb._runner/eb._client 测试打桩接缝
-            from ...arch_routes import exec_bridge as _eb
+            from ...agent.execution import exec_bridge as _eb
             from ..governance.timeouts import get as _timeout_of
             _eb._client().finish(job_id, keep_worktree=False,
                                  timeout=_timeout_of("runner_finish"))
