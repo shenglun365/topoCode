@@ -926,7 +926,7 @@ def test_cline_sidecar_script_default_fallback(tmp_path):
         ClineTurnAdapter, _default_sidecar_script)
     a = ClineTurnAdapter({"sidecar_script": ""})
     assert a._script == _default_sidecar_script()
-    assert os.path.isfile(a._script), "默认 sidecar 脚本应存在(需 npm run build -w packages/agent-sidecar)"
+    assert os.path.isfile(a._script), "默认 sidecar 脚本应存在(需 npm run build -w packages/cline-sidecar)"
     b = ClineTurnAdapter({"sidecar_script": str(tmp_path / "x.js")})
     assert b._script == str(tmp_path / "x.js"), "显式配置不覆盖"
 

@@ -61,7 +61,7 @@ def test_install_flow_with_auto_default(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import cline_engines as CE
     root = tmp_path / "engines"
-    src = tmp_path / "repo" / "packages" / "agent-sidecar"
+    src = tmp_path / "repo" / "packages" / "cline-sidecar"
     src.mkdir(parents=True)
     monkeypatch.setattr(CE, "engines_root", lambda: str(root))
     monkeypatch.setattr(CE, "sidecar_source_dir", lambda: str(src))
@@ -108,7 +108,7 @@ def test_install_npm_failure_cleans_up(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import cline_engines as CE
     root = tmp_path / "engines"
-    src = tmp_path / "repo" / "packages" / "agent-sidecar"
+    src = tmp_path / "repo" / "packages" / "cline-sidecar"
     (src / "dist").mkdir(parents=True)
     (src / "dist" / "index.js").write_text("//")
     monkeypatch.setattr(CE, "engines_root", lambda: str(root))

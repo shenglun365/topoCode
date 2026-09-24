@@ -6,7 +6,7 @@
   "description": "TopoCode - 源码架构分析与学习工具",
   "workspaces": [
     "packages/web-core",
-    "packages/agent-sidecar",
+    "packages/cline-sidecar",
     "packages/graph-kernel",
     "apps/workbench",
     "apps/docs",

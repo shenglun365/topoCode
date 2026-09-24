@@ -61,7 +61,7 @@ def repo_root() -> str:
 
 
 def sidecar_source_dir() -> str:
-    return os.path.join(repo_root(), "packages", "agent-sidecar")
+    return os.path.join(repo_root(), "packages", "cline-sidecar")
 
 
 def repo_sidecar_dist() -> str:
@@ -190,10 +190,10 @@ def _ensure_repo_dist(log: list[str], rebuild: bool) -> Optional[str]:
     if not os.path.isdir(src):
         return f"未定位到 sidecar 源目录: {src}"
     if rebuild or not os.path.isfile(repo_sidecar_dist()):
-        log.append("$ npm run build -w packages/agent-sidecar")
+        log.append("$ npm run build -w packages/cline-sidecar")
         try:
             out = subprocess.run(
-                ["npm", "run", "build", "-w", "packages/agent-sidecar"],
+                ["npm", "run", "build", "-w", "packages/cline-sidecar"],
                 capture_output=True, text=True, timeout=_BUILD_TIMEOUT, cwd=repo_root())
         except subprocess.TimeoutExpired:
             return "仓库 sidecar 构建超时(300s)"
@@ -236,7 +236,7 @@ def install_engine(version: str, rebuild: bool = False) -> dict:
                         os.path.join(d, "dist"))
         with open(os.path.join(d, "package.json"), "w", encoding="utf-8") as f:
             json.dump({
-                "name": "@topocode/cline-sidecar",
+                "name": "@topo/cline-sidecar",
                 "version": "0.1.0",
                 "private": True,
                 "type": "module",

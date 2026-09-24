@@ -452,7 +452,7 @@ async def probe_executor(request: Request):
                     pass
             script = script or _default_sidecar_path()
             exists = os.path.isfile(script)
-            detail = f"sidecar: {script} {'存在' if exists else '缺失（需 npm run build -w packages/agent-sidecar）'}" + engine_note
+            detail = f"sidecar: {script} {'存在' if exists else '缺失（需 npm run build -w packages/cline-sidecar）'}" + engine_note
             # node 版本门槛（@cline/core 硬性要求 >=22）
             node_ver = ""
             try:
@@ -657,7 +657,7 @@ def _env_detect() -> dict:
                   "version": node, "sidecar": sidecar,
                   "sidecarExists": os.path.isfile(sidecar),
                   "engines": engines, "engineDefault": engine_default,
-                  "installCmd": "npm run build -w packages/agent-sidecar（topoOne-ui 仓库根）"},
+                  "installCmd": "npm run build -w packages/cline-sidecar（topoOne-ui 仓库根）"},
     }
 
 
@@ -681,8 +681,8 @@ async def install_executor(request: Request):
         if os.path.isfile(os.path.join(probe, "package.json")):
             root = probe
         if not root:
-            return err("未定位到 topoOne-ui 仓库根, 请手动执行: npm run build -w packages/agent-sidecar")
-        cmd = ["npm", "run", "build", "-w", "packages/agent-sidecar"]
+            return err("未定位到 topoOne-ui 仓库根, 请手动执行: npm run build -w packages/cline-sidecar")
+        cmd = ["npm", "run", "build", "-w", "packages/cline-sidecar"]
     else:
         cmd = ["npm", "install", "-g", "opencode-ai" if agent == "opencode" else "@openai/codex"]
     try:
@@ -861,4 +861,4 @@ async def runtime_executors():
 def _default_sidecar_path() -> str:
     # arch_routes → topoone_app_architect → architect → apps → 仓库根
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-    return os.path.join(root, "..", "packages", "agent-sidecar", "dist", "index.js")
+    return os.path.join(root, "..", "packages", "cline-sidecar", "dist", "index.js")

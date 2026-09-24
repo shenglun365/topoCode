@@ -62,7 +62,7 @@ const installMsg = ref<Record<string, string>>({})
 const AGENT_META: Record<string, { label: string; doc: string }> = {
   opencode: { label: 'opencode', doc: 'npm install -g opencode-ai' },
   codex: { label: 'codex', doc: 'npm install -g @openai/codex' },
-  cline: { label: 'cline SDK (自主模式)', doc: 'npm run build -w packages/agent-sidecar' },
+  cline: { label: 'cline SDK (自主模式)', doc: 'npm run build -w packages/cline-sidecar' },
 }
 async function detectEnv() {
   envDetecting.value = true

@@ -285,10 +285,10 @@ def _ensure_v1(url: str) -> str:
 
 def _default_sidecar_script() -> str:
     """sidecar 脚本默认路径: turn_adapter → runner → plugins → topoone → core
-    → packages → 仓库根/packages/agent-sidecar/dist/index.js。
+    → packages → 仓库根/packages/cline-sidecar/dist/index.js。
     config 未显式携带时回退(architect 侧注册表默认值为空串)。"""
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-    return os.path.join(root, "agent-sidecar", "dist", "index.js")
+    return os.path.join(root, "cline-sidecar", "dist", "index.js")
 
 
 class _AppServerProcess:
