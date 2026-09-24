@@ -2,7 +2,7 @@
 
 > 版本 v1.0 | 2026-09-10 | 性质：**产品迭代方向评估 + 分阶段可执行任务清单（不含实现逻辑）**
 > 决策输入（2026-09-10 拍板）：① 主线取舍 = **工程闭环（architect）优先**；② 目标用户 = 个人开发者 / 团队工程效能 / 对外 Agent 生态三者均在视野，需排序；③ 商业化 = **暂无压力，但需预留清晰路径**
-> 关联文档：[architecture-issues-0905.md](architecture-issues-0905.md)（工程问题清单，下称"0905 评估"）· [kb-unified-components-plan.md](kb-unified-components-plan.md)（KB 统一方案）· [architect-review.md](architect-review.md)（architect 专项评估）· [architect-reconstruction/global-promotion-design.md](architect-reconstruction/global-promotion-design.md)（G 提升设计）· [local-small-model-finetune.md](local-small-model-finetune.md)（小模型微调与闭环胜任力分析）· [conventions/CONV-00~04](conventions/)（分工与门禁）
+> 关联文档：[architecture-refactor-plan-20260924.md](architecture-refactor-plan-20260924.md)（系统架构重构主方案，承接 0905 评估全部蓝图）· [kb-unified-components-plan.md](kb-unified-components-plan.md)（KB 统一方案，Stage 5 待办）· [architect-reconstruction/global-promotion-design.md](architect-reconstruction/global-promotion-design.md)（G 提升设计，待实现）· [conventions/CONV-00~04](conventions/)（分工与门禁）· 已归档：[0905 评估](archive/architecture-issues-0905.md) / [architect 专项评估](archive/architect-review.md) / [小模型微调分析](archive/local-small-model-finetune.md)（见 [archive/README](archive/README.md)）
 
 ---
 
@@ -72,7 +72,7 @@ Phase 1 地基期（~2-4 周）          Phase 2 闭环攻坚（1-2 月）      
 | P1-T4 | **core 分析管线集成测试** | 10 文件多语言 fixture（py+ts，含 import/call 关系），runTask 走完 6 步，断言 graph_node/edge 行数与 provenance、community_hierarchy 层级与模块度、任务状态机、进度事件单调（mock PUB）；LLM 步 mock | `packages/core/tests/test_pipeline_integration.py` + fixture | G2+G3+G6 | 1.5~2 人日 |
 | P1-T5 | **KB 统一方案 Stage 5 清理** | 按 kb-unified-components-plan §Stage 5 勾稽清单执行：双线残留消费点下线、comm_id 前缀反解协议收口、检测层暗病修复（CALL 无效重跑备选分支、incremental min_node_cnt 漂移） | 清理 PR + 勾稽表更新 | G3+G4+G5+G7（消费面广） | 2~3 人日 |
 | P1-T6 | **C1 architect 半共享态架构拍板** | 评审会裁决：semantic_assets 等自持模块是"下沉 core"还是"确认 architect 私有 + 接口化"；产出决策记录（ADR），明确 36 张表的冻结/扩张边界 | `docs/architect-reconstruction/` 下 ADR 一篇 | 无代码门禁（评审产出） | 0.5 人日会议 + 记录 |
-| P1-T7 | **快赢三连（A2/A3/A4）** | A2：docs viewer.py(1206 行) 按域拆路由模块；A3：architect 前端 token 副本收敛到 web-core `services/token.ts`；A4：CONV-00 两处"9 进程"文案改 10 | 三个小 PR | G3/G4/G5/G7 按涉及面 | 2~3 人日 |
+| P1-T7 | **快赢三连（A2/A3/A4）** | A2：docs viewer.py(1206 行) 按域拆路由模块；A3：architect 前端 token 副本收敛到 web-core `services/token.ts`；A4：进程口径核对——代码实测 9 进程（agent-bus 已退役），「9 进程」口径正确，见 [MS1 设计](refactor/MS1-safety-net.md) D3 | 三个小 PR | G3/G4/G5/G7 按涉及面 | 2~3 人日 |
 
 **Phase 1 验收标准**：`npm run test:py` 用例数显著增加且全绿（当前基线 252）；docs/chat/workbench 后端测试从"接近零"到有安全网；KB 只有一套组件口径；C1 有书面裁决。
 
@@ -150,7 +150,7 @@ Phase 1 地基期（~2-4 周）          Phase 2 闭环攻坚（1-2 月）      
 
 ### 6.3 闭环链路能力分级（围栏 → 编码 → bug 修复）
 
-> 对 architect 黄金路径三环节的小模型胜任力结论（详细论证见 [local-small-model-finetune.md](local-small-model-finetune.md) 第二部分，本文只记结论）：
+> 对 architect 黄金路径三环节的小模型胜任力结论（详细论证见 [local-small-model-finetune.md](archive/local-small-model-finetune.md) 第二部分，已归档；本文只记结论）：
 
 | 环节 | 可下沉到 S 档（微调小模型） | 必须保留 M/H 档 |
 |---|---|---|

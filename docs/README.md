@@ -1,0 +1,48 @@
+# docs 文档索引
+
+> 2026-09-24 重构前清理后建立。目标：只保留**现行有效**文档，历史件一律入 [archive/](archive/README.md)（附归档原因与取代者，git 可溯源）。
+
+## 现行主方案与路线
+
+| 文档 | 状态 | 说明 |
+|---|---|---|
+| [architecture-refactor-plan-20260924.md](architecture-refactor-plan-20260924.md) | **已评审待实施** | 系统架构重构主方案：现状分析 + 五项裁决 + B0~B6 批次计划 |
+| [refactor/milestones.md](refactor/milestones.md) | **阶段拆分定稿** | 里程碑总控 MS1~MS7：每阶段独立可测判据 + 状态跟踪；各 MS 细化设计逐个产出评审 |
+| [refactor/MS1-safety-net.md](refactor/MS1-safety-net.md) | 待评审 | MS1 细化设计：四套测试文件级方案（docs 36 路由/knowledge 7 方法/chat SSE 路径/6 步管线）+ 缺陷 D1~D6 处置 |
+| [product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md) | 现行 | 产品迭代路线图（2026-09，含 L 组/各线任务排期） |
+| [architect-v2-todo.md](architect-v2-todo.md) | 现行 | architect v2 重构待办（P0 遗留/P1 资产表/P2 旧机制清退/P3 引擎打磨） |
+| [kb-unified-components-plan.md](kb-unified-components-plan.md) | Stage 5 待办 | KB 组件双线统一方案（Stage 0~4 已完成） |
+| [runner-verify-gate-design.md](runner-verify-gate-design.md) | 设计定稿待实现 | runner 程序化验收门禁 V1~V5（roadmap P2-T5） |
+| [architect-reconstruction/global-promotion-design.md](architect-reconstruction/global-promotion-design.md) | 设计定稿待实现 | 认知层→主库提升策略（WS8） |
+
+## 设计参考
+
+| 文档 | 说明 |
+|---|---|
+| [database-design.md](database-design.md) | 全仓持久化存储设计参考（KB 核心 + architect） |
+| [diagram-build-animation-design.md](diagram-build-animation-design.md) | 图示构建动画设计方案（源码剥离版，跨项目参考） |
+| [oss-reference-landscape.md](oss-reference-landscape.md) | 开源参考项目清单（按 topocode 层分类，含接入纪律） |
+
+## architect 领域文档（docs/architect/）
+
+| 文档 | 角色 |
+|---|---|
+| [error-contract.md](architect/error-contract.md) | 错误契约（cv-175，分层固定） |
+| [kb-schema-versions.md](architect/kb-schema-versions.md) | 知识资产格式版本发布记录（K1，运行时权威在 migrations.py） |
+| [agent-session-flow.md](architect/agent-session-flow.md) | 会话流转全景导航图（流转变更须同步本图） |
+| [agent-arch-gap-adoption-2609.md](architect/agent-arch-gap-adoption-2609.md) | 架构差距采纳方案（架构采纳轨道单源） |
+| [agent-harness-evaluation-2609.md](architect/agent-harness-evaluation-2609.md) | 外部 Agent 源码评估与采纳路线（多线状态归位表） |
+| [agent-structure-review-2609.md](architect/agent-structure-review-2609.md) | agent 结构评估（批次 A/B/C，部分已被 adoption 改道） |
+| [agent-capability-design-2609.md](architect/agent-capability-design-2609.md) | agent 能力整体设计 v1（待评审实施） |
+| [compensation-strategy-requirements-2609.md](architect/compensation-strategy-requirements-2609.md) | 模型能力分级补偿策略需求规格 |
+| [goal-understanding-2609.md](architect/goal-understanding-2609.md) | 目标理解层归一设计（v0 讨论稿，A1/D5 挂账） |
+| [tech-debt-ledger-2609.md](architect/tech-debt-ledger-2609.md) | 技术挂账台账（单源备忘录） |
+| [remote-agent.md](architect/remote-agent.md) | 远端 Coding Agent Worker 接入指南（S3） |
+
+## 治理规约（docs/conventions/）
+
+CONV-00 总纲与分工矩阵 · CONV-01 topoone-core · CONV-02 web-core · CONV-03 子项目开发规约 · CONV-04 API 契约与验证门禁
+
+## 归档
+
+历史文档一律入 [archive/](archive/README.md)，索引含原路径/归档原因/取代者。归档规则：已被取代或已落地冻结的方案文档，在对应新方案定稿或工作完成后归档。
