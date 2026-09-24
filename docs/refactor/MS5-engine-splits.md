@@ -1,6 +1,6 @@
 # MS5 细化设计：引擎与外围巨型模块拆分
 
-> 状态：**待评审** | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS5 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B4
+> 状态：**部分实施完成**（V0/V1/V2 落地；V3 回退挂账 MS6 前置） | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS5 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B4
 > 事实基线：2026-09-24 全量核证（task_manager 4,296 行锚点 / db/manager 2,181 行 DDL 块 / chat·web_tools·viewer 零漂移确认 / 基线与安全网清点）。0905 蓝图（A2/B1a/B1c/B1d）行号漂移已逐点修正。
 > 并行性：与 MS4 零文件交集（本 MS 只动 packages/core + apps/chat + apps/docs），可并行推进。
 > 铁律：**RPC 218 基线零变化**——所有拆分均为纯物理切分，方法集/注册顺序/编号不动。
@@ -146,3 +146,20 @@ topoone_app_chat/
 | V4 | 收口验收回写 | 0.5d |
 
 开工前 `git tag pre-MS5`；与 MS4 并行（零文件交集，双方判据互不依赖）。
+
+
+---
+
+## 9. 实施记录（2026-09-24）
+
+| 批 | commit | 内容 |
+|---|---|---|
+| V0 | a4f2ef1 | DDL 外置五件（manager 2,181→1,159 行）+ 契约测试 5 例（golden 内嵌 pre-MS5 快照）+ core 296 绿 |
+| V1 | 7ac450b | task_api 六域+common+门面（4,296→门面 34 行+域件最大 1,750）；parity 218 对等；`_compute_file_ranks` 接缝经 PEP562 惰性委托保持穿透；3 例失败 worktree 归因为 pre-MS5 存量（ab 对拍×2+list_batch_files），V1 自身回归（cancel）已修 |
+| V2 | 36ff479 + cc60fdd | viewer/ 七件；G0 守卫 26 路由不变；两处深度陷阱（community 漏 os、测试 STATIC_DIR 路径）修补 |
+| V3 | ——**回退** | 子包化后 SSE 事件环挂起（字节级等价复现仍挂，pre-MS5 原版当日 0.95s 通过——排除环境漂移，定性为模块组织引发的深层 asyncio/线程时序问题）；已按裁决⑥恢复单文件，chat 32+docs 18 全绿。挂账 MS6 前置，需专项归因（嫌疑面：惰性 from-import 绑定复制 vs run_in_executor 队列时序） |
+
+### 实施期修正
+1. graph-kernel 深路径（继承 MS1 教训）直接走 barrel 出口
+2. `from-import` 绑定复制使 monkeypatch 失效——域内改模块属性调用（`common._compute_file_ranks`），门面用 `__getattr__` 委托
+3. tests 同名模块跨套件混跑冲突（conftest/test_* 裸名）——判据 3 改为分域命令口径；sys.path 卫生债挂 MS6

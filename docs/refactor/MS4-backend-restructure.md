@@ -1,6 +1,7 @@
 # MS4 细化设计：architect 后端职能归位
 
-> 状态：**待评审** | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS4 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B3
+> 状态：**评审通过；W1 开发中（WIP 分支）** | 日期：2026-09-24
+> W1 物理归位已在 `ms4-w1-wip` 分支推进（198 文件，git mv+规则重写），余项：全量套件顺序依赖挂起（test_direct_commands WS recv_until——单跑绿，属前序泄漏）与残余收敛；dev-1 保持全绿基线。 | 上游：[milestones.md](milestones.md) §2-MS4 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B3
 > 事实基线：2026-09-24 全量核证（arch_routes 72 文件全景 / agent→routes 216 import 清单 / 层序门禁立条 / sem 函数族锚点），0905-B1b 蓝图行号已复核。
 > 并行性：与 MS5 零文件交集（本 MS 只动 apps/architect + 其测试），可并行推进。
 
@@ -147,3 +148,14 @@ symbols.py/codegraph.py 头注升级为裁决⑤ SLA 表述（codegraph=architec
 | W9 | 契约注释升级 + 收口验收回写 | 0.25d |
 
 开工前 `git tag pre-MS4`；与 MS5 并行（零文件交集）。
+
+
+---
+
+## 9. W1 实施记录（WIP，ms4-w1-wip 分支 e5d33c4）
+
+已完成的机械批与陷阱清单（供续作参考）：
+- git mv：store→顶层、sem→顶层、db_schema→store/schema、ctx/common/kb_gateway→顶层
+- 规则重写 159+ 文件：agent 三点形、arch_routes 两点形、tests 绝对形、multi-name 拆分（`from .. import store, arch_git` 型）、`# noqa` 尾注剥离后重分组
+- 已修陷阱：① 缩进压扁（正则重排丢缩进）② `# noqa` 尾注致 moved 判定失败 ③ sem 内三点相对深度方向（app/sem 应为两点）④ latent-broken imports（dossier/units 的 `..arch_routes.common` 在拆分前即不可达，顺手改真身）⑤ kb_gateway 越顶 `..agent` → `.agent` ⑥ ctx.py 的 `.schema` 应为 `.store.schema`
+- 余项：全量套件顺序依赖挂起归因（direct_commands 单跑绿）→ 其余 W2~W9 按本设计继续
