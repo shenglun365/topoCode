@@ -604,7 +604,7 @@ AGENTS.md/skills 等静态文件形式存在；TopoCode 是 **"cognition first"*
 | roadmap P2-T4：mandate 质量加固（符号可解析到 AstNodeRef） | **K4**（同源：锚定而非臆造的引用语义） | AST 锚点机制已有，mandate 勾稽未做 |
 | roadmap P2-T6：G 提升（项目库→主库，global-promotion 设计） | **K1/K2**（主库提升对象 = 带版本知识资产；K1 设计时预留提升通道 schema） | 未实现 |
 | roadmap P3-T1~T3：MCP 工具面做厚 / 接入文档 / 调用度量 | K 线「使用」闭环对外出口；P3-T1「工具描述面向外部 agent」= K4 语义 | 待办 |
-| roadmap P2-T9 / 0905 D2：agent-bus 事件驱动化 | **决策正确、条目作废**：broker 随生命周期重构 v2（S0）退役——职责已被 S2 双收件人路由 + exec_bridge 泵 + waiting_input 吸收（与「单流+过滤器」基线一致，避免双消息机制并存）；`d2d10ee` 摘除注册（防崩溃重启环）、`arch_bus_messages` 已入 `_DROPPED_TABLES` 显式清除。**残留收尾两项**：① README:96/114/116 与 CONV-00 仍写 agent-bus /「10 进程」，实际拓扑为 9 进程，需回写（0905 A4 同类问题复发）；② P2-T9 建议正式关闭，消息面归宿 = A5/A6.1 | 已核实（git cf7fb08→5711708→376a999→d2d10ee） |
+| roadmap P2-T9 / 0905 D2：agent-bus 事件驱动化 | **决策正确、条目作废**：broker 随生命周期重构 v2（S0）退役——职责已被 S2 双收件人路由 + exec_bridge 泵 + waiting_input 吸收（与「单流+过滤器」基线一致，避免双消息机制并存）；`d2d10ee` 摘除注册（防崩溃重启环）、`arch_bus_messages` 已入 `_DROPPED_TABLES` 显式清除。**残留收尾两项**：① ~~README/CONV-00「10 进程」回写~~ **已完成**（MS1 D3 核证：实际拓扑恒为 9 进程，README/CONV 现行口径正确，CONV-00 已落口径注）；② P2-T9 建议正式关闭，消息面归宿 = A5/A6.1 | 已核实（git cf7fb08→5711708→376a999→d2d10ee） |
 | structure-review 批次 A1（泵泄漏 try/finally） | 卫生（前置） | 泄漏清理未见；但 `recover_conv_tasks`/sweep 泵恢复机制已存在（cv-153），与 A5 durable 语义部分重叠 |
 | structure-review 批次 A2（exec_bridge 收敛 RunnerClient）= G7 | **R1** | **未做**（exec_bridge 无 `_client`）——R1 成立 |
 | structure-review 批次 B1~B4 | **A6.1/M1 前置**（B1 能力矩阵 = A6.1 降级路由依据；B4 单源化 = prompt 契约化前置） | **均未落地**（无 capabilities.py / test_agent_layering.py / reflection/pipeline.py / test_prompt_single_source.py）——建议优先级上提 |

@@ -50,7 +50,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
   1. `python -m pytest apps/docs/tests apps/chat/tests apps/workbench/tests packages/core/tests -v` 全绿（新增四套测试可见）
   2. `npm run type-check && npm run lint && npm run test` 全绿
   3. `git ls-files | grep -E "render-worker-bundled|static/architect.html"` 零命中
-  4. `topo serve && topo status` 实测进程数与文档口径一致（当前 9）；`grep -rn "10 进程" docs/ README.md` 零命中
+  4. `topo serve && topo status` 实测进程数与文档口径一致（当前 9）；`grep -rn "10 进程" docs/ README.md` 命中仅限归档件（docs/archive/）与勘误记录本身——活跃文档零「改 10」待办
 - **细化设计文档**：[MS1-safety-net.md](MS1-safety-net.md)（已产出，待评审）
 
 ### MS2 死代码与残留清零〔B1〕

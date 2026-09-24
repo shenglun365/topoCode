@@ -213,7 +213,7 @@ result = _do_parse(ctx)                  # :1064，同步执行 6 步
 | 1 | `python -m pytest apps/docs/tests apps/chat/tests apps/workbench/tests packages/core/tests -v` | 全绿，新增 4 套可见（docs ~40 / workbench ~14 / chat ~25 / core +8） |
 | 2 | `npm run type-check && npm run lint && npm run test` | 全绿 |
 | 3 | `git ls-files \| grep -E "render-worker-bundled\|static/architect.html"` | 仅余 `apps/architect/src/architect.html`（源模板，合法） |
-| 4 | `topo serve && topo status` 实测进程数，与 README:115/CONV-00:8 口径一致（当前 9）；`grep -rn "10 进程" docs/ README.md` 零命中 | 一致 |
+| 4 | `topo serve && topo status` 实测进程数，与 README:115/CONV-00:8 口径一致（当前 9）；`grep -rn "10 进程" docs/ README.md` 命中仅限归档件与勘误记录，活跃文档零「改 10」待办 | 一致 |
 | 5 | `git status` 确认 D1 untrack、D2/D6 声明与修复落地 | 见 4.5 各验证列 |
 
 ## 7. 风险与回退
