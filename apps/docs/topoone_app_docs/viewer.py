@@ -849,7 +849,7 @@ async def diagram_editor_process(request: Request):
         _diag_log.info("code_preview=%s ...", code[:200].replace("\n", "\\n"))
         _diag_log.info("instruction=%s", instruction[:300])
 
-        from web_tools import get_web_tool_definitions
+        from topoone_app_chat.web_tools import get_web_tool_definitions
 
         diagram_tool_names = [
             "web_diagram_parse",
