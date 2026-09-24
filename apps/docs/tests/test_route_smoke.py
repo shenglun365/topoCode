@@ -55,7 +55,7 @@ def test_g0_scaffold_routes(client):
 
 def test_g1_pages(client):
     """页面路由：dist 产物存在才断 200（构建产物非 pytest 职责，缺省 skip 语义）。"""
-    from topoone_app_docs.viewer import STATIC_DIR
+    from topoone_app_docs.viewer._shared import STATIC_DIR
 
     r_doc = client.get("/doc")
     if os.path.isfile(os.path.join(STATIC_DIR, "viewer.html")):
