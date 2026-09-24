@@ -23,14 +23,12 @@ const iconMap = {
   home: HomeIcon,
   code: FolderIcon,
   analysis: LightBulbIcon,
-  knowledge: BookOpenIcon,
 }
 
 const activities = [
   { page: 'home' as PageType, key: 'nav.home' },
   { page: 'code' as PageType, key: 'nav.code' },
   { page: 'analysis' as PageType, key: 'nav.analysis' },
-  // { page: 'knowledge' as PageType, key: 'nav.knowledge' },
 ]
 
 const currentPage = computed(() => navigation.currentPage)

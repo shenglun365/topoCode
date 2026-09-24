@@ -12,7 +12,6 @@ import file from './file'
 import group from './group'
 import guide from './guide'
 import _import from './import'
-import knowledge from './knowledge'
 import nav from './nav'
 import onboarding from './onboarding'
 import pageTitle from './pageTitle'
@@ -43,7 +42,6 @@ export default {
   ...group,
   ...guide,
   ..._import,
-  ...knowledge,
   ...nav,
   ...onboarding,
   ...pageTitle,

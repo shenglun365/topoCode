@@ -22,7 +22,6 @@ export const useNavigationStore = defineStore('navigation', () => {
       home: i18n.global.t('nav.projectList'),
       code: i18n.global.t('nav.code'),
       analysis: i18n.global.t('pageTitle.analysis'),
-      knowledge: i18n.global.t('nav.knowledge'),
       user: i18n.global.t('nav.userCenter'),
       settings: i18n.global.t('nav.settings'),
       coder: i18n.global.t('nav.coder'),

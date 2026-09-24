@@ -46,7 +46,6 @@ export default { shell: {
   activityBar: {
     home: 'Home',
     analysis: 'Analysis',
-    knowledge: 'Knowledge',
     settings: 'Settings',
   },
   statusBar: {

@@ -6,7 +6,6 @@ export default { nav: {
   projectList: 'Project List',
   coder: 'Coding Workbench',
   analysis: 'Analysis',
-  knowledge: 'Knowledge',
   settings: 'Settings',
   dashboard: 'Dashboard',
   files: 'Files',

@@ -46,7 +46,6 @@ export default { shell: {
   activityBar: {
     home: '首页',
     analysis: '分析',
-    knowledge: '知识库',
     settings: '设置',
   },
   statusBar: {

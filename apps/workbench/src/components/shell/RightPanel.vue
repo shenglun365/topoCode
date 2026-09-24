@@ -20,7 +20,6 @@ const projectStore = useProjectStore()
 const panelTitleKeys: Record<string, string> = {
   home: 'ai.assistantTitle',
   analysis: 'shell.rightPanel.taskDetail',
-  knowledge: 'shell.rightPanel.docDetail',
   coder: 'shell.rightPanel.context',
   user: 'shell.rightPanel.settingsDetail',
 }

@@ -9,7 +9,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { HomeTab } from '@/stores/project'
 
-export type FuncGroupId = 'home' | 'code' | 'analysis' | 'knowledge' | 'coder'
+export type FuncGroupId = 'home' | 'code' | 'analysis' | 'coder'
 
 export interface FuncGroupContext {
     projectId?: string;
@@ -23,7 +23,6 @@ interface FuncGroupContextMap {
     home: FuncGroupContext;
     code: FuncGroupContext;
     analysis: FuncGroupContext;
-    knowledge: FuncGroupContext;
     coder: FuncGroupContext;
 }
 
@@ -34,7 +33,6 @@ export const useFuncGroupStore = defineStore('funcGroup', () => {
         home: { tabs: [] },
         code: { tabs: [] },
         analysis: { tabs: [] },
-        knowledge: { tabs: [] },
         coder: { tabs: [] },
     });
 

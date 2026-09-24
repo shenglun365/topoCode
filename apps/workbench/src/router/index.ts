@@ -54,12 +54,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'pageTitle.analysis' },
   },
   {
-    path: '/knowledge',
-    name: 'Knowledge',
-    component: () => import('@/pages/KnowledgePage.vue'),
-    meta: { title: 'nav.knowledge' },
-  },
-  {
     path: '/login',
     name: 'Login',
     component: () => import('@/pages/LoginPage.vue'),
@@ -102,7 +96,6 @@ const routePageMap: Record<string, PageType> = {
   '/home': 'home',
   '/code': 'code',
   '/analysis': 'analysis',
-  '/knowledge': 'knowledge',
 }
 
 // 从路由同步左侧导航选中态与面包屑（刷新 / 直达 URL 时保证高亮正确）

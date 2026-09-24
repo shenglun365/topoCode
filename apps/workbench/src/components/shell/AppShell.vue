@@ -34,7 +34,6 @@ const TITLE_PAGE_KEYS: Record<string, string> = {
   '/home': 'nav.projects',
   '/code': 'nav.code',
   '/analysis': 'pageTitle.analysis',
-  '/knowledge': 'nav.knowledge',
   '/coder': 'nav.coder',
 }
 
@@ -79,7 +78,6 @@ const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
     '/home': 'home',
     '/code': 'home',
     '/analysis': 'analysis',
-    '/knowledge': 'knowledge',
     '/coder': 'coder',
 }
 
