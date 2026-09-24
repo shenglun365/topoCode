@@ -1,6 +1,6 @@
 # MS2 细化设计：死代码与残留清零
 
-> 状态：**待评审** | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS2 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B1
+> 状态：**已评审通过，实施完成**（2026-09-24，K1~K5 全部落地，净删 −7,006 行） | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS2 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B1
 > 事实基线：2026-09-24 两路代码核证（前端逐项引用核证 / 后端 shim 与空目录核证），全部结论带 文件:行号。
 > 纪律：**只删零引用物**；有真实引用者移交后续 MS 随消费者共改（裁决⑥同款逻辑）。
 
@@ -114,15 +114,20 @@
 
 ## 8. commit 序列（每批独立可 revert）
 
-| 序 | 内容 | 预估 |
+| 序 | commit | 内容 |
 |---|---|---|
-| K1 | shim 八件套 + 69 处引用迁移 + golden 重生成 + docstring | 1d |
-| K2 | architect 17+2 文件 + 类型清理 | 0.5d |
-| K3 | workbench 5 文件 + alias ×3 配置 | 0.25d |
-| K4 | KnowledgePage 集群 + 8 处解耦 + mock.ts | 0.75d |
-| K5 | web-core ×2 + 空目录 ×3 + 收口验收回写 | 0.5d |
+| K1 | cc36437 | shim 八件套撤除 + 69 处引用迁移 + line_baseline 收缩 8 条 + 层序刻度补 sessions 层与 4 条显形立条（1101 passed，唯一红=R1 存量 ctx_usage 在途） |
+| K2 | 2363743 | architect 前端死码 19 文件 −2,935 行（types 清理 **deferred**：types/index.ts 有用户在途改动防混入，MS6 候选） |
+| K3 | 91e1ec7 | workbench 死码 5 文件 + alias ×3 −1,000 行 |
+| K4 | 5f03568 | KnowledgePage 退役 −2,635 行（8 处解耦 + mock.ts 终点删除） |
+| K5 | 39ed3b0 | web-core ×2 + 空目录 ×3（−107 行）+ greenfield.py 陈旧措辞清理 |
 
-合计 ~3 人日。开工前 `git tag pre-MS2`。
+### 实施期修正记录
+
+1. **R2 层序门禁显形四条依赖**：shim 撤除后 memory/units、memory/distill、planning/req_spec、sessions/coding → reflection 首次对扫描可见（此前经 arch_routes 通道隐形）。处置：`sessions` 目录补入层序刻度（此前刻度缺失属门禁潜在 KeyError 缺陷）+ 四文件在 _R2_INVENTORY 立条注明「MS2 显形、MS4 断环清退」
+2. **相对导入深度**：agent/** 内改写须按文件位置取 `..reflection`（非 `..agent.reflection`）——首版脚本因此短暂引入 ModuleNotFoundError，已即时修正
+3. **pathspec 提交拾取陷阱**：`git commit -- <dir>` 会把目录下未跟踪文件一并入库（K1 首提误拾取用户在途 ctx_usage.py）——已 reset 剔除重提，该文件保持未跟踪原状
+4. **净删统计**：93 files, +256/−7,006（shortstat 实测）
 
 ---
 

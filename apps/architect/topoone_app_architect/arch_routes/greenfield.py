@@ -1,7 +1,7 @@
 """Greenfield routes — Blueprint / Scaffold / Extract / Launch / Guide.
 
-契约见 docs/architect/api-knowledge-greenfield.md。服务端返回确定性的模拟结果，
-形状与前端 blueprint-agent / scaffold-service / extract-service 对齐。
+契约见 docs/architect/api-knowledge-greenfield.md。服务端返回确定性的模拟结果。
+(原「与前端 blueprint-agent / extract-service 对齐」措辞已随 MS2 前端死码删除而失效)
 """
 from typing import Optional
 from fastapi import APIRouter, Request
