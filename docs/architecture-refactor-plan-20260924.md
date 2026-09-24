@@ -84,21 +84,22 @@ npm workspaces monorepo：4 个独立 Vite 前端应用（workbench 163 文件 3
 3. web-core 瘦身：statusBadge/useComponentId(+ConfirmDialog)/browser-api 三件无纠缠直下沉；**ipc.ts/types/ipc.ts 受阻于 portal settings 三面板双消费**（0905 未发现）→ 列 U6 评审裁决点（案 A：settings 随迁 workbench+portal 路由收缩【建议】；案 B：挂账 MS6）；图域 diagram-normalize 归口 graph-kernel；**新发现孤儿组件 D3ForceGraph/MermaidViewer ~932 行**（MS2 漏网）随批删除
 4. sidecar 更名：现名实为 `@topocode/cline-sidecar` → `@topo/cline-sidecar` + 目录 `packages/agent-sidecar`→`packages/cline-sidecar`（Python 4 路径收口函数/8 处命令串/3 处测试）
 
-### B3 后端职能归位（~10 人日，前置：B0；architect 35 测试文件即安全网）
+### B3 后端职能归位（~9 人日，前置：B0）——实施细则见 [refactor/MS4-backend-restructure.md](refactor/MS4-backend-restructure.md)（全量核证后多项修正）
 
-1. arch_routes 拆层：routes/ + store/ 独立归位 + sem/ 独立 + db_schema→schema/
-2. req_agent.py(1,465)+exec_bridge.py(1,030) 移入 agent/ → orchestrator 20+ 处 `..arch_routes` import 清零断环
-3. sessions.py(1,440) 收尾拆分（消息/流 items/分组/摘要）
-4. tracking 同名澄清（路由 vs store/tracking）、tagent_* 四件(508 行)归一、server.py 去私有引用
-5. sem/engine.py(4,851) 五域拆分（0905-B1b 蓝图：reconcile/extract_primary/extract_scope_impl/aggregate/edge_derive+query 门面）
-6. symbols.py/codegraph.py 契约注释升级（裁决⑤三元分工）
+1. arch_routes(72 文件 28,853 行) 拆层：store/+sem/+db_schema→store/schema 提升平级；**ctx/common/kb_gateway infra 三件随迁**（核证新增：store/sem 横向依赖，不随迁则平级包反指 arch_routes）；重写面实测 **~420 处**（agent 91 线+routes 77+sem 11+tests 128+semantic_assets 门面 32）
+2. req_agent+exec_bridge 移入 agent/{tools,execution}——**断环真实规模核证为 216 处 import/40 文件**（原估「orchestrator 20+ 处」严重偏低）；判据 1 原文的两点形 grep 只覆盖 agent 根层，升级为全形态 `grep -rn arch_routes agent/` 零命中；**_R1_INVENTORY 39 条目标清空**；R2 四条 reflection 上行立条经核证非 routes 环，移交 agent 层序专项（MS6 前置）
+3. sessions.py(1,456) 收尾拆分——尾部实证为 L1224-1456「12 条 /tasks/* 路由簇+units 读侧」连续段
+4. tracking 同名澄清（路由更名 tracking_api）、tagent 四件归一（**核证：tagent_chat 无生产调用方可删、extract 的 agentic 循环已退役**，终态 se+utgen 两件）、server.py 去私有（三处下划线引实证）
+5. sem/engine.py(4,851) 五域拆分（0905-B1b 蓝图函数族行号已逐点复核在位）
+6. symbols.py/codegraph.py 契约注释升级（裁决⑤ SLA 表述核证**未落**，两文件仍为旧「双后端+auto」表述）
+7. （在途遗留）ctx_usage 的 R1 立条缺口（现行 R1 红态根因）随 W1 store 提升自动消解
 
-### B4 core/chat/docs 巨型拆分（~8 人日，前置：B0，裁决③）
+### B4 core/chat/docs 巨型拆分（~7 人日，前置：B0）——实施细则见 [refactor/MS5-engine-splits.md](refactor/MS5-engine-splits.md)（蓝图漂移已修正）
 
-1. task_manager.py(4,296) 五域拆分（0905-B1a 蓝图：tasks_crud/community_query/agent_dispatch/subdocs/git_info/positions；聚合函数锁注册顺序）
-2. db/manager.py DDL 外置 `db/schema/{main,knowledge,sessions,chat,project}.py` + 拼接全等契约测试
-3. chat.py(1,815)/web_tools.py(1,849) 拆分（顺序：**先拆后迁**——B4 原位拆好并补测试，B6 纯迁移，降低单批次风险）
-4. docs viewer/ 子包拆分（0905-A2 蓝图：pages/community/plantuml/diagram_api/diagram_editor/layout）
+1. task_manager.py(4,296) 六域拆分（0905-B1a：tasks_crud/community_query/agent_dispatch/subdocs/git_info/positions + common；聚合锁序）。**漂移修正**：git/positions 全族与 _ensure_project_db 已是模块级非闭包；positions 读侧实为 load+list_position_keys；RPC 面经 service/project.py `_tm_*` 八别名二次包装——门面须保三个稳定进口（register_analysis_methods/_compute_file_ranks[agent 3 处惰性+测试打桩字符串]/八函数）
+2. db/manager.py(2,181) DDL 外置（五块共 1,038 行 :228-1265）+ 全等契约测试（golden 以 pre-MS5 快照内嵌）
+3. chat.py/web_tools.py 拆分（**先拆后迁**为 B6 铺路；chat_api 六件+web_tools 四件；`_llm_round` SSE 闭包随 messages 整段迁）
+4. docs viewer/ 子包拆分（0905-A2 七件；**MS1 的 G0 路由数守卫 26/10 为安全锁**）
 
 ### B5 前端巨型组件拆分（~9 人日，前置：B2）
 

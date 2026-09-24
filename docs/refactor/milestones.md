@@ -77,24 +77,24 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 ### MS4 architect 后端职能归位〔B3〕
 
 - **功能单元属性**：architect 后端结构定型——arch_routes 五层混居解体、agent↔routes 循环依赖清零、sem/engine 巨石拆解。
-- **范围**：routes/store/sem/schema 平级归位；req_agent+exec_bridge 移入 agent/；sessions.py 收尾拆分；tracking 同名澄清；tagent_* 四件归一；server.py 去私有引用；sem/engine.py 五域拆分（0905-B1b 蓝图）；symbols.py/codegraph.py 契约注释升级（裁决⑤）
+- **范围**（核证后修正，细则见 [MS4-backend-restructure.md](MS4-backend-restructure.md)）：store/sem/db_schema 提升平级 + **ctx/common/kb_gateway infra 三件随迁**（新事实）+ ~420 处 import 重写；req_agent→agent/tools、exec_bridge→agent/execution；残余三通道抽取（zmq_stream/asset_skill/asset_map_tools）；sessions 尾段 L1224-1456 切出；tracking 更名 tracking_api；tagent 归一（chat 件可删、终态 se+utgen）；server 三处去私有；sem/engine 五域拆分（蓝图行号已复核）；裁决⑤ SLA 契约注释落笔；**R1 39 条立条目标清空**、R2 四条移交 agent 层序专项（MS6 前置）
 - **独立可测判据**：
-  1. `grep -n "from ..arch_routes" apps/architect/topoone_app_architect/agent/ -r` 零命中（延迟 import 环清零）
-  2. `python -m pytest apps/architect/tests -q` 全绿（35 测试文件即安全网）
-  3. 目标目录结构落位（routes/ 不再含 store/sem/DDL/harness）；sem 拆分后单文件 <1,500 行
-  4. 服务启动烟测：`python -c "from topoone_app_architect.server import build_app"` + `/health` 200
-- **细化设计文档**：`MS4-backend-restructure.md`（待产出）
+  1. `grep -rn "arch_routes" apps/architect/topoone_app_architect/agent/ --include='*.py'` 零 import 命中（**判据升级**：原文两点形 grep 只覆盖根层，全形态断言；含 _R1_INVENTORY 清空后门禁零容忍）
+  2. `python -m pytest apps/architect/tests -q` 全绿（R1 现行红态[ctx_usage 立条缺口]随 W1 消解转绿）
+  3. 目录落位：`topoone_app_architect/{store,sem}` 平级、arch_routes 纯路由化；sem 拆分后单文件 <1,500 行
+  4. 烟测：`python -c "from topoone_app_architect.server import build_app"` + `/health` 200
+- **细化设计文档**：[MS4-backend-restructure.md](MS4-backend-restructure.md)（已产出，待评审）
 
 ### MS5 引擎与外围巨型模块拆分〔B4〕
 
 - **功能单元属性**：core/chat/docs 三处巨型模块拆分，RPC 218 基线冻结下的纯内部重构。
-- **范围**：task_manager.py 五域拆分（0905-B1a 蓝图）；db/manager DDL 外置 + 全等契约测试；chat.py/web_tools.py 拆分（**先拆后迁**——为 MS7 铺路）；docs viewer/ 子包拆分（0905-A2 蓝图）
+- **范围**（细则见 [MS5-engine-splits.md](MS5-engine-splits.md)，蓝图漂移已修正）：task_manager 六域+common+门面（门面保三个稳定进口：register/_compute_file_ranks/八函数）；db/manager DDL 五块 1,038 行外置+golden 全等契约；chat_api 六件+web_tools 四件（SSE 闭包整段随迁）；viewer/ 子包七件（G0 路由数守卫为锁）
 - **独立可测判据**：
-  1. `git diff packages/core/rpc-method-baseline.json` 为空（拆分前后基线零变化）
-  2. DDL 拼接全等契约测试通过（五段 SQL 与旧常量字符串全等）
-  3. `python -m pytest packages/core/tests apps/chat/tests apps/docs/tests -q` 全绿
-  4. docs 27 路由行为不变（MS1 smoke 套件全绿）；拆分后单文件 <1,500 行
-- **细化设计文档**：`MS5-engine-splits.md`（待产出）
+  1. `git diff pre-MS5..HEAD -- packages/core/rpc-method-baseline.json` 为空
+  2. DDL 全等契约测试通过（golden 内嵌 pre-MS5 快照）
+  3. `python -m pytest packages/core/tests packages/core/topoone/tests apps/chat/tests apps/docs/tests -q` 全绿（**含 topoone 独立套件**——task_manager 注册顺序与打桩敏感面在此）
+  4. docs 行为不变（MS1 smoke 全绿 + G0 守卫 26/10）；拆分产物单文件 <1,500 行
+- **细化设计文档**：[MS5-engine-splits.md](MS5-engine-splits.md)（已产出，待评审）
 
 ### MS6 前端巨型组件拆分〔B5〕
 
@@ -126,8 +126,8 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 | MS1 | ✅ 已评审（2026-09-24） | — | ✅ C1~C8 落地（b8cf54f..a835b5d，8+2 commits，含 D6/D7 两缺陷修复） | ✅ 判据1: 349 passed/39.7s · 判据3: ls-files 零命中 · 判据4: 进程=9 核证 · 判据2: type-check✅ test:fe✅ lint 存量红灯豁免（错误全在 MS1 未触碰文件）；topo serve 实测留待用户环境 |
 | MS2 | ✅ 已评审（2026-09-24） | — | ✅ K1~K5 落地（cc36437..39ed3b0+greenfield 措辞清理，6 commits） | ✅ 净删 **−7,006 行/+256**（93 文件）：architect 2,935 + workbench 3,635 + web-core 107 + shim/迁移 329；判据1: architect 1101(R1 存量)+四域 349+FE typecheck/test 全绿；判据2: A1~A5 零引用命中（仅存勘误记录与已清理措辞）；判据3: shortstat 与清单一致 |
 | MS3 | ✅ 已评审（U6=案A；U2=本期合入） | — | ✅ 在途合入 e06d1bd + U0~U8 落地（d3fdf88..75bad87，11 commits） | ✅ 判据1: architect web-core import=0+依赖零声明+独立build ✓（全口径达成）· 判据2: 旧token键=0 · 判据3: 四域349+FE vitest(54/9/9/12)+architect 1101(R1存量) · 判据4: 案A口径通过 · 判据5/6: 0命中 |
-| MS4 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
-| MS5 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
+| MS4 | ✅ 已产出（[MS4-backend-restructure.md](MS4-backend-restructure.md)，待评审；与 MS5 并行零交集） | ⬜ | ⬜ | ⬜ |
+| MS5 | ✅ 已产出（[MS5-engine-splits.md](MS5-engine-splits.md)，待评审；与 MS4 并行零交集） | ⬜ | ⬜ | ⬜ |
 | MS6 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS7 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 
