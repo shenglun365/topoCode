@@ -25,11 +25,75 @@ def _load_env():
                 line = line.strip()
                 if not line or line.startswith('#') or '=' not in line:
                     continue
-                key, val = line.split('=', 1)
-                os.environ.setdefault(key.strip(), val.strip())
+                    key, val = line.split('=', 1)
+                    os.environ.setdefault(key.strip(), val.strip())
 
 
 _load_env()
+
+
+def _pidfile_path(data_dir: str) -> str:
+    return os.path.join(data_dir or os.path.expanduser("~/.topocode"),
+                        "architect.pid")
+
+
+def _cmdline_of(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return f.read().decode("utf-8", "replace").replace("\0", " ")
+    except (OSError, ValueError):
+        return ""
+
+
+def _ensure_single_instance(data_dir: str) -> None:
+    """实例互斥 pidfile（3470 端口冲突事故根治, 通用逻辑非特判）。
+
+    启动前检测既有实例并按其监管形态处置:
+    - 孤儿(ppid=1, 无监管者) → 自动接管: SIGTERM 等退(超时 SIGKILL)——
+      supervisor 死亡后的遗留实例不应阻塞监管树恢复;
+    - 被监管实例(ppid 存活) → 拒绝双开并报明 pid——手动实例不得越权
+      顶掉监管树的正主(防端口竞争复发);
+    - 无实例 → 直接放行。启动后写自己的 pid 供下轮判定。
+    """
+    pf = _pidfile_path(data_dir)
+    try:
+        old = int(open(pf).read().strip())
+    except (OSError, ValueError):
+        old = 0
+    if old and old != os.getpid() and os.path.exists(f"/proc/{old}"):
+        ppid = 0
+        try:
+            with open(f"/proc/{old}/stat") as f:
+                ppid = int(f.read().split(") ", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            pass
+        if "topoone_app_architect" not in _cmdline_of(old):
+            logger.warning("[architect] pidfile %s 指向非 architect 进程 "
+                           "(pid=%s), 覆盖登记", pf, old)
+        elif ppid == 1:
+            import time as _t
+            logger.warning("[architect] 检测到孤儿实例 pid=%s, 自动接管"
+                           "(SIGTERM)", old)
+            os.kill(old, signal.SIGTERM)
+            for _ in range(100):
+                if not os.path.exists(f"/proc/{old}"):
+                    break
+                _t.sleep(0.1)
+            else:
+                logger.warning("[architect] 孤儿 pid=%s 未退, SIGKILL", old)
+                try:
+                    os.kill(old, signal.SIGKILL)
+                except OSError:
+                    pass
+        else:
+            raise SystemExit(
+                f"[architect] 实例已在运行且受监管: pid={old} "
+                f"(pidfile={pf})——如需重启请先停监管者(supervisor/终端), "
+                "勿手动双开(3470 端口竞争事故见运维记录)")
+    os.makedirs(os.path.dirname(pf), exist_ok=True)
+    with open(pf, "w") as f:
+        f.write(str(os.getpid()))
+    logger.info("[architect] pidfile 登记 pid=%s → %s", os.getpid(), pf)
 
 
 def main():
@@ -40,6 +104,8 @@ def main():
     parser.add_argument("--kb-url", type=str, default=None, help="KB data_api base URL")
     parser.add_argument("--mcp-url", type=str, default=None, help="MCP server base URL")
     args = parser.parse_args()
+
+    _ensure_single_instance(args.data_dir or "")
 
     if args.kb_url:
         os.environ.setdefault("KB_BASE_URL", args.kb_url)

@@ -149,7 +149,9 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
 
     @app.get("/health", include_in_schema=False)
     async def health():
-        return {"status": "ok", "service": "architect"}
+        # pid 自报(服务身份): supervisor 就绪判定校验「响应者==自己 spawn 的
+        # 进程」——端口可达≠就绪, 外部监听者(孤儿实例)不再能骗过探针
+        return {"status": "ok", "service": "architect", "pid": os.getpid()}
 
     # SPA 静态产物(由 vite.architect.config.ts 构建到 static/)
     _web = os.path.join(STATIC_DIR, "web")

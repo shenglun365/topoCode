@@ -72,6 +72,25 @@ def _http_ok(url: str, timeout: float = 2.0) -> bool:
         return False
 
 
+def _health_pid(url: str, timeout: float = 2.0) -> Optional[int]:
+    """读健康端点自报的服务 pid（服务身份；端点未自报/不可达 → None）。
+
+    端口可达≠就绪——孤儿/外部实例会响应同一端口, 骗过纯端口探针
+    （实证: 孤儿占 3470 → 子进程 bind 失败但探针 200 → 假 ready →
+    重试烧尽 → FATAL 全树终止）。就绪判定=「响应者==自己 spawn 的
+    进程」; 服务未自报 pid(旧版)→ None → 调用方退回端口可达语义。"""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if not (200 <= resp.status < 400):
+                return None
+            import json as _json
+            body = _json.loads(resp.read().decode("utf-8") or "{}")
+            pid = body.get("pid") if isinstance(body, dict) else None
+            return int(pid) if pid else None
+    except Exception:
+        return None
+
+
 class Supervisor:
     """子进程监督者"""
 
@@ -141,12 +160,22 @@ class Supervisor:
         self._monitor_task = self._loop.create_task(self._monitor_loop())
 
     async def _wait_health(self, wi: WorkerInfo):
-        """轮询 HTTP 健康端点直到就绪（进程已退出则立即返回，由监控循环重启）"""
+        """轮询 HTTP 健康端点直到就绪（进程已退出则立即返回，由监控循环重启）
+
+        就绪判定（身份校验）: 响应者 pid == 本 worker 子进程 pid 才算就绪——
+        端口被外部实例占用时子进程永远 bind 失败, 端口可达是假就绪
+        （孤儿骗探针 → 重试烧尽 → FATAL, 见 _health_pid 注释）。
+        服务未自报 pid（旧版端点）→ 退回端口可达语义（向后兼容）。
+        """
         while self._running:
             if not wi.is_alive:
                 return
             # _http_ok 是同步阻塞调用（urllib），必须放到线程池，避免阻塞事件循环
-            ok = await self._loop.run_in_executor(None, _http_ok, wi.health_url)
+            reported = await self._loop.run_in_executor(
+                None, _health_pid, wi.health_url)
+            ok = (reported == wi.proc.pid if reported is not None
+                  else await self._loop.run_in_executor(None, _http_ok,
+                                                        wi.health_url))
             if ok:
                 wi.status = "ready"
                 wi.ready_event.set()
