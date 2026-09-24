@@ -67,15 +67,15 @@ npm workspaces monorepo：4 个独立 Vite 前端应用（workbench 163 文件 3
 6. ~~根 test:py 指向修正~~ 实测指向无误（空目录不致 pytest 收集失败）；真缺陷为 **CI backend job 未装 4 个 app 包**（与 scripts/setup.sh 不一致）——补齐对齐
 7. （MS1 探查新发现）viewer.py:852 悬空 `from web_tools import ...` → `POST /api/diagram-editor/process` 必 500；修复指向 `topoone_app_chat.web_tools` + docs 临时依赖声明（MS5 重估）
 
-### B1 删除清零（~3 人日，前置：B0）
+### B1 删除清零（~3 人日，前置：B0）——实施细则见 [refactor/MS2-dead-code-purge.md](refactor/MS2-dead-code-purge.md)，含逐项引用核证与零引用验证命令
 
-1. 前端死代码 ~4,700 行：
-   - architect：services（asset-validator/blueprint-agent/extract-service/guide-patterns/mainkb-service）+ stores（collaboration/git-sync/kb-query 死岛）+ 组件（BaselineSummaryBar/ComponentListView/KbQueryView/KbQueryHistory/PseudoExplainer/DesignPanel/ProjectSetupDialog/AssetDetailModal/ScopeProposalModal）
-   - workbench：agent-usage-store/plugin-store/TaskCard/ProjectList/providers.ts/mock.ts 约 600 行/`@topo-animation` 失效 alias
-   - web-core：fileColors/DiagramRebuildDialog/zmq.ts
-2. 后端 8 个兼容 shim 删除（adaptation/capability_mining/context_registry/evaluator/llm_dataset/model_profile/prompt_registry/ws_events，引用方改直达 `agent/`）
-3. `apps/{chat,docs}/server/` 空目录
-4. KnowledgePage 退役裁决（ActivityBar 入口已注释，路由/页面/store/i18n ~1,500 行；默认建议：退役，执行时无异议即删）
+1. 前端死代码 **~6,600 行**（0924 核证，高于 0905 估的 4,700）：
+   - architect：services 5 + stores 3 + 组件 9 + 级联（kb-query-agent/design-service）+ types 清理
+   - workbench：agent-usage-store/plugin-store/analysis-TaskCard/project-ProjectList/providers.ts/mock.ts 828 行/`@topo-animation` 失效 alias
+   - web-core：fileColors/zmq.ts（**DiagramRebuildDialog 核证有真实引用（DiagramViewer），移出 B1 交 B5 随消费者共改**）
+2. 后端 8 个兼容 shim 删除（adaptation/capability_mining/context_registry/evaluator/llm_dataset/model_profile/prompt_registry/ws_events，纯 re-export 80 行；41 生产 + 28 测试引用改直达 `agent/` 真身；含 line_baseline golden 收缩与 monkeypatch 接缝成对迁移）
+3. `apps/{chat,docs,architect}/server/` 空目录 ×3（architect 为核证时新发现）
+4. KnowledgePage 退役（裁决：退役——页面+knowledge/ 组件 5 件+store+i18n ~1,780 行 + 8 处导航/类型/i18n 解耦）
 
 ### B2 前端职能归一（~8 人日，前置：B1，方向=裁决①）
 

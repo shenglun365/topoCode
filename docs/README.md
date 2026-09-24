@@ -8,7 +8,8 @@
 |---|---|---|
 | [architecture-refactor-plan-20260924.md](architecture-refactor-plan-20260924.md) | **已评审待实施** | 系统架构重构主方案：现状分析 + 五项裁决 + B0~B6 批次计划 |
 | [refactor/milestones.md](refactor/milestones.md) | **阶段拆分定稿** | 里程碑总控 MS1~MS7：每阶段独立可测判据 + 状态跟踪；各 MS 细化设计逐个产出评审 |
-| [refactor/MS1-safety-net.md](refactor/MS1-safety-net.md) | 待评审 | MS1 细化设计：四套测试文件级方案（docs 36 路由/knowledge 7 方法/chat SSE 路径/6 步管线）+ 缺陷 D1~D6 处置 |
+| [refactor/MS1-safety-net.md](refactor/MS1-safety-net.md) | 已实施完成 | MS1 细化设计+实施记录：四套测试（78 例）+ 缺陷 D1~D7 清零，验收全绿 |
+| [refactor/MS2-dead-code-purge.md](refactor/MS2-dead-code-purge.md) | 待评审 | MS2 细化设计：~6,600 行死码五批删除（shim 迁移/architect/workbench/KnowledgePage/web-core）+ 附录零引用验证命令组 |
 | [product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md) | 现行 | 产品迭代路线图（2026-09，含 L 组/各线任务排期） |
 | [architect-v2-todo.md](architect-v2-todo.md) | 现行 | architect v2 重构待办（P0 遗留/P1 资产表/P2 旧机制清退/P3 引擎打磨） |
 | [kb-unified-components-plan.md](kb-unified-components-plan.md) | Stage 5 待办 | KB 组件双线统一方案（Stage 0~4 已完成） |

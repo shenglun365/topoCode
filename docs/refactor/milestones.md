@@ -56,12 +56,12 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 ### MS2 死代码与残留清零〔B1〕
 
 - **功能单元属性**：删除全部已验证零引用的死代码（~4,700 行 FE + 8 个后端 shim + 空目录 + 失效 alias），代码库回到最小真实态。
-- **范围**：前端死代码三批（architect services/stores/组件、workbench stores/组件/mock 600 行、web-core 3 文件）/ 后端 8 兼容 shim（引用方改直达 `agent/`）/ `apps/{chat,docs}/server/` 空目录 / KnowledgePage 退役（默认裁决：退役）
+- **范围**：前端死代码 ~6,600 行（核证后高于 0905 估的 4,700；architect services/stores/组件 17+2 文件、workbench stores/组件/alias、web-core **2** 文件——DiagramRebuildDialog 经核证有真实引用移交 MS6）/ 后端 8 兼容 shim（41 生产 + 28 测试引用改直达 `agent/` 真身）/ `apps/{chat,docs,architect}/server/` 空目录 ×3（第三个为核证时计划外发现）/ KnowledgePage 退役集群（~1,780 行 + 8 处解耦）——细则见 [MS2-dead-code-purge.md](MS2-dead-code-purge.md)
 - **独立可测判据**：
-  1. 删除后 `npm run type-check && npm run lint && npm run test` 与 `python -m pytest apps/architect/tests -q` 全绿
-  2. 每个删除物附零引用验证命令（细化设计中逐条列出），执行零命中
-  3. 前端文件数/行数净减统计与清单一致
-- **细化设计文档**：`MS2-dead-code-purge.md`（待产出）
+  1. 删除后 `npm run type-check`、`npm run test:py`（architect 全量）、`npm run test:fe` 全绿；lint 存量红灯豁免（同 MS1）且问题数净减不增
+  2. 附录 A1~A5 零引用验证命令组逐组零命中
+  3. `git diff pre-MS2..HEAD --shortstat` 净减统计与清单一致
+- **细化设计文档**：[MS2-dead-code-purge.md](MS2-dead-code-purge.md)（已产出，待评审）
 
 ### MS3 前端职能归一〔B2〕
 
@@ -99,7 +99,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 ### MS6 前端巨型组件拆分〔B5〕
 
 - **功能单元属性**：六个迭代热点文件拆为「子组件+composable」，键位/行为零变化。
-- **范围**：architect（AssetManagementWorkspace/SemanticGraphView/AnalysisChat）+ workbench（ReportHome/ProjectCard/community-store 抽 useComponentAnalysis）；ChatSession 归 MS7（拆+上提同做）
+- **范围**：architect（AssetManagementWorkspace/SemanticGraphView/AnalysisChat）+ workbench（ReportHome/ProjectCard/community-store 抽 useComponentAnalysis）；**接收 MS2 移交：web-core DiagramRebuildDialog 随 DiagramViewer 共改再裁决去留**；ChatSession 归 MS7（拆+上提同做）
 - **独立可测判据**：
   1. 现有 vitest 全绿 + 各页核心交互手动回归清单（细化设计中列全）
   2. 拆分后单文件 <1,500 行；props/emits 边界清单化
@@ -124,7 +124,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 | MS | 细化设计 | 评审 | 开发 | 验收 |
 |---|---|---|---|---|
 | MS1 | ✅ 已评审（2026-09-24） | — | ✅ C1~C8 落地（b8cf54f..a835b5d，8+2 commits，含 D6/D7 两缺陷修复） | ✅ 判据1: 349 passed/39.7s · 判据3: ls-files 零命中 · 判据4: 进程=9 核证 · 判据2: type-check✅ test:fe✅ lint 存量红灯豁免（错误全在 MS1 未触碰文件）；topo serve 实测留待用户环境 |
-| MS2 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
+| MS2 | ✅ 已产出（[MS2-dead-code-purge.md](MS2-dead-code-purge.md)，待评审） | ⬜ | ⬜ | ⬜ |
 | MS3 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS4 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS5 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
