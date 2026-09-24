@@ -125,7 +125,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 |---|---|---|---|---|
 | MS1 | ✅ 已评审（2026-09-24） | — | ✅ C1~C8 落地（b8cf54f..a835b5d，8+2 commits，含 D6/D7 两缺陷修复） | ✅ 判据1: 349 passed/39.7s · 判据3: ls-files 零命中 · 判据4: 进程=9 核证 · 判据2: type-check✅ test:fe✅ lint 存量红灯豁免（错误全在 MS1 未触碰文件）；topo serve 实测留待用户环境 |
 | MS2 | ✅ 已评审（2026-09-24） | — | ✅ K1~K5 落地（cc36437..39ed3b0+greenfield 措辞清理，6 commits） | ✅ 净删 **−7,006 行/+256**（93 文件）：architect 2,935 + workbench 3,635 + web-core 107 + shim/迁移 329；判据1: architect 1101(R1 存量)+四域 349+FE typecheck/test 全绿；判据2: A1~A5 零引用命中（仅存勘误记录与已清理措辞）；判据3: shortstat 与清单一致 |
-| MS3 | ✅ 已评审（2026-09-24：U6=案A；U2 前置=本期合入在途） | ⬜ | ⬜ | ⬜ |
+| MS3 | ✅ 已评审（U6=案A；U2=本期合入） | — | ✅ 在途合入 e06d1bd + U0~U8 落地（d3fdf88..75bad87，11 commits） | ✅ 判据1: architect web-core import=0+依赖零声明+独立build ✓（全口径达成）· 判据2: 旧token键=0 · 判据3: 四域349+FE vitest(54/9/9/12)+architect 1101(R1存量) · 判据4: 案A口径通过 · 判据5/6: 0命中 |
 | MS4 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS5 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS6 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |

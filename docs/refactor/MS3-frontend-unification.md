@@ -1,6 +1,7 @@
 # MS3 细化设计：前端职能归一（architect 独立 + KB 系基建归一）
 
-> 状态：**已评审通过（2026-09-24）：U6=案 A；U2 前置条件裁决「本期合入」——在途工作先行落地解锁碰撞面** | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS3 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B2 · 裁决①
+> 状态：**已评审通过并实施完成**（2026-09-24，U0~U8 全部落地，无挂账项） | 日期：2026-09-24
+> 裁决：U6=案 A（settings 六件随迁 workbench，portal 收缩 #/settings）；U2 前置=本期合入（在途工作 e06d1bd 先行落地，碰撞面解除，判据 1 全口径达成） | 上游：[milestones.md](milestones.md) §2-MS3 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B2 · 裁决①
 > 事实基线：2026-09-24 三路核证（architect 依赖面 / KB 归一面 / sidecar 与图域），全部带 文件:行号。
 > 方向：architect 对 web-core **零依赖**（深路径与包声明全摘）；KB 系收敛到单一 web-core；web-core 只留多 app 真共享物。
 
@@ -148,3 +149,26 @@
 | U8 | 收口验收回写 | 0.5d |
 
 开工前 `git tag pre-MS3`；U2 若挂账，MS3 验收按 1a 双口径如实记录。
+
+
+---
+
+## 9. 实施记录（2026-09-24，全部落地）
+
+| 批 | commit | 内容 |
+|---|---|---|
+| 前置 | e06d1bd | 在途工作合入（chevron 单源/ctx chip/问询卡收口，19 文件，vitest 54+pytest 38 全绿）+ R1 为 ctx_usage 立条 |
+| 前置 | 3c0415b | 补录前序设计文档 2 件 |
+| U0 | d3fdf88 + 2d74809 | diagram-normalize 归口 graph-kernel（barrel 出口；web-core 留 barrel 兼容层——深路径 export * 在 app 侧 tsconfig 解析失败，实施期改走根 barrel）+ 孤儿组件删除 −968 行 |
+| U1+U2 | 7518adb | 自持 shell 13 件 + i18n/common 488 行 + topo-render 裁剪版；7 文件 9 import 迁移 + mock 同步 + 依赖摘除；独立 build ✓ |
+| U3 | 00f59e0 | token 10 字面量归一 + migrateLegacyAuthKeys 垫片（token.ts 单源，两 loadSession 首行调用）+ 单测 3 例 |
+| U4 | 78c86f3 | useDialog 扩展 choices/confirmChoice/ok·cancelLabel；AppDialog choices 渲染；useConfirm 退役 |
+| U5+U6 | 7a737c3 + f533d87 | 五件下沉（37+18+14+2 消费面改本地）+ settings 六件随迁 + AppPortal 收缩；git add -A 误回扫孤儿已纠正 |
+| U7 | 00d8498 | sidecar 更名（目录+包名+4 路径函数+8 命令串+3 测试；lockfile 再生） |
+| U8 | 75bad87 + 本提交 | CONV-02 对齐 + window.api 本地断言（全局 declare 随 ipc 下沉）+ 验收回写 |
+
+### 实施期修正记录
+1. **graph-kernel 深路径解析**：`export * from '@topo/graph-kernel/core/...'` 在 workbench/architect tsconfig（moduleResolution: bundler）下 TS2307——改走根 barrel 出口（architect 裸引先例路径），绕开子路径解析差异
+2. **git add -A 陷阱复发**：U0 mv-away 后又 mv-back 的孤儿组件被 U5/U6 的 `git add -A` 重新扫入——f533d87 纠正；教训与 MS1-D1 同源，pathspec 提交纪律必须贯彻
+3. **window.api 全局声明**：declare global 随 ipc.ts 居 workbench——web-core 三处使用点改 `(window as any)` 本地断言（portal 独立构建下 api 本就可能不存在，类型上如实化）
+4. **验收证据**：判据 1 全口径（src/tests/package.json 零命中，仅 shell/index.ts:1 独立化说明注释提及）；判据 2 = 0；判据 3 = 349 py + FE vitest 54/9/9/12 + architect 1101（R1 存量豁免）；判据 4/5/6 = 0 命中
