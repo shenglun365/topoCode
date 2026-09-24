@@ -157,7 +157,9 @@ topoone_app_chat/
 | V0 | a4f2ef1 | DDL 外置五件（manager 2,181→1,159 行）+ 契约测试 5 例（golden 内嵌 pre-MS5 快照）+ core 296 绿 |
 | V1 | 7ac450b | task_api 六域+common+门面（4,296→门面 34 行+域件最大 1,750）；parity 218 对等；`_compute_file_ranks` 接缝经 PEP562 惰性委托保持穿透；3 例失败 worktree 归因为 pre-MS5 存量（ab 对拍×2+list_batch_files），V1 自身回归（cancel）已修 |
 | V2 | 36ff479 + cc60fdd | viewer/ 七件；G0 守卫 26 路由不变；两处深度陷阱（community 漏 os、测试 STATIC_DIR 路径）修补 |
-| V3 | ——**回退** | 子包化后 SSE 事件环挂起（字节级等价复现仍挂，pre-MS5 原版当日 0.95s 通过——排除环境漂移，定性为模块组织引发的深层 asyncio/线程时序问题）；已按裁决⑥恢复单文件，chat 32+docs 18 全绿。挂账 MS6 前置，需专项归因（嫌疑面：惰性 from-import 绑定复制 vs run_in_executor 队列时序） |
+| V3 | ——**回退** | 子包化后 SSE 事件环挂起（字节级等价复现仍挂，pre-MS5 原版当日 0.95s 通过——排除环境漂移，定性为模块组织引发的深层 asyncio/线程时序问题）；已按裁决⑥恢复单文件，chat 32+docs 18 全绿。挂账 MS6 前置。
+> **V3 重做结论（本次）**：渐进二分执行——Step A（web_tools 三件子包）✅ 全绿落地（1ac94e4）；Step B（chat_api 五件，头部整块原样拷贝、send 字节级 ast 等价）❌ SSE 挂起**精确复现**并取得关键法证：faulthandler 全栈显示「LLM 线程在打印 enter 后、执行下一行前**凭空消失**」（5 线程中无任何 chat 帧；消费协程 0.15s 轮询正常；事件循环 idle select）。线程不可能在两条纯 Python 语句间消失且无帧——指向 C 扩展层阻塞且帧不可见，或线程被外部机制移除。已尝试未果：stdlib 注入排查、模块双实例排查（无）、PEP562 委托、`-o faulthandler_timeout`、py-spy（需提权）。
+> **下一步归因入口**：① `sudo py-spy dump`（提权后可直接看消失线程的真实栈）② 最小复现缩减（把 chat_api 五件逐件回退二分，定位到具体子模块触发）③ 对比 `sys.settrace` 全量行事件（trace 会改变时序，仅作对照）。三项均需独立会话预算。 |
 
 ### 实施期修正
 1. graph-kernel 深路径（继承 MS1 教训）直接走 barrel 出口
