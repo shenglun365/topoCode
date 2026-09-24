@@ -29,23 +29,18 @@ def register_methods(server, multi_db):
     register_render_methods(server, multi_db)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="TopoOne Docs Service (doc viewer + web_root)")
-    parser.add_argument("--data-dir", type=str, default=None)
-    parser.add_argument("--port", type=int, default=int(os.environ.get("DOC_SERVICE_PORT", "3481")))
-    parser.add_argument("--host", type=str, default="127.0.0.1")
-    args = parser.parse_args()
+def build_app(data_dir: str, port: int = 3481):
+    """组装 docs 服务 FastAPI app（M11 装配体原样提取；MS1 C3 行为保持，TestClient 可直接构造）。
 
-    data_dir = args.data_dir or os.path.join(os.path.expanduser("~"), ".topocode")
-    os.makedirs(data_dir, exist_ok=True)
-
-    import uvicorn
+    副作用：common.set_globals(multi_db, port) 设置进程级全局态；
+    app.state.multi_db 挂载 MultiDBManager（main() 收尾 close_all 用）。
+    """
     from topoone import service_common as common
     from topoone.db.manager import MultiDBManager
     from topoone.rpc.service_app import MethodServer, create_service_app
 
     multi_db = MultiDBManager(data_dir)
-    common.set_globals(multi_db, port=args.port)
+    common.set_globals(multi_db, port=port)
 
     # plantuml 缓存初始化（docs 服务独占，M11 起从 gateway 移入）
     cache_path = os.path.join(data_dir, "cache", "plantuml_cache.db")
@@ -85,6 +80,23 @@ def main():
     app.include_router(viewer_router)
     app.include_router(web_root_router)
     app.include_router(create_topo_router(diagram_services, fallback_renderer=_fallback_pu, prefix="/api/topo"))
+    app.state.multi_db = multi_db
+    return app
+
+
+def main():
+    parser = argparse.ArgumentParser(description="TopoOne Docs Service (doc viewer + web_root)")
+    parser.add_argument("--data-dir", type=str, default=None)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("DOC_SERVICE_PORT", "3481")))
+    parser.add_argument("--host", type=str, default="127.0.0.1")
+    args = parser.parse_args()
+
+    data_dir = args.data_dir or os.path.join(os.path.expanduser("~"), ".topocode")
+    os.makedirs(data_dir, exist_ok=True)
+
+    import uvicorn
+
+    app = build_app(data_dir, port=args.port)
 
     logger.info(f"[docs-service] starting on http://{args.host}:{args.port}")
     from topoone.http_logging import install_heartbeat_filter
@@ -92,7 +104,7 @@ def main():
     try:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     finally:
-        multi_db.close_all()
+        app.state.multi_db.close_all()
 
 
 if __name__ == "__main__":
