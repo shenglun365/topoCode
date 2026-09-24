@@ -156,6 +156,20 @@ class ConversationsStore:
         return _update(cls.TABLE, conv_id, data)
 
     @classmethod
+    def merge_meta(cls, conv_id: str, patch: dict) -> Optional[dict]:
+        """meta 读改写合并(通用能力): 只合并 patch 键, 不覆盖 meta 其余既有键。
+
+        各特性往会话 meta 落状态(如 ctxUsage)统一走此方法, 替代各自手搓
+        读-改-写(读侧已按 _JSON_COLUMNS 解 meta 为 dict)。会话不存在 → None。"""
+        row = cls.get(conv_id)
+        if not row:
+            return None
+        old = row.get("meta")
+        if not isinstance(old, dict):
+            old = {}
+        return cls.update(conv_id, {"meta": {**old, **(patch or {})}})
+
+    @classmethod
     def messages(cls, conv_id: str, limit: int = 200) -> list[dict]:
         db, found = _locate_db(cls.TABLE, conv_id)
         if not found:

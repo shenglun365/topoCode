@@ -201,3 +201,191 @@ def test_run_button_auto_starts(arch_env, tmp_path, monkeypatch):
     r = cmds.run_execute(conv, skip_plan=True, auto_start=True)
     assert r.get("ok") and r["task"]["status"] == "running", r
     # 完结态/忽略态不会被误启动语义破坏: confirm 幂等由 dispatch 门禁保证
+
+
+def test_confirm_double_click_single_runner(arch_env, tmp_path, monkeypatch):
+    """连点「开始执行」防重: 慢启动窗口内并发 confirm 只拉起一个 runner,
+    第二次点击幂等命中(duplicate=True), 不产生多个 LLM 进程。"""
+    import threading
+    import time as _time
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    root = tmp_path / "p"; root.mkdir()
+    conv = _mk_conv(projectId="proj-dc", meta={"root": str(root)})
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-dc"))
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_start_task_pump", lambda *a, **k: None)
+    starts = {"n": 0}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        if path == "/api/implement":
+            starts["n"] += 1
+            _time.sleep(0.1)   # 模拟慢启动: 第二次 confirm 在状态翻转前到达
+            return {"ok": True, "jobId": f"j-dc-{starts['n']}", "branch": "task/dc",
+                    "worktree": str(tmp_path / "wt"), "sessionId": "s",
+                    "baseCommit": "sha-dc"}
+        return {"ok": True}
+
+    monkeypatch.setattr(eb, "_runner", _fake_runner)
+    r = eb.propose_task(conv, "T", "目标: X", executor_hint={"executorType": "cline-sdk"})
+    barrier = threading.Barrier(2)
+    outs = []
+
+    def _click():
+        barrier.wait()
+        outs.append(eb.confirm_task(r["id"]))
+
+    threads = [threading.Thread(target=_click) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert starts["n"] == 1, f"runner 被拉起 {starts['n']} 次(连点穿透)"
+    assert all(o.get("ok") for o in outs), outs
+    assert any(o.get("duplicate") for o in outs), outs
+    assert store.TasksStore.get(r["id"])["status"] == ST.TASK_RUNNING
+
+
+def test_stop_during_confirm_slow_start_no_zombie(arch_env, tmp_path, monkeypatch):
+    """confirm 慢启动窗口内停止: stop 等状态迁移锁串行 → 重读 running →
+    runner finish + cancelled(旧代码取消被 running 覆写成僵尸任务)。"""
+    import threading
+    import time as _time
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    root = tmp_path / "p"; root.mkdir()
+    conv = _mk_conv(projectId="proj-sz", meta={"root": str(root)})
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-sz"))
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_start_task_pump", lambda *a, **k: None)
+    started = threading.Event()
+    release = threading.Event()
+    finishes = {"n": 0}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        if path == "/api/implement":
+            started.set()
+            release.wait(2.0)
+            return {"ok": True, "jobId": "j-sz", "branch": "task/sz",
+                    "worktree": str(tmp_path / "wt"), "sessionId": "s",
+                    "baseCommit": "sha-sz"}
+        if path.endswith("/finish"):
+            finishes["n"] += 1
+        return {"ok": True}
+
+    monkeypatch.setattr(eb, "_runner", _fake_runner)
+    r = eb.propose_task(conv, "T", "目标: X", executor_hint={"executorType": "cline-sdk"})
+    tid = r["id"]
+    th = threading.Thread(target=eb.confirm_task, args=(tid,))
+    th.start()
+    assert started.wait(2.0), "confirm 未进入慢启动"
+    stop_res = {}
+
+    def _stop():
+        stop_res["r"] = eb.task_stop(tid)
+
+    ts = threading.Thread(target=_stop)
+    ts.start()
+    _time.sleep(0.05)      # stop 已阻塞在状态迁移锁上
+    release.set()          # confirm 完成: 状态翻转 running → 锁释放
+    th.join(2.0)
+    ts.join(2.0)
+    assert finishes["n"] == 1, "运行中停止应调用 runner finish"
+    assert stop_res["r"]["ok"], stop_res
+    assert store.TasksStore.get(tid)["status"] == ST.TASK_CANCELLED
+
+
+def test_ignore_during_confirm_start_gets_409(arch_env, tmp_path, monkeypatch):
+    """忽略在 confirm 慢启动期间到达: 等锁串行 → 锁内重读 running → 409
+    (旧代码忽略被 confirm 覆写复活为 running)。"""
+    import threading
+    import time as _time
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    root = tmp_path / "p"; root.mkdir()
+    conv = _mk_conv(projectId="proj-ig", meta={"root": str(root)})
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-ig"))
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_start_task_pump", lambda *a, **k: None)
+    started = threading.Event()
+    release = threading.Event()
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        if path == "/api/implement":
+            started.set()
+            release.wait(2.0)
+            return {"ok": True, "jobId": "j-ig", "branch": "task/ig",
+                    "worktree": str(tmp_path / "wt"), "sessionId": "s",
+                    "baseCommit": "sha-ig"}
+        return {"ok": True}
+
+    monkeypatch.setattr(eb, "_runner", _fake_runner)
+    r = eb.propose_task(conv, "T", "目标: X", executor_hint={"executorType": "cline-sdk"})
+    tid = r["id"]
+    th = threading.Thread(target=eb.confirm_task, args=(tid,))
+    th.start()
+    assert started.wait(2.0)
+    ig = {}
+
+    def _ign():
+        ig["r"] = eb.ignore_task(tid)
+
+    ti = threading.Thread(target=_ign)
+    ti.start()
+    _time.sleep(0.05)      # ignore 已阻塞在状态迁移锁上
+    release.set()
+    th.join(2.0)
+    ti.join(2.0)
+    assert not ig["r"]["ok"] and ig["r"].get("code") == 409, ig
+    assert store.TasksStore.get(tid)["status"] == ST.TASK_RUNNING
+
+
+def test_double_stop_serialized_single_finish(arch_env, tmp_path, monkeypatch):
+    """运行中任务双停: 状态迁移锁串行 → runner finish 恰一次,
+    第二次停止锁内重读终态显式 not-active, 状态恒 cancelled。"""
+    import threading
+    from topoone_app_architect.arch_routes import exec_bridge as eb
+    root = tmp_path / "p"; root.mkdir()
+    conv = _mk_conv(projectId="proj-ds2", meta={"root": str(root)})
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-ds2"))
+    monkeypatch.setattr(eb, "_resolve_boundary_files", lambda *a, **k: [])
+    monkeypatch.setattr(eb, "_check_mutex", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_start_task_pump", lambda *a, **k: None)
+    finishes = {"n": 0}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "j-ds2", "branch": "task/ds2",
+                    "worktree": str(tmp_path / "wt"), "sessionId": "s",
+                    "baseCommit": "sha-ds2"}
+        if path.endswith("/finish"):
+            finishes["n"] += 1
+        return {"ok": True}
+
+    monkeypatch.setattr(eb, "_runner", _fake_runner)
+    r = eb.propose_task(conv, "T", "目标: X", executor_hint={"executorType": "cline-sdk"})
+    assert eb.confirm_task(r["id"])["ok"]
+    barrier = threading.Barrier(2)
+    outs = []
+
+    def _stop():
+        barrier.wait()
+        outs.append(eb.task_stop(r["id"]))
+
+    threads = [threading.Thread(target=_stop) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(2.0)
+    assert finishes["n"] == 1, f"runner finish 被调用 {finishes['n']} 次"
+    assert len([o for o in outs if o.get("ok")]) == 1
+    assert len([o for o in outs if not o.get("ok")]) == 1
+    assert store.TasksStore.get(r["id"])["status"] == ST.TASK_CANCELLED

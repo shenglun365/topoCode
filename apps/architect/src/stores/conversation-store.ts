@@ -144,19 +144,29 @@ export const useConversationStore = defineStore('archConversation', () => {
     } catch { /* 保持现状 */ }
   }
 
-  /** 任务操作(轻门禁确认/取消/停止/转达)。 */
-  async function taskAction(taskId: string, action: 'confirm' | 'cancel' | 'input' | 'ignore', text?: string) {
-    const { apiPost } = await import('@/services/api-client')
-    try {
-      if (action === 'input') {
-        await apiPost(`/tasks/${taskId}/input`, { text: text || '' })
-      } else {
-        await apiPost(`/tasks/${taskId}/${action}`, {})
-      }
-      await refreshTasks()
-      void refreshActiveMessages()
-      return true
-    } catch { return false }
+  /** 任务操作(轻门禁确认/取消/停止/转达)。同键 in-flight 去重——
+   *  连点「开始执行」只发一次 confirm(后端另有同会话串行+幂等兜底)。 */
+  const taskActionInflight = new Map<string, Promise<boolean>>()
+  function taskAction(taskId: string, action: 'confirm' | 'cancel' | 'input' | 'ignore', text?: string): Promise<boolean> {
+    const key = `${taskId}:${action}`
+    const prev = taskActionInflight.get(key)
+    if (prev) return prev
+    const p = (async () => {
+      const { apiPost } = await import('@/services/api-client')
+      try {
+        if (action === 'input') {
+          await apiPost(`/tasks/${taskId}/input`, { text: text || '' })
+        } else {
+          await apiPost(`/tasks/${taskId}/${action}`, {})
+        }
+        await refreshTasks()
+        void refreshActiveMessages()
+        return true
+      } catch { return false }
+    })()
+    taskActionInflight.set(key, p)
+    void p.finally(() => taskActionInflight.delete(key))
+    return p
   }
 
   /**
@@ -549,6 +559,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         return
       case 'turnEnd':
         scheduleRefresh()
+        void refreshActiveMeta()   // meta 驱动的 UI(如 ctxUsage chip)随回合刷新
         return
       default:
         return

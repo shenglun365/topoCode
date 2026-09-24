@@ -306,3 +306,51 @@ def test_card_round_short_circuit_skips_narration(pipeline):
              and (m.get("meta") or {}).get("kind") != "specReady"
              and "需求卡已创建" in (m.get("content") or "")]
     assert dupes == [], "落卡轮不得再落合成收尾文本(cv-203)"
+
+
+# ── 上下文用量记账(cognition/ctx_usage 通用链: 估算/merge_meta/落账/透传) ──
+
+def test_estimate_msgs_tokens_char_ratio():
+    from topoone_app_architect.agent.cognition.ctx_usage import (
+        CHARS_PER_TOKEN, estimate_msgs_tokens)
+    assert CHARS_PER_TOKEN == 2, "口径须与主后端 TokenBudget 一致"
+    msgs = [{"role": "system", "content": "x" * 100},
+            {"role": "user", "content": "y" * 50},
+            {"role": "assistant", "content": ""}]
+    assert estimate_msgs_tokens(msgs) == 75
+    assert estimate_msgs_tokens([]) == 0
+    assert estimate_msgs_tokens(None) == 0
+
+
+def test_merge_meta_preserves_existing_keys(arch_env):
+    assert store.ConversationsStore.merge_meta("cv-not-exist", {"a": 1}) is None
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
+    assert store.ConversationsStore.merge_meta(conv["id"], {"a": 1}) is not None
+    store.ConversationsStore.merge_meta(conv["id"], {"b": {"nested": True}})
+    meta = store.ConversationsStore.get(conv["id"])["meta"]
+    assert meta["a"] == 1 and meta["b"] == {"nested": True}, "merge 不得覆盖既有键"
+
+
+def test_record_turn_writes_ctx_usage_fail_soft(arch_env, monkeypatch):
+    from topoone_app_architect.agent.cognition import ctx_usage
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
+    store.ConversationsStore.merge_meta(conv["id"], {"keep": "me"})
+    monkeypatch.setattr(ctx_usage, "resolve_budget", lambda mid: 32000)
+    ctx_usage.record_turn(conv["id"],
+                          [{"role": "user", "content": "z" * 200}], "m1")
+    meta = store.ConversationsStore.get(conv["id"])["meta"]
+    u = meta["ctxUsage"]
+    assert u["used"] == 100 and u["budget"] == 32000 and u["at"] > 0
+    assert meta["keep"] == "me", "落账不得覆盖 meta 其余键"
+    monkeypatch.setattr(ctx_usage, "resolve_budget", lambda mid: 0)
+    ctx_usage.record_turn(conv["id"], [], "")
+    assert store.ConversationsStore.get(conv["id"])["meta"]["ctxUsage"]["budget"] == 0
+
+
+def test_sessions_list_passthrough_meta(client):
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
+    store.ConversationsStore.merge_meta(
+        conv["id"], {"ctxUsage": {"used": 7, "budget": 0, "at": 1}})
+    rows = client.get("/api/architect/sessions").json()["data"]
+    hit = next(r for r in rows if r["id"] == conv["id"])
+    assert hit["meta"]["ctxUsage"]["used"] == 7

@@ -820,6 +820,7 @@ async function pollRunningState() {
         :has-session="!!conv.activeId"
         :conv-id="conv.activeId || undefined"
         :tasks="conv.tasks"
+        :ctx-usage="((conv.activeMeta as any)?.meta?.ctxUsage) ?? null"
         @set-analysis-mode="onSetAnalysisMode"
         @set-clarify-mode="onSetClarifyMode"
         @set-isolated="onSetIsolated"

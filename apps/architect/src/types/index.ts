@@ -1395,3 +1395,13 @@ export interface GraphFileEntry {
   /** 归属组件 id 列表(componentsOf 口径，首项为主分组)。 */
   comps: string[]
 }
+
+/** 会话上下文用量账目(后端 cognition/ctx_usage 回合落账 → conversations.meta.ctxUsage)。 */
+export interface CtxUsage {
+  /** 本回合实际发送组装体估算 tokens(chars/2 口径)。 */
+  used: number
+  /** 可用上下文预算 tokens；0=容量未知(模型 API 探测不到，不猜)。 */
+  budget: number
+  /** 落账时间 epoch ms。 */
+  at?: number
+}

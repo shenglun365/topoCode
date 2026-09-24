@@ -4,7 +4,11 @@
     :class="statusTone"
   >
     <div class="flex items-center gap-2 flex-wrap">
-      <span class="font-semibold">{{ task.title || '任务' }}</span>
+      <span
+        class="font-semibold cursor-pointer select-none"
+        title="点击收起/展开卡片"
+        @click="toggleCollapse"
+      >{{ task.title || '任务' }}</span>
       <span class="chip !text-[10px] bg-ctp-surface1 text-ctp-subtext0 font-mono">{{ task.executorType || 'opencode' }}</span>
       <span
         v-if="task.specVer > 0"
@@ -33,29 +37,34 @@
       <!-- 默认保存: saved → 开始执行/忽略; 存量 pending_confirm → 确认/取消 -->
       <template v-if="task.status === 'saved'">
         <button
-          class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30"
-          @click="$emit('confirm', task.id)"
+          class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30 disabled:opacity-40"
+          :disabled="acted"
+          @click="act('confirm', task.id)"
         >▶ 开始执行</button>
         <button
-          class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25"
-          @click="$emit('ignore', task.id)"
+          class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25 disabled:opacity-40"
+          :disabled="acted"
+          @click="act('ignore', task.id)"
         >✕ 忽略</button>
       </template>
       <template v-else-if="task.status === 'pending_confirm'">
         <button
-          class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30"
-          @click="$emit('confirm', task.id)"
+          class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30 disabled:opacity-40"
+          :disabled="acted"
+          @click="act('confirm', task.id)"
         >✓ 确认执行</button>
         <button
-          class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25"
-          @click="$emit('cancel', task.id)"
+          class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25 disabled:opacity-40"
+          :disabled="acted"
+          @click="act('cancel', task.id)"
         >✕ 取消</button>
       </template>
       <!-- 执行中 → 停止 -->
       <button
         v-else-if="task.status === 'running' || task.status === 'waiting_input'"
-        class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25"
-        @click="$emit('cancel', task.id)"
+        class="btn-mini bg-ctp-red/15 text-ctp-red hover:bg-ctp-red/25 disabled:opacity-40"
+        :disabled="acted"
+        @click="act('cancel', task.id)"
       >⏹ 停止</button>
       <!-- 完成 → 已阅(reviewing 消化出口; 幂等) -->
       <button
@@ -64,7 +73,10 @@
         title="回执已阅——不合并、不建下张卡(留痕可追溯)"
         @click="$emit('dismiss', task.id)"
       >✓ 已阅</button>
+      <CollapseChevron class="ml-auto" :collapsed="collapsed" @toggle="toggleCollapse" />
     </div>
+    <!-- 收起体: header(标题/状态/操作)恒可见; v-show 保留挂载——StreamItems 实时流不丢 -->
+    <div v-show="!collapsed">
     <div v-if="task.branch" class="mt-1 text-[10px] text-ctp-overlay1 font-mono">
       分支 {{ task.branch }}
     </div>
@@ -182,6 +194,7 @@
       ⏸ 等待你的输入——直接回复即转达
     </div>
     <div v-if="task.resultMd && isTerminal" class="mt-1 text-ctp-subtext0 line-clamp-6 whitespace-pre-wrap">{{ task.resultMd }}</div>
+    </div>
   </div>
 </template>
 
@@ -189,10 +202,22 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 import { apiPost } from '@/services/api-client'
+import { useCardCollapse } from '@/composables/useCardCollapse'
+import CollapseChevron from './CollapseChevron.vue'
 import StreamItems from './StreamItems.vue'
 
 const props = defineProps<{ task: Record<string, any>; convId?: string }>()
-defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
+const emit = defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
+
+// 连点防重: 首次点击即锁定(慢路径秒级——后端 confirm 含探针/runner start),
+// 任务状态翻转(running/失败等)后解锁。后端同会话锁+幂等为最终兜底。
+const acted = ref(false)
+watch(() => props.task.status, () => { acted.value = false })
+function act(kind: 'confirm' | 'cancel' | 'ignore', id: string) {
+  if (acted.value) return
+  acted.value = true
+  emit(kind, id)
+}
 
 // ── 验收配置(V1): 仅 pending_confirm 可写, 启动时随 start payload 下发 ──
 const vcOpen = ref(false)
@@ -239,6 +264,14 @@ const STATUS_TEXT: Record<string, string> = {
 }
 const statusText = computed(() => STATUS_TEXT[props.task.status] || props.task.status)
 const isTerminal = computed(() => ['done', 'failed', 'cancelled', 'ignored'].includes(props.task.status))
+
+// 收起/展开(统一状态源): 终态自动收起(仿问询卡已答先例), 用户覆盖持久化可反选
+const { isCollapsed: cardIsCollapsed, toggle: cardToggle } = useCardCollapse()
+const cardKey = computed(() => `task:${props.task.id}`)
+const collapsed = computed(() => cardIsCollapsed(cardKey.value, isTerminal.value))
+function toggleCollapse() {
+  cardToggle(cardKey.value, isTerminal.value)
+}
 const progress = computed(() => (typeof props.task.progress === 'object' && props.task.progress) || null)
 const isLive = computed(() => ['running', 'waiting_input'].includes(props.task.status))
 const processTail = computed(() => ((props.task.progress?.process) || []).slice(-8))

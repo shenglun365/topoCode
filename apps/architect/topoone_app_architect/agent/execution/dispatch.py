@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -296,19 +297,48 @@ def propose_task(conv: dict, title: str, instruction: str,
     return task
 
 
+# 同会话任务状态迁移锁(confirm/stop/ignore/merge 共用)——实测连点「开始执行」
+# 拉起多个 runner/LLM 进程, 且慢路径(范围探针 LLM + runner start ≤20s)期间
+# 状态仍 saved: check-then-act 非原子。改任务状态的迁移操作全程持锁 + 锁内
+# 重读状态, 杜绝 confirm×stop/ignore 互覆(僵尸任务)、双 confirm 双启动。
+_confirm_locks: Dict[str, threading.Lock] = {}
+_confirm_locks_guard = threading.Lock()
+
+
+def _conv_task_lock(conv_id: str) -> threading.Lock:
+    with _confirm_locks_guard:
+        lk = _confirm_locks.get(conv_id)
+        if lk is None:
+            lk = threading.Lock()
+            _confirm_locks[conv_id] = lk
+        return lk
+
+
 def confirm_task(task_id: str) -> dict:
     """开始执行(2026-09-20 语义: saved|pending_confirm → running)。
 
     原用户确认门禁已按产品裁决取消(默认保存/手动触发/主动忽略)——
-    本函数即「开始执行」动作; 存量 pending_confirm 卡沿用同门。"""
+    本函数即「开始执行」动作; 存量 pending_confirm 卡沿用同门。
+    同会话状态迁移锁内执行(防重); 已在执行的任务重复 confirm 幂等成功。"""
     task = store.TasksStore.get(task_id)
     if not task:
         return {"ok": False, "error": "task-not-found"}
-    if (task.get("status") or "") not in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM):
-        return {"ok": False, "error": f"task-status={task.get('status')}"}
     conv = store.ConversationsStore.get(task["conversationId"])
     if not conv:
         return {"ok": False, "error": "conv-not-found"}
+    with _conv_task_lock(conv["id"]):
+        return _confirm_task_locked(task_id, conv)
+
+
+def _confirm_task_locked(task_id: str, conv: dict) -> dict:
+    """confirm 主体(须持 _conv_confirm_lock 调用)。锁内重读任务状态:
+    并发第二次点击在慢路径完成前到达时, 已翻转的 running 态在此幂等命中。"""
+    task = store.TasksStore.get(task_id) or {}
+    _st = task.get("status") or ""
+    if _st in (ST.TASK_RUNNING, ST.TASK_WAITING_INPUT):
+        return {"ok": True, "task": task, "duplicate": True}
+    if _st not in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM):
+        return {"ok": False, "error": f"task-status={_st}"}
     from ...arch_routes.execution import conv_root_project
     conv_id = conv["id"]
     # 同会话活跃任务互斥(一次一个 subagent 回合); 命中先惰性自愈——
@@ -678,22 +708,26 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
 def ignore_task(task_id: str) -> Dict[str, Any]:
     """用户主动忽略(软删置灰, 2026-09-20 产品裁决): 仅未开始(saved)卡可忽略。
 
-    终态 ignored: 排除互斥/恢复, 流内卡片置灰可追溯; 同需求可重新建卡。"""
+    终态 ignored: 排除互斥/恢复, 流内卡片置灰可追溯; 同需求可重新建卡。
+    同会话状态迁移锁内执行——防与 confirm 慢启动竞态(忽略被 running 覆写复活)。"""
     task = store.TasksStore.get(task_id)
     if not task:
         return {"ok": False, "error": "task-not-found", "code": 404}
-    if (task.get("status") or "") != ST.TASK_SAVED:
-        return {"ok": False, "error":
-                f"仅未开始(saved)任务可忽略(当前 {task.get('status')})——"
-                "运行中请先停止, 已完成/已忽略无需忽略。", "code": 409}
-    task = store.TasksStore.update(task_id, {"status": ST.TASK_IGNORED}) or task
     conv_id = task.get("conversationId") or ""
-    _eb()._append(conv_id, "assistant",
-                  f"🚫 **任务已忽略**：{task.get('title')}",
-                  msg_meta={"kind": "task_ignored", "taskId": task_id})
-    _publish_task(conv_id, task)
-    _flow_recompute(conv_id, trigger="task-ignore")
-    return {"ok": True, "task": task}
+    with _conv_task_lock(conv_id):
+        task = store.TasksStore.get(task_id) or task
+        if (task.get("status") or "") != ST.TASK_SAVED:
+            return {"ok": False, "error":
+                    f"仅未开始(saved)任务可忽略(当前 {task.get('status')})——"
+                    "运行中请先停止, 已完成/已忽略无需忽略。", "code": 409}
+        task = store.TasksStore.update(task_id, {"status": ST.TASK_IGNORED}) or task
+        conv_id = task.get("conversationId") or ""
+        _eb()._append(conv_id, "assistant",
+                      f"🚫 **任务已忽略**：{task.get('title')}",
+                      msg_meta={"kind": "task_ignored", "taskId": task_id})
+        _publish_task(conv_id, task)
+        _flow_recompute(conv_id, trigger="task-ignore")
+        return {"ok": True, "task": task}
 
 
 def dismiss_task(task_id: str) -> Dict[str, Any]:
@@ -719,26 +753,31 @@ def dismiss_task(task_id: str) -> Dict[str, Any]:
 
 
 def task_stop(task_id: str, reason: str = "") -> Dict[str, Any]:
-    """停止任务(保留 worktree/分支)。"""
+    """停止任务(保留 worktree/分支)。同会话状态迁移锁内执行——
+    防与 confirm 慢启动竞态(取消被 running 覆写成僵尸任务); 锁内重读状态。"""
     task = store.TasksStore.get(task_id)
-    if not task or (task.get("status") or "") in _eb()._TASK_TERMINAL:
+    if not task:
         return {"ok": False, "error": "task-not-active"}
-    if (task.get("status") or "") in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM):
-        store.TasksStore.finish(task_id, "cancelled", reason or "用户取消")
+    with _conv_task_lock(task.get("conversationId") or ""):
+        task = store.TasksStore.get(task_id) or task
+        if (task.get("status") or "") in _eb()._TASK_TERMINAL:
+            return {"ok": False, "error": "task-not-active"}
+        if (task.get("status") or "") in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM):
+            store.TasksStore.finish(task_id, "cancelled", reason or "用户取消")
+            t = store.TasksStore.get(task_id) or {}
+            _publish_task(task["conversationId"], t)
+            _flow_recompute(task["conversationId"], trigger="task-stop")
+            return {"ok": True, "task": t}
+        from ..governance.timeouts import get as _timeout_of
+        _eb()._client().finish(str(task.get("runnerJobId") or ""), keep_worktree=True,
+                               timeout=_timeout_of("runner_finish"))
+        store.TasksStore.finish(task_id, "cancelled", reason or "用户停止")
+        for fut in (_eb()._TASK_PUMPS.pop(task["conversationId"], None) or {}).values():
+            fut.cancel()
+        _task_reaggregate_work_state(task["conversationId"])
         t = store.TasksStore.get(task_id) or {}
         _publish_task(task["conversationId"], t)
-        _flow_recompute(task["conversationId"], trigger="task-stop")
         return {"ok": True, "task": t}
-    from ..governance.timeouts import get as _timeout_of
-    _eb()._client().finish(str(task.get("runnerJobId") or ""), keep_worktree=True,
-                           timeout=_timeout_of("runner_finish"))
-    store.TasksStore.finish(task_id, "cancelled", reason or "用户停止")
-    for fut in (_eb()._TASK_PUMPS.pop(task["conversationId"], None) or {}).values():
-        fut.cancel()
-    _task_reaggregate_work_state(task["conversationId"])
-    t = store.TasksStore.get(task_id) or {}
-    _publish_task(task["conversationId"], t)
-    return {"ok": True, "task": t}
 
 
 def active_task_of(conv_id: str) -> Optional[dict]:

@@ -176,7 +176,18 @@ def merge_branch(task_id: str, mode: str = "ff") -> Dict[str, Any]:
 
     mode: ff = 仅快进(主目录无推进时); no-ff = 强制合并提交(冲突则中止回显)。
     成功 → 任务行记 merged_at/merged_head(merged 终态, 分支内容已进主)。
-    """
+    同会话任务状态迁移锁内执行——防双击双 merge(precheck/git 慢路径窗口)。"""
+    from ...arch_routes import store
+    task = store.TasksStore.get(task_id)
+    if not task:
+        return {"ok": False, "error": "task-not-found", "code": 404}
+    from .dispatch import _conv_task_lock
+    with _conv_task_lock(task.get("conversationId") or ""):
+        return _merge_branch_locked(task_id, mode)
+
+
+def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
+    """merge 主体(须持 _conv_task_lock 调用)——锁内重读任务行裁决状态门禁。"""
     from ...arch_routes import store
     task = store.TasksStore.get(task_id)
     if not task:

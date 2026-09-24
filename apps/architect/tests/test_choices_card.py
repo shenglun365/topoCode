@@ -48,12 +48,12 @@ def _land_fence(content, conv_id="conv-ch"):
 
     token = _ctx.set_conv(conv_id)
     try:
-        fc, _c, used, errs = asyncio.run(_post_turn_land(
+        fc, _c, used, errs, landed = asyncio.run(_post_turn_land(
             SimpleNamespace(send=_send), conv_id, [], None, None, None, None,
             {}, set(), {}, content, None, allowed_tools=set()))
     finally:
         _ctx.reset_conv(token)
-    return fc, used, errs
+    return fc, used, errs, landed
 
 
 # ── 协议层: 显式标记提取/剥离(不进 json 候选扫描) ─────────────────────
@@ -91,7 +91,7 @@ def test_strip_choices_fence_scoped():
 def test_fence_source_lands_choices_card(arch_env):
     from topoone_app_architect.agent.collab import cards as _cards
     from topoone_app_architect.arch_routes import store
-    fc, used, _errs = _land_fence(f"请确认选型：\n{CHOICES_FENCE}")
+    fc, used, _errs, _landed = _land_fence(f"请确认选型：\n{CHOICES_FENCE}")
     assert used == set()                       # 交互卡不计入写工具
     assert "choices" not in fc                 # 围栏剥离
     cards = [m for m in store.ConversationsStore.messages("conv-ch")
@@ -106,7 +106,7 @@ def test_fence_source_lands_choices_card(arch_env):
 
 def test_no_card_on_invalid_payload(arch_env):
     from topoone_app_architect.arch_routes import store
-    fc, _used, _e = _land_fence('问题：\n```choices\n{"groups": []}\n```')
+    fc, _used, _e, _landed = _land_fence('问题：\n```choices\n{"groups": []}\n```')
     cards = [m for m in store.ConversationsStore.messages("conv-ch")
              if (m.get("meta") or {}).get("kind") == KIND_CHOICES]
     assert cards == [] and "```choices" in fc   # 坏载荷正文保留(信息不丢)

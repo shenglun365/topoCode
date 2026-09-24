@@ -108,6 +108,7 @@ _R2_INVENTORY = {
     "memory/units.py": {"reflection"},       # MS2 显形(原经 shim); memory→reflection 摘要回路, MS4 断环清退
     "memory/distill.py": {"reflection"},     # MS2 显形(原经 shim); 蒸馏经 repair 摘要, MS4 断环清退
     "sessions/coding.py": {"reflection"},    # MS2 显形(原经 shim); coding 回合摘要, MS4 断环清退
+    "cognition/ctx_usage.py": set(),             # 2026-09-24 在途合入立条——ctx 预算模块引 arch_routes.store(会话存取); MS4 断环时随 req_agent/store 通道统一清退
     "perception/commands.py": {"planning", "turns", "compensation"},
     "planning/task_plan.py": {"turns"},
     "planning/scope_probe.py": {"turns"},
