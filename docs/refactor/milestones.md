@@ -66,13 +66,13 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 ### MS3 前端职能归一〔B2〕
 
 - **功能单元属性**：前端架构定型——architect 彻底独立（裁决①），KB 系（workbench/chat/docs）基建归一，web-core 瘦身到正确职责。
-- **范围**：architect 12 处 web-core import 自持替换 + `SYNC-WITH` 锚点 + 移除依赖声明；KB 系 token key 统一 `topocode:token`；useConfirm→useDialog；StarLogoMark/svg/auth-service/Markdown 合一；web-core 越位物（ipc/types/ipc/browser-api/useComponentId/statusBadge）下沉 workbench；图域逻辑归口 graph-kernel；agent-sidecar 改名 `@topo/cline-sidecar`
+- **范围**（三路核证后修正，细则见 [MS3-frontend-unification.md](MS3-frontend-unification.md)）：architect **9 处 import/7 文件**自持替换（4 模块全走拷贝+SYNC-WITH；**碰撞面 4 文件 gated 待在途合入**，U1 干净面先行）+ 移除依赖声明；token key 统一 `topocode:token`（10 处字面量+迁移垫片）；useDialog 扩展 choices 吸收 useConfirm（auth-service/Markdown 合一核证后降级为文档化分歧）；web-core 下沉安全三件（statusBadge/useComponentId+ConfirmDialog/browser-api）+ **ipc 双件列 U6 评审裁决点**（portal settings 双消费）；diagram-normalize 归口 graph-kernel + 孤儿组件×2 删除（MS2 漏网）；sidecar 更名（现名 @topocode/→@topo/，目录同步）
 - **独立可测判据**：
-  1. `grep -rn "@topo/web-core" apps/architect/src` 零命中；architect 独立 `npm run build` 成功
+  1. `grep -rn "@topo/web-core" apps/architect/src` 零命中 + 依赖零声明 + 独立 build 成功（碰撞面未合入时按「U1 后仅余 4 文件」双口径如实记录）
   2. `grep -rn "topocode_token" packages apps --include=*.ts --include=*.vue` 零命中（token key 单一）
   3. KB 系三 app 功能回归：现有测试全绿 + 登录/图渲染/聊天收发手动清单
-  4. `web-core` 中 workbench 专用物清零（ipc 系列下沉后 grep 消费者仅 workbench）
-- **细化设计文档**：`MS3-frontend-unification.md`（待产出）
+  4. web-core 中 workbench 专用物清零（ipc 系列按 U6 裁决口径；安全三件 grep 消费者仅 workbench）
+- **细化设计文档**：[MS3-frontend-unification.md](MS3-frontend-unification.md)（已产出，待评审）
 
 ### MS4 architect 后端职能归位〔B3〕
 
@@ -125,7 +125,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 |---|---|---|---|---|
 | MS1 | ✅ 已评审（2026-09-24） | — | ✅ C1~C8 落地（b8cf54f..a835b5d，8+2 commits，含 D6/D7 两缺陷修复） | ✅ 判据1: 349 passed/39.7s · 判据3: ls-files 零命中 · 判据4: 进程=9 核证 · 判据2: type-check✅ test:fe✅ lint 存量红灯豁免（错误全在 MS1 未触碰文件）；topo serve 实测留待用户环境 |
 | MS2 | ✅ 已评审（2026-09-24） | — | ✅ K1~K5 落地（cc36437..39ed3b0+greenfield 措辞清理，6 commits） | ✅ 净删 **−7,006 行/+256**（93 文件）：architect 2,935 + workbench 3,635 + web-core 107 + shim/迁移 329；判据1: architect 1101(R1 存量)+四域 349+FE typecheck/test 全绿；判据2: A1~A5 零引用命中（仅存勘误记录与已清理措辞）；判据3: shortstat 与清单一致 |
-| MS3 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
+| MS3 | ✅ 已产出（[MS3-frontend-unification.md](MS3-frontend-unification.md)，待评审；含 U6 裁决点与 U2 gated 前置条件） | ⬜ | ⬜ | ⬜ |
 | MS4 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS5 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS6 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |

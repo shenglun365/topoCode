@@ -77,12 +77,12 @@ npm workspaces monorepo：4 个独立 Vite 前端应用（workbench 163 文件 3
 3. `apps/{chat,docs,architect}/server/` 空目录 ×3（architect 为核证时新发现）
 4. KnowledgePage 退役（裁决：退役——页面+knowledge/ 组件 5 件+store+i18n ~1,780 行 + 8 处导航/类型/i18n 解耦）
 
-### B2 前端职能归一（~8 人日，前置：B1，方向=裁决①）
+### B2 前端职能归一（~8 人日，前置：B1，方向=裁决①）——实施细则见 [refactor/MS3-frontend-unification.md](refactor/MS3-frontend-unification.md)（三路核证后多项修正）
 
-1. architect 独立化：12 处 web-core import 替换为自持实现（token/传输/i18n/shell/useTopoRender），api-client/ws-client 加 `SYNC-WITH` 锚点，最后移除 `@topo/web-core` 依赖声明；KB 基线组件语义支持收口为 MCP 通道（kb_gateway）
-2. KB 系（workbench/chat/docs）归一：token key 统一为 `topocode:token`（web-core token.ts/api.ts、graph-kernel auth.ts 三处多数派，仅 web-core/utils/http.ts 一处需改）、useConfirm→useDialog、StarLogoMark/svg/auth-service/Markdown 渲染合一
-3. web-core 瘦身：ipc.ts/types/ipc.ts/browser-api/useComponentId/statusBadge 下沉 workbench；图域逻辑（render/diagram-normalize/diagramStateStore）归口 graph-kernel
-4. agent-sidecar npm 名归一 `@topo/cline-sidecar`
+1. architect 独立化：**9 处 import / 7 文件**（MS2 删码后少于原估 12）——4 个被引模块 KB 系全在用，全走「拷贝副本+SYNC-WITH 锚点」；**4 个 import 所在文件恰为在途未提交改动**（ConversationDock/conversation-store/i18n×2）→ U1/U2 分裂（干净面先行，碰撞面 gated 待在途合入）；KB 基线组件语义支持收口为 MCP 通道（kb_gateway，MS7 验收面）
+2. KB 系归一：token key 统一 `topocode:token`（实测 **10 处字面量**横跨 http.ts/use-auth.ts/auth-store，非原估 1 处；需一次性旧→新迁移垫片防登出）、useDialog **扩展 choices 吸收** useConfirm（核证 useDialog 非超集，直接替换不成立）；~~auth-service/Markdown 合一~~ **降级**：前者为超集分叉（mock 分支）、后者为三表面本质差异配置——均文档化分歧保留
+3. web-core 瘦身：statusBadge/useComponentId(+ConfirmDialog)/browser-api 三件无纠缠直下沉；**ipc.ts/types/ipc.ts 受阻于 portal settings 三面板双消费**（0905 未发现）→ 列 U6 评审裁决点（案 A：settings 随迁 workbench+portal 路由收缩【建议】；案 B：挂账 MS6）；图域 diagram-normalize 归口 graph-kernel；**新发现孤儿组件 D3ForceGraph/MermaidViewer ~932 行**（MS2 漏网）随批删除
+4. sidecar 更名：现名实为 `@topocode/cline-sidecar` → `@topo/cline-sidecar` + 目录 `packages/agent-sidecar`→`packages/cline-sidecar`（Python 4 路径收口函数/8 处命令串/3 处测试）
 
 ### B3 后端职能归位（~10 人日，前置：B0；architect 35 测试文件即安全网）
 
