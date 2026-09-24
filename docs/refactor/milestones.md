@@ -125,7 +125,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 |---|---|---|---|---|
 | MS1 | ✅ 已评审（2026-09-24） | — | ✅ C1~C8 落地（b8cf54f..a835b5d，8+2 commits，含 D6/D7 两缺陷修复） | ✅ 判据1: 349 passed/39.7s · 判据3: ls-files 零命中 · 判据4: 进程=9 核证 · 判据2: type-check✅ test:fe✅ lint 存量红灯豁免（错误全在 MS1 未触碰文件）；topo serve 实测留待用户环境 |
 | MS2 | ✅ 已评审（2026-09-24） | — | ✅ K1~K5 落地（cc36437..39ed3b0+greenfield 措辞清理，6 commits） | ✅ 净删 **−7,006 行/+256**（93 文件）：architect 2,935 + workbench 3,635 + web-core 107 + shim/迁移 329；判据1: architect 1101(R1 存量)+四域 349+FE typecheck/test 全绿；判据2: A1~A5 零引用命中（仅存勘误记录与已清理措辞）；判据3: shortstat 与清单一致 |
-| MS3 | ✅ 已产出（[MS3-frontend-unification.md](MS3-frontend-unification.md)，待评审；含 U6 裁决点与 U2 gated 前置条件） | ⬜ | ⬜ | ⬜ |
+| MS3 | ✅ 已评审（2026-09-24：U6=案A；U2 前置=本期合入在途） | ⬜ | ⬜ | ⬜ |
 | MS4 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS5 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS6 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |

@@ -1,6 +1,6 @@
 # MS3 细化设计：前端职能归一（architect 独立 + KB 系基建归一）
 
-> 状态：**待评审** | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS3 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B2 · 裁决①
+> 状态：**已评审通过（2026-09-24）：U6=案 A；U2 前置条件裁决「本期合入」——在途工作先行落地解锁碰撞面** | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS3 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B2 · 裁决①
 > 事实基线：2026-09-24 三路核证（architect 依赖面 / KB 归一面 / sidecar 与图域），全部带 文件:行号。
 > 方向：architect 对 web-core **零依赖**（深路径与包声明全摘）；KB 系收敛到单一 web-core；web-core 只留多 app 真共享物。
 
@@ -56,7 +56,7 @@
 **迁移 3 个干净文件**：AppTopbar.vue（import 改 `@/shell/...`）、settings-store.ts（改 `@/shell/prefs`）、useDiagramRenderer.ts（改 `@/services/topo-render` + graph-kernel 直引）。
 **验证**：`grep @topo/web-core apps/architect/src` 仅余碰撞面 4 文件命中；vue-tsc + vitest 54 全绿。
 
-### U2 architect 独立化·碰撞面收尾（4/9，**前置条件：用户在途 4 文件合入**）
+### U2 architect 独立化·碰撞面收尾（4/9）——前置条件已裁决本期合入（在途工作先行单独 commit 落地）
 
 - 前置条件声明：ConversationDock.vue / conversation-store.ts / i18n/en-US.ts / i18n/zh-CN.ts 均有未提交在途改动（F1）。**等待合入后执行**；若 MS3 收口时仍未合入，U2 顺延挂账至 MS6 前置，MS3 以「5/9 清除 + 自持模块就位」验收
 - 动作：4 文件 import 改自持路径；`tests/conversation-live-buffer.test.ts:47` mock 路径同步；摘除 `apps/architect/package.json:23` 临时依赖；`grep -rn "@topo/web-core" apps/architect` 全仓零命中；`npm run build -w @topo/app-architect` 独立构建成功
@@ -90,7 +90,7 @@
 事实（F7）：ipc.ts+types/ipc.ts（1,841 行）被 portal/settings 三面板双消费。
 - **案 A（建议）：settings 三面板随迁 workbench**——它们本就是工作台域页面（经 workbench router 渲染）；portal 独立构建剔除 settings 路由（portal=登录/门户面，设置属工作台）。动：三面板+SettingsPage 迁 `apps/workbench/src/components/settings/`，ipc/types/ipc 迁 workbench，portal 路由表与 AppPortal 相应收缩，web-core index.ts:21 re-export 摘除
 - **案 B：ipc 双件留 web-core**，接受「web-core 含 workbench 单消费者大件」现状，挂账 MS6 重评 web-core/portal 边界
-默认按案 A 执行，评审可改判。
+**评审裁决：案 A（2026-09-24 确认）。**
 
 ### U7 sidecar 更名 `@topo/cline-sidecar`
 
