@@ -2,7 +2,7 @@
 
 > 版本 v1.0 | 2026-09-11 | 状态：**设计定稿，待实现**（对应 roadmap P2-T5 修订）
 > 背景：2026-09-11 执行模式评估结论——当前实施交付为**声明制**（`[[IMPLEMENT_DONE]]` 采信 agent 自述，runner 无任何程序化验证）；单测执行器（`test_runner.py`）与实施回路断线；回归/编译无保障；错误修复隐式依赖执行器内部循环。
-> 关联文档：[product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md)（P2-T5）· [local-small-model-finetune.md](local-small-model-finetune.md) §2.3（反馈回路质量决定修复模型级别——本设计正是把反馈回路工程化）· [plan-B.md](archive/plan-B.md)（约束求解哲学，已归档）
+> 关联文档：[product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md)（P2-T5）· [local-small-model-finetune.md](archive/local-small-model-finetune.md) §2.3（已归档；反馈回路质量决定修复模型级别——本设计正是把反馈回路工程化）· [plan-B.md](archive/plan-B.md)（约束求解哲学，已归档）
 > 实现载体：`packages/core/topoone/plugins/runner/implement.py`（ImplementJob 管线）+ `apps/architect/.../test_runner.py`（复用扩展）+ 会话/项目配置存储。**不依赖已退役的 SE 任务树状态机。**
 
 ---
