@@ -158,4 +158,5 @@ symbols.py/codegraph.py 头注升级为裁决⑤ SLA 表述（codegraph=architec
 - git mv：store→顶层、sem→顶层、db_schema→store/schema、ctx/common/kb_gateway→顶层
 - 规则重写 159+ 文件：agent 三点形、arch_routes 两点形、tests 绝对形、multi-name 拆分（`from .. import store, arch_git` 型）、`# noqa` 尾注剥离后重分组
 - 已修陷阱：① 缩进压扁（正则重排丢缩进）② `# noqa` 尾注致 moved 判定失败 ③ sem 内三点相对深度方向（app/sem 应为两点）④ latent-broken imports（dossier/units 的 `..arch_routes.common` 在拆分前即不可达，顺手改真身）⑤ kb_gateway 越顶 `..agent` → `.agent` ⑥ ctx.py 的 `.schema` 应为 `.store.schema`
-- 余项：全量套件顺序依赖挂起归因（direct_commands 单跑绿）→ 其余 W2~W9 按本设计继续
+- 余项：**顺序依赖挂起归因（复现配方已锐化）**——`pytest tests/test_direct_commands.py tests/test_design.py` 反序即挂（direct 全过后，design 的 WS chat 用例收不到事件帧；单文件/正序/孤立用例全绿）。定性：direct 文件遗留状态阻断后续 WS 会话（嫌疑：turn/pump 全局态或 ctx 单例时序），与 V3 挂起同族（asyncio/线程时序 × 模块组织）。归因入口：对 design WS handler 埋 faulthandler.dump_traceback_later + 对比 direct 前后 `ctx`/`store` 单例与 exec_bridge._TASK_PUMPS 状态
+- 其余 W2~W9 按本设计继续
