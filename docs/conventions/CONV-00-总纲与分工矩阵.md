@@ -7,6 +7,8 @@
 
 Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个前端共享内核 + 4 个独立子项目**，运行时为 **9 个独立进程**（核心 kb/gateway/llm/agent + 生态 mcp/runner + manifest 服务 docs/chat/architect；拓扑以 `supervisor/cli.py` 注册表为准——原 agent-bus broker 已随生命周期重构 v2 退役，消息面由会话单流 + 事件泵承载），由 `topo serve`（supervisor）统一拉起，`gateway:3456` 是唯一对外入口。
 
+> 口径注（MS1 D3，2026-09-24 核证）：agent-bus 退役后进程数**恒为 9**（`supervisor/cli.py` `_FIXED_SERVICES` 6 项 + manifest `kind=service` 3 项）；历史文档中「10 进程」均为退役前笔误。进程数变更必须过 G6 门禁并同步本节拓扑图。
+
 ```
                     浏览器（唯一入口 :3456）
                           │
