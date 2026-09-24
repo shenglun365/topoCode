@@ -151,7 +151,7 @@ def test_list_batch_files(pipe_provider, monkeypatch):
             {"file_path": "b.py", "batch": "P1", "score": 50},
         ], "counts": {"P0": 1, "P1": 1, "P2": 0}}
 
-    monkeypatch.setattr("topoone.engine.task_manager._compute_file_ranks", fake_ranks)
+    monkeypatch.setattr("topoone.engine.task_api.common._compute_file_ranks", fake_ranks)
     all_p0 = pipe_provider.list_batch_files(TASK, PID, "P0", include_cached=True)
     assert all_p0 == ["a.py"]
     assert calls["components"] == 2  # L0 社区（INCLUDE+CALL）
