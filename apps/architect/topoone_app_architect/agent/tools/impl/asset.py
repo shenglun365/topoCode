@@ -125,7 +125,7 @@ def tool_convention_propose(root: Optional[str] = None,
 def tool_contract_propose(root: Optional[str] = None,
                           project: Optional[str] = None,
                           items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    from ....arch_routes import ctx as _ctx
+    from .... import ctx as _ctx
     from ....arch_routes import contracts as _contracts
     from ....arch_routes.semantic_assets import project_id_for
     pid = project_id_for(root, project)

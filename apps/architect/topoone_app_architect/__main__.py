@@ -120,7 +120,7 @@ def main():
     logging.basicConfig(level=getattr(logging, _log_level, logging.INFO),
                         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     for _name in ("arch_routes", "arch_routes.semantic_assets", "arch_routes.req_agent",
-                  "arch_routes.kb_gateway", "arch_routes.project", "arch_routes.common"):
+                  "kb_gateway", "arch_routes.project", "common"):
         logging.getLogger(_name).setLevel(getattr(logging, _log_level, logging.INFO))
     logger.info("Architect 日志级别: %s (可用 ARCH_LOG_LEVEL 覆盖)", _log_level)
     # cross-origin: dev/web via vite, and reports 3456 (if any reverse proxy kept)

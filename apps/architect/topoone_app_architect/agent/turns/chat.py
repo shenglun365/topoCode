@@ -138,7 +138,7 @@ def _model_health_hint(model_id: str) -> str:
 
     数据源 CollabConfigStore `llm.modelProfiles`; 无档案/成绩尚可 → 空串。"""
     try:
-        from ...arch_routes import store
+        from ... import store
         raw = store.CollabConfigStore.get("llm.modelProfiles", "")
         profiles = json.loads(raw) if raw else {}
         row = profiles.get(model_id or "") or {}
@@ -166,8 +166,8 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
     空返回: turnError 折叠卡 + error 事件(错误必须完整可见且可刷新)。
     """
     from ...arch_routes import req_agent
-    from ...arch_routes import store
-    from ...arch_routes.common import _ts
+    from ... import store
+    from ...common import _ts
 
     conv_id = gate["conv_id"]
     request_id = loop["request_id"]
@@ -721,7 +721,7 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
         event["assets"] = result["assets"][:12]
     await send(event)
     # P2 上下文注册表: 工具轨迹/产物 → 单元(会话级溯源)
-    from ...arch_routes import ctx as _ctx
+    from ... import ctx as _ctx
     try:
         context_registry.record_tool_call(_ctx.get_conv() or "", name, args, ok, summary)
     except Exception:

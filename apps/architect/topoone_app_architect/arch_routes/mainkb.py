@@ -15,8 +15,8 @@ from typing import Optional
 
 from fastapi import APIRouter
 
-from .common import err, ok
-from .store import ProjectsStore
+from ..common import err, ok
+from ..store import ProjectsStore
 
 logger = logging.getLogger(__name__)
 

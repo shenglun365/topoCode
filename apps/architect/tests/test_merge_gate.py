@@ -11,7 +11,7 @@ import pytest
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 
 @pytest.fixture()

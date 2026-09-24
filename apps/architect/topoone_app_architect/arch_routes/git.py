@@ -7,8 +7,9 @@
 import re
 from typing import Optional
 from fastapi import APIRouter, Request
-from .common import _ts, ok, err
-from . import store, arch_git
+from ..common import _ts, ok, err
+from .. import store
+from . import arch_git
 
 router = APIRouter()
 

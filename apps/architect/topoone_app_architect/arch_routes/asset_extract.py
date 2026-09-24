@@ -223,7 +223,7 @@ def _batch_name_enrich(root: str, project: Optional[str], file_: str, kind: str,
 
     只产业务 name；失败/解析不出 → 返回空(候选全部走地板符号名)，不影响提取主体。
     """
-    from .kb_gateway import get_gateway
+    from ..kb_gateway import get_gateway
     from .tagent_se import KbGatewayLLMClient
     from topocode_agent.core.utils import extract_json_object
 

@@ -19,13 +19,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from topoone_app_architect.arch_routes import router as arch_router
-from topoone_app_architect.arch_routes.sem import symbols as _sym
-from topoone_app_architect.arch_routes.sem import codegraph as _sem_codegraph
+from topoone_app_architect.sem import symbols as _sym
+from topoone_app_architect.sem import codegraph as _sem_codegraph
 
 
 @pytest.fixture(autouse=True)
 def _clean_caches(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import ctx as C
+    from topoone_app_architect import ctx as C
     monkeypatch.setenv("ARCH_CODEGRAPH", "off")
     monkeypatch.setattr(_sem_codegraph, "_mode_cache", None)
     monkeypatch.setattr(_sem_codegraph, "_cli_cache", ("", 0.0))
@@ -118,7 +118,7 @@ def test_native_conn_rows_dict_queryable(tmp_path, monkeypatch):
     data = _mk_core_env(tmp_path, root, "proj-nq")
     monkeypatch.setenv("TOPOCODE_DB_DIR", data)
     _sym.invalidate_native_cache()
-    from topoone_app_architect.arch_routes.sem.codegraph import _query_nodes
+    from topoone_app_architect.sem.codegraph import _query_nodes
     conn = _sym._open_core_conn("proj-nq")
     rows = _query_nodes(conn, files=["a.py"])
     assert len(rows) == 3
@@ -302,7 +302,7 @@ def test_cold_start_endpoint_bootstraps_project(tmp_path, monkeypatch):
     data = _mk_core_env(tmp_path, str(tmp_path / "elsewhere"), "proj-other", with_db=False)
     monkeypatch.setenv("TOPOCODE_DB_DIR", data)
     _sym.invalidate_native_cache()
-    from topoone_app_architect.arch_routes import kb_gateway as _kg
+    from topoone_app_architect import kb_gateway as _kg
     calls = []
 
     def fake_call(method, **p):
@@ -352,7 +352,7 @@ def test_symbol_sync_endpoint_initiates_pull_request(tmp_path, monkeypatch):
     data = _mk_core_env(tmp_path, str(root), "proj-sync", with_db=True)
     monkeypatch.setenv("TOPOCODE_DB_DIR", data)
     _sym.invalidate_native_cache()
-    from topoone_app_architect.arch_routes import kb_gateway as _kg
+    from topoone_app_architect import kb_gateway as _kg
     calls = []
     monkeypatch.setattr(_kg, "call_kb",
                         lambda method, **p: calls.append((method, p))

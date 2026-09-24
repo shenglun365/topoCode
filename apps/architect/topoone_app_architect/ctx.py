@@ -40,7 +40,7 @@ def data_dir() -> str:
 def setup(data_dir: str = None, kb_url: str = None, mcp_url: str = None):
     """初始化上下文。data_dir 缺省取 ARCH_DATA_DIR / ~/.topocode。"""
     global _db, _kb, _data_dir
-    from . import db_schema
+    from .store import schema as db_schema
     from .kb_gateway import KbGateway
     data_dir = data_dir or default_data_dir()
     if data_dir != _data_dir:
@@ -168,7 +168,7 @@ def project_db(project_id: str, create: bool = True):
             return None
         os.makedirs(os.path.dirname(path), exist_ok=True)
         from topoone.db.manager import SQLiteContext
-        from . import db_schema
+        from .store import schema as db_schema
         cached = SQLiteContext(path, label=f"architect:{project_id}")
         db_schema.init_architect_project_db(cached)
         _project_dbs[project_id] = cached

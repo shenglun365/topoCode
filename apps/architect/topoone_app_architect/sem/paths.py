@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def project_id_for(root: Optional[str], project: Optional[str]) -> str:
     """按 arch_projects 解析项目稳定 id(未登记路径 → 按 root 哈希合成)。"""
-    from ..project import _resolve_project as _rp
+    from ..arch_routes.project import _resolve_project as _rp
     try:
         proj = _rp(root, project)
     except Exception:
@@ -40,7 +40,7 @@ def _stable_id(root: str) -> str:
 
 
 def resolve_root(root: Optional[str], project: Optional[str]) -> Optional[str]:
-    from ..project import _resolve_project as _rp
+    from ..arch_routes.project import _resolve_project as _rp
     try:
         proj = _rp(root, project)
     except Exception:

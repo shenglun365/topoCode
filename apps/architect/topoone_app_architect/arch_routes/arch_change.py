@@ -6,8 +6,8 @@
 """
 from typing import Optional
 from fastapi import APIRouter, Request
-from .common import _ts, _id, ok, err
-from . import store
+from ..common import _ts, _id, ok, err
+from .. import store
 
 router = APIRouter()
 
@@ -23,7 +23,7 @@ def _kb_degraded(root=None, project_id=None) -> bool:
 def _resolve(root=None, project=None):
     """解析项目 → KB id；未绑定/降级返回 None。"""
     from .project import _resolve_project
-    from .kb_gateway import call_kb
+    from ..kb_gateway import call_kb
     proj = _resolve_project(root, project)
     if not proj:
         return None, None, None
@@ -312,7 +312,7 @@ def _spec_from_kb(root=None, project=None):
     - 派生规则: 基于 KB 真实组件模型推导(组件边界/依赖方向/分层约束)
     """
     from .knowledge import _project_ctx
-    from .kb_gateway import call_kb
+    from ..kb_gateway import call_kb
     _, degraded = _project_ctx(root, project)
     if degraded:
         return None

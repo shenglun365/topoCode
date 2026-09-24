@@ -50,7 +50,7 @@ def load_strategies() -> List[Dict[str, Any]]:
 
     改一条澄清问题 = PUT /flow-policy, 零发版。引擎测试不依赖具体条目。"""
     try:
-        from ...arch_routes import store as _s
+        from ... import store as _s
         from ..governance.flow_policy import load_flow_policy
         pol = load_flow_policy(_s.CollabConfigStore.get)
     except Exception:  # noqa: BLE001

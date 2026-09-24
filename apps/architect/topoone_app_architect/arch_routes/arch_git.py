@@ -13,8 +13,8 @@ import os
 import subprocess
 from typing import Optional
 
-from .common import _ts
-from . import store
+from ..common import _ts
+from .. import store
 
 # 顶层跳过目录(与 dirs.py _SKIP 一致)。
 _SKIP = {".git", ".hg", ".svn", ".idea", ".vscode", "__pycache__", ".DS_Store",
@@ -34,7 +34,7 @@ def _git(args, cwd=None, timeout: float = 60):
 
 
 def _data_dir() -> str:
-    from . import ctx
+    from .. import ctx
     return ctx.default_data_dir()
 
 

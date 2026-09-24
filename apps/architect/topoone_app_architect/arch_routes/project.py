@@ -14,8 +14,8 @@ import subprocess
 from typing import Optional
 from fastapi import APIRouter, Request
 
-from .common import _ts, ok, err, build_architecture_model
-from . import store
+from ..common import _ts, ok, err, build_architecture_model
+from .. import store
 
 from ..agent.governance.timeouts import get as _timeout_of
 router = APIRouter()
@@ -99,7 +99,7 @@ def kb_degraded(root: Optional[str] = None, project_id: Optional[str] = None) ->
 
 def _kb_call(method: str, **params):
     """调用 KB 方法(经 ctx 网关，拓扑无关)；结果 None/错误时回退。"""
-    from .kb_gateway import call_kb
+    from ..kb_gateway import call_kb
     return call_kb(method, **params)
 
 
@@ -133,7 +133,7 @@ def _kb_baseline_head(kb_project_id: str, baseline_id: str = "") -> str:
     if not kb_project_id:
         return ""
     try:
-        from .kb_gateway import call_kb
+        from ..kb_gateway import call_kb
         versions = call_kb("version.list", projectId=kb_project_id) or []
     except Exception:
         return ""
@@ -322,7 +322,7 @@ async def delete_project(request: Request):
     delete_data = bool(body.get("deleteData"))
     if delete_data:
         # 项目库整体删除(architect/<pid>/arch.db，含快照记录等全部项目数据)
-        from . import ctx as _ctx
+        from .. import ctx as _ctx
         _ctx.delete_project_db(proj["id"])
     store.ProjectsStore.delete(proj["id"])
     return ok({"deleted": True, "deleteData": delete_data, "id": proj["id"]})
@@ -522,7 +522,7 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
     version = ""
     if kb_project_id:
         try:
-            from .kb_gateway import call_kb
+            from ..kb_gateway import call_kb
             versions = call_kb("version.list", projectId=kb_project_id) or []
         except Exception:
             versions = []
@@ -596,7 +596,7 @@ def _by_kb_components(files: list, proj: dict) -> list:
         # 组件目录(architecture.catalog)：唯一 id + parentId + owns，含 L0-L2 父子层级。
         # ⚠️ 不用 architecture.model——其 components 被拍平(parentId 丢失、id 序号重复)，
         # 无法构建组件树(实测 nginx-src：catalog 99 组件带层级 vs model 21 组件 id 重复)。
-        from .common import build_component_catalog
+        from ..common import build_component_catalog
         catalog = build_component_catalog(proj.get("rootPath"), proj.get("id"))
         comps = catalog.get("components") or []
     except Exception:
@@ -619,7 +619,7 @@ def _by_kb_components(files: list, proj: dict) -> list:
                 or changed.endswith("/" + owned))
 
     def _owner_of(path: str) -> str:
-        from .sem.paths import _norm_path
+        from ..sem.paths import _norm_path
         p = _norm_path(path)
         owners = [cid for cid, c in by_id.items()
                   if any(_owns_match(_norm_path(o), p) for o in (c.get("owns") or []))]
@@ -780,7 +780,7 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
         # 基线视图摘要：对外生效任务数/覆盖率/stale（architect 不感知任务，仅看视图代际）
         if matched is not None:
             try:
-                from .kb_gateway import call_kb
+                from ..kb_gateway import call_kb
                 summary = call_kb("view.summary", projectId=proj["kbProjectId"])
             except Exception:
                 summary = None

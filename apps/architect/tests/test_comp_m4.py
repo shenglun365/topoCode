@@ -25,7 +25,7 @@ def _mk_conv(store, **kw):
 # ── R3.2: 图门禁(propose_task, T2 显式挡) ─────────────────────────────
 
 def test_r32_gate_rejects_missing_diagram(arch_env, monkeypatch):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     from topoone_app_architect.arch_routes import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T2")
     r = eb.propose_task(conv, "T", "实现功能(无图)", executor_hint={"executorType": "cline-sdk"})
@@ -33,7 +33,7 @@ def test_r32_gate_rejects_missing_diagram(arch_env, monkeypatch):
 
 
 def test_r32_gate_passes_with_diagram(arch_env):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     from topoone_app_architect.arch_routes import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T2")
     r = eb.propose_task(conv, "T", "实现功能\n" + _DIAGRAM,
@@ -44,7 +44,7 @@ def test_r32_gate_passes_with_diagram(arch_env):
 
 def test_r32_plan_steps_exempt(arch_env):
     """计划步骤卡豁免图门禁(gate_diagram=False)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     from topoone_app_architect.arch_routes import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T2")
     r = eb.propose_task(conv, "T", "步骤指令(无图)",
@@ -54,7 +54,7 @@ def test_r32_plan_steps_exempt(arch_env):
 
 
 def test_r32_switch_off_disables_gate(arch_env):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     from topoone_app_architect.arch_routes import exec_bridge as eb
     store.CollabConfigStore.set("agent.comp.overrides",
                                 json.dumps({"r3_2_logic_gate": False}))
@@ -66,7 +66,7 @@ def test_r32_switch_off_disables_gate(arch_env):
 
 def test_r32_t1_not_gated(arch_env):
     """门禁仅 T2(logic_diagram=uml); T1 无图正常建卡。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     from topoone_app_architect.arch_routes import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T1")
     r = eb.propose_task(conv, "T", "实现功能(无图)",

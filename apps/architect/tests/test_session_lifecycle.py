@@ -9,8 +9,8 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
-from topoone_app_architect.arch_routes import store
+import topoone_app_architect.ctx as C
+from topoone_app_architect import store
 
 from fastapi.testclient import TestClient
 from topoone_app_architect.server import build_app
@@ -168,8 +168,8 @@ def test_migration_v2_from_legacy(tmp_path, monkeypatch):
         "analysis": json.dumps({"designMd": "旧方案", "acceptance": ["x"],
                                 "allowedScope": ["src/a/"]}),
         "updatedAt": 111})
-    from topoone_app_architect.arch_routes.db_schema import _migrate_lifecycle_v2
-    from topoone_app_architect.arch_routes.store.base import _db
+    from topoone_app_architect.store.schema import _migrate_lifecycle_v2
+    from topoone_app_architect.store.base import _db
     _migrate_lifecycle_v2(_db())
     _migrate_lifecycle_v2(_db())  # 幂等
     r = store.RequirementsStore.get("RQ-M")
@@ -186,8 +186,8 @@ def test_migration_v2_deletes_execution_convs(tmp_path, monkeypatch):
     store.ConversationsStore.append_message({"id": "m-x", "conversationId": ce["id"],
                                               "role": "assistant", "time": 1, "content": "x"})
     cn = store.ConversationsStore.create({"kind": "generic", "title": "留"})
-    from topoone_app_architect.arch_routes.db_schema import _migrate_lifecycle_v2
-    from topoone_app_architect.arch_routes.store.base import _db
+    from topoone_app_architect.store.schema import _migrate_lifecycle_v2
+    from topoone_app_architect.store.base import _db
     _migrate_lifecycle_v2(_db())
     assert store.ConversationsStore.get(ce["id"]) is None
     assert store.ConversationsStore.get(cn["id"]) is not None

@@ -10,7 +10,7 @@
 import logging
 from typing import List, Optional
 
-from .store import NamingConventionStore
+from ..store import NamingConventionStore
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ def _builtin_for(scenario: str) -> str:
 def _merge_global_conventions(convs: list, pid: str, scenario: str) -> list:
     """WS8-S4: 合并主库全局桶规约(场景匹配, 归一文本去重, 全局行缀后)。"""
     try:
-        from .store.base import GLOBAL_PID, _db, _row_to_api
+        from ..store.base import GLOBAL_PID, _db, _row_to_api
         rows = _db().fetchall(
             "SELECT * FROM arch_naming_conventions WHERE project_id = ? "
             "AND status = 'active' AND scenarios LIKE ? ORDER BY updated_at DESC LIMIT 50",
@@ -255,7 +255,7 @@ def skill_docs(root: Optional[str], project: Optional[str],
                 parts.append("\n".join(lines))
         # WS7 能力闭环: 已采纳提案(流程/技巧/skill)按场景标签注入(静态注册→可增长)
         try:
-            from .store import CapabilityProposalStore
+            from ..store import CapabilityProposalStore
             accepted = CapabilityProposalStore.list(pid, status="accepted", limit=200)
 
             def _scene_list(p):

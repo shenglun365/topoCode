@@ -18,7 +18,7 @@ sys.path.insert(0, _repo)
 from topoone_app_architect.agent.collab import cards as cards_mod
 from topoone_app_architect.agent.planning import task_plan as tp
 from topoone_app_architect.agent.planning.task_plan import _plan_diagnosis
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 
 @pytest.fixture()
@@ -150,7 +150,7 @@ def test_split_prompt_requires_chinese_titles(arch):
 # ── 三分态诊断(批戊已立项, 信息流文案面回归) ─────────────────────────
 
 def test_plan_diagnosis_three_states(arch):
-    from topoone_app_architect.arch_routes import store as _s
+    from topoone_app_architect import store as _s
     rid = _mk_req("RQ-IF2")
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     # cv-248 I2: taskId 非空必须指向真实任务行(悬空=failed 降级语义)

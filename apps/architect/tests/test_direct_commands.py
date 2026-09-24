@@ -20,9 +20,9 @@ sys.path.insert(0, _repo)
 
 from fastapi.testclient import TestClient
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 import topoone_app_architect.arch_routes.req_agent as req_agent
-import topoone_app_architect.arch_routes.store as store
+import topoone_app_architect.store as store
 from topoone_app_architect.agent.perception.commands import match_imperative
 from topoone_app_architect.agent.perception import commands as cmds
 from topoone_app_architect.agent.governance.focus import build_focus, resolve_intent
@@ -315,7 +315,7 @@ def test_llm_catalog_url_strips_v1_and_probes_context(monkeypatch):
     catalog = [{"source": "imported", "id": "model-x", "name": "35B",
                 "provider": "custom-local", "model": "Qwen3.6-35B",
                 "url": "http://h:8082/v1", "type": "local"}]
-    monkeypatch.setattr("topoone_app_architect.arch_routes.kb_gateway.call_kb",
+    monkeypatch.setattr("topoone_app_architect.kb_gateway.call_kb",
                         lambda method, **kw: [{"id": "model-x", "name": "35B",
                                                "provider": "custom-local", "model": "Qwen3.6-35B",
                                                "url": "http://h:8082/v1", "type": "local"}])

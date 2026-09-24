@@ -22,7 +22,7 @@ from topoone_app_architect.agent.turns import intent_llm
 
 
 def _set_policy(raw: dict) -> None:
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     from topoone_app_architect.agent.governance import flow_policy as fp
     store.CollabConfigStore.set(fp.POLICY_KEY, json.dumps(raw, ensure_ascii=False))
 
@@ -100,7 +100,7 @@ def _stub_llm(monkeypatch, payload=None, counter=None):
 
 def _set_escalation(on: bool) -> None:
     from topoone_app_architect.agent.governance import flow_policy as fp
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.CollabConfigStore.set(fp.POLICY_KEY, json.dumps(
         {"goal": {"escalation": {"llmFallback": on, "minConfidence": 0.7,
                                  "maxTextChars": 200}}}))
@@ -193,7 +193,7 @@ def test_guard_stays_regex_only_with_llm_switch_on(arch_env, monkeypatch):
     from topoone_app_architect.agent.governance import flow
     from topoone_app_architect.agent.governance.flow_policy import (
         deep_merge, DEFAULT_FLOW_POLICY)
-    from topoone_app_architect.arch_routes.store.states import FLOW_INTERRUPTED
+    from topoone_app_architect.store.states import FLOW_INTERRUPTED
     _stub_llm(monkeypatch, payload={"intent": "generic_exec", "confidence": 0.9})
     pol = deep_merge(DEFAULT_FLOW_POLICY, {"phases": {"interrupted": {
         "guards": [{"intents": ["generic_exec"], "reply": "⛔拦截"}]}}})

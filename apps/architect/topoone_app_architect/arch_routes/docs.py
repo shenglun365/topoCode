@@ -10,7 +10,7 @@
 import os
 import re
 from fastapi import APIRouter, HTTPException
-from .common import ok
+from ..common import ok
 
 router = APIRouter()
 

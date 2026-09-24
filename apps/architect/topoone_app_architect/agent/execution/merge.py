@@ -26,7 +26,7 @@ def merge_precheck(task_id: str) -> Dict[str, Any]:
       即 hash 校验, 我们守合并入口);
     - 任务分支推进清单: 验收合并内容。
     """
-    from ...arch_routes import store
+    from ... import store
     task = store.TasksStore.get(task_id)
     if not task:
         return {"ok": False, "error": "task-not-found", "code": 404}
@@ -79,7 +79,7 @@ def _chain_base(conv_id: str, exclude_task_id: str, root: str) -> str:
 
     只在同会话链内; 跨会话靠卡片未合并预警暴露。
     """
-    from ...arch_routes import store
+    from ... import store
     try:
         from ..governance.boundary import _git_run
         for t in sorted(store.TasksStore.of_conv(conv_id),
@@ -104,7 +104,7 @@ def _chain_base(conv_id: str, exclude_task_id: str, root: str) -> str:
 
 def _unmerged_branch_notes(conv_id: str, root: str, limit: int = 3) -> str:
     """同项目未合并终态分支清单 → 任务卡预警文案(基线不含其改动)。"""
-    from ...arch_routes import store
+    from ... import store
     try:
         from ..governance.boundary import _git_run
         items = []
@@ -177,7 +177,7 @@ def merge_branch(task_id: str, mode: str = "ff") -> Dict[str, Any]:
     mode: ff = 仅快进(主目录无推进时); no-ff = 强制合并提交(冲突则中止回显)。
     成功 → 任务行记 merged_at/merged_head(merged 终态, 分支内容已进主)。
     同会话任务状态迁移锁内执行——防双击双 merge(precheck/git 慢路径窗口)。"""
-    from ...arch_routes import store
+    from ... import store
     task = store.TasksStore.get(task_id)
     if not task:
         return {"ok": False, "error": "task-not-found", "code": 404}
@@ -188,7 +188,7 @@ def merge_branch(task_id: str, mode: str = "ff") -> Dict[str, Any]:
 
 def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
     """merge 主体(须持 _conv_task_lock 调用)——锁内重读任务行裁决状态门禁。"""
-    from ...arch_routes import store
+    from ... import store
     task = store.TasksStore.get(task_id)
     if not task:
         return {"ok": False, "error": "task-not-found", "code": 404}
@@ -240,7 +240,7 @@ def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
                 "error": f"合并失败: {(r.stderr or r.stdout or '')[:200]}",
                 "code": 400}
     head = _git_run(["rev-parse", "HEAD"], root).stdout.strip()
-    from ...arch_routes.common import _ts
+    from ...common import _ts
     store.TasksStore.update(task_id, {"mergedAt": _ts(), "mergedHead": head})
     # 生命周期闭环(用户裁决): 合并同意 = 过程产物清理同意(worktree/分支)
     cleanup_note = _post_merge_cleanup(task, root)

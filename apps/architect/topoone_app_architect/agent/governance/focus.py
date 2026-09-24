@@ -29,7 +29,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-from ...arch_routes.store.states import (
+from ...store.states import (
     FLOW_ARMED, FLOW_CLARIFYING, FLOW_EXECUTING, FLOW_FREE,
     FLOW_INTERRUPTED, FLOW_REVIEWING,
     TASK_DONE, TASK_PENDING_CONFIRM, TASK_RUNNING,
@@ -251,7 +251,7 @@ def build_focus(conv_id: str, now: Optional[int] = None, *,
     改变实体状态自然驱动。
     """
     now = int(now or time.time() * 1000)
-    from ...arch_routes import store as _s
+    from ... import store as _s
     from ..planning.task_plan import get_plan
     conv = _s.ConversationsStore.get(conv_id) or {}
     tasks = [t for t in (_s.TasksStore.of_conv(conv_id) or [])

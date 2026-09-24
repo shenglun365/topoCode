@@ -16,7 +16,7 @@ sys.path.insert(0, _repo)
 
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
-from topoone_app_architect.arch_routes import ctx, kb_gateway
+from topoone_app_architect import ctx, kb_gateway
 from topoone_app_architect.server import build_app
 
 

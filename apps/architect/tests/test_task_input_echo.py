@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_exec_implement import _mk_v2_fixture  # noqa: E402
 
-from topoone_app_architect.arch_routes import store  # noqa: E402
+from topoone_app_architect import store  # noqa: E402
 
 
 def test_input_echo_durable_with_request_id(tmp_path, monkeypatch):

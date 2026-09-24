@@ -9,11 +9,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from topoone_app_architect.agent.tools.protocol import TOOL_CALL_SCHEMA  # noqa: E402
-from topoone_app_architect.arch_routes import req_agent, store  # noqa: E402
+from topoone_app_architect import store  # noqa: E402
+from topoone_app_architect.arch_routes import req_agent
 
 
 def _setup_env(tmp_path, monkeypatch):
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     data = str(tmp_path / "d")
     C._db = None
     C._kb = None

@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 
-from .common import _ts, ok, err, build_architecture_model
-from . import store
+from ..common import _ts, ok, err, build_architecture_model
+from .. import store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

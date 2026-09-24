@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_exec_implement import _mk_v2_fixture  # noqa: E402
 
-from topoone_app_architect.arch_routes import exec_bridge  # noqa: E402
+from topoone_app_architect.arch_routes import exec_bridge
 
 
 def test_set_verify_config_roundtrip(tmp_path, monkeypatch):
@@ -29,7 +29,7 @@ def test_set_verify_config_roundtrip(tmp_path, monkeypatch):
 def test_set_verify_config_rejects_running(tmp_path, monkeypatch):
     conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
     task = eb.propose_task(conv, "运行态", "x")
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.TasksStore.update(task["id"], {"status": "running"})
     assert exec_bridge.task_set_verify_config(task["id"], {"test": "x"}) is None
 

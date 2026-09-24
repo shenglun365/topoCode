@@ -8,9 +8,9 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
-import topoone_app_architect.arch_routes.store as store
-from topoone_app_architect.arch_routes import db_schema
+import topoone_app_architect.ctx as C
+import topoone_app_architect.store as store
+from topoone_app_architect.store import schema as db_schema
 
 
 def _setup(tmp_path, monkeypatch):

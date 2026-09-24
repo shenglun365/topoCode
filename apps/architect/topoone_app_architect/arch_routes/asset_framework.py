@@ -17,8 +17,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 
-from .common import err, ok
-from .store import FrameworkConfigStore, _fetchall_routed, _row_to_api
+from ..common import err, ok
+from ..store import FrameworkConfigStore, _fetchall_routed, _row_to_api
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ def _void_all_assets(project_id: str, framework_version: int,
                      executed_by: str) -> int:
     """标准变更：存量资产整体作废（保留行、不写墓碑 R1、命名继承中断）。"""
     import time
-    from .store import _target_db
+    from ..store import _target_db
     db = _target_db("arch_semantic_assets", project_id=project_id)
     cur = db.execute(
         "UPDATE arch_semantic_assets SET status = 'voided', "
@@ -215,14 +215,14 @@ def _apply_change(project_id: str, config: Dict[str, Any], change_kind: str,
     voided = _void_all_assets(project_id, row["version"], executed_by)
     # 规约联动：关联旧值域的规约标记待复核（plan-C §5.3）
     try:
-        from .store import NamingConventionStore
+        from ..store import NamingConventionStore
         NamingConventionStore.mark_pending_review(project_id, row["version"])
     except Exception as e:
         logger.warning("[framework] 规约待复核标记失败: %s", e)
     # 契约条目联动（V8）：非 accepted 条目标 staleByFramework 需重确认；
     # 切到 z 空值域(如 low)时未 accepted 条目 z_axis 自动清空并提示
     try:
-        from .store import _target_db as _tdb
+        from ..store import _target_db as _tdb
         db = _tdb("arch_contract_items", project_id=project_id)
         cur = db.execute(
             "UPDATE arch_contract_items SET stale_by_framework = 1 "
@@ -255,7 +255,7 @@ def coverage(project_id: str) -> Dict[str, Any]:
     含 active + stale（作废 voided 不计入覆盖）。
     """
     try:
-        from .common import build_component_catalog
+        from ..common import build_component_catalog
         catalog = (build_component_catalog(None, None) or {}).get("components") or []
     except Exception as e:
         logger.warning("[framework] 组件目录获取失败: %s", e)

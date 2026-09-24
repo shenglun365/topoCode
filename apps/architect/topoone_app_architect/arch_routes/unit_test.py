@@ -3,8 +3,8 @@
 契约见 docs/architect/api-unit-test.md。执行/对话走 WS(/ws/unit-test)。
 """
 from fastapi import APIRouter, Request
-from .common import _ts, ok, err
-from . import store
+from ..common import _ts, ok, err
+from .. import store
 
 router = APIRouter()
 

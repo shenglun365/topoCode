@@ -22,7 +22,7 @@ import logging
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ...arch_routes.store.states import FLOW_PHASES
+from ...store.states import FLOW_PHASES
 from .goal_defaults import DEFAULT_GOAL_STRATEGIES
 from ..turns.help_docs import DEFAULT_HELP_TOPICS
 
@@ -579,7 +579,7 @@ def load_flow_policy(getter: Optional[Callable[[str, Any], Any]] = None) -> dict
     """
     if getter is None:
         try:
-            from ...arch_routes.store import CollabConfigStore
+            from ...store import CollabConfigStore
             getter = CollabConfigStore.get
         except Exception:  # noqa: BLE001
             getter = _blank_getter

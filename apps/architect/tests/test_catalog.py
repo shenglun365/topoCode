@@ -48,7 +48,7 @@ def test_role_route_resolves_config(arch_env, monkeypatch):
 
 
 def test_light_route_resolves_config(arch_env):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.CollabConfigStore.set("llm.lightTaskModels",
                                 '{"summary": "m-sum-y"}')
     assert CATALOG["light:summary"].model_route() == "m-sum-y"

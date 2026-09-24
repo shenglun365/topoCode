@@ -65,7 +65,7 @@ def _clarify_directive_msg(gate: dict, conv: dict) -> str:
 
     规约快照(已绑定需求)供缺口矩阵; 判定失败静默(不阻塞主链)。"""
     try:
-        from ...arch_routes import store as _store
+        from ... import store as _store
         from ..requirements.clarify import clarify_directive as _cd_fn
         _mode = str((conv or {}).get("clarifyMode") or "auto").strip()
         _question = str((gate or {}).get("question") or "")
@@ -85,7 +85,7 @@ def _clarify_directive_msg(gate: dict, conv: dict) -> str:
 def _load_flow_policy() -> dict:
     """生效 policy(每回合读, 同 read_overrides 口径; 坏值回落缺省——S0 fail-soft)。"""
     try:
-        from ...arch_routes import store as _s
+        from ... import store as _s
         from ..governance.flow_policy import load_flow_policy
         return load_flow_policy(_s.CollabConfigStore.get)
     except Exception:  # noqa: BLE001
@@ -112,7 +112,7 @@ def _repair_notes_msg(conv: dict, model_id: str, pol: dict) -> str:
     开关: repair_note_injection ∧ policy.enabled。失败静默(计数)。"""
     try:
         from ..cognition import model_profile as _mp
-        from ...arch_routes import store as _s
+        from ... import store as _s
         from ..compensation.overrides import override_enabled, read_overrides
         _get = _s.CollabConfigStore.get
         if not override_enabled(read_overrides(_get), "repair_note_injection"):
@@ -151,7 +151,7 @@ def _overflow_digest_msg(conv: dict, history: list, pol: dict) -> str:
     try:
         cfg = (pol.get("injections") or {}).get("overflowDigest") or {}
         from ..compensation.overrides import override_enabled, read_overrides
-        from ...arch_routes import store as _s
+        from ... import store as _s
         if cfg.get("enabled", True) is False \
                 or not override_enabled(read_overrides(_s.CollabConfigStore.get),
                                         "overflow_digest"):
@@ -272,7 +272,7 @@ def _chat_context(data: dict, gate: dict, skill_scenarios: list, history: list,
     except Exception:  # noqa: BLE001
         _gear_cfg = {}
         _swallow("ctx.executor_hint")
-    from ...arch_routes import store as _store_mod
+    from ... import store as _store_mod
     from ..compensation.overrides import read_overrides, override_enabled
     from ..governance.gears import WEAKEST_TIER
     _overrides = read_overrides(_store_mod.CollabConfigStore.get)

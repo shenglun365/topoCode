@@ -109,7 +109,7 @@ def test_chat_context_injects_clarify_directive(arch_env):
     assert "强制挡" not in sys_text
     # 已建需求 + 缺口 → 缺口驱动指令仍在 context 面
     conv_gap = {**conv, "reqId": "RQ-1"}
-    import topoone_app_architect.arch_routes.store as _store
+    import topoone_app_architect.store as _store
     # 直接用函数级快照(不经库): clarify_directive 的 gap 分支已有单测, 此处验接线
     _, msgs2, _ = ctx_mod._chat_context(
         {"root": "", "project": ""},
@@ -125,7 +125,7 @@ def test_chat_context_injects_clarify_directive(arch_env):
 def test_clarify_mode_rest_roundtrip(arch_env):
     from fastapi.testclient import TestClient
     from topoone_app_architect.server import build_app
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     client = TestClient(build_app(data_dir=os.environ["ARCH_DATA_DIR"]))
     r = client.post(f"/api/architect/sessions/{conv['id']}/clarify-mode",

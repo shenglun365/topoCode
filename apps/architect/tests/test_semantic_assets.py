@@ -16,8 +16,8 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
-import topoone_app_architect.arch_routes.store as store
+import topoone_app_architect.ctx as C
+import topoone_app_architect.store as store
 _SEM_MODULE_NAMES = ("taxonomy", "paths", "codegraph", "scope", "incremental", "context", "anchors", "engine")
 
 
@@ -28,17 +28,17 @@ def _patch_all(monkeypatch, name, value):
     if hasattr(_sa, name):
         monkeypatch.setattr(_sa, name, value)
     for _mn in _SEM_MODULE_NAMES:
-        _mod = importlib.import_module(f"topoone_app_architect.arch_routes.sem.{_mn}")
+        _mod = importlib.import_module(f"topoone_app_architect.sem.{_mn}")
         if hasattr(_mod, name):
             monkeypatch.setattr(_mod, name, value)
 
 
 from topoone_app_architect.arch_routes import semantic_assets as S
-from topoone_app_architect.arch_routes.sem import context as _sem_context
-from topoone_app_architect.arch_routes.sem import engine as _sem_engine
-from topoone_app_architect.arch_routes.sem import scope as _sem_scope
-from topoone_app_architect.arch_routes.sem import incremental as _sem_incremental
-from topoone_app_architect.arch_routes.sem import codegraph as _sem_codegraph
+from topoone_app_architect.sem import context as _sem_context
+from topoone_app_architect.sem import engine as _sem_engine
+from topoone_app_architect.sem import scope as _sem_scope
+from topoone_app_architect.sem import incremental as _sem_incremental
+from topoone_app_architect.sem import codegraph as _sem_codegraph
 
 
 def _ctx(tmp_path, monkeypatch):
@@ -183,7 +183,7 @@ def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
             {"id": "c2", "owns": ["a/x.py", "a/y.py"]},
         ]}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         _fake_catalog)
     m1 = S._component_file_map("/root-cachetest", "proj-cache")
     m2 = S._component_file_map("/root-cachetest", "proj-cache")
@@ -200,9 +200,9 @@ def test_component_file_map_model_fallback(tmp_path, monkeypatch):
     """组件目录为空(降级/无基线) → 回退架构模型装配组件文件映射(与 _comm_files 口径一致)。"""
     _ctx(tmp_path, monkeypatch)
     S._comp_file_map_cache.clear()
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": []})
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
+    monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
                         lambda root, project: {"components": [
                             {"id": "m1", "owns": ["b/z.py"]}
                         ]})
@@ -517,7 +517,7 @@ def test_batch_no_separate_update_action(tmp_path, monkeypatch):
 def test_comm_files_falls_back_to_catalog(tmp_path, monkeypatch):
     """模型(INCLUDE·L1)查不到的组件 id(如 CALL/L0) → 回退组件目录解析文件。"""
     _ctx(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.common as common
+    import topoone_app_architect.common as common
     monkeypatch.setattr(common, "build_architecture_model", lambda *a, **k: {
         "components": [{"id": "L1-0001", "owns": ["svc/model.py"]}]})
     monkeypatch.setattr(common, "build_component_catalog", lambda *a, **k: {
@@ -533,9 +533,9 @@ def test_comm_files_falls_back_to_catalog(tmp_path, monkeypatch):
 def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
     """comm 组件未命中目录/模型(文件为空)时，不得退化为全项目扫描。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": []})
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
+    monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
                         lambda *a, **k: {"components": []})
     # 即使存在 codegraph 节点，未解析文件的 comm 范围也不应扫全项目。
     _patch_all(monkeypatch, "_query_nodes", lambda conn, files=None, symbols=None, limit=400: [
@@ -555,13 +555,13 @@ def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
 def test_comm_files_ex_matching(tmp_path, monkeypatch):
     """comm 解析匹配链：精确 id → 精确名称 → 忽略大小写 → 唯一子串；多义/全未命中返回候选。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": [
                             {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
                             {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]},
                             {"id": "comm-3", "name": "图表转译引擎", "owns": ["c/z.ts"]},
                         ]})
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
+    monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
                         lambda *a, **k: {"components": []})
     # 1) 精确 id
     files, err = S._comm_files_ex("/r", "comm-1")
@@ -584,12 +584,12 @@ def test_comm_files_ex_matching(tmp_path, monkeypatch):
 def test_extract_comm_miss_carries_candidates(tmp_path, monkeypatch):
     """comm 未命中 → extract_scope 返回 error+候选清单（agent 可如实报告并请用户重选）。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": [
                             {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
                             {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]},
                         ]})
-    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
+    monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
                         lambda *a, **k: {"components": []})
     res = S.extract_scope("/tmp/x", None, scope_type="comm", scope_key="topoOne-animation",
                           kinds=["asset"], use_llm=False)
@@ -939,7 +939,7 @@ def test_leaf_components_resolves_leaves_only(tmp_path, monkeypatch):
     """叶子解析：父组件(有子)不参与聚合，仅叶子被返回且父先子后保序。"""
     _ctx(tmp_path, monkeypatch)
     # mock 组件目录：父 c1 有子 c1-1/c1-2，独立叶子 c2
-    from topoone_app_architect.arch_routes import common as CM
+    from topoone_app_architect import common as CM
     monkeypatch.setattr(CM, "build_component_catalog",
                         lambda root=None, project=None: {"components": [
                             {"id": "c1", "name": "父", "parentId": None, "owns": ["a.py"]},
@@ -955,7 +955,7 @@ def test_leaf_components_resolves_leaves_only(tmp_path, monkeypatch):
 def test_postorder_component_nodes_direct_files(tmp_path, monkeypatch):
     """后序遍历：子先于父；中间节点独有文件(未被叶子覆盖)归入其 direct。"""
     _ctx(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import common as CM
+    from topoone_app_architect import common as CM
     monkeypatch.setattr(CM, "build_component_catalog",
                         lambda root=None, project=None: {"components": [
                             {"id": "c1", "name": "父", "parentId": None,
@@ -2101,7 +2101,7 @@ def test_migration_keeps_rule_as_first_class_kind(tmp_path, monkeypatch):
     decision/logic(id/canonical_key 仍为 rule 前缀，造成 id 与列值矛盾)。
     """
     db = _ctx(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import db_schema
+    from topoone_app_architect.store import schema as db_schema
     now = 1
     store.SemanticAssetsStore.create({
         "id": "sa-s-i-r-1", "projectId": "proj-1", "kind": "rule",
@@ -2706,8 +2706,8 @@ def test_unowned_no_symbol_source_maps_424(tmp_path, monkeypatch):
     monkeypatch.setattr(_sem_codegraph, "_mode_cache", None)
     monkeypatch.setattr(_sem_codegraph, "_cli_cache", (None, __import__("time").time()))
     import time as _time
-    from topoone_app_architect.arch_routes.sem import unowned as _uo
-    from topoone_app_architect.arch_routes.sem import symbols as _sym
+    from topoone_app_architect.sem import unowned as _uo
+    from topoone_app_architect.sem import symbols as _sym
     monkeypatch.setattr(_sym, "_core_pid_cache", {})
     root = str(tmp_path / "noindex")
     os.makedirs(root, exist_ok=True)

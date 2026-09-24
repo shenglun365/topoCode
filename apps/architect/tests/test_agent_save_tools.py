@@ -8,7 +8,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 _SEM_MODULE_NAMES = ("taxonomy", "paths", "codegraph", "scope", "incremental", "context", "anchors", "engine")
 
 
@@ -19,17 +19,17 @@ def _patch_all(monkeypatch, name, value):
     if hasattr(_sa, name):
         monkeypatch.setattr(_sa, name, value)
     for _mn in _SEM_MODULE_NAMES:
-        _mod = importlib.import_module(f"topoone_app_architect.arch_routes.sem.{_mn}")
+        _mod = importlib.import_module(f"topoone_app_architect.sem.{_mn}")
         if hasattr(_mod, name):
             monkeypatch.setattr(_mod, name, value)
 
 
 from topoone_app_architect.arch_routes import semantic_assets as S
-from topoone_app_architect.arch_routes.sem import context as _sem_context
+from topoone_app_architect.sem import context as _sem_context
 from topoone_app_architect.arch_routes import asset_framework as F
 from topoone_app_architect.arch_routes.req_agent import (
     tool_asset_semantic_save, tool_code_read_symbols)
-from topoone_app_architect.arch_routes.store import (
+from topoone_app_architect.store import (
     NameTombstoneStore, SemanticAssetsStore)
 
 

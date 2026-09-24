@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List
 logger = logging.getLogger("arch.prompt_registry")
 
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 

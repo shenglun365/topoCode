@@ -39,7 +39,7 @@ CHOICES_FENCE = (
 def _land_fence(content, conv_id="conv-ch"):
     """跑一次回合后代落通道(含 choices 处理), 返回 final_content。"""
     from topoone_app_architect.agent.turns.chat import _post_turn_land
-    from topoone_app_architect.arch_routes import ctx as _ctx, store
+    from topoone_app_architect import ctx as _ctx, store
     store.ConversationsStore.create({"id": conv_id, "kind": "generic",
                                      "title": "t"})
 
@@ -90,7 +90,7 @@ def test_strip_choices_fence_scoped():
 
 def test_fence_source_lands_choices_card(arch_env):
     from topoone_app_architect.agent.collab import cards as _cards
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     fc, used, _errs, _landed = _land_fence(f"请确认选型：\n{CHOICES_FENCE}")
     assert used == set()                       # 交互卡不计入写工具
     assert "choices" not in fc                 # 围栏剥离
@@ -105,7 +105,7 @@ def test_fence_source_lands_choices_card(arch_env):
 
 
 def test_no_card_on_invalid_payload(arch_env):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     fc, _used, _e, _landed = _land_fence('问题：\n```choices\n{"groups": []}\n```')
     cards = [m for m in store.ConversationsStore.messages("conv-ch")
              if (m.get("meta") or {}).get("kind") == KIND_CHOICES]
@@ -142,7 +142,7 @@ def test_gu_decision_attaches_choices(arch_env):
 def test_upsert_same_fingerprint_in_place(arch_env):
     """同 fingerprint 原位更新(多回合澄清单锚位, 不刷屏——进度锚同款)。"""
     from topoone_app_architect.agent.collab.cards import land_choices
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.ConversationsStore.create({"id": "conv-ch", "kind": "generic",
                                      "title": "t"})
     pay1 = {"title": "澄清 v1", "groups": [{"label": "q1", "question": "a"}]}
@@ -203,7 +203,7 @@ def test_choices_card_tracking_entry(arch_env):
     """需求跟踪资产条目: 问询发出即挂账留档(category=问询, ref=卡消息行);
     原位更新不重复挂账。"""
     from topoone_app_architect.agent.collab.cards import land_choices
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.ConversationsStore.create({"id": "conv-tr", "kind": "generic",
                                      "title": "t"})
     pay = {"title": "选型确认", "groups": [{"label": "后端框架",
@@ -223,6 +223,6 @@ def test_choices_card_tracking_entry(arch_env):
 
 
 def _tracking_all():
-    from topoone_app_architect.arch_routes.store import tracking as _tr
+    from topoone_app_architect.store import tracking as _tr
     # all() 项目硬隔离(无请求上下文→[]); 测试面走 all_across
     return _tr.TrackingItemsStore.all_across(category="问询")

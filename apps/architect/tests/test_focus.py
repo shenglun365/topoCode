@@ -17,7 +17,7 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect.agent.governance.focus import (
     build_focus, derive_phase, frames_from_entities, resolve_intent)
-from topoone_app_architect.arch_routes.store import states as ST
+from topoone_app_architect.store import states as ST
 
 
 def _t(status="pending_confirm", tid="task-1", title="T", **kw):
@@ -157,7 +157,7 @@ def _plan_env(tmp_path, monkeypatch):
 
 def test_cv241_continue_confirm_starts_prefilled_step(tmp_path, monkeypatch):
     """「继续执行」+ 计划步骤已预填待确认 → 就近启动该步(旧架构=误导性失败)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     from topoone_app_architect.agent.planning.task_plan import save_plan
     from topoone_app_architect.arch_routes import exec_bridge as eb
     import topoone_app_architect.arch_routes.execution as ex

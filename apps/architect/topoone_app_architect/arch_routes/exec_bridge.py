@@ -19,8 +19,8 @@ import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
 
-from . import store
-from .store import states as ST
+from .. import store
+from ..store import states as ST
 from ..agent.execution.runner_client import RunnerClient
 
 logger = logging.getLogger(__name__)
@@ -513,8 +513,8 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
         "importance": 1})
     # 需求跟踪台账: 回执挂账(终态结果), 失败不阻断沉淀
     try:
-        from .store.tracking import emit as _tr_emit
-        from .store.states import TRACK_DONE, TRACK_FAILED
+        from ..store.tracking import emit as _tr_emit
+        from ..store.states import TRACK_DONE, TRACK_FAILED
         ok_receipt = status == "done"
         _tr_emit(category="回执",
                  title=f"任务回执[{status}]：{title}",
@@ -727,8 +727,8 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 project_id=pid, agent=agent)
         # 需求跟踪台账: 决策请求挂账(waiting/等用户), 失败不阻断执行流
         try:
-            from .store.tracking import emit as _tr_emit
-            from .store.states import TRACK_WAITING
+            from ..store.tracking import emit as _tr_emit
+            from ..store.states import TRACK_WAITING
             _tr_emit(category="决策",
                      title=f"越界审批：{tool_name}（任务「{title}」）",
                      content=f"任务 {task_id} 的执行器请求使用工具 `{tool_name}`，等待用户批准。",

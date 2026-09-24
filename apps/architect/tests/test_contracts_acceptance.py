@@ -15,12 +15,12 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
-from topoone_app_architect.arch_routes import acceptance as AC  # noqa: E402
-from topoone_app_architect.arch_routes import asset_framework as F  # noqa: E402
-from topoone_app_architect.arch_routes import contracts as CT  # noqa: E402
-from topoone_app_architect.arch_routes import semantic_assets as S  # noqa: E402
-from topoone_app_architect.arch_routes.store import (  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
+from topoone_app_architect.arch_routes import acceptance as AC
+from topoone_app_architect.arch_routes import asset_framework as F
+from topoone_app_architect.arch_routes import contracts as CT
+from topoone_app_architect.arch_routes import semantic_assets as S
+from topoone_app_architect.store import (  # noqa: E402
     AcceptanceStore, ContractItemStore, ContractPackageStore,
     NamingConventionStore, SemanticAssetsStore)
 

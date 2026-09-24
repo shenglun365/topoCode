@@ -95,7 +95,7 @@ def test_m5_comp_gap_telemetry(arch_env, monkeypatch):
     """A 弱分 + 挡位高于 T2 → 记 comp_gap; 挡位已 T2 → 不记。"""
     from topoone_app_architect.agent.cognition import model_profile as mp
     from topoone_app_architect.agent.turns import context as tctx
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     mp.set_manual_tier("m-gap", 0)                        # A 强挡基线
     gaps = []
     monkeypatch.setattr(

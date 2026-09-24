@@ -12,7 +12,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 _KB_ARGS = [("kb.asset.search", {"text": "支付"}),
             ("kb.code_mappings", {"asset_ids": ["a1"]}),

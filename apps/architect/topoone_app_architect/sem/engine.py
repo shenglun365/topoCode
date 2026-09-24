@@ -1179,7 +1179,7 @@ def extract_scope(root: Optional[str], project: Optional[str],
                 "reason": f"level={level} 暂停再生，提取统一为实现层"}
     # 实现层：规则候选(类别定死) → (文件×类型)定向 tAgent → 验收 → 工具补齐 → 种子地板。
     # LLM 不可用/关闭时管线自动退化为纯确定性种子资产(不丢类别覆盖)。
-    from .. import asset_extract
+    from ..arch_routes import asset_extract
     all_assets = asset_extract.extract_directed(
         root, project, ctx, kinds, model_id=model_id, use_llm=use_llm)
     if not use_llm:
@@ -1253,7 +1253,7 @@ def save_agent_assets(root: Optional[str], project: Optional[str],
     - 墓碑承接：新资产查参考池，同名符号有历史命名 → 沿用；
     - 复用 _save_assets（canonicalKey 去重/实现层幻影拒绝/renamed 溯源/多归属合并）。
     """
-    from .. import asset_framework as F
+    from ..arch_routes import asset_framework as F
     pid = project_id_for(root, project)
     allowed_kinds = set(F.allowed_kinds(pid))
     allowed_levels = set(F.allowed_levels(pid))
@@ -1537,7 +1537,7 @@ def _aggregate_one_batch(leaf: dict, batch: str, model_id: Optional[str],
 
     失败(LLM 不可达/解析失败)返回空列表，由调用方决定隔离策略。
     """
-    from ..req_agent import llm_sync, get_max_tokens_preference
+    from ..arch_routes.req_agent import llm_sync, get_max_tokens_preference
     cname = leaf.get("name") or leaf.get("id") or ""
     cdesc = (leaf.get("desc") or "").strip().replace("\n", " ")[:400]
     owns = (leaf.get("owns") or [])[:6]
@@ -2528,8 +2528,8 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
     pseudo, degraded = "", True
     if snippet:
         try:
-            from ..req_agent import get_max_tokens_preference
-            from ...agent.turns.catalog import catalog_call
+            from ..arch_routes.req_agent import get_max_tokens_preference
+            from ..agent.turns.catalog import catalog_call
             # tAgent 角色模型路由(§9/B1)：伪码解释走 pseudo 角色；显式传入优先
             sys_prompt = (
                 "你是资深架构师。基于给定的真实源码片段与该语义资产的类别/描述/结构，"
@@ -2580,8 +2580,8 @@ def generate_desc(asset_id: str, root: Optional[str] = None,
     desc, degraded = "", True
     if snippet:
         try:
-            from ..req_agent import get_max_tokens_preference
-            from ...agent.turns.catalog import catalog_call
+            from ..arch_routes.req_agent import get_max_tokens_preference
+            from ..agent.turns.catalog import catalog_call
             # 名称解析走 extract 角色；摘要同样跟随(显式传入优先; 目录路由解析)
             detail_txt = json.dumps(a.get("detail") or {}, ensure_ascii=False)[:800]
             sys_prompt = (
@@ -2737,8 +2737,8 @@ def generate_node_brief(a: dict, root: Optional[str], project: Optional[str],
                 "只输出简介正文。"
             )
             user_prompt = "\n".join(ctx_lines) + f"\n\n真实源码片段:\n{snippet}\n\n请输出简介。"
-            from ..req_agent import get_max_tokens_preference
-            from ...agent.turns.catalog import catalog_call
+            from ..arch_routes.req_agent import get_max_tokens_preference
+            from ..agent.turns.catalog import catalog_call
             res = catalog_call("role:pseudo",
                                [{"role": "system", "content": sys_prompt},
                                 {"role": "user", "content": user_prompt}],
@@ -2800,8 +2800,8 @@ def generate_node_briefs_batch(pid: str, file: str, assets: List[dict],
     user_prompt = (terms_txt + "\n" if terms_txt else "") + (conv_txt + "\n" if conv_txt else "") \
         + "\n\n".join(ctx_blocks) + "\n\n请输出 JSON。"
     try:
-        from ..req_agent import get_max_tokens_preference
-        from ...agent.turns.catalog import catalog_call
+        from ..arch_routes.req_agent import get_max_tokens_preference
+        from ..agent.turns.catalog import catalog_call
         res = catalog_call("role:pseudo",
                            [{"role": "system", "content": sys_prompt},
                             {"role": "user", "content": user_prompt}],
@@ -2913,8 +2913,8 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
             + "\n\ntarget 资产清单:\n" + "\n".join(tgt_blocks) + "\n\n请输出 JSON。")
     notes: Dict[str, str] = {}
     try:
-        from ..req_agent import get_max_tokens_preference
-        from ...agent.turns.catalog import catalog_call
+        from ..arch_routes.req_agent import get_max_tokens_preference
+        from ..agent.turns.catalog import catalog_call
         res = catalog_call("role:pseudo",
                            [{"role": "system", "content": sys_prompt},
                             {"role": "user", "content": user}],
@@ -3138,7 +3138,7 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
     if conv_txt:
         ctx.append(conv_txt)
     try:
-        from ..asset_skill import skill_docs
+        from ..arch_routes.asset_skill import skill_docs
         skill_txt = skill_docs(root, project, ["linenote"])
     except Exception as e:
         logger.warning("[semantic] line-notes skill 加载失败: %s", e)
@@ -3157,8 +3157,8 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
     )
     sys_prompt = (skill_txt + "\n\n" if skill_txt else "") + base_prompt + tools_doc
 
-    from ..req_agent import run_tools_loop, get_max_tokens_preference
-    from ..agent_roles import resolve_role_model
+    from ..arch_routes.req_agent import run_tools_loop, get_max_tokens_preference
+    from ..arch_routes.agent_roles import resolve_role_model
     # 逐行解读与伪码走查同属 pseudo 角色(查询期轻量解读)；
     # 多轮工具调用(白名单只读工具，封顶 3 轮)允许模型补读符号/检索资产后再给注解。
     # M4: 多轮循环独立推进非单次调用, 保留原通道不经 CallTurn。
@@ -3758,13 +3758,13 @@ def changed_files(root: str, project: Optional[str]) -> Dict[str, List[str]]:
     if not root or not os.path.isdir(root):
         return {"added": [], "modified": [], "deleted": []}
     try:
-        from ..project import _resolve_project as _rp
+        from ..arch_routes.project import _resolve_project as _rp
         proj = _rp(root, project)
     except Exception:
         proj = None
     if proj:
         try:
-            from ..arch_git import diff_worktree
+            from ..arch_routes.arch_git import diff_worktree
             d = diff_worktree(proj)
             for f in d.get("files") or []:
                 s = f.get("status", "")

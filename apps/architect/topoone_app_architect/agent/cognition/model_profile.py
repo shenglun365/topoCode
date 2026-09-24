@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("arch.model_profile")
 
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 

@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from ...arch_routes.store import CollabConfigStore
+from ...store import CollabConfigStore
 
 logger = logging.getLogger("arch.agent.roles")
 

@@ -21,7 +21,7 @@ import re
 import typing
 from typing import Any, Callable, Dict, List, Optional
 
-from . import store
+from .. import store
 
 from ..agent.cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ def record_tool_audit(name: str, arguments: Dict[str, Any], ok: bool,
                       project: str = "") -> Dict[str, Any]:
     """工具调用审计记录(结构接口预留)。当前仅 debug 日志, 不落存储。"""
     try:
-        from . import ctx as _actx
+        from .. import ctx as _actx
         conv_id = _actx.get_conv() or ""
         req_id = _actx.get_req() or ""
     except Exception:
@@ -102,7 +102,7 @@ def record_tool_audit(name: str, arguments: Dict[str, Any], ok: bool,
     }
     logger.debug("[tool-audit] %s", json.dumps(rec, ensure_ascii=False)[:400])
     try:
-        from .store.base import _insert_into, _db
+        from ..store.base import _insert_into, _db
         _insert_into(_db(), "arch_tool_audit", {
             "ts": rec["ts"], "tool": name,
             "argsDigest": rec["argsDigest"], "ok": rec["ok"],
@@ -253,10 +253,10 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
     # PR1 归档只读: 归档会话上拒绝动作类工具(落库/定稿/指派); 检索/读取/提炼放行
     if name in _ARCHIVED_DENY_TOOLS:
         try:
-            from . import ctx as _ctx
+            from .. import ctx as _ctx
             conv_id = _ctx.get_conv()
             if conv_id:
-                from . import store as _store
+                from .. import store as _store
                 conv = _store.ConversationsStore.get(conv_id)
                 if conv and (conv.get("status") or "active") == "archived":
                     return {"error": f"会话已归档(只读)：{name} 不可执行。可读取/复制/提炼。"}
@@ -483,8 +483,9 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
                      acceptanceMd: str = "", newRequirement: bool = False,
                      root: Optional[str] = None,
                      project: Optional[str] = None) -> Dict[str, Any]:
-    from . import ctx, store as _store
-    from .common import _ts
+    from .. import ctx
+    from .. import store as _store
+    from ..common import _ts
     title = (title or "").strip()
     if not title:
         return {"ok": False, "error": "缺少需求标题"}
@@ -549,8 +550,8 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     _sync_analysis_cache(req["id"], snapshot)
     # 需求跟踪台账: 需求落库即挂账(生成=done), 失败不阻断需求流
     try:
-        from .store.tracking import emit as _tr_emit
-        from .store.states import TRACK_DONE
+        from ..store.tracking import emit as _tr_emit
+        from ..store.states import TRACK_DONE
         _tr_emit(category="需求",
                  title=str(req.get("title") or req["id"])[:200],
                  content=str(snapshot.get("desc") or "")[:2000],
@@ -659,7 +660,7 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
         or _body_placeholder_error(designMd, "designMd")
     if body_err:
         return {"ok": False, "error": body_err}
-    from . import ctx
+    from .. import ctx
     req_id = (reqId or "").strip() or ctx.get_req()
     if not req_id:
         # 回退读会话绑定: req.propose 与 amend 同轮调用时 ctx.req 尚未回写(下一轮生效)
@@ -742,7 +743,7 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
     "参数：convId(会话 id)、limit?(消息条数, 默认 20)。",
 )
 def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
-    from . import store as _store
+    from .. import store as _store
     cid = (convId or "").strip()
     if not cid:
         return {"error": "缺少 convId"}
@@ -768,7 +769,7 @@ def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
 
 # ── LLM 通道: 实现迁至 agent.cognition.llm(P1), 此处 re-export 兼容存量引用 ──
 
-from ..arch_routes.store import states as ST
+from ..store import states as ST
 from ..agent.cognition import prompt as _disc  # noqa: F401,E402
 from ..agent.cognition.llm import (  # noqa: F401,E402
     _LLM_CALL_TIMEOUT,
@@ -1381,8 +1382,8 @@ def tool_asset_upsert(title: str, content: str,
                       unitId: Optional[str] = None,
                       conversationId: Optional[str] = None,
                       reqId: Optional[str] = None) -> Dict[str, Any]:
-    from . import ctx as _ctx
-    from .store import ContextUnitsStore
+    from .. import ctx as _ctx
+    from ..store import ContextUnitsStore
     conv_id = conversationId or _ctx.get_conv() or ""
     if not conv_id:
         return {"ok": False, "error": "no-conversation"}
@@ -1405,8 +1406,8 @@ def tool_asset_upsert(title: str, content: str,
 def tool_asset_list(type: Optional[str] = None, q: Optional[str] = None,
                     limit: int = 50,
                     conversationId: Optional[str] = None) -> Dict[str, Any]:
-    from . import ctx as _ctx
-    from .store import ContextUnitsStore
+    from .. import ctx as _ctx
+    from ..store import ContextUnitsStore
     conv_id = conversationId or _ctx.get_conv() or ""
     if not conv_id:
         return {"ok": False, "error": "no-conversation"}
@@ -1425,7 +1426,7 @@ def tool_asset_list(type: Optional[str] = None, q: Optional[str] = None,
     "删除会话知识单元(误沉淀/过期知识清理)。",
 )
 def tool_asset_delete(unitId: str) -> Dict[str, Any]:
-    from .store import ContextUnitsStore
+    from ..store import ContextUnitsStore
     removed = ContextUnitsStore.delete(unitId)
     return {"ok": bool(removed), "deleted": bool(removed)}
 

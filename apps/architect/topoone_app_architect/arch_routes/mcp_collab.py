@@ -4,8 +4,8 @@ import logging
 import urllib.error
 import urllib.request
 from fastapi import APIRouter, Request
-from .common import _ts, _id, ok, err
-from . import store
+from ..common import _ts, _id, ok, err
+from .. import store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -244,7 +244,7 @@ async def import_llm_models_route():
     - 每次导入先清除原有全部 imported(source=imported) 记录，再按 KB 当前列表重建；
     - manual(source=manual) 项整体保留；identity 与手动项重复的 KB 项跳过(preserved)。
     """
-    from .kb_gateway import call_kb
+    from ..kb_gateway import call_kb
     raw = call_kb("settings.getModels")
     if not raw:
         return err(424, "KB 不可达或无可用模型")
@@ -302,7 +302,7 @@ def _sync_manual_to_kb(entry: dict) -> dict:
     本地 id(探测会回退默认模型, 前端连通性测试仍可用直连 url)。
     """
     try:
-        from .kb_gateway import call_kb
+        from ..kb_gateway import call_kb
         raw = call_kb("settings.getModels")
         rows = raw if isinstance(raw, list) else list((raw or {}).get("models") or [])
         model_name = str(entry.get("model") or "").strip()
@@ -409,7 +409,7 @@ async def delete_llm_model_route(model_id: str):
     if target.get("source") == "manual" and not target.get("kbShared") \
             and not str(model_id).startswith("man-"):
         try:
-            from .kb_gateway import call_kb
+            from ..kb_gateway import call_kb
             call_kb("settings.removeModel", id=model_id)
         except Exception as e:  # noqa: BLE001
             logging.getLogger("arch.mcp_collab").warning(

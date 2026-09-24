@@ -2,9 +2,9 @@
 import re
 from typing import Optional
 from fastapi import APIRouter, Request
-from .common import _ts, ok, err
+from ..common import _ts, ok, err
 from .knowledge import KB_NOTE
-from . import store
+from .. import store
 
 router = APIRouter()
 
@@ -179,13 +179,13 @@ async def create_requirement(request: Request, projectId: str = ""):
     # _resolve_project 的 root 联动; 前端 projectStore 直传 id 更可靠)
     _p_token = None
     if (projectId or "").strip():
-        from . import ctx as _ctx
+        from .. import ctx as _ctx
         _p_token = _ctx.set_project(projectId.strip())
     try:
         return await _create_requirement_impl(request, body)
     finally:
         if _p_token:
-            from . import ctx as _ctx
+            from .. import ctx as _ctx
             _ctx.reset_project(_p_token)
 
 
@@ -194,7 +194,7 @@ async def _create_requirement_impl(request: Request, body: dict):
     # S5：资产地图对话来源（对话中形成的提案卡提交时携带）
     src_type = (body.get("sourceType") or "").strip()
     src_conv = (body.get("sourceConversationId") or "").strip()
-    from .common import _ts as _ts2
+    from ..common import _ts as _ts2
     import json as _json
     _ts_v = _ts2()
     snapshot = {"title": body.get("title", ""), "desc": body.get("desc", ""),
@@ -216,8 +216,8 @@ async def _create_requirement_impl(request: Request, body: dict):
     store.RequirementsStore.create(req)
     # 需求跟踪台账: 手工登记挂账(draft=等待用户完善), 失败不阻断
     try:
-        from .store.tracking import emit as _tr_emit
-        from .store.states import TRACK_DONE, TRACK_WAITING
+        from ..store.tracking import emit as _tr_emit
+        from ..store.states import TRACK_DONE, TRACK_WAITING
         status = req.get("status") or "draft"
         is_draft = status == "draft"
         _tr_emit(category="需求", title=req.get("title") or req["id"],
@@ -328,7 +328,7 @@ async def analyze_clarify(request: Request):
         return err(400, KB_NOTE)
 
     from .req_agent import req_harness_clarify
-    from .common import KbUnavailableError
+    from ..common import KbUnavailableError
     tier = "T1"
     try:
         from ..agent.governance.gears import resolve_gear
@@ -379,7 +379,7 @@ async def analyze_collect(request: Request):
         return err(400, KB_NOTE)
 
     from .req_agent import req_harness_collect
-    from .common import KbUnavailableError
+    from ..common import KbUnavailableError
     tier = "T1"
     try:
         from ..agent.governance.gears import resolve_gear

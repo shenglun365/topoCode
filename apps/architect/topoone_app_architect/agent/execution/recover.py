@@ -50,7 +50,7 @@ def recover_sweep() -> int:
     存在 running/waiting_input 任务的会话 → recover_conv_tasks。
     返回收尾任务数(重挂泵不计)。"""
     import sqlite3
-    from ...arch_routes import ctx as _ctx
+    from ... import ctx as _ctx
     data_dir = _ctx.data_dir()
     db_paths = [os.path.join(data_dir, "architect.db")]
     proj_root = os.path.join(data_dir, "architect")
@@ -106,7 +106,7 @@ def recover_conv_tasks(conv_id: str) -> dict:
     """
     # 调用期解析: eb._client/_handle_task_event/_task_ctx 为测试打桩接缝
     from ...arch_routes import exec_bridge as _eb
-    from ...arch_routes.store import states as ST
+    from ...store import states as ST
     out = {"finished": 0, "repump": []}
     now_ms = int(__import__("time").time() * 1000)
     for t in _eb.store.TasksStore.of_conv(conv_id):

@@ -4,8 +4,8 @@
 后端优先承载前端 tag-store 的持久化；内置分类法由前端 + i18n 提供。
 """
 from fastapi import APIRouter, Request
-from .common import _ts, ok, err
-from . import store
+from ..common import _ts, ok, err
+from .. import store
 
 router = APIRouter()
 

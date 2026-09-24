@@ -1,3 +1,4 @@
+
 """公共测试夹具(规范化环节六) — 环境隔离/客户端/WS 助手单源。
 
 旧形态: 每个测试文件手写 _setup/_env/_client(同一套 env 重置五连,
@@ -9,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 
 
 def isolate_arch(tmp_path, monkeypatch) -> str:

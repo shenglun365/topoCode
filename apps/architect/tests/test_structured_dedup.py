@@ -15,7 +15,7 @@ sys.path.insert(0, _repo)
 from fastapi.testclient import TestClient
 
 import topoone_app_architect.arch_routes.req_agent as req_agent
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 from topoone_app_architect.server import build_app
 
 WS_PATH = "/api/architect/ws/kb-analysis"
@@ -24,7 +24,7 @@ WS_PATH = "/api/architect/ws/kb-analysis"
 def test_structured_channel_duplicate_propose_deduped(tmp_path, monkeypatch):
     data = str(tmp_path / "arch")
     monkeypatch.setenv("ARCH_DATA_DIR", data)
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     C._db = None; C._kb = None; C._data_dir = None
     C._project_dbs.clear()
     C.reset_project(C._project_var.set(None))
@@ -75,7 +75,7 @@ def test_final_round_branch_duplicate_propose_deduped(tmp_path, monkeypatch):
     """满轮收尾分支(流式文本轮 tool_round>=max)同样去重。"""
     data = str(tmp_path / "arch")
     monkeypatch.setenv("ARCH_DATA_DIR", data)
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     C._db = None; C._kb = None; C._data_dir = None
     C._project_dbs.clear()
     C.reset_project(C._project_var.set(None))

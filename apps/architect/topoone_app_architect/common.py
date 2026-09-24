@@ -67,7 +67,7 @@ def build_architecture_model(root=None, project=None, include_code_mappings: boo
     - KB 调用失败/不可达/方法缺失 → 抛 KbUnavailableError，路由转 502(不再静默当空)。
     """
     try:
-        from . import project as _project_mod
+        from .arch_routes import project as _project_mod
         from .kb_gateway import call_kb
         if _project_mod.kb_degraded(root, project):
             return empty_architecture_model()
@@ -101,7 +101,7 @@ def build_component_catalog(root=None, project=None) -> dict:
     - KB 调用失败/不可达 → 抛 KbUnavailableError，路由转 502。
     """
     try:
-        from . import project as _project_mod
+        from .arch_routes import project as _project_mod
         from .kb_gateway import call_kb
         if _project_mod.kb_degraded(root, project):
             return {"components": [], "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None}

@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from topoone_app_architect.arch_routes import agent_executors as ae  # noqa: E402
+from topoone_app_architect.arch_routes import agent_executors as ae
 
 
 def test_cline_is_default_executor():

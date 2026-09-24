@@ -16,8 +16,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from ...arch_routes import store
-from ...arch_routes.store import states as ST
+from ... import store
+from ...store import states as ST
 
 logger = logging.getLogger("arch_routes.exec_bridge")
 
@@ -47,7 +47,7 @@ def stop(conv_id: str, reason: str = "") -> str:
 def _last_failed_task(conv_id: str) -> dict:
     """会话最近一次失败任务行(跨主库+项目库扫描, 与 recover_sweep 同法)。"""
     try:
-        from ...arch_routes.store.base import _db, _scan_dbs
+        from ...store.base import _db, _scan_dbs
         seen = []
         for db in [_db(), *_scan_dbs()]:
             try:
@@ -120,7 +120,7 @@ def propose_task(conv: dict, title: str, instruction: str,
     conv_id = conv["id"]
     conv = store.ConversationsStore.get(conv_id) or conv   # 取全量行(create 返回值可能缺 reqId 等字段)
     # 安全等级归一(三值轴; 非法值回落 mutating——显式优于静默升档)
-    from ...arch_routes.store.states import (SAFETY_CLASSES, SAFETY_MUTATING,
+    from ...store.states import (SAFETY_CLASSES, SAFETY_MUTATING,
                                              SAFETY_READONLY)
     _safety = str(safety_class or "").strip().lower() or SAFETY_MUTATING
     if _safety not in SAFETY_CLASSES:
@@ -655,8 +655,8 @@ def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:
                     project_id=(store.ConversationsStore.get(conv_id) or {}).get("projectId") or "")
             # 需求跟踪台账: 决议回填(按 requestId 定位挂起的「决策」条目)
             try:
-                from ...arch_routes.store.tracking import TrackingItemsStore
-                from ...arch_routes.store.states import TRACK_DONE, TRACK_WAITING
+                from ...store.tracking import TrackingItemsStore
+                from ...store.states import TRACK_DONE, TRACK_WAITING
                 for d in TrackingItemsStore.find_by_ref("approval", request_id, category="决策"):
                     if (d.get("state") or "") == TRACK_WAITING:
                         TrackingItemsStore.update(d["id"], {

@@ -17,8 +17,8 @@ import subprocess
 from typing import Optional
 from fastapi import APIRouter, Request
 
-from .common import _ts, ok, err
-from . import store
+from ..common import _ts, ok, err
+from .. import store
 from .project import _list_kb_projects, _same_repo_source
 
 router = APIRouter()

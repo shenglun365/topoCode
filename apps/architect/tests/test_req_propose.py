@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from topoone_app_architect.arch_routes import ctx  # noqa: E402
+from topoone_app_architect import ctx  # noqa: E402
 
 
 class TestReqPropose(unittest.TestCase):
@@ -15,7 +15,8 @@ class TestReqPropose(unittest.TestCase):
         ctx.setup(data_dir=self.dir)
 
     def test_propose_creates_requirement_with_source(self):
-        from topoone_app_architect.arch_routes import req_agent, store
+        from topoone_app_architect import store
+        from topoone_app_architect.arch_routes import req_agent
         # 模拟资产对话上下文（会话 id）
         token = ctx.set_conv("conv-test-1")
         try:

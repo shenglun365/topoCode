@@ -15,8 +15,8 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
-import topoone_app_architect.arch_routes.store as store
+import topoone_app_architect.ctx as C
+import topoone_app_architect.store as store
 from topoone_app_architect.agent.perception import commands as cmds
 from topoone_app_architect.agent.planning.task_plan import propose_task_tool
 from topoone_app_architect.arch_routes import agent_executors as ae

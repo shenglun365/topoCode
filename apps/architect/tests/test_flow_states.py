@@ -16,7 +16,7 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect.agent.governance import flow
 from topoone_app_architect.agent.governance.gears import resolve_gear
-from topoone_app_architect.arch_routes.store import states as ST
+from topoone_app_architect.store import states as ST
 
 
 # ── 派生(纯函数) ──────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ def test_register_hint_consumed_by_flow_hints():
 # ── 集成(store): 事件迁移 / 审计 / dismiss ───────────────────────────
 
 def test_recompute_transitions(arch_env):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     cid = conv["id"]
     # free(空缓存惰性回填)
@@ -209,7 +209,7 @@ def test_recompute_transitions(arch_env):
 
 
 def test_interrupted_recovery_cycle(arch_env):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     cid = conv["id"]
     store.TasksStore.create({"conversationId": cid, "title": "T",
@@ -227,7 +227,7 @@ def test_interrupted_recovery_cycle(arch_env):
 
 def test_dismiss_consumes_reviewing(arch_env):
     from topoone_app_architect.agent.execution.dispatch import dismiss_task
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     cid = conv["id"]
     task = store.TasksStore.create({"conversationId": cid, "title": "T",
@@ -248,7 +248,7 @@ def test_dismiss_consumes_reviewing(arch_env):
 
 def test_safety_class_roundtrip(arch_env):
     from topoone_app_architect.agent.execution.dispatch import propose_task
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     task = propose_task(conv, "只读分析", "分析架构，不要修改任何文件",
                         safety_class="readonly",
@@ -264,7 +264,7 @@ def test_safety_class_roundtrip(arch_env):
 
 
 def test_archive_freezes_phase(arch_env):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     cid = conv["id"]
     flow.set_flow_state(store.ConversationsStore.get(cid), ST.FLOW_ARMED,

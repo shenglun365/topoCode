@@ -13,7 +13,7 @@ from topoone_app_architect.agent.reflection import repair_tasks as rt  # noqa: E
 
 
 def _setup_env(tmp_path, monkeypatch):
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     data = str(tmp_path / "d")
     C._db = None
     C._kb = None
@@ -41,7 +41,8 @@ def test_registry_has_tool_call_kind():
 def test_repair_fixes_unknown_tool(tmp_path, monkeypatch):
     """未知工具(名称幻觉) → 隔离修复出合法工具名 → 执行成功。"""
     _setup_env(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import req_agent, store
+    from topoone_app_architect import store
+    from topoone_app_architect.arch_routes import req_agent
 
     def fake_llm_sync(msgs, **kw):
         assert "req_probe" in msgs[-1]["content"]       # 原调用可见

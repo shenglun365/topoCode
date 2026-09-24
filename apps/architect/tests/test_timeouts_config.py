@@ -61,8 +61,8 @@ def test_llm_call_sourced_from_registry(arch_env, monkeypatch):
 
 def test_saved_task_tracks_as_waiting():
     """cv-200: 默认保存(saved)在台账里是「待启动」, 不是 cancelled。"""
-    from topoone_app_architect.arch_routes.store.tracking import _task_state_of
-    from topoone_app_architect.arch_routes.store.states import (
+    from topoone_app_architect.store.tracking import _task_state_of
+    from topoone_app_architect.store.states import (
         TASK_SAVED, TASK_PENDING_CONFIRM, TRACK_WAITING)
     assert _task_state_of(TASK_SAVED) == (TRACK_WAITING, "user")
     assert _task_state_of(TASK_PENDING_CONFIRM) == (TRACK_WAITING, "user")

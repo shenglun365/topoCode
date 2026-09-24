@@ -11,11 +11,11 @@ from test_exec_implement import _mk_v2_fixture  # noqa: E402
 
 from topoone_app_architect.agent.execution.items import (  # noqa: E402
     item_from_card, project_event, STREAM_PERSIST_TYPES)
-from topoone_app_architect.arch_routes import store  # noqa: E402
+from topoone_app_architect import store  # noqa: E402
 
 
 def _setup_env(tmp_path, monkeypatch):
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     data = str(tmp_path / "arch")
     monkeypatch.setenv("ARCH_DATA_DIR", data)
     C._db = None

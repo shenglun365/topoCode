@@ -9,8 +9,8 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from . import store
-from .common import _ts
+from .. import store
+from ..common import _ts
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

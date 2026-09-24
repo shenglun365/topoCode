@@ -9,7 +9,7 @@ from ..registry import register_architect_tool
 logger = logging.getLogger("arch_routes.req_agent")
 
 def _model(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
-    from ....arch_routes.common import build_architecture_model
+    from ....common import build_architecture_model
     return build_architecture_model(root, project)
 
 
@@ -18,7 +18,7 @@ def _model_assets(root: Optional[str], project: Optional[str]) -> List[Dict[str,
 
 
 def _model_code_mappings(root: Optional[str], project: Optional[str]) -> List[Dict[str, Any]]:
-    from ....arch_routes.common import build_architecture_model
+    from ....common import build_architecture_model
     model = build_architecture_model(root, project, include_code_mappings=True)
     real = model.get("codeMappings") or []
     if real:

@@ -32,7 +32,7 @@ def _reports_base() -> str:
 def _auth_headers() -> dict:
     """reports(经网关) 需鉴权：转发本地数据目录的 token(architect 与网关同源)。"""
     try:
-        from . import ctx
+        from .. import ctx
         tok_path = os.path.join(ctx.data_dir(), "token")
         with open(tok_path, "r", encoding="utf-8") as f:
             tok = f.read().strip()

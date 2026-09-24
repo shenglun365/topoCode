@@ -34,12 +34,12 @@ TOOLS = [
 
 def _record(tool: str, detail: str, status: str = "ok") -> None:
     try:
-        from . import store
-        from .common import _id, _ts
+        from .. import store
+        from ..common import _id, _ts
         store.CollabConfigStore  # 触发 store 就绪
         import sqlite3
         # 直接落 mcp_calls 表（复用 mcp_collab 语义）
-        from .ctx import get_db
+        from ..ctx import get_db
         db = get_db()
         db.execute(
             "INSERT INTO arch_mcp_calls (id, tool, input, output, status, time) "
@@ -53,7 +53,7 @@ def _record(tool: str, detail: str, status: str = "ok") -> None:
 
 def _resolve_project_entry(project: Optional[str] = None) -> Optional[dict]:
     """MCP 工具的项目解析：显式 id > 唯一项目 > None（带提示）。"""
-    from . import store
+    from .. import store
     rows = store.ProjectsStore.all()
     if project:
         for r in rows:
@@ -75,12 +75,12 @@ def _md_header(title: str, proj: Optional[dict]) -> str:
 
 
 def tool_overview(project: Optional[str] = None) -> str:
-    from .common import build_component_catalog
+    from ..common import build_component_catalog
     proj = _resolve_project_entry(project)
     if not proj:
         rows = [f"- {r.get('id')} {r.get('name','')}" for r in ([])
                 ] or []
-        from . import store
+        from .. import store
         allp = [f"- `{r.get('id')}` {r.get('name','')}" for r in store.ProjectsStore.list()]
         return ("# 资产地图\n\n无法唯一定位项目，请传 project 参数。可用项目：\n"
                 + "\n".join(allp or ["- (无)"]))
@@ -101,7 +101,7 @@ def tool_overview(project: Optional[str] = None) -> str:
         out.append(f"组件目录不可用：{e}")
     # 语义资产统计
     try:
-        from . import store
+        from .. import store
         pid = _pid_of(proj)
         stats: dict[str, int] = {}
         for a in store.SemanticAssetsStore.all(pid, limit=5000) or []:
@@ -119,7 +119,7 @@ def tool_overview(project: Optional[str] = None) -> str:
 
 
 def tool_component(name: str, project: Optional[str] = None) -> str:
-    from .common import build_component_catalog
+    from ..common import build_component_catalog
     proj = _resolve_project_entry(project)
     if not proj:
         return "# 组件档案\n\n无法唯一定位项目，请传 project 参数。"
@@ -152,7 +152,7 @@ def tool_component(name: str, project: Optional[str] = None) -> str:
             out.extend(f"- `{name_of.get(d, d)}`" for d in rdeps[:40])
         # 组件内语义资产
         try:
-            from . import store
+            from .. import store
             pid = _pid_of(proj)
             comp_assets = [a for a in store.SemanticAssetsStore.all(pid, limit=2000) or []
                            if any(nl in ((a.get("scope") or {}).get("key") or "").lower()
@@ -179,7 +179,7 @@ def tool_assets(query: str = "", kind: str = "", level: str = "", limit: int = 3
     proj = _resolve_project_entry(project)
     if not proj:
         return "# 语义资产\n\n无法唯一定位项目，请传 project 参数。"
-    from . import store
+    from .. import store
     rows = store.SemanticAssetsStore.search(_pid_of(proj), text=query, kind=kind,
                                             level=level,
                                             limit=min(int(limit or 30), 200)) or []
@@ -202,7 +202,7 @@ def tool_rules(project: Optional[str] = None) -> str:
 
     out.append("## 编码规约（KB 文档）\n")
     try:
-        from .kb_gateway import call_kb
+        from ..kb_gateway import call_kb
         docs = call_kb("knowledge.listDocs") or []
         found = False
         for d in docs:
@@ -217,7 +217,7 @@ def tool_rules(project: Optional[str] = None) -> str:
         out.append(f"(KB 不可达: {e})")
 
     try:
-        from . import store
+        from .. import store
         convs = store.NamingConventionStore.list(pid, status="active") or []
         if convs:
             out.append("\n## 命名规约（active）\n")
@@ -236,13 +236,13 @@ def tool_rules(project: Optional[str] = None) -> str:
 
 
 def tool_graph(kind: str = "component", project: Optional[str] = None) -> str:
-    from .common import build_architecture_model
+    from ..common import build_architecture_model
     proj = _resolve_project_entry(project)
     if not proj:
         return "# 关系图\n\n无法唯一定位项目，请传 project 参数。"
     try:
         if kind == "semantic":
-            from . import store
+            from .. import store
             rows = store.SemanticAssetsStore.all(_pid_of(proj), limit=800) or []
             out = [_md_header("语义关系图", proj), "```mermaid\ngraph LR"]
             seen = set()
