@@ -24,9 +24,7 @@
     /* Path alias（M10: 移除 @web/*，workbench 不引用根 web/）*/
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@topo-animation": ["src/lib/topo-animation"],
-      "@topo-animation/*": ["src/lib/topo-animation/*"]
+      "@/*": ["src/*"]
     },
 
     "types": ["vite/client", "node"]

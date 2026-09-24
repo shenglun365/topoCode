@@ -14,8 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      '@topo-animation': resolve(__dirname, 'src/lib/topo-animation'),
-    },
+          },
   },
   envPrefix: ['VITE_', 'TOPOCODE_'],
   base: './',
