@@ -1173,7 +1173,7 @@ async def list_archives(project_id: str = Query(None), category: str = Query(Non
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         rows = common.multi_db.chat_db.fetchall(
             f"SELECT id, title, content, category, tags, source, created_at "
-            f"FROM chat_archives {where} ORDER BY created_at DESC LIMIT 50"
+            f"FROM chat_archives {where} ORDER BY created_at DESC LIMIT 50", tuple(params)
         )
         return {"archives": [{"id": r["id"], "title": r["title"], "content": r["content"][:500],
                                "category": r["category"], "tags": r["tags"], "source": r["source"],
