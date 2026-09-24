@@ -15,7 +15,7 @@ import { apiBaseUrl, getToken } from '@/services/api-client'
 import { currentProjectParams } from '@/services/project-service'
 import { requirementService } from '@/services/requirement-service'
 import { outlineAbbrCache } from '@/services/outline-cache'
-import { readModelPref } from '@topo/web-core/shell'
+import { readModelPref } from '@/shell/prefs'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import { useChatProgress } from '@/composables/useChatProgress'
 

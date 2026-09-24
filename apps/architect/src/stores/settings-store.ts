@@ -7,7 +7,7 @@ import {
   readFontSize,
   writeFontSize,
   setFontSize,
-} from '@topo/web-core/shell'
+} from '@/shell/prefs'
 
 const LEGACY_PERSIST_KEY = 'arch-settings'
 

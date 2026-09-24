@@ -44,7 +44,7 @@ vi.mock('@/services/requirement-service', () => ({
 vi.mock('@/services/outline-cache', () => ({
   outlineAbbrCache: { removeMessages: vi.fn() },
 }))
-vi.mock('@topo/web-core/shell', () => ({ readModelPref: vi.fn(() => '') }))
+vi.mock('@/shell/prefs', () => ({ readModelPref: vi.fn(() => '') }))
 vi.mock('@/composables/useDiagramSkill', () => ({
   useDiagramSkill: vi.fn(() => ({ diagramSkill: { value: false }, toggleDiagramSkill: vi.fn() })),
 }))

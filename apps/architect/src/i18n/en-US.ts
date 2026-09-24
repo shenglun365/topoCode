@@ -1,4 +1,4 @@
-import { commonEn } from '@topo/web-core/i18n/common'
+import { commonEn } from '@/i18n/common'
 export default {
 
   app: {

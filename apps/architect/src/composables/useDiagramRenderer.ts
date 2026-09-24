@@ -1,13 +1,13 @@
 /** 图渲染统一入口（收敛到 topoOne 内核）。
 
-mermaid/plantuml 渲染统一经 @topo/web-core/composables/useTopoRender：
+mermaid/plantuml 渲染统一经 @/services/topo-render（SYNC-WITH web-core useTopoRender）：
 - mermaid  主线程 MermaidEngine（catppuccin 主题随 data-theme，见内核 themes）
 - plantuml POST {base}/plantuml/svg（gateway /api/topo，sidecar→本地 jar→远程兜底）
 规模预判/超限友好提示等纯函数保留于此。
 */
 
-import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
-import { normalizeMermaidCode } from '@topo/web-core/services/diagram-normalize'
+import { renderDiagram } from '@/services/topo-render'
+import { normalizeMermaidCode } from '@topo/graph-kernel'
 
 export type DiagramLang = 'mermaid' | 'plantuml'
 
@@ -21,7 +21,7 @@ export async function renderPlantuml(code: string): Promise<string> {
   return renderDiagram('plantuml', code)
 }
 
-/** 清理规则单一源见 @topo/web-core/services/diagram-normalize（F2 修正，原此处有一份拷贝） */
+/** 清理规则单一源见 @topo/graph-kernel（MS3-U0 归口） */
 export function normalizeMermaid(code: string): string {
   return normalizeMermaidCode(code)
 }

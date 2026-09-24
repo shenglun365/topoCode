@@ -20,7 +20,7 @@ import { sessionService, type ConversationMeta } from '@/services/session-servic
 import { currentProjectParams } from '@/services/project-service'
 import { namingService } from '@/services/naming-service'
 import { apiBaseUrl, apiGet, apiPost, getToken } from '@/services/api-client'
-import { readModelPref } from '@topo/web-core/shell'
+import { readModelPref } from '@/shell/prefs'
 
 const props = withDefaults(defineProps<{
   /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */

@@ -1,4 +1,4 @@
-import { commonZh } from '@topo/web-core/i18n/common'
+import { commonZh } from '@/i18n/common'
 export default {
 
   app: {
