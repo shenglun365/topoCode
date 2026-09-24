@@ -25,8 +25,9 @@ function _syncFallback(): string {
 async function _initDeviceId(): Promise<string> {
   if (_cachedId) return _cachedId
   try {
-    if (window.api?.device?.getId) {
-      const id = await window.api.device.getId()
+    const wapi = (window as any).api
+    if (wapi?.device?.getId) {
+      const id = await wapi.device.getId()
       if (id) {
         _cachedId = id
         return id

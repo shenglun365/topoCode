@@ -73,7 +73,7 @@ export const resourceService = {
   },
 
   async getImportStatus(importId: string): Promise<{ status: string; progress: number; message: string; result?: { projectId: string; projectName: string } }> {
-    const result = await (window.api as any)?.system?.importStatus?.(importId)
+    const result = await ((window as any).api)?.system?.importStatus?.(importId)
     return result || { status: '', progress: 0, message: '' }
   },
 

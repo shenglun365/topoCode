@@ -1,6 +1,7 @@
 /* ========================================
-   window.api 全局类型 — IPC 桥单一契约源
-   （实现：services/browser-api.ts，HTTP /api/rpc + /ws/events）
+   window.api 契约参考 — 全局 declare global 已随 ipc.ts/browser-api.ts
+   下沉 workbench(MS3-U5/U6: apps/workbench/src/types/ipc.ts:903);
+   web-core 内使用点以 (window as any) 本地断言(portal 独立构建下 api 可能不存在)
    ======================================== */
 export {} // make this a module so `declare global` works
 
