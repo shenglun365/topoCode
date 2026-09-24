@@ -1,6 +1,6 @@
 # MS1 细化设计：测试安全网与工程缺陷清零
 
-> 状态：**待评审** | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS1 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B0
+> 状态：**已评审通过，实施完成**（2026-09-24，C1~C8 全部落地） | 日期：2026-09-24 | 上游：[milestones.md](milestones.md) §2-MS1 · [0924 重构方案](../architecture-refactor-plan-20260924.md) B0
 > 事实基线：2026-09-24 三路代码探查（docs 路由与产物 / core 管线与 RPC / chat 路径与缺陷），全部结论带 文件:行号 落入本文。
 
 ## 1. 目标
@@ -42,6 +42,7 @@
 | F10 | 根 test:py（package.json:33）当前指向**无误**——5 个目录均存在，pytest 对空目录（docs 仅 .gitkeep、workbench 仅 .ts）不做失败收集；新增测试后自然生效，**无需改 script** | package.json:33 |
 | F11 | CI backend job 只 `pip install -e packages/core`（ci.yml:34-47），但 test:py 含 4 个 app 包测试（且现有 test_service_app.py:131 已 import topoone_app_docs）——CI 与本地环境（scripts/setup.sh:28-32 装全部 5 包）不一致 | ci.yml vs setup.sh |
 | F12 | `static/architect.html` 仍被 git 跟踪（`1c657d8` 入库早于 ignore 规则；.gitignore:60 已覆盖该目录，untrack 后即闭环）；CONV-04:146"已在 .gitignore"的陈述在 untrack 后成立 | git ls-files 实测 |
+| F14 | **（套件新发现缺陷 D7）**`GET /api/chat/archives` 带 project/category/tag 任一筛选必 500——chat.py:1174 `fetchall` 漏传 `tuple(params)`，SQL 占位符与绑定数不匹配；无筛选时正常，故存量未暴露 | 测试首跑复现 |
 | F13 | architect 源码 9 处真实 import `@topo/web-core`（ConversationDock.vue:23、AppTopbar.vue:6-7、useDiagramRenderer.ts:9-10、i18n/en+zh:1、conversation-store.ts:18、settings-store.ts:4-10），package.json 无声明，靠 hoisting 生效 | grep 实测 |
 
 ## 4. 分步设计（文件级）
@@ -144,7 +145,7 @@ ensure_chat_tables(multi_db)
 app = FastAPI(); app.include_router(chat_router)
 client = TestClient(app)          # teardown: common.multi_db = None
 ```
-**LLM 打桩策略**（legacy 路径，chat.py:707-804 `_llm_round` 直连 `{base_url}/v1/chat/completions`）：monkeypatch `chat._llm_round` 为脚本化 async 生成器（产出 chunk→done 事件序）；`/compress` 分支 monkeypatch `SessionCompressor._llm_compress`（chat.py:1782）。零真实 HTTP（同 test_tagent_chat.py 头部纪律）。
+**LLM 打桩策略**（实施期修正）：`_llm_round` 是 `send_chat_message` 闭包内的同步函数（chat.py:707），**不可 monkeypatch**——真实接缝是模块内 `import requests` 后的 `_req.post`（chat.py:749，流式 `iter_lines` + 非流式 auto-title 双形态）。`/compress` 分支 monkeypatch `SessionCompressor.execute`。零真实 HTTP（同 test_tagent_chat.py 纪律）。另：`stream=False` 通道（chat.py:642）无 LLM 即可全链路持久化，作为零打桩用例。
 
 用例表（P0 必做/P1 应做/P2 冒烟）：
 
@@ -193,6 +194,7 @@ result = _do_parse(ctx)                  # :1064，同步执行 6 步
 | D3 | 进程口径不一致：方案文档 :13「10 进程」、B0 条目 5「9→10」为笔误，代码实测 9 进程（F9） | 修方案文档两处为 9；README/CONV-00/CONV-01/CONV-04 的「9 进程」**保持不动**（准确）；在 CONV-00 §3 加一行口径注：「agent-bus 退役后恒为 9，变更须过 G6」 | `topo serve && topo status` 实测 9 OK（记录进验收）；`grep -rn "10 进程" docs/ README.md` 零命中 |
 | D4 | render-worker-bundled.js untrack——**已天然完成**（F8） | 无动作，转为验证项 | `git ls-files \| grep render-worker-bundled` 零命中 |
 | D5 | CI backend job 未装 4 个 app 包（F11） | `.github/workflows/ci.yml` backend job 改为 `pip install -e packages/core -e apps/workbench -e apps/docs -e apps/chat -e apps/architect`（与 scripts/setup.sh:28-32 对齐） | CI backend job 绿（本地等效：setup 后 `npm run test:py`） |
+| D7 | `GET /api/chat/archives` 带筛选必 500（F14，套件发现） | chat.py:1174 `fetchall(...)` 补传 `tuple(params)`（一行） | 带筛选 list 断言 200 且 total 正确 |
 | D6 | `POST /api/diagram-editor/process` 必 500（F4） | viewer.py:852 `from web_tools import ...` → `from topoone_app_chat.web_tools import ...`；`apps/docs/pyproject.toml` 增临时依赖 `topoone-app-chat`（MS5 拆分时随 chat.py/web_tools.py 归位重估） | smoke 套件该端点断非 500；`python -c "import topoone_app_docs.viewer"` 无警告 |
 
 ### 4.6 全局态纪律（三套新 conftest 共同遵守）
@@ -201,8 +203,8 @@ result = _do_parse(ctx)                  # :1064，同步执行 6 步
 
 ## 5. 测试计划
 
-- 单套运行：`python -m pytest apps/docs/tests -q`（新增 ~40 例）· `apps/workbench/tests -q`（~14）· `apps/chat/tests -q`（新增 ~25，加存量 10）· `packages/core/tests/test_pipeline_integration.py -q`（~8）
-- 全量：`npm run test:py`（5 域）+ `npm run test:fe`；耗时预算：管线集成 ≤60s、其余每套 ≤20s（超时即视为设计失败，回头查 fixture 重量）
+- 实测：docs 18 例 /6s（session 级 app+sidecar，用例级唯一种子 id 隔离）· chat 21 例新增 /3s · workbench+core 版本 12 例 /0.8s · 管线 7 例 /0.9s
+- 实施期修正两处预期：① 管线进度事件在 step1 批次并发（as_completed）下可能交错，单调断言放宽为「界内 + 收口 ≥99」；② docs G2 的空 body 规则改为「空 JSON 对象不得 500」——裸 `request.json()` 对无 body 抛 JSONDecodeError → 500 属系统性缺口，记档为 MS5 加固候选（test_route_smoke.py 模块注释）
 - CI：D5 落地后 backend job 首次真实覆盖 5 域
 - 不新增 pytest 标记/ini；全部用例默认收集
 
@@ -210,10 +212,10 @@ result = _do_parse(ctx)                  # :1064，同步执行 6 步
 
 | # | 命令 | 预期 |
 |---|---|---|
-| 1 | `python -m pytest apps/docs/tests apps/chat/tests apps/workbench/tests packages/core/tests -v` | 全绿，新增 4 套可见（docs ~40 / workbench ~14 / chat ~25 / core +8） |
-| 2 | `npm run type-check && npm run lint && npm run test` | 全绿 |
+| 1 | `python -m pytest apps/docs/tests apps/chat/tests apps/workbench/tests packages/core/tests -q` | **✅ 349 passed / 39.7s**（docs 18 + chat 32 含存量 tagent 11 + workbench 12 + core 291） |
+| 2 | `npm run type-check` / `npm run test:fe` / `npm run lint` | **✅ type-check exit=0；✅ test:fe 21 passed；⚠️ lint exit=1 为存量红灯**——130 错误全部位于 MS1 未触碰文件（web-core/src、scripts/、前会话在途 architect 组件），MS1 commit 集内零 lint 目标文件 |
 | 3 | `git ls-files \| grep -E "render-worker-bundled\|static/architect.html"` | 仅余 `apps/architect/src/architect.html`（源模板，合法） |
-| 4 | `topo serve && topo status` 实测进程数，与 README:115/CONV-00:8 口径一致（当前 9）；`grep -rn "10 进程" docs/ README.md` 命中仅限归档件与勘误记录，活跃文档零「改 10」待办 | 一致 |
+| 4 | 进程口径：`_all_service_names()` 代码级核证 = **9**（kb/gateway/llm/agent/docs/chat/architect/mcp/runner）；`grep -rn "10 进程" docs/` 命中仅限归档件与勘误记录本身 | **✅ 一致**（`topo serve` 全量起停留待用户环境执行） |
 | 5 | `git status` 确认 D1 untrack、D2/D6 声明与修复落地 | 见 4.5 各验证列 |
 
 ## 7. 风险与回退
@@ -229,15 +231,18 @@ result = _do_parse(ctx)                  # :1064，同步执行 6 步
 
 ## 8. 工作量与 commit 序列（每项独立可 revert）
 
-| 序 | 内容 | 预估 |
-|---|---|---|
-| C1 | D3+D4 文档口径修正（方案文档 2 处 + CONV-00 注记；验证项记录） | 0.25d |
-| C2 | D1 untrack + D2 依赖声明 + D5 CI 对齐 | 0.5d |
-| C3 | 4.0 build_app 提取（含导入/`--help` 烟测） | 0.25d |
-| C4 | 4.1 docs smoke 套件（conftest + 2 文件） | 1.5d |
-| C5 | 4.2 workbench+core knowledge 套件（2 文件） | 1d |
-| C6 | 4.3 chat 路径套件 | 1.5d |
-| C7 | 4.4 管线集成套件 | 1d |
-| C8 | D6 修复 + editor-process 用例收口 + 全量验收（§6 五条） | 0.5d |
+### 实施记录（2026-09-24，全部落地）
 
-合计 ~6.5 人日（含评审吸收）。开工前打 `git tag pre-MS1`（裁决⑥）。
+| 序 | commit | 内容 |
+|---|---|---|
+| — | `pre-MS1` tag + b8cf54f + b3a18a0 | 文档归档与 MS1 设计定稿先行入库 |
+| C1 | f4c68d9 + f8accef | CONV-00 口径注记 + harness-evaluation 残留关闭 |
+| C2 | 63c658f + eec1f5d | D2 依赖声明 + D5 CI 对齐 ‖ D1 untrack（pathspec 提交会从工作区回捞文件，需「暂离→提交→移回」三步） |
+| C3 | c2cd8b9 | build_app 提取（multi_db 经 app.state 传回收尾） |
+| C8' | 73608ad | D6 悬空 import 修复（先于 C4 落地使锚点用例可绿） |
+| C4 | 5b832c0 | docs smoke 套件 18 例（首跑即实证 D6：500+ModuleNotFoundError） |
+| C5 | 944e64e | knowledge 套件 12 例 |
+| C6 | af76b4f | chat 套件 21 例 + **D7 修复**（套件首跑发现 list_archives 筛选 500） |
+| C7 | a835b5d | 管线集成 7 例（core 全量 291 passed 零回归） |
+
+验收证据见 §6。安全网建成的直接收益已在实施中兑现：**D6/D7 两个存量生产缺陷由新套件首次运行即捕获**。
