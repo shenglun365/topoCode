@@ -4,7 +4,7 @@ import {
   getTaskStatusColor,
   getBackendStatusLabel,
   getBackendStatusColor,
-} from '@topo/web-core/utils/statusBadge'
+} from '@/utils/statusBadge'
 
 describe('getTaskStatusLabel', () => {
   it('returns Chinese label for known statuses', () => {
