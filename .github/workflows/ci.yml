@@ -40,8 +40,8 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install core (editable)
-        run: pip install -e packages/core
+      - name: Install core + app packages (editable, align scripts/setup.sh)
+        run: pip install -e packages/core -e apps/workbench -e apps/docs -e apps/chat -e apps/architect
 
       - name: Backend tests (core + apps)
         run: npm run test:py
