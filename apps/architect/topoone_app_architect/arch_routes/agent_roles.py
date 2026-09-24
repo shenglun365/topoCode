@@ -11,7 +11,7 @@ import json
 
 from fastapi import APIRouter, Request
 
-from .common import err, ok
+from ..common import err, ok
 from ..agent.cognition.roles import (  # noqa: F401
     DEFAULT_ROLES,
     get_roles,
@@ -61,7 +61,7 @@ async def api_light_tasks_put(request: Request):
 
 def get_light_tasks() -> dict:
     """读配置(词表全集, 缺键补空; 坏 JSON → 空值兜底)。"""
-    from .store import CollabConfigStore
+    from ..store import CollabConfigStore
     raw = CollabConfigStore.get(LIGHT_TASKS_KEY, "") or "{}"
     try:
         data = json.loads(raw)
@@ -73,7 +73,7 @@ def get_light_tasks() -> dict:
 
 def set_light_tasks(data: dict) -> dict:
     """写入(词表键 + 模型目录越界剥离——cv-168 同源教训)。"""
-    from .store import CollabConfigStore
+    from ..store import CollabConfigStore
     from ..agent.cognition.roles import _known_model_ids
     clean = normalize_light_tasks(data, _known_model_ids())
     CollabConfigStore.set(LIGHT_TASKS_KEY, json.dumps(clean, ensure_ascii=False))
@@ -82,7 +82,7 @@ def set_light_tasks(data: dict) -> dict:
 
 def load_light_tasks_cfg() -> dict:
     """消费方注入入口(units/scope_probe 经此读原始 cfg——不做全集补齐)。"""
-    from .store import CollabConfigStore
+    from ..store import CollabConfigStore
     raw = CollabConfigStore.get(LIGHT_TASKS_KEY, "") or "{}"
     try:
         data = json.loads(raw)

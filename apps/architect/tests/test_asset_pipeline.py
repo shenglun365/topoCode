@@ -15,12 +15,12 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
-from topoone_app_architect.arch_routes import asset_rules as R  # noqa: E402
-from topoone_app_architect.arch_routes import asset_templates as T  # noqa: E402
-from topoone_app_architect.arch_routes import asset_tools as AT  # noqa: E402
-from topoone_app_architect.arch_routes import asset_extract as E  # noqa: E402
-from topoone_app_architect.arch_routes import asset_diagram as F  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
+from topoone_app_architect.arch_routes import asset_rules as R
+from topoone_app_architect.arch_routes import asset_templates as T
+from topoone_app_architect.arch_routes import asset_tools as AT
+from topoone_app_architect.arch_routes import asset_extract as E
+from topoone_app_architect.arch_routes import asset_diagram as F
 
 
 def _ctx(tmp_path, monkeypatch):
@@ -449,7 +449,7 @@ def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
                     "mode": "chat"}
 
     gw = _GW()
-    import topoone_app_architect.arch_routes.kb_gateway as KG
+    import topoone_app_architect.kb_gateway as KG
     monkeypatch.setattr(KG, "get_gateway", lambda: gw)
     assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=True)
     assert len(gw.calls) == 1  # 名称解析单次直连
@@ -471,7 +471,7 @@ def test_extract_group_llm_failure_falls_to_floor(tmp_path, monkeypatch):
         def call(self, method, timeout=None, **params):
             return {"content": "oops", "mode": "chat"}   # 非 JSON → 名称解析失败
 
-    import topoone_app_architect.arch_routes.kb_gateway as KG
+    import topoone_app_architect.kb_gateway as KG
     monkeypatch.setattr(KG, "get_gateway", lambda: _GW())
     assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=True)
     assert len(assets) == 1 and assets[0]["kind"] == "entity"

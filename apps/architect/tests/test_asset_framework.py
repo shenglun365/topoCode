@@ -8,10 +8,10 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 from topoone_app_architect.arch_routes import asset_framework as F
-from topoone_app_architect.arch_routes import store
-from topoone_app_architect.arch_routes.store import (
+from topoone_app_architect import store
+from topoone_app_architect.store import (
     FrameworkConfigStore, GlossaryStore, NameTombstoneStore,
     NamingConventionStore, SemanticAssetsStore, UserOverlayStore,
 )
@@ -43,7 +43,7 @@ def _mk_asset(aid: str, kind: str = "process", status: str = "active",
 
 
 def _get_raw(aid: str):
-    from topoone_app_architect.arch_routes.store import _get
+    from topoone_app_architect.store import _get
     return _get("arch_semantic_assets", aid)
 
 

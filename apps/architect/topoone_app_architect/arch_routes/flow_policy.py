@@ -8,7 +8,7 @@ swallow_counters)不在此表, 见 agent/compensation/overrides.py。
 """
 from fastapi import APIRouter, Request
 
-from .common import err, ok
+from ..common import err, ok
 
 router = APIRouter()
 
@@ -17,7 +17,7 @@ router = APIRouter()
 async def api_flow_policy_get():
     from ..agent.governance.flow_policy import (
         DEFAULT_FLOW_POLICY, POLICY_KEY, load_flow_policy)
-    from .store import CollabConfigStore
+    from ..store import CollabConfigStore
     raw = CollabConfigStore.get(POLICY_KEY, "")
     return ok({"policy": load_flow_policy(CollabConfigStore.get),
                "overrideRaw": raw or "",
@@ -27,7 +27,7 @@ async def api_flow_policy_get():
 @router.put("/flow-policy")
 async def api_flow_policy_put(request: Request):
     from ..agent.governance.flow_policy import POLICY_KEY, load_flow_policy, validate_flow_policy
-    from .store import CollabConfigStore
+    from ..store import CollabConfigStore
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -46,6 +46,6 @@ async def api_flow_policy_put(request: Request):
 @router.delete("/flow-policy")
 async def api_flow_policy_delete():
     from ..agent.governance.flow_policy import POLICY_KEY, load_flow_policy
-    from .store import CollabConfigStore
+    from ..store import CollabConfigStore
     CollabConfigStore.set(POLICY_KEY, "")
     return ok({"policy": load_flow_policy(CollabConfigStore.get)})

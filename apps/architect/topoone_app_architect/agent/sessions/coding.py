@@ -19,7 +19,7 @@ def _meta_of(conv: dict) -> dict:
 
 
 def _set_active_coding_session(conv_id: str, sub_id: str) -> None:
-    from ...arch_routes import store
+    from ... import store
     meta = _meta_of(store.ConversationsStore.get(conv_id) or {})
     meta["activeCodingSession"] = sub_id
     store.ConversationsStore.update(conv_id, {"meta": meta})

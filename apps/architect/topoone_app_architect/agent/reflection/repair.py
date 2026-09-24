@@ -23,7 +23,7 @@ logger = logging.getLogger("arch.reflection.repair")
 
 
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 
@@ -195,7 +195,7 @@ def _persist_repair_note(task: "RepairTask", out: Dict[str, Any]) -> None:
     try:
         from ..compensation.overrides import override_enabled, read_overrides
         from ..governance.flow_policy import load_flow_policy
-        from ...arch_routes import store
+        from ... import store
         _get = store.CollabConfigStore.get
         if not override_enabled(read_overrides(_get), "repair_note_injection"):
             return
@@ -206,7 +206,7 @@ def _persist_repair_note(task: "RepairTask", out: Dict[str, Any]) -> None:
         conv_id = str(task.anchor_conv or "")
         if not conv_id:
             try:
-                from ...arch_routes import ctx as _ctx
+                from ... import ctx as _ctx
                 conv_id = str(_ctx.get_conv() or "")
             except Exception:  # noqa: BLE001
                 conv_id = ""

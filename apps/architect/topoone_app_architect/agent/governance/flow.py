@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from ...arch_routes.store.states import (
+from ...store.states import (
     CONV_ACTIVE,
     FLOW_ARMED, FLOW_CLARIFYING, FLOW_EXECUTING, FLOW_FREE,
     FLOW_INTERRUPTED, FLOW_PHASES, FLOW_REVIEWING,
@@ -218,7 +218,7 @@ def evaluate_guards(phase: str, text: str,
 
 
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 
@@ -351,7 +351,7 @@ def mark_stale_interrupted(conv_id: str) -> bool:
 
 def land_phase_reply(conv_id: str, reply: str) -> str:
     """硬闸直通回执落库(orchestrator ①.5 消费; 同直通指令落库口径)。返回 messageId。"""
-    from ...arch_routes import store
+    from ... import store
     msg_id = store.next_id("m")
     store.ConversationsStore.append_message({
         "id": msg_id, "conversationId": conv_id, "role": "assistant",

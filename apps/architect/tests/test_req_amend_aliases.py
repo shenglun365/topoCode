@@ -13,7 +13,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 
 def _mk_ready_req(conv_id, title="原标题"):
@@ -34,7 +34,8 @@ def _mk_ready_req(conv_id, title="原标题"):
 
 
 def _amend(rid, args):
-    from topoone_app_architect.arch_routes import req_agent, ctx
+    from topoone_app_architect import ctx
+    from topoone_app_architect.arch_routes import req_agent
     tok = ctx.set_req(rid)
     tok2 = ctx.set_conv("cv-am")
     try:

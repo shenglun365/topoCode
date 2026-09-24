@@ -53,7 +53,7 @@ def generate_unit_tests(*, scope: str, root: Optional[str], project: Optional[st
     LLM/KB 不可达或解析失败 → None(调用方 502/降级)。同步外壳 + asyncio.run。
     """
     import asyncio
-    from .kb_gateway import get_gateway
+    from ..kb_gateway import get_gateway
 
     gateway = get_gateway()
     if gateway is None:

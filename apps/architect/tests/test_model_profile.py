@@ -8,8 +8,8 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
-from topoone_app_architect.arch_routes import store
+import topoone_app_architect.ctx as C
+from topoone_app_architect import store
 
 
 def _setup(tmp_path, monkeypatch):
@@ -219,7 +219,7 @@ def test_manual_model_update_route(tmp_path, monkeypatch):
             return self._b
 
     # 隔离 KB: manual 同步走本地保留路径(不触真实主库)
-    from topoone_app_architect.arch_routes import kb_gateway
+    from topoone_app_architect import kb_gateway
     monkeypatch.setattr(kb_gateway, "call_kb",
                         lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("kb isolated")))
 
@@ -230,7 +230,7 @@ def test_manual_model_update_route(tmp_path, monkeypatch):
         res = await M.update_manual_llm_model_route(mid, FakeReq(
             {"name": "新名", "model": "new-model", "url": "http://b"}))
         return mid, res
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     _setup(tmp_path, monkeypatch)
     mid, res = asyncio.run(_run())
     data = res.body["data"] if hasattr(res, "body") else res["data"]
@@ -248,7 +248,7 @@ def test_manual_model_update_route(tmp_path, monkeypatch):
 
 def test_llm_models_save_dedupes_by_id(tmp_path, monkeypatch):
     """存储归一: 同 id 双行(KB 同步按名复用 id + 名称变体所致)保留 updatedAt 最新。"""
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     _setup(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import mcp_collab as M
     M.save_llm_models([
@@ -268,10 +268,10 @@ def test_model_delete_route(tmp_path, monkeypatch):
     """删除分流: imported 仅解除导入(不动主库); manual 清理主库注册条目;
     kbShared(复用 KB 自有)不删主库; 选中偏好指向被删条目时清空。"""
     import asyncio
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     _setup(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import mcp_collab as M
-    from topoone_app_architect.arch_routes import kb_gateway
+    from topoone_app_architect import kb_gateway
 
     removed = []
     monkeypatch.setattr(kb_gateway, "call_kb",
@@ -283,7 +283,7 @@ def test_model_delete_route(tmp_path, monkeypatch):
         {"source": "manual", "id": "model-kb9", "name": "c", "model": "m3",
          "kbShared": True},                                                          # 复用 KB 自有
     ])
-    from topoone_app_architect.arch_routes import store as _st
+    from topoone_app_architect import store as _st
     _st.CollabConfigStore.set("llm.modelId", "model-kb1")
 
     # imported: 仅本地移除, 不触主库
@@ -307,10 +307,10 @@ def test_manual_model_kb_sync_binds_id(tmp_path, monkeypatch):
 
     主库 id 是探测/对话链路的真实路由键(否则 llm.sync 回退 is_default)。
     """
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     _setup(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import mcp_collab as M
-    from topoone_app_architect.arch_routes import kb_gateway
+    from topoone_app_architect import kb_gateway
     import topoone_app_architect.arch_routes.mcp_collab as M
     calls = {"get": 0, "add": 0}
 

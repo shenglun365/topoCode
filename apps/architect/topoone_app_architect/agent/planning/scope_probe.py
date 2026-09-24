@@ -33,7 +33,7 @@ def gather_grounding(root: str, project: Optional[str], req_text: str,
     # history: 同项目其他需求的边界(scope 先验)——需求存项目库, all() 天然项目隔离
     history: List[str] = []
     try:
-        from ...arch_routes import store
+        from ... import store
         for r in store.RequirementsStore.all():
             if r.get("id") == exclude_rid:
                 continue
@@ -173,7 +173,7 @@ def heuristic_scope_fallback(root: str, req_text: str,
             _add(tok.rstrip("/"), "tree" if tok in tree_set else "tree")
     # ② 历史需求边界先验(同项目, 目录前缀级)
     try:
-        from ...arch_routes import store
+        from ... import store
         for r in store.RequirementsStore.all():
             if len(files) >= _MAX_PROPOSED:
                 break

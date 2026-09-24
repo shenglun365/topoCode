@@ -171,7 +171,7 @@ def run_extraction_agentic(*, sys_msg: str, user_msg: str,
     - 工具结果经 loop 的 observe_tool_result 入清单（含锚点抽取），参与
       后续轮次预算编译与 GC 可达性豁免。
     """
-    from .kb_gateway import get_gateway
+    from ..kb_gateway import get_gateway
 
     if context_manager is None:
         context_manager = build_extraction_context(

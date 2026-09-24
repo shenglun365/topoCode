@@ -9,13 +9,13 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 from topoone_app_architect.arch_routes import agent_roles as R
 from topoone_app_architect.agent.cognition import roles as _cog_roles
 from topoone_app_architect.arch_routes import asset_skill as K
 from topoone_app_architect.arch_routes import semantic_assets as S
 from topoone_app_architect.arch_routes import req_agent
-from topoone_app_architect.arch_routes.store import (
+from topoone_app_architect.store import (
     CollabConfigStore, NamingConventionStore)
 
 

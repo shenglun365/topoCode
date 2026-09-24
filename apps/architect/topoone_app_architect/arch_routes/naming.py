@@ -27,8 +27,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 
-from .common import err, ok
-from .store import (GlossaryStore, NameTombstoneStore, NamingConventionStore,
+from ..common import err, ok
+from ..store import (GlossaryStore, NameTombstoneStore, NamingConventionStore,
                     UserOverlayStore)
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ def propose_convention(pid: str, rule_text: str,
 
 def _rejection_facts(pid: str, item_id: str) -> List[Dict[str, Any]]:
     """该条目最近一次验收报告中 L1/L2 失败/部分事实（失败模式证据）。"""
-    from .store import AcceptanceStore
+    from ..store import AcceptanceStore
     for rep in AcceptanceStore.list_reports(pid, limit=20):
         detail = AcceptanceStore.report_detail(rep.get("id", ""), pid) or {}
         hits = [f for f in detail.get("facts") or []
@@ -157,7 +157,7 @@ def induce_from_rejection(pid: str, item_id: str,
     归纳结果按场景（accept）注入后续验收（见 asset_skill.skill_docs），防同类失败复发。
     条目非 rejected → 返回 None；归纳失败不抛（调用方安全）。
     """
-    from .store import ContractItemStore
+    from ..store import ContractItemStore
     item = ContractItemStore.get(item_id, pid or None)
     if not item or item.get("status") != "rejected":
         return None
@@ -446,7 +446,7 @@ async def api_tombstones(project: Optional[str] = None, root: Optional[str] = No
 async def api_asset_names(asset_id: str,
                           project: Optional[str] = None,
                           root: Optional[str] = None):
-    from . import store as _store
+    from .. import store as _store
     from .semantic_assets import project_id_for
     asset = _store.SemanticAssetsStore.get(asset_id)
     if not asset:

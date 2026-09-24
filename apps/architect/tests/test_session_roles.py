@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client(tmp_path):
-    from topoone_app_architect.arch_routes import ctx as C
+    from topoone_app_architect import ctx as C
     C._db = None; C._kb = None; C._data_dir = None
     C._project_dbs.clear()
     from topoone_app_architect import server as _srv

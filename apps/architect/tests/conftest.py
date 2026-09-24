@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 
 
 def isolate_arch(tmp_path, monkeypatch) -> str:

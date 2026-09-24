@@ -14,7 +14,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
 _SEM_MODULE_NAMES = ("taxonomy", "paths", "codegraph", "scope", "incremental", "context", "anchors", "engine")
 
 
@@ -25,16 +25,16 @@ def _patch_all(monkeypatch, name, value):
     if hasattr(_sa, name):
         monkeypatch.setattr(_sa, name, value)
     for _mn in _SEM_MODULE_NAMES:
-        _mod = importlib.import_module(f"topoone_app_architect.arch_routes.sem.{_mn}")
+        _mod = importlib.import_module(f"topoone_app_architect.sem.{_mn}")
         if hasattr(_mod, name):
             monkeypatch.setattr(_mod, name, value)
 
 
-from topoone_app_architect.arch_routes import semantic_assets as S  # noqa: E402
-from topoone_app_architect.arch_routes.sem import context as _sem_context
+from topoone_app_architect.arch_routes import semantic_assets as S
+from topoone_app_architect.sem import context as _sem_context
 from topoone_app_architect.arch_routes.naming import (  # noqa: E402
     _parse_terms_file)
-from topoone_app_architect.arch_routes.store import (  # noqa: E402
+from topoone_app_architect.store import (  # noqa: E402
     GlossaryStore, NameTombstoneStore, NamingConventionStore,
     SemanticAssetsStore, UserOverlayStore)
 
@@ -248,7 +248,7 @@ class TestNamesHistory:
 # ── 就地认知编辑（rename/merge/split；R5 main-KB 拒绝） ─────────
 
 def _mk_asset(pid, name, refs, kind="entity", level="implementation"):
-    from topoone_app_architect.arch_routes.store import _now_ms
+    from topoone_app_architect.store import _now_ms
     return SemanticAssetsStore.create({
         "id": f"sa-t-{abs(hash(name)) % 10 ** 8}", "projectId": pid,
         "kind": kind, "level": level, "name": name,
@@ -264,7 +264,7 @@ class TestCognitiveEdit:
         _mk_asset(pid, "创建订单", [{"file": "m.py", "symbol": "create_order"}])
         rows = SemanticAssetsStore.all(pid, kind="entity")
         aid = rows[0]["id"]
-        from topoone_app_architect.arch_routes.semantic_assets import api_asset_rename
+        from topoone_app_architect.semantic_assets import api_asset_rename
         out = _call(lambda: api_asset_rename(_req(
             {"assetId": aid, "newName": "下单(校验版)", "author": "designer"})))
         data = out.get("data") or {}
@@ -286,7 +286,7 @@ class TestCognitiveEdit:
         t1 = _mk_asset(pid, "订单校验", [{"file": "b.py", "symbol": "Check"}])
         t2 = _mk_asset(pid, "订单落库", [{"file": "a.py", "symbol": "Svc"},
                                         {"file": "c.py", "symbol": "Persist"}])
-        from topoone_app_architect.arch_routes.semantic_assets import api_asset_merge
+        from topoone_app_architect.semantic_assets import api_asset_merge
         out = _call(lambda: api_asset_merge(_req({
             "intoId": into["id"], "targetIds": [t1["id"], t2["id"]],
             "targetName": "订单"})))
@@ -310,7 +310,7 @@ class TestCognitiveEdit:
             {"file": "a.py", "symbol": "Validate"},
             {"file": "a.py", "symbol": "Persist"},
         ], kind="process")
-        from topoone_app_architect.arch_routes.semantic_assets import api_asset_split
+        from topoone_app_architect.semantic_assets import api_asset_split
         out = _call(lambda: api_asset_split(_req({
             "assetId": src["id"],
             "parts": [
@@ -339,11 +339,11 @@ class TestCognitiveEdit:
         _mk_asset(pid, "创建订单", [{"file": "m.py", "symbol": "create_order"}])
         rows = SemanticAssetsStore.all(pid, kind="entity")
         aid = rows[0]["id"]
-        from topoone_app_architect.arch_routes import store as st
+        from topoone_app_architect import store as st
         monkeypatch.setattr(
             st.ProjectsStore, "get",
             classmethod(lambda cls, row_id: {"kbProjectId": "kb-1"}))
-        from topoone_app_architect.arch_routes.semantic_assets import api_asset_rename
+        from topoone_app_architect.semantic_assets import api_asset_rename
         out = _call(lambda: api_asset_rename(_req(
             {"assetId": aid, "newName": "X"})))
         assert out.get("code") == 409

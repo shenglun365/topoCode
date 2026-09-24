@@ -8,13 +8,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from topoone_app_architect.arch_routes import store  # noqa: E402
-from topoone_app_architect.arch_routes.store import tracking as TR  # noqa: E402
-from topoone_app_architect.arch_routes.store import states as ST  # noqa: E402
+from topoone_app_architect import store  # noqa: E402
+from topoone_app_architect.store import tracking as TR  # noqa: E402
+from topoone_app_architect.store import states as ST  # noqa: E402
 
 
 def _setup_env(tmp_path, monkeypatch):
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     data = str(tmp_path / "arch")
     monkeypatch.setenv("ARCH_DATA_DIR", data)
     C._db = None
@@ -234,7 +234,7 @@ def test_emit_without_project_routes_by_ref(tmp_path, monkeypatch):
     """cv-204 T3: emit 未带 projectId → 会话行缺失时从 ref 需求行推导,
     不再误落主库默认桶。"""
     _setup_env(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes.store import base as _sbase
+    from topoone_app_architect.store import base as _sbase
     # 需求表无 project_id 列——项目归属按库位置表达: 直插 pj-ref 项目库
     rdb = _sbase._target_db("arch_requirements", data={"projectId": "pj-ref"})
     _sbase._insert_into(rdb, "arch_requirements", {

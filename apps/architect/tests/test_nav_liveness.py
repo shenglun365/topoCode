@@ -19,7 +19,7 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect.agent.governance import focus as focus_mod
 from topoone_app_architect.agent.planning.task_plan import _plan_diagnosis
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 
 @pytest.fixture()

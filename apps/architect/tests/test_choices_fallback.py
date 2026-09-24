@@ -109,7 +109,7 @@ def test_intent_gate_is_caller_side():
 def test_land_choices_carries_gu_action(arch_env):
     """代落问询卡 meta 携带回合 guAction(记账载体=回合产物); 空缺省兼容。"""
     from topoone_app_architect.agent.collab import cards as _cards
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.ConversationsStore.create({"id": "conv-ga", "kind": "generic",
                                      "title": "t"})
     _cards.land_choices("conv-ga", GOOD, gu_action="clarify-first")
@@ -127,7 +127,7 @@ def test_focus_clarify_pending_from_card_ledger(arch_env):
     记账派生 → 下回合 L0-2.8 消解为 continuation(澄清循环收敛出口)。"""
     from topoone_app_architect.agent.collab import cards as _cards
     from topoone_app_architect.agent.governance.focus import _pending_action
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv_id = "conv-ledger"
     store.ConversationsStore.create({"id": conv_id, "kind": "generic",
                                      "title": "t"})
@@ -161,7 +161,7 @@ def test_focus_clarify_pending_from_card_ledger(arch_env):
 def test_json_fallback_lands_choices_card(arch_env):
     """cv-252 端到端: json 围栏载荷经兜底识别落卡(ChoicesCard 激活)。"""
     from topoone_app_architect.agent.collab import cards as _cards
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     conv = store.ConversationsStore.create({"id": "conv-c252",
                                             "kind": "generic", "title": "t"})
     card = _cards.land_choices("conv-c252", extract_choices_json_fence(
@@ -184,7 +184,7 @@ def test_bare_fence_turn_returns_card_landed(arch_env):
     import asyncio
     from types import SimpleNamespace
     from topoone_app_architect.agent.turns.chat import _post_turn_land
-    from topoone_app_architect.arch_routes import ctx as _ctx, store
+    from topoone_app_architect import ctx as _ctx, store
     store.ConversationsStore.create({"id": "conv-bare", "kind": "generic",
                                      "title": "t"})
 

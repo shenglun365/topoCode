@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 
 # 惰性访问(P4): agent 侧模块不得在 import 期触发 arch_routes 初始化(循环导入)
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 
 def _arch_ts():
-    from ..arch_routes.common import _ts
+    from ...common import _ts
     return _arch_ts()
 
 
@@ -465,7 +465,7 @@ def register_probe_tool() -> None:
     def _probe_run(instruction: str, files: str = "", executorId: str = "",
                    timeoutS: int = 600, project: Optional[str] = None,
                    root: Optional[str] = None) -> dict:
-        from ...arch_routes import ctx as _ctx
+        from ... import ctx as _ctx
         from ...arch_routes.project import _resolve_project
         conv_id = _ctx.get_conv() or ""
         try:

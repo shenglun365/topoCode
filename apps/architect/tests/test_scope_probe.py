@@ -10,7 +10,7 @@ import pytest
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 from topoone_app_architect.agent.governance.boundary import (
     changed_since, files_exist, list_repo_files)
 
@@ -76,7 +76,7 @@ def subprocess_sha(repo) -> str:
 # ── grounding 与探针解析 ─────────────────────────────────────────────
 
 def _isolate(arch_env, monkeypatch):
-    from topoone_app_architect.arch_routes import ctx as C
+    from topoone_app_architect import ctx as C
     monkeypatch.setattr(C, "_project_var", C._project_var)
     return arch_env
 

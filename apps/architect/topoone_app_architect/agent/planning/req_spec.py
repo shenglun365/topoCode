@@ -16,7 +16,7 @@ logger = logging.getLogger("arch.planning.req_spec")
 
 # 惰性访问(P4): import 期零触发 arch_routes 初始化
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 
@@ -135,7 +135,7 @@ def _fallback_title() -> str:
     载荷 title 仍优先; 仅当载荷未给标题时兜底(需求是项目资产, RQ 编号唯一
     可辨识, 会话标题提供扫读语义)。"""
     try:
-        from ...arch_routes import ctx as _ctx
+        from ... import ctx as _ctx
         conv = (_store().ConversationsStore.get(str(_ctx.get_conv() or "")) or {})
         t = str(conv.get("title") or "").strip()
         if t:

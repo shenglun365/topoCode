@@ -17,8 +17,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 
-from ...arch_routes.common import err, ok
-from ...arch_routes.store.base import _row_to_api
+from ...common import err, ok
+from ...store.base import _row_to_api
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ _MINE_SCHEMA = {
 
 def _mine_material(conv_id: str, budget: int = 12000) -> str:
     """会话材料: 消息(用户问题+助手结论) + 高优上下文单元(方案/回执/artifact 摘要)。"""
-    from ...arch_routes import store
+    from ... import store
     parts: List[str] = []
     msgs = store.ConversationsStore.messages(conv_id, limit=40) or []
     for m in msgs:
@@ -106,8 +106,8 @@ def _parse_proposal_array(text: str) -> List[dict]:
 def run_mine(conversation_id: str, root: Optional[str] = None,
              project: Optional[str] = None, model_id: str = "") -> Dict[str, Any]:
     """提炼入口: 材料 → LLM(role=mine) → 提案(pending)。返回 {proposals, markdown}。"""
-    from ...arch_routes import store
-    from ...arch_routes.semantic_assets import project_id_for
+    from ... import store
+    from ...semantic_assets import project_id_for
     from ...arch_routes.req_agent import llm_sync
     from ...arch_routes.agent_roles import resolve_role_model
 
@@ -151,7 +151,7 @@ def run_mine(conversation_id: str, root: Optional[str] = None,
 
     # 去重: 已 active 规约 + 已采纳提案(标题精确匹配)
     try:
-        from ...arch_routes.store import NamingConventionStore
+        from ...store import NamingConventionStore
         existing = {c.get("ruleText", "").strip() for c in NamingConventionStore.list(pid, status="active")}
     except Exception:
         existing = set()
@@ -187,7 +187,7 @@ def run_mine(conversation_id: str, root: Optional[str] = None,
 
 def decide_proposal(project_id: str, proposal_id: str, action: str) -> Dict[str, Any]:
     """采纳/忽略提案。采纳生效: convention→规约库(active); 其余→accepted(skill_docs 注入)。"""
-    from ...arch_routes import store
+    from ... import store
     row = store.CapabilityProposalStore.get(proposal_id, project_id)
     if not row:
         return {"error": f"提案 {proposal_id} 不存在"}
@@ -199,7 +199,7 @@ def decide_proposal(project_id: str, proposal_id: str, action: str) -> Dict[str,
     applied = ""
     if action == "accept":
         if row.get("type") == "convention":
-            from ...arch_routes.store import NamingConventionStore
+            from ...store import NamingConventionStore
             NamingConventionStore.create(
                 project_id, row.get("content", ""),
                 scenarios=row.get("scenarios") or ["naming"],
@@ -223,7 +223,7 @@ def register_mining_tools() -> None:
     )
     def _capability_mine(conversation: str = "", project: Optional[str] = None,
                          root: Optional[str] = None) -> dict:
-        from ...arch_routes import ctx as _ctx
+        from ... import ctx as _ctx
         conv_id = (conversation or "").strip() or _ctx.get_conv() or ""
         result = run_mine(conv_id, root=root, project=project)
         if result.get("error"):
@@ -246,7 +246,7 @@ async def api_mine(request: Request):
     # 统一时间线: 提炼报告沉淀为关联会话消息(复用/分析/总结可见)
     try:
         conv_id = str(body.get("conversationId") or "")
-        from ...arch_routes import store
+        from ... import store
         if conv_id and store.ConversationsStore.get(conv_id):
             store.ConversationsStore.append_message({
                 "id": store.next_id("m"), "conversationId": conv_id,
@@ -265,7 +265,7 @@ async def api_mine(request: Request):
 
 @router.get("/capabilities/proposals")
 async def api_proposals(project: str = "", status: str = "pending"):
-    from ...arch_routes import store
+    from ... import store
     if not project:
         return err(400, "缺少 project")
     rows = store.CapabilityProposalStore.list(project, status=status or "pending")
@@ -294,7 +294,7 @@ def _norm_text(s: str) -> str:
 
 def _unique_global_id(table: str, base_id: str) -> str:
     """全局桶 id 去重(force 并存时 g-<id> 可能已存在)。"""
-    from ...arch_routes.store.base import _db
+    from ...store.base import _db
     gid = f"g-{base_id}"
     if _db().fetchone(f"SELECT id FROM {table} WHERE id = ?", (gid,)) is None:
         return gid
@@ -303,7 +303,7 @@ def _unique_global_id(table: str, base_id: str) -> str:
 
 
 def _global_rows(table: str, status_cond: str = "") -> List[Dict[str, Any]]:
-    from ...arch_routes.store.base import GLOBAL_PID, _db
+    from ...store.base import GLOBAL_PID, _db
     sql = f"SELECT * FROM {table} WHERE project_id = ?"
     if status_cond:
         sql += f" AND {status_cond}"
@@ -319,8 +319,8 @@ def promote_to_global(project: str, kind: str, ref_id: str,
     冲突三选一: duplicate(重复, 提示跳过) / conflict(同语义, 报告双方) / promoted。
     """
     import time as _time
-    from ...arch_routes.store import base as _sbase
-    from ...arch_routes.store import NamingConventionStore, SemanticAssetsStore, CapabilityProposalStore
+    from ...store import base as _sbase
+    from ...store import NamingConventionStore, SemanticAssetsStore, CapabilityProposalStore
     now = int(_time.time() * 1000)
     decision = (decision or "").strip().lower()
 
@@ -478,8 +478,8 @@ async def periodic_mine_loop(interval_h: float = 6.0, min_idle_h: float = 24.0,
     会话 → run_mine 落 pending(设计者裁决, 不自动生效)。异常吞掉, 下轮重试。"""
     import asyncio as _aio
     import time as _time
-    from ...arch_routes.store import CapabilityProposalStore, ConversationsStore
-    from ...arch_routes.store.base import _scan_dbs
+    from ...store import CapabilityProposalStore, ConversationsStore
+    from ...store.base import _scan_dbs
     await _aio.sleep(60)  # 启动缓冲
     while True:
         try:
@@ -529,7 +529,7 @@ def start_periodic_mine() -> None:
 @router.get("/capabilities/global")
 async def api_global_layer(project: str = ""):
     """主库全局桶概览(WS8-S3 消费侧): 提案明细 + 规约/资产计数。"""
-    from ...arch_routes.store.base import GLOBAL_PID, _db
+    from ...store.base import GLOBAL_PID, _db
     props = []
     for r in _db().fetchall(
             "SELECT * FROM arch_capability_proposals WHERE project_id = ? "
@@ -553,7 +553,7 @@ async def api_global_import(request: Request):
     items = body.get("items") or []
     if not project or not items:
         return err(400, "缺少 project/items")
-    from ...arch_routes.store.base import GLOBAL_PID, _db, _insert, _update, _now_ms
+    from ...store.base import GLOBAL_PID, _db, _insert, _update, _now_ms
     imported = []
     for it in items[:50]:
         kind, gid = str(it.get("kind") or ""), str(it.get("id") or "")

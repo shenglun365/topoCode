@@ -52,7 +52,7 @@ def _impl(file_: str) -> dict:
     if file_ in impls:
         return impls[file_] or {}
     try:
-        from . import store
+        from .. import store
         from .semantic_assets import project_id_for
         pid = project_id_for(getattr(_tl, "root", None), getattr(_tl, "project", None))
         row = store.AstCacheStore.get(pid, file_) if pid else None

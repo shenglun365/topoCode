@@ -26,7 +26,7 @@ def _cfg_getter(raw: str):
 
 
 def _set_policy(raw: dict) -> None:
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.CollabConfigStore.set(fp.POLICY_KEY, json.dumps(raw, ensure_ascii=False))
 
 
@@ -46,12 +46,12 @@ def test_deep_merge_note_override_reaches_flow():
         # 未覆盖相位回落缺省
         assert "流程相位" in flow.phase_note("armed", pol)
     finally:
-        from topoone_app_architect.arch_routes import store
+        from topoone_app_architect import store
         store.CollabConfigStore.set(fp.POLICY_KEY, "")
 
 
 def test_load_bad_config_falls_back_to_defaults():
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     for bad in (
         {"phases": {"bogus_phase": {"note": "x"}}},          # 未知相位
         {"phases": {"interrupted": {"guards": [
@@ -124,7 +124,7 @@ def test_element_boost_policy_driven_p_axis():
             or base.element_hints == "high"
         assert "流程相位" in p.architect_note
     finally:
-        from topoone_app_architect.arch_routes import store
+        from topoone_app_architect import store
         store.CollabConfigStore.set(fp.POLICY_KEY, "")
 
 
@@ -157,7 +157,7 @@ def _stub_llm(monkeypatch, payload='{"fix": 1}', counter=None):
 
 def test_repair_note_persist_and_signature_dedupe(arch_env, monkeypatch):
     from topoone_app_architect.agent.reflection.repair import RepairTask, run_repair_loop
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     cid = store.ConversationsStore.create({"kind": "generic", "title": "t"})["id"]
     _stub_llm(monkeypatch)
     task = RepairTask(task_id="fix1", system="s", user="u",
@@ -175,7 +175,7 @@ def test_repair_note_persist_and_signature_dedupe(arch_env, monkeypatch):
 
 def test_repair_note_keep_latest_prune(arch_env, monkeypatch):
     from topoone_app_architect.agent.reflection.repair import RepairTask, run_repair_loop
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     cid = store.ConversationsStore.create({"kind": "generic", "title": "t"})["id"]
     _set_policy({"injections": {"repairNotes": {"keepLatest": 2}}})
     try:
@@ -188,12 +188,12 @@ def test_repair_note_keep_latest_prune(arch_env, monkeypatch):
         assert len(units) == 2                  # 修剪最旧, 保留 keepLatest
         assert all(u["title"] != "修复经验: fix0" for u in units)
     finally:
-        from topoone_app_architect.arch_routes import store
+        from topoone_app_architect import store
         store.CollabConfigStore.set(fp.POLICY_KEY, "")
 
 
 def _mk_units(cid, n):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     for i in range(n):
         store.ContextUnitsStore.create({
             "conversationId": cid, "type": "repair_note",
@@ -211,7 +211,7 @@ def _chat(conv, history=None, model_id=""):
 
 
 def test_repair_notes_injection_cap_and_weak_tier(arch_env, monkeypatch):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     cid = store.ConversationsStore.create({"kind": "generic", "title": "t"})["id"]
     conv = store.ConversationsStore.get(cid)
     _mk_units(cid, 4)
@@ -226,7 +226,7 @@ def test_repair_notes_injection_cap_and_weak_tier(arch_env, monkeypatch):
 
 def test_repair_note_switch_off(arch_env, monkeypatch):
     from topoone_app_architect.agent.compensation.overrides import OVERRIDES_KEY
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     cid = store.ConversationsStore.create({"kind": "generic", "title": "t"})["id"]
     conv = store.ConversationsStore.get(cid)
     _mk_units(cid, 2)
@@ -276,7 +276,7 @@ def _history(n):
 
 
 def test_overflow_digest_injected_and_cached(arch_env, monkeypatch):
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     cid = store.ConversationsStore.create({"kind": "generic", "title": "t"})["id"]
     conv = store.ConversationsStore.get(cid)
     calls: list = []
@@ -292,7 +292,7 @@ def test_overflow_digest_injected_and_cached(arch_env, monkeypatch):
 
 def test_overflow_digest_llm_fail_keeps_truncation(arch_env, monkeypatch):
     import topoone_app_architect.arch_routes.req_agent as ra
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
 
     def _boom(*a, **kw):
         raise RuntimeError("llm down")
@@ -308,7 +308,7 @@ def test_overflow_digest_llm_fail_keeps_truncation(arch_env, monkeypatch):
 
 def test_digest_never_lands_message_stream(arch_env, monkeypatch):
     """防守线③: 摘要只做装配期瞬态注入, 消息表零新行(cv-194 真相源保留)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     cid = store.ConversationsStore.create({"kind": "generic", "title": "t"})["id"]
     conv = store.ConversationsStore.get(cid)
     _stub_llm(monkeypatch, payload="要点纪要B")
@@ -321,7 +321,7 @@ def test_assembly_budget_clamps(arch_env, monkeypatch):
                                                    "floorChars": 50,
                                                    "coefMin": 0.05}}})
     try:
-        from topoone_app_architect.arch_routes import store
+        from topoone_app_architect import store
         cid = store.ConversationsStore.create({"kind": "generic", "title": "t"})["id"]
         conv = store.ConversationsStore.get(cid)
         _mk_units(cid, 2)
@@ -336,7 +336,7 @@ def test_assembly_budget_clamps(arch_env, monkeypatch):
         assert len(inj) == 1                            # 预算吃满 → 经验弃尾
         assert inj[0].startswith("【历史摘要") and inj[0].endswith("…")
     finally:
-        from topoone_app_architect.arch_routes import store
+        from topoone_app_architect import store
         store.CollabConfigStore.set(fp.POLICY_KEY, "")
 
 

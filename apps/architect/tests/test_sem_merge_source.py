@@ -12,7 +12,7 @@ import sqlite3
 
 import pytest
 
-from topoone_app_architect.arch_routes.sem import symbols as sym
+from topoone_app_architect.sem import symbols as sym
 
 
 @pytest.fixture()

@@ -15,9 +15,9 @@ logger = logging.getLogger("arch_routes.req_agent")
     "「有多少资产」「各类数量」等统计类提问用",
 )
 def tool_semantic_stats(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
-    from ....arch_routes.sem.engine import (SEMANTIC_KINDS, SEMANTIC_LEVELS, _lazy_reconcile,
+    from ....sem.engine import (SEMANTIC_KINDS, SEMANTIC_LEVELS, _lazy_reconcile,
                                             project_id_for)
-    from ....arch_routes import store
+    from .... import store
     try:
         _lazy_reconcile(root, project)
         pid = project_id_for(root, project)
@@ -59,7 +59,7 @@ def tool_semantic_search(root: Optional[str], project: Optional[str],
     # WS8-S4: includeGlobal 时合并主库全局桶(按需开关, R7 禁全量注入)
     if includeGlobal and text.strip():
         try:
-            from ....arch_routes.store.base import GLOBAL_PID, _db, _row_to_api
+            from ....store.base import GLOBAL_PID, _db, _row_to_api
             like = f"%{text.strip()}%"
             grows = _db().fetchall(
                 "SELECT * FROM arch_semantic_assets WHERE project_id = ? "
@@ -171,8 +171,8 @@ def tool_code_read_symbols(root: Optional[str] = None, project: Optional[str] = 
                            file: str = "", symbol: str = "",
                            startLine: int = 0, endLine: int = 0) -> Dict[str, Any]:
     import os
-    from ....arch_routes.semantic_assets import resolve_root, project_id_for
-    from ....arch_routes import store as _store
+    from ....semantic_assets import resolve_root, project_id_for
+    from .... import store as _store
     rpath = resolve_root(root, project)
     if not rpath or not file:
         return {"error": "缺少项目根或文件路径"}

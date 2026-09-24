@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 
 def _arch_ts():
-    from ..arch_routes.common import _ts
+    from ...common import _ts
     return _arch_ts()
 
 

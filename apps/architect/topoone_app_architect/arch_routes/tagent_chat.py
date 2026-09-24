@@ -36,7 +36,7 @@ def chat_reply(*, question: str, root: Optional[str], project: Optional[str],
     (不能在运行中的事件循环里直接调用)。
     """
     import asyncio
-    from .kb_gateway import get_gateway
+    from ..kb_gateway import get_gateway
 
     gateway = get_gateway()
     if gateway is None:

@@ -105,7 +105,7 @@ def main_stdio() -> None:
     logging.basicConfig(level=logging.INFO)
     data_dir = os.environ.get("TOPOCODE_DATA_DIR") or os.path.join(
         os.path.expanduser("~"), ".topocode")
-    from .arch_routes import ctx
+    from . import ctx
     ctx.setup(data_dir=data_dir)
     mcp = build_mcp()
     mcp.run(transport="stdio")

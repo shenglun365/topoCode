@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from . import store
+from .. import store
 
 GUIDE_SYSTEM = (
     "你是「架构师工作台」的会话导航助手。基于给定的会话状态，给出 2-4 条下一步操作建议。\n"
@@ -48,7 +48,7 @@ def guide_req_state(req_id: str) -> Optional[dict]:
 def guide_jobs_state(conv_id: str) -> list:
     """v2 任务状态(P3: 旧 jobs 账本只读兜底)——guide 提示材料。"""
     try:
-        from .store import TasksStore
+        from ..store import TasksStore
         out = [{"taskId": t.get("id"), "title": (t.get("title") or "")[:60],
                 "status": t.get("status"), "branch": t.get("branch") or ""}
                for t in TasksStore.of_conv(conv_id)[-3:]]

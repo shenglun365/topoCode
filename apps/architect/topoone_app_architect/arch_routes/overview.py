@@ -15,7 +15,7 @@
 from typing import Optional
 from fastapi import APIRouter
 
-from .common import ok
+from ..common import ok
 from . import mcp_collab as mcp_collab_routes
 from . import project as project_routes
 from . import greenfield as greenfield_routes

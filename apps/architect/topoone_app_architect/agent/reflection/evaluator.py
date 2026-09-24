@@ -54,8 +54,8 @@ def _spans_overlap(a: Dict[str, int], b: Dict[str, int]) -> bool:
 def change_footprint(root: Optional[str], project: Optional[str],
                      file_spans: List[Dict[str, Any]]) -> Dict[str, Any]:
     """file_spans → 受影响语义资产(锚点行重叠) + 资产关系子图(经 semantic_graph)。"""
-    from ...arch_routes.sem.engine import project_id_for, semantic_graph
-    from ...arch_routes import store
+    from ...sem.engine import project_id_for, semantic_graph
+    from ... import store
     pid = project_id_for(root, project)
     if not pid:
         return {"assets": [], "edges": [], "note": "项目未绑定(无语义资产)"}
@@ -225,8 +225,8 @@ def run_evaluate(conv_id: str, target: str = "plan",
     """评估入口: 方案评估(变更足迹×语义资产影响面)。返回 {markdown, assets}; 出错 {error}。
 
     target: plan(默认)——重构曾丢失此参数致 NameError(cv-157 同类幻影引用)。"""
-    from ...arch_routes import store
-    from ...arch_routes.sem.engine import project_id_for
+    from ... import store
+    from ...sem.engine import project_id_for
     pid = project_id_for(root, project)
 
     def _latest_plan() -> Optional[dict]:
@@ -282,7 +282,7 @@ def register_evaluator_tools() -> None:
     def _capability_evaluate(project: Optional[str] = None,
                              root: Optional[str] = None,
                              target: str = "plan") -> dict:
-        from ...arch_routes import ctx as _ctx
+        from ... import ctx as _ctx
         conv_id = _ctx.get_conv() or ""
         if not conv_id:
             return {"error": "评估需在会话中执行(读取会话 plan 契约)"}

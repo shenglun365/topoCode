@@ -32,7 +32,7 @@ _LOCK = threading.Lock()
 
 
 def _dir() -> str:
-    from ...arch_routes import ctx
+    from ... import ctx
     return os.path.join(ctx.data_dir(), "architect", "llm_dataset")
 
 
@@ -52,7 +52,7 @@ def _jstr(v: Any) -> str:
 def record(kind: str, **fields: Any) -> None:
     """追加一条事件。永不抛出。自动补 ts/会话/需求/项目/模型。"""
     try:
-        from ...arch_routes import ctx
+        from ... import ctx
         rec: Dict[str, Any] = {"ts": int(time.time() * 1000), "kind": kind}
         try:
             rec["convId"] = ctx.get_conv() or ""
@@ -105,7 +105,7 @@ def swallow(tag: str) -> None:
     """
     try:
         from ..compensation.overrides import override_enabled, read_overrides
-        from ...arch_routes import store
+        from ... import store
         if not override_enabled(
                 read_overrides(store.CollabConfigStore.get), "swallow_counters"):
             return

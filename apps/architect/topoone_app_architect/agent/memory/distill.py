@@ -55,7 +55,7 @@ _SYSTEM = (
 
 
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 
@@ -155,8 +155,8 @@ def land_error_pattern(project_id: str, pattern: Dict[str, Any],
         "importance": 2})
     # 需求跟踪台账: 新模式挂「异常」条目(同签名追加不重复挂), 失败不阻断
     try:
-        from ...arch_routes.store.tracking import emit as _tr_emit
-        from ...arch_routes.store.states import TRACK_DONE
+        from ...store.tracking import emit as _tr_emit
+        from ...store.states import TRACK_DONE
         _tr_emit(category="异常", title=f"错误模式: {sig}",
                  content=f"**归因**: {cause}\n**修正**: {fix}"[:1000],
                  action_type="分析", creator_role="architect",

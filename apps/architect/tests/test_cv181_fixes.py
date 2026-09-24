@@ -8,7 +8,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 
 # ── 修复1: 续跑分支单源(propose 决定, confirm 消费) ──────────────────

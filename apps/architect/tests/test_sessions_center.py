@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
-import topoone_app_architect.arch_routes.store as store  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
+import topoone_app_architect.store as store  # noqa: E402
 
 
 class TestSessionsCenter(unittest.TestCase):

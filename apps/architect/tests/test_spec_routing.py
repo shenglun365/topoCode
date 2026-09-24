@@ -17,7 +17,7 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect.agent.planning.req_spec import (
     _fallback_title, _plan_delivered, apply_spec_payload)
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 PAYLOAD = {"title": "[UI开发] 基础工作台界面",
            "requirementMd": "**背景**：工作台界面实现",
@@ -66,7 +66,7 @@ def _mk_bound(conv_id="conv-rt", delivered_plan=False, active_plan=False,
 def test_delivered_plan_routes_to_new_requirement(arch):
     """计划全 done(交付完结) + 新载荷 → 新建: 新编号/v1/载荷标题生效/绑定翻页。"""
     rid, conv_id = _mk_bound(delivered_plan=True)
-    from topoone_app_architect.arch_routes import ctx as _ctx
+    from topoone_app_architect import ctx as _ctx
     token = _ctx.set_conv(conv_id)                # 生产收口同款(ctx 内调用)
     try:
         res = apply_spec_payload(dict(PAYLOAD), req_id=rid, project="p")
@@ -120,7 +120,7 @@ def test_title_fallback_chain(arch):
     验证最后环节生效; 不烧 L2 修复通道。"""
     conv = store.ConversationsStore.create({"id": "conv-fb", "kind": "generic",
                                             "title": "动画引擎会话"})
-    from topoone_app_architect.arch_routes import ctx as _ctx
+    from topoone_app_architect import ctx as _ctx
     token = _ctx.set_conv("conv-fb")
     try:
         assert _fallback_title() == "动画引擎会话·需求"

@@ -19,8 +19,8 @@ import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
 
-from . import store
-from .store import states as ST
+from .. import store
+from ..store import states as ST
 from ..agent.execution.runner_client import RunnerClient
 
 logger = logging.getLogger(__name__)

@@ -22,7 +22,7 @@ sys.path.insert(0, _repo)
 from topoone_app_architect.arch_routes import asset_extract
 from topoone_app_architect.arch_routes import tagent_extract
 import topoone_app_architect.arch_routes.req_agent as RA
-import topoone_app_architect.arch_routes.kb_gateway as KG
+import topoone_app_architect.kb_gateway as KG
 
 
 class FakeGateway:

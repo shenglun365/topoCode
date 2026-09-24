@@ -10,7 +10,7 @@
 import logging
 from typing import List, Optional
 
-from .store import NamingConventionStore
+from ..store import NamingConventionStore
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +255,7 @@ def skill_docs(root: Optional[str], project: Optional[str],
                 parts.append("\n".join(lines))
         # WS7 能力闭环: 已采纳提案(流程/技巧/skill)按场景标签注入(静态注册→可增长)
         try:
-            from .store import CapabilityProposalStore
+            from ..store import CapabilityProposalStore
             accepted = CapabilityProposalStore.list(pid, status="accepted", limit=200)
 
             def _scene_list(p):

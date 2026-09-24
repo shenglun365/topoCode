@@ -14,7 +14,8 @@ _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
 from fastapi.testclient import TestClient
-from topoone_app_architect.arch_routes import ctx, kb_gateway, tagent_chat
+from topoone_app_architect import ctx, kb_gateway
+from topoone_app_architect.arch_routes import tagent_chat
 from topoone_app_architect.server import build_app
 
 

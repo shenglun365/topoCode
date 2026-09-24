@@ -381,7 +381,7 @@ def plan_goal_directive(question: str, conv: Optional[dict],
     try:
         if pol is None:
             try:
-                from ...arch_routes import store as _s
+                from ... import store as _s
                 from ..governance.flow_policy import load_flow_policy
                 pol = load_flow_policy(_s.CollabConfigStore.get)
             except Exception:  # noqa: BLE001

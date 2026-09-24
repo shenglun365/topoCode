@@ -9,8 +9,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
-import topoone_app_architect.arch_routes.store as store  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
+import topoone_app_architect.store as store  # noqa: E402
 
 
 class _MockRunnerHandler(BaseHTTPRequestHandler):

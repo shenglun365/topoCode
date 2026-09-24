@@ -17,9 +17,9 @@ from fastapi import APIRouter, Request
 import fastapi
 from fastapi.responses import StreamingResponse
 
-from .common import _ts, ok, err
-from . import store
-from .store import states as ST
+from ..common import _ts, ok, err
+from .. import store
+from ..store import states as ST
 from ..agent.collab import sse as ws_events
 
 router = APIRouter()
@@ -372,7 +372,7 @@ def _delete_session_cascade(conv_id: str) -> int:
         pass
     # v2: 活跃任务终态化(runner 侧停止) + 任务行级联删除
     try:
-        from .store import TasksStore
+        from ..store import TasksStore
         for t in TasksStore.of_conv(conv_id):
             if (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT, ST.TASK_PENDING_CONFIRM):
                 if t.get("runnerJobId"):
@@ -513,7 +513,7 @@ def _running_role_of(conv: dict) -> dict:
 def _tasks_of_conv(conv: dict) -> list:
     """v2 统一会话: 会话任务清单(arch_tasks, 倒序)。失败静默(旧库无表)。"""
     try:
-        from .store import TasksStore
+        from ..store import TasksStore
         ts = TasksStore.of_conv(conv.get("id") or "") or []
         ts.sort(key=lambda t: (t.get("createdAt") or 0), reverse=True)
         return ts
@@ -763,7 +763,7 @@ async def clone_session(conv_id: str, request: Request):
     tail_n = min(max(int(data.get("tailMessages") or 10), 0), 40)
 
     # 库路由: 源会话在项目库时, 克隆全程显式路由到同库(调用方无需带 project)
-    from . import ctx as _ctx
+    from .. import ctx as _ctx
     pid = (conv.get("projectId") or "").strip()
     tok = _ctx.set_project(pid) if pid else None
     try:
@@ -1064,7 +1064,7 @@ async def stop_exec_session(conv_id: str):
     if not store.ConversationsStore.get(conv_id):
         return err(404, "会话不存在")
     stopped = []
-    from .store import TasksStore
+    from ..store import TasksStore
     for t in TasksStore.of_conv(conv_id):
         if (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT, ST.TASK_PENDING_CONFIRM):
             res = await asyncio.to_thread(exec_bridge.task_stop, t["id"], "user")
@@ -1131,7 +1131,7 @@ async def session_spec_apply(conv_id: str, request: Request):
                    "summary": f"需求 {prev_rid} 已写入（重复提交已幂等跳过）——"
                               "点需求卡「一键建卡执行」发起执行"})
     from .req_agent import apply_spec_payload
-    from . import ctx as _ctx
+    from .. import ctx as _ctx
 
     def _apply():
         # ctx 会话上下文(cv-248 根因): spec-apply 原先未设置 conv 上下文——

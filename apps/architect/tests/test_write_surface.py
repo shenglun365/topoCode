@@ -44,7 +44,7 @@ class _IO:
 def _land(content, allowed, conv_id="conv-t"):
     """跑一次回合后代落通道, 返回 (final_content, tools_used, tool_errors, io)。"""
     from topoone_app_architect.agent.turns.chat import _post_turn_land
-    from topoone_app_architect.arch_routes import ctx as _ctx, store
+    from topoone_app_architect import ctx as _ctx, store
     store.ConversationsStore.create({"id": conv_id, "kind": "generic",
                                      "title": "t"})
     io = _IO()
@@ -101,7 +101,7 @@ def test_strip_is_scope_safe():
 def test_pure_read_surface_never_lands_cards(arch_env):
     """纯读面(allowed_tools 不含写工具)不代落——载荷按模型原文诚实保留
     +rejected 遥测(cv-242「落卡权=确定性意图命中专属」的执法闭环)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     fc, used, errs, io = _land(f"说明\n{SPEC_JSON}", allowed=set())
     assert used == set()                       # 未代落
     assert io.card_landed is False             # 未落卡 → 无空收尾豁免
@@ -113,7 +113,7 @@ def test_pure_read_surface_never_lands_cards(arch_env):
 
 def test_authorized_surface_lands_and_strips(arch_env):
     """授权面代落: 需求卡落库 + 载荷正文剥离 + 零合成通知(卡即回执)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     fc, used, errs, io = _land(f"按确认立卡。\n{SPEC_JSON}",
                                allowed={"req.propose", "req.amend"})
     assert used == {"req.propose"} and not errs
@@ -126,7 +126,7 @@ def test_authorized_surface_lands_and_strips(arch_env):
 
 def test_task_payload_lands_task_card(arch_env):
     """任务载荷 → task.propose(规约排斥后归属唯一)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     fc, used, errs, _io = _land(f"建卡。\n{TASK_FENCE}",
                                 allowed={"task.propose"})
     assert used == {"task.propose"} and not errs
@@ -137,7 +137,7 @@ def test_task_payload_lands_task_card(arch_env):
 
 def test_spec_payload_never_becomes_task_card(arch_env):
     """schema 归属终审: 任务面授权下规约载荷不得落成任务卡(cv-246 事故面)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     fc, used, _errs, _io = _land(SPEC_JSON, allowed={"task.propose"})
     assert used == set() and store.TasksStore.of_conv("conv-t") == []
 
@@ -225,7 +225,7 @@ def test_clarify_frame_not_shadowed_by_card_messages(arch_env):
     """choices 卡等落流产物不得遮蔽回合产物的 guAction(cv-248: 围栏源问询卡
     后落流 → 澄清帧丢失 → 答复误判新澄清 → 面缺 req.propose → 代落被拒)。"""
     from topoone_app_architect.agent.governance.focus import _pending_action
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.ConversationsStore.create({"id": "conv-sh", "kind": "generic",
                                      "title": "t"})
     now = 1_800_000_000_000
@@ -255,7 +255,8 @@ def test_spec_apply_lands_card_binds_and_idempotent(arch_env):
     """spec-apply 三缺陷终审(cv-248): ①ctx 设置→specReady 卡落流+
     conv.reqId 回写 ②载荷指纹幂等(重复提交不再新建)。"""
     import asyncio
-    from topoone_app_architect.arch_routes import sessions as _sess, store
+    from topoone_app_architect import store
+    from topoone_app_architect.arch_routes import sessions as _sess
     from fastapi import Request
 
     conv = store.ConversationsStore.create({"id": "conv-sa", "kind": "generic",

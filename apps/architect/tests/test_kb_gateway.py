@@ -11,7 +11,7 @@ import urllib.error
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.kb_gateway as G
+import topoone_app_architect.kb_gateway as G
 from topoone_app_architect.arch_routes import req_agent as RA
 
 
@@ -63,7 +63,7 @@ def test_call_timeout_logs_timeout_not_unreachable(monkeypatch, caplog):
     def fake_urlopen(req, timeout=None):
         raise socket.timeout("timed out")
     monkeypatch.setattr(G.urllib.request, "urlopen", fake_urlopen)
-    with caplog.at_level(logging.INFO, logger="topoone_app_architect.arch_routes.kb_gateway"):
+    with caplog.at_level(logging.INFO, logger="topoone_app_architect.kb_gateway"):
         assert _gw().call("llm.sync", timeout=300) is None
     joined = "\n".join(r.getMessage() for r in caplog.records)
     assert "timeout after" in joined and "unreachable" not in joined
@@ -75,7 +75,7 @@ def test_call_connection_refused_still_unreachable(monkeypatch, caplog):
     def fake_urlopen(req, timeout=None):
         raise urllib.error.URLError(socket.gaierror("name or service not known"))
     monkeypatch.setattr(G.urllib.request, "urlopen", fake_urlopen)
-    with caplog.at_level(logging.INFO, logger="topoone_app_architect.arch_routes.kb_gateway"):
+    with caplog.at_level(logging.INFO, logger="topoone_app_architect.kb_gateway"):
         assert _gw().call("architecture.model") is None
     joined = "\n".join(r.getMessage() for r in caplog.records)
     assert "unreachable" in joined and "timeout after" not in joined

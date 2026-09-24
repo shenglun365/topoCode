@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from topoone_app_architect.agent.cognition import prompt as disc  # noqa: E402
-from topoone_app_architect.arch_routes import req_agent  # noqa: E402
+from topoone_app_architect.arch_routes import req_agent
 
 
 def test_protocol_doc_composed_from_constants():
@@ -131,7 +131,7 @@ def test_tool_parse_audit_counts_broken_blocks():
 def test_record_tool_parse_fail_samples(tmp_path, monkeypatch):
     """损坏样本落 llm_dataset(kind=tool_parse_fail); 正常输出零事件。"""
     import json
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     data = str(tmp_path / "d")
     C._db = None; C._kb = None; C._data_dir = None
     C._project_dbs.clear()

@@ -11,8 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-import topoone_app_architect.arch_routes.ctx as C
-import topoone_app_architect.arch_routes.store as store
+import topoone_app_architect.ctx as C
+import topoone_app_architect.store as store
 
 
 

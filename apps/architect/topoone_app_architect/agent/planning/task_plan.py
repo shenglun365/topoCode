@@ -15,7 +15,7 @@ logger = logging.getLogger("arch.planning.task_plan")
 
 
 def _store():
-    from ...arch_routes import store
+    from ... import store
     return store
 
 
@@ -111,7 +111,7 @@ def propose_task_tool(title: str, instruction: str,
     safetyClass: 安全等级三值轴(readonly|mutating|high-stakes; 缺省 mutating)
       —— readonly 豁免互斥+强制就地; high-stakes worktree 强制+合并门禁。
     workTags: 开放工作类型标签(分析/文档/部署…不设枚举; 仅影响提示)。"""
-    from ...arch_routes import ctx as _ctx
+    from ... import ctx as _ctx
     from ...arch_routes import exec_bridge
     store = _store()
     conv_id = _ctx.get_conv() or ""
@@ -173,7 +173,7 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
     try:
         from ..compensation.overrides import read_overrides
         from ..compensation.overrides import override_enabled as _oe
-        from ...arch_routes import store as _s
+        from ... import store as _s
         if _oe(read_overrides(_s.CollabConfigStore.get), "r2_5_intra_tier"):
             from ..compensation.providers.intratier import intra_tier_note
             _intra = intra_tier_note(str(getattr(policy, "tier", "") or ""),
@@ -509,7 +509,7 @@ def _plan_diagnosis(plan: list) -> str:
     步骤态读**绑定任务的实际状态**(plan 行 status 只记账推进, 卡片真态在
     任务行——cv-241 实证: 预填后 plan 行仍 pending 而任务已 saved)。
     推进动作本身归焦点栈(resolve_intent.confirm_task)。"""
-    from ...arch_routes import store as _s
+    from ... import store as _s
     pending_confirm, failed = [], []
     for s in plan:
         tid = s.get("taskId")
@@ -546,7 +546,7 @@ def retry_failed_step(conv: dict, task_id: str) -> Dict[str, Any]:
 
     指代(taskId)由焦点 recent.task_failed 就近给出; 依赖满足性沿用
     propose_plan_step 内部校验。"""
-    from ...arch_routes import store as _s
+    from ... import store as _s
     task = _s.TasksStore.get(task_id) or {}
     rid = str(task.get("reqId") or "")
     plan = get_plan(rid)
@@ -568,7 +568,7 @@ def retry_failed_step(conv: dict, task_id: str) -> Dict[str, Any]:
 def on_plan_task_done(conv_id: str, task_id: str) -> None:
     """done 事件钩子: 回填步骤状态 → 预填下一步 / 汇总。"""
     try:
-        from ...arch_routes import store as _s
+        from ... import store as _s
         task = _s.TasksStore.get(task_id) or {}
         rid = task.get("reqId") or ""
         plan = get_plan(rid)
@@ -612,7 +612,7 @@ def on_plan_task_done(conv_id: str, task_id: str) -> None:
 def on_plan_task_failed(task_id: str) -> None:
     """failed 事件钩子: 步骤标 failed(下次 /执行 自动重发该步)。"""
     try:
-        from ...arch_routes import store as _s
+        from ... import store as _s
         task = _s.TasksStore.get(task_id) or {}
         rid = task.get("reqId") or ""
         plan = get_plan(rid)
@@ -627,7 +627,7 @@ def on_plan_task_failed(task_id: str) -> None:
 
 def _finish_plan_receipt(conv_id: str, rid: str, plan: list) -> None:
     from ...arch_routes import exec_bridge as eb
-    from ...arch_routes import store as _s
+    from ... import store as _s
     conv = _s.ConversationsStore.get(conv_id) or {}
     lines = "\n".join(
         f"- 步骤 {s.get('seq')}: **{s.get('title')}** — "

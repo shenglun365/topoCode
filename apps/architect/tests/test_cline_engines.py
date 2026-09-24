@@ -11,7 +11,7 @@ import types
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 
 
 def _setup(tmp_path, monkeypatch):
@@ -171,7 +171,7 @@ def test_broken_engine_not_resolved(tmp_path, monkeypatch):
     broken = _fake_engine(root, "0.0.83", ok=False)
     assert CE.set_default_version("0.0.83") and "损坏" in CE.set_default_version("0.0.83")
     # 直接写默认绕过校验(模拟外部破坏) → 解析拒
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.CollabConfigStore.set(CE.CONFIG_KEY, "0.0.83")
     assert CE.resolve_engine() is None
     assert CE.list_engines()[1]["ok"] is False and broken.endswith("0.0.83")

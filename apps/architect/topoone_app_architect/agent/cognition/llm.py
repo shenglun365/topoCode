@@ -45,19 +45,19 @@ def _now_ms() -> int:
 
 def _kb_gateway():
     try:
-        from ...arch_routes import ctx
+        from ... import ctx
         g = ctx.kb()
         if g is not None:
             return g
     except Exception:
         pass
-    from ...arch_routes.kb_gateway import get_gateway
+    from ...kb_gateway import get_gateway
     return get_gateway()
 
 
 def get_model_preference() -> str:
     """architect 侧模型偏好(空 = 由主后端默认 is_default 兜底)。"""
-    from ...arch_routes import store
+    from ... import store
     return store.CollabConfigStore.get(_MODEL_KEY, "")
 
 
@@ -76,13 +76,13 @@ def resolve_call_model(explicit: Optional[str]) -> str:
 
 
 def set_model_preference(model_id: str) -> None:
-    from ...arch_routes import store
+    from ... import store
     store.CollabConfigStore.set(_MODEL_KEY, model_id)
 
 
 def get_max_tokens_preference() -> Optional[int]:
     """architect 侧 max_tokens 偏好(空 = 主后端按 model_configs.max_tokens)。"""
-    from ...arch_routes import store
+    from ... import store
     raw = store.CollabConfigStore.get(_MAX_TOKENS_KEY, "")
     try:
         val = int(raw)
@@ -93,7 +93,7 @@ def get_max_tokens_preference() -> Optional[int]:
 
 def set_max_tokens_preference(value: Optional[int]) -> None:
     """设置 max_tokens 偏好；None/<=0 视为清除(回退主后端模型配置)。"""
-    from ...arch_routes import store
+    from ... import store
     store.CollabConfigStore.set(
         _MAX_TOKENS_KEY,
         str(int(value)) if value and int(value) > 0 else "",
@@ -102,7 +102,7 @@ def set_max_tokens_preference(value: Optional[int]) -> None:
 
 def get_context_budget_preference() -> int:
     """architect 侧上下文预算偏好(0 = 未设置 → 显式/探测兜底)。"""
-    from ...arch_routes import store
+    from ... import store
     try:
         return int(store.CollabConfigStore.get(_CONTEXT_BUDGET_KEY, "") or 0)
     except (TypeError, ValueError):
@@ -111,7 +111,7 @@ def get_context_budget_preference() -> int:
 
 def set_context_budget_preference(value: Optional[int]) -> None:
     """设置上下文预算偏好；None/<=0 视为清除(回退探测容量)。"""
-    from ...arch_routes import store
+    from ... import store
     store.CollabConfigStore.set(
         _CONTEXT_BUDGET_KEY,
         str(int(value)) if value and int(value) > 0 else "",
@@ -163,7 +163,7 @@ def probe_context_window(url: str, model_hint: str = "") -> Optional[int]:
 
 def _catalog_entry(model_id: str) -> Dict[str, Any]:
     """llm.models 目录条目(取 url/model 供探测)。"""
-    from ...arch_routes import store
+    from ... import store
     try:
         raw = store.CollabConfigStore.get("llm.models", "")
         for r in json.loads(raw) if raw else []:

@@ -96,7 +96,7 @@ def test_r2_4_floor_at_t2():
 
 def test_r2_3_heuristic_fallback_tree_and_history(tmp_path, monkeypatch, arch_env):
     import subprocess
-    import topoone_app_architect.arch_routes.store as store
+    import topoone_app_architect.store as store
     root = str(tmp_path / "repo")
     os.makedirs(f"{root}/src/http", exist_ok=True)
     for f in ("src/http/server.py", "src/http/router.py", "README.md"):

@@ -23,7 +23,7 @@ from typing import Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 
-from .common import ok, err
+from ..common import ok, err
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,7 +32,7 @@ _GIT_BACKEND = "/usr/lib/git-core/git-http-backend"
 
 
 def _git_root() -> str:
-    from .ctx import data_dir
+    from ..ctx import data_dir
     return os.path.join(data_dir(), "git")
 
 
@@ -43,7 +43,7 @@ def _check_token(request: Request) -> bool:
         return True
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
-        from .ctx import data_dir
+        from ..ctx import data_dir
         token_file = os.path.join(data_dir(), "token")
         try:
             return auth[7:].strip() == open(token_file).read().strip()

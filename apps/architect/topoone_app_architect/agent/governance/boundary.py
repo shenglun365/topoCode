@@ -35,7 +35,7 @@ def _git_run(args: List[str], cwd: str, check: bool = True,
 def resolve_boundary_files(rid: str, root: str, project: Optional[str]) -> List[str]:
     """规约边界 → 文件/目录前缀集合(文件级统一口径; 组件经 KB 解析为文件集)。"""
     from ...arch_routes.req_agent import parse_scope_files
-    from ...arch_routes import store
+    from ... import store
     snap = (store.RequirementsStore.spec_active(rid or "") or {}).get("snapshot") or {}
     scope = snap.get("allowedScope") or []
     files = set(parse_scope_files(scope))
@@ -43,7 +43,7 @@ def resolve_boundary_files(rid: str, root: str, project: Optional[str]) -> List[
              if str(x or "").strip().startswith("comp:")]
     if comps:
         try:
-            from ...arch_routes.sem.engine import _component_file_map
+            from ...sem.engine import _component_file_map
             cfm = _component_file_map(root or "", project)
             for cid in comps:
                 for f in cfm.get(cid) or []:

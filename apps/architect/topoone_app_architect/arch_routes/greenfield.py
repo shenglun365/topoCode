@@ -5,8 +5,8 @@
 """
 from typing import Optional
 from fastapi import APIRouter, Request
-from .common import _ts, _id, ok, err
-from . import store
+from ..common import _ts, _id, ok, err
+from .. import store
 
 router = APIRouter()
 
@@ -168,7 +168,7 @@ async def kb_extract(request: Request):
 async def kb_baseline(request: Request):
     """建立知识基线。已关联 KB 项目时经 `version.list`+`version.materialize` 取真实版本
     与文件清单写入快照；KB 能力不足/不可达 → 明确报错(不占位)。"""
-    from .kb_gateway import call_kb
+    from ..kb_gateway import call_kb
     body = await request.json()
     proj_id = body.get("kbProjectId") or body.get("projectId")
     commit = body.get("commit") or "HEAD"

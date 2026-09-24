@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
-import topoone_app_architect.arch_routes.store as store  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
+import topoone_app_architect.store as store  # noqa: E402
 
 
 class TestDevDigest(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestDevDigest(unittest.TestCase):
 
     def _seed(self):
         now = store._ts() if hasattr(store, "_ts") else 0
-        from topoone_app_architect.arch_routes.common import _ts
+        from topoone_app_architect.common import _ts
         now = _ts()
         conv = store.ConversationsStore.create({"kind": "requirement", "title": "支付重构讨论"})
         store.ConversationsStore.update(conv["id"], {"summary": "完成支付网关重构方案定型"})

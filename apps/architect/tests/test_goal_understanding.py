@@ -194,7 +194,7 @@ def test_forced_mode_configurable_ask_first():
 
 def test_strategy_library_config_driven_end_to_end(arch_env):
     """D5 端到端: 改策略库配置 → GU 分类与四问随之变化(零发版)。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.CollabConfigStore.set(fp.POLICY_KEY, json.dumps({"goal": {
         "strategies": [{"key": "anim", "label": "动画引擎",
                         "kws": ["动画", "关键帧"],
@@ -204,7 +204,7 @@ def test_strategy_library_config_driven_end_to_end(arch_env):
     assert p["kind"] == "requirement" and p["strategy"] == "anim"
     r = gu.resolve_goal_directive(p, fp.load_flow_policy())
     assert "动画引擎" in r["text"] and "动画驱动方式" in r["text"]
-    from topoone_app_architect.arch_routes import store as _s
+    from topoone_app_architect import store as _s
     _s.CollabConfigStore.set(fp.POLICY_KEY, "")
 
 

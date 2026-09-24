@@ -116,8 +116,8 @@ def land(conv_id: str, text: str, kind: Optional[str] = None, *,
         raise ValueError(
             f"未知卡片类型 {kind!r}——必须在 collab.cards 词汇表注册后再使用")
     try:
-        from ...arch_routes import store as _store
-        from ...arch_routes.common import _ts
+        from ... import store as _store
+        from ...common import _ts
         if not project_id:
             try:
                 project_id = ((_store.ConversationsStore.get(conv_id) or {})
@@ -162,7 +162,7 @@ def land_status(conv_id: str, text: str, task_id: str, *, status: str = "",
     进度不刷屏)——定位与改写同库连接(update_message_by_meta, 防跨库路由
     漂移); 读侧经 SSE conv-message 通知刷新。失败返回 None(不阻断)。"""
     try:
-        from ...arch_routes import store as _store
+        from ... import store as _store
         upd = _store.ConversationsStore.update_message_by_meta(
             conv_id, {"kind": KIND_TASK_STATUS, "taskId": task_id},
             {"content": text, "meta": {"status": status, **payload},
@@ -190,7 +190,7 @@ def land_plan_progress(conv_id: str, rid: str, text: str, *, total: int = 0,
     计划总览卡落首卡(kind=taskPlan); 之后每步完成/预填原位 UPDATE 为进度
     视图——信息流中 N 步计划只占 1 个锚位。失败返回 None(不阻断)。"""
     try:
-        from ...arch_routes import store as _store
+        from ... import store as _store
         upd = _store.ConversationsStore.update_message_by_meta(
             conv_id, {"kind": KIND_TASK_PLAN, "requirementId": rid},
             {"content": text, "meta": {"total": total}})
@@ -326,7 +326,7 @@ def land_choices(conv_id: str, payload: dict, *, fingerprint: str = "",
         meta_payload["fingerprint"] = fingerprint
     if fingerprint:
         try:
-            from ...arch_routes import store as _store
+            from ... import store as _store
             upd = _store.ConversationsStore.update_message_by_meta(
                 conv_id, {"kind": KIND_CHOICES, "fingerprint": fingerprint},
                 {"content": title, "meta": meta_payload,
@@ -346,7 +346,7 @@ def land_choices(conv_id: str, payload: dict, *, fingerprint: str = "",
     # 收集在台账可溯); 仅新卡挂账(原位更新不重复)。
     if row:
         try:
-            from ...arch_routes.store import tracking as _tr
+            from ...store import tracking as _tr
             summary = "；".join(
                 f"{(g.get('label') or g.get('question') or '')[:24]}"
                 for g in (payload.get("groups") or [])[:6])

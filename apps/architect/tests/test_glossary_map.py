@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from topoone_app_architect.agent.memory.glossary_map import expand_query  # noqa: E402
 from topoone_app_architect.agent.memory.units import ctx_search  # noqa: E402
-from topoone_app_architect.arch_routes import store  # noqa: E402
+from topoone_app_architect import store  # noqa: E402
 
 
 # ── 纯函数 ──────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ def test_expand_query_caps_and_no_self_dup():
 # ── ctx.search 集成 ─────────────────────────────────────────────────
 
 def _setup_env(tmp_path, monkeypatch):
-    import topoone_app_architect.arch_routes.ctx as C
+    import topoone_app_architect.ctx as C
     data = str(tmp_path / "arch")
     monkeypatch.setenv("ARCH_DATA_DIR", data)
     C._db = None

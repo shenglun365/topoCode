@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
-from topoone_app_architect.arch_routes import mainkb as MK  # noqa: E402
-from topoone_app_architect.arch_routes.store import ProjectsStore  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
+from topoone_app_architect.arch_routes import mainkb as MK
+from topoone_app_architect.store import ProjectsStore  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
 

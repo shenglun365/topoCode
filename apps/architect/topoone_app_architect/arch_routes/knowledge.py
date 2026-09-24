@@ -10,9 +10,9 @@ KB-REQ-17 组件模型已由 KB `/zmq/architecture.model`
 from typing import Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from .common import (_ts, _id, ok, err, build_architecture_model, empty_architecture_model,
+from ..common import (_ts, _id, ok, err, build_architecture_model, empty_architecture_model,
                      build_component_catalog, KbUnavailableError, _MODEL_KEYS)
-from .kb_gateway import call_kb
+from ..kb_gateway import call_kb
 
 router = APIRouter()
 
@@ -132,7 +132,7 @@ async def get_coding_rules():
     """编码规约(真实)：从 KB 文档中查找规约/约定/规则类文档并汇总；
     KB 不可达或无匹配文档 → 返回空串(前端展示空，不伪造固定文本)。"""
     try:
-        from .kb_gateway import call_kb
+        from ..kb_gateway import call_kb
         docs = call_kb("knowledge.listDocs") or []
     except Exception:
         return ""

@@ -20,7 +20,7 @@ def suggest_tiers() -> Dict[str, Any]:
     failRate, calls, fails}]}; 任何失败返回空表(观测口不碍主链)。
     """
     try:
-        from ...arch_routes import store as _s
+        from ... import store as _s
         from ..cognition import model_profile as _mp
         from ..governance.flow_policy import load_flow_policy
         from . import dataset as _ds

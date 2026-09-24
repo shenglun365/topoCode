@@ -26,7 +26,7 @@ _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def _data_dir() -> str:
-    from .ctx import data_dir
+    from ..ctx import data_dir
     return data_dir()
 
 

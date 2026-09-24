@@ -14,7 +14,7 @@ _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
 from topoone_app_architect.agent.planning import task_plan as tp
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 import pytest
 

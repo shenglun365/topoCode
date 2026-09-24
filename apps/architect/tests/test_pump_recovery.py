@@ -17,8 +17,8 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
-import topoone_app_architect.arch_routes.store as store
+import topoone_app_architect.ctx as C
+import topoone_app_architect.store as store
 from topoone_app_architect.arch_routes import exec_bridge as eb
 
 

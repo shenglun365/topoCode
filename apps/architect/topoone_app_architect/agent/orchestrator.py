@@ -74,7 +74,7 @@ async def _confirm_focus_task(conv: dict, send: SendFn, store,
 async def _retry_focus_task(conv: dict, send: SendFn, store,
                             user_msg_id: str, task_id: str) -> None:
     """焦点动作执行器(批戊): 重发失败步骤(retry_failed 指代落地)。"""
-    from ..arch_routes.common import _ts
+    from ..common import _ts
     from .planning.task_plan import retry_failed_step
     conv_id = conv["id"]
     res = await asyncio.to_thread(retry_failed_step, conv, task_id)
@@ -94,7 +94,7 @@ async def _run_direct_command(cmd: str, conv: dict, send: SendFn, store,
     @执行器 前缀显式指定执行器; 回执落库+done 事件与常规回合同形;
     specReady meta 供前端渲染[一键建卡]动作。"""
     from .perception import commands as _cmds
-    from ..arch_routes.common import _ts
+    from ..common import _ts
     conv_id = conv["id"]
     # cv-197: 直通链可含 LLM 拆步(最长 LLM_SYNC_TIMEOUT=300s)——零反馈即
     # 「卡死」观感; 状态事件 + 首尾日志补齐可观测性。
@@ -205,8 +205,8 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     _chat_land), 本体只做请求解析与段间接线(行为等价重构, 无新抽象层)。
     """
     from ..arch_routes import req_agent
-    from ..arch_routes import store
-    from ..arch_routes.common import _ts
+    from .. import store
+    from ..common import _ts
 
     now = _ts()
     # ---- 请求解析(段间共享的入口事实) ----
@@ -358,13 +358,13 @@ async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:
     失败已回错误事件 → None; 成功 → {conv_id, conv, question, last_user_msg_id}。
     """
     from ..arch_routes import req_agent
-    from ..arch_routes import store
-    from ..arch_routes.common import _ts
+    from .. import store
+    from ..common import _ts
 
     _register_session_tools()
     history = data.get("messages") or []
     # 请求级项目上下文(项目库路由；WS 无 HTTP 查询串，按消息载荷设置)
-    from ..arch_routes import ctx as _ctx
+    from .. import ctx as _ctx
     from ..arch_routes.project import _resolve_project as _rp
     try:
         _proj = _rp((data.get("root") or "").strip(),
@@ -421,8 +421,8 @@ async def _chat_route(data: dict, gate: dict, send: SendFn):
     /指令与文字确认确定性直通(cv-152: 指令不落回模型) → 已处理(True);
     其余返回 (False, decision)——assign 契约随 decision 交给上下文段。
     """
-    from ..arch_routes import store
-    from ..arch_routes.common import _ts
+    from .. import store
+    from ..common import _ts
 
     conv_id = gate["conv_id"]
     question = gate["question"]
@@ -500,7 +500,7 @@ async def _chat_route(data: dict, gate: dict, send: SendFn):
             # relay_hint / none: 焦点态提示(直通回执, 零 LLM)
             note = str(res.get("note") or "")
             if note:
-                from ..arch_routes.common import _ts as _tsn
+                from ..common import _ts as _tsn
                 msg_id = store.next_id("m")
                 await send({"type": "chat_start",
                             "conversationId": conv_id, "requestId": "",

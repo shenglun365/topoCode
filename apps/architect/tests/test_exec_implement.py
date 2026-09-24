@@ -10,9 +10,9 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C
+import topoone_app_architect.ctx as C
 from topoone_app_architect.arch_routes import req_agent
-from topoone_app_architect.arch_routes import store
+from topoone_app_architect import store
 
 
 def _setup(tmp_path, monkeypatch):
@@ -292,7 +292,8 @@ def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
 def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
     """跨库级联: 会话在主库默认桶(无活跃项目写入), 需求在项目库——删除会话时
     项目库需求同样清理(draft 删/ready 清 ownerConv), 消息同桶删净不残留。"""
-    from topoone_app_architect.arch_routes import sessions as S, exec_bridge, ctx as C
+    from topoone_app_architect import ctx as C
+    from topoone_app_architect.arch_routes import sessions as S, exec_bridge
     monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
     _mk_fixture(tmp_path, monkeypatch)
 
@@ -519,7 +520,7 @@ def test_active_task_of_priority(tmp_path, monkeypatch):
 def test_task_tool_propose_and_retired_req(tmp_path, monkeypatch):
     """LLM 工具面(快捷挡): task.propose 建卡; req.propose 被退役拦截(引导文案)。"""
     conv, eb, _ = _mk_v2_fixture(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import ctx as _ctx
+    from topoone_app_architect import ctx as _ctx
     _ctx.set_conv(conv["id"])
     # 快捷挡: 直出任务卡 + req.* 规约工具退役(本用例测的是 v2 退役语义)
     store.ConversationsStore.update(conv["id"], {"analysisMode": "quick"})
@@ -650,7 +651,7 @@ def test_task_create_same_db_as_conversation(tmp_path, monkeypatch):
     旧实现静默落主库 → of_conv/互斥/恢复对该任务全部失明。"""
     from tests.conftest import isolate_arch
     isolate_arch(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes.store.base import _db, _target_db
+    from topoone_app_architect.store.base import _db, _target_db
     conv = store.ConversationsStore.create({"projectId": "proj-same", "title": "T",
                                             "meta": {"root": "/tmp/x"}})
     t = store.TasksStore.create({"conversationId": conv["id"],

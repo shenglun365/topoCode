@@ -42,7 +42,7 @@ def record_turn(conv_id: str, msgs: List[Dict[str, str]], model_id: str) -> None
     调用点约定: 回合落库阶段(_chat_land)——装配阶段保持纯函数, 持久化归 land。
     任何异常吞掉记 debug, 绝不阻塞回合主链。"""
     try:
-        from ...arch_routes import store
+        from ... import store
         store.ConversationsStore.merge_meta(conv_id, {
             CTX_USAGE_KEY: {"used": estimate_msgs_tokens(msgs),
                             "budget": resolve_budget(model_id),

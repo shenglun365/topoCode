@@ -88,7 +88,7 @@ def test_lookup_miss_returns_catalog_hint():
 
 def test_help_topics_config_override_and_validation(arch_env):
     """配置全量覆盖缺省表(与 strategies 同款); 写侧校验 key 唯一/body 非空。"""
-    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect import store
     store.CollabConfigStore.set(fp.POLICY_KEY, json.dumps({"goal": {
         "helpTopics": [
             {"key": "custom", "title": "自定义主题", "kws": ["自定义"],

@@ -15,12 +15,12 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.ctx as C  # noqa: E402
-from topoone_app_architect.arch_routes import acceptance as AC  # noqa: E402
-from topoone_app_architect.arch_routes import asset_framework as F  # noqa: E402
-from topoone_app_architect.arch_routes import contracts as CT  # noqa: E402
-from topoone_app_architect.arch_routes import semantic_assets as S  # noqa: E402
-from topoone_app_architect.arch_routes.store import (  # noqa: E402
+import topoone_app_architect.ctx as C  # noqa: E402
+from topoone_app_architect.arch_routes import acceptance as AC
+from topoone_app_architect.arch_routes import asset_framework as F
+from topoone_app_architect.arch_routes import contracts as CT
+from topoone_app_architect.arch_routes import semantic_assets as S
+from topoone_app_architect.store import (  # noqa: E402
     AcceptanceStore, ContractItemStore, ContractPackageStore,
     NamingConventionStore, SemanticAssetsStore)
 
@@ -554,7 +554,7 @@ class TestImpactAnalysis:
                                            target={"file": "x.py", "symbol": "fx"}))
         for i in (i_stale, i_ok, i_intent, i_miss):
             CT.confirm_item(i["id"])
-        from topoone_app_architect.arch_routes.semantic_assets import _impact_analysis
+        from topoone_app_architect.semantic_assets import _impact_analysis
         res = _impact_analysis(str(tmp_path), None)
         # 直接变更
         assert [d["id"] for d in res["direct"]] == ["sa-a"]
@@ -576,7 +576,7 @@ class TestImpactAnalysis:
     def test_impact_empty_project(self, tmp_path, monkeypatch):
         _ctx_setup(tmp_path, monkeypatch)
         monkeypatch.setattr(S, "_lazy_reconcile", lambda *a, **k: None)
-        from topoone_app_architect.arch_routes.semantic_assets import _impact_analysis
+        from topoone_app_architect.semantic_assets import _impact_analysis
         res = _impact_analysis(str(tmp_path), None)
         assert res["direct"] == [] and res["propagated"] == []
         assert res["drift"] == [] and res["coverage"]["pct"] == 0

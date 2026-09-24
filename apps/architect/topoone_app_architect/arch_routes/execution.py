@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Optional
 
-from . import store
+from .. import store
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _resolve_root_project(reqs, body):
     project = body.get("project")
     if not project:
         try:
-            from . import ctx
+            from .. import ctx
             project = ctx.get_project()
         except Exception:
             project = None
