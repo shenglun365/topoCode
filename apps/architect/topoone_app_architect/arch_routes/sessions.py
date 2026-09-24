@@ -387,7 +387,7 @@ def _delete_session_cascade(conv_id: str) -> int:
     # 需求跟踪台账: 清该会话(直接/主线)的条目——主会话删除时其子会话条目
     # 经 main_conversation_id 一并清除; 递归子会话调用各清残留(失败不阻断)
     try:
-        from .store.tracking import TrackingItemsStore
+        from ..store.tracking import TrackingItemsStore
         TrackingItemsStore.delete_by_conversation(conv_id)
     except Exception:  # noqa: BLE001
         pass

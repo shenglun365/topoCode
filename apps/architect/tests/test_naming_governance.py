@@ -264,7 +264,7 @@ class TestCognitiveEdit:
         _mk_asset(pid, "创建订单", [{"file": "m.py", "symbol": "create_order"}])
         rows = SemanticAssetsStore.all(pid, kind="entity")
         aid = rows[0]["id"]
-        from topoone_app_architect.semantic_assets import api_asset_rename
+        from topoone_app_architect.arch_routes.semantic_assets import api_asset_rename
         out = _call(lambda: api_asset_rename(_req(
             {"assetId": aid, "newName": "下单(校验版)", "author": "designer"})))
         data = out.get("data") or {}
@@ -286,7 +286,7 @@ class TestCognitiveEdit:
         t1 = _mk_asset(pid, "订单校验", [{"file": "b.py", "symbol": "Check"}])
         t2 = _mk_asset(pid, "订单落库", [{"file": "a.py", "symbol": "Svc"},
                                         {"file": "c.py", "symbol": "Persist"}])
-        from topoone_app_architect.semantic_assets import api_asset_merge
+        from topoone_app_architect.arch_routes.semantic_assets import api_asset_merge
         out = _call(lambda: api_asset_merge(_req({
             "intoId": into["id"], "targetIds": [t1["id"], t2["id"]],
             "targetName": "订单"})))
@@ -310,7 +310,7 @@ class TestCognitiveEdit:
             {"file": "a.py", "symbol": "Validate"},
             {"file": "a.py", "symbol": "Persist"},
         ], kind="process")
-        from topoone_app_architect.semantic_assets import api_asset_split
+        from topoone_app_architect.arch_routes.semantic_assets import api_asset_split
         out = _call(lambda: api_asset_split(_req({
             "assetId": src["id"],
             "parts": [
@@ -343,7 +343,7 @@ class TestCognitiveEdit:
         monkeypatch.setattr(
             st.ProjectsStore, "get",
             classmethod(lambda cls, row_id: {"kbProjectId": "kb-1"}))
-        from topoone_app_architect.semantic_assets import api_asset_rename
+        from topoone_app_architect.arch_routes.semantic_assets import api_asset_rename
         out = _call(lambda: api_asset_rename(_req(
             {"assetId": aid, "newName": "X"})))
         assert out.get("code") == 409

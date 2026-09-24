@@ -216,8 +216,8 @@ async def _create_requirement_impl(request: Request, body: dict):
     store.RequirementsStore.create(req)
     # 需求跟踪台账: 手工登记挂账(draft=等待用户完善), 失败不阻断
     try:
-        from .store.tracking import emit as _tr_emit
-        from .store.states import TRACK_DONE, TRACK_WAITING
+        from ..store.tracking import emit as _tr_emit
+        from ..store.states import TRACK_DONE, TRACK_WAITING
         status = req.get("status") or "draft"
         is_draft = status == "draft"
         _tr_emit(category="需求", title=req.get("title") or req["id"],

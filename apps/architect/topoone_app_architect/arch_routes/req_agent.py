@@ -102,7 +102,7 @@ def record_tool_audit(name: str, arguments: Dict[str, Any], ok: bool,
     }
     logger.debug("[tool-audit] %s", json.dumps(rec, ensure_ascii=False)[:400])
     try:
-        from .store.base import _insert_into, _db
+        from ..store.base import _insert_into, _db
         _insert_into(_db(), "arch_tool_audit", {
             "ts": rec["ts"], "tool": name,
             "argsDigest": rec["argsDigest"], "ok": rec["ok"],
@@ -550,8 +550,8 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     _sync_analysis_cache(req["id"], snapshot)
     # 需求跟踪台账: 需求落库即挂账(生成=done), 失败不阻断需求流
     try:
-        from .store.tracking import emit as _tr_emit
-        from .store.states import TRACK_DONE
+        from ..store.tracking import emit as _tr_emit
+        from ..store.states import TRACK_DONE
         _tr_emit(category="需求",
                  title=str(req.get("title") or req["id"])[:200],
                  content=str(snapshot.get("desc") or "")[:2000],

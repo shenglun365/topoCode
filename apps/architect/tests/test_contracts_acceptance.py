@@ -554,7 +554,7 @@ class TestImpactAnalysis:
                                            target={"file": "x.py", "symbol": "fx"}))
         for i in (i_stale, i_ok, i_intent, i_miss):
             CT.confirm_item(i["id"])
-        from topoone_app_architect.semantic_assets import _impact_analysis
+        from topoone_app_architect.arch_routes.semantic_assets import _impact_analysis
         res = _impact_analysis(str(tmp_path), None)
         # 直接变更
         assert [d["id"] for d in res["direct"]] == ["sa-a"]
@@ -576,7 +576,7 @@ class TestImpactAnalysis:
     def test_impact_empty_project(self, tmp_path, monkeypatch):
         _ctx_setup(tmp_path, monkeypatch)
         monkeypatch.setattr(S, "_lazy_reconcile", lambda *a, **k: None)
-        from topoone_app_architect.semantic_assets import _impact_analysis
+        from topoone_app_architect.arch_routes.semantic_assets import _impact_analysis
         res = _impact_analysis(str(tmp_path), None)
         assert res["direct"] == [] and res["propagated"] == []
         assert res["drift"] == [] and res["coverage"]["pct"] == 0

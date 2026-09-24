@@ -18,7 +18,7 @@ logger = logging.getLogger("arch_routes.req_agent")
 def tool_asset_semantic_save(root: Optional[str] = None,
                              project: Optional[str] = None,
                              assets: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    from ....semantic_assets import save_agent_assets
+    from ....arch_routes.semantic_assets import save_agent_assets
     return save_agent_assets(root, project, assets or [], executed_by="agent")
 
 
@@ -32,7 +32,7 @@ def tool_asset_semantic_update(root: Optional[str] = None,
                                project: Optional[str] = None,
                                assetId: str = "",
                                patch: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    from ....semantic_assets import edit_asset_desc, rename_asset
+    from ....arch_routes.semantic_assets import edit_asset_desc, rename_asset
     patch = patch or {}
     if not (assetId or "").strip():
         return {"error": "assetId 必填"}
@@ -61,7 +61,7 @@ def tool_asset_semantic_merge(root: Optional[str] = None,
                               intoId: str = "",
                               targetIds: Optional[List[str]] = None,
                               targetName: str = "") -> Dict[str, Any]:
-    from ....semantic_assets import merge_assets
+    from ....arch_routes.semantic_assets import merge_assets
     try:
         return merge_assets((intoId or "").strip(), list(targetIds or []),
                             (targetName or "").strip(), author="agent")
@@ -78,7 +78,7 @@ def tool_asset_semantic_split(root: Optional[str] = None,
                               project: Optional[str] = None,
                               assetId: str = "",
                               parts: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    from ....semantic_assets import split_asset
+    from ....arch_routes.semantic_assets import split_asset
     try:
         return split_asset((assetId or "").strip(), list(parts or []), author="agent")
     except ValueError as e:
@@ -99,7 +99,7 @@ def tool_convention_propose(root: Optional[str] = None,
                             scenarios: Optional[List[str]] = None,
                             appliesKinds: Optional[List[str]] = None) -> Dict[str, Any]:
     from ....arch_routes import naming as _naming
-    from ....semantic_assets import project_id_for
+    from ....arch_routes.semantic_assets import project_id_for
     pid = project_id_for(root, project)
     try:
         row = _naming.propose_convention(
@@ -127,7 +127,7 @@ def tool_contract_propose(root: Optional[str] = None,
                           items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     from .... import ctx as _ctx
     from ....arch_routes import contracts as _contracts
-    from ....semantic_assets import project_id_for
+    from ....arch_routes.semantic_assets import project_id_for
     pid = project_id_for(root, project)
     conv_id = _ctx.get_conv() or ""
     out: List[Dict[str, Any]] = []

@@ -171,7 +171,7 @@ def tool_code_read_symbols(root: Optional[str] = None, project: Optional[str] = 
                            file: str = "", symbol: str = "",
                            startLine: int = 0, endLine: int = 0) -> Dict[str, Any]:
     import os
-    from ....semantic_assets import resolve_root, project_id_for
+    from ....arch_routes.semantic_assets import resolve_root, project_id_for
     from .... import store as _store
     rpath = resolve_root(root, project)
     if not rpath or not file:
