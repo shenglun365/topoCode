@@ -12,7 +12,7 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 
 export { ensureMermaid, mermaidParseErrorDetail } from '@topo/graph-kernel/engines/mermaid/mermaid.ts'
-export { normalizeMermaidCode } from './diagram-normalize'
+export { normalizeMermaidCode } from '@topo/graph-kernel'
 
 const md = new MarkdownIt({
   html: true,

@@ -9,7 +9,7 @@
 import { ref } from 'vue'
 import i18n from '@/i18n'
 import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
-import { normalizeMermaidCode } from '@topo/web-core/services/diagram-normalize'
+import { normalizeMermaidCode } from '@topo/graph-kernel'
 
 export interface DiagramBlock {
   id: string
@@ -48,7 +48,7 @@ function injectDiagram(block: DiagramBlock) {
   }
 }
 
-/** 清理规则单一源见 @topo/web-core/services/diagram-normalize（F2 修正，原此处有一份拷贝） */
+/** 清理规则单一源见 @topo/graph-kernel/core/diagram-normalize（MS3-U0 归口） */
 function normalizeDiagramCode(lang: string, code: string): string {
   if (lang === 'mermaid') return normalizeMermaidCode(code)
   return code

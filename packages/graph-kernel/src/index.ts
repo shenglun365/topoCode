@@ -1,3 +1,4 @@
+export { normalizeMermaidCode } from './core/diagram-normalize';
 export { createDiagram } from './core/DiagramView';
 export type { DiagramOptions, DiagramSource, DiagramView } from './core/DiagramView';
 
