@@ -113,8 +113,8 @@ export const useProjectStore = defineStore('project', () => {
     if (existing) return null
 
     // 前置校验：检查是否有正在执行的分析任务
-    const { useConfirm } = await import('@/composables/useConfirm')
-    const { confirmChoice } = useConfirm()
+    const { useDialog } = await import('@topo/web-core/composables/useDialog')
+    const { confirmChoice } = useDialog()
     const running = await ipc.analysis.listRunningTasks()
     if (running && running.length > 0) {
       const names = running.map((r: any) => r.name).join('、')
@@ -368,8 +368,11 @@ export const useProjectStore = defineStore('project', () => {
     if (!tab) return false
 
     if (tab.hasUnsavedChanges) {
-      const { useConfirm } = await import('@/composables/useConfirm')
-      const confirmed = await useConfirm().confirm(i18n.global.t('report.confirmCloseUnsaved'))
+      const { useDialog } = await import('@topo/web-core/composables/useDialog')
+      const confirmed = await useDialog().confirm(i18n.global.t('report.confirmCloseUnsaved'), '确认', {
+        okLabel: i18n.global.t('common.confirm'),
+        cancelLabel: i18n.global.t('common.cancel'),
+      })
       if (!confirmed) return false
     }
 

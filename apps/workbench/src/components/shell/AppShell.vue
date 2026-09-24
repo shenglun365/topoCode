@@ -13,14 +13,15 @@ import { usePanelStore } from '@/stores/panel'
 import { useProjectStore } from '@/stores/project'
 import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
-import { useConfirm } from '@/composables/useConfirm'
+import { useDialog } from '@topo/web-core/composables/useDialog'
+import AppDialog from '@topo/web-core/components/AppDialog.vue'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useCrashReportStore } from '@/stores/crashReport'
 
 const { t } = useI18n()
 
 const { showId, componentId } = useComponentId('SH-001')
-const { confirmState, confirmResolve } = useConfirm()
+const { dialog } = useDialog()
 const route = useRoute()
 const funcGroup = useFuncGroupStore()
 const statusStore = useStatusStore()
@@ -217,47 +218,8 @@ onUnmounted(() => {
     <!-- 新手引导 -->
     <OnboardingTour />
 
-    <!-- 全局确认弹窗（替代 confirm()） -->
-    <div
-      v-if="confirmState.visible"
-      class="confirm-overlay"
-      @click.self="confirmResolve(confirmState.choices ? null : false)"
-    >
-      <div class="confirm-box">
-        <p>{{ confirmState.message }}</p>
-        <div
-          v-if="confirmState.choices"
-          class="confirm-actions"
-        >
-          <button
-            v-for="c in confirmState.choices"
-            :key="c.value"
-            class="confirm-btn"
-            :class="'confirm-btn-' + (c.variant || 'primary')"
-            @click="confirmResolve(c.value)"
-          >
-            {{ c.label }}
-          </button>
-        </div>
-        <div
-          v-else
-          class="confirm-actions"
-        >
-          <button
-            class="confirm-btn confirm-btn-primary"
-            @click="confirmResolve(true)"
-          >
-            {{ t('common.confirm') }}
-          </button>
-          <button
-            class="confirm-btn"
-            @click="confirmResolve(false)"
-          >
-            {{ t('common.cancel') }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- 全局确认/选择弹窗（MS3-U4: useDialog 统一, 吸收原 useConfirm） -->
+    <AppDialog :dialog="dialog" @ok="(v) => dialog.onOk?.(v)" @cancel="dialog.onCancel?.()" />
   </div>
 </template>
 
