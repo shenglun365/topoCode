@@ -128,7 +128,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 | MS3 | ✅ 已评审（U6=案A；U2=本期合入） | — | ✅ 在途合入 e06d1bd + U0~U8 落地（d3fdf88..75bad87，11 commits） | ✅ 判据1: architect web-core import=0+依赖零声明+独立build ✓（全口径达成）· 判据2: 旧token键=0 · 判据3: 四域349+FE vitest(54/9/9/12)+architect 1101(R1存量) · 判据4: 案A口径通过 · 判据5/6: 0命中 |
 | MS4 | ✅ 已评审 | ✅ W1~W9 全部完结（33ddde4..07ba81c，24 commits；W8 经 SCC 分析**保留 engine 单文件**+§13.1 未来路径） | ✅ 1098 全绿；厚通道 6 类+V3 专项为显式遗留 |
 | MS6 | ✅ 已评审 | ✅ **W0~W6 全部完结**（ca75656..W6，逐批全绿）——W0 安全网 20 例；W1 AMW 3,296→615；W2 SGV 2,649→282；W3 AnalysisChat 2,383→421；W4 ReportHome/ProjectCard→157/167；W5 community-store 1,252→792；W6 types 净删 39 死类型(-153 行)+DiagramViewer 裁定案(方案A) | ✅ architect 1098+64、workbench 19、chat/docs 50、parity 5 全绿 |
-| MS7 | ✅ 已评审 | 🔶 W0 核证✅ + **W1 d3 清零落地**(912e096, -21,552 行)——下一步 W2 ChatSession 拆分 | ⬜ | ⬜ |
+| MS7 | ✅ 已评审 | 🔶 W0✅ W1✅(-21,552) W2✅(3f32034) **W3 chat 前端并入落地**(ab28e53, chat FE src 核空=裁决②前端面达成)——剩 W4 后端域托管/W5 列表归一/W6 MCP+CONV/W7 收官 | ⬜ | ⬜ |
 | MS5 | ✅ 已评审 | ✅ V0/V1/V2+V3-StepA 落地（web_tools 三件 1ac94e4）；**V3B 已裁决结项（2026-09-25 选路径 b）**：chat.py 保留单文件，MS7-W4 原样搬迁 | 🔶 判据1~4 全达成；StepB 二选一路径待用户裁决 |
 | MS6 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS7 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
