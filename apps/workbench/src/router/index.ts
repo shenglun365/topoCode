@@ -51,6 +51,8 @@ const routes: RouteRecordRaw[] = [
     path: '/chat',
     name: 'chat',
     component: () => import('@/pages/ChatSession.vue'),
+    // 全屏裸页（MS7-W3 体验回归）：chat 自带侧栏+工具栏，不套 workbench 壳
+    meta: { hideShell: true },
   },
   {
     path: '/analysis',
