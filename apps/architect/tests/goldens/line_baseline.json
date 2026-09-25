@@ -118,7 +118,7 @@
   "arch_routes/git.py": 118,
   "arch_routes/git_host.py": 169,
   "arch_routes/greenfield.py": 259,
-  "arch_routes/knowledge.py": 320,
+  "arch_routes/knowledge.py": 350,
   "arch_routes/mainkb.py": 73,
   "arch_routes/mcp_collab.py": 536,
   "arch_routes/naming.py": 480,

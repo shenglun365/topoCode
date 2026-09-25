@@ -156,7 +156,11 @@ def test_chat_service_importable(data_dir):
         "import topoone_app_chat.main\n"
         "print('topoone_app_chat import OK')\n"
     )
-    r = subprocess.run([_sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    # MS7-W4: 包体迁 apps/workbench/chat_service —— 子进程经 PYTHONPATH 引导（免 editable 时序依赖）
+    from pathlib import Path as _Path
+    _chat_root = str(_Path(__file__).resolve().parents[3] / "apps" / "workbench" / "chat_service")
+    _env = dict(os.environ, PYTHONPATH=_chat_root + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    r = subprocess.run([_sys.executable, "-c", code], capture_output=True, text=True, timeout=60, env=_env, cwd=_chat_root)
     assert "OK" in r.stdout, f"import failed: {r.stderr[:500]}"
     assert "error" not in r.stderr.lower() or "Traceback" not in r.stderr, r.stderr[:500]
 
