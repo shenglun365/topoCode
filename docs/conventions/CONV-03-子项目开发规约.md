@@ -52,6 +52,16 @@ apps/<name>/
 | 静态托管 | gateway 挂载（static_mount） | gateway 挂载 **或** 服务自托管（architect：static_dir 指向包内 static，static_mount=[]） |
 | 适用 | 与核心数据强耦合、无独立状态的薄层 | 有独立业务/独立 DB/独立团队演进 |
 
+### 3.1 kind=core 薄层档准入标准（C2 合法化，MS7-W6 定案）
+
+kind=core 是正式「薄层档」（0905 C2 kb god-process 维持现状+文档化裁决）。**准入**（三条同时满足）：
+
+1. 注册方法 **≤ 20 个**（当前 workbench 7 个 knowledge.*）；
+2. **无独立 DB**（数据全部落主库，读经进程内 multi_db）；
+3. **无长阻塞任务**（无独立生命周期/后台轮询进程）。
+
+**升级触发线**（任一命中 → 升级 kind=service，对齐 docs/chat 模式）：方法数 > 20；或出现长阻塞/独立生命周期任务；或需要独立 DB。
+
 ## 4. 后端包规约（topoone_app_*）
 
 1. `pyproject.toml`：`name = "topoone-app-<name>"`，`dependencies` 必含 `topoone-core`；独立服务加 `fastapi`/`uvicorn`。

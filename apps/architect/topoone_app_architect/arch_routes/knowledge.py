@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from ..common import (_ts, _id, ok, err, build_architecture_model, empty_architecture_model,
                      build_component_catalog, KbUnavailableError, _MODEL_KEYS)
-from ..kb_gateway import call_kb
+from ..kb_gateway import call_kb, get_gateway
 
 router = APIRouter()
 
@@ -132,7 +132,7 @@ async def get_coding_rules():
     """编码规约(真实)：从 KB 文档中查找规约/约定/规则类文档并汇总；
     KB 不可达或无匹配文档 → 返回空串(前端展示空，不伪造固定文本)。"""
     try:
-        from ..kb_gateway import call_kb
+        from ..kb_gateway import call_kb, get_gateway
         docs = call_kb("knowledge.listDocs") or []
     except Exception:
         return ""
@@ -318,3 +318,33 @@ async def kb_update_cancel(req_id: str):
             "data": None,
         })
     return ok(res)
+
+
+# ── KB 基线组件语义 · MCP 出向通道（MS7-W6，裁决① 收口）────────────────
+# KbGateway.query() 预留接口的首个消费路由：architect 经 KB 侧 plugins/mcp_server
+# (:3460 /v1/tools/*) 检索基线组件语义。MCP 不可达 → err 降级（前端按不可用渲染）。
+
+@router.get("/kb/semantics/tools")
+async def kb_semantics_tools():
+    """列出 KB MCP 可用工具（基线语义检索面）。不可达返回空表。"""
+    gw = get_gateway()
+    return ok({"tools": gw.tools()})
+
+
+@router.post("/kb/semantics/query")
+async def kb_semantics_query(request: Request):
+    """基线组件语义 MCP 检索：转发 `query(tool, **params)`。
+
+    Body: { tool: str, params: object }——tool 如 `kb_semantic_search`。
+    MCP 不可达/超时 → err("...")（KbGateway.query 语义：None 即降级）。
+    """
+    body = await request.json() or {}
+    tool = body.get("tool") or ""
+    if not tool:
+        return err("missing tool")
+    params = body.get("params") or {}
+    gw = get_gateway()
+    result = gw.query(tool, **params)
+    if result is None:
+        return err(503, "KB MCP 不可达：基线语义检索降级（" + KB_NOTE + "）")
+    return ok(result)

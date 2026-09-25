@@ -85,6 +85,18 @@ GET/POST /api/architect/...
 
 **铁律**：跨进程取数走 RPC/HTTP；禁止打开他进程 DB 文件写；`~/.topocode` 文件布局零迁移（新增文件允许）。
 
+### 5.1 只读 WAL 共享档（C3 合法化，MS7-W6 定案；裁决⑤ 范围收窄）
+
+允许**同机**服务以 `mode=ro` + WAL 直接只读打开他进程的 project.db，**三约束**：
+
+1. **只读**——URI `mode=ro`，写事务由 SQLite 层拒绝（禁写事务）；
+2. **禁止跨机**——仅限同一台机器上的进程间；
+3. **声明**——使用方必须在 manifest 注释声明共享哪些库。
+
+配套单源：`MultiDBManager.open_project_ro(project_id)` 工厂（db/manager.py，MS7-W6 新增）固化只读连接，防止误写。
+**适用范围（裁决⑤ 收窄，不得扩大）**：① architect 符号兜底路径（symbols.py native fallback）；② docs viewer 查询。
+其余跨进程取数仍走 RPC/HTTP（铁律不变）。
+
 ## 6. 门禁定义（G1–G8）
 
 | 门禁 | 内容 | 命令/判据 |

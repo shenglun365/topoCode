@@ -1058,6 +1058,21 @@ class MultiDBManager:
             except Exception:
                 pass
 
+    def open_project_ro(self, project_id: str) -> sqlite3.Connection:
+        """C3 WAL 直读合法化（MS7-W6）：以 mode=ro 打开项目库的只读连接。
+
+        边界规则（CONV-04 §5 只读 WAL 共享档，三约束）：
+        a) 只读——URI mode=ro，写事务由 SQLite 层拒绝；
+        b) 仅限同机进程；
+        c) 使用方必须在 manifest 注释声明共享哪些库。
+        适用范围（裁决⑤收窄）：符号兜底路径（architect symbols.py native fallback）
+        与 docs viewer 查询。返回裸 sqlite3.Connection（不经 LRU 缓存，调用方自管生命周期）。
+        """
+        db_path = self._project_db_path(project_id)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=3000)
+        conn.row_factory = sqlite3.Row
+        return conn
+
     def get_project_db(self, project_id: str) -> SQLiteContext:
         """
         获取项目库连接（懒加载 + LRU 缓存 + 空闲超时剔除）
