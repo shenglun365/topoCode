@@ -127,7 +127,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 | MS2 | ✅ 已评审（2026-09-24） | — | ✅ K1~K5 落地（cc36437..39ed3b0+greenfield 措辞清理，6 commits） | ✅ 净删 **−7,006 行/+256**（93 文件）：architect 2,935 + workbench 3,635 + web-core 107 + shim/迁移 329；判据1: architect 1101(R1 存量)+四域 349+FE typecheck/test 全绿；判据2: A1~A5 零引用命中（仅存勘误记录与已清理措辞）；判据3: shortstat 与清单一致 |
 | MS3 | ✅ 已评审（U6=案A；U2=本期合入） | — | ✅ 在途合入 e06d1bd + U0~U8 落地（d3fdf88..75bad87，11 commits） | ✅ 判据1: architect web-core import=0+依赖零声明+独立build ✓（全口径达成）· 判据2: 旧token键=0 · 判据3: 四域349+FE vitest(54/9/9/12)+architect 1101(R1存量) · 判据4: 案A口径通过 · 判据5/6: 0命中 |
 | MS4 | ✅ 已产出（[MS4-backend-restructure.md](MS4-backend-restructure.md)，待评审；与 MS5 并行零交集） | ⬜ | ⬜ | ⬜ |
-| MS5 | ✅ 已评审 | ✅ V0/V1/V2 落地（a4f2ef1/7ac450b/36ff479+cc60fdd）；V3 回退挂账 MS6 前置 | 🔶 部分：判据1 parity 218 对等 ✓；判据2 DDL 契约 5 例 ✓；判据3 分域全绿（core 296/chat 32/docs 18；topoone 122 中 3 例 pre-MS5 存量 worktree 归因）· 判据4 docs 行为不变 ✓ + 单文件 <1,500 ✓ |
+| MS5 | ✅ 已评审 | ✅ V0/V1/V2+V3-StepA 落地（web_tools 三件 1ac94e4）；V3-StepB(chat_api) 挂账专项 | 🔶 判据1 parity ✓ · 判据2 DDL 契约 ✓ · 判据3 分域全绿 · 判据4 行数 ✓；StepB SSE 挂起法证已入档(线程无帧消失), 待 py-spy 提权归因 |
 | MS6 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS7 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 

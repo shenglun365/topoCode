@@ -160,3 +160,17 @@ symbols.py/codegraph.py 头注升级为裁决⑤ SLA 表述（codegraph=architec
 - 已修陷阱：① 缩进压扁（正则重排丢缩进）② `# noqa` 尾注致 moved 判定失败 ③ sem 内三点相对深度方向（app/sem 应为两点）④ latent-broken imports（dossier/units 的 `..arch_routes.common` 在拆分前即不可达，顺手改真身）⑤ kb_gateway 越顶 `..agent` → `.agent` ⑥ ctx.py 的 `.schema` 应为 `.store.schema`
 - 余项：**顺序依赖挂起归因（复现配方已锐化）**——`pytest tests/test_direct_commands.py tests/test_design.py` 反序即挂（direct 全过后，design 的 WS chat 用例收不到事件帧；单文件/正序/孤立用例全绿）。定性：direct 文件遗留状态阻断后续 WS 会话（嫌疑：turn/pump 全局态或 ctx 单例时序），与 V3 挂起同族（asyncio/线程时序 × 模块组织）。归因入口：对 design WS handler 埋 faulthandler.dump_traceback_later + 对比 direct 前后 `ctx`/`store` 单例与 exec_bridge._TASK_PUMPS 状态
 - 其余 W2~W9 按本设计继续
+
+
+---
+
+## 10. 实施记录（2026-09-24/25）
+
+| 批 | commit | 内容 |
+|---|---|---|
+| W1 | 33ddde4(merge) | store/sem/db_schema/ctx/common/kb_gateway 提升平级(198 文件)；**挂起根因**: commands.py:55 多人名 from-import 残留 store 名→arch_routes.store 半初始化第二实例→WS 回合 AttributeError 被吞；另修缩进/`# noqa` 尾注/三点深度/latent-broken imports 等 6 类陷阱 |
+| W2 | cc4ef06(merge) | req_agent→agent/tools、exec_bridge→agent/execution + 86 消费面文件重写 + 引用数据门禁全对齐(golden/白名单/hotspot/层序权威重算) |
+| W3 | 8834c8d | zmq_stream→agent/collab、asset_skill→sem/skill_docs(整文件, 本无路由)、asset_map_tools→sem/map_tools(同) |
+| 收尾 | 8834c8d+ | skill_docs 惰性导入升 ..arch_routes、baseline 重建(sem/store 纳入) |
+
+**W3 后残余 agent→arch_routes 通道（thick, 属 W3b/后续）**: project(kb_degraded/_resolve_project ×7)、agent_executors(registry ×4)、execution.conv_root_project ×4、cline_engines.resolve_engine、semantic_assets 门面 ×8、agent_roles ×2。这些是厚路由模块, 抽取需连带 REST 面设计——与 W4(sessions 拆分)/W6 合并考量。
