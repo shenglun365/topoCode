@@ -2,7 +2,7 @@
 
 > 状态：**待评审**（评审通过后按批执行，每批全绿合入）
 > 核证日期：2026-09-25（工作区 clean，基线 dev-1 @ 07ba81c）
-> 前置：~~MS6-W6 DiagramViewer 裁决~~ **已解除（2026-09-25 方案A：留 web-core，无迁移联动）**——MS7 与 MS6 解耦，可并行或独立推进
+> 前置：已解除（DiagramViewer 方案A 定案）；MS6 已全部完结（d7ecfaf+046688b 质量修复）——**MS7 开工就绪**
 
 ## 1. 核证快照（实测）——两处重要修正
 
@@ -56,3 +56,15 @@ tag 计划：`git tag pre-MS7`；W4 前追加 `pre-MS7-W4`（目录迁移回退�
 - **依赖 MS6-W6**（DiagramViewer 裁决）→ 建议 MS6 先行
 - **不依赖 MS5-V3B**（chat.py 挂起专项与前端拆分/迁移正交）
 - V3-StepB 若仍挂账，W4 迁移时**原样搬迁不拆分**（W8 先例：不为迁移而拆）
+
+
+---
+
+## 6. W0 核证批执行记录（2026-09-25，开工准备）
+
+- **tag**：`pre-MS7` 已打（裁决⑥ 兜底纪律）
+- **① d3 孤儿复证 ✅**：全 src 唯一 d3 引用在 render-worker.ts 自身内部（动态 import），外部消费面为零——W1 纯删安全成立
+- **② ChatSession 依赖盘点 ✅**：web-core 依赖 9 处（api/render/diagramStateStore/parseContent/chat-stream/shell/toast/dialog/AppDialog/DiagramViewer/domain types——workbench 本就依赖 web-core，上提零新增）+ 本地组件 5 个随迁（ChatInput/ChatSidebar/ChatMessage/RenameDialog/SaveAsDocDialog）；chat 前端全量 2,550 行 / 7 vue
+- **③ 3483 引用面 ✅**：前端**零硬编码**；引用全部在 chat 域自身（manifest.toml 声明式端口 + main.py 默认值）——W4 迁移只动 manifest/pyproject/CI 路径
+- **④ 重大发现：代理链** —— chat 前端 vite proxy `/api → 3456 主服务`（**非直连 3483**！），与 workbench 现有 proxy 完全一致 → **W3 上提后零代理改动**（原设计的"跨域鉴权风险"不成立，同源同代理语义）
+- **⑤ chat 前端测试基建**：无 vitest（M12 echo）——W2 前需建最小冒烟（vitest.config + ChatSession 挂载 2 例）
