@@ -3138,7 +3138,7 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
     if conv_txt:
         ctx.append(conv_txt)
     try:
-        from ..arch_routes.asset_skill import skill_docs
+        from .skill_docs import skill_docs
         skill_txt = skill_docs(root, project, ["linenote"])
     except Exception as e:
         logger.warning("[semantic] line-notes skill 加载失败: %s", e)

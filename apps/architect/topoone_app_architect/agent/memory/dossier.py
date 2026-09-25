@@ -78,7 +78,7 @@ def assemble_dossier(conv_id: str, reqs: Optional[list] = None,
     # 5) 项目规约(编码必须遵守)
     if root or pid:
         try:
-            from ...arch_routes.asset_map_tools import run_tool
+            from ...sem.map_tools import run_tool
             rules = run_tool("map.rules", {"project": pid or None})
             sections.append(("项目规约(编码必须遵守)", _clip(rules, 4000)))
         except Exception as e:  # noqa: BLE001

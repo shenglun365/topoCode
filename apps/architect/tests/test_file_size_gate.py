@@ -40,7 +40,7 @@ with open(BASELINE_PATH, encoding="utf-8") as f:
 
 def _py_lines():
     out = {}
-    for sub in ("agent", "arch_routes"):
+    for sub in ("agent", "arch_routes", "sem", "store"):
         root = os.path.join(ROOT, sub)
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d != "__pycache__"]

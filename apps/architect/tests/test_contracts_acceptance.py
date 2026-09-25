@@ -476,7 +476,7 @@ class TestExperienceWriteback:
         pid = _pid(tmp_path)
         NamingConventionStore.create(pid, "验收订单须核对库存扣减顺序",
                                      scenarios=["accept"], status="active")
-        from topoone_app_architect.arch_routes import asset_skill as SK
+        import topoone_app_architect.sem.skill_docs as SK
         doc = SK.skill_docs(str(tmp_path), None, ["accept"])
         assert "验收经验规约" in doc and "验收订单须核对库存扣减顺序" in doc
         # 非 accept 场景不注入该经验规约

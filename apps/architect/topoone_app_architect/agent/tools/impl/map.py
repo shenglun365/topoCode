@@ -18,7 +18,7 @@ logger = logging.getLogger("arch_routes.req_agent")
     "穷举/统计/层级类提问(如「有哪些组件」「L0/L1 模块」「资产总数」)先调此工具",
 )
 def tool_map_overview(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
-    from ....arch_routes.asset_map_tools import run_tool
+    from ....sem.map_tools import run_tool
     return {"markdown": run_tool("map.overview", {"project": project})}
 
 
@@ -28,7 +28,7 @@ def tool_map_overview(root: Optional[str], project: Optional[str]) -> Dict[str, 
 )
 def tool_map_component(root: Optional[str], project: Optional[str],
                        name: str = "") -> Dict[str, Any]:
-    from ....arch_routes.asset_map_tools import run_tool
+    from ....sem.map_tools import run_tool
     if not (name or "").strip():
         return {"error": "缺少组件名(name)"}
     return {"markdown": run_tool("map.component", {"name": name.strip(), "project": project})}
@@ -41,7 +41,7 @@ def tool_map_component(root: Optional[str], project: Optional[str],
 )
 def tool_map_assets(root: Optional[str], project: Optional[str], query: str = "",
                     kind: str = "", level: str = "", limit: int = 30) -> Dict[str, Any]:
-    from ....arch_routes.asset_map_tools import run_tool
+    from ....sem.map_tools import run_tool
     return {"markdown": run_tool("map.assets", {"query": query, "kind": kind,
                                                 "level": level, "limit": limit,
                                                 "project": project})}
@@ -52,7 +52,7 @@ def tool_map_assets(root: Optional[str], project: Optional[str], query: str = ""
     "项目规约全集(Markdown)：架构规约+编码规约+命名规约+词汇表，编码/方案评估必须遵守",
 )
 def tool_map_rules(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
-    from ....arch_routes.asset_map_tools import run_tool
+    from ....sem.map_tools import run_tool
     return {"markdown": run_tool("map.rules", {"project": project})}
 
 
@@ -62,6 +62,6 @@ def tool_map_rules(root: Optional[str], project: Optional[str]) -> Dict[str, Any
 )
 def tool_map_graph(root: Optional[str], project: Optional[str],
                    kind: str = "component") -> Dict[str, Any]:
-    from ....arch_routes.asset_map_tools import run_tool
+    from ....sem.map_tools import run_tool
     return {"markdown": run_tool("map.graph", {"kind": kind or "component",
                                                "project": project})}

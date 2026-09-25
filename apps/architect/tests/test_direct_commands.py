@@ -26,7 +26,7 @@ import topoone_app_architect.store as store
 from topoone_app_architect.agent.perception.commands import match_imperative
 from topoone_app_architect.agent.perception import commands as cmds
 from topoone_app_architect.agent.governance.focus import build_focus, resolve_intent
-from topoone_app_architect.arch_routes.asset_skill import _builtin_for, skill_docs
+from topoone_app_architect.sem.skill_docs import _builtin_for, skill_docs
 from topoone_app_architect.server import build_app
 
 WS_PATH = "/api/architect/ws/kb-analysis"

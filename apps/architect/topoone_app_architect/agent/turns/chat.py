@@ -731,7 +731,7 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
 
 async def _iter_llm_events(request_id: str, idle_timeout: Optional[float] = None):
     """architect 进程内 ZMQ SUB 订阅主后端 llm.* 流(按 requestId 过滤)。"""
-    from ...arch_routes.zmq_stream import iter_llm_events
+    from ..collab.zmq_stream import iter_llm_events
     async for e in iter_llm_events(request_id, idle_timeout=idle_timeout):
         yield e
 

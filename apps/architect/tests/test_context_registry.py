@@ -76,13 +76,13 @@ class TestContextRegistry(unittest.TestCase):
         self.assertIn("支付需求快照", md)
 
     def test_mcp_run_tool_dispatch(self):
-        from topoone_app_architect.arch_routes import asset_map_tools
+        from topoone_app_architect.sem import map_tools
         from topoone_app_architect.agent.memory import units as cr
         conv = self._conv(title="登录会话")
         cr.record_tool_call(conv["id"], "kb.asset.search", {}, True, "登录鉴权资产")
-        md = asset_map_tools.run_tool("ctx.search", {"query": "登录"})
+        md = map_tools.run_tool("ctx.search", {"query": "登录"})
         self.assertIn("登录鉴权资产", md)
-        unknown = asset_map_tools.run_tool("ctx.nope", {})
+        unknown = map_tools.run_tool("ctx.nope", {})
         self.assertIn("未知工具", unknown)
 
     def test_chat_tools_registered(self):

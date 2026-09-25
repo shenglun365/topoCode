@@ -1,5 +1,7 @@
 """语义资产提取 skill 文档（规约模板 → agent 可执行知识）— plan-C §4.1。
 
+(MS4-W3 整体自 arch_routes/asset_skill.py 迁入——该文件本无路由, 属语义资产域逻辑。)
+
 **按场景加载（防上下文污染）**：`skill_docs(root, project, scenarios)` 只拼接
 当前场景相关片段——builtin 规约(按场景切分) + 项目规约库(arch_naming_conventions
 按 scenarios 标签过滤)。禁止默认全量注入。
@@ -183,7 +185,7 @@ def _builtin_for(scenario: str) -> str:
 def _merge_global_conventions(convs: list, pid: str, scenario: str) -> list:
     """WS8-S4: 合并主库全局桶规约(场景匹配, 归一文本去重, 全局行缀后)。"""
     try:
-        from ..store.base import GLOBAL_PID, _db, _row_to_api
+        from .store.base import GLOBAL_PID, _db, _row_to_api
         rows = _db().fetchall(
             "SELECT * FROM arch_naming_conventions WHERE project_id = ? "
             "AND status = 'active' AND scenarios LIKE ? ORDER BY updated_at DESC LIMIT 50",
@@ -215,7 +217,7 @@ def skill_docs(root: Optional[str], project: Optional[str],
     # 组件 ID 定位改走本地资产检索(extract 场景其余内容与 KB 无关, 保留)。
     degraded = False
     try:
-        from .project import kb_degraded as _kd
+        from ..arch_routes.project import kb_degraded as _kd
         degraded = _kd(root, project)
     except Exception:  # noqa: BLE001
         degraded = True
@@ -232,7 +234,7 @@ def skill_docs(root: Optional[str], project: Optional[str],
         parts.append(b)
     # 项目规约（按场景标签过滤——R7 禁全量注入）
     try:
-        from .semantic_assets import project_id_for
+        from ..arch_routes.semantic_assets import project_id_for
         pid = project_id_for(root, project)
         if "extract" in scenarios or "naming" in scenarios:
             convs = NamingConventionStore.list(pid, scenario="extract")
@@ -255,7 +257,7 @@ def skill_docs(root: Optional[str], project: Optional[str],
                 parts.append("\n".join(lines))
         # WS7 能力闭环: 已采纳提案(流程/技巧/skill)按场景标签注入(静态注册→可增长)
         try:
-            from ..store import CapabilityProposalStore
+            from .store import CapabilityProposalStore
             accepted = CapabilityProposalStore.list(pid, status="accepted", limit=200)
 
             def _scene_list(p):

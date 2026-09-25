@@ -12,7 +12,7 @@ sys.path.insert(0, _repo)
 import topoone_app_architect.ctx as C
 from topoone_app_architect.arch_routes import agent_roles as R
 from topoone_app_architect.agent.cognition import roles as _cog_roles
-from topoone_app_architect.arch_routes import asset_skill as K
+import topoone_app_architect.sem.skill_docs as K
 from topoone_app_architect.arch_routes import semantic_assets as S
 from topoone_app_architect.agent.tools import req_agent
 from topoone_app_architect.store import (

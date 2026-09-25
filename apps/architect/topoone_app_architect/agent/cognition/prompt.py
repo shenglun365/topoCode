@@ -206,7 +206,7 @@ def _r_skill_docs(ctx: Dict[str, Any]) -> str:
     scenarios = ctx.get("skill_scenarios") or []
     if not scenarios:
         return ""
-    from ...arch_routes.asset_skill import skill_docs
+    from ...sem.skill_docs import skill_docs
     return skill_docs(ctx.get("root"), ctx.get("project"), scenarios)
 
 
