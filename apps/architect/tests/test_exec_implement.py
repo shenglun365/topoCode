@@ -156,7 +156,8 @@ def test_bind_with_model_and_switch(tmp_path, monkeypatch):
 def test_executor_hint_model_priority(tmp_path, monkeypatch):
     """hint 模型优先级: conv.executorModel > config.models[0] > cfg.model。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import agent_executors as ae, exec_bridge as eb
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     # 仅 cfg.model(无白名单) → cfg.model
     monkeypatch.setattr(ae, "load_executors", lambda: [
         {"id": "ex1", "type": "opencode", "enabled": True,
@@ -254,7 +255,8 @@ def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
     """删除会话级联清理关联条目: 停作业/递归删子会话/孤儿 draft 需求删除/
     保留需求的 ownerConv 悬空引用清空。"""
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import sessions as S, exec_bridge
+    from topoone_app_architect.arch_routes import sessions as S
+    from topoone_app_architect.agent.execution import exec_bridge
     monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
     # draft 需求(source=本会话) → 应级联删除(级联策略按 status 判定, 与创建路径无关)
     rid_draft = store.next_id("RQ")
@@ -293,7 +295,8 @@ def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
     """跨库级联: 会话在主库默认桶(无活跃项目写入), 需求在项目库——删除会话时
     项目库需求同样清理(draft 删/ready 清 ownerConv), 消息同桶删净不残留。"""
     from topoone_app_architect import ctx as C
-    from topoone_app_architect.arch_routes import sessions as S, exec_bridge
+    from topoone_app_architect.arch_routes import sessions as S
+    from topoone_app_architect.agent.execution import exec_bridge
     monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
     _mk_fixture(tmp_path, monkeypatch)
 

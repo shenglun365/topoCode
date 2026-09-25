@@ -190,7 +190,7 @@ def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
 
     architect 辅助判定材料——完成与否由用户判定(裁决#3)。
     """
-    from .req_agent import parse_scope_files
+    from ..tools.req_agent import parse_scope_files
     active = store.RequirementsStore.spec_active(rid or "") or {}
     snap = active.get("snapshot") or {}
     scope_files = parse_scope_files(snap.get("allowedScope") or [])
@@ -872,7 +872,7 @@ def _task_gear(task: dict, conv: Optional[dict] = None):
     """任务挡位解析(环节十二a, 三维矩阵): 会话 analysisMode + 执行器配置(C 轴)
     + architect 对话模型(A 轴) → GearPolicy。"""
     from ...agent.governance.gears import resolve_gear
-    from .req_agent import get_model_preference
+    from ..tools.req_agent import get_model_preference
     _conv = conv or store.ConversationsStore.get(task.get("conversationId") or "") or {}
     try:
         hint = executor_hint_by_id(str(task.get("executorId") or ""), _conv) or {}
@@ -953,7 +953,7 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
         return None
     conv_model = ((conv or {}).get("executorModel") or "").strip()
     try:
-        from .agent_executors import (load_executors, _default_sidecar_path,
+        from ...arch_routes.agent_executors import (load_executors, _default_sidecar_path,
                                       _builtin_cline_models)
         for e in load_executors():
             if (e.get("id") or "") == eid:
@@ -981,7 +981,7 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                 cline_data_dir = ""
                 if not sidecar_script and e.get("type") == "cline-sdk":
                     try:
-                        from .cline_engines import resolve_engine
+                        from ...arch_routes.cline_engines import resolve_engine
                         eng = resolve_engine()
                         if eng:
                             sidecar_script = eng["script"]

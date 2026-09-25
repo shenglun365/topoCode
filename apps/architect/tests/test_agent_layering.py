@@ -91,6 +91,8 @@ _R1_INVENTORY = {
     # (agent.flow.policy 缺省单源+读取)——states 词表引用随 flow.py 同款先例;
     # 行为面数据驱动为本职, 清退随 states 上提。
     "governance/flow_policy.py",
+    "execution/exec_bridge.py",  # MS4-W2(2026-09-24) 适配层本体移入 agent/execution——通道保留至 W3 抽取清退
+    "tools/req_agent.py",        # MS4-W2(2026-09-24) 同上, agent/tools/req_agent——W3 清退,
 }
 
 # 存量违规冻结——低层引高层。
@@ -99,20 +101,22 @@ _R1_INVENTORY = {
 # →turns(2026-09-19 M3 立条): R3.1 链3收编——入口/计划/探针调用点经 CallTurn
 # 统一入口(设计 §4 目标形态: 入口层路由进内核 L2), 属目标架构而非债务。
 _R2_INVENTORY = {
-    # requirements/harness.py(2026-09-19 M4 立条): clarify/collect 经 CallTurn
-    # (R3.1 链3②; M4 目标形态——需求域路由进内核 L2)。
-    "requirements/harness.py": {"turns"},
-    "cognition/llm.py": {"reflection"},
-    "cognition/model_profile.py": {"reflection"},
-    "planning/req_spec.py": {"reflection"},  # MS2(2026-09-24) shim 撤除显形——原经 arch_routes.adaptation 规避扫描, 语义依赖本就存在; MS4 断环清退
-    "memory/units.py": {"reflection"},       # MS2 显形(原经 shim); memory→reflection 摘要回路, MS4 断环清退
-    "memory/distill.py": {"reflection"},     # MS2 显形(原经 shim); 蒸馏经 repair 摘要, MS4 断环清退
-    "sessions/coding.py": {"reflection"},    # MS2 显形(原经 shim); coding 回合摘要, MS4 断环清退
-    "cognition/ctx_usage.py": set(),             # 2026-09-24 在途合入立条——ctx 预算模块引 arch_routes.store(会话存取); MS4 断环时随 req_agent/store 通道统一清退
-    "perception/commands.py": {"planning", "turns", "compensation"},
-    "planning/task_plan.py": {"turns"},
-    "planning/scope_probe.py": {"turns"},
+    # ── MS4-W2(2026-09-24) 权威重算: req_agent 移入 tools 后按门禁逻辑全量扫描,
+    # 12 条为当前真实上行集(合并历史立条); W3 抽取/回调注入后逐条清退(只许缩短) ──
+    "requirements/harness.py": {"turns"},  # M4 立条: clarify/collect 经 CallTurn(链3②)
+    "cognition/llm.py": {"reflection"},  # 引 reflection 评测产物
+    "cognition/model_profile.py": {"reflection", "tools"},
+    "cognition/prompt.py": {"tools"},
+    "memory/distill.py": {"reflection"},  # 蒸馏经 repair 摘要
+    "memory/units.py": {"reflection", "tools"},  # 摘要回路 + W2 tools 就地
+    "memory/working.py": {"tools"},
+    "perception/commands.py": {"planning", "turns", "compensation", "execution"},
+    "planning/req_spec.py": {"reflection", "tools"},  # MS2 显形 + W2 就地
+    "planning/scope_probe.py": {"turns", "tools"},  # W2 就地
+    "planning/task_plan.py": {"turns", "execution"},
+    "tools/req_agent.py": {"requirements", "turns", "reflection"},  # W2 移入本体
 }
+
 
 
 def _resolve_module(node, pkg: str):

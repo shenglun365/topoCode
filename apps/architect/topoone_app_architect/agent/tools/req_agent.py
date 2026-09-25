@@ -266,7 +266,7 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
     # 杜绝静默空结果误导模型; internal=True 系统确定性路径放行。
     if name in KB_FACE_TOOLS and not internal:
         try:
-            from .project import kb_degraded as _kb_deg
+            from ...arch_routes.project import kb_degraded as _kb_deg
             if _kb_deg(root, project):
                 return {"error":
                         "当前项目未关联知识库(KB)，kb.* 工具不可用。"
@@ -1258,7 +1258,7 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
     # cv-189 注入层硬控制(入口强制): 未关联 KB → 无论调用方传什么, kb_enabled
     # 恒 False(能力文档无 kb.*/mcp.call; MCP 块/skill/路由段各自另有降级门)。
     try:
-        from .project import kb_degraded as _kd
+        from ...arch_routes.project import kb_degraded as _kd
         if _kd(root, project):
             kb_enabled = False
     except Exception:  # noqa: BLE001
@@ -1303,7 +1303,7 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
     ir_doc = f"\n\n{_ir_schema_doc()}"
     extra = f"\n\n{_diagram_skill_doc()}" if diagram_skill else ""
     try:
-        from .project import kb_degraded as _kd
+        from ...arch_routes.project import kb_degraded as _kd
         _mcp_on = not _kd(root, project)
     except Exception:  # noqa: BLE001
         _mcp_on = True
