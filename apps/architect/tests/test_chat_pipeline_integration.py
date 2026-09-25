@@ -141,7 +141,7 @@ def test_full_pipeline_task_fence_autoland(pipeline):
 
 def test_full_pipeline_text_confirm_runs_task(pipeline, monkeypatch):
     """文字「确认」直通: 真实 confirm_task→选定链→runner 载荷(带执行器配置)。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, gw, tmp = pipeline
     store.CollabConfigStore.set("agent.executors", json.dumps([
         {"id": "cline", "type": "cline-sdk", "enabled": True, "default": True,

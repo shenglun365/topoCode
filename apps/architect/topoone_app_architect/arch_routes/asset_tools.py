@@ -10,7 +10,7 @@ import re
 import threading
 from typing import Any, Dict, List, Optional
 
-from .req_agent import register_architect_tool
+from ..agent.tools.req_agent import register_architect_tool
 
 _tl = threading.local()
 

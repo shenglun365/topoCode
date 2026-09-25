@@ -250,7 +250,7 @@ def _probe_tools() -> List[Dict[str, str]]:
 
 
 def _extract_calls(raw: str):
-    from ...arch_routes import req_agent as _req_agent_mod
+    from ...agent.tools import req_agent as _req_agent_mod
     return _req_agent_mod.extract_tool_calls(raw)
 
 
@@ -268,7 +268,7 @@ def _build_cases() -> Dict[str, List[Dict[str, Any]]]:
 
 
 def _probe_call(system: str, user: str, max_tokens: int, model_id: str) -> Optional[str]:
-    from ...arch_routes import req_agent as _req_agent_mod
+    from ...agent.tools import req_agent as _req_agent_mod
     try:
         res = _req_agent_mod.llm_sync([{"role": "system", "content": system},
                                        {"role": "user", "content": user}],

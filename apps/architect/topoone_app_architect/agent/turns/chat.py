@@ -126,7 +126,7 @@ class _LiveForward:
 def _chat_max_tokens() -> Optional[int]:
     """读 KB 侧 `llm.maxTokens` 偏好(与 llm.modelId 同源)；未配置返回 None → 主后端用模型配置。
     覆盖值做过小保护，避免思考型模型在推理阶段耗尽 token 产出空正文。"""
-    from ...arch_routes import req_agent
+    from ...agent.tools import req_agent
     pref = req_agent.get_max_tokens_preference()
     if pref and pref > 0:
         return max(pref, _MIN_CHAT_MAX_TOKENS)
@@ -165,7 +165,7 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
     正常: 确定性围栏代落(_post_turn_land) → assistant 单流落库 → done 事件;
     空返回: turnError 折叠卡 + error 事件(错误必须完整可见且可刷新)。
     """
-    from ...arch_routes import req_agent
+    from ...agent.tools import req_agent
     from ... import store
     from ...common import _ts
 
@@ -287,12 +287,12 @@ def _gu_structured_schema(allowed_tools: Optional[set]):
 
 def _call_key(name: str, args) -> tuple:
     """回合内重复调用判别键(单源委托 req_agent; async 面薄壳)。"""
-    from ...arch_routes import req_agent as _ra
+    from ...agent.tools import req_agent as _ra
     return _ra._call_key(name, args)
 
 
 def _dup_call_text() -> str:
-    from ...arch_routes import req_agent as _ra
+    from ...agent.tools import req_agent as _ra
     return _ra._DUP_CALL_TEXT
 
 
@@ -313,7 +313,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
     与执行面(名单外拒绝回喂)双重收敛。
     返回 {request_id, assistant_text, visible, tool_round, loop_fell_back,
     card_closed}; msgs/tools_used/tool_errors 原地变更(守卫与遥测依赖)。"""
-    from ...arch_routes import req_agent
+    from ...agent.tools import req_agent
     max_rounds = max(1, int(max_tool_rounds or _MAX_TOOL_ROUNDS))
     structured_on = True    # M4-A: 受限生成通道开关(逐轮按支持位判定+失败降级)
     request_id = None
@@ -583,7 +583,7 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     card_landed=围栏代落通道本回合成功落卡(choices/规约/任务任一;
     cv-253): 正文剥空时与工具轮 card_closed 同规「卡即产物,
     空收尾≠空返回错误」。"""
-    from ...arch_routes import req_agent
+    from ...agent.tools import req_agent
 
     card_landed = False
 
@@ -662,7 +662,7 @@ async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_roun
     (run_tools_loop 在工作线程同步执行，send 回调非线程安全，
     必须 run_coroutine_threadsafe；连接已断时 send 抛异常需吞掉)。
     """
-    from ...arch_routes import req_agent
+    from ...agent.tools import req_agent
     loop = asyncio.get_running_loop()
 
     def on_progress(event: str, detail: dict) -> None:
@@ -704,7 +704,7 @@ async def _run_tool_with_progress(send: SendFn, request_id: str, name: str, args
     参数自动修复已按 cv-175 裁决拆除——错误如实返回(明确报错优于静默纠偏)。
     """
     from ..memory import units as context_registry
-    from ...arch_routes import req_agent
+    from ...agent.tools import req_agent
     await send({"type": "tool_call", "requestId": request_id, "tool": name})
     result = await asyncio.to_thread(
         req_agent.execute_tool_with_repair, name, args, root, project,
@@ -741,7 +741,7 @@ def _req_chat_stream(msgs, model_id):
 
     cv-156 实证: 函数体在早前重构中丢失(隐式 return None)——流式通道自
     9-13 起从未发起, 所有回合静默走同步降级(大提示词下小模型易空返回)。"""
-    from ...arch_routes.req_agent import llm_chat_start
+    from ...agent.tools.req_agent import llm_chat_start
     return llm_chat_start(msgs, model_id=model_id or None,
                           session_id="arch-req-chat",
                           max_tokens=_chat_max_tokens())

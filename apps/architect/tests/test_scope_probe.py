@@ -100,7 +100,7 @@ def test_gather_grounding_tree_and_history(arch_env, git_repo):
 
 def test_probe_scope_normalizes_llm_output(arch_env, monkeypatch, git_repo):
     repo, _ = git_repo
-    from topoone_app_architect.arch_routes import req_agent as ra
+    from topoone_app_architect.agent.tools import req_agent as ra
 
     def _fake_llm(messages, **kw):
         assert "范围探针" in messages[0]["content"]
@@ -121,7 +121,7 @@ def test_probe_scope_normalizes_llm_output(arch_env, monkeypatch, git_repo):
 
 def test_probe_scope_llm_unavailable(arch_env, monkeypatch, git_repo):
     repo, _ = git_repo
-    from topoone_app_architect.arch_routes import req_agent as ra
+    from topoone_app_architect.agent.tools import req_agent as ra
     monkeypatch.setattr(ra, "llm_sync", lambda *a, **k: (_ for _ in ()).throw(
         RuntimeError("down")))
     from topoone_app_architect.agent.planning.scope_probe import probe_scope
@@ -144,7 +144,7 @@ def _mk_conv_req(arch_env, tmp_path, monkeypatch, rid="RQ-sp", with_scope=False,
         "specVersions": [{"ver": 1, "state": "confirmed",
                           "snapshot": {"allowedScope": scope, "designMd": "方案"},
                           "source": {}, "reason": "", "createdAt": 0}]})
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(tmp_path / "repo"), "proj-sp"))

@@ -35,7 +35,7 @@ def _mk_req(conv_id):
 
 
 def test_propose_creates_saved_and_card_text(arch_env):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv()
     r = eb.propose_task(conv, "任务一", "目标: X", executor_hint={"executorType": "cline-sdk"})
     assert r.get("id") and r["status"] == ST.TASK_SAVED
@@ -48,7 +48,7 @@ def test_propose_creates_saved_and_card_text(arch_env):
 
 def test_same_req_propose_rewrites_saved_card(arch_env):
     """对话补充 → agent 重复 task.propose 改写同需求 saved 卡(不产生重复卡)。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv()
     rid = _mk_req(conv["id"])
     r1 = eb.propose_task(conv, "任务一", "目标: 初始方案",
@@ -66,7 +66,7 @@ def test_same_req_propose_rewrites_saved_card(arch_env):
 
 
 def test_different_req_creates_new_card(arch_env):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv()
     _mk_req(conv["id"])
     eb.propose_task(conv, "任务一", "x", executor_hint={"executorType": "cline-sdk"})
@@ -77,7 +77,7 @@ def test_different_req_creates_new_card(arch_env):
 
 
 def test_ignore_task_semantics(arch_env):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv()
     r = eb.propose_task(conv, "T", "x", executor_hint={"executorType": "cline-sdk"})
     tid = r["id"]
@@ -97,7 +97,7 @@ def test_ignore_task_semantics(arch_env):
 
 def test_confirm_saved_starts_execution(arch_env, tmp_path, monkeypatch):
     """手动触发: confirm(saved) → running(原确认语义)。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "p"; root.mkdir()
     conv = _mk_conv(projectId="proj-ds", meta={"root": str(root)})
     monkeypatch.setattr(
@@ -125,7 +125,7 @@ def test_confirm_saved_starts_execution(arch_env, tmp_path, monkeypatch):
 
 
 def test_task_input_on_saved_guides(arch_env):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv()
     r = eb.propose_task(conv, "T", "x", executor_hint={"executorType": "cline-sdk"})
     res = eb.task_input(r["id"], "快点做")
@@ -134,7 +134,7 @@ def test_task_input_on_saved_guides(arch_env):
 
 def test_legacy_pending_confirm_still_confirmable(arch_env, tmp_path, monkeypatch):
     """存量原状: 直建 pending_confirm 行仍走确认门。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "p"; root.mkdir()
     conv = _mk_conv(projectId="proj-lg", meta={"root": str(root)})
     monkeypatch.setattr(
@@ -177,7 +177,7 @@ def test_requirement_ignore_rest(arch_env):
 
 def test_run_button_auto_starts(arch_env, tmp_path, monkeypatch):
     """cv-200: 按钮「运行」= 建卡即启动(auto_start)——不再要求二次点开始。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "p"; root.mkdir()
     conv = _mk_conv(projectId="proj-as", meta={"root": str(root)})
     monkeypatch.setattr(
@@ -208,7 +208,7 @@ def test_confirm_double_click_single_runner(arch_env, tmp_path, monkeypatch):
     第二次点击幂等命中(duplicate=True), 不产生多个 LLM 进程。"""
     import threading
     import time as _time
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "p"; root.mkdir()
     conv = _mk_conv(projectId="proj-dc", meta={"root": str(root)})
     monkeypatch.setattr(
@@ -253,7 +253,7 @@ def test_stop_during_confirm_slow_start_no_zombie(arch_env, tmp_path, monkeypatc
     runner finish + cancelled(旧代码取消被 running 覆写成僵尸任务)。"""
     import threading
     import time as _time
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "p"; root.mkdir()
     conv = _mk_conv(projectId="proj-sz", meta={"root": str(root)})
     monkeypatch.setattr(
@@ -304,7 +304,7 @@ def test_ignore_during_confirm_start_gets_409(arch_env, tmp_path, monkeypatch):
     (旧代码忽略被 confirm 覆写复活为 running)。"""
     import threading
     import time as _time
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "p"; root.mkdir()
     conv = _mk_conv(projectId="proj-ig", meta={"root": str(root)})
     monkeypatch.setattr(
@@ -350,7 +350,7 @@ def test_double_stop_serialized_single_finish(arch_env, tmp_path, monkeypatch):
     """运行中任务双停: 状态迁移锁串行 → runner finish 恰一次,
     第二次停止锁内重读终态显式 not-active, 状态恒 cancelled。"""
     import threading
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "p"; root.mkdir()
     conv = _mk_conv(projectId="proj-ds2", meta={"root": str(root)})
     monkeypatch.setattr(

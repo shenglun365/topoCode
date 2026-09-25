@@ -49,7 +49,7 @@ def test_a1_t2_execute_single_card_not_gated(arch_env, monkeypatch, tmp_path):
 
 def test_a1_chat_propose_still_gated_at_t2(arch_env):
     """门禁仍适用于 chat task.propose 路径(有 LLM 可回炉)。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T",
                                             "analysisMode": "T2"})
     r = eb.propose_task(conv, "T", "无图指令(无回车)",

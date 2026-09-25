@@ -39,7 +39,7 @@ class TestDevDigest(unittest.TestCase):
         conv = self._seed()
         # LLM 通道修复后本机模型可达 → 显式打桩模拟不可达，锁定降级直排断言
         from unittest.mock import patch as _mock_patch
-        import topoone_app_architect.arch_routes.req_agent as _RA
+        import topoone_app_architect.agent.tools.req_agent as _RA
         # 真实 llm_sync 在 LLM 不可达时内部吞错返回 None → 模拟同行为(非抛错)
         _ra_patch = _mock_patch.object(_RA, "llm_sync", lambda *a, **k: None)
         _ra_patch.start()

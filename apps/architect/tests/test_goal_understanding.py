@@ -158,7 +158,7 @@ def test_goal_policy_validation():
 
 def test_static_persona_block_in_capability_doc(arch_env):
     """人格层恒定: posture 判据块进能力文档(与 policy 无关, 不随回合抖动)。"""
-    from topoone_app_architect.arch_routes.req_agent import chat_system_prompt
+    from topoone_app_architect.agent.tools.req_agent import chat_system_prompt
     doc = chat_system_prompt("", "", model_id="")
     assert "对话路线(判据)" in doc and "三问定性" in doc
     assert "不要复述" in doc

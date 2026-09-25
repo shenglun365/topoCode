@@ -34,7 +34,7 @@ def test_kb_degraded_criterion(arch_env):
 
 def test_run_arch_tool_blocks_kb_when_degraded(arch_env):
     """执行面: 降级项目上 kb.* 四件全部拦截, 错误带本地替代指引。"""
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     for name, args in _KB_ARGS:
         r = req_agent.run_arch_tool(name, args, root=None, project=None)
         assert "未关联知识库" in str(r.get("error")), (name, r)
@@ -45,7 +45,7 @@ def test_run_arch_tool_kb_passes_when_linked(arch_env, monkeypatch):
     """已关联(有基线)项目: 拦截放行, 工具真实执行。"""
     import topoone_app_architect.arch_routes.project as proj_mod
     import topoone_app_architect.agent.tools.impl.kb as kb_impl
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     monkeypatch.setattr(proj_mod, "kb_degraded",
                         lambda root=None, project_id=None: False)
     monkeypatch.setattr(kb_impl, "_model_assets",
@@ -57,7 +57,7 @@ def test_run_arch_tool_kb_passes_when_linked(arch_env, monkeypatch):
 
 def test_run_arch_tool_kb_internal_bypass(arch_env):
     """internal=True(系统确定性路径)不拦——回退工具原降级语义。"""
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     r = req_agent.run_arch_tool("kb.asset.search", {"text": "x"},
                                 root=None, project=None, internal=True)
     assert "error" not in r and r.get("result") == []
@@ -89,7 +89,7 @@ def test_chat_context_cuts_kb_tools_when_unlinked(arch_env):
 def test_degraded_prompt_free_of_kb_narrative(arch_env):
     """cv-189 注入层硬控制验收(模型 API 日志口径):
     未关联 KB → 系统提示词零 KB 叙述; 已关联 → KB 能力叙述照常。"""
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     store.ProjectsStore.create({"id": "proj-kbN", "name": "无基线",
                                 "rootPath": "/tmp/kbN"})
     store.ProjectsStore.create({"id": "proj-kbL", "name": "有基线",
@@ -107,7 +107,7 @@ def test_degraded_prompt_free_of_kb_narrative(arch_env):
 
 def test_run_arch_tool_blocks_mcp_call_when_degraded(arch_env):
     """执行面: mcp.call(KB MCP 出向代理)在降级项目上硬拦。"""
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     r = req_agent.run_arch_tool("mcp.call", {"tool": "x", "params": {}},
                                 root=None, project=None)
     assert "未关联知识库" in str(r.get("error")), r

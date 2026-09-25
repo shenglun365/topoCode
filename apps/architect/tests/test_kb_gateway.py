@@ -12,7 +12,7 @@ _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
 import topoone_app_architect.kb_gateway as G
-from topoone_app_architect.arch_routes import req_agent as RA
+from topoone_app_architect.agent.tools import req_agent as RA
 
 
 def _gw():

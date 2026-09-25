@@ -15,8 +15,8 @@ import pytest
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.req_agent as ra
-from topoone_app_architect.arch_routes.req_agent import _normalize_tool_calls
+import topoone_app_architect.agent.tools.req_agent as ra
+from topoone_app_architect.agent.tools.req_agent import _normalize_tool_calls
 
 
 @pytest.fixture()

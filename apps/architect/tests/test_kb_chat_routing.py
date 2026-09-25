@@ -20,7 +20,7 @@ sys.path.insert(0, _repo)
 from fastapi.testclient import TestClient
 
 import topoone_app_architect.ctx as C
-import topoone_app_architect.arch_routes.req_agent as req_agent
+import topoone_app_architect.agent.tools.req_agent as req_agent
 import topoone_app_architect.store as store
 from topoone_app_architect.server import build_app
 
@@ -89,7 +89,7 @@ def test_archived_session_rejects_chat(tmp_path, monkeypatch):
 # ── attachTo 定向转达 ────────────────────────────────────────────────
 
 def test_attach_to_active_task_transfers(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, captured = _client(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     task = _mk_task(conv["id"], status="running")
@@ -112,7 +112,7 @@ def test_attach_to_active_task_transfers(tmp_path, monkeypatch):
 
 
 def test_attach_to_transfer_queued_reply(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, _ = _client(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     task = _mk_task(conv["id"], status="waiting_input")
@@ -126,7 +126,7 @@ def test_attach_to_transfer_queued_reply(tmp_path, monkeypatch):
 
 
 def test_attach_to_transfer_failure_reply(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, captured = _client(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     task = _mk_task(conv["id"], status="running")
@@ -155,7 +155,7 @@ def test_attach_to_stale_task_falls_to_architect(tmp_path, monkeypatch):
 # ── agent 显式指派 ───────────────────────────────────────────────────
 
 def test_agent_pick_matching_task_transfers(tmp_path, monkeypatch):
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, captured = _client(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     _mk_task(conv["id"], status="running", executor_type="opencode")
@@ -171,7 +171,7 @@ def test_agent_pick_matching_task_transfers(tmp_path, monkeypatch):
 
 def test_agent_pick_pending_confirm_not_absorbed(tmp_path, monkeypatch):
     """待确认任务不吸收输入——引导用户确认/取消, 本轮走 architect。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     client, captured = _client(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T"})
     _mk_task(conv["id"], status="pending_confirm", executor_type="opencode")

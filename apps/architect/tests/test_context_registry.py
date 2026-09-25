@@ -42,7 +42,7 @@ class TestContextRegistry(unittest.TestCase):
         """
         from unittest.mock import patch
         from topoone_app_architect.agent.memory import units as cr
-        import topoone_app_architect.arch_routes.req_agent as _ra
+        import topoone_app_architect.agent.tools.req_agent as _ra
         conv = self._conv(kind="design", title="")
         store.ConversationsStore.append_message({
             "id": store.next_id("m"), "conversationId": conv["id"],
@@ -87,7 +87,7 @@ class TestContextRegistry(unittest.TestCase):
 
     def test_chat_tools_registered(self):
         from topoone_app_architect.agent.memory import units as context_registry
-        from topoone_app_architect.arch_routes import req_agent
+        from topoone_app_architect.agent.tools import req_agent
         context_registry.register_chat_tools()
         names = [t["name"] for t in req_agent.architect_tools()]
         self.assertIn("ctx.search", names)

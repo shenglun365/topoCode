@@ -24,7 +24,7 @@ logger = logging.getLogger("arch_routes.exec_bridge")
 
 def _eb():
     """exec_bridge 调用期引用(驻留接缝; 模块对象绑定, 规避初始化环)。"""
-    from ...arch_routes import exec_bridge as _m
+    from ...agent.execution import exec_bridge as _m
     return _m
 
 

@@ -202,7 +202,7 @@ def test_exec_bridge_hint_injects_engine(tmp_path, monkeypatch):
     (script + cline_data_dir); 无引擎回退仓库内置且不携带数据目录。"""
     _setup(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import agent_executors as AE
-    from topoone_app_architect.arch_routes import exec_bridge as EB
+    from topoone_app_architect.agent.execution import exec_bridge as EB
     AE.save_executors([{"id": "cline", "type": "cline-sdk", "enabled": True,
                         "default": True,
                         "config": {"node_bin": "node", "sidecar_script": "",

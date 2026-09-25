@@ -81,8 +81,8 @@ def test_scan_covers_hotspot_files():
     """扫描器自身健康检查: 热点文件必须在扫描范围内(cv-157 事故文件)。"""
     hotspots = [
         os.path.join(_PKG_ROOT, "agent", "orchestrator.py"),
-        os.path.join(_PKG_ROOT, "arch_routes", "exec_bridge.py"),
-        os.path.join(_PKG_ROOT, "arch_routes", "req_agent.py"),
+        os.path.join(_PKG_ROOT, "agent", "execution", "exec_bridge.py"),
+        os.path.join(_PKG_ROOT, "agent", "tools", "req_agent.py"),
     ]
     for h in hotspots:
         assert os.path.isfile(h), h

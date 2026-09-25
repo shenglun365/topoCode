@@ -11,7 +11,7 @@ import sys
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
-import topoone_app_architect.arch_routes.req_agent as _ra
+import topoone_app_architect.agent.tools.req_agent as _ra
 from topoone_app_architect.agent.compensation.providers.milestone import (
     milestone_section)
 
@@ -26,7 +26,7 @@ def _mk_conv(store, **kw):
 
 def test_r32_gate_rejects_missing_diagram(arch_env, monkeypatch):
     from topoone_app_architect import store
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T2")
     r = eb.propose_task(conv, "T", "实现功能(无图)", executor_hint={"executorType": "cline-sdk"})
     assert not r["ok"] and "逻辑图" in str(r.get("error"))
@@ -34,7 +34,7 @@ def test_r32_gate_rejects_missing_diagram(arch_env, monkeypatch):
 
 def test_r32_gate_passes_with_diagram(arch_env):
     from topoone_app_architect import store
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T2")
     r = eb.propose_task(conv, "T", "实现功能\n" + _DIAGRAM,
                         executor_hint={"executorType": "cline-sdk"})
@@ -45,7 +45,7 @@ def test_r32_gate_passes_with_diagram(arch_env):
 def test_r32_plan_steps_exempt(arch_env):
     """计划步骤卡豁免图门禁(gate_diagram=False)。"""
     from topoone_app_architect import store
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T2")
     r = eb.propose_task(conv, "T", "步骤指令(无图)",
                         executor_hint={"executorType": "cline-sdk"},
@@ -55,7 +55,7 @@ def test_r32_plan_steps_exempt(arch_env):
 
 def test_r32_switch_off_disables_gate(arch_env):
     from topoone_app_architect import store
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     store.CollabConfigStore.set("agent.comp.overrides",
                                 json.dumps({"r3_2_logic_gate": False}))
     conv = _mk_conv(store, analysisMode="T2")
@@ -67,7 +67,7 @@ def test_r32_switch_off_disables_gate(arch_env):
 def test_r32_t1_not_gated(arch_env):
     """门禁仅 T2(logic_diagram=uml); T1 无图正常建卡。"""
     from topoone_app_architect import store
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T1")
     r = eb.propose_task(conv, "T", "实现功能(无图)",
                         executor_hint={"executorType": "cline-sdk"})
@@ -84,7 +84,7 @@ def test_r33_milestone_section_structured_hint():
 
 
 def test_r33_payload_parses_json_block():
-    from topoone_app_architect.arch_routes.exec_bridge import (
+    from topoone_app_architect.agent.execution.exec_bridge import (
         _milestone_report_payload, _milestone_report_files)
     text = ('报告\n```json\n{"changed_files": ["src/a.py", "src/b.py"], '
             '"verify": "ok", "next": "全部完成"}\n```\n')

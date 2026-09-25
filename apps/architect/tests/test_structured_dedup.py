@@ -14,7 +14,7 @@ sys.path.insert(0, _repo)
 
 from fastapi.testclient import TestClient
 
-import topoone_app_architect.arch_routes.req_agent as req_agent
+import topoone_app_architect.agent.tools.req_agent as req_agent
 from topoone_app_architect import store
 from topoone_app_architect.server import build_app
 

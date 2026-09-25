@@ -365,7 +365,7 @@ def _delete_session_cascade(conv_id: str) -> int:
     - 本体 + 消息(含 job_* 账本消息)随 ConversationsStore.delete
 
     返回级联删除的会话数(含自身)。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     try:
         exec_bridge.stop(conv_id, reason="deleted")  # 无运行作业时为 no-op
     except Exception:  # noqa: BLE001 — runner 不可达不阻断删除
@@ -411,7 +411,7 @@ async def session_messages(conv_id: str):
     # T3 恢复扩面: 打开会话(只读查看)即惰性核对 running/waiting_input 任务——
     # 不再要求用户必须发消息才自愈(cv-161: 服务重启后泵丢失, 任务假 running)
     try:
-        from . import exec_bridge as _eb
+        from ..agent.execution import exec_bridge as _eb
         if any((t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT)
                for t in store.TasksStore.of_conv(conv_id)):
             rec = await asyncio.to_thread(_eb.recover_conv_tasks, conv_id)
@@ -495,7 +495,7 @@ def _running_role_of(conv: dict) -> dict:
 
     P6 单读: 仅 arch_tasks 驱动(旧 meta.jobs 账本写路径已清退, 不再双读)。"""
     try:
-        from . import exec_bridge as _eb
+        from ..agent.execution import exec_bridge as _eb
         t = _eb.active_task_of(conv["id"]) if conv.get("id") else None
         if t and (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT):
             out = {"role": "coding",
@@ -827,7 +827,7 @@ def _clone_into_project(conv: dict, executor_id: str, tail_n: int, conv_id: str,
         })
     # 作业前情简报(源会话有作业史时)
     try:
-        from .exec_bridge import _prior_job_brief
+        from ..agent.execution.exec_bridge import _prior_job_brief
         brief = (_prior_job_brief(conv) or "").strip()
         if brief:
             store.ConversationsStore.append_message({
@@ -927,7 +927,7 @@ async def feed_to_coding(conv_id: str, request: Request):
     body: {messageId} 定向转发历史消息 | {text} 直发文本。
     过滤规则(确定性): 剥离 hint 本地提示/工具轨迹标记, 只留正文。
     """
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
@@ -1060,7 +1060,7 @@ async def stop_exec_session(conv_id: str):
     P3: v2 arch_tasks 为主——逐个 task_stop(runner finish 保留 worktree/分支);
     meta.jobs 存量行(历史会话)仍经 exec_bridge.stop 兜底终态化。
     """
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     if not store.ConversationsStore.get(conv_id):
         return err(404, "会话不存在")
     stopped = []
@@ -1090,7 +1090,7 @@ async def recover_session_route(conv_id: str):
     rec = await asyncio.to_thread(_flow.recover_session, conv_id)
     for tid, jid, rid, ag in (rec or {}).get("repump", []):
         try:
-            from . import exec_bridge as _eb
+            from ..agent.execution import exec_bridge as _eb
             _eb._start_task_pump(conv_id, tid, jid, rid, ag)
         except Exception:  # noqa: BLE001
             pass
@@ -1130,7 +1130,7 @@ async def session_spec_apply(conv_id: str, request: Request):
                    "idempotent": True,
                    "summary": f"需求 {prev_rid} 已写入（重复提交已幂等跳过）——"
                               "点需求卡「一键建卡执行」发起执行"})
-    from .req_agent import apply_spec_payload
+    from ..agent.tools.req_agent import apply_spec_payload
     from .. import ctx as _ctx
 
     def _apply():
@@ -1226,7 +1226,7 @@ async def task_merge(task_id: str, request: Request):
     """确认合并(本地 PR 语义, 环节十五): 门禁通过后执行合并, 任务记 merged 终态。
 
     body: {mode?: "ff"(默认, 仅快进) | "no-ff"(强制合并提交, 冲突中止回显)}。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     try:
         body = await request.json()
     except Exception:
@@ -1250,7 +1250,7 @@ async def task_merge(task_id: str, request: Request):
 @router.get("/tasks/{task_id}/merge-precheck")
 async def task_merge_precheck(task_id: str):
     """合并入口检查(环节十五): 主目录推进/任务分支内容/是否可直并。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     res = await asyncio.to_thread(exec_bridge.merge_precheck, task_id)
     if not res.get("ok"):
         return err(int(res.get("code") or 400), res.get("error") or "precheck-failed")
@@ -1262,7 +1262,7 @@ async def task_cleanup(task_id: str, request: Request):
     """T5 终态任务对账清理: runner finish(释放执行器资源/可选删 worktree)。
 
     body: {keepWorktree?: bool=true}; 幂等——runner 作业不存在也视为清毕。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     keep = True
     try:
         body = await request.json()
@@ -1296,7 +1296,7 @@ async def task_confirm(task_id: str, request: Request):
     """确认任务卡 → 拉起 runner(轻门禁唯一入口)。
 
     body 可选 executorType: 覆盖任务执行器(确认时换引擎, 优先级低于专用端点)。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     etype = ""
     try:
         body = await request.json()
@@ -1327,7 +1327,7 @@ async def task_dismiss(task_id: str):
 @router.post("/tasks/{task_id}/executor")
 async def task_set_executor(task_id: str, request: Request):
     """设定任务执行器(待确认态切换; cline/opencode/codex)。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -1347,7 +1347,7 @@ async def task_verify_config(task_id: str, request: Request):
     """设定任务验收门禁配置(待确认态; V1 发现链 P0 显式来源)。
 
     body: {verifyConfig: {maxAttempts?, autoRepair?, timeoutMul?, build?, test?}}"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -1365,7 +1365,7 @@ async def task_verify_config(task_id: str, request: Request):
 @router.post("/tasks/{task_id}/cancel")
 async def task_cancel(task_id: str, request: Request):
     """取消(待确认)/停止(执行中)任务; 保留 worktree/分支。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     reason = ""
     try:
         body = await request.json()
@@ -1381,7 +1381,7 @@ async def task_cancel(task_id: str, request: Request):
 @router.post("/tasks/{task_id}/input")
 async def task_input(task_id: str, request: Request):
     """向任务转达用户回复(waiting_input 立即; running 排队续跑)。"""
-    from . import exec_bridge
+    from ..agent.execution import exec_bridge
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001

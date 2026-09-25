@@ -46,7 +46,7 @@ async def _confirm_focus_task(conv: dict, send: SendFn, store,
                               executor: str = "", label: str = "") -> None:
     """焦点动作执行器(批戊): 就近确认焦点帧指代的任务卡(替代 run_confirm 全量
     扫描/多卡逐张提示——指代由焦点帧给出, 与卡片按钮同门禁链)。"""
-    from ..arch_routes import exec_bridge as _eb
+    from .execution import exec_bridge as _eb
     conv_id = conv["id"]
     executor = (executor or "").strip()
 
@@ -204,7 +204,7 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     每段为独立函数(_chat_gate/_chat_route/_chat_context/_run_llm_tool_loop/
     _chat_land), 本体只做请求解析与段间接线(行为等价重构, 无新抽象层)。
     """
-    from ..arch_routes import req_agent
+    from .tools import req_agent
     from .. import store
     from ..common import _ts
 
@@ -312,7 +312,7 @@ def _resolve_gu_allowed(plan: Optional[dict]) -> Optional[set]:
         return None
     import fnmatch as _fm
     try:
-        from ..arch_routes import req_agent as _ra
+        from .tools import req_agent as _ra
         names = set(_ra._ARCH_TOOLS)
     except Exception:  # noqa: BLE001
         return None
@@ -357,7 +357,7 @@ async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:
     绑定/归档闸/自愈/需求回填(感知层) + P1 泵恢复(惰性) + 用户消息落单流。
     失败已回错误事件 → None; 成功 → {conv_id, conv, question, last_user_msg_id}。
     """
-    from ..arch_routes import req_agent
+    from .tools import req_agent
     from .. import store
     from ..common import _ts
 
@@ -389,7 +389,7 @@ async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:
     try:
         if any((t.get("status") or "") in ("running", "waiting_input")
                for t in store.TasksStore.of_conv(conv_id)):
-            from ..arch_routes import exec_bridge as _eb
+            from .execution import exec_bridge as _eb
             _rec = await asyncio.to_thread(_eb.recover_conv_tasks, conv_id)
             for _tid, _jid, _rid2, _ag in (_rec or {}).get("repump", []):
                 _eb._start_task_pump(conv_id, _tid, _jid, _rid2, _ag)
@@ -429,7 +429,7 @@ async def _chat_route(data: dict, gate: dict, send: SendFn):
     attach_to = str(data.get("attachTo") or "").strip()
     agent_pick = str(data.get("agent") or "").strip()
     digest = str(data.get("digest") or "").strip()[:2000]   # 语境摘要(用户选史生成)
-    from ..arch_routes import exec_bridge as _eb
+    from .execution import exec_bridge as _eb
     decision = _route_decide(conv_id, question, attach_to, agent_pick, store, _eb,
                              digest=digest)
     final_b = decision.reply or None

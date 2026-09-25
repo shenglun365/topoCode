@@ -53,7 +53,7 @@ def run_execute(conv: Dict[str, Any], executor_id: str = "",
 
     executor_id(@cline 前缀)显式指定执行器——查注册表, 查不到显式失败不降级。"""
     from ... import store
-    from ...arch_routes import exec_bridge
+    from ...agent.execution import exec_bridge
     executor_id = (executor_id or "").strip()
     hint = None
     if executor_id:

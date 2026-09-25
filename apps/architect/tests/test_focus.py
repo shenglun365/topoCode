@@ -146,7 +146,7 @@ def test_resolve_matrix_core_paths():
 def _plan_env(tmp_path, monkeypatch):
     from tests.conftest import isolate_arch
     data = isolate_arch(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.req_agent as req_agent
+    import topoone_app_architect.agent.tools.req_agent as req_agent
     monkeypatch.setattr(req_agent, "llm_chat_start", lambda *a, **k: None)
     monkeypatch.setattr(req_agent, "run_tools_loop",
                         lambda msgs, **kw: {"content": "ok"})
@@ -159,7 +159,7 @@ def test_cv241_continue_confirm_starts_prefilled_step(tmp_path, monkeypatch):
     """「继续执行」+ 计划步骤已预填待确认 → 就近启动该步(旧架构=误导性失败)。"""
     from topoone_app_architect import store
     from topoone_app_architect.agent.planning.task_plan import save_plan
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     import topoone_app_architect.arch_routes.execution as ex
     client = _plan_env(tmp_path, monkeypatch)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})

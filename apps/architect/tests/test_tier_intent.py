@@ -87,7 +87,7 @@ def _clear_cache():
 
 
 def _stub_llm(monkeypatch, payload=None, counter=None):
-    import topoone_app_architect.arch_routes.req_agent as ra
+    import topoone_app_architect.agent.tools.req_agent as ra
 
     def _fake(*a, **kw):
         if counter is not None:

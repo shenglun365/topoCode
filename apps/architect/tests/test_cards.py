@@ -71,11 +71,11 @@ def test_legacy_wrappers_delegate_to_land(arch_env, monkeypatch):
     sse = []
     monkeypatch.setattr(cards, "emit", lambda cid, mid, agent="", kind="": sse.append(kind))
     # log_conv_event 委托
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     req_agent.log_conv_event(conv["id"], "需求卡", meta={"kind": "specReady",
                                                          "requirementId": "RQ-9", "ver": 2})
     # _append 委托
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     eb._append(conv["id"], "assistant", "任务卡",
                msg_meta={"kind": "task_card", "taskId": "task-9"})
     msgs = store.ConversationsStore.messages(conv["id"])
@@ -92,7 +92,7 @@ def test_requirement_card_single_emit_per_extract_path(arch_env, monkeypatch):
     from topoone_app_architect.agent.collab import cards
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
     monkeypatch.setattr(cards, "emit", lambda *a, **k: None)
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     token = C.set_conv(conv["id"])   # propose/amend 的卡片落流按请求级会话上下文路由
     try:
         r = req_agent.run_arch_tool(
@@ -125,7 +125,7 @@ def test_run_tool_with_progress_no_arg_repair(arch_env, monkeypatch):
         calls["n"] += 1
         return {"error": "参数 missing_field 缺失(可修复形态)"}   # 旧逻辑会触发修复重试
 
-    from topoone_app_architect.arch_routes import req_agent as _ra
+    from topoone_app_architect.agent.tools import req_agent as _ra
     monkeypatch.setattr(_ra, "run_arch_tool", fake_run_arch_tool)
     res = asyncio.run(orc._run_tool_with_progress(fake_send, "rid-x", "req.propose",
                                                   {"title": "t"}, "", ""))

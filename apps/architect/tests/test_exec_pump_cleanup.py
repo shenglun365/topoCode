@@ -8,7 +8,7 @@ Run: cd <repo> && python -m pytest apps/architect/tests/test_exec_pump_cleanup.p
 import asyncio
 
 from topoone_app_architect.agent.execution import pumps as _pumps
-from topoone_app_architect.arch_routes import exec_bridge as eb
+from topoone_app_architect.agent.execution import exec_bridge as eb
 
 
 def _seed(conv_id: str, job_id: str) -> None:

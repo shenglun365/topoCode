@@ -57,7 +57,7 @@ def test_builtin_cline_models_projection(tmp_path, monkeypatch):
     from tests.conftest import isolate_arch
     isolate_arch(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import agent_executors as ae
-    from topoone_app_architect.arch_routes import exec_bridge as EB
+    from topoone_app_architect.agent.execution import exec_bridge as EB
     from topoone_app_architect.arch_routes import mcp_collab as MC
     MC.save_llm_models([
         {"source": "manual", "id": "m1", "name": "LMS-a", "model": "ma",

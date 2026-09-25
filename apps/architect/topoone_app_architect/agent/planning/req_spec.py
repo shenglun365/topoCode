@@ -21,7 +21,7 @@ def _store():
 
 
 def _ra():
-    from ...arch_routes import req_agent
+    from ...agent.tools import req_agent
     return req_agent
 
 

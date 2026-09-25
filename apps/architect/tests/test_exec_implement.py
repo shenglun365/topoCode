@@ -11,7 +11,7 @@ _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
 import topoone_app_architect.ctx as C
-from topoone_app_architect.arch_routes import req_agent
+from topoone_app_architect.agent.tools import req_agent
 from topoone_app_architect import store
 
 
@@ -53,7 +53,7 @@ def _mk_fixture(tmp_path, monkeypatch):
 
 
 def _patch_bridge(monkeypatch, tmp_path):
-    from topoone_app_architect.arch_routes import exec_bridge, websocket as ws
+    from topoone_app_architect.agent.execution import exec_bridge, websocket as ws
     started = {}
     monkeypatch.setattr(exec_bridge, "start_implement",
                         lambda conv, instruction, executor_hint=None,
@@ -69,7 +69,7 @@ def _patch_bridge(monkeypatch, tmp_path):
 
 def test_acceptance_brief_detects_overrun(tmp_path, monkeypatch):
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import exec_bridge
+    from topoone_app_architect.agent.execution import exec_bridge
     brief = exec_bridge._acceptance_brief(conv["id"], rid,
                                           ["modules/x/a.py", "src/core/ngx.c"])
     assert "越界" in brief and "src/core/ngx.c" in brief
@@ -82,7 +82,7 @@ def test_acceptance_brief_detects_overrun(tmp_path, monkeypatch):
 # ── 互斥引擎 ─────────────────────────────────────────────────────────
 
 def test_files_intersect_prefix_semantics():
-    from topoone_app_architect.arch_routes.exec_bridge import _files_intersect
+    from topoone_app_architect.agent.execution.exec_bridge import _files_intersect
     a = ["modules/x", "modules/y/sub.py"]
     b = ["modules/x/core.c", "other/z"]
     assert _files_intersect(a, b) == ["modules/x"]          # 目录前缀覆盖
@@ -92,7 +92,7 @@ def test_files_intersect_prefix_semantics():
 
 def test_check_mutex_blocks_and_readonly(tmp_path, monkeypatch):
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import exec_bridge
+    from topoone_app_architect.agent.execution import exec_bridge
     running = {"ok": True, "jobs": [
         {"jobId": "j-other", "root": str(tmp_path), "branch": "b1",
          "boundaries": {"files": ["modules/x/core.c"], "readOnly": False}},
@@ -156,7 +156,8 @@ def test_bind_with_model_and_switch(tmp_path, monkeypatch):
 def test_executor_hint_model_priority(tmp_path, monkeypatch):
     """hint 模型优先级: conv.executorModel > config.models[0] > cfg.model。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import agent_executors as ae, exec_bridge as eb
+    from topoone_app_architect.arch_routes import agent_executors as ae
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     # 仅 cfg.model(无白名单) → cfg.model
     monkeypatch.setattr(ae, "load_executors", lambda: [
         {"id": "ex1", "type": "opencode", "enabled": True,
@@ -204,7 +205,7 @@ def test_chat_system_prompt_no_reject_boundary():
 
     经 prompt_registry 组装后按渲染产物断言(不再检查函数源码)。
     """
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     s = req_agent.chat_system_prompt(None, None)
     assert "不拒做" in s and "职责边界" in s, "system 提示应含职责边界(弱相关受理)"
     assert "designMd" in s, "边界提示应同步强调 designMd 完整性"
@@ -223,7 +224,7 @@ def test_chat_system_prompt_registry_equivalence(monkeypatch):
     import topoone_app_architect.arch_routes.project as _proj_mod
     monkeypatch.setattr(_proj_mod, "kb_degraded",
                         lambda root=None, project_id=None: False)
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     import topoone_app_architect.agent.cognition.prompt as prompt_registry
     prompt_registry.set_overrides({"single_source": False})
     try:
@@ -235,7 +236,7 @@ def test_chat_system_prompt_registry_equivalence(monkeypatch):
         prompt_registry.set_overrides({})
     # 单源模式: 注册表渲染能力文档(含协议+全部工具名)
     doc = prompt_registry.capability_doc_from_tools()
-    from topoone_app_architect.arch_routes.req_agent import _ARCH_TOOLS
+    from topoone_app_architect.agent.tools.req_agent import _ARCH_TOOLS
     assert "[TOOL_CALL]" in doc
     for name in ("req.propose", "req.amend", "kb.asset.search", "map.overview"):
         assert name in doc, f"单源文档缺工具 {name}"
@@ -254,7 +255,8 @@ def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
     """删除会话级联清理关联条目: 停作业/递归删子会话/孤儿 draft 需求删除/
     保留需求的 ownerConv 悬空引用清空。"""
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import sessions as S, exec_bridge
+    from topoone_app_architect.arch_routes import sessions as S
+    from topoone_app_architect.agent.execution import exec_bridge
     monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
     # draft 需求(source=本会话) → 应级联删除(级联策略按 status 判定, 与创建路径无关)
     rid_draft = store.next_id("RQ")
@@ -293,7 +295,8 @@ def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
     """跨库级联: 会话在主库默认桶(无活跃项目写入), 需求在项目库——删除会话时
     项目库需求同样清理(draft 删/ready 清 ownerConv), 消息同桶删净不残留。"""
     from topoone_app_architect import ctx as C
-    from topoone_app_architect.arch_routes import sessions as S, exec_bridge
+    from topoone_app_architect.arch_routes import sessions as S
+    from topoone_app_architect.agent.execution import exec_bridge
     monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
     _mk_fixture(tmp_path, monkeypatch)
 
@@ -326,7 +329,7 @@ def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
 def _mk_v2_fixture(tmp_path, monkeypatch, root_files=("README.md", "# P\n")):
     """v2 任务测试底座: 会话(绑项目根) + mock runner。"""
     _setup(tmp_path, monkeypatch)
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     root = tmp_path / "proj"
     root.mkdir(exist_ok=True)
     for i, (name, content) in enumerate([("README.md", "# P\n")] if isinstance(root_files[0], str) else root_files):
@@ -558,7 +561,7 @@ def test_delete_session_cascades_tasks(tmp_path, monkeypatch):
 
 def test_extract_task_fence_forms():
     """任务载荷提取: ```task 围栏 / ```json 任务形态认领; 图 IR 排除(cv-147)。"""
-    from topoone_app_architect.arch_routes.req_agent import extract_task_fence
+    from topoone_app_architect.agent.tools.req_agent import extract_task_fence
     # 显式 task 围栏
     t = extract_task_fence('前置说明\n```task\n{"title": "T", "instruction": "实现 X"}\n```')
     assert t and t["title"] == "T" and "实现 X" in t["instruction"]

@@ -34,7 +34,7 @@ def _git_run(args: List[str], cwd: str, check: bool = True,
 
 def resolve_boundary_files(rid: str, root: str, project: Optional[str]) -> List[str]:
     """规约边界 → 文件/目录前缀集合(文件级统一口径; 组件经 KB 解析为文件集)。"""
-    from ...arch_routes.req_agent import parse_scope_files
+    from ...agent.tools.req_agent import parse_scope_files
     from ... import store
     snap = (store.RequirementsStore.spec_active(rid or "") or {}).get("snapshot") or {}
     scope = snap.get("allowedScope") or []

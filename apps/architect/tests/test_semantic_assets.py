@@ -915,7 +915,7 @@ def test_aggregate_high_links_parent(tmp_path, monkeypatch):
     for a in saved:
         store.SemanticAssetsStore.update(a["id"], {"meta": {"scopes": ["comm-c1"]}})
     child_id = saved[0]["id"]
-    import topoone_app_architect.arch_routes.req_agent as RA
+    import topoone_app_architect.agent.tools.req_agent as RA
     monkeypatch.setattr(RA, "llm_sync", lambda *a, **k: {"output": {"assets": [
         {"kind": "process", "name": "订单创建与结算", "desc": "端到端业务过程",
          "aggregates": [{"assetId": child_id, "role": "core"}]},
@@ -994,7 +994,7 @@ def test_aggregate_high_includes_intermediate_direct(tmp_path, monkeypatch):
                       "startLine": 1, "endLine": 2}]}], ctx)
     store.SemanticAssetsStore.update(saved[0]["id"], {"meta": {"scopes": ["c1"]}})
     shared_id = saved[0]["id"]
-    import topoone_app_architect.arch_routes.req_agent as RA
+    import topoone_app_architect.agent.tools.req_agent as RA
     monkeypatch.setattr(RA, "llm_sync", lambda *a, **k: {"output": {"assets": [
         {"kind": "process", "name": "共享配置业务", "desc": "d",
          "aggregates": [{"assetId": shared_id}]}]}})
@@ -1030,7 +1030,7 @@ def test_aggregate_high_per_leaf_batching_and_merge(tmp_path, monkeypatch):
         store.SemanticAssetsStore.update(a["id"], {"meta": {"scopes": [scopes]}})
     a_ids = [x["id"] for x in saved]
     b_id = savedB[0]["id"]
-    import topoone_app_architect.arch_routes.req_agent as RA
+    import topoone_app_architect.agent.tools.req_agent as RA
     calls = {"n": 0}
     def fake_llm(*a, **k):
         calls["n"] += 1
@@ -1079,7 +1079,7 @@ def test_aggregate_high_leaf_failure_isolated(tmp_path, monkeypatch):
                       "startLine": 1, "endLine": 2}]}], ctx)
     store.SemanticAssetsStore.update(bad[0]["id"], {"meta": {"scopes": ["comm-bad"]}})
     store.SemanticAssetsStore.update(ok[0]["id"], {"meta": {"scopes": ["comm-ok"]}})
-    import topoone_app_architect.arch_routes.req_agent as RA
+    import topoone_app_architect.agent.tools.req_agent as RA
     ok_id = ok[0]["id"]
     def fake_llm(*a, **k):
         body = a[0]
@@ -1131,7 +1131,7 @@ def test_aggregate_high_best_effort_retries_on_llm_failure(tmp_path, monkeypatch
     ], ctx)
     store.SemanticAssetsStore.update(saved[0]["id"], {"meta": {"scopes": ["comm-c1"]}})
     child_id = saved[0]["id"]
-    import topoone_app_architect.arch_routes.req_agent as RA
+    import topoone_app_architect.agent.tools.req_agent as RA
     calls = {"n": 0}
     def flaky(*a, **k):
         calls["n"] += 1
@@ -1164,7 +1164,7 @@ def test_aggregate_high_best_effort_failure_visible_after_retries(tmp_path, monk
                       "kind": "func", "startLine": 20, "endLine": 30}]},
     ], ctx)
     store.SemanticAssetsStore.update(saved[0]["id"], {"meta": {"scopes": ["comm-c1"]}})
-    import topoone_app_architect.arch_routes.req_agent as RA
+    import topoone_app_architect.agent.tools.req_agent as RA
     monkeypatch.setattr(RA, "llm_sync", lambda *a, **k: None)
     res = S._aggregate_high_best_effort("/tmp/x", None)
     assert res["count"] == 0
@@ -2209,7 +2209,7 @@ def test_generate_line_notes_llm_context_and_persist(tmp_path, monkeypatch):
             {"line": 99, "note": "越界行应被丢弃"},
         ]}, ensure_ascii=False)}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm)
     res = S.generate_line_notes("sa-ln-1", rel, 1, 6, root=str(root))
     assert res["degraded"] is False and res["cached"] is False
     assert res["notes"] == {2: "定义订单金额汇总方法"}
@@ -2241,7 +2241,7 @@ def test_generate_line_notes_cache_hit(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("缓存命中时不应调用 LLM")
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", boom)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", boom)
     res = S.generate_line_notes("sa-ln-2", rel, 1, 6, root=str(root))
     assert res["cached"] is True and res["notes"] == {2: "缓存注解"}
 
@@ -2257,7 +2257,7 @@ def test_generate_line_notes_llm_fail_degraded(tmp_path, monkeypatch):
     def fail(*a, **k):
         raise RuntimeError("llm down")
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fail)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fail)
     res = S.generate_line_notes("sa-ln-3", rel, 1, 6, root=str(root))
     assert res["degraded"] is True and res["notes"] == {}
     # 失败不落库(可重试)
@@ -2298,7 +2298,7 @@ def test_generate_line_notes_ctx_overflow_halving(tmp_path, monkeypatch):
     pid = S.project_id_for(str(root), None)
     _ln_asset(pid, "sa-ln-7", rel)
     seen = []
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync",
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync",
                         _ln_overflow_llm(seen, [
                             [{"line": 2, "note": "批一注解"}],
                             [{"line": 5, "note": "批二注解"}],
@@ -2328,7 +2328,7 @@ def test_generate_line_notes_ctx_overflow_depth_exhausted(tmp_path, monkeypatch)
             kw["on_error"]("prompt is too long: 200000 tokens > 8192 maximum")
         return None
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", always_overflow)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", always_overflow)
     res = S.generate_line_notes("sa-ln-8", rel, 1, 6, root=str(root))
     assert res["degraded"] is True and res["notes"] == {}
     assert "解读失败" in (res.get("error") or "")
@@ -2376,7 +2376,7 @@ def test_generate_line_notes_tool_round_whitelist(tmp_path, monkeypatch):
             return {"content": tc}
         return {"content": _j.dumps({"notes": [{"line": 5, "note": "for 循环汇总"}]}, ensure_ascii=False)}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm)
     res = S.generate_line_notes("sa-ln-5", rel, 1, 6, root=str(root))
     assert res["degraded"] is False
     assert res["notes"] == {5: "for 循环汇总"}
@@ -2401,7 +2401,7 @@ def test_generate_line_notes_resolves_project_root(tmp_path, monkeypatch):
         return {"content": _j.dumps({"notes": [{"line": 5, "note": "for 循环汇总"}]},
                                     ensure_ascii=False)}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm)
     res = S.generate_line_notes("sa-ln-6", rel, 1, 6, root=None, project="proj-ln")
     assert res["degraded"] is False
     assert res["notes"] == {5: "for 循环汇总"}
@@ -2427,7 +2427,7 @@ def test_generate_line_notes_multi_window_cache(tmp_path, monkeypatch):
             notes = [{"line": 2, "note": "窗口W2注解"}]
         return {"content": _j.dumps({"notes": notes}, ensure_ascii=False)}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm)
     r1 = S.generate_line_notes("sa-ln-7", rel, 1, 6, root=str(root))
     r2 = S.generate_line_notes("sa-ln-7", rel, 1, 3, root=str(root))
     assert calls["n"] == 2
@@ -2460,7 +2460,7 @@ def test_generate_line_notes_full_and_segment_share_cache(tmp_path, monkeypatch)
             notes = [{"line": 5, "note": "分段注解"}]
         return {"content": _j.dumps({"notes": notes}, ensure_ascii=False)}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm)
     full = S.generate_line_notes("sa-ln-8", rel, 1, 7, root=str(root))
     seg = S.generate_line_notes("sa-ln-8", rel, 3, 6, root=str(root))
     assert calls["n"] == 2
@@ -2493,7 +2493,7 @@ def test_generate_line_notes_force_regenerates(tmp_path, monkeypatch):
         calls["n"] += 1
         return {"content": _j.dumps({"notes": [{"line": 5, "note": "新注解"}]}, ensure_ascii=False)}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm)
     # 不带 force → 命中旧缓存
     r1 = S.generate_line_notes("sa-ln-9", rel, 1, 6, root=str(root))
     assert r1["cached"] is True and r1["notes"] == {2: "旧缓存注解"} and calls["n"] == 0
@@ -2531,14 +2531,14 @@ def test_generate_node_brief_grounded_and_cached(tmp_path, monkeypatch):
     def fake_llm_bad(msgs, **kw):
         return {"content": "这段代码实现了一个通用的数据处理流程，结构清晰。"}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm_bad)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm_bad)
     r = S.generate_node_brief(a, str(root), None)
     assert r["degraded"] is True and "通用的数据处理" not in (a.get("nodeBrief") or "")
 
     def fake_llm_good(msgs, **kw):
         return {"content": "total 方法遍历 items 汇总 amount 金额并返回。"}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm_good)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm_good)
     r2 = S.generate_node_brief(store.SemanticAssetsStore.get("sa-nb-1"), str(root), None)
     assert r2["degraded"] is False and "total" in r2["brief"]
     # 缓存命中(不再调 LLM)
@@ -2546,7 +2546,7 @@ def test_generate_node_brief_grounded_and_cached(tmp_path, monkeypatch):
     def fake_llm_count(msgs, **kw):
         calls["n"] += 1
         return {"content": "total 汇总。"}
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm_count)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm_count)
     r3 = S.generate_node_brief(store.SemanticAssetsStore.get("sa-nb-1"), str(root), None)
     assert r3["cached"] is True and calls["n"] == 0
 
@@ -2570,7 +2570,7 @@ def test_generate_node_briefs_batch(tmp_path, monkeypatch):
             {"id": "sa-nb-b2", "brief": "这段代码实现了完全抽象的数据处理。"},
         ]}, ensure_ascii=False)}
 
-    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    monkeypatch.setattr("topoone_app_architect.agent.tools.req_agent.llm_sync", fake_llm)
     n = S.generate_node_briefs_batch(pid, rel, [
         store.SemanticAssetsStore.get("sa-nb-b1"),
         store.SemanticAssetsStore.get("sa-nb-b2"),

@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter, Request
 
 from ..agent.execution.runner_client import RunnerClient
-from .exec_bridge import _runner
+from ..agent.execution.exec_bridge import _runner
 from ..common import err, ok
 
 logger = logging.getLogger(__name__)

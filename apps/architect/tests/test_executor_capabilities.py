@@ -41,7 +41,7 @@ def test_workspace_mapping_via_caps():
 
 def test_build_workspace_files_mapping(tmp_path, monkeypatch):
     """组装端行为保真: cline→.cline/*, opencode/未知→AGENTS.md, teams 仅 cline。"""
-    from topoone_app_architect.arch_routes import exec_bridge as eb
+    from topoone_app_architect.agent.execution import exec_bridge as eb
     task = {"rulesMd": "规则正文"}
     cfg = {"teams": {"agents": [{"name": "planner", "content": "规划者"}]}}
 

@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from topoone_app_architect.arch_routes import exec_bridge as eb
+from topoone_app_architect.agent.execution import exec_bridge as eb
 
 
 def _ctx():

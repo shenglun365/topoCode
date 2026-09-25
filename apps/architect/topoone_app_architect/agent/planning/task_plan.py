@@ -112,7 +112,7 @@ def propose_task_tool(title: str, instruction: str,
       —— readonly 豁免互斥+强制就地; high-stakes worktree 强制+合并门禁。
     workTags: 开放工作类型标签(分析/文档/部署…不设枚举; 仅影响提示)。"""
     from ... import ctx as _ctx
-    from ...arch_routes import exec_bridge
+    from ...agent.execution import exec_bridge
     store = _store()
     conv_id = _ctx.get_conv() or ""
     if not conv_id:
@@ -361,7 +361,7 @@ def propose_plan_step(conv: dict, rid: str, idx: int,
     plan = get_plan(rid)
     if idx >= len(plan):
         return {"ok": False, "error": "计划步骤越界"}
-    from ...arch_routes import exec_bridge as eb
+    from ...agent.execution import exec_bridge as eb
     req = _store().RequirementsStore.get(rid) or {}
     base_title = str(req.get("title") or "实施任务").strip()[:60]
     step = plan[idx]
@@ -391,7 +391,7 @@ def maybe_plan_and_propose(conv: dict, rid: str, req_text: str, fallback_title: 
     - 无计划: LLM 拆步 ≥2 → 建计划 + taskPlan 卡 + 下发第一步; 否则 None
     """
     from ...arch_routes.agent_executors import normalize_executor_type
-    from ...arch_routes.exec_bridge import executor_hint_by_id
+    from ...agent.execution.exec_bridge import executor_hint_by_id
     from ..governance.gears import resolve_gear
     _hint = executor_hint
     if not _hint:
@@ -459,7 +459,7 @@ def _refresh_plan_anchor(conv_id: str, rid: str, plan: list) -> None:
     零新增消息行(upsert 同 requirementId 单卡)。"""
     if not plan:
         return
-    from ...arch_routes import exec_bridge as eb
+    from ...agent.execution import exec_bridge as eb
     conv = _store().ConversationsStore.get(conv_id) or {}
 
     def _mark(s: dict) -> str:
@@ -491,7 +491,7 @@ def _refresh_plan_anchor(conv_id: str, rid: str, plan: list) -> None:
 
 
 def _land_plan_card(conv: dict, rid: str, plan: list) -> None:
-    from ...arch_routes import exec_bridge as eb
+    from ...agent.execution import exec_bridge as eb
     lines = "\n".join(
         f"{i + 1}. **{s.get('title')}** — {s.get('instruction', '')[:80]}"
         for i, s in enumerate(plan))
@@ -595,7 +595,7 @@ def on_plan_task_done(conv_id: str, task_id: str) -> None:
             if blocked and not failed:
                 # fail-fast: 存在失败依赖 → 后继阻塞等人工(不自动跳过)
                 conv = _s.ConversationsStore.get(conv_id) or {}
-                from ...arch_routes import exec_bridge as eb
+                from ...agent.execution import exec_bridge as eb
                 overview = _tg.blocked_summary(plan)
                 eb._append(conv_id, "assistant",
                            f"⛔ 计划后继步骤被阻塞（{overview}）——"
@@ -626,7 +626,7 @@ def on_plan_task_failed(task_id: str) -> None:
 
 
 def _finish_plan_receipt(conv_id: str, rid: str, plan: list) -> None:
-    from ...arch_routes import exec_bridge as eb
+    from ...agent.execution import exec_bridge as eb
     from ... import store as _s
     conv = _s.ConversationsStore.get(conv_id) or {}
     lines = "\n".join(

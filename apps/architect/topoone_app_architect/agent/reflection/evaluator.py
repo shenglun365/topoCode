@@ -272,7 +272,7 @@ def _read_disposition(task: Optional[dict]) -> Optional[dict]:
 
 def register_evaluator_tools() -> None:
     """注册 capability.evaluate 会话 agent 工具(WS4)。"""
-    from ...arch_routes.req_agent import register_architect_tool
+    from ...agent.tools.req_agent import register_architect_tool
 
     @register_architect_tool(
         "capability.evaluate",

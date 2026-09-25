@@ -19,9 +19,9 @@ import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
 
-from .. import store
-from ..store import states as ST
-from ..agent.execution.runner_client import RunnerClient
+from ... import store
+from ...store import states as ST
+from ...agent.execution.runner_client import RunnerClient
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ def _aggregate_work_state(conv_id: str) -> None:
     except Exception:  # noqa: BLE001
         pass
     try:   # 流程相位重算(作业账本变化即占用事实变化; fail-soft)
-        from ..agent.governance import flow as _flow
+        from ...agent.governance import flow as _flow
         _flow.recompute(conv_id, trigger="job-settled")
     except Exception:  # noqa: BLE001
         pass
@@ -123,7 +123,7 @@ def _meta_dict_of(conv: dict) -> dict:
 def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = None,
             project_id: str = "", agent: str = "") -> None:
     """委托 collab.cards.land(卡片落流唯一出口, cv-175 规范化)。"""
-    from ..agent.collab import cards as _cards
+    from ...agent.collab import cards as _cards
     meta = dict(msg_meta or {})
     _cards.land(conv_id, content, kind=meta.pop("kind", None), role=role,
                 project_id=project_id, agent=agent, **meta)
@@ -190,7 +190,7 @@ def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
 
     architect 辅助判定材料——完成与否由用户判定(裁决#3)。
     """
-    from .req_agent import parse_scope_files
+    from ..tools.req_agent import parse_scope_files
     active = store.RequirementsStore.spec_active(rid or "") or {}
     snap = active.get("snapshot") or {}
     scope_files = parse_scope_files(snap.get("allowedScope") or [])
@@ -215,21 +215,21 @@ def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
 # ── 互斥引擎(裁决#1/#2/#9) — 实现迁至 agent.governance.boundary(P2), 薄委托 ──
 
 def _resolve_boundary_files(rid: str, root: str, project: Optional[str]) -> List[str]:
-    from ..agent.governance.boundary import resolve_boundary_files
+    from ...agent.governance.boundary import resolve_boundary_files
     return resolve_boundary_files(rid, root, project)
 
 
 def _check_mutex(conv: dict, root: str, boundary_files: List[str]) -> Optional[str]:
-    from ..agent.governance.boundary import check_mutex
+    from ...agent.governance.boundary import check_mutex
     return check_mutex(conv, root, boundary_files, runner=_runner)
 
 
 def _files_intersect(a: List[str], b: List[str]) -> List[str]:
-    from ..agent.governance.boundary import files_intersect
+    from ...agent.governance.boundary import files_intersect
     return files_intersect(a, b)
 # ── 下发域(M4 拆分): propose/confirm/task_input/setters/stop 迁
 # agent/execution/dispatch.py(与 DispatchTurn 协作); re-export 保持 REST/测试接缝。
-from ..agent.execution.dispatch import (_last_failed_branch, _last_failed_task,
+from ...agent.execution.dispatch import (_last_failed_branch, _last_failed_task,
                                         ignore_task,
                                         _publish_task, _task_reaggregate_work_state,
                                         active_task_of, confirm_task, propose_task,
@@ -251,7 +251,7 @@ _TASK_ACTIVE = (ST.TASK_PENDING_CONFIRM, "running", ST.TASK_WAITING_INPUT)
 
 # ── 合并域(M2 拆分): 实现迁 agent/execution/merge.py, 此处 re-export ──
 # (sessions REST 与测试经 eb.* 引用, 接缝保持不变; runner 打桩经调用期解析仍生效)
-from ..agent.execution.merge import (_chain_base, _post_merge_cleanup,
+from ...agent.execution.merge import (_chain_base, _post_merge_cleanup,
                                      _unmerged_branch_notes, merge_branch,
                                      merge_precheck)
 
@@ -291,7 +291,7 @@ def _start_task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
 
 # ── 恢复对账系(M2 拆分): 实现迁 agent/execution/recover.py, re-export 保持接缝 ──
 # (泵核 _task_pump/_handle_task_event 与 eb.* 打桩面深耦合, 随 M4 DispatchTurn 迁出)
-from ..agent.execution.recover import (recover_conv_tasks, recover_sweep,
+from ...agent.execution.recover import (recover_conv_tasks, recover_sweep,
                                        start_recover_sweep)
 
 
@@ -321,7 +321,7 @@ def _status_card_refresh(conv_id: str, task_id: str, agent: str, pid: str,
 def land_plan_progress(conv_id: str, rid: str, text: str, *,
                        total: int = 0, project_id: str = "") -> Optional[dict]:
     """计划进度锚(L3): cards.land_plan_progress 桥(planning 经此落锚, 单源)。"""
-    from ..agent.collab import cards as _cards
+    from ...agent.collab import cards as _cards
     return _cards.land_plan_progress(conv_id, rid, text, total=total,
                                      project_id=project_id)
 
@@ -337,7 +337,7 @@ def task_status_card(conv_id: str, task_id: str, status: str,
         t = store.TasksStore.get(task_id) or {}
         prog = t.get("progress") or {}
         title = (t.get("title") or "任务")[:40]
-        from ..agent.collab import cards as _cards
+        from ...agent.collab import cards as _cards
         _AGENT = {"icon": agent or "architect"}
         marks = {"running": "🔄 **执行中**", "waiting": "⏸ **等待你的输入**",
                  "done": "✅ **已完成**", "failed": "❌ **失败**",
@@ -381,7 +381,7 @@ def _publish_progress(conv_id: str, task_id: str, prog: dict,
             return
         _PROGRESS_SSE_LAST[task_id] = now
     try:
-        from ..agent.collab.sse import emit
+        from ...agent.collab.sse import emit
         emit("progress", conv_id, taskId=task_id, **{"at": _ts(), **prog})
     except Exception:  # noqa: BLE001
         pass
@@ -396,7 +396,7 @@ def _build_workspace_files(executor_type: str, executor_cfg: dict, task: dict) -
     - cfg.rulesMd         执行器级规约文本
     - cfg.teams.agents    cline teams 成员配置([{name, content}])
     """
-    from ..agent.execution.capabilities import caps
+    from ...agent.execution.capabilities import caps
     files: list = []
     cap = caps(executor_type)
     rules_dir = str(cap.get("workspace_rules") or "")
@@ -441,7 +441,7 @@ def _milestone_report_payload(text: str) -> List[str]:
     if not text:
         return []
     try:
-        from ..agent.compensation.providers import parse_json_block
+        from ...agent.compensation.providers import parse_json_block
         payload, _track = parse_json_block(text)
         if payload and isinstance(payload.get("changed_files"), list):
             files = [str(x).strip() for x in payload["changed_files"] if str(x).strip()]
@@ -513,8 +513,8 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
         "importance": 1})
     # 需求跟踪台账: 回执挂账(终态结果), 失败不阻断沉淀
     try:
-        from ..store.tracking import emit as _tr_emit
-        from ..store.states import TRACK_DONE, TRACK_FAILED
+        from ...store.tracking import emit as _tr_emit
+        from ...store.states import TRACK_DONE, TRACK_FAILED
         ok_receipt = status == "done"
         _tr_emit(category="回执",
                  title=f"任务回执[{status}]：{title}",
@@ -646,7 +646,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                          note=f"变更 {len(changed)} 文件")
         # 任务计划(环节十四): 步骤完成 → 回填 + 预填下一步 / 汇总
         try:
-            from ..agent.planning.task_plan import on_plan_task_done
+            from ...agent.planning.task_plan import on_plan_task_done
             on_plan_task_done(conv_id, task_id)
         except Exception:  # noqa: BLE001
             pass
@@ -669,7 +669,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                          note=text[:160])
         # 任务计划(环节十四): 步骤标 failed(下次 /执行 自动重发)
         try:
-            from ..agent.planning.task_plan import on_plan_task_failed
+            from ...agent.planning.task_plan import on_plan_task_failed
             on_plan_task_failed(task_id)
         except Exception:  # noqa: BLE001
             pass
@@ -727,8 +727,8 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 project_id=pid, agent=agent)
         # 需求跟踪台账: 决策请求挂账(waiting/等用户), 失败不阻断执行流
         try:
-            from ..store.tracking import emit as _tr_emit
-            from ..store.states import TRACK_WAITING
+            from ...store.tracking import emit as _tr_emit
+            from ...store.states import TRACK_WAITING
             _tr_emit(category="决策",
                      title=f"越界审批：{tool_name}（任务「{title}」）",
                      content=f"任务 {task_id} 的执行器请求使用工具 `{tool_name}`，等待用户批准。",
@@ -791,7 +791,7 @@ def _land_stream_items(ev: dict, conv_id: str, task_id: str, job_id: str,
     投影语义单源 agent/execution/items.py; 落消息类卡片不入流表(读侧投影)。
     """
     try:
-        from ..agent.execution.items import project_event, STREAM_PERSIST_TYPES
+        from ...agent.execution.items import project_event, STREAM_PERSIST_TYPES
         items = [i for i in project_event(ev)
                  if i.get("type") in STREAM_PERSIST_TYPES]
         if not items:
@@ -807,7 +807,7 @@ def _land_stream_items(ev: dict, conv_id: str, task_id: str, job_id: str,
                     "seq": it_.get("seq")})
             except Exception:  # noqa: BLE001 — 重复 id(泵重放)幂等跳过
                 pass
-        from ..agent.collab.sse import emit
+        from ...agent.collab.sse import emit
         emit("items", conv_id, taskId=task_id, items=items)
     except Exception as e:  # noqa: BLE001 — 投影故障不阻断既有事件处理
         logger.warning("[exec-bridge] stream item 投影失败 task=%s: %s",
@@ -817,7 +817,7 @@ def _land_stream_items(ev: dict, conv_id: str, task_id: str, job_id: str,
 async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
                      agent: str) -> None:
     """任务泵: 骨架委托 agent.execution.pumps(唯一实现), 事件走 task 路径。"""
-    from ..agent.execution import pumps as _pumps
+    from ...agent.execution import pumps as _pumps
     logger.info("[exec-bridge] task-pump start conv=%s task=%s job=%s",
                 conv_id, task_id, job_id)
 
@@ -871,8 +871,8 @@ async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
 def _task_gear(task: dict, conv: Optional[dict] = None):
     """任务挡位解析(环节十二a, 三维矩阵): 会话 analysisMode + 执行器配置(C 轴)
     + architect 对话模型(A 轴) → GearPolicy。"""
-    from ..agent.governance.gears import resolve_gear
-    from .req_agent import get_model_preference
+    from ...agent.governance.gears import resolve_gear
+    from ..tools.req_agent import get_model_preference
     _conv = conv or store.ConversationsStore.get(task.get("conversationId") or "") or {}
     try:
         hint = executor_hint_by_id(str(task.get("executorId") or ""), _conv) or {}
@@ -888,7 +888,7 @@ def _task_instruction(task: dict, prior_brief: str = "", policy=None,
                       probe_score: Optional[float] = None) -> str:
     """任务指令组装(P4 委托 planning.task_plan; 挡位策略按挡分叉, 环节十二a;
     runtime=运行时身份事实 A3; probe_score=R2.5 同挡密度微调)。"""
-    from ..agent.planning.task_plan import assemble_task_instruction
+    from ...agent.planning.task_plan import assemble_task_instruction
     return assemble_task_instruction(task, prior_brief, policy=policy, runtime=runtime,
                                      probe_score=probe_score)
 
@@ -953,7 +953,7 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
         return None
     conv_model = ((conv or {}).get("executorModel") or "").strip()
     try:
-        from .agent_executors import (load_executors, _default_sidecar_path,
+        from ...arch_routes.agent_executors import (load_executors, _default_sidecar_path,
                                       _builtin_cline_models)
         for e in load_executors():
             if (e.get("id") or "") == eid:
@@ -981,7 +981,7 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                 cline_data_dir = ""
                 if not sidecar_script and e.get("type") == "cline-sdk":
                     try:
-                        from .cline_engines import resolve_engine
+                        from ...arch_routes.cline_engines import resolve_engine
                         eng = resolve_engine()
                         if eng:
                             sidecar_script = eng["script"]

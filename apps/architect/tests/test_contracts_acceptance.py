@@ -338,7 +338,7 @@ class TestAcceptance:
         d = AcceptanceStore.report_detail(reports[0]["id"], pid)
         assert d["report"]["id"] and len(d["facts"]) == 2 and d["opinions"] == []
         # 手动激活 L3（mock llm_sync）
-        import topoone_app_architect.arch_routes.req_agent as RA
+        import topoone_app_architect.agent.tools.req_agent as RA
         monkeypatch.setattr(RA, "llm_sync",
                             lambda messages, **kw: {"content": "语义基本一致。\n置信度: 0.82",
                                                    "modelId": "mock-model"})
@@ -392,7 +392,7 @@ class TestExperienceWriteback:
         _ctx_setup(tmp_path, monkeypatch)
         pid = _pid(tmp_path)
         conf = self._rejected_item_with_fail_facts(tmp_path, monkeypatch, pid)
-        from topoone_app_architect.arch_routes import req_agent as RA
+        from topoone_app_architect.agent.tools import req_agent as RA
         monkeypatch.setattr(RA, "llm_sync",
                             lambda messages, **kw: {"output": {
                                 "ruleText": "验收 create_order 须核对库存扣减顺序",
@@ -410,7 +410,7 @@ class TestExperienceWriteback:
         _ctx_setup(tmp_path, monkeypatch)
         pid = _pid(tmp_path)
         conf = self._rejected_item_with_fail_facts(tmp_path, monkeypatch, pid)
-        from topoone_app_architect.arch_routes import req_agent as RA
+        from topoone_app_architect.agent.tools import req_agent as RA
         monkeypatch.setattr(RA, "llm_sync", lambda messages, **kw: None)
         from topoone_app_architect.arch_routes.naming import induce_from_rejection
         row = induce_from_rejection(pid, conf["id"])
@@ -430,7 +430,7 @@ class TestExperienceWriteback:
         _ctx_setup(tmp_path, monkeypatch)
         pid = _pid(tmp_path)
         conf = self._rejected_item_with_fail_facts(tmp_path, monkeypatch, pid)
-        from topoone_app_architect.arch_routes import req_agent as RA
+        from topoone_app_architect.agent.tools import req_agent as RA
         monkeypatch.setattr(RA, "llm_sync", lambda messages, **kw: None)
         from topoone_app_architect.arch_routes.naming import (
             api_conventions_induce_from_rejection)

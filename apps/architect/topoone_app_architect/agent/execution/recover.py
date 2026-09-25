@@ -105,7 +105,7 @@ def recover_conv_tasks(conv_id: str) -> dict:
     返回 {"finished": 收尾数, "repump": [(task_id, job_id, rid, agent), ...]}。
     """
     # 调用期解析: eb._client/_handle_task_event/_task_ctx 为测试打桩接缝
-    from ...arch_routes import exec_bridge as _eb
+    from ...agent.execution import exec_bridge as _eb
     from ...store import states as ST
     out = {"finished": 0, "repump": []}
     now_ms = int(__import__("time").time() * 1000)

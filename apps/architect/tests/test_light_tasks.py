@@ -99,7 +99,7 @@ def test_wiring_probe_uses_light_model(tmp_path, monkeypatch):
     from topoone_app_architect.arch_routes import agent_roles
     agent_roles.set_light_tasks({"summary": "", "probe": "m-mid"})
     import topoone_app_architect.agent.planning.scope_probe as sp
-    from topoone_app_architect.arch_routes import req_agent
+    from topoone_app_architect.agent.tools import req_agent
     captured = {}
 
     def fake_llm_sync(msgs, **kw):
