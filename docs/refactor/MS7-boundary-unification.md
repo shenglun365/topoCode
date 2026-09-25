@@ -32,7 +32,7 @@ architect 侧已删，仅 workbench 一套（1,436 行）。剩余工作=ChatSes
 | 批 | 内容 | 判据（全绿门禁） | 预估 |
 |---|---|---|---|
 | **W0 核证+安全网** | ① d3 孤儿复证（动态 import/字符串引用兜底 grep）② ChatSession 依赖盘点 ③ web-core portal 路由表核证 ④ ChatSession 迁移前 vitest 冒烟（chat 域建测试基建，M12 豁免收窄为"仅无测试页面"） | 盘点清单入档；chat 域 vitest run 绿 | 1d |
-| **W1 d3 孤儿清零** | 删 useD3Graph/render-manager/render-worker+ bundled/types.ts + package.json d3 依赖 + lock 重算；**同变更核验** bundle-worker 不存在（实测未见） | workbench type-check+lint+test 绿；`grep -r d3 src/` 空；产物 -21K 行 | 0.5d |
+| **W1 d3 孤儿清零** ✅ | 删 5 文件(-21,552 行含 bundled)+d3/@types/d3 依赖移除+孤儿 i18n 键清理；lock 剩余 d3=mermaid/cytoscape 生态传递引用(非本仓声明) | typecheck 0+19/19；package.json/root grep 零命中 ✓ | 0.5d |
 | **W2 ChatSession 域内拆分** | 拆 useChatStream / useMessageActions / useChatCommands composables（仍在 apps/chat，行为零变） | chat 域 vitest（W0 建）绿；手测 SSE 流式对照清单 | 1.5d |
 | **W3 chat 前端上提** | ChatSession+composables 迁 workbench/src/components/chat/；与 AIAssistantPanel 对接（复用 diagramStateStore 契约）；apps/chat/src 清理（DiagramViewer 留 web-core【MS6-W6 方案A 定案】，ChatSession 迁入 workbench 后改 @topo/web-core 引用不变） | workbench 全套件绿；两应用构建绿；chat 前端残余核空 | 1.5d |
 | **W4 chat 后端域托管** | apps/chat/topoone_app_chat → apps/workbench/chat_service/（目录迁移+import 路径+pyproject+启动脚本+CI 路径）；**保留独立进程 :3483**；docs/portal 跳转改址（按 W0 路由表） | chat 32+docs 18 后端套件绿；进程启停冒烟；RPC 基线 diff 空 | 2d |
