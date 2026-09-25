@@ -4,7 +4,7 @@
  *
  * Run: cd apps/architect && npx vitest run tests/spec-view.test.ts
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -91,7 +91,10 @@ describe('正文规约载荷识别(字段签名)', () => {
 })
 
 describe('渲染面守门(载荷形态决定渲染形态)', () => {
+  const dir = resolve(root, 'src/components/requirements/chat-view')
   const chat = readFileSync(`${root}/src/components/requirements/AnalysisChat.vue`, 'utf-8')
+    + readdirSync(dir).filter((f) => f.endsWith('.ts'))
+      .map((fl) => readFileSync(resolve(dir, fl), 'utf-8')).join('\n')
 
   it('specCard 与正文草稿视图共用单源(不内联重复组装)', () => {
     expect(chat.includes("from '@/services/spec-view'")).toBe(true)

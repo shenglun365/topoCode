@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { kindChipClass } from '@/services/semantic-kind-style'
 import { useI18n } from 'vue-i18n'
 import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon, CpuChipIcon } from '@heroicons/vue/24/outline'
@@ -19,6 +19,17 @@ import { apiPost, apiGet, apiPut } from '@/services/api-client'
 import type { CtxUsage, SemanticAsset } from '@/types'
 import type { ToolTrailItem } from '@/composables/useChatProgress'
 import { copyText } from '@/utils/clipboard'
+
+import { useChatCards } from './chat-view/useChatCards'
+import { useChatInput } from './chat-view/useChatInput'
+import { useChatRoute } from './chat-view/useChatRoute'
+import { useChatDigest } from './chat-view/useChatDigest'
+import { useChatSend } from './chat-view/useChatSend'
+import { useChatActions } from './chat-view/useChatActions'
+import { useChatProposal } from './chat-view/useChatProposal'
+import { useChatContract } from './chat-view/useChatContract'
+import type { ChatDeps } from './chat-view/chatTypes'
+import { WS_KEY } from './chat-view/key'
 
 const props = defineProps<{
   turns: KbAnalysisTurn[]
@@ -104,960 +115,179 @@ const emit = defineEmits<{
 }>()
 
 // ── 头部标题行内编辑 ──
-const editingTitle = ref(false)
-const titleDraft = ref('')
-
-/** 资产引用点击 → 联动资产地图(图谱节点/资产卡)。宿主页面监听 arch:open-asset。 */
-function openAssetRef(id: string) {
-  window.dispatchEvent(new CustomEvent('arch:open-asset', { detail: id }))
-}
-
-// ── S3 投喂门: 消息级「转达 coding」(dock 执行 POST /feed, 结果本地消息) ──
-const feedBusyIdx = ref(-1)
-const mergeBusyIdx = ref(-1)
-const mergedDone = ref<Record<number, boolean>>({})
-
-/** 合并入口检查(环节十五): git 事实 → 轻提示(可否直并/需先 rebase)。 */
-async function runMergePrecheck(i: number, taskId: string) {
-  mergeBusyIdx.value = i
-  try {
-    const r = await apiGet<{ fastForward: boolean | null; mainNewCommits: string[]; branchCommits: string[]; advice: string }>(
-      `/tasks/${taskId}/merge-precheck`)
-    const ff = r.fastForward === true ? '✓ 可直接合并' : r.fastForward === false ? '⚠ 主目录有推进, 需先 rebase' : '— 无基点, 请手工检视'
-    showToast(`合并检查: ${ff} — ${r.advice}`)
-  } catch (e: any) {
-    showToast(`✗ 合并检查失败: ${e?.message || e}`)
-  } finally {
-    mergeBusyIdx.value = -1
-  }
-}
-
-/** 确认合并(本地 PR 语义): 门禁通过后执行; 冲突/需 rebase → 提示原文。 */
-async function confirmMerge(i: number, taskId: string) {
-  mergeBusyIdx.value = i
-  try {
-    const r = await apiPost<{ mergedHead: string; advice: string }>(
-      `/tasks/${taskId}/merge`, { mode: 'ff' })
-    mergedDone.value[i] = true
-    showToast(`✓ ${r.advice}`)
-  } catch (e: any) {
-    showToast(`✗ 合并未执行: ${e?.message || e}`)
-  } finally {
-    mergeBusyIdx.value = -1
-  }
-}
-
-// ── 规约 JSON 识别(字段签名): 单源在 services/spec-view(识别/归一/分节
-// 组装一体)——「写入需求」按钮与正文规约草稿视图(cv-248)共用。 ──
-function specPayloadOf(index: number): Record<string, unknown> | null {
-  return parseSpecPayload(props.turns[index]?.content || '')
-}
-// 正文规约草稿视图(cv-248): 规约 schema 载荷按 MD 分节渲染(载荷形态决定
-// 渲染形态), 不再代码块原样显示。computed 集合(识别含正则, 避免逐帧重跑)。
-const specDraftIdx = computed(() => {
-  const set = new Set<number>()
-  ;(props.turns || []).forEach((m: any, i: number) => {
-    if (m.role === 'assistant' && !m.item && specPayloadOf(i)) set.add(i)
-  })
-  return set
-})
-function specDraftView(i: number) {
-  return assembleSpecView(specPayloadOf(i) || {}, '')
-}
-const specBusyIdx = ref(-1)
-// cv-248: 已写入态(本地)——写入成功后按钮禁用防重复(后端另有指纹幂等兜底)
-const specAppliedIdx = reactive(new Set<number>())
-function onSpecApply(index: number) {
-  if (specBusyIdx.value >= 0 || specAppliedIdx.has(index)) return
-  const payload = specPayloadOf(index)
-  if (!payload) return
-  specBusyIdx.value = index
-  try {
-    emit('spec-apply', { index, payload })
-    specAppliedIdx.add(index)
-  } finally {
-    setTimeout(() => { specBusyIdx.value = -1 }, 800)
-  }
-}
-
-/** 阶段标注配色(设计/实现/评估/验收——消息级工具推导, 非会话分类)。 */
-function stageClass(stage: string) {
-  if (stage === 'design') return 'bg-ctp-peach/15 text-ctp-peach'
-  if (stage === 'implement') return 'bg-ctp-sky/15 text-ctp-sky'
-  if (stage === 'evaluate') return 'bg-ctp-yellow/15 text-ctp-yellow'
-  return 'bg-ctp-green/15 text-ctp-green'
-}
-function startTitleEdit() {
-  titleDraft.value = props.title || ''
-  editingTitle.value = true
-}
-function onTitleInput(e: Event) { titleDraft.value = (e.target as HTMLInputElement).value }
-function commitTitleEdit() {
-  if (!editingTitle.value) return
-  editingTitle.value = false
-  const t = titleDraft.value.trim()
-  if (t && t !== props.title) emit('rename', t)
-}
-
-const { t } = useI18n()
-const input = ref('')
-const inputRef = ref<HTMLTextAreaElement | null>(null)
-
-// ---- 工具轨迹浮层（防信息过载：默认收起，点击展开；回合结束/busy 清空自动关闭）----
-const trailOpen = ref(false)
-watch(() => props.busy, (b) => { if (!b) trailOpen.value = false })
-
-// ---- 外部引用预填：nonce 变化 → 追加进输入框并聚焦(用户可补充问题后再发送) ----
-watch(() => props.insertDraft?.nonce ?? 0, (n) => {
-  if (!n) return
-  const text = props.insertDraft?.text ?? ''
-  if (!text) return
-  input.value = input.value ? `${input.value} ${text}` : text
-  void nextTick(() => {
-    inputRef.value?.focus()
-    manualHeight = false
-    autoResize()
-    const el = inputRef.value
-    if (el) el.selectionStart = el.selectionEnd = el.value.length
-  })
-})
-const scrollRef = ref<HTMLElement | null>(null)
-const answers = reactive<Record<string, string>>({})
-// cv-247 问询卡已答态(本地): 卡内回复或输入区自由回复后均置已答(防重复)
-const choicesAnswered = reactive(new Set<string>())
-// 已答态零写点派生(cv-254): 协议保证问询卡与答复交替(cv-247——卡内回复
-// 与输入区自由回复同答语义)——卡之后的首条 user 消息即其答复, 刷新后
-// 由会话流时间序派生, 不回退不丢真
-const answeredByFlow = computed(() => {
-  const set = new Set<string>()
-  let pending = ''
-  for (const m of (props.turns || []) as any[]) {
-    if (m.item?.type === 'choices') pending = String(m.id || '')
-    else if (m.role === 'user' && pending) { set.add(pending); pending = '' }
-  }
-  return set
-})
-// 问询卡填写草稿(cv-254): 用户输入=工作产物, 随会话落库——刷新/断线/
-// 前端重启后原样恢复(specDraft 同类 conv.meta 草稿, 非事实写点)
-const choiceDrafts = ref<Record<string, any>>({})
-const draftTimers = new Map<string, ReturnType<typeof setTimeout>>()
-async function loadChoiceDrafts() {
-  if (!props.convId) return
-  try {
-    const r: any = await apiGet(`/sessions/${props.convId}/choices-draft`)
-    choiceDrafts.value = (r as any)?.drafts || (r as any)?.data?.drafts || {}
-  } catch { /* fail-soft: 草稿不可得=空白填写 */ }
-}
-function scheduleDraftSave(cardId: string, draft: any) {
-  if (!props.convId || answeredByFlow.value.has(cardId)
-      || choicesAnswered.has(cardId)) return
-  clearTimeout(draftTimers.get(cardId))
-  draftTimers.set(cardId, setTimeout(() => {
-    void apiPut(`/sessions/${props.convId}/choices-draft`,
-                { cardId, draft }).catch(() => {})
-  }, 800))
-}
-function clearChoiceDraft(cardId: string) {
-  clearTimeout(draftTimers.get(cardId))
-  draftTimers.delete(cardId)
-  if (!props.convId) return
-  void apiPut(`/sessions/${props.convId}/choices-draft`,
-              { cardId, draft: null }).catch(() => {})
-}
-watch(() => props.turns.length, () => {
-  if ((props.turns || []).some((m: any) => m.item?.type === 'choices')
-      && !Object.keys(choiceDrafts.value).length) void loadChoiceDrafts()
-}, { immediate: true })
-const choicesCards = computed(() =>
-  (props.turns || []).filter((m: any) => m.item?.type === 'choices'))
-
-watch(
-  () => props.turns.length,
-  async () => {
-    await nextTick()
-    scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior: 'smooth' })
-  },
-)
-watch(
-  () => props.turns,
-  (turns) => {
-    const q = turns[turns.length - 1]?.questions
-    if (q) q.forEach((item) => { if (!(item.key in answers)) answers[item.key] = item.answer ?? '' })
-  },
-  { deep: true },
-)
-
-// ── v2 语境路由(发起者感知): 回复永远面向「当前持球方」——单输入框, 零模式切换 ──
-// 规则: ① 存在 waiting_input 任务 → 转达该任务(attachTo)
-//       ② 存在活跃任务 且 最后 assistant 消息为 coding subagent 产出 → 转达(排队)
-//       ③ 其余 → architect 外循环
-// 覆盖: 内联 @执行器 前缀(一次性指派, 发送时剥离) > 菜单单次翻转(发送后复位)
-type RouteTarget =
-  | { kind: 'architect' }
-  | { kind: 'task'; taskId: string }
-  | { kind: 'assign'; agent: string }
-const routeMenuOpen = ref(false)
-const routeOverride = ref<RouteTarget | null>(null)
-/** 活跃任务: waiting_input 优先, 否则最新 pending_confirm/running。 */
-const activeTask = computed(() => {
-  const ts = props.tasks || []
-  return ts.find((t) => t.status === 'waiting_input')
-    || ts.find((t) => t.status === 'pending_confirm' || t.status === 'running')
-    || null
-})
-/** 最后一条 assistant 消息的 agent 标注(architect 消息无 agent; subagent 消息 agent=cline/opencode/codex)。 */
-const lastAssistantAgent = computed(() => {
-  for (let i = props.turns.length - 1; i >= 0; i--) {
-    const m = props.turns[i]
-    if (m.role === 'assistant') return (m as any).agent || ''
-  }
-  return ''
-})
-/** 内联 @执行器 前缀(一次性指派; 命中返回执行器类型, 发送时剥离前缀)。 */
-const INLINE_AGENTS = ['cline', 'opencode', 'codex']
-const inlineAgent = computed(() => {
-  const v = (input.value || '').trimStart()
-  for (const a of INLINE_AGENTS) {
-    if (v === `@${a}` || v.startsWith(`@${a} `)) return a
-  }
-  return null
-})
-/** 有效路由: 单次翻转 > 内联 @ > 发起者感知。 */
-const effectiveRoute = computed<RouteTarget>(() => {
-  if (routeOverride.value) return routeOverride.value
-  if (inlineAgent.value) return { kind: 'assign', agent: inlineAgent.value }
-  const waiting = (props.tasks || []).find((t) => t.status === 'waiting_input')
-  if (waiting) return { kind: 'task', taskId: waiting.id }
-  const act = activeTask.value
-  if (act && lastAssistantAgent.value && lastAssistantAgent.value !== 'architect') {
-    return { kind: 'task', taskId: act.id }
-  }
-  return { kind: 'architect' }
-})
-function taskTitleOf(id?: string): string {
-  const t = (props.tasks || []).find((x) => x.id === id)
-  return (t?.title as string) || ''
-}
-/** 工具条路由按钮配色: 中性(architect) / sky(转达任务) / peach(一次性指派)——一眼可辨路由态。 */
-const routeBtnClass = computed(() => {
-  if (effectiveRoute.value.kind === 'assign') return 'bg-ctp-peach/15 text-ctp-peach hover:bg-ctp-peach/25'
-  if (effectiveRoute.value.kind === 'task') return 'bg-ctp-sky/15 text-ctp-sky hover:bg-ctp-sky/25'
-  return 'btn-ghost'
-})
-function routeDetail(r: RouteTarget): string {
-  if (r.kind === 'assign') return `一次性指派 ${r.agent} coding subagent(发送后复位)`
-  if (r.kind === 'task') {
-    const t = (props.tasks || []).find((x) => x.id === r.taskId)
-    return `转达任务「${taskTitleOf(r.taskId) || r.taskId}」${t?.executorType ? `(${t.executorType})` : ''}`
-  }
-  return 'architect 外循环(分析/设计/编排)'
-}
-/** 菜单单次翻转: 仅作用于下一次发送(发送后自动复位)。 */
-function pickRoute(r: RouteTarget) {
-  routeMenuOpen.value = false
-  routeOverride.value = r
-}
-/** 快捷挡直切开关(闪电 icon): architect 模式=关(暗, 需求分析→规约→任务完整链, 按执行器能力档位自动适配) / coding 执行器模式=开(高亮, 直出任务卡·关 KB), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
-const quickOn = computed(() => (props.analysisMode || 'strict') === 'quick')
-/** 空白对话(会话未创建)锁定: 挡位是会话级字段, 无 conv_id 可写。 */
-const quickLocked = computed(() => props.hasSession === false)
-const quickTitle = computed(() => {
-  if (quickLocked.value) return '模式切换需在已有会话中进行 — 发送首条消息创建会话后可用'
-  return quickOn.value
-    ? 'coding 执行器模式 — 直出任务卡·关 KB（点击切回 architect 模式）'
-    : 'architect 模式 — 需求分析→规约→任务，按执行器能力档位自动适配（点击切至 coding 执行器模式）'
-})
-function toggleQuickMode() {
-  if (quickLocked.value) return
-  emit('set-analysis-mode', quickOn.value ? 'strict' : 'quick')
-}
-
-/** 需求澄清挡位(cv-190): 自动=规约有缺口才集中提问 / 强制=先澄清后落卡(明确指令自动跳过)。 */
-const clarifyForced = computed(() => (props.clarifyMode || 'auto') === 'forced')
-const clarifyTitle = computed(() => {
-  if (quickLocked.value) return '澄清挡位需在已有会话中切换 — 发送首条消息创建会话后可用'
-  return clarifyForced.value
-    ? '强制澄清 — 每个需求回合先集中提问补齐要素再落卡（明确指令自动跳过；点击切回自动）'
-    : '自动澄清 — 规约有要素缺口时才集中提问（点击切为强制澄清）'
-})
-function toggleClarifyMode() {
-  if (quickLocked.value) return
-  emit('set-clarify-mode', clarifyForced.value ? 'auto' : 'forced')
-}
-
-/** worktree 隔离挡位(cv-202): 缺省就地; 显式开启后任务在 worktree 分支作业。 */
-const isolatedOn = computed(() => !!props.isolated)
-const isolatedTitle = computed(() => {
-  if (quickLocked.value) return '隔离模式需在已有会话中切换 — 发送首条消息创建会话后可用'
-  return isolatedOn.value
-    ? '隔离模式 开 — 任务在独立 worktree 分支作业, 完成后合并回项目目录（点击关闭）'
-    : '隔离模式 关 — 直接写入项目目录（点击开启隔离）'
-})
-function toggleIsolated() {
-  if (quickLocked.value) return
-  emit('set-isolated', !isolatedOn.value)
-}
-
-// ── 执行器选择(路由钮内, 靠右): 完整名称显示 + 清单选择; 绑定/克隆语义在宿主 ──
-const defaultExecutor = computed(() =>
-  (props.executors || []).find((e) => e.default) || null)
-/** 按钮完整名称: 已绑定=「id · type」; 未绑定=「默认 {id}」; 无注册表=「执行器」。 */
-const executorLabel = computed(() => {
-  const b = props.boundExecutorId
-  if (b) {
-    const t = (props.executors || []).find((e) => e.id === b)?.type
-    return t && t !== b ? `${b} · ${t}` : b
-  }
-  return defaultExecutor.value ? `默认 ${defaultExecutor.value.id}` : '执行器'
-})
-function executorFull(e: { id: string; type?: string }): string {
-  return e.type && e.type !== e.id ? `${e.id} · ${e.type}` : e.id
-}
-function pickExecutor(id: string) {
-  routeMenuOpen.value = false
-  if (id === props.boundExecutorId) return
-  emit('bind-executor', id)
-}
-
 // ── 语境摘要(转达下发): 摘要模式选史 → REST 生成 → 可编辑草稿卡 → 发送/自动通过 ──
-const DIGEST_AUTO_KEY = 'arch.digestAutoSend'
-const digestMode = ref(false)
-const selIds = ref<Set<string>>(new Set())
-const digestBusy = ref(false)
-const digestDraft = ref<string | null>(null)   // 非空=草稿卡(可编辑)
 
-/** 任务状态卡样式映射(cv-203): running/waiting/done/failed → 图标+配色。 */
-function statusStrip(it: any): { icon: string; cls: string } {
-  const s = String(it?.payload?.status || it?.status || 'running')
-  if (s === 'done') return { icon: '✅', cls: 'border-ctp-green/30 bg-ctp-green/5 text-ctp-subtext1' }
-  if (s === 'failed') return { icon: '❌', cls: 'border-ctp-red/30 bg-ctp-red/5 text-ctp-subtext1' }
-  if (s === 'waiting') return { icon: '⏸', cls: 'border-ctp-yellow/30 bg-ctp-yellow/5 text-ctp-subtext1' }
-  return { icon: '🔄', cls: 'border-ctp-sky/30 bg-ctp-sky/5 text-ctp-subtext1' }
-}
-
-// ── 工具审批操作条(task_approval 消息) ──
-const approvalDone = reactive<Record<string, 'approved' | 'rejected'>>({})
-async function respondApproval(m: any, approved: boolean) {
-  const jobId = m?.meta?.approvalJobId
-  const requestId = m?.meta?.approvalRequestId
-  if (!jobId || !requestId || approvalDone[m.id]) return
-  try {
-    await apiPost(`/exec/${jobId}/approval`, {
-      requestId, approved,
-      reason: approved ? 'approved' : 'rejected by user',
-    })
-    approvalDone[m.id] = approved ? 'approved' : 'rejected'
-  } catch { /* 失败保持可重试 */ }
-}
-const digestAutoSend = ref(localStorage.getItem(DIGEST_AUTO_KEY) === '1')
-/** 摘要入口仅转达语境(路由=任务)显示; architect 路由本就全史可见无需摘要。 */
-const canDigest = computed(() => effectiveRoute.value.kind === 'task')
-function toggleDigestMode() {
-  if (!canDigest.value) return
-  digestMode.value = !digestMode.value
-  if (!digestMode.value) exitDigest()
-}
-function exitDigest() {
-  digestMode.value = false
-  selIds.value = new Set()
-  digestDraft.value = null
-}
-function toggleSel(m: any) {
-  if (!digestMode.value || !m?.id) return   // 本地乐观回合无 id, 不可选
-  const s = new Set(selIds.value)
-  if (s.has(m.id)) s.delete(m.id)
-  else s.add(m.id)
-  selIds.value = s
-}
-/** 生成摘要: REST → 自动通过(跳卡直发) 或 草稿卡人工审核。 */
-async function generateDigest() {
-  if (!selIds.value.size || digestBusy.value || !props.convId) return
-  digestBusy.value = true
-  try {
-    const r = await apiPost<{ digest: string; chars: number; summarized: boolean }>(
-      `/sessions/${props.convId}/msg-digest`, { msgIds: [...selIds.value] })
-    const digest = (r as any)?.digest || (r as any)?.data?.digest || ''
-    if (!digest) return
-    if (digestAutoSend.value) {
-      await sendDigest(digest)          // 自动通过: 不落审核卡
-      exitDigest()
-    } else {
-      digestDraft.value = digest
-    }
-  } catch { /* 生成失败: 保留选择可重试 */ } finally {
-    digestBusy.value = false
-  }
-}
-async function sendDigest(digest: string) {
-  const r = effectiveRoute.value
-  if (r.kind !== 'task' || props.busy) return
-  emit('send', { text: '', attachTo: r.taskId, digest })
-}
-function confirmDigest() {
-  if (digestDraft.value?.trim()) void sendDigest(digestDraft.value)
-  exitDigest()
-}
-function onAutoSendToggle(e: Event) {
-  digestAutoSend.value = (e.target as HTMLInputElement).checked
-  localStorage.setItem(DIGEST_AUTO_KEY, digestAutoSend.value ? '1' : '0')
-}
-watch(canDigest, (ok) => { if (!ok && digestMode.value) exitDigest() })
-/** 草稿卡标题: 当前转达目标任务。 */
-const digestTargetTitle = computed(() => {
-  const r = effectiveRoute.value
-  return r.kind === 'task' ? (taskTitleOf(r.taskId).slice(0, 20) || '当前任务') : '当前任务'
-})
-/** 占位文案随语境联动(转达任务/指派执行器时给出方向提示)。 */
-const inputPlaceholder = computed(() => {
-  if (props.readOnly) return t('session.readOnlyHint')
-  const r = effectiveRoute.value
-  if (r.kind === 'task') return `回复当前任务「${taskTitleOf(r.taskId).slice(0, 16) || '…'}」…`
-  if (r.kind === 'assign') return `@${r.agent} `
-  return t('requirement.chat.placeholder')
-})
-
-/** 任务卡定位: meta.taskId → 最新任务行(状态实时)。 */
-function taskById(id?: string) {
-  if (!id) return null
-  return (props.tasks || []).find((t) => t.id === id) || null
-}
-
-/** 需求卡的执行按钮状态检测(cv-205): 需求已有进行中任务(running/
- * waiting_input/pending_confirm) → 禁用一键建卡执行(后端同守卫兜底,
- * cv-203 防重复执行); saved 不算进行中(建卡走修订分支); 终态可重试。 */
-const _ACTIVE_TASK_STATUS = new Set(['running', 'waiting_input', 'pending_confirm'])
-function reqActiveTask(reqId?: string) {
-  if (!reqId) return null
-  return (props.tasks || []).find((t: any) => (t.reqId || '') === reqId
-    && _ACTIVE_TASK_STATUS.has(String(t.status || ''))) || null
-}
-
-/** 同需求是否已有 spec 消息卡(唯一宿主存在 → S5 提案卡让位, 实时/刷新同构)。 */
-function hasSpecCardFor(reqId?: string) {
-  if (!reqId) return false
-  return props.turns.some((t: any) =>
-    t.item?.type === 'spec' && t.item?.payload?.requirementId === reqId)
-}
-
-/** 规约版本更新后, 旧版卡 = 历史快照(cv-215): 同需求存在更高版本卡 → 本卡
- * 退役——不渲染执行按钮(防误点旧版启动), 默认收起仅作参考信息;
- * coding 上下文交接始终取台账最新规约(服务端 dispatch), 与消息卡无关。 */
-function specSuperseded(m: any) {
-  const rid = m.item?.payload?.requirementId
-  const ver = Number(m.item?.payload?.ver || 0)
-  if (!rid || !ver) return false
-  return props.turns.some((t: any) =>
-    t.item?.type === 'spec' && t.item?.payload?.requirementId === rid
-    && Number(t.item?.payload?.ver || 0) > ver)
-}
-
-/** 版本徽标(未带 ver 的历史卡显示 v1 口径)。 */
-function specVer(m: any) {
-  return Number(m.item?.payload?.ver || 0) || 1
-}
-
-/** 需求卡渲染载荷(方案 A): spec 消息卡 = 唯一宿主, 提案数据(m.proposal,
- * attach/rehydrate 供给)降级为载荷。正文 = 五段 MD(与执行器指令同构:
- * 需求目标/方案/允许改动范围/禁止改动/验收标准——所见即所得), 不截断;
- * 兜底播报原文。active: 需求已有进行中任务(执行按钮禁用)。 */
-// ── 信息卡收起/展开(统一状态源 useCardCollapse; 用户覆盖持久化 localStorage) ──
-const { isCollapsed: cardIsCollapsed, toggle: cardToggle } = useCardCollapse()
-/** 卡键: 消息 id 为稳定持久键(可选子键区分同消息多卡, 如 conventions 多条)。 */
-function _cardKey(m: any, sub = '') {
-  const base = String(m.item?.id || m.id || m.proposal?.id || m.item?.payload?.requirementId || '')
-  return sub ? `${base}:${sub}` : base
-}
-function mCollapsed(m: any, auto = false, sub = '') {
-  return cardIsCollapsed(_cardKey(m, sub), auto)
-}
-function toggleM(m: any, auto = false, sub = '') {
-  cardToggle(_cardKey(m, sub), auto)
-}
-/** 需求卡: 旧版快照默认收起; 用户手动展开/收起后以手动为准(持久化)。 */
-function specCardCollapsed(m: any) {
-  return mCollapsed(m, specSuperseded(m))
-}
-function toggleSpecCard(m: any) {
-  toggleM(m, specSuperseded(m))
-}/** 取代本卡的新版本号(快照徽标用)。 */
-function specSupersededVer(m: any) {
-  const rid = m.item?.payload?.requirementId
-  const ver = Number(m.item?.payload?.ver || 0)
-  let max = ver
-  for (const t of props.turns) {
-    if (t.item?.type === 'spec' && t.item?.payload?.requirementId === rid) {
-      max = Math.max(max, Number(t.item?.payload?.ver || 0))
-    }
-  }
-  return max
-}
-function specCard(m: any) {
-  // cv-215: 卡自包含规约载荷优先(本版全文——历史版本卡即历史快照);
-  // 旧数据(无 spec 载荷)回落 m.proposal(台账当前版)。
-  // 分节组装单源=services/spec-view(与正文规约草稿视图共用, cv-248)。
-  const p = m.item?.payload?.spec || m.proposal || {}
-  const active = reqActiveTask(m.item?.payload?.requirementId)
-  return {
-    ...assembleSpecView(p, String(m.content || '').slice(0, 60)),
-    active: !!active,
-    activeStatus: active ? String(active.status) : '',
-  }
-}
-
-// ── 模型 chip: 随选随生效(下次执行; 进行中作业模型已固化) ──
-const modelMenuOpen = ref(false)
-function onModelClick() {
-  modelMenuOpen.value = !modelMenuOpen.value
-}
-function pickModel(m: string) {
-  modelMenuOpen.value = false
-  if (m !== (props.executorModel || '')) emit('set-model', m)
-}
-
-/** 问询卡回复: 组装文本走既有发送通道(与手打等价, cv-247)。 */
-function onChoicesReply(msgId: string, text: string) {
-  choicesAnswered.add(msgId)
-  clearChoiceDraft(msgId)               // 答复已提交, 草稿使命完成
-  emit('send', { text })
-}
-
-function send() {
-  if (!input.value.trim()) return
-  if (props.busy) return
-  // 本地命令拦截(绘图/方案/摘要/提炼/归档): 组件内或上抛宿主执行, 不发后端
-  const local = matchLocalCmd(input.value)
-  if (local) {
-    runLocalCmd(local)
-    input.value = ''
-    cmdMenuOpen.value = false
-    resetInputHeight()
-    return
-  }
-  // 语境路由: 组装 attachTo(转达任务卡)/agent(一次性指派), 剥离内联 @执行器 前缀
-  const r = effectiveRoute.value
-  let text = input.value.trim()
-  const ia = inlineAgent.value
-  if (ia) text = text.replace(new RegExp(`^@${ia}[\\s\\u00A0]*`), '').trim()
-  emit('send', {
-    text,
-    attachTo: r.kind === 'task' ? r.taskId : undefined,
-    agent: r.kind === 'assign' ? r.agent : undefined,
-  })
-  routeOverride.value = null // 单次翻转复位(避免持久模式陷阱)
-  // 自由回复消化在飞问询卡(cv-247: 模板可整体弃用)
-  for (const m of choicesCards.value) choicesAnswered.add(String(m.id || m.item?.id || ''))
-  input.value = ''
-  cmdMenuOpen.value = false
-  resetInputHeight()
-  nextTick(() => scrollRef.value?.scrollTo({ top: scrollRef.value.scrollHeight, behavior: 'smooth' }))
-}
-
-/** 本地命令(前端拦截, 不发后端): 会话操作/状态切换——与工具条按钮同动作。 */
-const LOCAL_CMD_LIST = [
-  { name: '绘图', desc: '切换绘图增强(IR→代码)' },
-  { name: '摘要', desc: '生成会话标题与摘要' },
-  { name: '提炼', desc: '提炼会话为数据资产' },
-  { name: '归档', desc: '结束会话(有可提炼内容时提示)' },
-  { name: '选摘', desc: '选取历史生成摘要转达执行器' },
-]
-const cmdMenuOpen = ref(false)
-const cmdFilter = computed(() => {
-  const v = input.value.trim()
-  if (!v.startsWith('/')) return []
-  const q = v.slice(1).toLowerCase()
-  return LOCAL_CMD_LIST.filter((c) => c.name.toLowerCase().startsWith(q))
-})
-/** 精确命中本地命令(拦截: 本地执行, 不发后端)。 */
-function matchLocalCmd(v: string): string | null {
-  const t = v.trim()
-  if (!t.startsWith('/')) return null
-  const name = t.slice(1)
-  return LOCAL_CMD_LIST.some((c) => c.name === name) ? name : null
-}
-watch(cmdFilter, (list) => { cmdMenuOpen.value = list.length > 0 && input.value.trim().startsWith('/') })
-function pickCmd(name: string) {
-  input.value = `/${name}`
-  cmdMenuOpen.value = false
-  inputRef.value?.focus()
-}
-function onCmdMenuKeydown(e: KeyboardEvent) {
-  if (!cmdMenuOpen.value) return
-  if (e.key === 'Escape') { cmdMenuOpen.value = false; e.preventDefault() }
-  else if (e.key === 'Enter' && cmdFilter.value.length === 1) {
-    input.value = `/${cmdFilter.value[0].name}`
-    cmdMenuOpen.value = false
-    e.preventDefault()
-  }
-}
-/** 本地命令分发: 绘图/选摘在组件内执行; 摘要/提炼/归档上抛宿主(与工具条同动作)。 */
-function runLocalCmd(name: string) {
-  if (name === '绘图') {
-    emit('toggle-diagram-skill', !props.diagramSkill)
-  } else if (name === '选摘') {
-    toggleDigestMode()
-  } else {
-    emit('local-cmd', name)
-  }
-}
-
-const MIN_ROWS = 2
-const MAX_ROWS = 6
-/** 读取行高与上下 padding(用于行数↔像素换算)。 */
-function inputMetrics(el: HTMLTextAreaElement) {
-  const cs = getComputedStyle(el)
-  return {
-    lineH: parseFloat(cs.lineHeight) || 16,
-    pad: (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0),
-  }
-}
-/** 用户拖拽把手进入手动高度模式(暂停自动伸缩)，发送后恢复。 */
-let manualHeight = false
-/** autoResize 施加高度时抑制 RO 回调(避免把自己的改动误判为手动拖拽)。 */
-let roSuppress = false
-let lastAppliedHeight = ''
-/** 自适应高度：随内容行数伸缩，默认/最矮 2 行、最高 6 行，超出滚动；手动拖拽后交由用户控制(仍限 2~6 行)。 */
-function autoResize() {
-  const el = inputRef.value
-  if (!el) return
-  if (manualHeight) {
-    // 手动模式：不改动用户拖出的高度，只维护滚动条
-    el.style.overflowY = el.scrollHeight > el.clientHeight + 1 ? 'auto' : 'hidden'
-    return
-  }
-  roSuppress = true
-  const { lineH, pad } = inputMetrics(el)
-  const min = lineH * MIN_ROWS + pad
-  const max = lineH * MAX_ROWS + pad
-  el.style.height = 'auto'
-  const h = Math.min(Math.max(el.scrollHeight, min), max)
-  el.style.height = `${h}px`
-  lastAppliedHeight = `${h}px`
-  el.style.overflowY = el.scrollHeight > max + 1 ? 'auto' : 'hidden'
-}
-/** 手动拖拽检测：高度变化非 autoResize 所施加 → 进入手动模式(越界钳制回 2~6 行)。 */
-const inputResizeObserver = new ResizeObserver(() => {
-  const el = inputRef.value
-  if (!el) return
-  if (roSuppress) { roSuppress = false; return }
-  if (el.style.height === lastAppliedHeight) return
-  manualHeight = true
-  const { lineH, pad } = inputMetrics(el)
-  const min = lineH * MIN_ROWS + pad
-  const max = lineH * MAX_ROWS + pad
-  const h = parseFloat(el.style.height) || 0
-  if (h && (h < min || h > max)) {
-    roSuppress = true
-    lastAppliedHeight = `${Math.min(Math.max(h, min), max)}px`
-    el.style.height = lastAppliedHeight
-  }
-  el.style.overflowY = el.scrollHeight > el.clientHeight + 1 ? 'auto' : 'hidden'
-})
-onMounted(() => {
-  if (inputRef.value) {
-    inputResizeObserver.observe(inputRef.value)
-    autoResize()
-  }
-})
-onUnmounted(() => inputResizeObserver.disconnect())
-/** 发送后清空并回到默认两行高度(同时退出手动模式)。 */
-function resetInputHeight() {
-  manualHeight = false
-  autoResize()
-}
-/** Enter 换行(不拦截, textarea 原生插入且不干扰 IME)；Ctrl/Cmd+Enter 发送。 */
-function onInputKeydown(e: KeyboardEvent) {
-  onCmdMenuKeydown(e)
-  if (e.key !== 'Enter') return
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault()
-    send()
-  }
-}
-
-function submitAnswers() {
-  emit('answers', { ...answers })
-  Object.keys(answers).forEach((k) => delete answers[k])
-}
-
-/** 单条消息删除：DOM 弹窗确认后移除本地 turn(持久化删除由 workspace 处理)。 */
-const deletePending = ref<number | null>(null)
-
-function removeTurn(i: number) {
-  if (props.busy) return
-  const m = props.turns[i]
-  if (!m) return
-  deletePending.value = i
-}
-
-function confirmDeleteTurn() {
-  const i = deletePending.value
-  deletePending.value = null
-  if (i === null) return
-  emit('delete-turn', i)
-}
-
-function cancelDeleteTurn() {
-  deletePending.value = null
-}
-
-// ---- 复制：整条消息按钮 + 选中即复制(监听 copy 事件) + 轻提示 ----
-const copiedTurn = ref<number | null>(null)
-const copiedTimer = ref<ReturnType<typeof setTimeout> | null>(null)
-const toastVisible = ref(false)
-const toastText = ref('')
-let toastTimer: ReturnType<typeof setTimeout> | null = null
-
-/** 一键复制整条消息(纯文本内容)。 */
-async function copyTurn(i: number) {
-  const m = props.turns[i]
-  if (!m) return
-  const ok = await copyText(m.content)
-  if (ok) {
-    copiedTurn.value = i
-    if (copiedTimer.value) clearTimeout(copiedTimer.value)
-    copiedTimer.value = setTimeout(() => { copiedTurn.value = null }, 1600)
-    showToast(t('requirement.chat.copySuccess'))
-  } else {
-    showToast(t('requirement.chat.copyFailed'))
-  }
-}
-
-/** 选中即复制：消息区内发生 copy 事件(快捷键/右键)时，提示已复制。 */
-function onMsgCopy() {
-  const sel = window.getSelection()
-  const text = sel?.toString().trim() ?? ''
-  if (text) showToast(t('requirement.chat.copySuccess'))
-}
-
-
-function showToast(text: string) {
-  toastText.value = text
-  toastVisible.value = true
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastVisible.value = false }, 2000)
-}
-
-// ── 提案卡确认存入：finalize 入池(待执行)；按钮自带 reqId, 多提案各自独立确认 ──
-const confirmingProposalId = ref('')
-// 提案卡状态核验(防重复存入): p.confirmed 是本地态, 刷新即失——以后端为准
-const proposalState = reactive<Record<string, string>>({})   // reqId -> draft/ready/done
-const proposalChecked = reactive<Record<string, boolean>>({})
-async function ensureProposalState(m: KbAnalysisTurn) {
-  const p = m.proposal
-  if (!p || p.confirmed || proposalChecked[p.id]) return
-  proposalChecked[p.id] = true
-  try {
-    const r = await apiGet<Record<string, any>>(`/requirements/${p.id}`)
-    const st = String(r?.status || '')
-    if (st) proposalState[p.id] = st
-    if (st === 'ready' || st === 'done') p.confirmed = true   // 已存入: 抑制存入按钮
-  } catch { /* 状态获取失败不阻塞卡片展示 */ }
-}
-// cv-188: 追踪 proposal 挂载本身——attachProposal 在回合已存在时写入,
-// turns.length 不变, 旧 watcher(只看长度)永不触发 → 实时卡漏判「已存入」
-watch(() => props.turns.map((t) => t.proposal?.id || '').join(','), () => {
-  for (const m of props.turns) if (m.proposal) void ensureProposalState(m)
-}, { immediate: true })
-/** 已存入(ready): 本地确认态或后端状态任一即可; done=已完成(不可再跑)。 */
-function proposalStored(m: KbAnalysisTurn): boolean {
-  const p = m.proposal
-  if (!p) return false
-  return p.confirmed || proposalState[p.id] === 'ready'
-}
-function proposalDone(m: KbAnalysisTurn): boolean {
-  const p = m.proposal
-  return !!p && proposalState[p.id] === 'done'
-}
-async function confirmProposal(m: KbAnalysisTurn) {
-  const p = m.proposal
-  if (!p || proposalStored(m) || confirmingProposalId.value) return   // 防重复存入
-  confirmingProposalId.value = p.id
-  try {
-    const analysis = {
-      ...(p.analysis ?? {}),
-      implementationPath: p.analysis?.implementationPath || p.analysis?.designMd || '',
-    }
-    const row = await apiPost<Record<string, unknown>>(`/requirements/${p.id}/finalize`, { analysis })
-    if (row && (row as any).id) {
-      p.confirmed = true
-      proposalState[p.id] = String((row as any).status || 'ready')
-      showToast(t('assetChat.extractPlan.confirmed'))
-    } else {
-      showToast(t('assetChat.extractPlan.confirmFailed'))
-    }
-  } catch (e: any) {
-    // 透出门禁原因(如"方案为空, 请 /调整 补全")而非笼统失败
-    const msg = e?.response?.data?.message || e?.message || ''
-    showToast(msg ? `${t('assetChat.extractPlan.confirmFailed')}：${String(msg).slice(0, 120)}` : t('assetChat.extractPlan.confirmFailed'))
-  } finally {
-    confirmingProposalId.value = ''
-  }
-}
-/** 提案卡运行: /执行 直通——按会话绑定执行器建任务卡(确认卡后 subagent 启动)。 */
-function runProposal() {
-  // cv-197: 按钮触发的 /执行 为合成消息——不回显气泡(后端落库带 synthetic 标记)
-  emit('send', { text: '/执行', synthetic: true })
-}
-
-// ---- 推理内容(thinking)折叠展示 ----
-const reasoningOpen = reactive<Record<number, boolean>>({})
-
-function toggleReasoning(i: number) {
-  reasoningOpen[i] = !reasoningOpen[i]
-}
-
-// ---- 语义数据资产卡片 ----
-const expandedAssets = reactive<Record<string, boolean>>({})
-
-function assetKey(turnIdx: number, assetIdx: number) {
-  return `${turnIdx}-${assetIdx}`
-}
-
-function toggleAsset(i: number, ai: number) {
-  const k = assetKey(i, ai)
-  expandedAssets[k] = !expandedAssets[k]
-}
-
-function assetKindIcon(kind?: SemanticAsset['kind']) {
-  if (kind === 'process') return BoltIcon
-  if (kind === 'decision' || kind === 'state') return AdjustmentsHorizontalIcon
-  if (kind === 'contract') return CubeTransparentIcon
-  return CubeTransparentIcon
-}
-
-function assetKindLabel(kind?: SemanticAsset['kind']): string {
-  return t(`requirement.chat.assetKind.${kind ?? 'asset'}`)
-}
-
-function assetSummary(a: SemanticAsset): string {
-  const d = a.detail
-  if (!d) return ''
-  const parts: string[] = []
-  if (d.fields?.length) parts.push(`${t('requirement.chat.assetFields')} ${d.fields.length}`)
-  if (d.steps?.length) parts.push(`${t('requirement.chat.assetSteps')} ${d.steps.length}`)
-  if (d.branches?.length) parts.push(`${t('requirement.chat.assetBranches')} ${d.branches.length}`)
-  if (a.astRefs?.length) parts.push(`${a.astRefs.length} AST`)
-  return parts.join(' · ')
-}
-
-function copyAsset(a: SemanticAsset) {
-  const lines = [`${a.name} (${assetKindLabel(a.kind)})`, `ID: ${a.id}`, a.desc]
-  if (a.astRefs?.length) {
-    lines.push('')
-    lines.push(...a.astRefs.slice(0, 10).map((r) => `${r.file}:L${r.startLine}-L${r.endLine} ${r.symbol}`))
-  }
-  void copyText(lines.join('\n')).then((ok) => showToast(ok ? t('requirement.chat.copySuccess') : t('requirement.chat.copyFailed')))
-}
-
-/** 资产是否可引用(active 且未标记需更新)。 */
-function assetUsable(a: SemanticAsset): boolean {
-  return a.status !== 'stale' && a.status !== 'deleted' && !a.needsUpdate
-}
-
-function onRefreshAsset(a: SemanticAsset) {
-  if (props.busy) return
-  emit('refresh-asset', a.id)
-}
-
-// ── 契约条目固化卡（🧾 期望固化） ─────────────────────────────
-
-const contractEditOpen = reactive<Record<string, boolean>>({})
-const contractEditText = reactive<Record<string, string>>({})
-
-function contractStatusLabel(s?: string): string {
-  return t(`requirement.chat.contractStatus.${s ?? 'draft'}`)
-}
-
-function contractStatusCls(s?: string): string {
-  const map: Record<string, string> = {
-    draft: 'bg-ctp-yellow/15 text-ctp-yellow',
-    confirmed: 'bg-ctp-blue/15 text-ctp-blue',
-    injected: 'bg-ctp-sky/15 text-ctp-sky',
-    verifying: 'bg-ctp-mauve/15 text-ctp-mauve',
-    accepted: 'bg-ctp-green/15 text-ctp-green',
-    rejected: 'bg-ctp-red/15 text-ctp-red',
-  }
-  return map[s ?? 'draft'] ?? map.draft
-}
-
-function contractTargetText(c: ContractItem): string {
-  const tgt = c.target ?? {}
-  const t2 = [tgt.file, tgt.symbol].filter(Boolean).join('::')
-  return t2 || t('requirement.chat.contractIntentOnly')
-}
-
-function contractBehaviorText(c: ContractItem): string {
-  const b = c.behavior ?? {}
-  const parts: string[] = []
-  if (b.steps?.length) parts.push(`${t('requirement.chat.assetSteps')} ${b.steps.length}`)
-  if (b.branches?.length) parts.push(`${t('requirement.chat.assetBranches')} ${b.branches.length}`)
-  if (b.fields?.length) parts.push(`${t('requirement.chat.assetFields')} ${b.fields.length}`)
-  if (c.zAxis?.length) parts.push(`Z ${c.zAxis.length}`)
-  return parts.join(' · ')
-}
-
-/** 展开「修改」：把可编辑期望字段序列化为 JSON 供设计者调整。 */
-function openContractEdit(c: ContractItem) {
-  if (contractEditOpen[c.id]) { contractEditOpen[c.id] = false; return }
-  const editable = {
-    target: c.target ?? {},
-    behavior: c.behavior ?? {},
-    zAxis: c.zAxis ?? [],
-    acceptance: c.acceptance ?? {},
-  }
-  contractEditText[c.id] = JSON.stringify(editable, null, 2)
-  contractEditOpen[c.id] = true
-}
-
-function saveContractEdit(c: ContractItem) {
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(contractEditText[c.id] || '{}')
-  } catch {
-    showToast(t('requirement.chat.contractEditInvalid'))
-    return
-  }
-  contractEditOpen[c.id] = false
-  emit('contract-edit-save', c.id, parsed)
-}
-
-function onContractConfirm(c: ContractItem) {
-  if (props.busy) return
-  emit('contract-confirm', c.id)
-}
-
-function onContractDelete(c: ContractItem) {
-  if (props.busy) return
-  emit('contract-delete', c.id)
-}
-
-function onConventionConfirm(c: NamingConvention) {
-  if (props.busy) return
-  emit('convention-confirm', c.id)
-}
-
-function onConventionIgnore(c: NamingConvention) {
-  if (props.busy) return
-  emit('convention-ignore', c.id)
-}
-
-function onGotoAcceptance() {
-  if (props.busy) return
-  emit('goto-acceptance')
-}
-
-/** 差异报告卡：L1/L2 通过率 + 待人工数 + 前三差异事实（事实/意见分区，判定在验收区块）。 */
-function diffSummary(detail: AcceptanceReportDetail): { rate: string; awaiting: number; top: AcceptanceFact[] } {
-  const facts = detail.facts ?? []
-  const pass = facts.filter((f) => f.verdict === 'pass').length
-  const rate = facts.length ? `${Math.round((pass / facts.length) * 100)}%` : '—'
-  const awaiting = (detail.report?.summary?.awaitingHuman ?? 0)
-    + facts.filter((f) => f.verdict === 'fail' || f.verdict === 'partial').length
-  const top = facts
-    .filter((f) => f.verdict !== 'pass')
-    .slice(0, 3)
-  return { rate, awaiting, top }
-}
+// ---- MS6-W3: 逻辑层8域(chat-view/)——本文件保留 props/emit/模板 ----
+const { t } = useI18n()
+const D: ChatDeps = { props, emit }
+D.cards = useChatCards(D)
+D.input = useChatInput(D)
+D.route = useChatRoute(D)
+D.digest = useChatDigest(D)
+D.send = useChatSend(D)
+D.actions = useChatActions(D)
+D.proposal = useChatProposal(D)
+D.contract = useChatContract(D)
+const ws = Object.assign({}, D.cards, D.input, D.route, D.digest, D.send, D.actions, D.proposal, D.contract)
+provide(WS_KEY, ws)
+const {
+  DIGEST_AUTO_KEY,
+  INLINE_AGENTS,
+  LOCAL_CMD_LIST,
+  MAX_ROWS,
+  MIN_ROWS,
+  _ACTIVE_TASK_STATUS,
+  _cardKey,
+  activeTask,
+  answeredByFlow,
+  answers,
+  approvalDone,
+  assetKey,
+  assetKindIcon,
+  assetKindLabel,
+  assetSummary,
+  assetUsable,
+  autoResize,
+  canDigest,
+  cancelDeleteTurn,
+  choiceDrafts,
+  choicesAnswered,
+  choicesCards,
+  clarifyForced,
+  clarifyTitle,
+  clearChoiceDraft,
+  cmdFilter,
+  cmdMenuOpen,
+  commitTitleEdit,
+  confirmDeleteTurn,
+  confirmDigest,
+  confirmMerge,
+  confirmProposal,
+  confirmingProposalId,
+  contractBehaviorText,
+  contractEditOpen,
+  contractEditText,
+  contractStatusCls,
+  contractStatusLabel,
+  contractTargetText,
+  copiedTimer,
+  copiedTurn,
+  copyAsset,
+  copyTurn,
+  defaultExecutor,
+  deletePending,
+  diffSummary,
+  digestAutoSend,
+  digestBusy,
+  digestDraft,
+  digestMode,
+  digestTargetTitle,
+  draftTimers,
+  editingTitle,
+  effectiveRoute,
+  ensureProposalState,
+  executorFull,
+  executorLabel,
+  exitDigest,
+  expandedAssets,
+  feedBusyIdx,
+  generateDigest,
+  hasSpecCardFor,
+  inlineAgent,
+  input,
+  inputMetrics,
+  inputPlaceholder,
+  inputRef,
+  inputResizeObserver,
+  isolatedOn,
+  isolatedTitle,
+  lastAppliedHeight,
+  lastAssistantAgent,
+  loadChoiceDrafts,
+  mCollapsed,
+  manualHeight,
+  matchLocalCmd,
+  mergeBusyIdx,
+  mergedDone,
+  modelMenuOpen,
+  onAutoSendToggle,
+  onChoicesReply,
+  onCmdMenuKeydown,
+  onContractConfirm,
+  onContractDelete,
+  onConventionConfirm,
+  onConventionIgnore,
+  onGotoAcceptance,
+  onInputKeydown,
+  onModelClick,
+  onMsgCopy,
+  onRefreshAsset,
+  onSpecApply,
+  onTitleInput,
+  openAssetRef,
+  openContractEdit,
+  pickCmd,
+  pickExecutor,
+  pickModel,
+  pickRoute,
+  proposalChecked,
+  proposalDone,
+  proposalState,
+  proposalStored,
+  quickLocked,
+  quickOn,
+  quickTitle,
+  reasoningOpen,
+  removeTurn,
+  reqActiveTask,
+  resetInputHeight,
+  respondApproval,
+  roSuppress,
+  routeBtnClass,
+  routeDetail,
+  routeMenuOpen,
+  routeOverride,
+  runLocalCmd,
+  runMergePrecheck,
+  runProposal,
+  saveContractEdit,
+  scheduleDraftSave,
+  scrollRef,
+  selIds,
+  send,
+  sendDigest,
+  showToast,
+  specAppliedIdx,
+  specBusyIdx,
+  specCard,
+  specCardCollapsed,
+  specDraftIdx,
+  specDraftView,
+  specPayloadOf,
+  specSuperseded,
+  specSupersededVer,
+  specVer,
+  stageClass,
+  startTitleEdit,
+  statusStrip,
+  submitAnswers,
+  taskById,
+  taskTitleOf,
+  titleDraft,
+  toastText,
+  toastTimer,
+  toastVisible,
+  toggleAsset,
+  toggleClarifyMode,
+  toggleDigestMode,
+  toggleIsolated,
+  toggleM,
+  toggleQuickMode,
+  toggleReasoning,
+  toggleSel,
+  toggleSpecCard,
+  trailOpen,
+} = ws
 
 onUnmounted(() => {
   if (copiedTimer.value) clearTimeout(copiedTimer.value)

@@ -115,3 +115,19 @@ W1 手工转写 → W2 升级为**机械抽取脚本**（核心资产，后续�
 - SFC 2,649→1,117（脚本 ~275 接线 + 模板 730 + 样式 113）；typecheck 0 错 + 64/64（FILE_BUDGET 冒烟守卫过）
 - **W2-S2 已完成**：模板两面板 + key.ts(SGV_WS_KEY/provideSgvWs/useSgvWs)；SFC 最终 **282 行**
 - W2 陷阱补充：⑤ 面板相对路径错位（panels/ 下的 `./X.vue` → `../../X.vue`——vite 报错清晰但 vue-tsc 不查）⑥ scoped 样式不穿透子组件——按消费方分发到面板自己的 style 块 ⑦ 注入键/面板组件的 import 插入用「条件包含性检查」会漏（早前部分插入残留+条件失配 → 重复声明/缺失并发）——**每轮手术前 grep 实况，不用记忆推断**
+
+
+---
+
+## 9. W3 执行记录（2026-09-25，S1 逻辑层落地）
+
+### 管线固化
+- 抽取管线固化为可复用工具 `/tmp/opencode/extract-vue.py`（配置驱动：domains 行段表 + anchor 锚点串）——W4/W5 直接复用
+- SFC 2,383→1,613；八域 chat-view/：cards 223 / input 214 / route 166 / digest 143 / send 121 / actions 161 / proposal 89 / contract 130 + key.ts + chatTypes
+- typecheck 0 错 + 64/64
+
+### 管线陷阱新增（均已修入工具）
+1. **锚点坐标漂移**（最重）：keep_tail_from 是切割后坐标——wiring 被插进模板中部。改为**唯一字符串锚**（`anchor: "onUnmounted(() => {"`）
+2. `has_word(body,"t(")` 的 `\b` 尾巴在 `(` 后永不匹配 → use_i18n 永远 False——改直接正则
+3. 守卫测试随架构更新：choices-card/spec-view 的源码断言改为扫描 SFC+chat-view/*.ts 组件族聚合源
+4. **严禁对已抽取文件重跑抽取器**（行段坐标失效 → 组合件垃圾）——重跑前必须 git restore
