@@ -28,6 +28,7 @@ function goHome() {
   // history 路由切换（原 location.hash='#/'）
   window.location.href = '/app/'
 }
+// 模板内 <a href="#/">、<a href="#/user"> 由 main.ts 全局 hash 锚点劫持承接
 </script>
 
 <template>
