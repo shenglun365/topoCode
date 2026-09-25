@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "test": "echo \"@topo/app-chat: no frontend unit tests (M12)\""
+    "test": "vitest run"
   },
   "dependencies": {
     "@topo/web-core": "*",

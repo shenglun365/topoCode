@@ -33,7 +33,7 @@ architect 侧已删，仅 workbench 一套（1,436 行）。剩余工作=ChatSes
 |---|---|---|---|
 | **W0 核证+安全网** | ① d3 孤儿复证（动态 import/字符串引用兜底 grep）② ChatSession 依赖盘点 ③ web-core portal 路由表核证 ④ ChatSession 迁移前 vitest 冒烟（chat 域建测试基建，M12 豁免收窄为"仅无测试页面"） | 盘点清单入档；chat 域 vitest run 绿 | 1d |
 | **W1 d3 孤儿清零** ✅ | 删 5 文件(-21,552 行含 bundled)+d3/@types/d3 依赖移除+孤儿 i18n 键清理；lock 剩余 d3=mermaid/cytoscape 生态传递引用(非本仓声明) | typecheck 0+19/19；package.json/root grep 零命中 ✓ | 0.5d |
-| **W2 ChatSession 域内拆分** | 拆 useChatStream / useMessageActions / useChatCommands composables（仍在 apps/chat，行为零变） | chat 域 vitest（W0 建）绿；手测 SSE 流式对照清单 | 1.5d |
+| **W2 ChatSession 域内拆分** ✅ | **chat 前端 vitest 基建建成(零新依赖, M12 豁免收窄为 2 例挂载冒烟)** + useChatStream(165)/useChatMsgactions(161) 外移(ctx 式 D 注入) | chat vitest 2/2；SFC 1,585→1,445 | 1.5d |
 | **W3 chat 前端上提** | ChatSession+composables 迁 workbench/src/components/chat/；与 AIAssistantPanel 对接（复用 diagramStateStore 契约）；apps/chat/src 清理（DiagramViewer 留 web-core【MS6-W6 方案A 定案】，ChatSession 迁入 workbench 后改 @topo/web-core 引用不变） | workbench 全套件绿；两应用构建绿；chat 前端残余核空 | 1.5d |
 | **W4 chat 后端域托管** | apps/chat/topoone_app_chat → apps/workbench/chat_service/（目录迁移+import 路径+pyproject+启动脚本+CI 路径）；**保留独立进程 :3483**；docs/portal 跳转改址（按 W0 路由表） | chat 32+docs 18 后端套件绿；进程启停冒烟；RPC 基线 diff 空 | 2d |
 | **W5 项目列表三处归一** | 数据层归一（api/类型/分页契约对齐 workbench 主源），三处 UI 壳各自保留 | 三域测试绿；对照清单（字段/分页/排序）零漂移 | 1.5d |
@@ -68,3 +68,14 @@ tag 计划：`git tag pre-MS7`；W4 前追加 `pre-MS7-W4`（目录迁移回退�
 - **③ 3483 引用面 ✅**：前端**零硬编码**；引用全部在 chat 域自身（manifest.toml 声明式端口 + main.py 默认值）——W4 迁移只动 manifest/pyproject/CI 路径
 - **④ 重大发现：代理链** —— chat 前端 vite proxy `/api → 3456 主服务`（**非直连 3483**！），与 workbench 现有 proxy 完全一致 → **W3 上提后零代理改动**（原设计的"跨域鉴权风险"不成立，同源同代理语义）
 - **⑤ chat 前端测试基建**：无 vitest（M12 echo）——W2 前需建最小冒烟（vitest.config + ChatSession 挂载 2 例）
+
+
+---
+
+## 7. W2 执行记录（2026-09-25）
+
+- **chat vitest 基建**：零新依赖（vitest/jsdom 经 workspace 提升；plugin-vue 走根 node_modules）；`test` script 从 echo 占位改为 `vitest run`——**M12 豁免正式收窄**
+- **冒烟 2 例**：全服务面 Proxy 桩 + BroadcastChannel/matchMedia/ResizeObserver jsdom 补桩下挂载/重复挂载
+- **抽取**：useChatStream(send/SSE/abort/图表开关) + useChatMsgActions(选择/删除/复制/引用/续写/存笔记)，SFC 1,585→1,445
+- **重大发现**：ChatSession.vue 头部 **@ts-nocheck**（M12 迁移豁免）——chat FE 的 typecheck 门对本文件恒 vacuous，**真实门禁 = vitest 冒烟**；W3 上提时维持此口径
+- 剩余大块（notes/archives/annotations/tabs 状态机 ~700 行）随 W3 上提原样随迁，不再预拆（收益不足）
