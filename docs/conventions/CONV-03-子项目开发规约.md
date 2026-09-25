@@ -126,7 +126,7 @@ kind=core 是正式「薄层档」（0905 C2 kb god-process 维持现状+文档�
 |---|---|
 | 源码范围 | `apps/chat/src/`（9 文件）、`apps/chat/topoone_app_chat/`、`apps/chat/tests/`（当前 0 文件，新增功能须补） |
 | 形态 | kind=service，独立进程 :3483 |
-| 前端 | dev :5175，base `/chat/`，页面 `/chat`（gateway serve chat.html），资产 `/chat/assets/*` |
+| 前端 | 已并入 workbench（MS7-W3）：`/chat` 由 gateway 301 → `/app#/chat`（workbench hash 路由），独立 SPA/dist/:5175 退役 |
 | API 归属 | REST 前缀 `/api/chat`·`/api/models`·`/api/skills`·`/api/template-locale`·`/api/drafts`·`/api/notes` |
 | 遗留 | 内置 LLM 客户端/skills/web_tools fallback 待瘦身（M12 任务 12.6，流式改经 llm 服务）——瘦身前不得扩大直连 provider 范围 |
 | 不得触碰 | 其他 app、core 基线、`/chat/` 资产路径 |

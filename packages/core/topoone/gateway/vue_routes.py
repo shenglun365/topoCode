@@ -8,7 +8,7 @@ import os
 import logging
 
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from topoone.gateway import static_sources
 
@@ -23,23 +23,6 @@ def _exists(filename: str) -> bool:
 
 def _file(filename: str) -> str:
     return os.path.join(static_sources.spa_static_dir(), filename)
-
-
-def _chat_static_dir() -> str:
-    """chat SPA 静态目录（MS7-W4 起 chat SPA 退役——FE 并入 workbench；保留函数供 manifest 兼容）。"""
-    from topoone.manifest import discover_apps
-    try:
-        apps = discover_apps(static_sources._REPO_ROOT)
-        m = apps.get("chat")
-        if m and m.static_dir:
-            return m.static_dir if os.path.isabs(m.static_dir) else os.path.join(static_sources._REPO_ROOT, m.static_dir)
-    except Exception:
-        pass
-    return os.path.join(static_sources._REPO_ROOT, "apps", "chat", "dist")
-
-
-def _chat_file(filename: str) -> str:
-    return os.path.join(_chat_static_dir(), filename)
 
 
 @vue_router.get("/v2", response_class=HTMLResponse)
@@ -70,10 +53,9 @@ async def v2_chat():
 
 @vue_router.get("/chat", response_class=HTMLResponse)
 async def spa_chat():
-    """chat 页面（/chat）— MS7-W3 起 FE 并入 workbench SPA（/app# 或 /app/chat 客户端路由）。"""
-    if os.path.isfile(_chat_file("chat.html")):
-        return FileResponse(_chat_file("chat.html"))
-    return HTMLResponse("chat SPA not built. Run: npm run build:chat")
+    """chat 页面（/chat）— MS7-W3 起 FE 并入 workbench SPA（hash 路由），301 至 /app#/chat。
+    chat 独立 SPA 已退役（W4），不再 serve chat.html。"""
+    return RedirectResponse("/app#/chat", status_code=301)
 
 
 @vue_router.get("/viewer", response_class=HTMLResponse)
