@@ -34,7 +34,7 @@
 |---|---|---|---|
 | **W0 安全网** ✅ | 六目标件 vitest 挂载冒烟+交互守卫（Vue 原生 createApp 挂载，零新依赖；两域 vitest 补 vue 插件口径已统一） | architect 64/64 + workbench 19/19 + 双域 typecheck 干净 | 1.5d |
 | **W1 AssetManagementWorkspace** ✅ | 逻辑层八域 composable（asset-workspace/：core 四元组整块+diff/chat/framework/unowned/sync/purgeBatch/graphTabs）+ 模板三面板（provide/inject 每挂载一套状态，行为语义保持） | 64/64+typecheck 0 错；SFC 3,296→615 行 | 1.5d |
-| **W2 SemanticGraphView** 🔶 | 逻辑层四域已落地（graph-view/：data 数据变换+diff 标记 / detail 选中+焦点+详情 / code 代码段+全文+逐行解读 / render 交互+SVG 样式+卡片拖拽） | 64/64+typecheck 0 错；SFC 2,649→1,117 行；**模板面板化(W2-S2)待做**（模板 730+样式 113=843 > 800，需 2-3 面板切分） | 1.5d |
+| **W2 SemanticGraphView** ✅ | S1 逻辑层四域 + S2 模板两面板（GraphToolbarPanel 326 / GraphMainPanel 703，SGV_WS_KEY 注入；样式分发：icon-pulse→工具栏，anchor-flash/td-node/card-*→主区） | 64/64+typecheck 0 错；**SFC 2,649→282 行**（<800 达成） | 1.5d |
 | **W3 AnalysisChat**（2,383） | 拆消息渲染/输入区/会话态 composables | 同上 | 1d |
 | **W4 ReportHome + ProjectCard**（1,443+1,441） | 各拆子组件+composables | 同上 | 1.5d |
 | **W5 community-store 抽 useComponentAnalysis**（1,252） | 组件分析逻辑抽 composable，store 瘦身为状态容器 | 同上 | 1d |
@@ -113,4 +113,5 @@ W1 手工转写 → W2 升级为**机械抽取脚本**（核心资产，后续�
 ### W2-S1 结果
 - `graph-view/`：useGraphData 333 / useGraphDetail 327 / useGraphCode 629 / useGraphRender 756 / graphTypes 5
 - SFC 2,649→1,117（脚本 ~275 接线 + 模板 730 + 样式 113）；typecheck 0 错 + 64/64（FILE_BUDGET 冒烟守卫过）
-- 待做 W2-S2：模板三面板（工具栏+图卡 / 详情+代码卡 / 弹窗组），预计 SFC → ~400 行
+- **W2-S2 已完成**：模板两面板 + key.ts(SGV_WS_KEY/provideSgvWs/useSgvWs)；SFC 最终 **282 行**
+- W2 陷阱补充：⑤ 面板相对路径错位（panels/ 下的 `./X.vue` → `../../X.vue`——vite 报错清晰但 vue-tsc 不查）⑥ scoped 样式不穿透子组件——按消费方分发到面板自己的 style 块 ⑦ 注入键/面板组件的 import 插入用「条件包含性检查」会漏（早前部分插入残留+条件失配 → 重复声明/缺失并发）——**每轮手术前 grep 实况，不用记忆推断**
