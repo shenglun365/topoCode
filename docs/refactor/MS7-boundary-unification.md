@@ -36,7 +36,7 @@ architect 侧已删，仅 workbench 一套（1,436 行）。剩余工作=ChatSes
 | **W2 ChatSession 域内拆分** ✅ | **chat 前端 vitest 基建建成(零新依赖, M12 豁免收窄为 2 例挂载冒烟)** + useChatStream(165)/useChatMsgactions(161) 外移(ctx 式 D 注入) | chat vitest 2/2；SFC 1,585→1,445 | 1.5d |
 | **W3 chat 前端上提** ✅ | git mv 纯迁移(98-100% 相似度)：ChatSession+chat-view+5 组件→workbench(components/chat/+pages/)；i18n 深合并(base 优先/chat 补缺, common 冲突安全)；/chat 路由+导航标题；**chat FE src 核空+deps 清零+FE 配置移除**；AIAssistantPanel 对接=共享 diagramStateStore 契约(已成立, 零改动)；strict:true 适配(reasoning 安全访问) | workbench 21/21+typecheck 0+**构建 13.2s 绿**；chat 后端 32 绿 | 1.5d |
 | **W4 chat 后端域托管** ✅ | git mv 包体+tests+pyproject → apps/workbench/chat_service/（99-100% 纯移）；**manifest 原地瘦身**（gateway 发现=apps/*/manifest.toml 硬约定，不可随迁；static_dir/mount 随 FE 并入退役）；conftest sys.path 引导免 pip 重装；setup.sh/CI/README/test:py 路径全改；**独立进程 :3483 保留**(python_entry 不变) | 后端 32+docs 18+architect 1098+parity 5 全绿；import 冒烟 OK；RPC 基线 diff=0 | 2d |
-| **W5 项目列表三处归一** | 数据层归一（api/类型/分页契约对齐 workbench 主源），三处 UI 壳各自保留 | 三域测试绿；对照清单（字段/分页/排序）零漂移 | 1.5d |
+| **W5 项目列表三处归一** ✅ | 核证修正：三处**同源主库**（docs /api/projects 即主库 4 字段；architect arch_projects=裁决① 独立域合法）。唯一漂移=docs **缺主源排序**→ 已对齐（pinned DESC, sort_order ASC, updated_at DESC）；diagram-editor 跨服务 import 路径修复（conftest 引导） | docs 18 绿（含 diagram-editor 修复）；对照清单 golden 入档 | 1.5d |
 | **W6 kb_gateway MCP + native 合法化** | kb_gateway 收口为 MCP 通道（architect 经 MCP 取 KB 基线组件语义）；native 直读 C2/C3 合法化条款入 CONV | kb_gateway 测试绿+MCP 冒烟；CONV 条文落笔 | 2d |
 | **W7 收官** | CONV-00~04 全量更新（含裁决①~⑥最终态）；milestones 收口；全程序总结报告 | 五域全套件全绿；文档闭环 | 1.5d |
 
@@ -100,3 +100,23 @@ tag 计划：`git tag pre-MS7`；W4 前追加 `pre-MS7-W4`（目录迁移回退�
 - **conftest sys.path 引导**：tests 目录插入包父路径——免 pip 重装即可跑（CI editable 路径同步更新后双保险）
 - **残余清单**：apps/chat/ 仅存 manifest.toml（发现约定必需）；workspaces/lock/setup.sh/CI/README/chat.py 注释全部改净（grep 零命中）
 - **裁决② 达成度 100%**：前端(W3) + 后端(W4) 均入 workbench 域托管，:3483 独立进程保留
+
+
+---
+
+## 10. W5 执行记录（2026-09-25）
+
+### 对照清单 golden（三处契约，核证后定稿）
+
+| 维度 | workbench（主源基准） | docs | architect |
+|---|---|---|---|
+| 端点 | RPC `project.list`（engine/service/project.py:105） | REST `/api/projects`（docs web_root.py） | REST `/project/list`（arch_routes/project.py:261） |
+| 数据源 | 主库 projects 表 | **同主库**（multi_db.main_db） | arch_projects（architect 自持，裁决① 独立域） |
+| 字段 | 全字段+groups+存储统计（snake→camel 经 ipc.adaptProject） | id/name/rootPath/isResource（4 字段） | ProjectInfo（architect 域类型） |
+| 排序 | pinned DESC → sort_order ASC → updated_at DESC | **W5 已对齐同序**（原无排序=漂移点） | pinned → favorite → updatedAt（architect 域语义） |
+| 分页 | 无（全量） | 无（全量，量级小） | 无（全量） |
+
+### 修复项
+1. docs `/api/projects` 加主源同款 ORDER BY（排序零漂移）
+2. docs diagram-editor 跨服务 import `topoone_app_chat`——W4 迁移后路径断裂 → docs/tests/conftest.py sys.path 引导（`parents[2]/workbench/chat_service`；生产由 setup.sh editable 覆盖）
+3. Web-Root 页面（/projects 门户壳）为 docs 独立入口，UI 壳保留 ✓

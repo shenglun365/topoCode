@@ -28,7 +28,11 @@ async def list_projects():
     if not common.multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        projects = common.multi_db.main_db.fetchall("SELECT id, name, root_path FROM projects")
+        # MS7-W5 排序归一：与主源 RPC project.list 同序（置顶→sort_order→最近更新）
+        projects = common.multi_db.main_db.fetchall(
+            "SELECT id, name, root_path, pinned, sort_order, updated_at FROM projects "
+            "ORDER BY pinned DESC, sort_order ASC, updated_at DESC"
+        )
         return [{
             "id": p["id"],
             "name": p["name"],

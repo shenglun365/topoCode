@@ -1,3 +1,13 @@
+
+# MS7-W4: diagram-editor 运行时跨服务 import topoone_app_chat——包体已迁
+# apps/workbench/chat_service/，测试环境经 sys.path 引导（生产由 setup.sh editable 覆盖）。
+import sys as _sys
+from pathlib import Path as _Path
+
+_CHAT_PKG_PARENT = str(_Path(__file__).resolve().parents[2] / "workbench" / "chat_service")
+if _CHAT_PKG_PARENT not in _sys.path:
+    _sys.path.insert(0, _CHAT_PKG_PARENT)
+
 """docs 服务测试夹具——临时数据目录 + 全局态设置/复位 + TestClient。
 
 纪律（MS1 §4.6）：service_common 全局态是进程级单例，每个用例 teardown
