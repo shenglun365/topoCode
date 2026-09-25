@@ -67,7 +67,7 @@ GET/POST /api/architect/...
 | `/` · `/home` | 门户首页（web-core dist-portal） | `/assets/*` |
 | `/app`（307→`/app/`） | workbench | `/app/assets/*` |
 | `/projects` · `/viewer` · `/web-root` | docs 页面 | `/docs/*` |
-| `/chat` | chat 页面 | `/chat/assets/*` |
+| `/chat` | workbench SPA 客户端路由（chat FE 并入，MS7-W3；chat 独立 SPA 产物退役） | —（workbench dist 承载） |
 | `/architect` | architect 页面（服务自托管） | `/web/architect/assets/*` |
 | `/api/rpc/{method}` | RPC | — |
 | `/ws/events` | 事件桥 | — |

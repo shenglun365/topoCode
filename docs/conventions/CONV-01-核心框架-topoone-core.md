@@ -35,7 +35,7 @@
 | llm | 3484 | 5682 | `python -m topoone.llm` |
 | agent | 3482 | 5684 | `python -m topoone.agent` |
 | docs | 3481 | 5683 | `python -m topoone_app_docs`（manifest） |
-| chat | 3483 | — | `python -m topoone_app_chat`（manifest） |
+| chat | 3483 | — | `python -m topoone_app_chat`（manifest；包体 MS7-W4 起 `apps/workbench/chat_service/topoone_app_chat`） |
 | architect | 3470 | — | `python -m topoone_app_architect`（manifest） |
 | mcp | 3460 | — | `python -m topoone.plugins.mcp` |
 | runner | 3458 | — | `python -m topoone.plugins.runner` |

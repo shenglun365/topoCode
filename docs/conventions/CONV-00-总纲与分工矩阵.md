@@ -35,7 +35,7 @@ Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个�
 | `packages/web-core/` | `@topo/web-core`（npm workspace） | Vue3 | 前端共享内核：RPC 客户端/共享组件/i18n/门户首页 |
 | `apps/workbench/` | `@topo/app-workbench` + `topoone_app_workbench` | Vue3 + Python | 主工作台（导入/分析/可视化/知识库） |
 | `apps/docs/` | `@topo/app-docs` + `topoone_app_docs` | Vue3 + Python | 文档浏览（viewer/web-root + render.* RPC） |
-| `apps/chat/` | `@topo/app-chat` + `topoone_app_chat` | Vue3 + Python | AI 对话（会话/技能/草稿） |
+| `apps/chat/` | —（FE 已并入 workbench，MS7-W3） | Python | chat 后端域托管（MS7-W4）：包体 `apps/workbench/chat_service/topoone_app_chat`，manifest 留 `apps/chat/`（gateway 发现约定），:3483 独立进程 |
 | `apps/architect/` | `@topo/app-architect` + `topoone_app_architect` | Vue3 + Python | Architect 工作台（语义资产/需求/设计/Coding Agent） |
 | `build/` | — | Node 脚本 | core bundle（render-worker / plugins / modules） |
 | `scripts/` | — | Shell/Python | serve / setup / rpc-baseline 等开发脚本 |
@@ -48,7 +48,7 @@ Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个�
 | 前端共享内核 | `packages/web-core/src/` + `dist-portal/`（构建产物） | 导出 API（index.ts）、token 客户端行为、门户 URL（/ · /home） | 前端基础组 | G4+G5+G7（type-check/build/5 SPA） |
 | workbench | `apps/workbench/{src,topoone_app_workbench,server,tests}` + manifest | `/app` URL、`/app` 资产路径、`knowledge.*` RPC 命名空间 | 工作台组 | G3+G4+G5+G6+G7 |
 | docs | `apps/docs/{src,topoone_app_docs,server,tests}` + manifest | `/docs/` 资产路径、`/viewer·/web-root·/projects` URL、`render.*·doc.*` RPC、`:3481` | 文档组 | 同上 |
-| chat | `apps/chat/{src,topoone_app_chat,server,tests}` + manifest | `/chat/` 资产路径、`/chat` URL、`/api/chat·/api/models·/api/skills·/api/template-locale·/api/drafts·/api/notes` 前缀、`:3483` | 对话组 | 同上 |
+| chat | `apps/workbench/chat_service/{topoone_app_chat,tests}` + `apps/chat/manifest.toml` | `/api/chat·/api/models·/api/skills·/api/template-locale·/api/drafts·/api/notes` 前缀、`:3483` | 对话组 | FE 页面 `/chat` 由 workbench SPA 客户端路由承载（MS7-W3） |
 | architect | `apps/architect/{src,topoone_app_architect,tests}` + manifest | `/architect` 页面、`/web/architect/` 资产路径、`/api/architect` 前缀、`:3470`、`architect.db` 独立 | Architect 组 | 同上 + WS kb-analysis |
 
 ## 4. 四大边界规则（所有模块共同遵守）
@@ -86,7 +86,7 @@ Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个�
 | 前端基础组 | @topo/web-core | 共享组件/i18n/RPC+token 客户端/门户；执行上提/下沉 |
 | 工作台组 | apps/workbench | 导入/分析/可视化/知识库 |
 | 文档组 | apps/docs | viewer/web-root + render/doc RPC |
-| 对话组 | apps/chat | 会话/技能/草稿 |
+| 对话组 | apps/workbench/chat_service（chat） | 会话/技能/草稿 |
 | Architect 组 | apps/architect | 语义资产/需求/设计/Coding Agent 集成 |
 
 > 团队小于角色数时合并兼任即可；**分工矩阵（§3）的"修改方"列是边界权威**，与人数无关。
