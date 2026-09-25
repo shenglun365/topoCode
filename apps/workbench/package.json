@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "TopoCode \u5b50\u9879\u76ee 1\uff1a\u4e3b\u5de5\u4f5c\u53f0\uff08\u77e5\u8bc6\u5e93\u89e3\u6790\u548c\u7ba1\u7406\uff09",
+  "description": "TopoCode 子项目 1：主工作台（知识库解析和管理）",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -14,7 +14,6 @@
   "dependencies": {
     "@heroicons/vue": "2.2.0",
     "@topo/web-core": "*",
-    "d3": "7.9.0",
     "highlight.js": "^11.11.1",
     "markdown-it": "14.1.1",
     "pinia": "3.0.3",

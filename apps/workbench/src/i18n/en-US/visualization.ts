@@ -1,7 +1,6 @@
 export default { visualization: {
   title: 'Visualization',
   mermaid: 'Mermaid',
-  d3: 'D3 Force Graph',
   plantuml: 'PlantUML',
   pixi: 'PIXI.js',
   animation: 'Animation',

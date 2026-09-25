@@ -1,7 +1,6 @@
 export default { visualization: {
   title: '可视化',
   mermaid: 'Mermaid',
-  d3: 'D3 力导向图',
   plantuml: 'PlantUML',
   pixi: 'PIXI.js',
   animation: '动画',
