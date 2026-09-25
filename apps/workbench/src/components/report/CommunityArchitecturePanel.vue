@@ -60,13 +60,13 @@ const hasAnyCommunity = computed(() => props.hasAnyCommunity)
 
 const runtimeCommunities = computed(() => {
   if (isExternalTab.value) return []
-  const coms = communityStore.tasks[props.taskId]?.communities || []
+  const coms = (communityStore.tasks[props.taskId]?.communities || []) as CommunityItem[]
   return coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
 })
 
 const availableLevels = computed(() => {
   if (isExternalTab.value) return []
-  const coms = communityStore.tasks[props.taskId]?.communities || []
+  const coms = (communityStore.tasks[props.taskId]?.communities || []) as CommunityItem[]
   const typeComs = coms.filter(c => c.edgeType === commEdgeType.value)
   const levels = new Set(typeComs.map(c => c.level))
   return Array.from(levels).sort()

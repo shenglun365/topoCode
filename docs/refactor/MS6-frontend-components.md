@@ -37,7 +37,7 @@
 | **W2 SemanticGraphView** ✅ | S1 逻辑层四域 + S2 模板两面板（GraphToolbarPanel 326 / GraphMainPanel 703，SGV_WS_KEY 注入；样式分发：icon-pulse→工具栏，anchor-flash/td-node/card-*→主区） | 64/64+typecheck 0 错；**SFC 2,649→282 行**（<800 达成） | 1.5d |
 | **W3 AnalysisChat** ✅ | S1 逻辑八域(chat-view/) + S2 模板两面板(ChatFeedPanel 1055/ChatBottomPanel 356, WS_KEY 注入+props 整体 v-bind 透传) | 64/64+typecheck 0 错；**SFC 2,383→421 行** | 1d |
 | **W4 ReportHome + ProjectCard** ✅ | ReportHome: load/presum/ui 三域+MainPanel(样式随迁); ProjectCard: state/menu/edit/actions 四域+MainPanel(模板+scoped 样式下沉, **全局 .context-menu 样式留 SFC**) | workbench 19/19+typecheck 0 错；**1,443→157 / 1,441→167** | 1.5d |
-| **W5 community-store 抽 useComponentAnalysis**（1,252） ⬜ | 组件分析逻辑抽 composable，store 瘦身为状态容器 | 同上 | 1d |
+| **W5 community-store 抽 useComponentAnalysis** ✅ | 组件分析簇(useComponentAnalysis 174: analyzeSelected/runTask/stop/retry) + agent 任务簇(useAgentTasks 364: 触发/轮询/历史/取消)外移；store 792 行仍为唯一 API 面(return 展开) | workbench 19/19+typecheck 0 错；**1,252→792(-37%)** | 1d |
 | **W6 收尾** | types 死类型清理 + **DiagramViewer 裁决已定案（2026-09-25 方案A：留 web-core；RebuildDialog=私有子件标注已落）**+ 文档回写 | 全套件+milestones 更新 | 1d |
 
 **合计 ~9 人日**（与原估算一致）。tag 计划：开工前 `git tag pre-MS6`。
@@ -150,3 +150,13 @@ W1 手工转写 → W2 升级为**机械抽取脚本**（核心资产，后续�
 2. emits/props 清单以 `grep` 全量收集为准；SFC 转发 `@xxx="(p) => emit('xxx', p)"`
 3. store 别名注入进 composable 函数体（pinia 单例等价原语义）；**注入的 import 必须放模块级**
 4. v-bind="props" 整体透传 + 面板声明子集 = 零逐 props 打地鼠
+
+
+---
+
+## 11. W5 执行记录（2026-09-25）
+
+- **模式**：store 逻辑簇外移为 ctx 注入式 composable（`useX(ctx)` 解构后裸名访问，正文零改写）；store setup 内接线并 `return { ...analysisApi, ...agentApi, ...原有面 }` —— API 面逐名保全（W0 形状守卫直接验证）
+- 交织区教训：triggerOverview/triggerComponentAnalysis(742-820) 与 agent 轮询机制深度交织——首次切割留中段导致保留区引用移出名（use-before-declaration）；**二次切割按语义簇合并交织区**
+- 保留区引用移出名的：wiring 后局部解构绑定（compile-driven 全量收集）
+- 门禁：workbench 19/19 + typecheck 0 错
