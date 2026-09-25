@@ -19,6 +19,11 @@ import { semanticAssetService, type AssetCompareResult } from '@/services/semant
 import { copyText } from '@/utils/clipboard'
 
 const { t } = useI18n()
+import { useGraphData } from './graph-view/useGraphData'
+import { useGraphDetail } from './graph-view/useGraphDetail'
+import { useGraphCode } from './graph-view/useGraphCode'
+import { useGraphRender } from './graph-view/useGraphRender'
+import type { WsDeps } from './graph-view/graphTypes'
 
 /** 图谱资源 tab 定义(由外部资产列表/组件列表打开)。 */
 export interface GraphTabDef {
@@ -43,1760 +48,223 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [id: string] }>()
 
 /** 图谱规模闸门：范围资产超此值不自动渲染，须经文件索引手动圈定(≤预算)。 */
-const FILE_BUDGET = 500
-const fileIndex = computed(() => props.fileIndex ?? [])
-const scopeTotal = computed(() => fileIndex.value.reduce((s, e) => s + e.n, 0))
-const overLimit = computed(() => scopeTotal.value > FILE_BUDGET)
-// 文件范围选择按 tab 持久化：重开 tab 不再强制圈定。
-const fileScopeKey = computed(() => `arch.graph.fileScope:${props.tab.id}`)
-const fileScopeSel = ref<string[]>((() => {
-  try { return JSON.parse(localStorage.getItem(`arch.graph.fileScope:${props.tab.id}`) || '[]') } catch { return [] }
-})())
-const fileScopeOpen = ref(false)
-/** 已圈定文件集合的资产数(工具栏徽标提示)。 */
-const scopeAssets = computed(() => {
-  const set = new Set(fileScopeSel.value)
-  return fileIndex.value.reduce((s, e) => s + (set.has(e.file) ? e.n : 0), 0)
-})
-watch(fileScopeKey, (k) => {
-  try { fileScopeSel.value = JSON.parse(localStorage.getItem(k) || '[]') } catch { fileScopeSel.value = [] }
-})
-function applyFileScope(files: string[]) {
-  fileScopeSel.value = files
-  try { localStorage.setItem(fileScopeKey.value, JSON.stringify(files)) } catch { /* ignore */ }
-  fileScopeOpen.value = false
-  void load(true)
-}
 
-const level = ref<SemanticAssetLevel | ''>('')
-/** 类型(资产类别)过滤：空=全部。 */
-const kindFilter = ref<SemanticAssetKind | ''>('')
-/** 图类型视图(空=按数据区间自动推荐)。 */
-const view = ref<SemanticGraphViewId | ''>('')
-const graph = ref<SemanticGraphResult | null>(null)
-
-/** 基线 diff：节点(任一锚点文件 ∈ diffFiles)集合 + 计数，供图例/详情徽标。 */
-const diffNodeIds = computed<Set<string>>(() => {
-  const s = new Set<string>()
-  const df = props.diffFiles
-  if (!df || !df.size) return s
-  for (const a of graph.value?.anchors ?? []) {
-    if (df.has(a.file)) s.add(a.assetId)
-  }
-  return s
-})
-const diffNodeCount = computed(() => diffNodeIds.value.size)
-function isDiffNode(id: string): boolean {
-  return props.diffFiles ? diffNodeIds.value.has(id) : false
-}
-
-// ---- 对比口径(任意 head 对)资产级变化：存在时优先于文件级 diff 徽标 ----
-type DiffBucket = 'changed' | 'weak' | 'new' | 'removed'
-/** 资产 id → 变化桶(后端 asset-compare 符号级判定)：
- *  changed=强关联(符号代码段有变更,黄底) / weak=弱关联(仅同文件其他位置变更,灰底)
- *  / new=目标侧新增(绿底) / removed=目标侧移除(红虚线)。
- *  ⚠️ strong 缺失(旧后端未重启)视为强。 */
-const diffKindById = computed<Map<string, DiffBucket>>(() => {
-  const m = new Map<string, DiffBucket>()
-  const c = props.compareData
-  if (!c) return m
-  for (const a of c.assets.changed) m.set(a.id, a.strong === false ? 'weak' : 'changed')
-  for (const a of c.assets.new) m.set(a.id, 'new')
-  for (const a of c.assets.removed) m.set(a.id, 'removed')
-  return m
-})
-const diffBucketCounts = computed(() => {
-  const counts: Record<DiffBucket, number> = { changed: 0, weak: 0, new: 0, removed: 0 }
-  for (const k of diffKindById.value.values()) counts[k] += 1
-  return counts
-})
-/** 仅看变化：图谱只渲染参与本次对比的资产(缓解大图下找变化节点)。 */
-const diffOnly = ref(false)
-/** 弱关联计数(仅同文件变更；不标色，仅提示)。 */
-const weakCount = computed(() => props.compareData?.assets.changedWeak ?? 0)
-const loading = ref(false)
-const selId = ref('')
-const selDetail = ref<SemanticAsset | null>(null)
-/** 邻域聚焦：开启后图谱只渲染选中资产周围 focusHops 跳子图(缓解大图拥挤/过宽/过长)。 */
-const focusMode = ref(false)
-const focusHops = ref(2)
-/** 范围锁定：锁定时切换选中节点不跟随重查(图谱视角保持)，解锁恢复漫游。
- *  默认锁定；全局共享偏好，LS 持久化(arch.graph.focusLock)。 */
-const FOCUS_LOCK_KEY = 'arch.graph.focusLock'
-const focusLock = ref((() => {
-  try { return (localStorage.getItem(FOCUS_LOCK_KEY) ?? '1') !== '0' }
-  catch { return true }
-})())
-watch(focusLock, (v) => {
-  try { localStorage.setItem(FOCUS_LOCK_KEY, v ? '1' : '0') } catch { /* ignore */ }
-})
-const lockAnchor = ref('')   // 锁定瞬间的中心锚点(软刷新/重查仍以其为中心)
-
-function toggleFocusLock() {
-  if (!focusMode.value) return
-  focusLock.value = !focusLock.value
-  if (focusLock.value) {
-    lockAnchor.value = selId.value
-  } else {
-    const drifted = selId.value && selId.value !== lockAnchor.value
-    lockAnchor.value = ''
-    // 解锁且选中已偏离锚点 → 立即对齐漫游态
-    if (drifted) void load()
-  }
-}
-/** 关系矩阵浮窗(独立全局浮窗，数据跟随当前图谱口径)。 */
-const matrixOpen = ref(false)
-/** 边图例浮层开关。 */
-const edgeLegendOpen = ref(false)
-/** 边图例浮层：Teleport 到 body + fixed 定位，避免被工具栏 overflow 裁剪或撑开。 */
-const legendBtnRef = ref<HTMLElement | null>(null)
-const legendPos = ref({ top: 0, left: 0 })
-const LEGEND_W = 176 // w-44
-function toggleEdgeLegend() {
-  if (!edgeLegendOpen.value && legendBtnRef.value) {
-    const r = legendBtnRef.value.getBoundingClientRect()
-    let left = r.right - LEGEND_W
-    if (left < 8) left = 8
-    if (left + LEGEND_W > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - LEGEND_W)
-    legendPos.value = { top: r.bottom + 4, left }
-  }
-  edgeLegendOpen.value = !edgeLegendOpen.value
-}
-function onLegendDocClick(e: MouseEvent) {
-  const t = e.target
-  if (!(t instanceof Node)) return
-  if (legendBtnRef.value?.contains(t)) return
-  if (document.querySelector('[data-edge-legend]')?.contains(t)) return
-  edgeLegendOpen.value = false
-}
-watch(edgeLegendOpen, (open) => {
-  if (open) setTimeout(() => document.addEventListener('click', onLegendDocClick, true), 0)
-  else document.removeEventListener('click', onLegendDocClick, true)
-})
-onBeforeUnmount(() => document.removeEventListener('click', onLegendDocClick, true))
-/** 工具栏开关矩阵浮窗：打开时强制还原展开态（最小化持久化会让重开只剩停靠小图标，形同"无弹窗"）。 */
-function toggleMatrix() {
-  matrixOpen.value = !matrixOpen.value
-  if (matrixOpen.value) {
-    try { localStorage.setItem('arch.matrixWin.minimized', '0') } catch { /* ignore */ }
-  }
-}
-
-/** 资产节点索引浮窗(左停靠)：开关逻辑与矩阵同款。 */
-const indexOpen = ref(false)
-function toggleIndex() {
-  indexOpen.value = !indexOpen.value
-  if (indexOpen.value) {
-    try { localStorage.setItem('arch.indexWin.minimized', '0') } catch { /* ignore */ }
-  }
-}
-/** 矩阵(含下钻行首/列头)选资产：与图谱节点点击同轨 — 切选后锚点滚动闪烁；同资产重复点回主锚点并闪烁。 */
-function onMatrixSelect(id: string) {
-  if (!id) return
-  if (id === selId.value) {
-    const home = selAnchors.value[0]?.file
-    if (home && activeFileTab.value !== home) activeFileTab.value = home
-    void nextTick(() => flashAnchor(0))
-    return
-  }
-  flashOnNext = true
-  flashSeg = 0
-  selId.value = id
-  return
-}
-/** 当前渲染语言(默认 mermaid)。 */
-const cardLang = ref<'mermaid' | 'plantuml'>('mermaid')
-const cardSrcOpen = ref(false)
-const cardFullscreen = ref(false)
-const diagramLangs = computed(() => [{ id: 'mermaid' as const, label: 'mermaid' }, { id: 'plantuml' as const, label: 'plantuml' }])
-function setCardLang(l: 'mermaid' | 'plantuml') {
-  cardLang.value = l
-}
-function toggleCardSource() {
-  cardSrcOpen.value = !cardSrcOpen.value
-}
-function openCardFullscreen() {
-  cardFullscreen.value = true
-}
-function closeCardFullscreen() {
-  cardFullscreen.value = false
-}
-/** 重播：默认(加载/重渲染)直接呈现最终完成图；点图内工具栏的重播按钮才按步骤播放。 */
-const diagRef = ref<InstanceType<typeof TopoDiagram> | null>(null)
-const replayTick = ref(0)
-const animating = ref(false)
-function replayGraph() {
-  replayTick.value += 1
-  animating.value = true
-}
-/** 把重播按钮注入图内浮动工具栏(.td-toolbar，与缩放/导出按钮同排，置首)。 */
-function injectReplayBtn(tries = 0) {
-  const host = diagRef.value?.containerRef
-  if (!host) return
-  if (host.querySelector('[data-td-replay]')) return
-  const bar = host.querySelector('.td-toolbar')
-  if (!bar) {
-    if (tries < 10) setTimeout(() => injectReplayBtn(tries + 1), 100)
-    return
-  }
-  const btn = makeButton('↻', t('assetMgmt.graph.replay'), replayGraph)
-  btn.dataset.tdReplay = '1'
-  bar.prepend(btn)
-}
-/** 播放到最后一步后关掉动画态：之后主题/语言/全屏等重渲染不再重播。 */
-function onDiagramReady() {
-  injectReplayBtn()
-  void nextTick(() => { applySelectedNodeStyle(); applyNodeTooltips(); applyDiffNodeStyles() })
-  if (!animating.value) return
-  const tryWatch = (tries = 0) => {
-    const ctrl = diagRef.value?.getAnimation() ?? null
-    if (!ctrl || ctrl.total <= 0) {
-      // 不支持动画的类型(无 plan)：稍候放弃，图本身已是完整态。
-      if (tries < 20) setTimeout(() => tryWatch(tries + 1), 100)
-      else animating.value = false
-      return
-    }
-    const stopWatch = ctrl.subscribe((st) => {
-      if (!st.playing && st.index >= ctrl.total - 1) {
-        stopWatch()
-        animating.value = false
-      }
-    })
-  }
-  tryWatch()
-}
-/** 节点是否已在可视区域内：节点屏幕 bbox 外扩 margin 逆映射到根用户空间后
- *  完全落在 svg 元素可视范围内(对 zoom-pan 的 transform/viewBox 实现均成立)。
- *  在视口内则跳过居中，避免点选时图谱频繁跳动(用户反馈)。 */
-function nodeVisibleInViewport(svg: SVGSVGElement, el: SVGGElement): boolean {
-  try {
-    const sctm = svg.getScreenCTM()
-    const svgRect = svg.getBoundingClientRect()
-    if (!sctm || !svgRect.width || !svgRect.height) return false
-    const inv = sctm.inverse()
-    const p1 = new DOMPoint(svgRect.left, svgRect.top).matrixTransform(inv)
-    const p2 = new DOMPoint(svgRect.right, svgRect.bottom).matrixTransform(inv)
-    const vx = Math.min(p1.x, p2.x)
-    const vy = Math.min(p1.y, p2.y)
-    const vw = Math.abs(p2.x - p1.x)
-    const vh = Math.abs(p2.y - p1.y)
-    const r = el.getBoundingClientRect()
-    if (!r.width || !r.height) return false
-    const a = new DOMPoint(r.left, r.top).matrixTransform(inv)
-    const b = new DOMPoint(r.right, r.bottom).matrixTransform(inv)
-    const M = 24 // 外扩余量：贴边节点也算完整可见
-    const nx = Math.min(a.x, b.x) - M
-    const ny = Math.min(a.y, b.y) - M
-    const nw = Math.abs(b.x - a.x) + 2 * M
-    const nh = Math.abs(b.y - a.y) + 2 * M
-    return nx >= vx && ny >= vy && nx + nw <= vx + vw && ny + nh <= vy + vh
-  } catch {
-    return false
-  }
-}
-/** 联动选中 → 节点居中：反查 clickIds 找 svg 节点元素，bbox 中心交 zoom-pan centerOn。
- *  节点已在可视区域内时不平移(避免频繁跳动)；仅视口外节点才居中。 */
-function centerSelectedNode() {
-  void nextTick(() => {
-    const svg = diagRef.value?.getSvg()
-    const cmap = clickIds.value
-    if (!svg || !selId.value || !cmap.size) return
-    const rev = new Map<string, string>()
-    cmap.forEach((aid, key) => { if (!rev.has(aid)) rev.set(aid, key) })
-    const key = rev.get(selId.value)
-    if (!key) return
-    let el: SVGGElement | null = null
-    for (const g of Array.from(svg.querySelectorAll<SVGGElement>('g.node'))) {
-      const mid = g.id.match(/flowchart-(.+?)-\d+$/)?.[1] ?? g.id
-      const txt = (g.textContent ?? '').trim()
-      if (mid === key || txt === key) { el = g; break }
-    }
-    if (!el) return
-    try {
-      if (nodeVisibleInViewport(svg, el)) return
-      // getBBox 是元素局部坐标系(祖先 transform 会偏移)；用屏幕 rect + getScreenCTM 逆映射回根 viewBox 空间
-      const r = el.getBoundingClientRect()
-      const sctm = svg.getScreenCTM()
-      if (!sctm || !r.width) return
-      const c = new DOMPoint(r.left + r.width / 2, r.top + r.height / 2).matrixTransform(sctm.inverse())
-      diagRef.value?.centerOn(c.x, c.y)
-    } catch { /* 未渲染时可能抛错，忽略 */ }
-  })
-}
-watch(selId, () => centerSelectedNode())
-
-/** 主题跟随 data-theme(catppuccin 变量随主题切换)。 */
-const themeMode = computed<'dark' | 'light'>(() =>
-  (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light') ? 'light' : 'dark')
-const themeVars = computed(() => themeVariablesFor(themeMode.value))
-/** 信息卡拖动位置。 */
-const cardPos = ref<{ x: number; y: number } | null>(null)
-const cardEl = ref<HTMLElement | null>(null)
-let cardDragging = false
-let cardStartX = 0
-let cardStartY = 0
-let cardStartPos = { x: 0, y: 0 }
-
-/** 资产类别 → 强调色(锚点高亮/最小化图标)。 */
-const KIND_TEXT: Record<string, string> = {
-  entity: 'text-ctp-mauve', contract: 'text-ctp-yellow', state: 'text-ctp-sky',
-  rule: 'text-ctp-peach', process: 'text-ctp-blue', decision: 'text-ctp-green',
-}
-const KIND_CHIP: Record<string, string> = KIND_CARD_CLASS
-/** 锚点行底色(比纯文字色更醒目)。 */
-const KIND_BG: Record<string, string> = {
-  entity: 'bg-ctp-mauve/15', contract: 'bg-ctp-yellow/15', state: 'bg-ctp-sky/15',
-  rule: 'bg-ctp-peach/15', process: 'bg-ctp-blue/15', decision: 'bg-ctp-green/15',
-}
-const kindTextClass = computed(() => KIND_TEXT[sel.value?.kind ?? ''] ?? 'text-ctp-yellow')
-const kindBgClass = computed(() => KIND_BG[sel.value?.kind ?? ''] ?? 'bg-ctp-yellow/15')
-const kindChipClass = computed(() => KIND_CHIP[sel.value?.kind ?? ''] ?? 'bg-ctp-surface0 text-ctp-subtext0 border-ctp-surface1')
-
-// 代码字号与顶部工具栏联动：比工具栏设定小一号(字号档位向下取一档)，最小 11px。
-const settings = useArchSettingsStore()
-const FONT_STEPS = [13, 15, 18, 22, 26, 32]
-const codeFontSize = computed(() => {
-  const fs = Number(settings.fontSize) || 16
-  const below = FONT_STEPS.filter((s) => s < fs)
-  return Math.max(11, below.length ? below[below.length - 1] : 11)
-})
-
-/** 信息卡尺寸(上下左右四边独立拉伸；最终尺寸持久化 LS，再次拉伸覆盖)。 */
-const CARD_MIN_KEY = 'arch.graphCard.minimized'
-const CARD_SIZE_KEY = 'arch.graphCard.size'
-const cardMin = ref((() => {
-  try { return localStorage.getItem(CARD_MIN_KEY) === '1' } catch { return false }
-})())
-function setCardMin(v: boolean) {
-  cardMin.value = v
-  try { localStorage.setItem(CARD_MIN_KEY, v ? '1' : '0') } catch { /* ignore */ }
-}
-function loadCardSize(): { w: number; h: number | null } {
-  try {
-    const raw = JSON.parse(localStorage.getItem(CARD_SIZE_KEY) || '')
-    if (raw && Number(raw.w) >= 360 && Number(raw.h) >= 240) return { w: Number(raw.w), h: Number(raw.h) }
-  } catch { /* ignore */ }
-  return { w: 560, h: 520 }
-}
-function saveCardSize() {
-  try { localStorage.setItem(CARD_SIZE_KEY, JSON.stringify(cardSize.value)) } catch { /* ignore */ }
-}
-const cardSize = ref<{ w: number; h: number | null }>(loadCardSize())
-const cardSizeInit = { ...cardSize.value }
-let cardResizing = false
-type CardResizeEdge = 'n' | 's' | 'e' | 'w'
-let resizeEdge: CardResizeEdge = 's'
-let resizeStart = { x: 0, y: 0, w: cardSizeInit.w, h: cardSizeInit.h, px: 0, py: 0 }
-
-function beginCardDrag(e: MouseEvent) {
-  if (e.button !== 0) return
-  const el = cardEl.value
-  if (!el) return
-  const target = e.target as HTMLElement
-  if (target.closest('button, a, input, select')) return
-  cardDragging = true
-  if (!cardPos.value) {
-    // 初始居中(transform 定位) → 首次拖动转为显式坐标
-    const r = el.getBoundingClientRect()
-    cardStartPos = { x: r.left, y: r.top }
-    cardPos.value = { ...cardStartPos }
-  } else {
-    cardStartPos = { x: el.offsetLeft, y: el.offsetTop }
-  }
-  cardStartX = e.clientX
-  cardStartY = e.clientY
-  // 监听挂 window：鼠标快速划出卡片/把手也不丢事件
-  window.addEventListener('mousemove', cardDrag)
-  window.addEventListener('mouseup', cardEndDrag, { once: true })
-  e.preventDefault()
-}
-function cardStartResize(e: MouseEvent, edge: CardResizeEdge) {
-  if (e.button !== 0) return
-  e.preventDefault()
-  e.stopPropagation()
-  const el = cardEl.value
-  if (!el) return
-  // 初始居中(transform 定位) → 首次拉伸转为显式坐标(n/w 边拉伸需同步调整位置)
-  let px = el.offsetLeft
-  let py = el.offsetTop
-  if (!cardPos.value) {
-    const r = el.getBoundingClientRect()
-    px = r.left
-    py = r.top
-    cardPos.value = { x: px, y: py }
-  }
-  resizeEdge = edge
-  cardResizing = true
-  resizeStart = {
-    x: e.clientX, y: e.clientY,
-    w: cardSize.value.w,
-    h: cardSize.value.h ?? el.offsetHeight,
-    px, py,
-  }
-  window.addEventListener('mousemove', cardDrag)
-  window.addEventListener('mouseup', cardEndDrag, { once: true })
-}
-function cardDrag(e: MouseEvent) {
-  if (cardResizing) {
-    const maxW = Math.min(1100, window.innerWidth - 16)
-    const maxH = Math.floor(window.innerHeight * 0.94)
-    const dx = e.clientX - resizeStart.x
-    const dy = e.clientY - resizeStart.y
-    let w = resizeStart.w
-    let h = resizeStart.h
-    let px = resizeStart.px
-    let py = resizeStart.py
-    if (resizeEdge === 'e') {
-      w = Math.min(maxW, Math.max(360, w + dx))
-    } else if (resizeEdge === 'w') {
-      // 左缘拉伸：宽度反向变化，左缘跟随(右缘固定)
-      w = Math.min(maxW, Math.max(360, w - dx))
-      px += resizeStart.w - w
-    }
-    if (resizeEdge === 's') {
-      h = Math.min(maxH, Math.max(240, h + dy))
-    } else if (resizeEdge === 'n') {
-      // 上缘拉伸：高度反向变化，上缘跟随(下缘固定)
-      h = Math.min(maxH, Math.max(240, h - dy))
-      py += resizeStart.h - h
-    }
-    cardSize.value = { w, h }
-    cardPos.value = { x: px, y: py }
-    return
-  }
-  if (!cardDragging) return
-  const el = cardEl.value
-  if (!el) return
-  // fixed 浮窗：视口内软钳制(至少留 80px 可抓握)
-  cardPos.value = {
-    x: Math.min(window.innerWidth - 80, Math.max(-(cardSize.value.w - 80), cardStartPos.x + (e.clientX - cardStartX))),
-    y: Math.min(window.innerHeight - 48, Math.max(0, cardStartPos.y + (e.clientY - cardStartY))),
-  }
-}
-function cardEndDrag() {
-  cardDragging = false
-  if (cardResizing) saveCardSize()
-  cardResizing = false
-  window.removeEventListener('mousemove', cardDrag)
-}
-function cardResetPos() { cardPos.value = null }
-
-/** 类型(资产类别)过滤后的节点集。 */
-const kindNodes = computed(() => (graph.value?.nodes ?? []).filter((n) =>
-  !kindFilter.value || n.kind === kindFilter.value))
-
-/** 当前(类型过滤下)实际有数据的粒度层级(业务→逻辑→实现)，避免无数据选项。 */
-const availableLevels = computed<SemanticAssetLevel[]>(() => {
-  const present = new Set(kindNodes.value.map((n) => n.level).filter(Boolean))
-  return (['business', 'logic', 'implementation'] as SemanticAssetLevel[]).filter((l) => present.has(l))
-})
-
-/** 粒度下拉选项：全部 + 有数据的层级。 */
-const levelOptions = computed(() => {
-  const labels: Record<string, string> = {
-    business: t('assetMgmt.graph.business'),
-    logic: t('assetMgmt.graph.logic'),
-    implementation: t('assetMgmt.graph.implementation'),
-  }
-  return availableLevels.value.map((l) => ({ value: l, label: labels[l] ?? l }))
-})
-
-/** 类型下拉选项(资产类别)。 */
-const kindOptions = computed(() =>
-  (['entity', 'contract', 'state', 'rule', 'process', 'decision'] as SemanticAssetKind[])
-    .map((k) => ({ value: k, label: t(`assetMgmt.kind.${k}`) })))
-
-/** 生效粒度(粒度下拉选择；空=全部)。 */
-const effectiveLevel = computed<SemanticAssetLevel | ''>(() => level.value)
-
-/** 生效节点集：按类型 + 粒度过滤；「仅看变化」开启时只留对比命中资产。
- *  ⚠️ 焦点资产(单资产 tab)永不被过滤——新提取/未入对比缓存的资产曾被 diffOnly
- *  滤成空图，误报「暂无语义资产」。 */
-const scopedNodes = computed(() => kindNodes.value.filter((n) =>
-  (!effectiveLevel.value || n.level === effectiveLevel.value) &&
-  (!diffOnly.value || !diffKindById.value.size || diffKindById.value.has(n.id)
-   || (props.tab.kind === 'asset' && n.id === props.tab.assetId))))
-
-const scopedEdges = computed(() => {
-  const ids = new Set(scopedNodes.value.map((n) => n.id))
-  return (graph.value?.edges ?? []).filter((e) =>
-    ids.has(e.from) && ids.has(e.to) && !edgeTypeOff.value.has(e.type || ''))
-})
-
-/** 间接边开关(默认关：1 跳中转关系虚线补充，变更后重查)。 */
-const includeIndirect = ref(false)
-watch(includeIndirect, () => load())
-/** 关闭显示的边类型集合(图例点击切换；空=全显示)。 */
-const edgeTypeOff = ref<Set<string>>(new Set())
-function toggleEdgeType(k: string) {
-  const next = new Set(edgeTypeOff.value)
-  if (next.has(k)) next.delete(k)
-  else next.add(k)
-  edgeTypeOff.value = next
-}
-/** 当前图谱内边类型 → 数量(图例)。 */
-const edgeTypeCounts = computed(() => {
-  const ids = new Set(scopedNodes.value.map((n) => n.id))
-  const cnt = new Map<string, number>()
-  for (const e of graph.value?.edges ?? []) {
-    if (!ids.has(e.from) || !ids.has(e.to)) continue
-    const k = e.type || ''
-    cnt.set(k, (cnt.get(k) || 0) + 1)
-  }
-  return [...cnt.entries()].sort((a, b) => b[1] - a[1])
-})
-const EDGE_TYPE_TEXT = computed<Record<string, string>>(() => ({
-  calls: t('assetMgmt.graph.edgeType.calls'), references: t('assetMgmt.graph.edgeType.references'),
-  imports: t('assetMgmt.graph.edgeType.imports'), contains: t('assetMgmt.graph.edgeType.contains'),
-  extends: t('assetMgmt.graph.edgeType.extends'), implements: t('assetMgmt.graph.edgeType.implements'),
-  instantiates: t('assetMgmt.graph.edgeType.instantiates'),
-  assigns: t('assetMgmt.graph.edgeType.assigns'), passes: t('assetMgmt.graph.edgeType.passes'),
-  type_of: t('assetMgmt.graph.edgeType.type_of'), returns: t('assetMgmt.graph.edgeType.returns'),
-  overrides: t('assetMgmt.graph.edgeType.overrides'), decorates: t('assetMgmt.graph.edgeType.decorates'),
-  callback: t('assetMgmt.graph.edgeType.callback'),
-}))
-function edgeTypeLabel(k: string) {
-  return EDGE_TYPE_TEXT.value[k] || k || t('assetMgmt.graph.edgeTypeFallback')
-}
-const EDGE_TYPE_COLOR: Record<string, string> = {
-  calls: 'text-ctp-red', references: 'text-ctp-blue', imports: 'text-ctp-yellow',
-  contains: 'text-ctp-green', extends: 'text-ctp-mauve', implements: 'text-ctp-mauve',
-  instantiates: 'text-ctp-peach', assigns: 'text-ctp-teal', passes: 'text-ctp-sky',
-  type_of: 'text-ctp-lavender', returns: 'text-ctp-flamingo', overrides: 'text-ctp-mauve',
-  decorates: 'text-ctp-pink', callback: 'text-ctp-rosewater',
-}
-function edgeTypeColor(k: string) {
-  return EDGE_TYPE_COLOR[k] || 'text-ctp-overlay1'
-}
-
-/** 图类型：手动选择优先，否则按数据区间自动推荐第一个支持的。 */
-const viewOptions = computed<{ value: SemanticGraphViewId; label: string }[]>(() => {
-  const supported = supportedViewsFor(effectiveLevel.value, scopedNodes.value)
-  const labels: Record<SemanticGraphViewId, string> = {
-    flow: t('assetMgmt.graph.viewFlow'),
-    class: t('assetMgmt.graph.viewClass'),
-    er: t('assetMgmt.graph.viewEr'),
-    seq: t('assetMgmt.graph.viewSeq'),
-    state: t('assetMgmt.graph.viewState'),
-    activity: t('assetMgmt.graph.viewActivity'),
-    mindmap: t('assetMgmt.graph.viewMindmap'),
-  }
-  return supported.map((v) => ({ value: v, label: labels[v] }))
-})
-
-/** 因数据不适合而被隐藏的视图及其原因(工具提示说明「为何不可选」)。 */
-const hiddenViewHints = computed<string[]>(() => {
-  const reasons = viewUnavailableReasons(effectiveLevel.value, scopedNodes.value)
-  const labels: Record<SemanticGraphViewId, string> = {
-    flow: t('assetMgmt.graph.viewFlow'),
-    class: t('assetMgmt.graph.viewClass'),
-    er: t('assetMgmt.graph.viewEr'),
-    seq: t('assetMgmt.graph.viewSeq'),
-    state: t('assetMgmt.graph.viewState'),
-    activity: t('assetMgmt.graph.viewActivity'),
-    mindmap: t('assetMgmt.graph.viewMindmap'),
-  }
-  return (Object.keys(reasons) as SemanticGraphViewId[]).map((v) => `${labels[v]}：${reasons[v]}`)
-})
-
-const effectiveView = computed<SemanticGraphViewId>(() => {
-  if (view.value && viewOptions.value.some((o) => o.value === view.value)) return view.value
-  // 未手动选择 → 按资产类别×粒度取推荐默认(如 entity+implementation → 类图)；不可用再退首个支持的
-  const kind = sel.value?.kind ?? (kindFilter.value || undefined)
-  const rec = recommendedSemanticView(kind, effectiveLevel.value || undefined)
-  if (viewOptions.value.some((o) => o.value === rec)) return rec
-  return viewOptions.value[0]?.value ?? 'flow'
-})
-
-/** 下拉绑定：未手动选择时显示当前生效(推荐)默认，选择后为手动值。 */
-const viewSel = computed<SemanticGraphViewId>({
-  get: () => effectiveView.value,
-  set: (v) => { view.value = v },
-})
-
-/** 选中节点(单资产视图的焦点 / 节点点击)。 */
-const sel = computed(() => (graph.value?.nodes ?? []).find((n) => n.id === selId.value) ?? null)
-
-const diagrams = computed<Partial<Record<'mermaid' | 'plantuml', string>>>(() => {
-  if (!graph.value) return {}
-  return semanticGraphViewDiagrams(effectiveView.value, scopedNodes.value, scopedEdges.value)
-})
-
-async function load(reset = false) {
-  // 规模闸门：范围资产 >500 且未圈定文件范围 → 不自动渲染，强制打开文件索引。
-  if (overLimit.value && !fileScopeSel.value.length) {
-    graph.value = null
-    fileScopeOpen.value = true
-    return
-  }
-  loading.value = true
-  expandedTabs.value = []   // 图谱重查(刷新/切视图/聚焦切换) → 拓展沉淀 tab 重置
-  // 访问历史 tab 不在此清空：图谱 tab 切换经 :key 重建组件自然重置；
-  // 聚焦模式/切视图触发的 load() 属同上下文重查，历史应保留(常驻)。
-  try {
-    const scope = props.tab.kind === 'comp' ? [props.tab.compId!] : undefined
-    // 文件范围：仅锚定该文件的资产子图(文件级图谱入口)
-    const file = props.tab.kind === 'file' ? props.tab.fileId : undefined
-    // 多文件范围：超限 tab 经文件索引圈定后的选取
-    const files = overLimit.value && fileScopeSel.value.length ? fileScopeSel.value : undefined
-    // 邻域聚焦：聚焦模式开启且有选中 → 以选中资产为中心 focusHops 跳子图；
-    // 范围锁定时以锁定锚点为中心(切换选中不跟随)；否则单资产 tab 聚焦该资产(1 跳)、组件 tab 全量。
-    let focus: string | undefined
-    let hops = 1
-    // 默认锁定(LS 偏好)且锚点未定 → 固化首个中心为锚点，此后切换选中不跟随
-    if (focusMode.value && focusLock.value && !lockAnchor.value && selId.value) {
-      lockAnchor.value = selId.value
-    }
-    if (focusMode.value && (focusLock.value ? lockAnchor.value : selId.value)) {
-      focus = focusLock.value ? lockAnchor.value : selId.value
-      hops = focusHops.value
-    } else if (props.tab.kind === 'asset') {
-      focus = props.tab.assetId
-    }
-    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value, file, files })
-    if (reset) {
-      // 打开/切换 tab：类型重置为全部；粒度默认=组件级取该组件最高可用层级，其余取全部。
-      kindFilter.value = ''
-      view.value = ''
-      level.value = props.tab.kind === 'comp' ? (availableLevels.value[0] ?? '') : ''
-    } else if (selId.value && !(graph.value?.nodes ?? []).some((n) => n.id === selId.value)) {
-      selId.value = ''
-      selDetail.value = null
-    }
-    // 单资产视图：聚焦目标资产。
-    if (props.tab.kind === 'asset' && props.tab.assetId && !selId.value) {
-      selId.value = props.tab.assetId
-    }
-  } catch {
-    graph.value = null
-  } finally {
-    loading.value = false
-  }
-}
-
-watch(() => props.tab, () => {
-  selId.value = props.tab.kind === 'asset' ? (props.tab.assetId ?? '') : ''
-  selDetail.value = null
-  load(true)
-})
-
-// 类型切换导致当前粒度无数据时，回退到全部(避免空图)。
-watch(availableLevels, (vals) => {
-  if (level.value && !vals.includes(level.value)) level.value = ''
-})
-
-// 邻域聚焦：开关/跳数变化 → 重查(聚焦态需有选中，否则回全量)。
-watch([focusMode, focusHops], () => {
-  void load()
-})
-// 聚焦开/关只管理本次锚点：锁定偏好(focusLock)是 LS 持久值，不随聚焦开关复位。
-// 关闭 → 清锚点；开启且处于锁定偏好 → 以当前选中为新一轮锚点。
-watch(focusMode, (on) => {
-  if (!on) {
-    lockAnchor.value = ''
-  } else if (focusLock.value) {
-    lockAnchor.value = selId.value
-  }
-})
-// 聚焦态下选中变化 → 跟随重查(以新选中为中心)；范围锁定时不跟随(漫游暂停)。
-watch(selId, (id, old) => {
-  if (focusMode.value && !focusLock.value && id && id !== old) void load()
-})
-
-function clearSel() {
-  selId.value = ''
-  selDetail.value = null
-}
-
-/** 选中节点的代码锚点。 */
-const selAnchors = computed<{ file: string; startLine: number; symbol: string }[]>(() => {
-  if (!sel.value) return []
-  const refs = selDetail.value?.astRefs ?? []
-  if (refs.length) return refs
-  return (graph.value?.anchors ?? [])
-    .filter((a) => a.assetId === sel.value!.id)
-    .map((a) => ({ file: a.file, startLine: a.line, symbol: a.symbol }))
-})
-
-// ---- 节点简介 + 关系描述(证据式，grounded；提取时/懒生成，stale 自动失效) ----
-const nodeBriefText = ref('')
-const nodeBriefLoading = ref(false)
-const edgeNotesMap = ref<Record<string, string>>({})
-const edgeNotesLoading = ref(false)
-const inEdges = ref<{ fromId: string; fromName: string; type?: string; desc?: string }[]>([])
-const inEdgesLoading = ref(false)
-
-/** 重新生成当前选中资产的简介(force)。 */
-async function regenerateNodeBrief() {
-  const d = selDetail.value
-  if (!d || nodeBriefLoading.value) return
-  nodeBriefLoading.value = true
-  try {
-    const r = await semanticAssetService.nodeBrief(d.id, true)
-    nodeBriefText.value = r.degraded ? (d.desc || '') : (r.brief || d.desc || '')
-  } catch { /* 保留现状 */ } finally {
-    nodeBriefLoading.value = false
-  }
-}
-
-/** 图谱软刷新：保留当前节点集(拓展合并结果不丢、聚焦层级不动)，就地更新节点字段
- *  (增强的简介/描述生效)与边描述，并并回新增节点/边/锚点。区别于 load() 整图重查(会重置拓展累积)。 */
-async function softRefreshGraph() {
-  const scope = props.tab.kind === 'comp' ? [props.tab.compId!] : undefined
-  let fresh: SemanticGraphResult
-  try {
-    fresh = await semanticAssetService.graph(
-      kindFilter.value || undefined, scope, effectiveLevel.value || undefined,
-      focusMode.value && (focusLock.value ? lockAnchor.value : selId.value)
-        ? { focus: focusLock.value ? lockAnchor.value : selId.value, hops: focusHops.value }
-        : undefined)
-  } catch {
-    return
-  }
-  const g = graph.value
-  if (!g) { await load(); return }
-  const freshById = new Map(fresh.nodes.map((n) => [n.id, n]))
-  // 就地更新已有节点字段(名称/描述/简介/详情/状态——增强结果生效)；拓展并回的节点保留
-  const nodes = g.nodes.map((n) => {
-    const f = freshById.get(n.id)
-    return f ? { ...n, name: f.name, desc: f.desc, nodeBrief: f.nodeBrief, detail: f.detail, needsUpdate: f.needsUpdate, status: f.status, change: f.change } : n
-  })
-  const eKey = (e: { from: string; to: string; type?: string }) => `${e.from}|${e.to}|${e.type ?? ''}`
-  const freshEdge = new Map(fresh.edges.map((e) => [eKey(e), e]))
-  const edges = g.edges.map((e) => {
-    const f = freshEdge.get(eKey(e))
-    return f ? { ...e, desc: f.desc, semantic: f.semantic } : e
-  })
-  const eKeys = new Set(edges.map(eKey))
-  const aKey = (a: { assetId: string; file: string; line: number }) => `${a.assetId}|${a.file}|${a.line}`
-  const aKeys = new Set((g.anchors ?? []).map(aKey))
-  graph.value = {
-    ...g,
-    nodes,
-    edges: [...edges, ...fresh.edges.filter((e) => !eKeys.has(eKey(e)))],
-    anchors: [...(g.anchors ?? []), ...(fresh.anchors ?? []).filter((a) => !aKeys.has(aKey(a)))],
-  }
-}
-
-/** 存量资产描述批量增强(后台)：启动后轮询进度，完成后软刷新图谱数据。 */
-const enhanceRunning = ref(false)
-const enhanceProgress = ref({ done: 0, total: 0 })
-let enhancePoll: ReturnType<typeof setInterval> | null = null
-async function startEnhanceDesc() {
-  if (enhanceRunning.value) return
-  try {
-    const r = await semanticAssetService.enhanceDesc(false)
-    enhanceRunning.value = !!r.running
-    enhanceProgress.value = { done: r.done, total: r.total }
-    if (enhancePoll) clearInterval(enhancePoll)
-    if (enhanceRunning.value) {
-      enhancePoll = setInterval(async () => {
-        try {
-          const s = await semanticAssetService.enhanceDescStatus()
-          enhanceProgress.value = { done: s.done, total: s.total }
-          if (!s.running) {
-            clearInterval(enhancePoll!)
-            enhancePoll = null
-            enhanceRunning.value = false
-            await softRefreshGraph()   // 完成 → 软刷新(简介/边描述生效；拓展合并与拓展 tab 保留)
-          }
-        } catch { /* 忽略单次轮询失败 */ }
-      }, 2000)
-    }
-  } catch (err: any) {
-    console.warn('[semantic] enhance desc 启动失败:', err?.message)
-  }
-}
-
-/** 选中资产的可展示关系(已解析到真实资产；成员归属不进列表)。 */
-const selRelations = computed(() => {
-  const d = selDetail.value
-  if (!d) return []
-  const nodes = graph.value?.nodes ?? []
-  const nameById = new Map(nodes.map((n) => [n.id, n.name]))
-  const idByName = new Map(nodes.map((n) => [n.name, n.id]))
-  const out: { key: string; targetId: string; targetName: string; type: string; desc: string }[] = []
-  const seen = new Set<string>()
-  for (const r of (d.detail?.relations ?? [])) {
-    const t = String((r as { target?: string }).target ?? '')
-    if (!t) continue
-    const tid = nodes.find((x) => x.id === t)?.id ?? idByName.get(t) ?? ''
-    if (!tid || tid === d.id) continue
-    const key = `${tid}|${r.type ?? ''}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({
-      key,
-      targetId: tid,
-      targetName: nameById.get(tid) ?? t,
-      type: (r as { type?: string }).type ?? '',
-      desc: edgeNotesMap.value[tid] ?? (r as { semantic?: string }).semantic ?? (r as { type?: string }).type ?? '',
-    })
-  }
-  return out
-})
-
-/** 点击关系行 → 跳转到对方资产(图谱选中 + 卡联动)。 */
-function jumpToRelation(r: { targetId: string }) {
-  if (!r.targetId || r.targetId === selId.value) return
-  selId.value = r.targetId
-}
-
-// 选中详情到达 → 节点简介(缺失则懒生成) + 关系描述(有关系才生成)
-watch(selDetail, async (d) => {
-  nodeBriefText.value = ''
-  edgeNotesMap.value = {}
-  relTabSegs.value = {}   // 切换资产 → 关系 tab 预览缓存失效
-  if (!d) return
-  // 访问历史 tab：选中资产的主锚点文件沉淀为 tab(LRU 上限 6)；active tab 跟随当前资产
-  const pf = selAnchors.value[0]?.file ?? ''
-  if (pf) {
-    activeFileTab.value = pf
-    const rest = visitedTabs.value.filter((x) => x.file !== pf)
-    visitedTabs.value = [...rest, { file: pf, label: pf.split('/').pop() || pf, assetId: d.id, assetName: d.name }].slice(-6)
-  }
-  if (d.nodeBrief) {
-    nodeBriefText.value = d.nodeBrief
-  } else {
-    nodeBriefLoading.value = true
-    try {
-      const r = await semanticAssetService.nodeBrief(d.id)
-      nodeBriefText.value = r.degraded ? '' : (r.brief || '')
-    } catch { /* 降级显示原 desc */ } finally {
-      nodeBriefLoading.value = false
-    }
-  }
-  if ((d.detail?.relations ?? []).length) {
-    edgeNotesLoading.value = true
-    try {
-      const r = await semanticAssetService.edgeNotes(d.id)
-      edgeNotesMap.value = r.notes || {}
-    } catch { /* 关系描述降级显示 semantic/type */ } finally {
-      edgeNotesLoading.value = false
-    }
-  }
-  // 入边(被谁引用)
-  inEdgesLoading.value = true
-  try {
-    const r = await semanticAssetService.inEdges(d.id)
-    inEdges.value = r.inEdges || []
-  } catch { inEdges.value = [] } finally {
-    inEdgesLoading.value = false
-  }
-})
-
-// ---- 代码段(多锚点多段展示) + 节点点击联动 + AI 逐行解读 ----
-
-/** 单个代码段：一个锚点对应一个源码窗口(symbol 已知时后端展开整个符号体)。 */
-interface CodeSegment {
-  file: string
-  symbol?: string
-  startLine: number
-  snippet: SourceSnippet | null
-  loading: boolean
-}
-const MAX_SEGMENTS = 4
-const segments = ref<CodeSegment[]>([])
-const segEls: (HTMLElement | null)[] = []
-let segSeq = 0
-
-// ---- B2 多段代码手风琴(>1 段折叠，默认仅首段展开) ----
-const collapsedSegs = ref<Set<number>>(new Set())
-function toggleSeg(i: number) {
-  const s = new Set(collapsedSegs.value)
-  if (s.has(i)) s.delete(i); else s.add(i)
-  collapsedSegs.value = s
-}
-// 重置折叠态：除首段外全部折叠(单段不折叠)。
-function resetSegCollapse(n: number) {
-  collapsedSegs.value = new Set(Array.from({ length: n }, (_, i) => i).filter((i) => i > 0))
-}
-
-// ---- 多文件 tab：访问历史(按文件沉淀，点击回跳资产) + 关系资产文件(预览) ----
-const activeFileTab = ref('')
-/** 当前资产锚点涉及的文件(去重；锚点上限 MAX_SEGMENTS 内)。 */
-const anchorFiles = computed<{ file: string; label: string }[]>(() => {
-  const files: string[] = []
-  for (const a of selAnchors.value.slice(0, MAX_SEGMENTS)) {
-    if (!files.includes(a.file)) files.push(a.file)
-  }
-  return files.map((f) => ({ file: f, label: f.split('/').pop() || f }))
-})
-/** 访问过的文件(LRU 上限 6)：每项记住该文件最近看过的资产，点击回跳(全联动)。 */
-const visitedTabs = ref<{ file: string; label: string; assetId: string; assetName: string }[]>([])
-/** 当前 tab 文件可见的段(携带原索引：segEls/lineNotesMaps 均按原始 si 寻址)。 */
-const activeTabSegs = computed(() =>
-  segments.value
-    .map((seg, si) => ({ seg, si }))
-    .filter(({ seg }) => anchorFiles.value.length <= 1 || seg.file === activeFileTab.value))
-/** 切换文件 tab：关系 tab 预览相关资产代码(全文模式下先退出全文)；自身文件 tab 聚焦首个代码段；
- *  全文模式切自身文件 tab → 连带切换全文文件。 */
-function switchFileTab(file: string) {
-  if (activeFileTab.value === file) return
-  activeFileTab.value = file
-  const rel = relTabs.value.find((t) => t.file === file)
-    ?? expandedTabs.value.find((t) => t.file === file)
-  if (rel) {
-    if (fullCode.value) { fullCode.value = null; fullCodeNotes.value = {} }
-    void ensureRelTab(rel).then(() => focusRelTab(rel.file))
-    return
-  }
-  if (fullCode.value && fullCode.value.file !== file) {
-    void loadFullCodeFor(file)
-    return
-  }
-  const i = segments.value.findIndex((s) => s.file === file)
-  if (i >= 0) jumpToSegment(i)
-}
-
-// ---- 关系延伸 tab：直接关系资产所在的其它文件也纳入 tab(预览相关代码，可跳转选中) ----
-interface RelTab { file: string; label: string; line: number; symbol: string; targetId: string; targetName: string; relText: string }
-/** tab 列表 = 自身锚点文件(self) + 关系资产文件(rel，去重、上限 3)。 */
-const relTabs = computed<RelTab[]>(() => {
-  const seenFile = new Set<string>(anchorFiles.value.map((f) => f.file))
-  const out: RelTab[] = []
-  for (const r of selRelations.value) {
-    const a = (graph.value?.anchors ?? []).find((x) => x.assetId === r.targetId)
-    if (!a || seenFile.has(a.file)) continue
-    seenFile.add(a.file)
-    out.push({
-      file: a.file, label: a.file.split('/').pop() || a.file,
-      line: a.line, symbol: a.symbol ?? '',
-      targetId: r.targetId, targetName: r.targetName, relText: r.desc || r.type,
-    })
-    if (out.length >= 3) break
-  }
-  return out
-})
-/** 拓展关联沉淀 tab(基于选中节点扩展出的关联节点所在文件；点击仅预览，不切换选中)。 */
-const expandedTabs = ref<RelTab[]>([])
-const fileTabs = computed(() => [
-  ...visitedTabs.value.map((v) => ({ file: v.file, label: v.label, kind: 'visit' as const, assetId: v.assetId, assetName: v.assetName, rel: null as RelTab | null })),
-  ...expandedTabs.value
-    .filter((t) => !visitedTabs.value.some((v) => v.file === t.file))
-    .map((t) => ({ file: t.file, label: t.label, kind: 'expand' as const, assetId: '', assetName: '', rel: t as RelTab | null })),
-  ...relTabs.value
-    .filter((t) => !visitedTabs.value.some((v) => v.file === t.file) && !expandedTabs.value.some((x) => x.file === t.file))
-    .map((t) => ({ file: t.file, label: t.label, kind: 'rel' as const, assetId: '', assetName: '', rel: t as RelTab | null })),
-])
-/** tab 点击：访问历史 → 选中对应资产(图谱/卡/焦点全联动)；关系/拓展 tab → 仅预览相关代码。 */
-function tabClick(t: { kind: 'visit' | 'rel' | 'expand'; file: string; assetId: string }) {
-  if (t.kind === 'visit' && t.assetId && t.assetId !== selId.value) {
-    selId.value = t.assetId
-    return
-  }
-  switchFileTab(t.file)
-}
-const activeRelTab = computed(() =>
-  relTabs.value.find((x) => x.file === activeFileTab.value)
-  ?? expandedTabs.value.find((x) => x.file === activeFileTab.value)
-  ?? null)
-/** 关系 tab 代码窗口(按文件懒拉取)。 */
-const relTabSegs = ref<Record<string, SourceSnippet | null>>({})
-const relTabLoading = ref('')
-const relTabEl = ref<HTMLElement | null>(null)
-async function ensureRelTab(t: RelTab) {
-  if (relTabSegs.value[t.file] || relTabLoading.value === t.file) return
-  relTabLoading.value = t.file
-  try {
-    const sn = (await semanticAssetService.sourceSnippet(t.file, t.line, t.symbol || undefined, 10, 10, SEG_SNIPPET_LIMIT)) ?? null
-    relTabSegs.value = { ...relTabSegs.value, [t.file]: sn }
-  } catch {
-    relTabSegs.value = { ...relTabSegs.value, [t.file]: null }
-  } finally {
-    relTabLoading.value = ''
-  }
-}
-/** 关系 tab 聚焦：滚动到其锚点行并闪烁。 */
-function focusRelTab(file: string) {
-  void nextTick(() => {
-    if (activeFileTab.value !== file) return
-    const first = relTabEl.value?.querySelector('[data-anchor-line]')
-    if (first) first.scrollIntoView({ block: 'center' })
-    triggerFlash()
-  })
-}
-
-// ---- 拓展关联：基于选中节点扩展 1 跳关联节点(增量合并，可累积)；相关文件沉淀为源码 tab ----
-const expanding = ref(false)
-const expandFeedback = ref('')
-let expandFeedbackTimer: ReturnType<typeof setTimeout> | null = null
-
-/** 拓展预判断：预取选中节点 1 跳子图(与拓展同源，含派生边)，以「不在图内的节点数」精确判定。
- *  预取失败视为未知 → 仍可点击(由点击后的「无新增」反馈兜底)，避免误置灰。 */
-const pendingExpand = ref<{ selId: string; sub: SemanticGraphResult; added: number } | null>(null)
-const expandUnknown = ref(false)
-const expandable = computed(() =>
-  expandUnknown.value || (!!pendingExpand.value
-    && pendingExpand.value.selId === selId.value
-    && pendingExpand.value.added > 0))
-
-async function prefetchExpand() {
-  const id = selId.value
-  if (!id || loading.value) { pendingExpand.value = null; return }
-  expandUnknown.value = false
-  try {
-    const scope = props.tab.kind === 'comp' ? [props.tab.compId!] : undefined
-    const sub = await semanticAssetService.graph(
-      kindFilter.value || undefined, scope, effectiveLevel.value || undefined,
-      { focus: id, hops: 1 })
-    if (selId.value !== id) return   // 选中已切换 → 丢弃过期结果
-    const ids = new Set((graph.value?.nodes ?? []).map((n) => n.id))
-    pendingExpand.value = { selId: id, sub, added: sub.nodes.filter((n) => !ids.has(n.id)).length }
-  } catch {
-    if (selId.value === id) {
-      pendingExpand.value = null
-      expandUnknown.value = true   // 预取失败不误伤：允许点击，点击后再按实际结果反馈
-    }
-  }
-}
-watch(selId, () => { pendingExpand.value = null; void prefetchExpand() })
-watch(graph, () => { if (selId.value) void prefetchExpand() })   // 拓展合并/重查后重算(无新增 → 置灰)
-
-async function expandSelected() {
-  if (!selId.value || loading.value || expanding.value) return
-  expanding.value = true
-  try {
-    let sub = pendingExpand.value?.selId === selId.value ? pendingExpand.value.sub : null
-    if (!sub) {
-      const scope = props.tab.kind === 'comp' ? [props.tab.compId!] : undefined
-      sub = await semanticAssetService.graph(
-        kindFilter.value || undefined, scope, effectiveLevel.value || undefined,
-        { focus: selId.value, hops: 1 })
-    }
-    const g = graph.value
-    if (!g) return
-    // 增量合并：节点按 id、边按 from|to|type、锚点按 assetId|file|line 去重
-    const nodeIds = new Set(g.nodes.map((n) => n.id))
-    const added = sub.nodes.filter((n) => !nodeIds.has(n.id))
-    const edgeKey = (e: { from: string; to: string; type?: string }) => `${e.from}|${e.to}|${e.type ?? ''}`
-    const edgeKeys = new Set(g.edges.map(edgeKey))
-    const newEdges = sub.edges.filter((e) => !edgeKeys.has(edgeKey(e)))
-    const anchorKey = (a: { assetId: string; file: string; line: number }) => `${a.assetId}|${a.file}|${a.line}`
-    const anchorKeys = new Set((g.anchors ?? []).map(anchorKey))
-    const newAnchors = (sub.anchors ?? []).filter((a) => !anchorKeys.has(anchorKey(a)))
-    if (added.length) {
-      graph.value = {
-        ...g,
-        nodes: [...g.nodes, ...added],
-        edges: [...g.edges, ...newEdges],
-        anchors: [...(g.anchors ?? []), ...newAnchors],
-        count: g.nodes.length + added.length,
-      }
-      // 卡片联动：新增节点的主锚点文件沉淀为拓展源码 tab(点击仅预览，不切换选中)
-      const seen = new Set<string>([
-        ...expandedTabs.value.map((x) => x.file),
-        ...visitedTabs.value.map((v) => v.file),
-        ...anchorFiles.value.map((f) => f.file),
-      ])
-      for (const n of added) {
-        const a = newAnchors.find((x) => x.assetId === n.id)
-        if (!a || seen.has(a.file)) continue
-        seen.add(a.file)
-        expandedTabs.value = [...expandedTabs.value, {
-          file: a.file, label: a.file.split('/').pop() || a.file,
-          line: a.line, symbol: a.symbol ?? '',
-          targetId: n.id, targetName: n.name, relText: t('assetMgmt.graph.expandLabel'),
-        }]
-      }
-    }
-    expandFeedback.value = added.length
-      ? t('assetMgmt.graph.expandAdded', { n: added.length })
-      : t('assetMgmt.graph.expandNone')
-    if (expandFeedbackTimer) clearTimeout(expandFeedbackTimer)
-    expandFeedbackTimer = setTimeout(() => { expandFeedback.value = '' }, 2200)
-  } finally {
-    expanding.value = false
-  }
-}
-
-// ---- C2 复制代码位置(file:Lx-Ly symbol) ----
-const copiedSeg = ref(-1)
-async function copySegLoc(seg: CodeSegment, si: number) {
-  const s = seg.snippet
-  if (!s?.lines?.length) return
-  const start = s.lines[0].line
-  const end = s.lines[s.lines.length - 1].line
-  const loc = `${seg.file}:L${start}${end !== start ? `-L${end}` : ''}${seg.symbol ? ' ' + seg.symbol : ''}`
-  if (await copyText(loc)) {
-    copiedSeg.value = si
-    setTimeout(() => { if (copiedSeg.value === si) copiedSeg.value = -1 }, 1500)
-  }
-}
-
-// ---- C1 按类别结构化 detail(有数据时)：entity/contract→字段 · process/decision→步骤 · state→状态 ----
-const detailBlock = computed<{ title: string; rows: { text: string; title: string }[] } | null>(() => {
-  const d = selDetail.value?.detail
-  if (!d) return null
-  const kind = sel.value?.kind
-  if ((kind === 'entity' || kind === 'contract') && d.fields?.length) {
-    return {
-      title: t('assetMgmt.graph.fields'),
-      rows: d.fields.map((f) => {
-        const text = `${f.name}${f.type ? `: ${f.type}` : ''}`
-        return { text, title: f.semantic ? `${f.name}: ${f.type ?? ''} — ${f.semantic}` : text }
-      }),
-    }
-  }
-  if ((kind === 'process' || kind === 'decision') && d.steps?.length) {
-    return {
-      title: t('assetMgmt.graph.steps'),
-      rows: d.steps.map((s, i) => {
-        const n = s.order ?? i + 1
-        const syms = s.symbols?.length ? ` · ${s.symbols.join(', ')}` : ''
-        return { text: `${n}. ${s.semantic}`, title: `${s.semantic}${syms}` }
-      }),
-    }
-  }
-  if (kind === 'state' && d.states?.length) {
-    return {
-      title: t('assetMgmt.graph.states'),
-      rows: d.states.map((s) => {
-        const marks = [s.initial ? '●' : '', s.final ? '◉' : ''].filter(Boolean).join('')
-        const text = `${s.name}${s.desc ? ` — ${s.desc}` : ''}${marks ? `  ${marks}` : ''}`
-        return { text, title: text }
-      }),
-    }
-  }
-  return null
-})
-
-// 选中资产 → 拉取完整详情（astRefs 唯一来源）。
-// 完整代码视图打开时：同文件资产切换保持视图(互斥：不重建资产卡)；跨文件 → 关闭全文并正常重建。
-watch(selId, async (id) => {
-  selDetail.value = null
-  if (!id) return
-  try {
-    const d = (await semanticAssetService.detail(id)) ?? null
-    if (fullCode.value && d) {
-      const files = new Set((d.astRefs ?? []).map((r) => r.file))
-      if (!files.has(fullCode.value.file)) {
-        // 跨文件切资产：全文视图跟随切到新资产主锚点文件(拉取失败 → 回退分段重建)
-        const target = (d.astRefs ?? [])[0]?.file ?? ''
-        if (target) {
-          activeFileTab.value = target
-          void (async () => {
-            const ok = await loadFullCodeFor(target)
-            if (!ok) void rebuildSegments(selAnchors.value)
-          })()
-        } else {
-          fullCode.value = null
-        }
-      }
-    }
-    selDetail.value = d
-  } catch {
-    selDetail.value = null
-  }
-})
-
-// ---- 节点点击 → 选中资产 + 锚点代码闪烁突出 ----
-const clickIds = computed(() => semanticViewClickIds(effectiveView.value, scopedNodes.value))
-let flashOnNext = false
-let flashSeg = 0
-const flashing = ref(false)
-let flashTimer: ReturnType<typeof setTimeout> | null = null
-
-/** 段内高亮行判定：highlight 非空用之，否则退回锚点行，保证至少一行高亮。 */
-function segHighlighted(seg: CodeSegment, line: number): boolean {
-  const s = seg.snippet
-  if (!s) return false
-  const hl = (s.highlight ?? []).map(Number).filter((n) => n > 0)
-  if (hl.length) return hl.includes(line)
-  return Number(s.anchorLine || 0) === line
-}
-
-/** 闪烁脉冲(分段/全文共用)：一个脉冲周期内高亮行加 anchor-flash 类。 */
-function triggerFlash() {
-  flashing.value = false
-  void nextTick(() => {
-    flashing.value = true
-    if (flashTimer) clearTimeout(flashTimer)
-    flashTimer = setTimeout(() => { flashing.value = false }, 1700)
-  })
-}
-
-/** 滚动到某段首个锚点行并闪烁强调(最小化时不做，脉冲提示覆盖)。 */
-function flashAnchor(segIdx = flashSeg) {
-  if (cardMin.value) return
-  const el = segEls[segIdx]
-  if (!el || !segments.value[segIdx]?.snippet) return
-  const first = el.querySelector('[data-anchor-line]')
-  if (first) first.scrollIntoView({ block: 'center' })
-  triggerFlash()
-}
-
-function onNodeClick(e: NodeClickEvent) {
-  // ① 稳定 id(nodeId)；② 文本兜底/别名(label 反查)；③ flow 文本「名称 · 资产ID」尾段
-  let assetId = clickIds.value.get(e.nodeId) ?? clickIds.value.get(e.label ?? '') ?? ''
-  if (!assetId) {
-    const tail = (e.label || '').split('·').pop()?.trim() ?? ''
-    if (/^sa-/.test(tail)) assetId = tail
-  }
-  if (!assetId && e.nodeId.startsWith('txt:')) {
-    // 点中文本未映射(如 UML 构造型 «process»、ER 字段行) → 半径 80px 内就近搜索可映射文本
-    assetId = nearestMappedAsset(e) ?? ''
-  }
-  if (!assetId) return
-  flashOnNext = true
-  flashSeg = 0
-  if (selId.value === assetId) {
-    // 同一节点重复点击：回到其主锚点文件 tab，立即闪烁。
-    const home = selAnchors.value[0]?.file
-    if (home && activeFileTab.value !== home) activeFileTab.value = home
-    flashOnNext = false
-    void nextTick(() => flashAnchor(0))
-    return
-  }
-  selId.value = assetId
-}
-
-/** 就近搜索可映射文本(节点整体点击：构造型/字段行等未映射文本落在可映射文本附近)。 */
-function nearestMappedAsset(e: NodeClickEvent): string | null {
-  const host: HTMLElement | null = diagRef.value?.containerRef ?? null
-  const svg = host?.querySelector('svg')
-  if (!svg) return null
-  const hostRect = host.getBoundingClientRect()
-  // 事件 x/y 为 container 相对坐标 → 还原视口坐标(与 text rect 同空间)
-  const px = hostRect.left + (e.x || 0)
-  const py = hostRect.top + (e.y || 0)
-  let best: string | null = null
-  let bestD = 80 * 80
-  svg.querySelectorAll('text').forEach((t) => {
-    const label = t.textContent?.trim() ?? ''
-    let aid = clickIds.value.get(label) ?? ''
-    if (!aid) {
-      const tail = label.split('·').pop()?.trim() ?? ''
-      if (/^sa-/.test(tail)) aid = tail
-    }
-    if (!aid) return
-    let r: DOMRect
-    try { r = t.getBoundingClientRect() } catch { return }
-    if (!r || (!r.width && !r.height)) return
-    const dx = r.left + r.width / 2 - px
-    const dy = r.top + r.height / 2 - py
-    const d = dx * dx + dy * dy
-    if (d < bestD) { bestD = d; best = aid }
-  })
-  return best
-}
-
-// ---- 图节点选中样式：绑定节点 DOM(每次选中切换：旧节点移除样式、新节点加样式) ----
-let selectedNodeEl: Element | null = null
-
-/** 与 node-click 插件同口径：从节点 DOM 剥出逻辑 id(mermaid id 模式 / plantuml uid)。
- *  mermaid 11 会把渲染实例 id(如 topo-one-mmd-3) 作前缀，先剥离再匹配。 */
-function resolveNodeIdFromEl(el: Element, rootPrefix = ''): string | null {
-  const raw = rootPrefix && el.id?.startsWith(rootPrefix) ? el.id.slice(rootPrefix.length) : (el.id || '')
-  const m = /^([a-zA-Z][a-zA-Z0-9]*)-([A-Za-z][\w-]*?)-\d+$/.exec(raw)
-  if (m) return m[2]
-  return el.getAttribute?.('data-entity-uid') ?? null
-}
-
-/** 当前选中资产 → 图内节点 DOM；id 寻址失败(plantuml 各视图)按节点文本兜底：
- *  候选=名称截断口径 + clickIds 反查标签(名称·ID/净化id 等各视图文本口径) + 内嵌资产 id 文本。 */
-function applySelectedNodeStyle() {
-  const host: HTMLElement | null = diagRef.value?.containerRef ?? null
-  const svg = host?.querySelector('svg')
-  if (!svg) return
-  selectedNodeEl?.classList.remove('td-node-selected')
-  selectedNodeEl = null
-  const targetId = selId.value
-  if (!targetId) return
-  const rootPrefix = svg.id ? `${svg.id}-` : ''
-  let wantNodeId: string | undefined
-  for (const [nid, aid] of clickIds.value) {   // 反查：assetId → 主键 nodeId
-    if (aid === targetId) { wantNodeId = nid; break }
-  }
-  if (wantNodeId) {
-    for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
-      if (resolveNodeIdFromEl(el, rootPrefix) === wantNodeId) { selectedNodeEl = el; break }
-    }
-  }
-  if (!selectedNodeEl) {
-    const name = sel.value?.name ?? ''
-    const candidates = new Set<string>([name, ...[30, 40, 26, 18].map((m) => semanticNodeLabelText(name, m))])
-    for (const [label, aid] of clickIds.value) {   // plantuml 各视图节点文本口径都登记在 clickIds
-      if (aid === targetId && label) candidates.add(label)
-    }
-    for (const t of svg.querySelectorAll('text')) {
-      const txt = (t.textContent || '').trim()
-      if (!txt) continue
-      if (candidates.has(txt) || txt.includes(targetId)) {   // plantuml flow 标签内嵌「· 资产ID」
-        // 爬升到含形状的最近组(plantuml 文本与形状可能不同层)，保证描边样式落在节点整体上
-        let el: Element | null = t
-        while (el && el !== svg) {
-          if (el.querySelector('rect, polygon, ellipse, circle')) { selectedNodeEl = el; break }
-          el = el.parentElement
-        }
-        if (!selectedNodeEl) selectedNodeEl = (t.closest('g') as Element | null) ?? t.parentElement
-        break
-      }
-    }
-  }
-  selectedNodeEl?.classList.add('td-node-selected')
-}
-
-/** 对比变化节点着色：桶类 td-node-diff-{changed|weak|new|removed} + 形状内联样式兜底
- *  (setProperty important，免疫 mermaid 主题样式优先级)。寻址与选中态同款(mermaid id 主口径)。 */
-const DIFF_FILL: Record<DiffBucket, string> = {
-  changed: 'rgba(249, 226, 175, 0.30)',   // 黄：强关联(符号段变更)
-  weak: 'rgba(136, 137, 163, 0.16)',      // 灰：弱关联(同文件变更,段未变)
-  new: 'rgba(166, 227, 161, 0.26)',       // 绿：目标侧新增
-  removed: 'rgba(243, 139, 168, 0.26)',   // 红：目标侧移除
-}
-const DIFF_STROKE: Record<DiffBucket, string> = {
-  changed: 'rgba(249, 226, 175, 0.8)',
-  weak: 'rgba(136, 137, 163, 0.5)',
-  new: 'rgba(166, 227, 161, 0.8)',
-  removed: 'rgba(243, 139, 168, 0.8)',
-}
-function applyDiffNodeStyles() {
-  const host: HTMLElement | null = diagRef.value?.containerRef ?? null
-  const svg = host?.querySelector('svg')
-  if (!svg) return
-  svg.querySelectorAll('[class*="td-node-diff"]').forEach((el) =>
-    el.classList.remove('td-node-diff-changed', 'td-node-diff-weak', 'td-node-diff-new', 'td-node-diff-removed'))
-  if (!diffKindById.value.size) return
-  const rootPrefix = svg.id ? `${svg.id}-` : ''
-  for (const [nid, aid] of clickIds.value) {
-    const bucket = diffKindById.value.get(aid)
-    if (!bucket) continue
-    for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
-      if (resolveNodeIdFromEl(el, rootPrefix) !== nid) continue
-      el.classList.add(`td-node-diff-${bucket}`)
-      // 内联样式兜底：mermaid 主题样式(SVG 内 <style> 带 id 选择器)特异性高于类规则，
-      // 类规则虽有 !important 但部分引擎渲染路径会被内联呈现覆盖——双保险。
-      for (const shape of el.querySelectorAll<SVGElement>('rect, polygon, ellipse, circle')) {
-        shape.style.setProperty('fill', DIFF_FILL[bucket], 'important')
-        shape.style.setProperty('stroke', DIFF_STROKE[bucket], 'important')
-        if (bucket === 'removed') shape.style.setProperty('stroke-dasharray', '6 3', 'important')
-        else shape.style.removeProperty('stroke-dasharray')
-      }
-      break
-    }
-  }
-}
-watch(diffKindById, () => void nextTick(applyDiffNodeStyles))
-
-/** 节点多行 tooltip：名称 / 类别·粒度 / 简介 / 锚点 / 关系(出·入)。数据现成，双引擎通用；
- *  单资产(孤立节点)hover 亦可见真实信息，避免「只有一个 ID」。 */
-function nodeTooltipText(n: { id: string; kind: string; level?: string; name: string; desc: string; nodeBrief?: string }): string {
-  const lines: string[] = [n.name]
-  const kindLabel = t(`assetMgmt.kind.${n.kind}`)
-  const levelMap: Record<string, string> = {
-    business: t('assetMgmt.graph.business'),
-    logic: t('assetMgmt.graph.logic'),
-    implementation: t('assetMgmt.graph.implementation'),
-  }
-  const meta = [kindLabel, n.level ? levelMap[n.level] : ''].filter(Boolean).join(' · ')
-  if (meta) lines.push(meta)
-  const brief = n.nodeBrief || n.desc
-  if (brief) lines.push(brief)
-  const anchors = (graph.value?.anchors ?? []).filter((a) => a.assetId === n.id)
-  if (anchors.length) {
-    const a = anchors[0]
-    const more = anchors.length > 1 ? ` (+${anchors.length - 1})` : ''
-    lines.push(`${t('assetMgmt.graph.anchor')}: ${shortPath(a.file)}:L${a.line}${a.symbol ? ' · ' + a.symbol : ''}${more}`)
-  }
-  const out = (scopedEdges.value ?? []).filter((e) => e.from === n.id).length
-  const inn = (scopedEdges.value ?? []).filter((e) => e.to === n.id).length
-  if (out || inn) lines.push(`${t('assetMgmt.relations')} ${out} · ${t('assetMgmt.graph.inEdges')} ${inn}`)
-  return lines.join('\n')
-}
-
-/** 节点 hover tooltip(多行)。原生 SVG <title> 实现，双引擎通用。 */
-/** 图谱悬停提示(双引擎统一)：节点=多行信息(名称/类别/简介/锚点/关系)，边=完整增强描述。
- *  mermaid 节点按 id 寻址；plantuml 节点/全部边按渲染文本匹配(SVG <text> 插 <title>，
- *  mermaid foreignObject HTML 标签设 title 属性)。 */
-function applyNodeTooltips() {
-  const host: HTMLElement | null = diagRef.value?.containerRef ?? null
-  const svg = host?.querySelector('svg')
-  if (!svg) return
-  const rootPrefix = svg.id ? `${svg.id}-` : ''
-  const NS = 'http://www.w3.org/2000/svg'
-  const titled = new Set<Element>()
-
-  // ① 节点：mermaid id 寻址(组粒度，最准)
-  for (const [nid, aid] of clickIds.value) {
-    for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
-      if (resolveNodeIdFromEl(el, rootPrefix) !== nid) continue
-      for (const old of el.querySelectorAll('title')) old.remove()
-      const n = scopedNodes.value.find((x) => x.id === aid)
-      if (n) {
-        const tip = document.createElementNS(NS, 'title')
-        tip.textContent = nodeTooltipText(n)
-        el.insertBefore(tip, el.firstChild)
-        titled.add(el)
-      }
-      break
-    }
-  }
-
-  // ② 节点文本兜底(plantuml 全部节点)：渲染文本口径(name·id/名称截断/净化id)都登记在 clickIds
-  const labelToNode = new Map<string, { id: string; kind: string; level?: string; name: string; desc: string; nodeBrief?: string }>()
-  for (const [label, aid] of clickIds.value) {
-    if (!label || labelToNode.has(label)) continue
-    const n = scopedNodes.value.find((x) => x.id === aid)
-    if (n) labelToNode.set(label, n)
-  }
-  for (const n of scopedNodes.value) {
-    for (const v of [n.name, ...[18, 26, 30, 40].map((m) => semanticNodeLabelText(n.name, m))]) {
-      if (!labelToNode.has(v)) labelToNode.set(v, n)
-    }
-  }
-  for (const t of svg.querySelectorAll('text')) {
-    const txt = (t.textContent || '').trim()
-    if (!txt || titled.size && [...titled].some((g) => g.contains(t))) continue
-    const n = labelToNode.get(txt)
-    if (!n) continue
-    let el: Element | null = t
-    while (el && el !== svg) {
-      if (el.querySelector('rect, polygon, ellipse, circle')) break
-      el = el.parentElement
-    }
-    const group = (el && el !== svg ? el : (t.closest('g') ?? t.parentElement)) as Element | null
-    if (group && !titled.has(group)) {
-      for (const old of group.querySelectorAll('title')) old.remove()
-      const tip = document.createElementNS(NS, 'title')
-      tip.textContent = nodeTooltipText(n)
-      group.insertBefore(tip, group.firstChild)
-      titled.add(group)
-    }
-  }
-
-  // ③ 边：标签截断变体 → 完整描述(增强 desc 优先)。与生成器同口径(_semLabel 清洗+截断+…)。
-  const labelToDesc = new Map<string, string>()
-  const puText = (s: string) => (s || '').replace(/[;|\r\n]+/g, ' ').replace(/-->/g, '->').trim()
-  for (const e of scopedEdges.value) {
-    // 悬停 = 关系描述 + 证据(文件:行/解析方式/置信度/间接中转)
-    const ev: string[] = []
-    if (e.indirect && e.via) ev.push(t('assetMgmt.graph.indirectVia', { via: e.via }))
-    if (e.file) ev.push(`${e.file}${e.line ? `:${e.line}` : ''}`)
-    if (e.resolvedBy) ev.push(e.resolvedBy + (e.confidence ? ` (${e.confidence})` : ''))
-    const tip = [(e.desc || e.semantic || e.type || '').trim(), ...ev].filter(Boolean).join('\n')
-    if (!tip) continue
-    const bases = new Set<string>([
-      (e.desc || e.type || e.semantic || '').trim(),
-      (e.desc || e.type || '').trim(),
-      (e.type || '').trim(),
-      (e.semantic || '').trim(),
-      // 间接边标签含 ⇝via 后缀(_semEdgeLabel 口径)
-      ...((e.indirect && e.via)
-        ? [(e.desc || e.type || e.semantic || 'rel').trim(), (e.desc || e.type || '').trim()]
-            .filter(Boolean).map((b) => `${b}⇝${e.via!.slice(0, 10)}`)
-        : []),
-    ].filter(Boolean))
-    for (const b of bases) {
-      for (const len of [10, 12, 14, 16, 20, 24, 26]) {
-        const v = semanticNodeLabelText(b, len)
-        if (!labelToDesc.has(v)) labelToDesc.set(v, tip)
-        const pv = puText(v)
-        if (!labelToDesc.has(pv)) labelToDesc.set(pv, tip)
-      }
-      if (!labelToDesc.has(b)) labelToDesc.set(b, tip)
-    }
-  }
-  for (const el of svg.querySelectorAll('text, foreignObject span, foreignObject div')) {
-    const txt = (el.textContent || '').trim()
-    if (!txt) continue
-    const full = labelToDesc.get(txt)
-    if (!full || full === txt) continue   // 未截断 → 悬停无增量
-    if (el.namespaceURI === NS) {
-      for (const old of el.querySelectorAll('title')) old.remove()
-      const tip = document.createElementNS(NS, 'title')
-      tip.textContent = full
-      el.insertBefore(tip, el.firstChild)
-    } else {
-      el.setAttribute('title', full)   // mermaid foreignObject 内是 HTML 元素
-    }
-  }
-}
-
-// ---- AI 逐行解读(逐段生成；结合术语/规约；手动触发，后端落库缓存) ----
-const lineNotesMaps = ref<Record<number, Record<number, string>>>({})
-const lineNotesLoading = ref(false)
-const lineNotesDegraded = ref(false)
-const lineNotesError = ref('')
-/** 最近一次结果是否全部来自缓存(失效缓存后端等同无缓存，不会误标)。 */
-const lineNotesFromCache = ref(false)
-
-/** 已解读行数(按钮上展示，让激活状态可见)。 */
-const lineNotesCount = computed(() =>
-  Object.values(lineNotesMaps.value).reduce((n, m) => n + Object.keys(m).length, 0)
-  + Object.keys(fullCodeNotes.value).length)
-
-async function loadLineNotes(force = false) {
-  if (!sel.value || lineNotesLoading.value) return
-  // 完整代码模式 → 解读全文窗口
-  if (fullCode.value) {
-    await loadFullCodeNotes(force)
-    return
-  }
-  const targets = segments.value
-    .map((seg, i) => ({ seg, i }))
-    .filter(({ seg }) => seg.snippet?.lines?.length)
-  if (!targets.length) return
-  lineNotesLoading.value = true
-  lineNotesError.value = ''
-  let degraded = false
-  let anyCached = false
-  let allCached = true
-  for (const { seg, i } of targets) {
-    const s = seg.snippet!
-    try {
-      const r = await semanticAssetService.lineNotes(
-        sel.value.id, s.file, s.lines[0].line, s.lines[s.lines.length - 1].line, { force })
-      // 键归一为数字(JSON 反序列化后为字符串键)，避免任何运行时键型差异
-      const norm: Record<number, string> = {}
-      for (const [k, v] of Object.entries(r.notes || {})) norm[Number(k)] = String(v)
-      lineNotesMaps.value = { ...lineNotesMaps.value, [i]: norm }
-      if (r.error) { lineNotesError.value = r.error; break }
-      if (r.degraded) degraded = true
-      if (r.cached) anyCached = true; else allCached = false
-    } catch (err: any) {
-      lineNotesError.value = err?.message || 'failed'
-      break
-    }
-  }
-  // 有明确 error 时只显示失败提示(可重试)，不再叠加「降级」横幅
-  lineNotesDegraded.value = degraded && !lineNotesError.value
-  lineNotesFromCache.value = anyCached && allCached
-  lineNotesLoading.value = false
-}
-
-/** 清除缓存重新生成(后端 force=true：视同无缓存，重新生成并覆盖)。 */
-function regenerateLineNotes() {
-  void loadLineNotes(true)
-}
-
-/** 锚点导航：点击锚点 → (跨文件时切到对应 tab)展开对应代码段并滚动、闪烁锚点行。 */
-function jumpToSegment(i: number) {
-  const seg = segments.value[i]
-  if (seg && activeFileTab.value !== seg.file) activeFileTab.value = seg.file
-  if (collapsedSegs.value.has(i)) toggleSeg(i)   // 先展开目标段(折叠时锚点行未渲染)
-  void nextTick(() => {
-    const el = segEls[i]
-    if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    flashSeg = i
-    flashAnchor(i)
-  })
-}
-
-// 最小化时信息刷新(选中资产变化) → 不自动展开浮窗；停靠图标闪动缩放 ~3s 提示。
-// 同时：未手动选图类型时，点击节点切换选中 → 钉住「用户正在看的视图」，
-// 防止推荐随新资产类别/粒度变化而偶发跳图(如 关系图→ER)。首次点击(sel null→资产)同样覆盖。
-const iconPulse = ref(false)
-let iconPulseTimer: ReturnType<typeof setTimeout> | null = null
-let lastShownView: SemanticGraphViewId | '' = ''
-watch(effectiveView, (_v, ov) => { lastShownView = ov ?? _v })   // 记录变更前的显示视图(供选中切换时钉住)
-watch(sel, (n) => {
-  void nextTick(applySelectedNodeStyle)   // 选中样式绑定到节点 DOM：新节点加样式、旧节点移除
-  if (view.value || !n) return
-  // 选中后的将显示视图(与 effectiveView 同口径)
-  const rec = recommendedSemanticView(n.kind, effectiveLevel.value || undefined)
-  const newEff = viewOptions.value.some((x) => x.value === rec) ? rec : (viewOptions.value[0]?.value ?? '')
-  const shown = lastShownView
-  if (shown && shown !== newEff && viewOptions.value.some((x) => x.value === shown)) {
-    view.value = shown   // 钉住正在看的视图(新数据下仍支持时)
-  }
-})
-watch(selId, (id, old) => {
-  if (!id || id === old || !cardMin.value) return
-  iconPulse.value = false
-  void nextTick(() => {
-    iconPulse.value = true
-    if (iconPulseTimer) clearTimeout(iconPulseTimer)
-    iconPulseTimer = setTimeout(() => { iconPulse.value = false }, 3000)
-  })
-})
-
-// 锚点变化 → 重建代码段并逐段拉取源码窗口；注解失效(后端落库缓存，重击按钮秒回)。
-// 完整代码视图打开时跳过重建(同文件资产切换不刷新资产卡)；关闭后下次锚点变化正常重建。
-
-/** 对比口径下资产卡代码的取数参数：
- *  - 资产参与本次对比(changed/new/removed) → 显示目标侧内容(worktree/目标 head)，
- *    并与基准 commit 做 git diff 逐行注解：基准侧资产的原代码以 -行呈现，
- *    目标侧新代码以 +行呈现(统一 diff 视图，增/删/改精确显示)；
- *  - 稳定资产(两侧内容一致) → 维持现状(工作区内容 + 符号体展开)，无 diff 开销。 */
-function snippetOptsFor(assetId: string): { ref?: string; diffBase?: string } {
-  const c = props.compareData
-  if (!c || c.noChanges) return {}
-  let side = ''
-  for (const a of c.assets.changed) if (a.id === assetId) side = a.side || 'stale'
-  for (const a of c.assets.new) if (a.id === assetId) side = 'target'
-  for (const a of c.assets.removed) if (a.id === assetId) side = 'base'
-  if (!side) return {}
-  // diff 比较对象恒为 基准 vs 目标侧；ref 仅决定显示内容取哪个 head(目标侧)
-  const ref = c.targetIsWorktree ? '' : c.target
-  return { ref: ref || undefined, diffBase: c.base || undefined }
-}
-
-async function rebuildSegments(anchors: { file: string; startLine: number; symbol: string }[]) {
-  const cap = anchors.slice(0, MAX_SEGMENTS)
-  activeFileTab.value = cap[0]?.file ?? ''   // 跟随图节点切换 → 文件 tab 焦点落在主锚点文件
-  const seq = ++segSeq
-  segments.value = cap.map((a) => ({ file: a.file, symbol: a.symbol, startLine: a.startLine, snippet: null, loading: true }))
-  resetSegCollapse(cap.length)   // B2: 除首段外全部折叠
-  lineNotesMaps.value = {}
-  lineNotesDegraded.value = false
-  lineNotesError.value = ''
-  const opts = snippetOptsFor(selId.value)
-  await Promise.all(cap.map(async (a, i) => {
-    let sn: SourceSnippet | null = null
-    try {
-      sn = (await semanticAssetService.sourceSnippet(a.file, a.startLine, a.symbol, 10, 10, SEG_SNIPPET_LIMIT, opts)) ?? null
-    } catch {
-      sn = null
-    }
-    if (seq !== segSeq) return
-    const seg = segments.value[i]
-    if (seg) { seg.snippet = sn; seg.loading = false }
-  }))
-}
-watch(selAnchors, (anchors) => {
-  if (fullCode.value) return
-  void rebuildSegments(anchors)
-})
-// 对比数据晚到(工具栏发起对比/切 head) → 已打开的资产卡带 diff 参数重建，
-// 保证 +/- 行视图与所选对比对一致(全文视图打开时同 rebuildSegments 策略跳过)。
-watch(() => props.compareData, () => {
-  if (!selId.value || fullCode.value) return
-  const anchors = selAnchors.value
-  if (anchors.length) void rebuildSegments(anchors)
-})
-
-// 选中变化后详情/源码异步到达 → 到位后闪烁。
-watch(segments, (segs) => {
-  if (flashOnNext && segs.some((s) => s.snippet)) {
-    flashOnNext = false
-    void nextTick(() => flashAnchor(flashSeg))
-  }
-}, { deep: true })
-
-// ---- 完整代码视图(单文件全文；文件内多资产锚点全部高亮，点击锚点切资产) ----
-// 互斥约定：全文视图内点击同文件资产锚点 → 仅切换图谱选中，不重建资产卡；
-// 跨文件(新资产锚点不在当前全文文件) → 关闭全文并按常规刷新图谱+资产卡。
-/** 分段源码窗口上限(行)：整符号体优先全量展示/解读(旧默认 60 行截断是「长函数只解读头部」的成因)。 */
-const SEG_SNIPPET_LIMIT = 2000
-/** 完整代码窗口上限(行)：优先全量提供；逐行解读超限由后端 1/2→1/4→1/8 分批降级兜住。 */
-const FULL_FILE_LIMIT = 8000
-const fullCode = ref<SourceSnippet | null>(null)
-const fullCodeLoading = ref(false)
-const fullCodeNotes = ref<Record<number, string>>({})
-const fullCodeNotesLoading = ref(false)
-const fullCodeError = ref('')
-
-async function toggleFullCode() {
-  fullCodeError.value = ''
-  if (fullCode.value) {
-    fullCode.value = null
-    fullCodeNotes.value = {}
-    return
-  }
-  const file = activeFileTab.value || selAnchors.value[0]?.file
-  if (!file || !sel.value) return
-  await loadFullCodeFor(file)
-}
-
-/** 拉取指定文件全文(窗口上限 FULL_FILE_LIMIT)；返回是否成功，供调用方兜底回退。 */
-async function loadFullCodeFor(file: string): Promise<boolean> {
-  fullCodeLoading.value = true
-  try {
-    fullCode.value = (await semanticAssetService.sourceSnippet(file, 1, undefined, FULL_FILE_LIMIT, FULL_FILE_LIMIT, FULL_FILE_LIMIT, snippetOptsFor(selId.value))) ?? null
-    fullCodeNotes.value = {}
-    return !!fullCode.value
-  } catch {
-    fullCode.value = null
-    return false
-  } finally {
-    fullCodeLoading.value = false
-  }
-}
-
-/** 全文内 行号 → 所属资产 id(仅图谱范围内已知锚点；严谨起见只标注确知行，不猜测区间)。 */
-const fullCodeOwners = computed<Map<number, string>>(() => {
-  const m = new Map<number, string>()
-  if (!fullCode.value) return m
-  for (const a of graph.value?.anchors ?? []) {
-    if (a.file !== fullCode.value!.file || !a.assetId) continue
-    if (!m.has(a.line)) m.set(a.line, a.assetId)
-  }
-  return m
-})
-
-/** 当前资产在全文文件内的锚点行集合(精确 astRefs 区间)。 */
-const fullCodeSelfLines = computed<Set<number>>(() => {
-  const s = new Set<number>()
-  if (!fullCode.value) return s
-  const file = fullCode.value.file
-  for (const r of selDetail.value?.astRefs ?? []) {
-    if ((r.file || '') !== file) continue
-    const a = Number(r.startLine || 0)
-    const b = Number(r.endLine || 0) || a
-    for (let ln = a; ln <= b; ln++) s.add(ln)
-  }
-  return s
-})
-
-// 全文视图可视焦点跟随：图节点点击/行点击切换资产(同文件不重建卡) → 滚动到
-// 当前资产首个锚点行并闪烁；打开全文时同样定位到首锚点行。
-const fullCodePreRef = ref<HTMLPreElement | null>(null)
-watch(fullCodeSelfLines, (lines) => {
-  if (!fullCode.value || cardMin.value || !lines.size) return
-  void nextTick(() => {
-    if (!fullCode.value) return
-    const first = Math.min(...lines)
-    const el = fullCodePreRef.value?.querySelector(`[data-full-line="${first}"]`)
-    if (el) el.scrollIntoView({ block: 'center' })
-    triggerFlash()
-  })
-})
-
-/** 全文行点击：命中其它资产锚点 → 切换选中(同文件 → 资产卡保持全文视图)。 */
-function onFullCodeLineClick(line: number) {
-  const ownerId = fullCodeOwners.value.get(line)
-  if (!ownerId || ownerId === selId.value) return
-  selId.value = ownerId
-}
-
-/** 锚点所属资产显示名(全文 tooltip 用)。 */
-function ownerName(assetId: string): string {
-  return graph.value?.nodes.find((n) => n.id === assetId)?.name ?? assetId
-}
-
-/** 源码路径展示：项目相对路径(去开头 ./ /)；过长时从头省略目录段(保尾部)，完整路径用 title 悬停展示。 */
-function shortPath(p: string, max = 42): string {
-  const norm = (p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
-  if (norm.length <= max) return norm
-  const parts = norm.split('/')
-  while (parts.length > 1 && parts.join('/').length > max) parts.shift()
-  const out = parts.join('/')
-  return (out.length < norm.length ? '…/' : '') + out
-}
-
-// ---- 完整代码 AI 逐行解读 ----
-async function loadFullCodeNotes(force = false) {
-  const fc = fullCode.value
-  if (!fc?.lines?.length || !sel.value || fullCodeNotesLoading.value) return
-  fullCodeNotesLoading.value = true
-  fullCodeError.value = ''
-  try {
-    const r = await semanticAssetService.lineNotes(
-      sel.value.id, fc.file, fc.lines[0].line, fc.lines[fc.lines.length - 1].line, { force })
-    const norm: Record<number, string> = {}
-    for (const [k, v] of Object.entries(r.notes || {})) norm[Number(k)] = String(v)
-    fullCodeNotes.value = norm
-    lineNotesFromCache.value = !!r.cached && !r.error
-    if (r.error) fullCodeError.value = r.error
-  } catch (err: any) {
-    fullCodeError.value = err?.message || 'failed'
-    lineNotesFromCache.value = false
-  } finally {
-    fullCodeNotesLoading.value = false
-  }
-}
+// ---- MS6-W2: 逻辑层四域(graph-view/)——本文件保留 props/emit/模板/样式 ----
+const D: WsDeps = { props, emit, settings: useArchSettingsStore() }
+D.data = useGraphData(D)
+D.detail = useGraphDetail(D)
+D.code = useGraphCode(D)
+D.render = useGraphRender(D)
+const {
+  CARD_MIN_KEY,
+  CARD_SIZE_KEY,
+  DIFF_FILL,
+  DIFF_STROKE,
+  EDGE_TYPE_COLOR,
+  EDGE_TYPE_TEXT,
+  FILE_BUDGET,
+  FOCUS_LOCK_KEY,
+  FONT_STEPS,
+  FULL_FILE_LIMIT,
+  KIND_BG,
+  KIND_CHIP,
+  KIND_TEXT,
+  LEGEND_W,
+  MAX_SEGMENTS,
+  SEG_SNIPPET_LIMIT,
+  activeFileTab,
+  activeRelTab,
+  activeTabSegs,
+  anchorFiles,
+  animating,
+  applyDiffNodeStyles,
+  applyFileScope,
+  applyNodeTooltips,
+  applySelectedNodeStyle,
+  availableLevels,
+  beginCardDrag,
+  cardDrag,
+  cardDragging,
+  cardEl,
+  cardEndDrag,
+  cardFullscreen,
+  cardLang,
+  cardMin,
+  cardPos,
+  cardResetPos,
+  cardResizing,
+  cardSize,
+  cardSizeInit,
+  cardSrcOpen,
+  cardStartPos,
+  cardStartResize,
+  cardStartX,
+  cardStartY,
+  centerSelectedNode,
+  clearSel,
+  clickIds,
+  closeCardFullscreen,
+  codeFontSize,
+  collapsedSegs,
+  copiedSeg,
+  copySegLoc,
+  detailBlock,
+  diagRef,
+  diagramLangs,
+  diagrams,
+  diffBucketCounts,
+  diffKindById,
+  diffNodeCount,
+  diffNodeIds,
+  diffOnly,
+  edgeLegendOpen,
+  edgeNotesLoading,
+  edgeNotesMap,
+  edgeTypeColor,
+  edgeTypeCounts,
+  edgeTypeLabel,
+  edgeTypeOff,
+  effectiveLevel,
+  effectiveView,
+  enhancePoll,
+  enhanceProgress,
+  enhanceRunning,
+  ensureRelTab,
+  expandFeedback,
+  expandFeedbackTimer,
+  expandSelected,
+  expandUnknown,
+  expandable,
+  expandedTabs,
+  expanding,
+  fileIndex,
+  fileScopeKey,
+  fileScopeOpen,
+  fileScopeSel,
+  fileTabs,
+  flashAnchor,
+  flashOnNext,
+  flashSeg,
+  flashTimer,
+  flashing,
+  focusHops,
+  focusLock,
+  focusMode,
+  focusRelTab,
+  fullCode,
+  fullCodeError,
+  fullCodeLoading,
+  fullCodeNotes,
+  fullCodeNotesLoading,
+  fullCodeOwners,
+  fullCodePreRef,
+  fullCodeSelfLines,
+  graph,
+  hiddenViewHints,
+  iconPulse,
+  iconPulseTimer,
+  inEdges,
+  inEdgesLoading,
+  includeIndirect,
+  indexOpen,
+  injectReplayBtn,
+  isDiffNode,
+  jumpToRelation,
+  jumpToSegment,
+  kindBgClass,
+  kindChipClass,
+  kindFilter,
+  kindNodes,
+  kindOptions,
+  kindTextClass,
+  lastShownView,
+  legendBtnRef,
+  legendPos,
+  level,
+  levelOptions,
+  lineNotesCount,
+  lineNotesDegraded,
+  lineNotesError,
+  lineNotesFromCache,
+  lineNotesLoading,
+  lineNotesMaps,
+  load,
+  loadCardSize,
+  loadFullCodeFor,
+  loadFullCodeNotes,
+  loadLineNotes,
+  loading,
+  lockAnchor,
+  matrixOpen,
+  nearestMappedAsset,
+  nodeBriefLoading,
+  nodeBriefText,
+  nodeTooltipText,
+  nodeVisibleInViewport,
+  onDiagramReady,
+  onFullCodeLineClick,
+  onLegendDocClick,
+  onMatrixSelect,
+  onNodeClick,
+  openCardFullscreen,
+  overLimit,
+  ownerName,
+  pendingExpand,
+  prefetchExpand,
+  rebuildSegments,
+  regenerateLineNotes,
+  regenerateNodeBrief,
+  relTabEl,
+  relTabLoading,
+  relTabSegs,
+  relTabs,
+  replayGraph,
+  replayTick,
+  resetSegCollapse,
+  resizeEdge,
+  resizeStart,
+  resolveNodeIdFromEl,
+  saveCardSize,
+  scopeAssets,
+  scopeTotal,
+  scopedEdges,
+  scopedNodes,
+  segEls,
+  segHighlighted,
+  segSeq,
+  segments,
+  sel,
+  selAnchors,
+  selDetail,
+  selId,
+  selRelations,
+  selectedNodeEl,
+  setCardLang,
+  setCardMin,
+  settings,
+  shortPath,
+  snippetOptsFor,
+  softRefreshGraph,
+  startEnhanceDesc,
+  switchFileTab,
+  tabClick,
+  themeMode,
+  themeVars,
+  toggleCardSource,
+  toggleEdgeLegend,
+  toggleEdgeType,
+  toggleFocusLock,
+  toggleFullCode,
+  toggleIndex,
+  toggleMatrix,
+  toggleSeg,
+  triggerFlash,
+  view,
+  viewOptions,
+  viewSel,
+  visitedTabs,
+  weakCount,
+} = Object.assign({}, D.data, D.detail, D.code, D.render)
 
 onMounted(async () => {
   await load()

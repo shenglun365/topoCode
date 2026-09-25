@@ -34,7 +34,7 @@
 |---|---|---|---|
 | **W0 安全网** ✅ | 六目标件 vitest 挂载冒烟+交互守卫（Vue 原生 createApp 挂载，零新依赖；两域 vitest 补 vue 插件口径已统一） | architect 64/64 + workbench 19/19 + 双域 typecheck 干净 | 1.5d |
 | **W1 AssetManagementWorkspace** ✅ | 逻辑层八域 composable（asset-workspace/：core 四元组整块+diff/chat/framework/unowned/sync/purgeBatch/graphTabs）+ 模板三面板（provide/inject 每挂载一套状态，行为语义保持） | 64/64+typecheck 0 错；SFC 3,296→615 行 | 1.5d |
-| **W2 SemanticGraphView**（2,649） | 拆三层：SVG 渲染 / 交互（zoom-pan/视口判定 nodeVisibleInViewport）/ 数据变换 | 同上 | 1.5d |
+| **W2 SemanticGraphView** 🔶 | 逻辑层四域已落地（graph-view/：data 数据变换+diff 标记 / detail 选中+焦点+详情 / code 代码段+全文+逐行解读 / render 交互+SVG 样式+卡片拖拽） | 64/64+typecheck 0 错；SFC 2,649→1,117 行；**模板面板化(W2-S2)待做**（模板 730+样式 113=843 > 800，需 2-3 面板切分） | 1.5d |
 | **W3 AnalysisChat**（2,383） | 拆消息渲染/输入区/会话态 composables | 同上 | 1d |
 | **W4 ReportHome + ProjectCard**（1,443+1,441） | 各拆子组件+composables | 同上 | 1.5d |
 | **W5 community-store 抽 useComponentAnalysis**（1,252） | 组件分析逻辑抽 composable，store 瘦身为状态容器 | 同上 | 1d |
@@ -97,3 +97,20 @@
 ### 陷阱记录
 1. 多根模板陷阱：根级 FileSourceCard 在根 `</div>` 之后——首刀误吞根关闭符致面板 30/31 失衡，vitest SFC 解析器报"missing end tag"而 vue-tsc(strict:false) 放行——**SFC 解析器比 vue-tsc 更严，两者都要过**
 2. 手术必须自底向上+硬断言边界；一次误差累积后从 git 恢复重做优于补丁式修复
+
+
+---
+
+## 8. W2 执行记录（2026-09-25，S1 逻辑层落地）
+
+### 方法论升级：机械抽取管线
+W1 手工转写 → W2 升级为**机械抽取脚本**（核心资产，后续组件复用）：
+- 域内代码**逐行原文**；跨域标识符自动 `D.<域>.` 前缀重写（排除集：后随 `:` / `?` / `"` —— 类型成员/对象键/可选属性/字符串键不重写）
+- **TS AST 语句对齐不可靠**（getStart 跳注释+行号偏移）；最终用**声明标记分段法**（顶层 `const/let/function/interface/type/watch` 行为分割点，范围=相邻标记之间——天然语句完整）
+- 类型声明自动提升到模块级 + export；SFC 头部 import 按 body 引用自动随迁（聚合按源、默认导入保原样）
+- 陷阱入档：① 返回块正则贪心吞关键字（解构名单须来自 defs 精确集合）② `level?:` 可选属性被重写 ③ SFC 多根模板（W1 已见）④ SFC 解析器比 vue-tsc 严
+
+### W2-S1 结果
+- `graph-view/`：useGraphData 333 / useGraphDetail 327 / useGraphCode 629 / useGraphRender 756 / graphTypes 5
+- SFC 2,649→1,117（脚本 ~275 接线 + 模板 730 + 样式 113）；typecheck 0 错 + 64/64（FILE_BUDGET 冒烟守卫过）
+- 待做 W2-S2：模板三面板（工具栏+图卡 / 详情+代码卡 / 弹窗组），预计 SFC → ~400 行
