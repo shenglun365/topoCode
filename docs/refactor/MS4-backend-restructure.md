@@ -174,3 +174,23 @@ symbols.py/codegraph.py 头注升级为裁决⑤ SLA 表述（codegraph=architec
 | 收尾 | 8834c8d+ | skill_docs 惰性导入升 ..arch_routes、baseline 重建(sem/store 纳入) |
 
 **W3 后残余 agent→arch_routes 通道（thick, 属 W3b/后续）**: project(kb_degraded/_resolve_project ×7)、agent_executors(registry ×4)、execution.conv_root_project ×4、cline_engines.resolve_engine、semantic_assets 门面 ×8、agent_roles ×2。这些是厚路由模块, 抽取需连带 REST 面设计——与 W4(sessions 拆分)/W6 合并考量。
+
+
+---
+
+## 11. W8 前置结构扫描（2026-09-24，供专项会话使用）
+
+sem/engine.py 4,851 行 / **161 顶层成员**。0905-B1b 五域蓝图**少算了三族**——实际八域：
+
+| # | 域 | 锚点(行) | 约行数 |
+|---|---|---|---|
+| 1 | reconcile（新鲜度门+再调和） | _lazy_reconcile:48 / reconcile_semantic:183 / refresh_scope:3450 / api_reconcile:4295 | ~600 |
+| 2 | extract（主类型判定+scope提取+落库） | :335-1330（_normalize/_config_carrier/_is_route_handler/_primary_kind/_heuristic/_fields_*/_save_assets/extract_scope/save_agent_assets） | ~1000 |
+| 3 | aggregate（聚合） | :1335-1811（_leaf/_postorder/_high_asset_text/_HIGH_SCHEMA/_aggregate_*/_inherit/_link_parent） | ~480 |
+| 4 | edge_derive（边推导+codegraph 适配） | :1821-2264（_DERIVED_*/_cg_*/_derive_*/_cached_derived/_relation_*) | ~440 |
+| 5 | query 门面（search/detail/graph/relations） | search:67 / detail:76 / api_search:165 / semantic_graph:2267 / api_graph:4664 / api_detail:4798 | ~550 |
+| 6 | **narrative（LLM 叙事生成）[蓝图未列]** | :2414-3268（pseudo/desc/briefs/line_notes/enhance/edge_notes + _LINE_NOTE 常量族） | ~850 |
+| 7 | **impact/change（变更管理）[蓝图未列]** | :3277-3474+3475-4293（MainKbEditRejected/rename/merge/split/_component_file_map/batch_manage/purge/impact/probe_impact/_diff_*/api_source_snippet） | ~800 |
+| 8 | **api 路由面** | :4295-4841 尾部 api_* 聚合（~30 个薄转发） | ~550 |
+
+建议拆分方案改为「八域」：narrative 独立成 sem/narrative.py（最大独立性, 纯 LLM 文本面）、impact/change 独立成 sem/change.py（纯 DB/版本面）、api_* 留门面或抽 sem/routes.py。依赖方向：门面 → 七域，域间经门面调用（禁止横向 import——当前抽查横向交叉为零）。
