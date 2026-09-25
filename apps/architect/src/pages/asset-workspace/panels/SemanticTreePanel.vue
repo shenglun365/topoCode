@@ -642,3 +642,12 @@ const {
               {{ t('assetMgmt.emptySemantic') }}
             </p>
 </template>
+
+<style scoped>
+/* 树行离屏跳过布局/绘制(配合前缀窗口渲染): 浏览器不维护不可见行样式与合成
+   (MS6-W1-S2 自 AMW SFC 迁入——scoped 样式不穿透子组件, 必须随 .tree-row 元素所在面板) */
+.tree-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
+}
+</style>

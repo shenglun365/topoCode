@@ -606,10 +606,3 @@ onMounted(async () => {
   />
 </template>
 
-<style scoped>
-/* 树行离屏跳过布局/绘制(配合前缀窗口渲染): 浏览器不维护不可见行样式与合成 */
-.tree-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 36px;
-}
-</style>
