@@ -78,6 +78,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/ResetPasswordPage.vue'),
     meta: { title: 'pageTitle.resetPassword', hideShell: true },
   },
+  {
+    // 全捕获：旧链接拼错/未知路径回落首页（避免落空渲染）
+    path: '/:pathMatch(.*)*',
+    redirect: '/',
+  },
 ]
 
 const router = createRouter({
