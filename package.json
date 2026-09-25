@@ -25,7 +25,7 @@
     "dev:chat": "bash scripts/dev-watch.sh chat",
     "dev:architect": "bash scripts/dev-watch.sh architect",
     "build": "npm run build:core && npm run build:portal && npm run build:apps",
-    "build:core": "node build/bundle-worker.mjs && node build/bundle-plugin.mjs && node build/bundle-module.mjs && npm run build:topoone-browser -w @topo/web-core",
+    "build:core": "node build/bundle-plugin.mjs && node build/bundle-module.mjs && npm run build:topoone-browser -w @topo/web-core",
     "build:portal": "npm run build:portal -w @topo/web-core",
     "build:apps": "npm run build -w @topo/app-workbench -w @topo/app-docs -w @topo/app-chat -w @topo/app-architect",
     "test": "npm run test:py && npm run test:fe",

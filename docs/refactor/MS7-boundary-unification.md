@@ -8,6 +8,8 @@
 
 ### 修正 A：workbench d3 图栈已是孤儿 ⚠️
 `useD3Graph.ts(82) / render-manager.ts(337) / render-worker.ts(155) / render-worker-bundled.js(20,861) / workers/types.ts` 在 workbench src 内**零消费**（MS2 删消费组件时底层设施漏删）。`d3@7.9.0` 仍挂 package.json。
+
+**补遗（用户实测暴露）**：根 `build:core` 的 `build/bundle-worker.mjs` 仍硬编码已删的 render-worker 入口——W1 只核了 `apps/workbench` 本地 build 门禁，漏了根编排脚本（其产物 bundled.js 同样零消费者）。已删 bundle-worker.mjs 并从 build:core 移除该步（8f844f5e 后补批）。教训：删除产物/设施时须 grep 根 build 编排脚本，不只子项目 vite。
 → 裁决④"统一 cytoscape"的**迁移部分已无对象**：docs 已用 cytoscape（useGraphState.ts 参考实现），workbench 无图视图需求。剩余工作=纯删除。
 
 ### 修正 B：AIAssistantPanel 收敛已由 MS3 完成

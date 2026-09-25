@@ -19,6 +19,6 @@ onUnmounted(() => window.removeEventListener('hashchange', sync))
 </script>
 
 <template>
-  <UserCenterPage v-else-if="route.startsWith('#/user')" />
+  <UserCenterPage v-if="route.startsWith('#/user')" />
   <AppHome v-else />
 </template>
