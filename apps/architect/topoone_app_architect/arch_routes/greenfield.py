@@ -219,7 +219,7 @@ def launch_info(root=None, project=None) -> dict:
     """启动信息(宿主机工作目录/KB 目录/模式)：已绑定项目 → 该项目真实 rootPath/kbRoot/mode；
     未绑定 → 空 execRoot(中性，不再返回假项目路径)。"""
     from . import project as _project_mod
-    proj = _project_mod._resolve_project(root, project)
+    proj = _project_mod.resolve_project(root, project)
     if not proj:
         return {"execRoot": "", "kbRoot": "", "mode": "existing", "productForm": "web", "scaffold": None}
     return {

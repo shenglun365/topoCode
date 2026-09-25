@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
-def _default_cors() -> list:
+def default_cors() -> list:
     """A9 修正：默认仍面向 dev 联调（5173/5174 直连 + 3456 反代），
     可经 `ARCH_CORS_ORIGINS`（逗号分隔）整体覆盖，供独立/生产部署配置。"""
     override = os.environ.get("ARCH_CORS_ORIGINS", "").strip()
@@ -59,9 +59,9 @@ class ProjectContextMiddleware:
             project = (qs.get("project") or [""])[0].strip() or None
             root = (qs.get("root") or [""])[0].strip() or None
             if project or root:
-                from topoone_app_architect.arch_routes.project import _resolve_project
+                from topoone_app_architect.arch_routes.project import resolve_project
                 try:
-                    proj = _resolve_project(root, project)
+                    proj = resolve_project(root, project)
                     if proj and proj.get("id"):
                         token = ctx.set_project(proj["id"])
                 except Exception:
@@ -87,7 +87,7 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins if cors_origins is not None else _default_cors(),
+        allow_origins=cors_origins if cors_origins is not None else default_cors(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -129,8 +129,8 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
         # 会话 agent 工具面注册(ctx.*/评估/提炼, 幂等)——P4 起实现延迟到
         # agent.orchestrator, 此处恢复"服务启动即注册"语义(MCP 面首调可用)
         try:
-            from .agent.orchestrator import _register_session_tools
-            _register_session_tools()
+            from .agent.orchestrator import register_session_tools
+            register_session_tools()
         except Exception:
             pass
         # P5: 定时批量提炼后台循环(异常自吞, 不影响主服务)

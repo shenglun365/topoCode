@@ -176,7 +176,7 @@ async def update_conversation(conv_id: str, request: Request):
 async def create_requirement(request: Request, projectId: str = ""):
     body = await request.json()
     # cv-204: 显式 projectId 直设请求级项目上下文(中间件 ?project= 依赖
-    # _resolve_project 的 root 联动; 前端 projectStore 直传 id 更可靠)
+    # resolve_project 的 root 联动; 前端 projectStore 直传 id 更可靠)
     _p_token = None
     if (projectId or "").strip():
         from .. import ctx as _ctx

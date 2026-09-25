@@ -151,35 +151,3 @@ async def _run_extraction_async(llm, tools, messages: list[dict], cm,
             "stop_reason": getattr(result, "stop_reason", "")}
 
 
-def run_extraction_agentic(*, sys_msg: str, user_msg: str,
-                           root: Optional[str], project: Optional[str],
-                           model_id: Optional[str] = None,
-                           max_rounds: int = 2,
-                           max_tokens: Optional[int] = None,
-                           context_manager=None,
-                           file_: str = "", kind: str = "",
-                           task_spec: str = "") -> dict:
-    """tAgent agentic_loop 提取轮（同步外壳），返回 `{'content', 'output'[, 'stop_reason']}`。
-
-    - 同步外壳 + `asyncio.run`：事件循环跑在**当前线程**（asyncio.run 不另开线程），
-      asset.* 工具（in_thread=False）因此与 `asset_tools.set_extraction_context`
-      同线程，thread-local 提取上下文/facts 可见。调用方不得在运行中的事件循环
-      线程内调用（调用链均为同步工具处理器，安全）；违反时 RuntimeError 由调用方
-      既有 try/except 捕获走地板。
-    - context_manager：可注入共享 cm（知识库自我更新等长 cm 场景跨文件累积）；
-      缺省按轮构建（任务规格钉驻 + 可达性）。
-    - 工具结果经 loop 的 observe_tool_result 入清单（含锚点抽取），参与
-      后续轮次预算编译与 GC 可达性豁免。
-    """
-    from ..kb_gateway import get_gateway
-
-    if context_manager is None:
-        context_manager = build_extraction_context(
-            file_=file_, kind=kind, task_spec=task_spec)
-    llm = KbGatewayLLMClient(get_gateway(), model_id=model_id or "")
-    tools = _extraction_registry(root, project)
-    messages = [{"role": "system", "content": sys_msg},
-                {"role": "user", "content": user_msg}]
-    return asyncio.run(
-        _run_extraction_async(llm, tools, messages, context_manager,
-                              max_rounds, max_tokens, model_id or ""))

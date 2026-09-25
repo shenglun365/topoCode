@@ -3758,7 +3758,7 @@ def changed_files(root: str, project: Optional[str]) -> Dict[str, List[str]]:
     if not root or not os.path.isdir(root):
         return {"added": [], "modified": [], "deleted": []}
     try:
-        from ..arch_routes.project import _resolve_project as _rp
+        from ..arch_routes.project import resolve_project as _rp
         proj = _rp(root, project)
     except Exception:
         proj = None

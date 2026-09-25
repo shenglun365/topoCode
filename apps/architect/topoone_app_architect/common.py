@@ -71,7 +71,7 @@ def build_architecture_model(root=None, project=None, include_code_mappings: boo
         from .kb_gateway import call_kb
         if _project_mod.kb_degraded(root, project):
             return empty_architecture_model()
-        proj = _project_mod._resolve_project(root, project)
+        proj = _project_mod.resolve_project(root, project)
         kb_id = (proj or {}).get("kbProjectId") or (proj or {}).get("kb_project_id")
         if not kb_id:
             return empty_architecture_model()
@@ -105,7 +105,7 @@ def build_component_catalog(root=None, project=None) -> dict:
         from .kb_gateway import call_kb
         if _project_mod.kb_degraded(root, project):
             return {"components": [], "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None}
-        proj = _project_mod._resolve_project(root, project)
+        proj = _project_mod.resolve_project(root, project)
         kb_id = (proj or {}).get("kbProjectId") or (proj or {}).get("kb_project_id")
         if not kb_id:
             return {"components": [], "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None}

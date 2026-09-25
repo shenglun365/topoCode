@@ -437,9 +437,9 @@ def register_promote_tools() -> None:
     def _capability_promote(kind: str, id: str, decision: str = "",
                             project: Optional[str] = None,
                             root: Optional[str] = None) -> dict:
-        from ...arch_routes.project import _resolve_project
+        from ...arch_routes.project import resolve_project
         try:
-            proj = _resolve_project(root, project)
+            proj = resolve_project(root, project)
         except Exception:
             proj = None
         pid = (proj or {}).get("id") or project or ""

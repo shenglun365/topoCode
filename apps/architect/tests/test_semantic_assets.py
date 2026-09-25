@@ -868,8 +868,6 @@ def test_extract_scope_low_level_paused_and_impl_fallback(tmp_path, monkeypatch)
     assert res.get("source") == "paused"
     # 实现层：tAgent 无结构化输出 → 种子地板兜底，层级 implementation
     import topoone_app_architect.arch_routes.tagent_extract as TE
-    monkeypatch.setattr(TE, "run_extraction_agentic",
-                        lambda **k: {"content": "", "output": None})
     res2 = S.extract_scope(str(proj), None, scope_type="files", scope_key="order",
                            files=["order.py"], kinds=["entity", "process"],
                            use_llm=True, level="implementation")

@@ -92,7 +92,7 @@ def tool_kb_code_mappings(asset_ids: List[str],
 def tool_kb_baseline(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
     if _project_degraded(root, project):
         return {}
-    from ....arch_routes.project import _resolve_project as _rp
+    from ....arch_routes.project import resolve_project as _rp
     try:
         proj = _rp(root, project)
     except Exception:
@@ -162,7 +162,7 @@ def tool_kb_graph(root: Optional[str], project: Optional[str],
     "读取当前项目上下文(项目名/分支/基线 id/降级状态)，LLM 用于判断模式(greenfield/existing)",
 )
 def tool_project_ctx(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
-    from ....arch_routes.project import _resolve_project as _rp
+    from ....arch_routes.project import resolve_project as _rp
     try:
         proj = _rp(root, project)
     except Exception:

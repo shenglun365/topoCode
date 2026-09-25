@@ -466,10 +466,10 @@ def register_probe_tool() -> None:
                    timeoutS: int = 600, project: Optional[str] = None,
                    root: Optional[str] = None) -> dict:
         from ... import ctx as _ctx
-        from ...arch_routes.project import _resolve_project
+        from ...arch_routes.project import resolve_project
         conv_id = _ctx.get_conv() or ""
         try:
-            proj = _resolve_project(root, project)
+            proj = resolve_project(root, project)
         except Exception:
             proj = None
         wt_root = root or ((proj or {}).get("rootPath") or "")

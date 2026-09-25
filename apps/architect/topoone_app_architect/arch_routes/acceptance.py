@@ -437,10 +437,10 @@ async def api_acceptance_run(request: Request):
     pid = _pid(body)
     if not pid:
         return err(400, "projectId 不能为空")
-    from .project import _resolve_project
+    from .project import resolve_project
     root = ""
     try:
-        proj = _resolve_project(body.get("root"), body.get("project"))
+        proj = resolve_project(body.get("root"), body.get("project"))
         root = (proj or {}).get("root") or ""
     except Exception:
         root = body.get("root") or ""

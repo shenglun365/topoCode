@@ -66,7 +66,6 @@ def test_extraction_name_only_no_tagent(monkeypatch):
 
     gw = FakeGateway([{"content": '{"names": [{"symbol": "Order", "name": "订单"}]}',
                        "mode": "chat"}])
-    monkeypatch.setattr(tagent_extract, "run_extraction_agentic", fake_tagent)
     monkeypatch.setattr(RA, "run_tools_loop", fake_legacy)
     monkeypatch.setattr(KG, "get_gateway", lambda: gw)
     assets = asset_extract._extract_group("/r", None, {}, "svc.py", "entity",

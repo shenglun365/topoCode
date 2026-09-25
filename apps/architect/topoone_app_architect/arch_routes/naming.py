@@ -398,8 +398,8 @@ async def api_glossary_import(request: Request):
     pid = _pid(body)
     if not pid:
         return err(400, "projectId 不能为空")
-    from .project import _resolve_project
-    proj = _resolve_project(body.get("root"), body.get("project")) or {}
+    from .project import resolve_project
+    proj = resolve_project(body.get("root"), body.get("project")) or {}
     root = proj.get("rootPath") or proj.get("root") or (body.get("root") or "").strip()
     rel = (body.get("path") or "").strip().lstrip("/")
     if not root or not rel:

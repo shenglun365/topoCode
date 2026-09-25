@@ -22,7 +22,7 @@ from . import mainkb
 from ..agent.reflection import mining as capability_mining
 from ..agent.reflection import dataset as llm_dataset
 from . import flow_policy
-from . import tracking
+from . import tracking_api as tracking
 
 router = APIRouter(prefix="/api/architect")
 router.include_router(project.router)

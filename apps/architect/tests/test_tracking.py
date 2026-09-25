@@ -158,9 +158,9 @@ def test_manual_requirement_emits_entry(tmp_path, monkeypatch):
     无项目上下文产生的条目(主库默认桶)项目视图不可见(非全局视角)。"""
     _setup_env(tmp_path, monkeypatch)
     with _mk_app() as client:
-        # 项目须先注册(?project= 经 _resolve_project 解析; 未注册 id → None)
-        from topoone_app_architect.arch_routes.project import _resolve_project
-        pid = _resolve_project(str(tmp_path / "proj-root"), "")["id"]
+        # 项目须先注册(?project= 经 resolve_project 解析; 未注册 id → None)
+        from topoone_app_architect.arch_routes.project import resolve_project
+        pid = resolve_project(str(tmp_path / "proj-root"), "")["id"]
         res = client.post(f"/api/architect/requirements?projectId={pid}", json={
             "title": "手工登记的需求", "desc": "描述"})
         assert res.status_code == 200

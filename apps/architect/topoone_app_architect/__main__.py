@@ -113,7 +113,7 @@ def main():
         os.environ.setdefault("MCP_BASE_URL", args.mcp_url)
 
     import uvicorn
-    from topoone_app_architect.server import build_app, _default_cors
+    from topoone_app_architect.server import build_app, default_cors
     # 让 architect 应用模块的 INFO 级日志可见(默认根 logger 只输出 WARNING+，
     # 会吞掉语义资产提取等关键诊断的 collect_context/extract_scope 明细)。
     _log_level = os.environ.get("ARCH_LOG_LEVEL", "INFO").upper()
@@ -124,7 +124,7 @@ def main():
         logging.getLogger(_name).setLevel(getattr(logging, _log_level, logging.INFO))
     logger.info("Architect 日志级别: %s (可用 ARCH_LOG_LEVEL 覆盖)", _log_level)
     # cross-origin: dev/web via vite, and reports 3456 (if any reverse proxy kept)
-    app = build_app(data_dir=args.data_dir, cors_origins=_default_cors())
+    app = build_app(data_dir=args.data_dir, cors_origins=default_cors())
 
     logger.info(f"Architect server starting on http://{args.host}:{args.port}")
 

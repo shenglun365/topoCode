@@ -14,10 +14,10 @@ from . import arch_git
 router = APIRouter()
 
 
-def _resolve_project(request: Request) -> Optional[dict]:
+def resolve_project(request: Request) -> Optional[dict]:
     root = request.query_params.get("root") or request.query_params.get("repo")
     project = request.query_params.get("project")
-    from .project import _resolve_project as _rp
+    from .project import resolve_project as _rp
     return _rp(root, project)
 
 
@@ -27,7 +27,7 @@ def _status(root: str):
 
 @router.get("/git/status")
 async def git_status(request: Request):
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     if not proj or not proj.get("rootPath"):
         return ok({"branch": "main", "ahead": 0, "behind": 0, "dirty": False,
                    "uncommitted": [], "staged": [], "baseline": ""})
@@ -36,7 +36,7 @@ async def git_status(request: Request):
 
 @router.get("/git/log")
 async def git_log(request: Request, limit: int = 10):
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     entries = arch_git.commit_log(root, limit=limit)
     return ok({"branch": arch_git.repo_status(root).get("branch") or "main",
@@ -45,7 +45,7 @@ async def git_log(request: Request, limit: int = 10):
 
 @router.get("/git/head")
 async def git_head(request: Request):
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     st = arch_git.repo_status(root)
     return ok({"oid": st.get("commit")[:8] or "unknown", "subject": "",
@@ -54,7 +54,7 @@ async def git_head(request: Request):
 
 @router.get("/git/working-tree")
 async def git_working_tree(request: Request, limit: int = 200):
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     files = arch_git.working_tree(root, limit=limit)
     return ok({"files": files})
@@ -63,7 +63,7 @@ async def git_working_tree(request: Request, limit: int = 200):
 @router.post("/git/checkout")
 async def git_checkout(request: Request):
     body = await request.json() or {}
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     ref = body.get("ref") or "main"
     return ok(arch_git.checkout(root, ref))
@@ -72,7 +72,7 @@ async def git_checkout(request: Request):
 @router.post("/git/reset")
 async def git_reset(request: Request):
     body = await request.json() or {}
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     target = body.get("target") or body.get("commit") or "HEAD"
     arch_git._git(["reset", "--hard", target], cwd=root)
@@ -83,7 +83,7 @@ async def git_reset(request: Request):
 @router.post("/git/commit")
 async def git_commit(request: Request):
     body = await request.json() or {}
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     msg = body.get("message") or "chore: 更新"
     arch_git._git(["add", "-A"], cwd=root)
@@ -96,7 +96,7 @@ async def git_commit(request: Request):
 @router.post("/git/push")
 async def git_push(request: Request):
     body = await request.json() or {}
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     branch = body.get("branch") or arch_git.repo_status(root).get("branch") or "main"
     from ..agent.governance.timeouts import get as _timeout_of
@@ -107,7 +107,7 @@ async def git_push(request: Request):
 
 @router.get("/git/diff")
 async def git_diff(request: Request):
-    proj = _resolve_project(request)
+    proj = resolve_project(request)
     root = (proj or {}).get("rootPath") or ""
     task_branch = (proj or {}).get("taskBranch") or ""
     base = (proj or {}).get("baselineCommit") or ""

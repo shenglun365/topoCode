@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # P2/P3: 会话 agent 的 ctx.* + probe.run/评估/提炼工具注册(幂等; P4 起延迟到首回合)
-def _register_session_tools() -> None:
+def register_session_tools() -> None:
     from .memory import units as _context_registry
     _context_registry.register_chat_tools()
     _context_registry.register_probe_tool()
@@ -361,11 +361,11 @@ async def _chat_gate(data: dict, send: SendFn, now: int) -> Optional[dict]:
     from .. import store
     from ..common import _ts
 
-    _register_session_tools()
+    register_session_tools()
     history = data.get("messages") or []
     # 请求级项目上下文(项目库路由；WS 无 HTTP 查询串，按消息载荷设置)
     from .. import ctx as _ctx
-    from ..arch_routes.project import _resolve_project as _rp
+    from ..arch_routes.project import resolve_project as _rp
     try:
         _proj = _rp((data.get("root") or "").strip(),
                     (data.get("project") or "").strip())

@@ -53,7 +53,7 @@ def _synthesize(root: str) -> dict:
     }
 
 
-def _resolve_project(root: Optional[str] = None, project_id: Optional[str] = None) -> Optional[dict]:
+def resolve_project(root: Optional[str] = None, project_id: Optional[str] = None) -> Optional[dict]:
     """按 URL 解析当前项目(arch_projects 为唯一事实源):
     - project=<architect行id>: 读 `arch_projects` 行;
     - project=<KB pid>(对话链路透传 proj-xxx): 按 kbProjectId 反查绑定行——
@@ -91,7 +91,7 @@ def kb_degraded(root: Optional[str] = None, project_id: Optional[str] = None) ->
     全插件 KB 相关 API 共用的判定口径(requirements/arch_change/knowledge 复用)。
     """
     try:
-        proj = _resolve_project(root, project_id)
+        proj = resolve_project(root, project_id)
     except Exception:
         return True
     return not (proj and proj.get("baselineId"))
@@ -241,7 +241,7 @@ def _match_kb_candidates(arch_root: str, rows: Optional[list] = None) -> dict:
 
 @router.get("/project/bound")
 async def get_bound_project(root: Optional[str] = None, project: Optional[str] = None):
-    return ok(_resolve_project(root, project))
+    return ok(resolve_project(root, project))
 
 
 def list_recent_projects() -> list:
@@ -271,7 +271,7 @@ async def flag_project(request: Request):
     Body: { root? 或 project?, pinned? 或 favorite? }，pinned/favorite 布尔置位。
     """
     body = await request.json() or {}
-    proj = _resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
+    proj = resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
     if not proj or not proj.get("id"):
         return err(400, "未定位到项目")
     patch = {}
@@ -297,7 +297,7 @@ async def rename_project(request: Request):
     name = str(body.get("name") or "").strip()
     if not name:
         return err(400, "项目名不能为空")
-    proj = _resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
+    proj = resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
     if not proj or not proj.get("id"):
         return err(400, "未定位到项目")
     row = store.ProjectsStore.update(proj["id"], {"name": name, "updatedAt": _ts()})
@@ -316,7 +316,7 @@ async def delete_project(request: Request):
     - deleteData=true 时，同时删除该项目的 architect 相关数据(如架构快照记录)。
     """
     body = await request.json() or {}
-    proj = _resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
+    proj = resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
     if not proj or not proj.get("id"):
         return err(400, "未定位到项目")
     delete_data = bool(body.get("deleteData"))
@@ -372,7 +372,7 @@ async def match_kb_projects(root: Optional[str] = None, project: Optional[str] =
     - 辅参数为远端仓库地址(仅当工作目录与 KB 都配置了远端时生效) → `remote` 组；
     - 两组同时返回；未命中对应组为空数组，由前端逐组标明「无」。
     """
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj or not proj.get("rootPath"):
         return err(400, "未定位到工作目录")
     return ok(_match_kb_candidates(proj["rootPath"]))
@@ -396,7 +396,7 @@ async def bind_project(request: Request):
     from . import arch_git
     arch_git.ensure_gitignore_entries(root)
     proj_id = _stable_proj_id(root)
-    base = _resolve_project(root, None) or _synthesize(root)
+    base = resolve_project(root, None) or _synthesize(root)
     kb_id = body.get("kbProjectId") or body.get("projectId")
     if kb_id:
         kb = _lookup_kb(kb_id)
@@ -421,7 +421,7 @@ async def bind_project(request: Request):
             "kbProjectId": kb["id"], "kbSourceDir": kb.get("rootPath") or "",
             "gitLinked": True, "linkVerifiedAt": _ts(),
         })
-        return ok(_resolve_project(root, None))
+        return ok(resolve_project(root, None))
     store.ProjectsStore.upsert(proj_id, {
         "name": body.get("name") or base["name"], "desc": base["desc"],
         "mode": "existing", "rootPath": root, "kbRoot": "",
@@ -430,7 +430,7 @@ async def bind_project(request: Request):
         "config": base.get("config") or dict(_DEFAULT_CONFIG),
         "gitLinked": False,
     })
-    return ok(_resolve_project(root, None))
+    return ok(resolve_project(root, None))
 
 
 @router.post("/project/link")
@@ -448,7 +448,7 @@ async def link_project(request: Request):
     root = (body.get("execRoot") or body.get("root") or "").strip()
     proj = None
     if root:
-        proj = _resolve_project(root, None)
+        proj = resolve_project(root, None)
     elif body.get("project"):
         proj = store.ProjectsStore.get(body["project"])
     if not proj or not proj.get("rootPath"):
@@ -476,14 +476,14 @@ async def link_project(request: Request):
         "createdAt": proj.get("createdAt") or _ts(), "updatedAt": _ts(),
     }
     store.ProjectsStore.upsert(proj["id"], data)
-    return ok(_resolve_project(None, proj["id"]))
+    return ok(resolve_project(None, proj["id"]))
 
 
 @router.post("/project/unlink")
 async def unlink_project(request: Request):
     """解除 KB 关联(architect 项目保留，回到降级)。"""
     body = await request.json() or {}
-    proj = _resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
+    proj = resolve_project(body.get("root") or body.get("execRoot"), body.get("project"))
     if not proj or not proj.get("id"):
         return err(400, "未定位到已关联的 architect 项目")
     store.ProjectsStore.update(proj["id"], {
@@ -491,7 +491,7 @@ async def unlink_project(request: Request):
         "baselineId": None, "gitLinked": False, "linkVerifiedAt": 0,
         "updatedAt": _ts(),
     })
-    return ok(_resolve_project(None, proj["id"]) or _resolve_project(body.get("root"), None))
+    return ok(resolve_project(None, proj["id"]) or resolve_project(body.get("root"), None))
 
 
 @router.post("/project/unbind")
@@ -502,7 +502,7 @@ async def unbind_project():
 
 @router.get("/project/status")
 async def get_project_status(root: Optional[str] = None, project: Optional[str] = None):
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj:
         return ok(None)
     if not proj.get("baselineId"):
@@ -742,7 +742,7 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
     覆盖的独占文件(files/added/modified/deleted)，另附子树上卷合计(total*)；未归属
     文件归「__unowned__」分组。
     """
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj:
         return ok(None)
     from . import arch_git
@@ -825,7 +825,7 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
 
 @router.get("/project/snapshots")
 async def get_snapshots(root: Optional[str] = None, project: Optional[str] = None):
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj or not proj.get("baselineId"):
         # 未关联知识库 → 无基线快照可读，返回空列表(前端提示降级)。
         return ok([])
@@ -842,7 +842,7 @@ async def get_snapshots(root: Optional[str] = None, project: Optional[str] = Non
 @router.post("/project/snapshots")
 async def create_snapshot(request: Request, root: Optional[str] = None, project: Optional[str] = None):
     body = await request.json()
-    resolved = _resolve_project(root, project)
+    resolved = resolve_project(root, project)
     if not resolved:
         return err(400, "未绑定项目，无法创建架构快照")
     snap_id = store.next_id("snap")
@@ -870,7 +870,7 @@ async def create_snapshot(request: Request, root: Optional[str] = None, project:
 
 @router.get("/project/baseline/meta")
 async def get_baseline_meta(root: Optional[str] = None, project: Optional[str] = None):
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj or not proj.get("baselineId"):
         return err(400, "未关联知识库，无法读取基线信息。请在项目概览「查找关联」中关联知识库后重试。")
     from . import arch_git
@@ -889,7 +889,7 @@ async def get_baseline_meta(root: Optional[str] = None, project: Optional[str] =
 
 @router.get("/project/baseline/dirty")
 async def get_baseline_dirty(root: Optional[str] = None, project: Optional[str] = None):
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj or not proj.get("baselineId"):
         return err(400, "未关联知识库，无法读取基线状态。")
     from . import arch_git
@@ -912,7 +912,7 @@ async def sync_baseline(request: Request):
     body = await request.json() or {}
     root = body.get("root") or request.query_params.get("root")
     project = body.get("project") or request.query_params.get("project")
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj or not proj.get("baselineId"):
         return err(400, "未关联知识库，无法同步基线。请在项目概览「查找关联」中关联知识库后重试。")
     from . import arch_git
@@ -929,7 +929,7 @@ async def sync_baseline(request: Request):
 @router.patch("/project/config")
 async def update_project_config(request: Request, root: Optional[str] = None, project: Optional[str] = None):
     patch = await request.json()
-    resolved = _resolve_project(root, project)
+    resolved = resolve_project(root, project)
     if not resolved:
         return err(400, "未绑定项目")
     config = dict(resolved.get("config") or {})

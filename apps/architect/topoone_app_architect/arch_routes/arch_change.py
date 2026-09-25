@@ -22,9 +22,9 @@ def _kb_degraded(root=None, project_id=None) -> bool:
 
 def _resolve(root=None, project=None):
     """解析项目 → KB id；未绑定/降级返回 None。"""
-    from .project import _resolve_project
+    from .project import resolve_project
     from ..kb_gateway import call_kb
-    proj = _resolve_project(root, project)
+    proj = resolve_project(root, project)
     if not proj:
         return None, None, None
     kb_id = proj.get("kbProjectId") or proj.get("kb_project_id") or ""

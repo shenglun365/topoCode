@@ -1002,9 +1002,9 @@ async def probe_session(conv_id: str, request: Request):
     instruction = (body.get("instruction") or "").strip()
     if not instruction:
         return err(400, "instruction 为空")
-    from .project import _resolve_project
+    from .project import resolve_project
     try:
-        proj = _resolve_project(body.get("root") or None, conv.get("projectId") or None)
+        proj = resolve_project(body.get("root") or None, conv.get("projectId") or None)
     except Exception:
         proj = None
     root = body.get("root") or ((proj or {}).get("rootPath") or "")

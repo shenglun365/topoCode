@@ -43,9 +43,9 @@ def _project_ctx(root: Optional[str] = None, project: Optional[str] = None):
 
     降级口径与 project.kb_degraded 一致：项目未解析或项目无 KB 基线。
     """
-    from .project import _resolve_project, kb_degraded
+    from .project import resolve_project, kb_degraded
     try:
-        proj = _resolve_project(root, project)
+        proj = resolve_project(root, project)
     except Exception:
         return None, True
     return proj, kb_degraded(root, project)
@@ -178,7 +178,7 @@ async def kb_query(request: Request):
     flow_by: Dict[str, List[str]] = {}
     try:
         from . import project as _project_mod
-        proj = _project_mod._resolve_project(spec.get("root"), spec.get("project"))
+        proj = _project_mod.resolve_project(spec.get("root"), spec.get("project"))
         kb_id = (proj or {}).get("kbProjectId") or (proj or {}).get("kb_project_id")
         if kb_id:
             tasks = call_kb("analysis.listTasks", projectId=kb_id) or []
@@ -259,7 +259,7 @@ async def kb_query(request: Request):
 def _resolve_kb_id(root, project) -> str:
     """辅助：解析项目 KB 关联 id(供 version.list 等)。"""
     from . import project as _project_mod
-    proj = _project_mod._resolve_project(root, project)
+    proj = _project_mod.resolve_project(root, project)
     return (proj or {}).get("kbProjectId") or (proj or {}).get("kb_project_id") or ""
 
 

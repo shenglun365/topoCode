@@ -344,8 +344,8 @@ def resolve_base_commit(root: Optional[str], project: Optional[str] = None) -> s
     """
     if root:
         try:
-            from ..arch_routes.project import _resolve_project
-            proj = _resolve_project(root, project) or {}
+            from ..arch_routes.project import resolve_project
+            proj = resolve_project(root, project) or {}
             bc = (proj.get("baselineCommit") or "").strip()
             if bc:
                 return bc
