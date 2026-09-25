@@ -17,7 +17,8 @@ export default defineConfig({
           },
   },
   envPrefix: ['VITE_', 'TOPOCODE_'],
-  base: './',
+  // history 路由基座：gateway 以 /app 挂载 dist（dev 同样在 /app/ 下访问）
+  base: '/app/',
   server: {
     host: '0.0.0.0',
     port: 5173,

@@ -25,7 +25,8 @@ const sections: Array<{ key: SectionKey; labelKey: string }> = [
 const active = ref<SectionKey>('models')
 
 function goHome() {
-  window.location.hash = '#/'
+  // history 路由切换（原 location.hash='#/'）
+  window.location.href = '/app/'
 }
 </script>
 

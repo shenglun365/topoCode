@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import i18n from '@/i18n'
 import { useProjectStore } from '@/stores/project'
@@ -81,7 +81,8 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const router = createRouter({
-  history: createWebHashHistory(),
+  // history 模式（方案A-2）：URL 形如 /app/chat；deep-link 由 gateway /app SPA fallback 兜底
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
 

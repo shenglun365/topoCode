@@ -53,9 +53,36 @@ async def v2_chat():
 
 @vue_router.get("/chat", response_class=HTMLResponse)
 async def spa_chat():
-    """chat 页面（/chat）— MS7-W3 起 FE 并入 workbench SPA（hash 路由），301 至 /app#/chat。
+    """chat 页面（/chat）— FE 并入 workbench SPA（history 路由，方案A），301 至 /app/chat。
     chat 独立 SPA 已退役（W4），不再 serve chat.html。"""
-    return RedirectResponse("/app#/chat", status_code=301)
+    return RedirectResponse("/app/chat", status_code=301)
+
+
+def _workbench_dist() -> str | None:
+    """workbench dist 目录（manifest static_dir；未配置/不存在返回 None）。"""
+    from topoone.manifest import discover_apps
+    try:
+        m = discover_apps(static_sources._REPO_ROOT).get("workbench")
+        if m and m.static_dir:
+            d = static_sources._resolve(m.static_dir)
+            if os.path.isdir(d):
+                return d
+    except Exception as e:
+        logger.warning(f"[vue_routes] workbench dist resolve failed: {e}")
+    return None
+
+
+@vue_router.get("/app/{rest:path}")
+async def app_spa_fallback(rest: str):
+    """workbench SPA 兜底（方案A history 路由）：dist 内真实文件直出（assets 等），
+    其余一律回 index.html 交客户端路由。目录穿越防护：resolve 后必须仍在 dist 内。"""
+    dist = _workbench_dist()
+    if not dist:
+        return HTMLResponse("workbench SPA not built. Run: npm run build -w @topo/app-workbench")
+    cand = os.path.realpath(os.path.join(dist, rest))
+    if cand.startswith(os.path.realpath(dist) + os.sep) and os.path.isfile(cand):
+        return FileResponse(cand)
+    return FileResponse(os.path.join(dist, "index.html"))
 
 
 @vue_router.get("/viewer", response_class=HTMLResponse)
