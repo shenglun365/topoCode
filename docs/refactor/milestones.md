@@ -99,23 +99,23 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 ### MS6 前端巨型组件拆分〔B5〕
 
 - **功能单元属性**：六个迭代热点文件拆为「子组件+composable」，键位/行为零变化。
-- **范围**：architect（AssetManagementWorkspace/SemanticGraphView/AnalysisChat）+ workbench（ReportHome/ProjectCard/community-store 抽 useComponentAnalysis）；**接收 MS2 移交：web-core DiagramRebuildDialog 随 DiagramViewer 共改再裁决去留**；ChatSession 归 MS7（拆+上提同做）
+- **范围**（核证 2026-09-25：3,296/2,649/2,383/1,443/1,441/1,252 行；ConversationDock 951 软上限内不入批）：architect（AssetManagementWorkspace/SemanticGraphView/AnalysisChat）+ workbench（ReportHome/ProjectCard/community-store 抽 useComponentAnalysis）；**接收 MS2 移交：web-core DiagramRebuildDialog 随 DiagramViewer 共改再裁决去留（裁决输入 MS7-W3）**；ChatSession 归 MS7（拆+上提同做）
 - **独立可测判据**：
   1. 现有 vitest 全绿 + 各页核心交互手动回归清单（细化设计中列全）
   2. 拆分后单文件 <1,500 行；props/emits 边界清单化
   3. i18n 键零丢失（键集合前后对比脚本）
-- **细化设计文档**：`MS6-component-splits.md`（待产出）
+- **细化设计文档**：[MS6-frontend-components.md](MS6-frontend-components.md)（已产出，待评审）
 
 ### MS7 边界重塑与栈统一〔B6〕
 
 - **功能单元属性**：最终边界形态——chat 并入 workbench（裁决②）、节点图栈一步到位统一 cytoscape（裁决④）、native 直读合法化与 MCP 边界收口（裁决①⑤）、CONV 治理落笔。
-- **范围**：ChatSession 拆 useChatStream/useMessageActions/useChatCommands 后上提 workbench（与 AIAssistantPanel 收敛为一套）；docs/portal 跳转改址；topoone_app_chat 迁 workbench 域托管（保留独立进程 :3483，目录迁移）；项目列表三处归一；`useNodeGraph`（cytoscape，性能 gate：5k 节点 <3s、拖拽 ≥30fps）+ 同变更删 d3/render-worker/bundle-worker；native 直读合法化（ro+WAL+manifest+open_project_ro，限符号兜底与 docs viewer）；C2/C3 入 CONV；architect 独立化收尾验证
+- **范围**：ChatSession 拆 useChatStream/useMessageActions/useChatCommands 后上提 workbench（与 AIAssistantPanel 收敛为一套）；docs/portal 跳转改址；topoone_app_chat 迁 workbench 域托管（保留独立进程 :3483，目录迁移）；项目列表三处归一；图栈统一——**核证修正（2026-09-25）：workbench d3 栈（useD3Graph/render-manager/render-worker 含 20,861 行 bundled 产物）已是零消费孤儿**，迁移对象已死，剩余=纯删除（-21K 行）；docs 已用 cytoscape（useGraphState 参考）；性能 gate 随消费场景消亡而失效，留档结案；native 直读合法化（ro+WAL+manifest+open_project_ro，限符号兜底与 docs viewer）；C2/C3 入 CONV；architect 独立化收尾验证
 - **独立可测判据**：
   1. chat 并入：docs 两处跳转与 portal 入口回归通过；`:3483` 服务在 workbench 域内正常起停
   2. 图栈：性能 gate 实测达标（记录数据）；`grep -rn "\"d3\"\|@types/d3" apps/workbench/package.json package.json` 零命中；大图交互手动回归
   3. 边界：architect 网络调用清单仅剩 MCP + 只读 HTTP；`grep -rn "@topo/web-core" apps/architect` 仍为零
   4. CONV-03/CONV-04 更新落笔；`architecture-review-YYYYMMDD.md` 归档产出
-- **细化设计文档**：`MS7-boundary-finalization.md`（待产出）
+- **细化设计文档**：[MS7-boundary-unification.md](MS7-boundary-unification.md)（已产出，待评审；含修正 A「d3 孤儿」/修正 B「AIAssistantPanel 收敛已由 MS3 完成」两处核证）
 
 ---
 
@@ -126,8 +126,10 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 | MS1 | ✅ 已评审（2026-09-24） | — | ✅ C1~C8 落地（b8cf54f..a835b5d，8+2 commits，含 D6/D7 两缺陷修复） | ✅ 判据1: 349 passed/39.7s · 判据3: ls-files 零命中 · 判据4: 进程=9 核证 · 判据2: type-check✅ test:fe✅ lint 存量红灯豁免（错误全在 MS1 未触碰文件）；topo serve 实测留待用户环境 |
 | MS2 | ✅ 已评审（2026-09-24） | — | ✅ K1~K5 落地（cc36437..39ed3b0+greenfield 措辞清理，6 commits） | ✅ 净删 **−7,006 行/+256**（93 文件）：architect 2,935 + workbench 3,635 + web-core 107 + shim/迁移 329；判据1: architect 1101(R1 存量)+四域 349+FE typecheck/test 全绿；判据2: A1~A5 零引用命中（仅存勘误记录与已清理措辞）；判据3: shortstat 与清单一致 |
 | MS3 | ✅ 已评审（U6=案A；U2=本期合入） | — | ✅ 在途合入 e06d1bd + U0~U8 落地（d3fdf88..75bad87，11 commits） | ✅ 判据1: architect web-core import=0+依赖零声明+独立build ✓（全口径达成）· 判据2: 旧token键=0 · 判据3: 四域349+FE vitest(54/9/9/12)+architect 1101(R1存量) · 判据4: 案A口径通过 · 判据5/6: 0命中 |
-| MS4 | ✅ 已产出（[MS4-backend-restructure.md](MS4-backend-restructure.md)，待评审；与 MS5 并行零交集） | ⬜ | ⬜ | ⬜ |
-| MS5 | ✅ 已评审 | ✅ V0/V1/V2+V3-StepA 落地（web_tools 三件 1ac94e4）；V3-StepB(chat_api) 挂账专项 | 🔶 判据1 parity ✓ · 判据2 DDL 契约 ✓ · 判据3 分域全绿 · 判据4 行数 ✓；StepB SSE 挂起法证已入档(线程无帧消失), 待 py-spy 提权归因 |
+| MS4 | ✅ 已评审 | ✅ W1~W9 全部完结（33ddde4..07ba81c，24 commits；W8 经 SCC 分析**保留 engine 单文件**+§13.1 未来路径） | ✅ 1098 全绿；厚通道 6 类+V3 专项为显式遗留 |
+| MS6 | 🔶 [设计已产出](MS6-frontend-components.md)待评审 | ⬜ | ⬜ | ⬜ |
+| MS7 | 🔶 [设计已产出](MS7-boundary-unification.md)待评审（含两处核证修正） | ⬜ | ⬜ | ⬜ |
+| MS5 | ✅ 已评审 | ✅ V0/V1/V2+V3-StepA 落地（web_tools 三件 1ac94e4）；**V3B 收口方案已细化待评审**（MS5-engine-splits.md 附节：sudo py-spy 诊断或按 W8 先例结项，0.5~1d） | 🔶 判据1~4 全达成；StepB 二选一路径待用户裁决 |
 | MS6 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 | MS7 | ⬜ 待产出 | ⬜ | ⬜ | ⬜ |
 
