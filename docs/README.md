@@ -11,7 +11,7 @@
 | [refactor/MS1-safety-net.md](refactor/MS1-safety-net.md) | 已实施完成 | MS1 细化设计+实施记录：四套测试（78 例）+ 缺陷 D1~D7 清零，验收全绿 |
 | [refactor/MS2-dead-code-purge.md](refactor/MS2-dead-code-purge.md) | 已实施完成 | MS2 细化设计+实施记录：净删 −7,006 行（shim 迁移/死码/KnowledgePage 退役） |
 | [refactor/MS3-frontend-unification.md](refactor/MS3-frontend-unification.md) | 已实施完成 | MS3 细化设计+实施记录：architect 彻底独立 + token 统一 + 对话框合一 + web-core 瘦身下沉 + sidecar 更名 |
-| [refactor/MS4-backend-restructure.md](refactor/MS4-backend-restructure.md) | 🔶 开发中(W1-W3 落地) | MS4 细化设计+实施记录：W1 平级归位/W2 双巨石入 agent/W3 三通道抽取（1102 全绿）；W4~W9 待续 |
+| [refactor/MS4-backend-restructure.md](refactor/MS4-backend-restructure.md) | 🔶 开发中(W1-W3 落地) | MS4 细化设计+实施记录：W1 平级归位/W2 双巨石入 agent/W3 三通道抽取（全绿）；W4/W5/W6/W7 落地，W8 八域拆分留专项，W9 待 W8 |
 | [refactor/MS5-engine-splits.md](refactor/MS5-engine-splits.md) | 🔶 部分完成 | MS5 细化设计+实施记录：V0 DDL/V1 task_api 六域/V2 viewer/V3-StepA web_tools 落地；StepB chat_api 挂账专项(py-spy 归因) |
 | [product-iteration-roadmap-2026-09.md](product-iteration-roadmap-2026-09.md) | 现行 | 产品迭代路线图（2026-09，含 L 组/各线任务排期） |
 | [architect-v2-todo.md](architect-v2-todo.md) | 现行 | architect v2 重构待办（P0 遗留/P1 资产表/P2 旧机制清退/P3 引擎打磨） |
