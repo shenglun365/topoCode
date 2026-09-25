@@ -7,6 +7,8 @@
  */
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { BoltIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon } from '@heroicons/vue/24/outline'
+import { copyText } from '@/utils/clipboard'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import type { SemanticStatsResult } from '@/services/semantic-asset-service'
@@ -632,6 +634,24 @@ export function useAssetCore(D: WsDeps) {
     return `${name} (${id})`
   }
 
+  // ---- 视图辅助(模板直接消费；MS6-W1 自 SFC 移入——树面板共用) ----
+  function kindIcon(k: SemanticAsset['kind']) {
+    if (k === 'process') return BoltIcon
+    if (k === 'decision') return AdjustmentsHorizontalIcon
+    if (k === 'contract') return ServerStackIcon
+    if (k === 'state') return AdjustmentsHorizontalIcon
+    return CubeTransparentIcon
+  }
+
+  async function copyAsset(a: SemanticAsset) {
+    const lines = [`${a.name} (${a.kind})`, `ID: ${a.id}`, a.desc]
+    if (a.astRefs?.length) {
+      lines.push('')
+      lines.push(...a.astRefs.slice(0, 10).map((r) => `${r.file}:L${r.startLine}-L${r.endLine} ${r.symbol}`))
+    }
+    await copyText(lines.join('\n'))
+  }
+
   return {
     tab, kind, level, q, items, loading, statusCounts, expanded, overviewStats, purging,
     kinds, levels, statusText,
@@ -646,7 +666,7 @@ export function useAssetCore(D: WsDeps) {
     refreshStatus, refreshOne, usable, detailLoading, descLoading,
     renderCap, renderedTreeRows, semScrollEl, loadMoreSentinel,
     genDesc, toggle, detailDone, hideFileless, onSearch,
-    compMetaText, compRefText,
+    compMetaText, compRefText, kindIcon, copyAsset,
   }
 }
 

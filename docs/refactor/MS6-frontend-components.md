@@ -33,7 +33,7 @@
 | 批 | 内容 | 判据（全绿门禁） | 预估 |
 |---|---|---|---|
 | **W0 安全网** ✅ | 六目标件 vitest 挂载冒烟+交互守卫（Vue 原生 createApp 挂载，零新依赖；两域 vitest 补 vue 插件口径已统一） | architect 64/64 + workbench 19/19 + 双域 typecheck 干净 | 1.5d |
-| **W1 AssetManagementWorkspace**（3,296） | 按 tab/区域拆子组件 + composables（数据加载/选择态/批量操作） | W0 测试全绿+新增覆盖；`vue-tsc` 零新错 | 1.5d |
+| **W1 AssetManagementWorkspace** ✅ | 逻辑层八域 composable（asset-workspace/：core 四元组整块+diff/chat/framework/unowned/sync/purgeBatch/graphTabs）+ 模板三面板（provide/inject 每挂载一套状态，行为语义保持） | 64/64+typecheck 0 错；SFC 3,296→615 行 | 1.5d |
 | **W2 SemanticGraphView**（2,649） | 拆三层：SVG 渲染 / 交互（zoom-pan/视口判定 nodeVisibleInViewport）/ 数据变换 | 同上 | 1.5d |
 | **W3 AnalysisChat**（2,383） | 拆消息渲染/输入区/会话态 composables | 同上 | 1d |
 | **W4 ReportHome + ProjectCard**（1,443+1,441） | 各拆子组件+composables | 同上 | 1.5d |
@@ -77,3 +77,23 @@
 - 挂载方式：Vue 原生 `createApp`（@vue/test-utils 因 registry 无授权不可装——零新依赖方案）；emit 捕获用 `h()` 透传 `onXxx`
 - 桩策略：服务面 Proxy 全桩 + RICH 默认形状（items/total/counts/status...）；jsdom 缺 API 补桩（ResizeObserver/scrollTo）
 - 门禁：architect **64/64**、workbench **19/19**、双域 `vue-tsc --noEmit` 干净
+
+
+---
+
+## 7. W1 执行记录（2026-09-25，两段提交）
+
+### W1-S1 逻辑层（c4e4ffe）
+- `pages/asset-workspace/`：`useAssetCore.ts`(四元组整块 671 行——data+compTree+scopeFilter+semanticTreeRows 内部纠缠不切, 零接缝风险) + 七特征域(diff 251/chat 153/framework 132/unowned 211/sync 131/purgeBatch 136/graphTabs 100) + `index.ts` 总装(73)
+- 跨域互引经 D 注入袋惰性解析(computed 天然惰性)；scope/q/哨兵三个 watch 在总装层接线
+- **生命周期留宿主**：窗口事件/会话钩子注册/轮询接管/初始加载在 SFC onMounted——composable 保持无副作用可测
+- SFC 3,296→1,758；typecheck 0 错 + 64/64
+
+### W1-S2 模板面板化
+- 三面板(panels/)：OverviewPanel 386 + SemanticTreePanel 648 + WorkspaceModals 251——模板块**逐行迁出**，状态经 `ASSET_WS_KEY` provide/inject 注入(每挂载一套状态, 语义与原页一致)
+- `kindIcon/copyAsset` 随树面板需求移入 core；根级 FileSourceCard 因**多根模板**留宿主(根关闭符在其前)
+- SFC 最终 **615 行**（目标 <800 达成）；typecheck 0 错 + 64/64
+
+### 陷阱记录
+1. 多根模板陷阱：根级 FileSourceCard 在根 `</div>` 之后——首刀误吞根关闭符致面板 30/31 失衡，vitest SFC 解析器报"missing end tag"而 vue-tsc(strict:false) 放行——**SFC 解析器比 vue-tsc 更严，两者都要过**
+2. 手术必须自底向上+硬断言边界；一次误差累积后从 git 恢复重做优于补丁式修复

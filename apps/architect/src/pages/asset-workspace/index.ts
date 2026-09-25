@@ -3,7 +3,8 @@
  * 组装八域 composable 并接线跨域 watch；SFC 仅保留 setup 生命周期钩子
  * (窗口事件/会话钩子注册/轮询接管)与模板。纯移动重构：逻辑与源文件逐行对应。
  */
-import { watch } from 'vue'
+import { inject, provide, watch } from 'vue'
+import type { InjectionKey } from 'vue'
 import { useAssetCore, type WsDeps } from './useAssetCore'
 import { useAssetChat } from './useAssetChat'
 import { useAssetDiff } from './useAssetDiff'
@@ -12,6 +13,9 @@ import { useUnownedExtract } from './useUnownedExtract'
 import { useSyncExtract } from './useSyncExtract'
 import { usePurgeBatch } from './usePurgeBatch'
 import { useGraphTabs } from './useGraphTabs'
+
+/** 面板注入键：SFC provide，子面板 inject 同一工作区实例(每挂载一套状态)。 */
+export const ASSET_WS_KEY: InjectionKey<AssetWorkspace> = Symbol('asset-workspace')
 
 export function useAssetWorkspace() {
   const D: WsDeps = {}
@@ -71,3 +75,10 @@ export function useAssetWorkspace() {
 }
 
 export type AssetWorkspace = ReturnType<typeof useAssetWorkspace>
+
+/** 面板侧取用(由 SFC provide)。 */
+export function useAssetWorkspaceCtx(): AssetWorkspace {
+  const ws = inject(ASSET_WS_KEY)
+  if (!ws) throw new Error('AssetWorkspace 未由宿主 provide')
+  return ws
+}
