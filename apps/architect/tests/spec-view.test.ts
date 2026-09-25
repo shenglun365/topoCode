@@ -95,6 +95,7 @@ describe('渲染面守门(载荷形态决定渲染形态)', () => {
   const chat = readFileSync(`${root}/src/components/requirements/AnalysisChat.vue`, 'utf-8')
     + readdirSync(dir).filter((f) => f.endsWith('.ts'))
       .map((fl) => readFileSync(resolve(dir, fl), 'utf-8')).join('\n')
+    + (() => { try { const pd = resolve(dir, 'panels'); return readdirSync(pd).filter((f) => f.endsWith('.vue')).map((f2) => readFileSync(resolve(pd, f2), 'utf-8')).join('\n') } catch { return '' } })()
 
   it('specCard 与正文草稿视图共用单源(不内联重复组装)', () => {
     expect(chat.includes("from '@/services/spec-view'")).toBe(true)

@@ -35,7 +35,7 @@
 | **W0 安全网** ✅ | 六目标件 vitest 挂载冒烟+交互守卫（Vue 原生 createApp 挂载，零新依赖；两域 vitest 补 vue 插件口径已统一） | architect 64/64 + workbench 19/19 + 双域 typecheck 干净 | 1.5d |
 | **W1 AssetManagementWorkspace** ✅ | 逻辑层八域 composable（asset-workspace/：core 四元组整块+diff/chat/framework/unowned/sync/purgeBatch/graphTabs）+ 模板三面板（provide/inject 每挂载一套状态，行为语义保持） | 64/64+typecheck 0 错；SFC 3,296→615 行 | 1.5d |
 | **W2 SemanticGraphView** ✅ | S1 逻辑层四域 + S2 模板两面板（GraphToolbarPanel 326 / GraphMainPanel 703，SGV_WS_KEY 注入；样式分发：icon-pulse→工具栏，anchor-flash/td-node/card-*→主区） | 64/64+typecheck 0 错；**SFC 2,649→282 行**（<800 达成） | 1.5d |
-| **W3 AnalysisChat**（2,383） | 拆消息渲染/输入区/会话态 composables | 同上 | 1d |
+| **W3 AnalysisChat** ✅ | S1 逻辑八域(chat-view/) + S2 模板两面板(ChatFeedPanel 1055/ChatBottomPanel 356, WS_KEY 注入+props 整体 v-bind 透传) | 64/64+typecheck 0 错；**SFC 2,383→421 行** | 1d |
 | **W4 ReportHome + ProjectCard**（1,443+1,441） | 各拆子组件+composables | 同上 | 1.5d |
 | **W5 community-store 抽 useComponentAnalysis**（1,252） | 组件分析逻辑抽 composable，store 瘦身为状态容器 | 同上 | 1d |
 | **W6 收尾** | types 死类型清理 + **DiagramViewer 裁决已定案（2026-09-25 方案A：留 web-core；RebuildDialog=私有子件标注已落）**+ 文档回写 | 全套件+milestones 更新 | 1d |
@@ -131,3 +131,6 @@ W1 手工转写 → W2 升级为**机械抽取脚本**（核心资产，后续�
 2. `has_word(body,"t(")` 的 `\b` 尾巴在 `(` 后永不匹配 → use_i18n 永远 False——改直接正则
 3. 守卫测试随架构更新：choices-card/spec-view 的源码断言改为扫描 SFC+chat-view/*.ts 组件族聚合源
 4. **严禁对已抽取文件重跑抽取器**（行段坐标失效 → 组合件垃圾）——重跑前必须 git restore
+5. W3-S2 陷阱：面板切割范围吞 SFC 根关闭/`</template>`（BottomPanel 尾部三连）——**面板化切割终点=内容块末行，绝不写到根关闭**；emits 清单须 `grep "emit('"` 全量收集
+6. props 透传用 `v-bind="props"` 整体绑定（面板声明子集），避免逐 props 打地鼠
+7. 源码守卫测试升级：聚合源 = SFC + 域目录 *.ts + panels/*.vue（递归）

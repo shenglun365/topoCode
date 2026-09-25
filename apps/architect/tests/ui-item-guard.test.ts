@@ -16,6 +16,8 @@ const root = resolve(process.cwd())
 
 const RENDER_FILES = [
   'src/components/requirements/AnalysisChat.vue',
+  'src/components/requirements/chat-view/panels/ChatFeedPanel.vue',
+  'src/components/requirements/chat-view/panels/ChatBottomPanel.vue',
   'src/components/chat/StreamItems.vue',
   'src/components/chat/ConversationDock.vue',
 ]
@@ -41,7 +43,7 @@ describe('A6.2 UI 守门: 渲染面只吃统一投影', () => {
   })
 
   it('AnalysisChat 消息渲染经 m.item 统一投影', () => {
-    const src = readFileSync(`${root}/src/components/requirements/AnalysisChat.vue`, 'utf-8')
+    const src = RENDER_FILES.map((f) => readFileSync(`${root}/${f}`, 'utf-8')).join('\n')
     expect(src).toMatch(/m\.item\?\.type/)
     // 守门规则注释在位(防后人误删)
     expect(src).toMatch(/守门|统一投影/)

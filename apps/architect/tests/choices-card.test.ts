@@ -109,7 +109,7 @@ describe('ChoicesCard 组件守门(A6.2 同思路, 静态断言)', () => {
 
 describe('会话流持久化守门(cv-248)', () => {
   it('choices 卡单渲染: 正文分支排除 choices(卡片即全部, 无标题文本双显)', () => {
-  const chat = readFileSync(`${root}/src/components/requirements/AnalysisChat.vue`, 'utf-8')
+  const chat = chatSrc
     expect(chat.includes("m.item?.type !== 'choices'")).toBe(true)
     expect(chat.includes("m.item?.type === 'choices'")).toBe(true)
   })
@@ -132,6 +132,7 @@ const chatViewSrc = (): string => {
   const dir = resolve(root, 'src/components/requirements/chat-view')
   return readdirSync(dir).filter((f) => f.endsWith('.ts'))
     .map((fl) => readFileSync(resolve(dir, fl), 'utf-8')).join('\n')
+    + (() => { try { const pd = resolve(dir, 'panels'); return readdirSync(pd).filter((f) => f.endsWith('.vue')).map((f2) => readFileSync(resolve(pd, f2), 'utf-8')).join('\n') } catch { return '' } })()
 }
 const chatSrc = readFileSync(
   resolve(root, 'src/components/requirements/AnalysisChat.vue'), 'utf-8') + chatViewSrc()
