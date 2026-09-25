@@ -23,7 +23,7 @@ _active_streams: dict = {}
 _active_streams_lock = threading.Lock()
 
 
-# M12: /chat 页面由 gateway 托管（vue_routes serve apps/chat/dist/chat.html +
+# MS7-W3: /chat 页面由 workbench SPA 承载（FE 并入，MS7-W3；原 vue_routes serve apps/chat/dist 已退役）+
 # /chat 静态挂载 serve 资产），chat 服务只承载 /api/* 业务路由。
 
 

@@ -28,7 +28,7 @@ echo "==> pip install -e（核心 + 子项目后端）..."
 pip install -e packages/core \
             -e apps/workbench \
             -e apps/docs \
-            -e apps/chat \
+            -e apps/workbench/chat_service \
             -e apps/architect
 
 # ── 3. 前端 workspaces（npm install）──────────────────────────────────

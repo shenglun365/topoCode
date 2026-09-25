@@ -26,7 +26,7 @@ def _file(filename: str) -> str:
 
 
 def _chat_static_dir() -> str:
-    """chat SPA 静态目录（apps/chat/dist；manifest 驱动，无 legacy 回退）。"""
+    """chat SPA 静态目录（MS7-W4 起 chat SPA 退役——FE 并入 workbench；保留函数供 manifest 兼容）。"""
     from topoone.manifest import discover_apps
     try:
         apps = discover_apps(static_sources._REPO_ROOT)
@@ -70,7 +70,7 @@ async def v2_chat():
 
 @vue_router.get("/chat", response_class=HTMLResponse)
 async def spa_chat():
-    """chat SPA（/chat）— M12 起由 gateway serve（apps/chat/dist/chat.html）。"""
+    """chat 页面（/chat）— MS7-W3 起 FE 并入 workbench SPA（/app# 或 /app/chat 客户端路由）。"""
     if os.path.isfile(_chat_file("chat.html")):
         return FileResponse(_chat_file("chat.html"))
     return HTMLResponse("chat SPA not built. Run: npm run build:chat")

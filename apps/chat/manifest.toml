@@ -1,14 +1,12 @@
-# 子项目 3：AI Chat（M12 切分完成）
-# python_entry = "topoone_app_chat:main"（独立进程 :3483，apps/chat/topoone_app_chat）
-# static_dir = "apps/chat/dist"（chat SPA 产物）；static_mount = ["/chat"]（gateway 托管资产，
-#   /chat 页面由 vue_routes serve dist/chat.html）；/chat 不在 api_prefixes（避免 proxy 遮蔽静态挂载）。
+# 子项目 3：AI Chat（MS7-W4 后端域托管：包体迁 apps/workbench/chat_service/topoone_app_chat，
+# 本 manifest 原地保留（gateway 发现=apps/*/manifest.toml 硬约定）；独立进程 :3483 不变。
+# FE 已并入 workbench SPA（裁决②, MS7-W3）：/chat 页面由 workbench dist 客户端路由承载，
+# static_dir/static_mount 随 chat SPA 退役。
 # 数据：topoone.db chat_drafts/chat_archives 主写；会话/消息经 llm 服务 session.*（sessions.db）。
 [app]
 name = "chat"
 kind = "service"
 python_entry = "topoone_app_chat:main"
-static_dir = "apps/chat/dist"
-static_mount = ["/chat"]
 api_prefixes = [
   "/api/chat",
   "/api/models",

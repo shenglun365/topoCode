@@ -263,7 +263,7 @@ def _publish(channel: str, event: str, data: dict):
 
 
 # M12: chat 专属表迁移（_ensure_chat_tables）已迁至 chat 子项目
-# （apps/chat/topoone_app_chat/chat_tables.py），core 不再承载 chat 专属逻辑。
+# （MS7-W4 起 apps/workbench/chat_service/topoone_app_chat/chat_tables.py），core 不再承载 chat 专属逻辑。
 
 # ── i18n for index page ──
 

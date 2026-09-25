@@ -172,7 +172,7 @@ npm run setup
 > 手动分步（等价于 `npm run setup`）：
 > ```bash
 > python3 -m venv .venv && source .venv/bin/activate
-> pip install -e packages/core -e apps/workbench -e apps/docs -e apps/chat -e apps/architect
+> pip install -e packages/core -e apps/workbench -e apps/docs -e apps/architect -e apps/workbench/chat_service
 > npm install
 > ```
 

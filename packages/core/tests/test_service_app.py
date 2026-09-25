@@ -145,7 +145,7 @@ def test_doc_service_methods_register(data_dir):
 
 
 def test_chat_service_importable(data_dir):
-    """chat 服务入口可加载（M12 迁 apps/chat/topoone_app_chat，独立进程可用）。"""
+    """chat 服务入口可加载（M12 引入；MS7-W4 起 apps/workbench/chat_service/topoone_app_chat，独立进程可用）。"""
     import subprocess
     import sys as _sys
 

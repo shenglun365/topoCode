@@ -17,7 +17,7 @@ from typing import Dict, List
 
 logger = logging.getLogger("arch.cognition.ctx_usage")
 
-CHARS_PER_TOKEN = 2          # 估算口径单源(与主后端 apps/chat TokenBudget 一致)
+CHARS_PER_TOKEN = 2          # 估算口径单源(与主后端 chat 服务(MS7-W4 起 apps/workbench/chat_service) TokenBudget 一致)
 CTX_USAGE_KEY = "ctxUsage"   # conversations.meta 账目键
 
 

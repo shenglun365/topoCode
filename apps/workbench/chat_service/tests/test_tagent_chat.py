@@ -1,7 +1,7 @@
 """I2 chat 薄化基础层测试：tAgent 集成（LLM 客户端 / web 工具适配 / 流式 agentic 运行器）。
 
 零真实 LLM/HTTP：fake LLMClient（原生 + 文本 fallback）、fake executor、fake sdb。
-Run:  cd <repo>/apps/chat && python -m pytest tests/test_tagent_chat.py -q
+Run:  cd <repo>/apps/workbench/chat_service && python -m pytest tests/test_tagent_chat.py -q
 """
 import asyncio
 import json

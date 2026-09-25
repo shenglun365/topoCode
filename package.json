@@ -10,7 +10,6 @@
     "packages/graph-kernel",
     "apps/workbench",
     "apps/docs",
-    "apps/chat",
     "apps/architect"
   ],
   "author": {
@@ -30,7 +29,7 @@
     "build:portal": "npm run build:portal -w @topo/web-core",
     "build:apps": "npm run build -w @topo/app-workbench -w @topo/app-docs -w @topo/app-chat -w @topo/app-architect",
     "test": "npm run test:py && npm run test:fe",
-    "test:py": "python -m pytest packages/core/tests apps/docs/tests apps/chat/tests apps/architect/tests apps/workbench/tests -v",
+    "test:py": "python -m pytest packages/core/tests apps/docs/tests apps/workbench/chat_service/tests apps/architect/tests apps/workbench/tests -v",
     "test:fe": "npm run test -w @topo/app-workbench -w @topo/app-docs -w @topo/app-chat && npm run test -w @topo/web-core",
     "type-check": "npm run typecheck --workspaces --if-present",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx --ignore-path .gitignore",
