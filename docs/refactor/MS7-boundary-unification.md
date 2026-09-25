@@ -2,7 +2,7 @@
 
 > 状态：**待评审**（评审通过后按批执行，每批全绿合入）
 > 核证日期：2026-09-25（工作区 clean，基线 dev-1 @ 07ba81c）
-> 前置：MS6-W6 的 DiagramViewer 裁决输入本设计 W3
+> 前置：~~MS6-W6 DiagramViewer 裁决~~ **已解除（2026-09-25 方案A：留 web-core，无迁移联动）**——MS7 与 MS6 解耦，可并行或独立推进
 
 ## 1. 核证快照（实测）——两处重要修正
 
@@ -34,7 +34,7 @@ architect 侧已删，仅 workbench 一套（1,436 行）。剩余工作=ChatSes
 | **W0 核证+安全网** | ① d3 孤儿复证（动态 import/字符串引用兜底 grep）② ChatSession 依赖盘点 ③ web-core portal 路由表核证 ④ ChatSession 迁移前 vitest 冒烟（chat 域建测试基建，M12 豁免收窄为"仅无测试页面"） | 盘点清单入档；chat 域 vitest run 绿 | 1d |
 | **W1 d3 孤儿清零** | 删 useD3Graph/render-manager/render-worker+ bundled/types.ts + package.json d3 依赖 + lock 重算；**同变更核验** bundle-worker 不存在（实测未见） | workbench type-check+lint+test 绿；`grep -r d3 src/` 空；产物 -21K 行 | 0.5d |
 | **W2 ChatSession 域内拆分** | 拆 useChatStream / useMessageActions / useChatCommands composables（仍在 apps/chat，行为零变） | chat 域 vitest（W0 建）绿；手测 SSE 流式对照清单 | 1.5d |
-| **W3 chat 前端上提** | ChatSession+composables 迁 workbench/src/components/chat/；与 AIAssistantPanel 对接（复用 diagramStateStore 契约）；apps/chat/src 清理（DiagramViewer 处置按 MS6-W6 裁决执行） | workbench 全套件绿；两应用构建绿；chat 前端残余核空 | 1.5d |
+| **W3 chat 前端上提** | ChatSession+composables 迁 workbench/src/components/chat/；与 AIAssistantPanel 对接（复用 diagramStateStore 契约）；apps/chat/src 清理（DiagramViewer 留 web-core【MS6-W6 方案A 定案】，ChatSession 迁入 workbench 后改 @topo/web-core 引用不变） | workbench 全套件绿；两应用构建绿；chat 前端残余核空 | 1.5d |
 | **W4 chat 后端域托管** | apps/chat/topoone_app_chat → apps/workbench/chat_service/（目录迁移+import 路径+pyproject+启动脚本+CI 路径）；**保留独立进程 :3483**；docs/portal 跳转改址（按 W0 路由表） | chat 32+docs 18 后端套件绿；进程启停冒烟；RPC 基线 diff 空 | 2d |
 | **W5 项目列表三处归一** | 数据层归一（api/类型/分页契约对齐 workbench 主源），三处 UI 壳各自保留 | 三域测试绿；对照清单（字段/分页/排序）零漂移 | 1.5d |
 | **W6 kb_gateway MCP + native 合法化** | kb_gateway 收口为 MCP 通道（architect 经 MCP 取 KB 基线组件语义）；native 直读 C2/C3 合法化条款入 CONV | kb_gateway 测试绿+MCP 冒烟；CONV 条文落笔 | 2d |

@@ -99,7 +99,7 @@ MS1 ──→ MS2 ──→ MS3 ──┬─────────────
 ### MS6 前端巨型组件拆分〔B5〕
 
 - **功能单元属性**：六个迭代热点文件拆为「子组件+composable」，键位/行为零变化。
-- **范围**（核证 2026-09-25：3,296/2,649/2,383/1,443/1,441/1,252 行；ConversationDock 951 软上限内不入批）：architect（AssetManagementWorkspace/SemanticGraphView/AnalysisChat）+ workbench（ReportHome/ProjectCard/community-store 抽 useComponentAnalysis）；**接收 MS2 移交：web-core DiagramRebuildDialog 随 DiagramViewer 共改再裁决去留（裁决输入 MS7-W3）**；ChatSession 归 MS7（拆+上提同做）
+- **范围**（核证 2026-09-25：3,296/2,649/2,383/1,443/1,441/1,252 行；ConversationDock 951 软上限内不入批）：architect（AssetManagementWorkspace/SemanticGraphView/AnalysisChat）+ workbench（ReportHome/ProjectCard/community-store 抽 useComponentAnalysis）；~~接收 MS2 移交：DiagramRebuildDialog 共改裁决~~ → **已结案（2026-09-25 方案A：DiagramViewer 留 web-core，RebuildDialog=私有子件已标注）**；ChatSession 归 MS7（拆+上提同做）
 - **独立可测判据**：
   1. 现有 vitest 全绿 + 各页核心交互手动回归清单（细化设计中列全）
   2. 拆分后单文件 <1,500 行；props/emits 边界清单化

@@ -38,7 +38,7 @@
 | **W3 AnalysisChat**（2,383） | 拆消息渲染/输入区/会话态 composables | 同上 | 1d |
 | **W4 ReportHome + ProjectCard**（1,443+1,441） | 各拆子组件+composables | 同上 | 1.5d |
 | **W5 community-store 抽 useComponentAnalysis**（1,252） | 组件分析逻辑抽 composable，store 瘦身为状态容器 | 同上 | 1d |
-| **W6 收尾** | types 死类型清理 + DiagramRebuildDialog/DiagramViewer 裁决（三选一：留 web-core / 随 MS7 chat 迁移下沉 / 各域复制）+ 文档回写 | 全套件+milestones 更新 | 1d |
+| **W6 收尾** | types 死类型清理 + **DiagramViewer 裁决已定案（2026-09-25 方案A：留 web-core；RebuildDialog=私有子件标注已落）**+ 文档回写 | 全套件+milestones 更新 | 1d |
 
 **合计 ~9 人日**（与原估算一致）。tag 计划：开工前 `git tag pre-MS6`。
 
@@ -51,5 +51,5 @@
 | vitest 对大组件挂载超时 | shallowMount+关键子组件 stub |
 
 ## 5. 与其他里程碑的接口
-- W6 的 DiagramViewer 裁决**输入 MS7-W3**（chat 上提时 ChatSession 依赖它——若选"下沉"，随 MS7 迁）
+- W6 DiagramViewer 裁决**已定案（方案A 留 web-core）**——MS7-W3 无迁移联动；重评触发条件（第 3 消费应用/需求分叉）已写入组件头注
 - 不依赖 MS5-V3B / MS7，可**立即开工**

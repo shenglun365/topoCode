@@ -1,3 +1,6 @@
+<!-- 【归属裁决 MS6-W6（2026-09-25，方案A）】本组件为 DiagramViewer 私有子件（仅
+     DiagramViewer.vue 内部挂载），外部禁止直接引用。与 DiagramViewer 同留 web-core；
+     重评触发条件：出现第 3 个消费应用，或各域图表需求分叉 → 重走下沉/复制评估。 -->
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
