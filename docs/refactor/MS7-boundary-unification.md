@@ -35,7 +35,7 @@ architect 侧已删，仅 workbench 一套（1,436 行）。剩余工作=ChatSes
 | **W1 d3 孤儿清零** ✅ | 删 5 文件(-21,552 行含 bundled)+d3/@types/d3 依赖移除+孤儿 i18n 键清理；lock 剩余 d3=mermaid/cytoscape 生态传递引用(非本仓声明) | typecheck 0+19/19；package.json/root grep 零命中 ✓ | 0.5d |
 | **W2 ChatSession 域内拆分** ✅ | **chat 前端 vitest 基建建成(零新依赖, M12 豁免收窄为 2 例挂载冒烟)** + useChatStream(165)/useChatMsgactions(161) 外移(ctx 式 D 注入) | chat vitest 2/2；SFC 1,585→1,445 | 1.5d |
 | **W3 chat 前端上提** ✅ | git mv 纯迁移(98-100% 相似度)：ChatSession+chat-view+5 组件→workbench(components/chat/+pages/)；i18n 深合并(base 优先/chat 补缺, common 冲突安全)；/chat 路由+导航标题；**chat FE src 核空+deps 清零+FE 配置移除**；AIAssistantPanel 对接=共享 diagramStateStore 契约(已成立, 零改动)；strict:true 适配(reasoning 安全访问) | workbench 21/21+typecheck 0+**构建 13.2s 绿**；chat 后端 32 绿 | 1.5d |
-| **W4 chat 后端域托管** | apps/chat/topoone_app_chat → apps/workbench/chat_service/（目录迁移+import 路径+pyproject+启动脚本+CI 路径）；**保留独立进程 :3483**；docs/portal 跳转改址（按 W0 路由表） | chat 32+docs 18 后端套件绿；进程启停冒烟；RPC 基线 diff 空 | 2d |
+| **W4 chat 后端域托管** ✅ | git mv 包体+tests+pyproject → apps/workbench/chat_service/（99-100% 纯移）；**manifest 原地瘦身**（gateway 发现=apps/*/manifest.toml 硬约定，不可随迁；static_dir/mount 随 FE 并入退役）；conftest sys.path 引导免 pip 重装；setup.sh/CI/README/test:py 路径全改；**独立进程 :3483 保留**(python_entry 不变) | 后端 32+docs 18+architect 1098+parity 5 全绿；import 冒烟 OK；RPC 基线 diff=0 | 2d |
 | **W5 项目列表三处归一** | 数据层归一（api/类型/分页契约对齐 workbench 主源），三处 UI 壳各自保留 | 三域测试绿；对照清单（字段/分页/排序）零漂移 | 1.5d |
 | **W6 kb_gateway MCP + native 合法化** | kb_gateway 收口为 MCP 通道（architect 经 MCP 取 KB 基线组件语义）；native 直读 C2/C3 合法化条款入 CONV | kb_gateway 测试绿+MCP 冒烟；CONV 条文落笔 | 2d |
 | **W7 收官** | CONV-00~04 全量更新（含裁决①~⑥最终态）；milestones 收口；全程序总结报告 | 五域全套件全绿；文档闭环 | 1.5d |
@@ -90,3 +90,13 @@ tag 计划：`git tag pre-MS7`；W4 前追加 `pre-MS7-W4`（目录迁移回退�
 - **strict:true 适配**：ChatMessage reasoning 可选链（chat 原 tsconfig 宽松）
 - **残余核空**：apps/chat 仅存 backend(topoone_app_chat)+tests(py)+manifest/pyproject；FE deps 清零、FE 配置(vite/vitest/tsconfig/index.html/dist)全删
 - chat 后端 32 例回归 ✓（未触及）
+
+
+---
+
+## 9. W4 执行记录（2026-09-25）
+
+- **决定性约束**：`discover_apps` = `apps/*/manifest.toml` 硬扫描 → manifest 不可随包迁移；包体迁至 chat_service/ 后 `python_entry = "topoone_app_chat:main"` 模块路径不变（import 由 editable/conftest 解析），gateway/uvicorn **零改动**
+- **conftest sys.path 引导**：tests 目录插入包父路径——免 pip 重装即可跑（CI editable 路径同步更新后双保险）
+- **残余清单**：apps/chat/ 仅存 manifest.toml（发现约定必需）；workspaces/lock/setup.sh/CI/README/chat.py 注释全部改净（grep 零命中）
+- **裁决② 达成度 100%**：前端(W3) + 后端(W4) 均入 workbench 域托管，:3483 独立进程保留
