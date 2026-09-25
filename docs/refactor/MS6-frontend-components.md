@@ -36,8 +36,8 @@
 | **W1 AssetManagementWorkspace** ✅ | 逻辑层八域 composable（asset-workspace/：core 四元组整块+diff/chat/framework/unowned/sync/purgeBatch/graphTabs）+ 模板三面板（provide/inject 每挂载一套状态，行为语义保持） | 64/64+typecheck 0 错；SFC 3,296→615 行 | 1.5d |
 | **W2 SemanticGraphView** ✅ | S1 逻辑层四域 + S2 模板两面板（GraphToolbarPanel 326 / GraphMainPanel 703，SGV_WS_KEY 注入；样式分发：icon-pulse→工具栏，anchor-flash/td-node/card-*→主区） | 64/64+typecheck 0 错；**SFC 2,649→282 行**（<800 达成） | 1.5d |
 | **W3 AnalysisChat** ✅ | S1 逻辑八域(chat-view/) + S2 模板两面板(ChatFeedPanel 1055/ChatBottomPanel 356, WS_KEY 注入+props 整体 v-bind 透传) | 64/64+typecheck 0 错；**SFC 2,383→421 行** | 1d |
-| **W4 ReportHome + ProjectCard**（1,443+1,441） | 各拆子组件+composables | 同上 | 1.5d |
-| **W5 community-store 抽 useComponentAnalysis**（1,252） | 组件分析逻辑抽 composable，store 瘦身为状态容器 | 同上 | 1d |
+| **W4 ReportHome + ProjectCard** ✅ | ReportHome: load/presum/ui 三域+MainPanel(样式随迁); ProjectCard: state/menu/edit/actions 四域+MainPanel(模板+scoped 样式下沉, **全局 .context-menu 样式留 SFC**) | workbench 19/19+typecheck 0 错；**1,443→157 / 1,441→167** | 1.5d |
+| **W5 community-store 抽 useComponentAnalysis**（1,252） ⬜ | 组件分析逻辑抽 composable，store 瘦身为状态容器 | 同上 | 1d |
 | **W6 收尾** | types 死类型清理 + **DiagramViewer 裁决已定案（2026-09-25 方案A：留 web-core；RebuildDialog=私有子件标注已落）**+ 文档回写 | 全套件+milestones 更新 | 1d |
 
 **合计 ~9 人日**（与原估算一致）。tag 计划：开工前 `git tag pre-MS6`。
@@ -134,3 +134,19 @@ W1 手工转写 → W2 升级为**机械抽取脚本**（核心资产，后续�
 5. W3-S2 陷阱：面板切割范围吞 SFC 根关闭/`</template>`（BottomPanel 尾部三连）——**面板化切割终点=内容块末行，绝不写到根关闭**；emits 清单须 `grep "emit('"` 全量收集
 6. props 透传用 `v-bind="props"` 整体绑定（面板声明子集），避免逐 props 打地鼠
 7. 源码守卫测试升级：聚合源 = SFC + 域目录 *.ts + panels/*.vue（递归）
+
+
+---
+
+## 10. W4 执行记录（2026-09-25）
+
+### 结果
+- **ReportHome 1,443→157**：report-view/（useReportLoad 192+ / useReportPresum 137+ / **useReportUi** 派生域）+ ReportMainPanel（模板+scoped 样式 642 行随迁）
+- **ProjectCard 1,441→167**：project-view/（useCardState/Menu/Edit/Actions）+ ProjectMainPanel（模板+scoped 样式；**全局 .context-menu 样式留 SFC**——teleport 菜单需要全局作用域）
+- 门禁：workbench 19/19 + typecheck 0 错
+
+### 陷阱新增
+1. **嵌套 `</template>` 截断**：面板取模板必须用 `rindex("</template>")`（v-if 内嵌 template 标签会让 index 命中中段）——W2-S2 同病复发于 W4
+2. emits/props 清单以 `grep` 全量收集为准；SFC 转发 `@xxx="(p) => emit('xxx', p)"`
+3. store 别名注入进 composable 函数体（pinia 单例等价原语义）；**注入的 import 必须放模块级**
+4. v-bind="props" 整体透传 + 面板声明子集 = 零逐 props 打地鼠
