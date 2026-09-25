@@ -39,7 +39,6 @@ _R1_INVENTORY = {
     # requirements/clarify.py(2026-09-22 立条): 策略库配置化(D5 偿还)后经
     # load_strategies 读 CollabConfigStore(惰性导入)——随 dataset 先例,
     # 清退随策略配置基座上提。
-    "requirements/clarify.py",
     "memory/units.py", "memory/working.py", "governance/boundary.py",
     # memory/distill.py(2026-09-17 P1 立条): 错误提炼编排层, 与 memory/units.py
     # 同款依赖(store/adaptation/agent_roles 惰性导入)——读错误材料 + 轻任务
@@ -59,11 +58,7 @@ _R1_INVENTORY = {
     "execution/merge.py", "execution/recover.py",
     # sessions/coding.py(2026-09-19 M2 立条): 自 arch_routes/sessions.py 迁出的
     # coding 子会话编排(adaptation 摘要中继随行)。
-    "sessions/coding.py",
-    # turns/call.py(2026-09-19 M3 立条): CallTurn 为 llm_sync 唯一白名单调用方
     # (D12 门禁)——链 3 全量收编后本条即门禁正源, 不清退。
-    "turns/call.py",
-    # turns/catalog.py(2026-09-19 M4 立条): CallCatalog 领域路由
     # (agent_roles 适配层 cfg 加载随行; 配置域 REST 不变)。
     "turns/catalog.py",
     # tools/impl/*(2026-09-19 M3 立条): 自 req_agent 按域迁出的工具实现
@@ -82,15 +77,10 @@ _R1_INVENTORY = {
     # governance/focus.py(2026-09-22 批戊立条): 焦点栈派生单源(工作记忆显式化)——
     # 与相位机同源同族(states 词表引用随 flow.py 同款先例); flow 降级为
     # 纯配置消费者后, 判别派生单源收敛于此。
-    "governance/focus.py",
-    # governance/flow.py(2026-09-21 立条续): 相位机本职含 states 词表 +
     # recompute/recover)——states 单源与 store 访问为相位机本职(recover.py 同款
     # 调用期解析先例); 策略/任务/自愈三方消费的公共事实轴, 清退随 states 上提。
-    "governance/flow.py",
-    # governance/flow_policy.py(2026-09-21 立条): 流程驱动配置基座
     # (agent.flow.policy 缺省单源+读取)——states 词表引用随 flow.py 同款先例;
     # 行为面数据驱动为本职, 清退随 states 上提。
-    "governance/flow_policy.py",
     "execution/exec_bridge.py",  # MS4-W2(2026-09-24) 适配层本体移入 agent/execution——通道保留至 W3 抽取清退
     "tools/req_agent.py",        # MS4-W2(2026-09-24) 同上, agent/tools/req_agent——W3 清退,
 }
