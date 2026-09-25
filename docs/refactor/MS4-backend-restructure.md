@@ -194,3 +194,53 @@ sem/engine.py 4,851 行 / **161 顶层成员**。0905-B1b 五域蓝图**少算�
 | 8 | **api 路由面** | :4295-4841 尾部 api_* 聚合（~30 个薄转发） | ~550 |
 
 建议拆分方案改为「八域」：narrative 独立成 sem/narrative.py（最大独立性, 纯 LLM 文本面）、impact/change 独立成 sem/change.py（纯 DB/版本面）、api_* 留门面或抽 sem/routes.py。依赖方向：门面 → 七域，域间经门面调用（禁止横向 import——当前抽查横向交叉为零）。
+
+
+---
+
+## 12. W8 细化设计：sem/engine.py 八域拆分（待评审 → 专项执行）
+
+### 12.1 依据（程序化核验）
+
+- 161 顶层成员全量 ast 扫描（行区间/域归属表见 §11 扫描）
+- **跨域函数调用 = 0**（ast 全量分析：任一域函数未调用其他域的定义符号）→ 纯物理切分成立
+- 消费面：semantic_assets.py 门面 150 名大导入 + agent(governance/boundary、reflection/evaluator、tools/impl/semantic) + tests 3 处——**全部经 engine 模块面**，故门面保全量 re-export 即消费者零改动
+
+### 12.2 模块映射（engine.py → 9 文件）
+
+| 新模块 | 成员（行区间） | 约行数 |
+|---|---|---|
+| `sem/_state.py` | 可变单例态：`_RECONCILE_AT`/`_DERIVED_EDGE_CACHE`/`_comp_file_map_cache`/`_ENHANCE`（跨调用生命周期，必须单实例） | ~60 |
+| `sem/reconcile.py` | `_lazy_reconcile`/`reconcile_semantic`/`_RECONCILE_INTERVAL`×2/:40 段 + `refresh_scope` | ~250 |
+| `sem/extract.py` | :335-1330（_KIND/_LEVEL_ALIASES、_normalize_*、_config_carrier、_is_contract_boundary、_impl/route/branches/constants、_primary_kind、_heuristic、_fields_*、_callee、_member_fields、_save_assets、extract_scope、_resolve_extract_levels、save_agent_assets） | ~1000 |
+| `sem/aggregate.py` | :1335-1811 + `_HIGH_SCHEMA`/`_AGG_*` | ~480 |
+| `sem/edge_derive.py` | :1821-2264（_DERIVED_*/_cg_*/_derive_*/_cached_derived） | ~440 |
+| `sem/narrative.py` | :2414-3268（context_block_for/_pseudo/_structural/generate_pseudo/desc/brief(s)/line_notes/enhance 族/_LINE_NOTE 常量） | ~850 |
+| `sem/change.py` | :3277-3474 + :3475-4293（MainKbEditRejected/rename/edit/merge/split/refresh_scope?留reconcile/_component_file_map/batch_manage/purge/impact/probe/_diff_*/changed_files/invalidate/handle_stale/register_scope_refs/referencing） | ~800 |
+| `sem/query.py` | search/detail/_grouped_search_items/_component_order_map/_scope/api_search/_relation_target_index/_resolve_relation_target/_graph_node_detail/_n_hop_subgraph/semantic_graph/context_block_for/mappings | ~450 |
+| `sem/engine.py`（门面） | api_* :4295-4841 全量（~30 薄转发）+ **150 名 re-export 面**（原 semantic_assets 大导入的完整镜像，消费者零改动） | ~600 |
+
+### 12.3 关键规则
+
+1. **可变态一律进 `_state.py`**（跨调用生命周期单实例）；域内常量随域走
+2. **门面 = 唯一兼容面**：engine.py 保留原 150 名 re-export + api_* 实现；`semantic_assets.py` 大导入零改动
+3. **域间禁止横向 import**（已核验零交叉；门面/api 可调七域）
+4. 头部导入按域分拷（engine 原头部 :1-33 每域拷所需子集，多拷无害——py 无 lint 门禁约束）
+
+### 12.4 验证与提交
+
+- 每域一 commit：搬移后跑 `pytest tests/test_semantic_assets.py -q`（104 例主安全网）
+- 最终：architect 全量 1102 + `python -c "from topoone_app_architect.sem.engine import *"` 烟测 + 行数复核（每件 <1,500）
+- 消费者零改动断言：W2 前后 `grep -rn "sem.engine import" apps/architect` 输出集不变
+
+### 12.5 风险
+
+| 风险 | 缓解 |
+|---|---|
+| 隐式模块级 NameError（域间私有函数互调未被 ast 捕获, 如装饰器/字符串引用） | 每域 commit 全量跑 104 例；`grep` 私有名交叉复核 |
+| `_state.py` 单例被测试 monkeypatch 按旧路径打桩 | grep 测试内 `_RECONCILE_AT|_DERIVED_EDGE_CACHE|_comp_file_map_cache` 打桩点，随迁 |
+| 门面漏导出 | semantic_assets 大导入行即检查表（150 名逐一比对） |
+
+### 12.6 工作量
+
+逐域 7 commits + 门面收口，**~1.5 人日**（纯物理搬移，零逻辑改动）。开工前 `git tag pre-MS4-W8`。
