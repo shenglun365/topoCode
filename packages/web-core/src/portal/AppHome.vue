@@ -89,7 +89,8 @@ const modules: ModuleCard[] = [
   },
   {
     key: 'chat',
-    href: `${gatewayBase}/chat`,
+    // chat FE 并入 workbench（MS7-W3）：规范直达 /app/chat（gateway /chat 会 301 到这里）
+    href: `${gatewayBase}/app/chat`,
     icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5',
     accent: '#f59e0b',
   },
