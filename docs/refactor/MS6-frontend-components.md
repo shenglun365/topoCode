@@ -160,3 +160,26 @@ W1 手工转写 → W2 升级为**机械抽取脚本**（核心资产，后续�
 - 交织区教训：triggerOverview/triggerComponentAnalysis(742-820) 与 agent 轮询机制深度交织——首次切割留中段导致保留区引用移出名（use-before-declaration）；**二次切割按语义簇合并交织区**
 - 保留区引用移出名的：wiring 后局部解构绑定（compile-driven 全量收集）
 - 门禁：workbench 19/19 + typecheck 0 错
+
+
+---
+
+## 12. W6 收尾（2026-09-25）
+
+- **architect types 死类型清理**（MS2 移交项结案）：候选 94 → vue-tsc 驱动迭代复活 55（被活类型引用）→ **净删 39 个 / -153 行**（1,407→1,254），typecheck 0 错。方法论：全删→编译驱动复活（比注释敏感的不动点分析可靠）
+- DiagramViewer/DiagramRebuildDialog 裁决已结案（方案A 留 web-core，5fc494d）
+- ConversationDock（951 行）软上限内不入批（W0 核证结论）
+
+## 13. MS6 总成绩单
+
+| 目标件 | 前 | 后 | 减幅 |
+|---|---|---|---|
+| AssetManagementWorkspace | 3,296 | 615 | -81% |
+| SemanticGraphView | 2,649 | 282 | -89% |
+| AnalysisChat | 2,383 | 421 | -82% |
+| ReportHome | 1,443 | 157 | -89% |
+| ProjectCard | 1,441 | 167 | -88% |
+| community-store | 1,252 | 792 | -37% |
+| types/index.ts 死类型 | 1,407 | 1,254 | -153 行 |
+
+**方法论资产**：extract-vue.py 机械抽取管线（声明标记分段/跨域 D. 前缀重写/类型提升/import 随迁/唯一串锚）+ 面板化流程（inject 注入/v-bind 透传/样式分发/守卫随架构升级）——陷阱 12 条全部入档。

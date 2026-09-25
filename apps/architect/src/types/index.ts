@@ -5,63 +5,17 @@ export type ReqKind = 'user-story' | 'fr' | 'nfr'
  * 登记簿状态(生命周期重构 v2):
  * draft(规约演进中) | ready(已确认可执行) | done(用户判定阶段性完结) | cancelled
  */
-export type ReqPoolStatus = 'draft' | 'ready' | 'done' | 'cancelled'
 
-export type AssetType = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
-  | 'asset' | 'process' | 'decision' | 'contract' | 'state' | 'rule'
-  | 'data_structure' | 'processing_flow' | 'control_logic'  // 废弃别名(兼容历史数据)
-
-/** 语义数据资产类别：静态·定义(entity/contract/state/rule) × 动态·处理(process/decision)。 */
 export type SemanticAssetKind = 'entity' | 'contract' | 'state' | 'rule' | 'process' | 'decision'
 
 /** 语义资产抽象粒度(业务→逻辑→实现，越低越贴近代码)。 */
 export type SemanticAssetLevel = 'business' | 'logic' | 'implementation'
 
-export interface SemanticAssetField {
-  name: string
-  type?: string
-  semantic?: string
-}
 
-export interface SemanticAssetRelation {
-  target: string
-  type?: string
-  semantic?: string
-  /** http 契约: 方法清单(GET/POST/...)。 */
-  methods?: string[]
-  line?: number
-}
 
-export interface SemanticAssetStep {
-  order?: number
-  semantic: string
-  symbols?: string[]
-  astRefs?: AstNodeRef[]
-}
 
-export interface SemanticAssetBranch {
-  condition?: string
-  then?: string
-  else?: string
-  semantic?: string
-  symbols?: string[]
-  astRefs?: AstNodeRef[]
-}
 
-export interface SemanticAssetState {
-  name: string
-  desc?: string
-  initial?: boolean
-  final?: boolean
-}
 
-export interface SemanticAssetTransition {
-  from?: string
-  to?: string
-  event?: string
-  condition?: string
-  action?: string
-}
 
 export interface SemanticAssetDetail {
   fields?: SemanticAssetField[]
@@ -142,36 +96,8 @@ export interface SemanticAsset {
 }
 
 /** 语义资产引用(需求/设计/任务/单测贯通)。 */
-export interface SemanticAssetRef {
-  assetId: string
-  role?: 'core' | 'related'
-}
 
-export interface AssetScopeItem {
-  assetId: string
-  assetType: AssetType
-  role: 'core' | 'related'   // 核心修改 / 关联修改
-  source: 'auto' | 'manual'
-  /** 抽象粒度(high|medium|low)：圈定表达"圈的是业务级还是代码级"。 */
-  level?: SemanticAssetLevel
-  /** 关联到的具体文件(经知识库代码映射对齐)。 */
-  file?: string
-  /** 核心节点伪代码：标识「改哪里」的范围(业务实体抽象，非详细实现)。 */
-  keyNode?: string
-}
 
-/** 抽象结构到具体代码 AST 节点的精确定位。 */
-export type AstNodeKind = 'struct' | 'class' | 'field' | 'method' | 'func' | 'table' | 'column' | 'mapping'
-
-export interface AstNodeRef {
-  file: string
-  symbol: string
-  kind: AstNodeKind
-  startLine: number
-  endLine: number
-}
-
-/** 知识库资产详情(API 返回的 JSON 形状，覆盖组件/ER 表/ORM 映射/实体类/执行流程/数据流)。 */
 export interface AssetDetail {
   assetId: string
   name: string
@@ -222,24 +148,6 @@ export interface Feasibility {
 }
 
 /** 需求入池门槛的四维质量评估。 */
-export interface RequirementAssessment {
-  /** 必要性：高 / 中 / 低 */
-  necessity: { grade: 'high' | 'medium' | 'low'; reason: string }
-  /** 原子性 / 独立性：能否独立交付、与其他需求解耦 */
-  atomicity: { independent: boolean; reason: string }
-  /** 可验收性：验收标准是否可测试、可验证 */
-  acceptability: { ok: boolean; reason: string }
-}
-
-/** 分析报告中的具体执行步骤拆分。 */
-export interface RequirementStep {
-  id: string
-  title: string
-  desc: string
-  estMin: number
-  files?: string[]
-  context?: string[]
-}
 
 export interface RequirementAnalysis {
   functionalScope: string[]      // 功能范围
@@ -255,7 +163,6 @@ export interface RequirementAnalysis {
 }
 
 /** agent 待回答的问题项(左栏对话的结构化收集回合)。 */
-export type QuestionType = 'text' | 'select' | 'multi-select' | 'assets'
 
 export interface QuestionItem {
   key: string
@@ -294,10 +201,6 @@ export interface FormDraft {
 }
 
 /** agent 路径建议回合的结论(需求提案 → 分析/直通)。 */
-export interface PathSuggestion {
-  recommended: 'analyze' | 'direct'
-  assessment: string[]           // 评估项: 数据资产规模 / 改动幅度 / 规约影响 / 冲突风险
-}
 
 export interface Requirement {
   id: string
@@ -335,148 +238,27 @@ export interface Requirement {
 
 // ============ 设计方案(方向2) ============
 
-export interface DesignColumn {
-  name: string
-  type: string
-  pk?: boolean
-  fk?: string
-}
 
-export interface DesignRelation {
-  from: string
-  to: string
-  type: string
-  key: string
-}
 
-export interface DesignDataChange {
-  assetId?: string
-  assetType?: string
-  action: 'create' | 'alter' | 'drop' | 'extend'
-  name?: string
-  detail: {
-    desc?: string
-    columns?: DesignColumn[]
-    relations?: DesignRelation[]
-  }
-}
 
-export interface DesignInterfaceChange {
-  assetId?: string
-  assetType?: string
-  action?: string
-  name?: string
-  detail?: {
-    before?: string
-    after?: string
-    endpoints?: string[]
-    flows?: string[]
-  }
-  reason?: string
-}
 
-export interface DesignSemanticChange {
-  assetId?: string
-  name?: string
-  action?: 'create' | 'modify' | 'drop'
-  reason?: string
-}
 
-export interface DesignStep {
-  title: string
-  desc?: string
-  estMin?: number
-  context?: string[]
-}
 
-export interface RequirementDesign {
-  dataChanges: DesignDataChange[]
-  interfaceChanges: DesignInterfaceChange[]
-  semanticChanges: DesignSemanticChange[]
-  steps: DesignStep[]
-  landingNote: string
-  createdAt?: number
-}
 
 // ============ 范围圈定(方向1) ============
 
-export interface ScopeProposalItem {
-  assetId: string
-  assetType: string
-  role: 'core' | 'related'
-  businessReason: string
-}
 
-export interface ScopeCatalogItem {
-  assetId: string
-  name: string
-  assetType: string
-  desc?: string
-  kind?: string
-  level?: string
-}
 
-export interface ScopeDiff {
-  added: ScopeProposalItem[]
-  removed: ScopeProposalItem[]
-  promoted: ScopeProposalItem[]
-  demoted: ScopeProposalItem[]
-}
 
-export interface ScopeProposal {
-  proposal: ScopeProposalItem[]
-  coverage: string[]
-  missing: string[]
-  catalog: ScopeCatalogItem[]
-  diff: ScopeDiff
-}
 
 // ============ 修改前后对比(方向3) ============
 
-export interface DesignDiffSummary {
-  added: number
-  removed: number
-  modified: number
-  same: number
-}
 
-export interface ColumnDiff {
-  added: ErColumn[]
-  removed: ErColumn[]
-  modified: { name: string; before: ErColumn; after: ErColumn }[]
-}
 
-export interface DesignDiff {
-  summary: DesignDiffSummary
-  tables: ErTable[]
-  columnDiffs: Record<string, ColumnDiff>
-}
 
-export interface SemanticDiff {
-  summary: Record<string, number>
-  items: DesignSemanticChange[]
-}
 
-export interface CompareDeviation {
-  level: 'er' | 'semantic'
-  kind: string
-  planned: string
-  actual: string
-  note: string
-}
 
-export interface CompareResult {
-  mode: 'planned' | 'actual'
-  summary: DesignDiffSummary
-  columnDiffs?: Record<string, ColumnDiff>
-  semanticDiff: SemanticDiff
-  beforeTables: ErTable[]
-  afterTables: ErTable[]
-  deviations?: CompareDeviation[]
-}
 
-export type ComponentKind = 'gateway' | 'service' | 'infra' | 'storage' | 'integration'
-  | 'page' | 'view' | 'widget' | 'ui-module'
 export type ChangeType = 'same' | 'added' | 'removed' | 'modified'
 
 export interface ArchComponent {
@@ -492,30 +274,11 @@ export interface ArchComponent {
   dependsOn: string[]
 }
 
-export type DataLevel = 'conceptual' | 'logical' | 'physical'
 
 // ============ 数据结构：ER 表视图 ============
 
-export interface ErColumn {
-  name: string
-  type: string
-  nullable: boolean
-  pk?: boolean
-  /** 外键 → 目标表 id。 */
-  fk?: string
-  desc: string
-  ast: AstNodeRef
-}
 
-export type ErRelationType = '1:1' | '1:N' | 'N:M'
 
-export interface ErRelation {
-  from: string
-  to: string
-  type: ErRelationType
-  key: string
-  desc?: string
-}
 
 export interface ErTable {
   id: string
@@ -531,14 +294,6 @@ export interface ErTable {
 
 // ============ 数据结构：ORM 映射视图 ============
 
-export interface OrmField {
-  entityField: string
-  column: string
-  type: string
-  tag: string
-  desc: string
-  ast: AstNodeRef
-}
 
 export interface OrmMapping {
   id: string
@@ -554,23 +309,8 @@ export interface OrmMapping {
 
 // ============ 数据结构：程序内实体类视图 ============
 
-export type EntityClassKind = 'class' | 'struct' | 'value-object' | 'dto'
 
-export interface EntityField {
-  name: string
-  type: string
-  visibility: 'public' | 'private' | 'protected'
-  desc: string
-  ast: AstNodeRef
-}
 
-export interface EntityMethod {
-  name: string
-  signature: string
-  returnType: string
-  desc: string
-  ast: AstNodeRef
-}
 
 export interface EntityClass {
   id: string
@@ -584,14 +324,6 @@ export interface EntityClass {
   ast: AstNodeRef
 }
 
-export interface FlowStep {
-  id: string
-  label: string
-  owner: string
-  type: 'action' | 'decision' | 'io' | 'sync'
-  /** 逻辑处理步骤 → AST 节点。 */
-  ast?: AstNodeRef
-}
 
 export interface ExecutionFlow {
   id: string
@@ -607,15 +339,6 @@ export interface ExecutionFlow {
   }
 }
 
-export interface DataStream {
-  id: string
-  name: string
-  from: string
-  to: string
-  payload: string
-  channel: string
-  change: ChangeType
-}
 
 export interface DataFlow {
   id: string
@@ -635,19 +358,7 @@ export interface ArchitectureModel {
   codeMappings?: CodeMapping[]
 }
 
-export type TaskStatus = 'pending' | 'in-progress' | 'reviewing' | 'done' | 'blocked'
-export type TaskKind = 'epic' | 'story' | 'task' | 'check'
 
-export interface TaskNode {
-  id: string
-  title: string
-  kind: TaskKind
-  status: TaskStatus
-  estMin: number
-  context: string[]
-  files: string[]
-  children?: TaskNode[]
-}
 
 export interface GranularityConfig {
   estMinMin: number
@@ -657,25 +368,9 @@ export interface GranularityConfig {
 }
 
 
-export interface ChangeItem {
-  resource: string     // 改动资源名(组件/数据结构/流程/数据流/文件)
-  kind: string         // added / modified / removed
-  before: string
-  after: string
-}
-
-export interface PlanImpact {
-  affected: string[]   // 受影响组件
-  grade: string
-  basis: string
-  risks: string[]
-}
 
 
-export type ExecutionStatus = 'created' | 'running' | 'accepting' | 'done' | 'failed' | 'blocked' | 'stopped'
-export type Connectivity = 'unknown' | 'ok' | 'fail'
 
-/** 概览页「启动命令」栏目：后端 /launch 返回的启动信息。 */
 export interface LaunchInfo {
   execRoot: string
   kbRoot: string
@@ -685,11 +380,6 @@ export interface LaunchInfo {
 }
 
 /** 概览页「agent设置」栏目：KB 关联项(来自 /project/kb/list 的关联项目)。 */
-export interface KbLinkItem extends KbProject {
-  bound?: boolean
-}
-
-/** 知识库连接配置。 */
 export interface KbConfig {
   dataApiUrl: string
   mcpUrl: string
@@ -723,16 +413,6 @@ export interface OverviewData {
 }
 
 /** 宿主目录浏览条目。 */
-export interface DirEntry {
-  name: string
-  isDir: boolean
-  size: number
-  mtime: number
-  readable?: boolean
-  writable?: boolean
-}
-
-/** GET /dir/list 返回数据。 */
 export interface DirList {
   path: string
   parent: string | null
@@ -782,29 +462,14 @@ export interface TaskSessionStats {
   bytesOut: number
 }
 
-export type AppendedReqStatus = 'appending' | 'analyzed' | 'designed' | 'executing' | 'done'
 
-export interface AppendedReq {
-  id: string
-  title: string
-  desc: string
-  scope: string[]
-  analysis?: RequirementAnalysis
-  design?: { approach: string; changes: ChangeItem[] }
-  status: AppendedReqStatus
-  updatedAt: number
-}
 
 export type TestLevel = 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5'
 
 /** 单测执行通道：三方 agent 或 topocode 命令行。 */
 export type TestChannel = 'agent' | 'cli'
 
-export type UnitTestStatus = 'idle' | 'running' | 'passed' | 'failed' | 'error' | 'skipped'
 
-export type UnitTestSource = 'requirement' | 'manual' | 'scan' | 'ai'
-
-/** 单元测试用例(脚本已编写，左栏列表展示；经「添加」关连脚本入库)。 */
 export interface UnitTest {
   id: string
   name: string
@@ -821,9 +486,6 @@ export interface UnitTest {
   updatedAt: number
 }
 
-export type UnitTestSessionStatus = 'created' | 'running' | 'done' | 'failed' | 'stopped'
-
-/** 单元测试会话：单独保留，可再进入或新建；工作区左右栏执行反馈。 */
 export interface UnitTestSession {
   id: string
   title: string
@@ -838,15 +500,7 @@ export interface UnitTestSession {
   updatedAt: number
 }
 
-export type AgentMsgRole = 'user' | 'assistant' | 'tool'
-export type AgentToolType = 'write-file' | 'run-command' | 'run-test'
 
-export interface AgentToolCall {
-  type: AgentToolType
-  label: string
-  detail: string
-  ok?: boolean
-}
 
 export interface AgentMessage {
   id: string
@@ -866,39 +520,11 @@ export interface Snapshot {
 }
 
 
-export interface WorkflowStageRoute {
-  path: string
-  query?: Record<string, string>
-}
-
-/** 数据快照，供阶段定义(数据对象)中的 isDone/matches 谓词做判定。 */
 
 
-/** 单个流水线阶段的声明式定义，未来微调只改这里/配置数据对象。 */
 
 
-export type SpecLayerKind = 'override' | 'explicit' | 'derived'
 
-export interface SpecOverride {
-  file: string
-  communityKey: string
-  pinned: boolean
-  note: string
-}
-
-export interface SpecRule {
-  id: string
-  text: string
-  level: 'blocker' | 'major' | 'minor'
-  source: SpecLayerKind
-}
-
-export interface SpecChangeEntry {
-  version: string
-  date: number
-  note: string
-  confirmedBy: string
-}
 
 export interface ArchitectureSpec {
   version: string
@@ -908,13 +534,7 @@ export interface ArchitectureSpec {
   changelog: SpecChangeEntry[]
 }
 
-export type DiffGrade = 'S' | 'M' | 'L'
 
-export interface StagingLayerStatus {
-  file: { reParsed: number; reusedByHash: number; edgesChanged: number }
-  community: { refined: number; dirty: number; action: string }
-  semantic: { reExplained: number; dirty: number; inherited: number }
-}
 
 export interface StagingModel {
   scope: { filesChanged: string[]; added: number; modified: number; deleted: number; deletedHighRisk: boolean }
@@ -927,7 +547,6 @@ export interface StagingModel {
 
 // ============ 系统管理：LLM 模型配置 ============
 
-export type LlmModelSource = 'imported' | 'manual'
 
 export interface ArchLlmModel {
   source: LlmModelSource
@@ -966,7 +585,6 @@ export interface IncrementalLogEntry {
   boundaryChanged: string[]
 }
 
-export type ComplianceKind = 'boundary' | 'spec' | 'critical' | 'direction'
 
 export interface ComplianceCheck {
   id: string
@@ -979,7 +597,6 @@ export interface ComplianceCheck {
 }
 
 export type GateKey = 'codeMerge' | 'specChange' | 'baselineCreate'
-export type RebaselineStatus = 'idle' | 'verified' | 'committed'
 
 export interface Rebaseline {
   status: RebaselineStatus
@@ -989,7 +606,6 @@ export interface Rebaseline {
   handshake: { verify: string; verifyOk: boolean; commitResult: string; committedId: string }
 }
 
-export type ExternalCallStatus = 'ok' | 'pending' | 'blocked'
 
 export interface ExternalCall {
   id: string
@@ -1041,15 +657,6 @@ export interface KbMatchResult {
 
 // ============ 需求分析会话历史(临时提案导入) ============
 
-export interface ConversationMessage {
-  id: string
-  conversationId: string
-  role: 'user' | 'assistant'
-  time: number
-  content: string
-}
-
-/** 会话历史摘要(历史导入列表条目)。 */
 export interface ConversationSummary {
   id: string
   kind?: string
@@ -1103,13 +710,6 @@ export interface ProjectInfo {
   favorite?: boolean
 }
 
-export interface RepoBaseline {
-  id: string
-  version: string
-  commit: string
-  manifestHash: string
-  createdAt: number
-}
 
 export interface RepoStatus {
   baseline: RepoBaseline
@@ -1126,14 +726,6 @@ export interface RepoStatus {
 }
 
 /** 项目概览(工作区首页)：工作目录/远端/KB/基线 + 相对基线的代码变更与组件变更。 */
-export interface ProjectOverviewDiffFile {
-  path: string
-  status: 'A' | 'M' | 'D' | 'R'
-  additions: number
-  deletions: number
-}
-
-/** 概览页组件变更(按 KB 组件汇总)：counts/files 为本组件+全部子孙的上卷合计。 */
 export interface ProjectOverviewComponent {
   id: string
   /** KB 组件 name，缺失时后端已回退为组件 id；「未归属」桶为空串 */
@@ -1189,9 +781,7 @@ export interface ProjectOverview {
   }
 }
 
-export type CollabMode = 'main-agent' | 'mcp-server' | 'spec-assist' | 'migration'
 
-export type CodeMappingTarget = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
 
 export interface CodeMapping {
   id: string
@@ -1219,71 +809,9 @@ export interface BaselineInfo {
 
 // ============ 系统基线：知识库复合查询 ============
 
-export type KbQueryRelKind = 'depends' | 'calls'   // 依赖组件 / 被调用组件
-export type KbQuerySection = 'basic' | 'structure' | 'flow'
 
-/** 复合查询条件(用户输入)。 */
-export interface KbQuerySpec {
-  kind: KbQueryRelKind
-  compIds: string[]
-  sections: KbQuerySection[]
-  /** 简短补充描述。 */
-  note?: string
-}
 
-/** 单条查询调用的知识库 skill 记录。 */
-export interface KbQuerySkill {
-  name: string
-  detail: string
-}
 
-/** 单个组件的分析结果(MD 片段)。 */
-export interface KbQueryCompResult {
-  componentId: string
-  name: string
-  kind: string
-  /** 关联组件(依赖/被调用)解析后的聚合 MD。 */
-  relMd: string
-  basicMd: string
-  structureMd: string
-  flowMd: string
-}
-
-export interface KbQueryResult {
-  id: string
-  spec: KbQuerySpec
-  /** 本次查询调用的知识库 skill 集合。 */
-  skills: KbQuerySkill[]
-  summary: string
-  compResults: KbQueryCompResult[]
-  cached: boolean
-  baselineTag: string
-  createdAt: number
-}
-
-/** 复合查询历史(聚合成信息流)。 */
-export interface KbQueryHistory {
-  id: string
-  spec: KbQuerySpec
-  baselineTag: string
-  cached: boolean
-  createdAt: number
-  summary: string
-}
-
-export type InteractionKind = 'issue' | 'info' | 'choice'
-export type InteractionStatus = 'pending' | 'resolved'
-
-export interface UserInteraction {
-  id: string
-  kind: InteractionKind
-  taskId: string
-  prompt: string
-  options?: string[]
-  answer?: string
-  status: InteractionStatus
-  createdAt: number
-}
 
 // ============ Greenfield：架构蓝图 ============
 
@@ -1301,24 +829,10 @@ export interface Blueprint {
 
 // ============ Greenfield：DesignTree 递归细化 ============
 
-export type DesignTreeNodeKind = 'service' | 'page' | 'entity' | 'flow' | 'sub'
-export type DesignTreeNodeStatus = 'pending' | 'locked' | 'demo-freeze'
 
-export interface DesignTreeNode {
-  id: string
-  parentId?: string
-  what: string
-  how: string
-  howDetail: string
-  kind: DesignTreeNodeKind
-  status: DesignTreeNodeStatus
-  children: DesignTreeNode[]
-  exampleRef?: string
-}
 
 // ============ Greenfield：脚手架 ============
 
-export type ScaffoldLayer = 1 | 2 | 3 | 4 | 5 | 6
 
 export interface ScaffoldFile {
   path: string
@@ -1332,27 +846,10 @@ export interface ScaffoldResult {
   validation: { build: boolean; vet: boolean; test: boolean }
 }
 
-export interface ScaffoldConfirm {
-  commit: string
-  filesWritten: number
-  buildPass: boolean
-}
 
 // ============ Greenfield：抽取（knowledge base bootstrap） ============
 
-export interface ExtractConfig {
-  execRoot: string
-  kbRoot: string
-  commit: string
-  baselineVersion: string
-}
 
-export interface ExtractResult {
-  snapshotId: string
-  model: ArchitectureModel
-  mappings: CodeMapping[]
-  metrics: { components: number; entities: number; flows: number; mappings: number }
-}
 
 // ============ Greenfield：引导工作流 ============
 
@@ -1404,4 +901,354 @@ export interface CtxUsage {
   budget: number
   /** 落账时间 epoch ms。 */
   at?: number
+}
+
+export interface DirEntry {
+  name: string
+  isDir: boolean
+  size: number
+  mtime: number
+  readable?: boolean
+  writable?: boolean
+}
+
+/** GET /dir/list 返回数据。 */
+
+export type AssetType = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
+  | 'asset' | 'process' | 'decision' | 'contract' | 'state' | 'rule'
+  | 'data_structure' | 'processing_flow' | 'control_logic'  // 废弃别名(兼容历史数据)
+
+/** 语义数据资产类别：静态·定义(entity/contract/state/rule) × 动态·处理(process/decision)。 */
+
+export interface RequirementAssessment {
+  /** 必要性：高 / 中 / 低 */
+  necessity: { grade: 'high' | 'medium' | 'low'; reason: string }
+  /** 原子性 / 独立性：能否独立交付、与其他需求解耦 */
+  atomicity: { independent: boolean; reason: string }
+  /** 可验收性：验收标准是否可测试、可验证 */
+  acceptability: { ok: boolean; reason: string }
+}
+
+/** 分析报告中的具体执行步骤拆分。 */
+
+export interface RequirementStep {
+  id: string
+  title: string
+  desc: string
+  estMin: number
+  files?: string[]
+  context?: string[]
+}
+
+export type RebaselineStatus = 'idle' | 'verified' | 'committed'
+
+export interface SemanticAssetBranch {
+  condition?: string
+  then?: string
+  else?: string
+  semantic?: string
+  symbols?: string[]
+  astRefs?: AstNodeRef[]
+}
+
+export interface EntityField {
+  name: string
+  type: string
+  visibility: 'public' | 'private' | 'protected'
+  desc: string
+  ast: AstNodeRef
+}
+
+export interface DataStream {
+  id: string
+  name: string
+  from: string
+  to: string
+  payload: string
+  channel: string
+  change: ChangeType
+}
+
+export interface StagingLayerStatus {
+  file: { reParsed: number; reusedByHash: number; edgesChanged: number }
+  community: { refined: number; dirty: number; action: string }
+  semantic: { reExplained: number; dirty: number; inherited: number }
+}
+
+export type AgentMsgRole = 'user' | 'assistant' | 'tool'
+
+export interface SpecRule {
+  id: string
+  text: string
+  level: 'blocker' | 'major' | 'minor'
+  source: SpecLayerKind
+}
+
+export interface SemanticAssetField {
+  name: string
+  type?: string
+  semantic?: string
+}
+
+export interface ChangeItem {
+  resource: string     // 改动资源名(组件/数据结构/流程/数据流/文件)
+  kind: string         // added / modified / removed
+  before: string
+  after: string
+}
+
+export type UnitTestStatus = 'idle' | 'running' | 'passed' | 'failed' | 'error' | 'skipped'
+
+export interface SpecOverride {
+  file: string
+  communityKey: string
+  pinned: boolean
+  note: string
+}
+
+export interface EntityMethod {
+  name: string
+  signature: string
+  returnType: string
+  desc: string
+  ast: AstNodeRef
+}
+
+export type DataLevel = 'conceptual' | 'logical' | 'physical'
+
+export interface RepoBaseline {
+  id: string
+  version: string
+  commit: string
+  manifestHash: string
+  createdAt: number
+}
+
+export type UnitTestSessionStatus = 'created' | 'running' | 'done' | 'failed' | 'stopped'
+
+/** 单元测试会话：单独保留，可再进入或新建；工作区左右栏执行反馈。 */
+
+export interface FlowStep {
+  id: string
+  label: string
+  owner: string
+  type: 'action' | 'decision' | 'io' | 'sync'
+  /** 逻辑处理步骤 → AST 节点。 */
+  ast?: AstNodeRef
+}
+
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  role: 'user' | 'assistant'
+  time: number
+  content: string
+}
+
+/** 会话历史摘要(历史导入列表条目)。 */
+
+export type ComplianceKind = 'boundary' | 'spec' | 'critical' | 'direction'
+
+export type EntityClassKind = 'class' | 'struct' | 'value-object' | 'dto'
+
+export interface SpecChangeEntry {
+  version: string
+  date: number
+  note: string
+  confirmedBy: string
+}
+
+export interface SemanticAssetTransition {
+  from?: string
+  to?: string
+  event?: string
+  condition?: string
+  action?: string
+}
+
+export type DiffGrade = 'S' | 'M' | 'L'
+
+export type ExternalCallStatus = 'ok' | 'pending' | 'blocked'
+
+export type ReqPoolStatus = 'draft' | 'ready' | 'done' | 'cancelled'
+
+export type UnitTestSource = 'requirement' | 'manual' | 'scan' | 'ai'
+
+/** 单元测试用例(脚本已编写，左栏列表展示；经「添加」关连脚本入库)。 */
+
+export interface AssetScopeItem {
+  assetId: string
+  assetType: AssetType
+  role: 'core' | 'related'   // 核心修改 / 关联修改
+  source: 'auto' | 'manual'
+  /** 抽象粒度(high|medium|low)：圈定表达"圈的是业务级还是代码级"。 */
+  level?: SemanticAssetLevel
+  /** 关联到的具体文件(经知识库代码映射对齐)。 */
+  file?: string
+  /** 核心节点伪代码：标识「改哪里」的范围(业务实体抽象，非详细实现)。 */
+  keyNode?: string
+}
+
+/** 抽象结构到具体代码 AST 节点的精确定位。 */
+
+export interface OrmField {
+  entityField: string
+  column: string
+  type: string
+  tag: string
+  desc: string
+  ast: AstNodeRef
+}
+
+export interface SemanticAssetStep {
+  order?: number
+  semantic: string
+  symbols?: string[]
+  astRefs?: AstNodeRef[]
+}
+
+export interface ProjectOverviewDiffFile {
+  path: string
+  status: 'A' | 'M' | 'D' | 'R'
+  additions: number
+  deletions: number
+}
+
+/** 概览页组件变更(按 KB 组件汇总)：counts/files 为本组件+全部子孙的上卷合计。 */
+
+export type LlmModelSource = 'imported' | 'manual'
+
+export type QuestionType = 'text' | 'select' | 'multi-select' | 'assets'
+
+export type ComponentKind = 'gateway' | 'service' | 'infra' | 'storage' | 'integration'
+  | 'page' | 'view' | 'widget' | 'ui-module'
+
+export interface SemanticAssetState {
+  name: string
+  desc?: string
+  initial?: boolean
+  final?: boolean
+}
+
+export interface RequirementDesign {
+  dataChanges: DesignDataChange[]
+  interfaceChanges: DesignInterfaceChange[]
+  semanticChanges: DesignSemanticChange[]
+  steps: DesignStep[]
+  landingNote: string
+  createdAt?: number
+}
+
+export interface ErRelation {
+  from: string
+  to: string
+  type: ErRelationType
+  key: string
+  desc?: string
+}
+
+export interface PathSuggestion {
+  recommended: 'analyze' | 'direct'
+  assessment: string[]           // 评估项: 数据资产规模 / 改动幅度 / 规约影响 / 冲突风险
+}
+
+export interface ErColumn {
+  name: string
+  type: string
+  nullable: boolean
+  pk?: boolean
+  /** 外键 → 目标表 id。 */
+  fk?: string
+  desc: string
+  ast: AstNodeRef
+}
+
+export type CodeMappingTarget = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
+
+export interface AgentToolCall {
+  type: AgentToolType
+  label: string
+  detail: string
+  ok?: boolean
+}
+
+export interface AstNodeRef {
+  file: string
+  symbol: string
+  kind: AstNodeKind
+  startLine: number
+  endLine: number
+}
+
+/** 知识库资产详情(API 返回的 JSON 形状，覆盖组件/ER 表/ORM 映射/实体类/执行流程/数据流)。 */
+
+export interface SemanticAssetRelation {
+  target: string
+  type?: string
+  semantic?: string
+  /** http 契约: 方法清单(GET/POST/...)。 */
+  methods?: string[]
+  line?: number
+}
+
+export type AstNodeKind = 'struct' | 'class' | 'field' | 'method' | 'func' | 'table' | 'column' | 'mapping'
+
+export interface DesignDataChange {
+  assetId?: string
+  assetType?: string
+  action: 'create' | 'alter' | 'drop' | 'extend'
+  name?: string
+  detail: {
+    desc?: string
+    columns?: DesignColumn[]
+    relations?: DesignRelation[]
+  }
+}
+
+export interface DesignInterfaceChange {
+  assetId?: string
+  assetType?: string
+  action?: string
+  name?: string
+  detail?: {
+    before?: string
+    after?: string
+    endpoints?: string[]
+    flows?: string[]
+  }
+  reason?: string
+}
+
+export type ErRelationType = '1:1' | '1:N' | 'N:M'
+
+export interface DesignStep {
+  title: string
+  desc?: string
+  estMin?: number
+  context?: string[]
+}
+
+export type SpecLayerKind = 'override' | 'explicit' | 'derived'
+
+export type AgentToolType = 'write-file' | 'run-command' | 'run-test'
+
+export interface DesignSemanticChange {
+  assetId?: string
+  name?: string
+  action?: 'create' | 'modify' | 'drop'
+  reason?: string
+}
+
+export interface DesignColumn {
+  name: string
+  type: string
+  pk?: boolean
+  fk?: string
+}
+
+export interface DesignRelation {
+  from: string
+  to: string
+  type: string
+  key: string
 }
