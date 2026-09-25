@@ -49,7 +49,7 @@ export default defineConfig({
   },
   cacheDir: resolve(__dirname, 'node_modules/.vite-architect'),
   optimizeDeps: {
-    include: ['cytoscape', 'cytoscape-cose-bilkent', 'marked', 'marked-highlight', 'highlight.js', 'mermaid'],
+    include: ['cytoscape', 'cytoscape-cose-bilkent', 'highlight.js', 'mermaid'],
     exclude: ['@/services/ipc', '@/services/*', '@/stores/*', '@/composables/*', '@/utils/*'],
   },
   build: {
