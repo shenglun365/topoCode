@@ -77,7 +77,7 @@ watch(() => props.message.content, () => nextTick(fitCodeBlocks))
       </div>
       <div v-if="showReasoningToggle" class="reasoning-toggle" @click="emit('toggleReasoning')">
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: showReasoning }"><polyline points="9 18 15 12 9 6"/></svg>
-        <span>{{ showReasoning ? $t('msg.reasoningHide') : $t('msg.reasoningShow') }}<span v-if="message.reasoning.length > 10" class="reasoning-tokens">({{ Math.round(message.reasoning.length / 2) }} tokens)</span></span>
+        <span>{{ showReasoning ? $t('msg.reasoningHide') : $t('msg.reasoningShow') }}<span v-if="(message.reasoning?.length ?? 0) > 10" class="reasoning-tokens">({{ Math.round((message.reasoning?.length ?? 0) / 2) }} tokens)</span></span>
       </div>
       <div v-if="message.reasoning && showReasoning" class="reasoning-content" v-html="renderMarkdown(message.reasoning)"></div>
       <template v-if="debug">

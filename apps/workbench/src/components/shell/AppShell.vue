@@ -35,6 +35,7 @@ const TITLE_PAGE_KEYS: Record<string, string> = {
   '/home': 'nav.projects',
   '/code': 'nav.code',
   '/analysis': 'pageTitle.analysis',
+  '/chat': 'nav.chat',
   '/coder': 'nav.coder',
 }
 

@@ -1,4 +1,5 @@
 import { portalZh } from '@topo/web-core/portal/i18n'
+import chatAppZh from '../chat-app-zh-CN'
 import ai from './ai'
 import analysis from './analysis'
 import auth from './auth'
@@ -27,7 +28,7 @@ import version from './version'
 import visualization from './visualization'
 import _window from './window'
 
-export default {
+const base = {
   ...portalZh,
   ...common,
   ...ai,
@@ -59,3 +60,14 @@ export default {
   ...visualization,
   ..._window,
 }
+
+// MS7-W3: chat 子应用文案并入(顶层命名空间深合并——已有键 workbench 优先, chat 补缺)
+function mergeChatApp<T extends Record<string, any>>(base: T, extra: Record<string, any>): T {
+  const out: any = { ...base }
+  for (const k of Object.keys(extra)) {
+    out[k] = out[k] && typeof out[k] === 'object' ? { ...extra[k], ...out[k] } : (out[k] ?? extra[k])
+  }
+  return out
+}
+
+export default mergeChatApp(base, chatAppZh)

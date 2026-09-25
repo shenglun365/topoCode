@@ -48,6 +48,11 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'nav.code' },
   },
   {
+    path: '/chat',
+    name: 'chat',
+    component: () => import('@/pages/ChatSession.vue'),
+  },
+  {
     path: '/analysis',
     name: 'Analysis',
     component: () => import('@/pages/AnalysisPage.vue'),
