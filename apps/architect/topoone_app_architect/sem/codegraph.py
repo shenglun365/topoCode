@@ -1,4 +1,7 @@
-"""semantic_assets 拆分模块（A1 修正：纯移动，逻辑零改动）。
+"""codegraph 后端适配（符号源主源侧）。
+
+【SLA（裁决⑤）】本模块 = architect 实时符号事实主源；native/KB(symbols.py TEMP
+视图) 为基线认知源+兜底。effective_mode() 的 auto 语义 = 可用即用主源。
 
 原 semantic_assets.py 5555 行 god-file 按段拆出；本模块由构建脚本生成段内容，
 跨模块引用为显式 import。每步拆分均跑 28 个后端测试文件保护。

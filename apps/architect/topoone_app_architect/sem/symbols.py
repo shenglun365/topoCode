@@ -1,5 +1,9 @@
 """符号源双后端：codegraph(外部 CLI，可选) vs native(core 分析库原生 AST)。
 
+【符号源 SLA（裁决⑤, MS4-W9 落笔）】codegraph = architect 主源（实时符号事实；
+ARCH_CODEGRAPH 默认 auto = codegraph 可用即用）；native/KB = 基线认知源
+（组件归属/划分/命名）+ 主源不可用时兜底。两后端共用本模块下游同构查询面。
+
 质量持平设计：native 后端用 TEMP 视图把 core 分析库(project.db)的
 graph_node/graph_edge 映射为下游同构符号模型(nodes/edges，contains 由
 同文件行区间推导)，上游 _query_nodes/_query_edges/_cg_* 全部零改动复用。
