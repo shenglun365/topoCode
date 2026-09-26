@@ -40,7 +40,7 @@
  "agent/governance/flow.py": 380,
  "agent/governance/flow_policy.py": 648,
  "agent/governance/focus.py": 312,
- "agent/governance/gears.py": 312,
+ "agent/governance/gears.py": 317,
  "agent/governance/goal_defaults.py": 73,
  "agent/governance/light_tasks.py": 62,
  "agent/governance/timeouts.py": 56,
