@@ -189,6 +189,7 @@ def test_card_vocabulary_projected_registry_consistent():
         "task_start", "task_input", "task_done", "task_failed",
         "task_approval_done", "taskPlanDone",
         "turnError", "digest_sent",
+        "proxy",                            # 直通回执(重定位 2026-09-26: 文本即形态)
     }
     structural = [k for k in _KNOWN_KINDS if k not in TEXT_RECEIPT_KINDS]
     missing = [k for k in structural if k not in CARD_ITEM_MAP]

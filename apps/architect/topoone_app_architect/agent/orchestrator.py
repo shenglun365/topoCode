@@ -236,9 +236,17 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     # ---- ①.55 coding 直通(quick 挡=通道代理, 定位裁决 2026-09-26) ----
     # 会话切至 coding 执行器模式(quick)后, 对话绕过需求/任务体系直达执行器——
     # 本回合恒收束(未配置执行器也显式报错, 不回落 architect 管线)。
+    # R3 例外: root/执行器解析在编排层完成后注入(R1——execution 不引 routes)。
     if str((conv or {}).get("analysisMode") or "") == "quick":
+        from ..arch_routes import agent_executors as _ae
+        from ..arch_routes.execution import conv_root_project
+        _root, _project = conv_root_project(conv)
+        _ex_list = [e for e in (_ae.load_executors() or []) if e.get("enabled")]
+        _ex = next((e for e in _ex_list if e.get("default")),
+                   _ex_list[0] if _ex_list else None)
         from .execution.proxy import proxy_turn
-        if await proxy_turn(data, gate, send):
+        if await proxy_turn(data, gate, send, root=_root, project=_project,
+                            executor=_ex or {}):
             return
 
     # ---- ①.5 相位硬闸(G1 裁决: 闸门之后/路由之前, 先于直通指令) ----

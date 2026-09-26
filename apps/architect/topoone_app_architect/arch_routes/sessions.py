@@ -555,9 +555,24 @@ def _conv_api(conv: dict) -> dict:
 
 
 def _executor_model_names(entry: dict) -> list:
-    """执行器白名单模型名(config.models[].name)。"""
+    """执行器白名单模型名(config.models[].name)。
+
+    内置 cline = 实例模型实时投影覆盖(与 GET /agent/executors 读侧、
+    executor_hint_by_id 执行侧同源; cv-259: 落盘快照恒空 → 展示 18 个模型
+    却校验"无可选模型"400——读写两侧口径分裂)。
+    """
+    models = list((entry.get("config") or {}).get("models") or [])
+    if (entry.get("type") == "cline-sdk"
+            and (entry.get("id") or "") == "cline"):
+        try:
+            from .agent_executors import _builtin_cline_models
+            live = _builtin_cline_models()
+            if live:
+                models = live
+        except Exception:  # noqa: BLE001
+            pass
     return [str(m.get("name") or m.get("model") or "")
-            for m in ((entry.get("config") or {}).get("models") or [])
+            for m in models
             if (m.get("name") or m.get("model"))]
 
 
