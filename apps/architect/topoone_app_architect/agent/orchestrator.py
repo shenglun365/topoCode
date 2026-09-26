@@ -233,6 +233,14 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     io = _TurnIO(send, conv_id, gate["last_user_msg_id"])
     await io.ensure_chat_start()
 
+    # ---- ①.55 coding 直通(quick 挡=通道代理, 定位裁决 2026-09-26) ----
+    # 会话切至 coding 执行器模式(quick)后, 对话绕过需求/任务体系直达执行器——
+    # 本回合恒收束(未配置执行器也显式报错, 不回落 architect 管线)。
+    if str((conv or {}).get("analysisMode") or "") == "quick":
+        from .execution.proxy import proxy_turn
+        if await proxy_turn(data, gate, send):
+            return
+
     # ---- ①.5 相位硬闸(G1 裁决: 闸门之后/路由之前, 先于直通指令) ----
     if await _phase_hard_gate(gate, send, store):
         return

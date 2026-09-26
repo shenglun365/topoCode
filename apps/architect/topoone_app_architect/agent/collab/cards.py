@@ -67,6 +67,7 @@ KIND_TASK_IGNORED = "task_ignored"    # 2026-09-20: 用户主动忽略任务卡(
 KIND_REQ_IGNORED = "req_ignored"      # 2026-09-20: 用户主动忽略需求卡(置灰回执)
 KIND_TASK_STATUS = "task_status"      # cv-203: 任务执行状态卡(同 taskId 单卡原位更新)
 KIND_CHOICES = "choices"              # cv-247: 结构化问询卡(可交互选项/开放题, 三源汇一)
+KIND_PROXY = "proxy"                # 重定位: coding 直通会话回执(启动/续话/结束/错误)
 KIND_TASK_RECEIPTS = (
     "task_start", "task_input", "task_done", "task_failed",
     "task_approval_done", "task_progress",
@@ -76,7 +77,7 @@ _KNOWN_KINDS = frozenset(
     (KIND_REQUIREMENT, KIND_TASK_CARD, KIND_TASK_APPROVAL, KIND_TURN_ERROR,
      KIND_DIGEST, KIND_TASK_PLAN, KIND_TASK_PLAN_DONE, KIND_TASK_INPUT_ECHO,
      KIND_TASK_IGNORED, KIND_REQ_IGNORED, KIND_TASK_STATUS,
-     *KIND_TASK_RECEIPTS, KIND_CHOICES))
+     *KIND_TASK_RECEIPTS, KIND_CHOICES, KIND_PROXY))
 
 # ── 删除策略(cv-248 liveness): kind → 删除后状态语义(守门全覆盖) ──────
 # rebuildable = 结构投影卡: 删除安全——读取面自愈(update-by-meta 回落 land

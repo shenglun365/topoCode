@@ -74,14 +74,14 @@ function pickRoute(r: RouteTarget) {
   routeMenuOpen.value = false
   routeOverride.value = r
 }
-/** 快捷挡直切开关(闪电 icon): architect 模式=关(暗, 需求分析→规约→任务完整链, 按执行器能力档位自动适配) / coding 执行器模式=开(高亮, 直出任务卡·关 KB), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
+/** 快捷挡直切开关(闪电 icon): architect 模式=关(暗, 需求分析→规约→任务完整链, 按执行器能力档位自动适配) / coding 执行器模式=开(高亮, 直通对话·不走需求/任务——architect 仅通道代理), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
 const quickOn = computed(() => (props.analysisMode || 'strict') === 'quick')
 /** 空白对话(会话未创建)锁定: 挡位是会话级字段, 无 conv_id 可写。 */
 const quickLocked = computed(() => props.hasSession === false)
 const quickTitle = computed(() => {
   if (quickLocked.value) return '模式切换需在已有会话中进行 — 发送首条消息创建会话后可用'
   return quickOn.value
-    ? 'coding 执行器模式 — 直出任务卡·关 KB（点击切回 architect 模式）'
+    ? 'coding 执行器模式 — 直通对话·不走需求/任务体系，architect 仅做通道代理（点击切回 architect 模式）'
     : 'architect 模式 — 需求分析→规约→任务，按执行器能力档位自动适配（点击切至 coding 执行器模式）'
 })
 function toggleQuickMode() {

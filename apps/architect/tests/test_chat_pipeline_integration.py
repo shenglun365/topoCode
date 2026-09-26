@@ -111,32 +111,78 @@ def test_full_pipeline_real_bodies_chat_with_tool_round(pipeline):
     assert any("core 组件" in m["content"] for m in assistant)
 
 
-def test_full_pipeline_task_fence_autoland(pipeline):
-    """任务围栏代落: 真实 extract_task_fence→propose_task→执行器选定链
-    (注册表默认 cline → type+id 同源)→任务卡落流。"""
-    client, gw, _tmp = pipeline
+def test_full_pipeline_quick_proxy_passthrough(pipeline, monkeypatch):
+    """quick 挡语义升级(定位裁决 2026-09-26): coding 执行器模式=直通对话——
+    回合绕过需求/任务体系直达执行器(零任务卡/零需求卡), architect 仅通道代理
+    + 上下文包装配。原「任务围栏代落」行为随之退役。"""
+    from topoone_app_architect.agent.execution import exec_bridge as eb
+    from topoone_app_architect.agent.execution import proxy
+    client, gw, tmp = pipeline
     store.CollabConfigStore.set("agent.executors", json.dumps([
         {"id": "cline", "type": "cline-sdk", "enabled": True, "default": True,
          "config": {"provider_id": "openai-compatible",
                     "models": [{"name": "M1", "model": "m-1", "url": "http://x/v1"}]}},
     ]))
-    gw.sync_script = [
-        '好的，我将该任务整理如下：\n```task\n{"title": "集成验证任务",'
-        ' "instruction": "编写冒烟测试覆盖主流程"}\n```',
-    ]
+    root = tmp / "proj"
+    root.mkdir()
+    (root / "README.md").write_text("# P\n")
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-it"))
+    captured: list = []
+
+    class _FakeSR:
+        ok = True
+        job_id = "job-qx"
+        branch = "proxy/x"
+        worktree = str(root)
+        session_id = "s"
+        base_commit = "sha"
+        workspace = "inplace"
+        raw = {}
+        error = ""
+
+    class _FakeClient:
+        def start_implement(self, payload, timeout=20.0):
+            captured.append(payload)
+            return _FakeSR()
+
+    monkeypatch.setattr(eb, "_client", lambda: _FakeClient())
+    monkeypatch.setattr(eb, "_runner",
+                        lambda path, payload=None, timeout=12.0: {"ok": True})
+    import topoone_app_architect.agent.execution.pumps as _pumps_mod
+
+    async def _no_pump(*a, **k):
+        return None
+
+    monkeypatch.setattr(_pumps_mod, "run_event_pump", _no_pump)
     conv = store.ConversationsStore.create({"kind": "generic", "title": "t",
                                             "analysisMode": "quick"})
+    import time as _time
     with client:
         with client.websocket_connect(WS_PATH) as ws:
             _chat(ws, "把这个活交给 coding 干", conv_id=conv["id"])
-            ev = _recv_until(ws, "done")
-    tasks = store.TasksStore.of_conv(ev["conversationId"])
-    assert len(tasks) == 1
-    assert tasks[0]["status"] == "saved"        # 默认保存(2026-09-20 裁决)
-    assert tasks[0]["executorType"] == "cline-sdk"
-    assert tasks[0]["executorId"] == "cline"     # id/配置同源(cv-158 回归)
-    msgs = store.ConversationsStore.messages(ev["conversationId"], limit=20)
-    assert any((m.get("meta") or {}).get("kind") == "task_card" for m in msgs)
+            # 直通终态经 cards.land(conv-message) 承载(不走 done 帧, 见 proxy 模块注记)
+            deadline = _time.time() + 10
+            cid = conv["id"]
+            while _time.time() < deadline:
+                msgs_now = store.ConversationsStore.messages(cid, limit=10)
+                if any((m.get("meta") or {}).get("kind") == "proxy"
+                       for m in msgs_now):
+                    break
+                _time.sleep(0.2)
+    cid = conv["id"]
+    # 直通纪律: 零任务卡/零需求卡
+    assert store.TasksStore.of_conv(cid) == []
+    msgs = store.ConversationsStore.messages(cid, limit=20)
+    assert not any((m.get("meta") or {}).get("kind") == "task_card" for m in msgs)
+    # 执行器会话已起, 载荷=用户文本+上下文包契约
+    assert len(captured) == 1
+    assert "把这个活交给 coding 干" in captured[0]["instruction"]
+    assert "上下文包(执行契约)" in captured[0]["instruction"]
+    assert captured[0]["executorType"] == "cline-sdk"
+    assert proxy.proxy_job_of(cid) is not None
+    proxy._PROXY_JOBS.pop(cid, None)
 
 
 def test_full_pipeline_text_confirm_runs_task(pipeline, monkeypatch):
