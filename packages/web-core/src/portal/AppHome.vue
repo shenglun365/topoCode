@@ -62,17 +62,10 @@ interface ModuleCard {
   accent: string
 }
 
-// 环境感知：统一网关在 3456（prod 同源）；dev 下各 SPA 分散在不同端口。
-// - 5173 = 主工作台 dev（history 路由基座 /app/）
-// - 5174 = docs SPA dev（viewer/web-root/portal）
-// - 5176 = architect dev
-// （5175 chat dev 已随 MS7-W3 chat FE 并入 workbench 退役）
-const host = window.location.hostname
-const port = window.location.port
-const isDev = ['5173', '5174', '5175', '5176'].includes(port)
-const gatewayBase = isDev ? `//${host}:3456` : ''
-// 知识库构建和管理：同源相对路径（dev→5173/app/home，网关→3456/app/home），
-// 新 tab 由卡片 target=_blank 承担（2026-09-25 用户裁决：与其余模块卡一致）
+// 模块卡全部同源相对路径——跟随当前访问端口（2026-09-25 用户裁决：不绑定网关 3456）。
+// 网关生产态由 gateway 静态挂载/路由承载；dev 态指向当前 vite 实例
+// （workbench vite history fallback + 客户端全捕获路由承接未知路径）。
+// 新 tab 由卡片 target=_blank 承担。
 const workbenchHref = '/app/home'
 
 const modules: ModuleCard[] = [
@@ -84,20 +77,20 @@ const modules: ModuleCard[] = [
   },
   {
     key: 'projects',
-    href: `${gatewayBase}/projects`,
+    href: '/projects',
     icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
     accent: '#10b981',
   },
   {
     key: 'chat',
-    // chat FE 并入 workbench（MS7-W3）：规范直达 /app/chat（gateway /chat 会 301 到这里）
-    href: `${gatewayBase}/app/chat`,
+    // chat FE 并入 workbench（MS7-W3）：规范直达 /app/chat
+    href: '/app/chat',
     icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5',
     accent: '#f59e0b',
   },
   {
     key: 'architect',
-    href: `${gatewayBase}/architect`,
+    href: '/architect',
     icon: 'M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25',
     accent: '#a855f7',
   },
