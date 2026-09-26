@@ -115,21 +115,42 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     - 未配置执行器 → 显式报错(不强硬保底到 architect 管线)
 
     R1 合规: root/executor 由 orchestrator 例外层解析注入, 本模块不依赖 arch_routes。
+
+    收口纪律(cv-259): 本回合必须恒发 WS done 终止帧——proxy 只落库不收口时,
+    前端 chatStream promise 永挂 busy=true, SSE conv-message 被无限 defer
+    (消息只能整页刷新可见)且输入框锁死。row 回执→done(content+messageId);
+    无回执(纯转发)→done(cardClosed) 清本地占位泡。
     """
     from . import exec_bridge as eb
     from .dispatch import _dirty_worktree
 
     conv_id, conv = gate["conv_id"], gate["conv"]
+
+    async def _send_done(row: Optional[dict] = None) -> None:
+        try:
+            if row:
+                await send({"type": "done", "conversationId": conv_id,
+                            "content": str(row.get("content") or ""),
+                            "messageId": str(row.get("id") or ""),
+                            "meta": {"kind": "proxy"}})
+            else:
+                await send({"type": "done", "conversationId": conv_id,
+                            "content": "", "cardClosed": True})
+        except Exception:  # noqa: BLE001 — 收口失败不吞落库事实(SSE 通道兜底)
+            logger.exception("[proxy] done 收口失败 conv=%s", conv_id)
+
     ex = executor
     if not ex:
-        eb._append(conv_id, "assistant",
-                   "⚠️ 未配置可用执行器(coding 执行器模式需要至少一个已启用的"
-                   "执行器)——请在执行器配置中启用后重试，或切回 architect 模式。",
-                   msg_meta={"kind": "proxy"})
+        row = eb._append(conv_id, "assistant",
+                         "⚠️ 未配置可用执行器(coding 执行器模式需要至少一个已启用的"
+                         "执行器)——请在执行器配置中启用后重试，或切回 architect 模式。",
+                         msg_meta={"kind": "proxy"})
+        await _send_done(row)
         return True
 
     text = str(gate.get("question") or "").strip()
     if not text:
+        await _send_done()
         return True
 
     # 执行器配置单源(经 exec_bridge hint 解析链, 与任务卡派发同构; cv-259:
@@ -170,22 +191,27 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
             r = eb._runner(f"/api/implement/{job['job_id']}/input",
                            {"text": text}, timeout=_t)
             if r is None:
-                eb._append(conv_id, "assistant",
-                           "⚠️ 转发失败: runner 不可达(:3458)。",
-                           msg_meta={"kind": "proxy"}, agent=_agent)
+                row = eb._append(conv_id, "assistant",
+                                 "⚠️ 转发失败: runner 不可达(:3458)。",
+                                 msg_meta={"kind": "proxy"}, agent=_agent)
+                await _send_done(row)
             elif r.get("ok") is False:
-                eb._append(conv_id, "assistant",
-                           f"⚠️ 转发失败: {r.get('error') or '未知错误'}。",
-                           msg_meta={"kind": "proxy"}, agent=_agent)
+                row = eb._append(conv_id, "assistant",
+                                 f"⚠️ 转发失败: {r.get('error') or '未知错误'}。",
+                                 msg_meta={"kind": "proxy"}, agent=_agent)
+                await _send_done(row)
+            else:
+                await _send_done()   # 纯转发静默成功: 收口清占位泡, 产出经泵+SSE 呈现
             return True
 
     # 首次启动: 隔离决策(cv-202 同口径: 会话隔离开关) + 脏工作区门禁
     worktree = bool((conv or {}).get("isolated"))
     if not worktree and root and _dirty_worktree(root):
-        eb._append(conv_id, "assistant",
-                   "⚠️ 工作区有未提交变更(可能来自其它开发进程)——直通执行器已拒绝"
-                   "就地启动，避免互踩。请先处理变更，或开启会话隔离开关。",
-                   msg_meta={"kind": "proxy"})
+        row = eb._append(conv_id, "assistant",
+                         "⚠️ 工作区有未提交变更(可能来自其它开发进程)——直通执行器已拒绝"
+                         "就地启动，避免互踩。请先处理变更，或开启会话隔离开关。",
+                         msg_meta={"kind": "proxy"})
+        await _send_done(row)
         return True
 
     from .context_pack import build_context_pack, render_context_pack_md
@@ -218,18 +244,20 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
 
     sr = eb._client().start_implement(payload, 20.0)
     if not sr.ok:
-        eb._append(conv_id, "assistant",
-                   f"⚠️ 直通启动失败: {sr.error or 'runner 服务不可达(:3458)'}",
-                   msg_meta={"kind": "proxy"})
+        row = eb._append(conv_id, "assistant",
+                         f"⚠️ 直通启动失败: {sr.error or 'runner 服务不可达(:3458)'}",
+                         msg_meta={"kind": "proxy"})
+        await _send_done(row)
         return True
 
     _PROXY_JOBS[conv_id] = {"job_id": sr.job_id, "executor_type": etype}
     _start_pump(conv_id, sr.job_id, etype)
-    eb._append(conv_id, "assistant",
-               f"🔗 已直通执行器 `{etype}`(job `{sr.job_id}`，"
-               f"{'隔离 worktree' if worktree else '就地模式'})"
-               "——本轮起你的消息直接发给执行器，architect 仅做通道。",
-               msg_meta={"kind": "proxy"}, agent=etype)
+    row = eb._append(conv_id, "assistant",
+                     f"🔗 已直通执行器 `{etype}`(job `{sr.job_id}`，"
+                     f"{'隔离 worktree' if worktree else '就地模式'})"
+                     "——本轮起你的消息直接发给执行器，architect 仅做通道。",
+                     msg_meta={"kind": "proxy"}, agent=etype)
+    await _send_done(row)
     return True
 
 

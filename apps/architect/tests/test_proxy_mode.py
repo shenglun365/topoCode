@@ -92,8 +92,17 @@ def _gate(conv):
 
 
 class _Send:
+    """记录 WS 回合帧(cv-259: 每分支必须以 done 收口)。"""
+
+    def __init__(self):
+        self.events: list = []
+
     async def __call__(self, payload):
-        pass
+        self.events.append(payload)
+
+    @property
+    def closed(self) -> bool:
+        return bool(self.events) and self.events[-1].get("type") == "done"
 
 
 def test_quick_mode_enabled_strict_not(arch_env, tmp_path):
@@ -112,11 +121,15 @@ def test_proxy_start_no_req_no_task(arch_env, tmp_path, monkeypatch,
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(tmp_path / "proj"), ""))
 
+    sn = _Send()
     handled = asyncio.run(proxy_turn(
-        {}, _gate(conv), _Send(), root=str(tmp_path / "proj"),
+        {}, _gate(conv), sn, root=str(tmp_path / "proj"),
         project="", executor=EXECUTOR_FIXTURE))
 
     assert handled is True
+    assert sn.closed, "直通回合必须以 WS done 收口(cv-259)"
+    _d = sn.events[-1]
+    assert "已直通执行器" in _d["content"] and _d.get("messageId")
     assert len(starts) == 1
     assert "把日志清理脚本写一下" in starts[0]["instruction"]
     assert "上下文包(执行契约)" in starts[0]["instruction"]
@@ -143,8 +156,11 @@ def test_proxy_followup_forwards_input(arch_env, tmp_path, monkeypatch):
 
     gate2 = {"conv_id": conv["id"], "conv": conv,
              "question": "补充: 只清 /var/log", "last_user_msg_id": "m2"}
-    assert asyncio.run(proxy_turn({}, gate2, _Send(), root=str(tmp_path / "proj"),
+    sn2 = _Send()
+    assert asyncio.run(proxy_turn({}, gate2, sn2, root=str(tmp_path / "proj"),
                                   project="", executor=EXECUTOR_FIXTURE)) is True
+    # 纯转发静默成功: done(cardClosed) 收口清占位泡(执行器产出经泵+SSE 呈现)
+    assert sn2.closed and sn2.events[-1].get("cardClosed") is True
     inputs = [pl for p, pl in captured if p.endswith("/input")]
     assert len(inputs) == 1 and inputs[0]["text"].startswith("补充:")
     assert len([p for p, _ in captured if p == "/api/implement"]) == n_impl
@@ -163,8 +179,10 @@ def test_proxy_dirty_repo_rejected(arch_env, tmp_path, monkeypatch):
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(root), ""))
 
-    assert asyncio.run(proxy_turn({}, _gate(conv), _Send(), root=str(root),
+    sn = _Send()
+    assert asyncio.run(proxy_turn({}, _gate(conv), sn, root=str(root),
                                   project="", executor=EXECUTOR_FIXTURE)) is True
+    assert sn.closed
     assert not [p for p, _ in captured if p == "/api/implement"]
     assert proxy.proxy_job_of(conv["id"]) is None
 
@@ -176,10 +194,12 @@ def test_proxy_without_executor_explicit_error(arch_env, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(tmp_path / "proj"), ""))
-    handled = asyncio.run(proxy_turn({}, _gate(conv), _Send(),
+    sn = _Send()
+    handled = asyncio.run(proxy_turn({}, _gate(conv), sn,
                                      root=str(tmp_path / "proj"), project="",
                                      executor={}))
     assert handled is True    # 显式报错收束, 不回落 architect 管线
+    assert sn.closed and "未配置可用执行器" in sn.events[-1]["content"]
     assert proxy.proxy_job_of(conv["id"]) is None
 
 
@@ -285,10 +305,12 @@ def test_proxy_forward_terminal_job_starts_new(arch_env, tmp_path, monkeypatch,
         "topoone_app_architect.agent.execution.exec_bridge._runner",
         fake_runner)
 
+    sn = _Send()
     async def _go():
-        await proxy_turn({}, _gate(conv), _Send(), root=str(tmp_path / "proj"),
+        await proxy_turn({}, _gate(conv), sn, root=str(tmp_path / "proj"),
                          project="", executor=EXECUTOR_FIXTURE)
     asyncio.run(_go())
+    assert sn.closed, "新开成功也须 done 收口"
     assert not [p for p, _ in captured if p.endswith("/input")], \
         "终态 job 不得再转发消息"
     assert len(starts) == 1, "应开启新的直通作业"
@@ -305,10 +327,12 @@ def test_proxy_forward_unreachable_runner_reports(arch_env, tmp_path,
         "topoone_app_architect.agent.execution.exec_bridge._runner",
         lambda path, payload=None, timeout=12.0: None)
 
+    sn = _Send()
     async def _go():
-        await proxy_turn({}, _gate(conv), _Send(), root=str(tmp_path / "proj"),
+        await proxy_turn({}, _gate(conv), sn, root=str(tmp_path / "proj"),
                          project="", executor=EXECUTOR_FIXTURE)
     asyncio.run(_go())
+    assert sn.closed
     msgs = store.ConversationsStore.messages(conv["id"])
     assert any("失联" in str(m.get("content") or "") for m in msgs)
 

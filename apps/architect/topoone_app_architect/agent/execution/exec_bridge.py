@@ -121,12 +121,15 @@ def _meta_dict_of(conv: dict) -> dict:
 # ── 会话消息 ──
 
 def _append(conv_id: str, role: str, content: str, msg_meta: Optional[dict] = None,
-            project_id: str = "", agent: str = "") -> None:
-    """委托 collab.cards.land(卡片落流唯一出口, cv-175 规范化)。"""
+            project_id: str = "", agent: str = "") -> Optional[dict]:
+    """委托 collab.cards.land(卡片落流唯一出口, cv-175 规范化)。
+
+    返回落库行(含 id; 供调用方回指 WS done 帧 messageId; cv-259 直通收口用),
+    失败 None。"""
     from ...agent.collab import cards as _cards
     meta = dict(msg_meta or {})
-    _cards.land(conv_id, content, kind=meta.pop("kind", None), role=role,
-                project_id=project_id, agent=agent, **meta)
+    return _cards.land(conv_id, content, kind=meta.pop("kind", None), role=role,
+                       project_id=project_id, agent=agent, **meta)
 
 def _copy_impl_flag(worktree: str, changed_files: List[str],
                     turn_text: str = "") -> str:
