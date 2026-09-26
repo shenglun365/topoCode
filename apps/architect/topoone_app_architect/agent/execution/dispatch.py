@@ -314,6 +314,25 @@ def _conv_task_lock(conv_id: str) -> threading.Lock:
         return lk
 
 
+def _dirty_worktree(root: str) -> bool:
+    """主工作区是否有未提交变更(含未跟踪)——并行进程保护门禁的检测器。
+
+    非 git 仓库/检测本身失败 → False(不阻断执行; 门禁只为防互踩, 不因工具
+    缺失 brick 全部任务——失败会记 INFO 日志, 非静默)。
+    """
+    import subprocess as _sp
+    try:
+        if _sp.run(["git", "-C", root, "rev-parse", "--is-inside-work-tree"],
+                   capture_output=True, timeout=5).returncode != 0:
+            return False
+        r = _sp.run(["git", "-C", root, "status", "--porcelain"],
+                    capture_output=True, timeout=5)
+        return bool(r.stdout.strip())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[dispatch] 工作区脏检测失败 root=%s: %s", root, e)
+        return False
+
+
 def confirm_task(task_id: str) -> dict:
     """开始执行(2026-09-20 语义: saved|pending_confirm → running)。
 
@@ -479,6 +498,15 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     else:
         payload["worktree"] = bool((conv or {}).get("isolated"))
     _ws = "worktree" if bool(payload["worktree"]) else "inplace"
+    # 重定位 P3 门禁(裁决 2026-09-26): 就地执行且主工作区有未提交变更(其它
+    # 开发进程可能在编码) → 显式失败, 不静默开工(cv-257: 与用户并行开发互踩)。
+    # 修复路径: 处理变更, 或开启会话隔离开关(worktree)。readonly 不写盘豁免。
+    if (not payload["worktree"] and _safety != ST.SAFETY_READONLY
+            and _dirty_worktree(root)):
+        _gate_msg = ("工作区有未提交变更(可能来自其它开发进程)——为避免互踩已拒绝"
+                     "就地执行。请先处理变更，或开启会话隔离开关后重试。")
+        store.TasksStore.finish(task_id, "failed", _gate_msg)
+        return {"ok": False, "error": _gate_msg}
     payload["instruction"] = _eb()._task_instruction(task, _eb()._task_chain_brief(conv_id, task_id),
                                                policy=policy,
                                                runtime={"branch": branch, "root": root,
