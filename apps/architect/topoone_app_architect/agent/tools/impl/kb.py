@@ -201,11 +201,20 @@ def tool_project_ctx(root: Optional[str], project: Optional[str]) -> Dict[str, A
         }
     except Exception:  # noqa: BLE001
         pass
-    # 解析域: 代码解析物(上下文单元数)——ContextUnitsStore 按 project_id 过滤
+    # 解析域: 语义拆分(定位对齐 2026-09-26)——semanticAssets=本地代码资产
+    # (资产地图/检索可用)，conversationUnits=会话派生记忆(非代码解析物)。
+    # cv-258 教训: 原来只报 contextUnits 且被 LLM 误读为「代码解析就绪」。
     try:
         from ....store.conv import ContextUnitsStore
+        from ....store.semantic import SemanticAssetsStore
         units = ContextUnitsStore.all(project_id=pid, limit=1000) if pid else []
-        out["parsed"] = {"contextUnits": len(units)}
+        sem_n = len(SemanticAssetsStore.all(pid, limit=5000) or []) if pid else 0
+        parsed: Dict[str, Any] = {"semanticAssets": sem_n,
+                                  "conversationUnits": len(units)}
+        if sem_n == 0:
+            parsed["hint"] = ("本地语义资产为空——存量代码分析可先调 "
+                              "asset.semantic.extract 建立本地资产索引")
+        out["parsed"] = parsed
     except Exception:  # noqa: BLE001
         pass
     return out

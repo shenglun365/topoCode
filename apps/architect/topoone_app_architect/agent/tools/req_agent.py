@@ -270,7 +270,8 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
             if _kb_deg(root, project):
                 return {"error":
                         "当前项目未关联知识库(KB)，kb.* 工具不可用。"
-                        "可改用本地能力: asset.semantic.search / map.overview / "
+                        "可改用本地能力: 资产未建立时先 asset.semantic.extract "
+                        "建本地索引，再 asset.semantic.search / map.overview / "
                         "map.assets / code.read_symbols；或在项目总览关联 KB 后重试。"}
         except Exception:  # noqa: BLE001
             pass

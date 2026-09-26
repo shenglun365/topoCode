@@ -320,6 +320,34 @@ def _contains_edges(out: List[dict], symbols: List[dict],
     return out
 
 
+_SKIP_DIRS = {".git", ".hg", ".svn", ".idea", ".vscode", "__pycache__",
+              ".DS_Store", "node_modules", "dist", "build", ".venv", "venv"}
+
+
+def _project_source_files(root: str, cap: int = 500) -> List[str]:
+    """降级 project 范围的本地源码文件枚举(无 codegraph/KB 清单可依时)。
+
+    口径单源：可提取判定复用 compare._extractable(与 KB 扫描 walker 同一
+    _CODE_EXTS)；忽略目录与 dirs._SKIP 同口径。路径相对 root、稳定排序。
+    上限 cap(默认 500，与 compare._CAP_PENDING 同量级；下游循环另有 120/趟截断)。
+    """
+    from .compare import _extractable
+    out: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS
+                       and not d.startswith(".")]
+        for fn in filenames:
+            rel = os.path.relpath(os.path.join(dirpath, fn), root)
+            rel = rel.replace(os.sep, "/")
+            if _extractable(rel):
+                out.append(rel)
+                if len(out) >= cap:
+                    out.sort()
+                    return out
+    out.sort()
+    return out
+
+
 def _collect_via_cache(root: str, project: Optional[str],
                        files: List[str], syms: List[str]):
     """无 codegraph 时的 AST 缓存层取数(要求③)：缓存命中 → KB 解析 → live 扫描。
@@ -332,6 +360,13 @@ def _collect_via_cache(root: str, project: Optional[str],
         # root 不可解析(缺 root/project 参数) → 无法读文件/扫描，返回空上下文防 TypeError。
         logger.warning("[semantic] _collect_via_cache: root 未解析, 返回空上下文")
         return [], [], "none", {}
+    if not files:
+        # 重定位 P-A(能力对齐修复): project 范围在 resolve_scope_files 恒返回空清单
+        # (全量语义由 codegraph 路径承载)，降级路径此前零文件 → 分析全空(cv-258 实测)。
+        # 本地枚举补上(非新建能力: 只补清单，解析/提取全走既有三级源)。
+        files = _project_source_files(root)
+        if files:
+            logger.info("[semantic] 降级 project 范围本地枚举源码文件: %d", len(files))
     pid = project_id_for(root, project)
     nodes: List[dict] = []
     # 每文件符号/refs 分组，供重建边(行区间归属必须限定单文件，防跨文件误归)。

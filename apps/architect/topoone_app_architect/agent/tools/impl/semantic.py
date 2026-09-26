@@ -80,6 +80,7 @@ def tool_semantic_search(root: Optional[str], project: Optional[str],
 @register_architect_tool(
     "asset.semantic.extract",
     "按指令从最新代码提取语义数据资产(六类: entity/contract/state/rule/process/decision，实现层)并落库。"
+    "**无 KB(降级)项目亦可用**——本地资产层入口(存量代码功能盘点/源码分析先跑此工具再检索/地图)。"
     "指令化提取的唯一执行入口：规则定死类别+tAgent 定向+锚定代码段+语义解释。"
     "参数 scope={type: comm|files|symbols|project, key?, files?, symbols?}，"
     "comm 时 key 为**组件ID**(comm-…，权威范围)；kinds 可选[六类]。"

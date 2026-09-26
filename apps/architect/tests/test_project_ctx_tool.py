@@ -53,7 +53,9 @@ def test_degraded_project_sees_execution_and_parsed(arch_env):
     assert out["execution"]["tasksDone"] == 2
     assert out["execution"]["tasksActive"] == 1
     assert len(out["execution"]["recentDone"]) == 2
-    assert out["parsed"]["contextUnits"] == 3
+    assert out["parsed"]["semanticAssets"] == 0
+    assert out["parsed"]["conversationUnits"] == 3
+    assert "asset.semantic.extract" in out["parsed"]["hint"]
 
 
 def test_recent_done_ordered_and_capped(arch_env):
