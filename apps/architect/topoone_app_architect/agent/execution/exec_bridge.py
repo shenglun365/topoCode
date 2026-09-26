@@ -489,10 +489,13 @@ def _merge_req_scope(rid: str, files: List[str]) -> int:
 
 def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
                            title: str, summary: str, changed_files,
-                           branch: str, pid: str) -> Optional[dict]:
+                           branch: str, pid: str,
+                           acceptance_brief: str = "") -> Optional[dict]:
     """知识沉淀(存储归一): 任务终态回执 → execution_report 单元(会话派生记忆, 检索面可捞)。
 
     归因来源: coding agent 执行报告(正文 summary)——P1 distill-errors 的材料。
+    重定位 P3 闭环: 验收材料(边界比对/越界/判据对照)并入沉淀——done 任务的
+    验收记录持久化于 execution_report 单元(不再只存活于消息文本)。
     """
     t = store.TasksStore.get(task_id) or {}
     prog = t.get("progress") or {}
@@ -501,12 +504,15 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
                        ("verify_test", "测试")):
         if prog.get(key) is not None:
             meta_lines.append(f"- {label}: {prog[key]}")
+    acc_section = ""
+    if acceptance_brief:
+        acc_section = ("\n\n**验收材料**(资产比对基底)\n" + str(acceptance_brief)[:2000])
     unit = store.ContextUnitsStore.create({
         "conversationId": conv_id, "projectId": pid,
         "type": "execution_report",
         "title": f"任务回执[{status}]：{title}",
         "content": ((summary or "")[:4000] + "\n\n**回执**\n"
-                    + "\n".join(meta_lines)),
+                    + "\n".join(meta_lines) + acc_section),
         "refs": {"taskId": task_id, "reqId": rid,
                  "files": [str(f) for f in (changed_files or [])][:50],
                  "executorType": t.get("executorType") or ""},
@@ -628,13 +634,16 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             brief += copy_note
         files = ("\n".join(f"- `{f}`" for f in changed[:20])
                  if changed else "- (无变更文件)")
+        # 重定位 P3: 越界缺口显式提示(可据此起草迭代规约——需用户确认, 不自动创建)
+        gap_note = ("\n\n> ⚠️ 检出越界改动——缺口已随验收材料归档，"
+                    "可据此起草迭代规约(回复确认后创建)。") if "越界改动" in brief else ""
         # cv-203 P3: 形态标签按任务 workspace 分叉(就地任务无分支, 分支名是
         # 建卡提案字段——展示它会误导)
         _loc = (f"分支 `{_trow.get('branch') or ''}`(隔离)"
                 if (_trow.get("workspace") or "") == "worktree" else "就地模式")
         _append(conv_id, "assistant",
                 f"✅ **任务完成**「{title}」· {_loc}\n\n{clean}\n\n"
-                f"**变更文件**：\n{files}\n\n---\n**验收简报**\n{brief}",
+                f"**变更文件**：\n{files}\n\n---\n**验收简报**\n{brief}{gap_note}",
                 msg_meta={"kind": "task_done", "taskId": task_id,
                           "branch": _trow.get("branch") or "",
                           "workspace": _trow.get("workspace") or "inplace"},
@@ -650,11 +659,12 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             on_plan_task_done(conv_id, task_id)
         except Exception:  # noqa: BLE001
             pass
-        # 知识沉淀: 任务回执 → execution_report 单元(会话派生记忆)
+        # 知识沉淀: 任务回执 → execution_report 单元(会话派生记忆; 含验收材料)
         try:
             _sediment_task_receipt(conv_id, task_id, ctx.get("rid") or "", "done",
                                    title, clean or text, changed,
-                                   _trow.get("branch") or "", pid)
+                                   _trow.get("branch") or "", pid,
+                                   acceptance_brief=brief)
         except Exception as e:  # noqa: BLE001
             logger.warning("[exec-bridge] 回执沉淀失败 task=%s: %s", task_id, e)
     elif kind == "failed":

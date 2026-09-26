@@ -526,6 +526,13 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
                                      "max_iterations": policy.max_iterations}
     if _etype:
         payload["executorType"] = _etype   # 引擎选择以 task 为准(无注册表也可指定)
+    # 上下文包(重定位 P2 契约): 规约/资产引用/约束/验收判据 结构化下发——
+    # 主 agent「上下文管理」职责的显式化; 缺规约(quick 直出卡)透明降级不阻断。
+    from .context_pack import build_context_pack, render_context_pack_md
+    pack = build_context_pack(task, conv, root, boundary_files)
+    payload["contextPack"] = pack
+    payload["instruction"] = (payload.get("instruction") or "") \
+        + "\n\n" + render_context_pack_md(pack)
     # V1 验收门禁配置透传(P0 显式配置来源; 任务行 verifyConfig → runner 发现链)
     if task.get("verifyConfig"):
         payload["verify"] = task["verifyConfig"]
