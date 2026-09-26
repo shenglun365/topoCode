@@ -63,16 +63,17 @@ interface ModuleCard {
 }
 
 // 环境感知：统一网关在 3456（prod 同源）；dev 下各 SPA 分散在不同端口。
-// - 5173 = 主工作台 dev（内嵌首页时工作台链接用 hash #/home）
+// - 5173 = 主工作台 dev（history 路由基座 /app/）
 // - 5174 = docs SPA dev（viewer/web-root/portal）
-// - 5175 = chat dev
 // - 5176 = architect dev
+// （5175 chat dev 已随 MS7-W3 chat FE 并入 workbench 退役）
 const host = window.location.hostname
 const port = window.location.port
-const isDevSrc = port === '5173'
 const isDev = ['5173', '5174', '5175', '5176'].includes(port)
 const gatewayBase = isDev ? `//${host}:3456` : ''
-const workbenchHref = isDevSrc ? '#/home' : `${gatewayBase}/app`
+// 知识库构建和管理：同源相对路径（dev→5173/app/home，网关→3456/app/home），
+// 新 tab 由卡片 target=_blank 承担（2026-09-25 用户裁决：与其余模块卡一致）
+const workbenchHref = '/app/home'
 
 const modules: ModuleCard[] = [
   {
