@@ -49,6 +49,7 @@
 3. ⬜ 带规约任务执行 → 完成消息含验收简报；执行器载荷含上下文契约段（日志可查）
 4. ⬜ 其它进程有未提交变更时就地执行 → 显式拒绝并引导（不再互踩）
 
-**随验证确认的行为注记**：cv-257 的 task-56 污染物仍在用户仓库
-（topo-animation: `packages/engine/src/tools/ast-scanner.mjs` + `.topo/asset-map.json`），
-待用户处置；KB 重建建议改走域内管道重跑。
+**随验证确认的行为注记**：cv-257 的 task-56 污染物（topo-animation:
+`ast-scanner.mjs` + `.topo/asset-map.json`）已由用户处置（2026-09-26）；
+KB 重建功能**待重新规划**（用户裁决 2026-09-26，稍后再议——届时按域内管道
+形态设计，不走编码执行器）。
