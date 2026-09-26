@@ -129,6 +129,18 @@ class TasksStore:
         return [_row_to_api(r) for r in rows]
 
     @classmethod
+    def of_project(cls, project_id: str, limit: int = 200) -> list[dict]:
+        """项目任务清单(最近更新倒序, limit 截断)——项目画像/完成度聚合用。
+        路由经 _fetchall_routed(项目库直查; 无定位时全库扫描仍按 project_id 过滤)。"""
+        rows, _mode = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE project_id = ? "
+            "ORDER BY updated_at DESC, rowid DESC LIMIT ?",
+            (project_id, limit),
+            project_id=project_id)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
     def active_of_conv(cls, conv_id: str):
         """最新活跃任务(pending_confirm/running/waiting_input); 无则 None。"""
         for t in reversed(cls.of_conv(conv_id)):

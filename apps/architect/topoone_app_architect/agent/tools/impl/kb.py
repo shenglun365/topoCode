@@ -159,18 +159,53 @@ def tool_kb_graph(root: Optional[str], project: Optional[str],
 
 @register_architect_tool(
     "project.ctx",
-    "读取当前项目上下文(项目名/分支/基线 id/降级状态)，LLM 用于判断模式(greenfield/existing)",
+    "读取项目上下文(项目名/分支/基线 id/降级状态 + 任务执行统计 + 代码解析概貌)"
+    "——完成情况/进度/项目现状类提问先看",
 )
 def tool_project_ctx(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
+    """项目处境画像(KB 域 + architect 本域执行/解析信号)。
+
+    cv-256 教训: 原实现只返回 KB 域 6 字段——无 KB 项目(降级态)下 LLM 拿到的
+    全是 0, 只能答"空状态", 无视了任务执行史与代码解析物。现按域聚合:
+    每域独立 try/except(域失败→字段缺省, 遵守 req_agent 模块头降级语义),
+    绝不因单域失败整体失败; 数据经 store 层(_fetchall_routed 路由), 不裸写 SQL。
+    """
     from ....arch_routes.project import resolve_project as _rp
     try:
         proj = _rp(root, project)
     except Exception:
         proj = None
-    return {
+    pid = (proj or {}).get("id") or project or ""
+    out: Dict[str, Any] = {
         "root": root, "project": project,
         "bound": bool(proj),
         "degraded": _project_degraded(root, project),
         "name": (proj or {}).get("name", ""),
         "baselineId": (proj or {}).get("baselineId", ""),
     }
+    # 执行域: 任务史(done/活跃 + 最近完成)——TasksStore.of_project 路由查询
+    try:
+        from ....store.tasks import TasksStore, TERMINAL_STATES
+        tasks = TasksStore.of_project(pid, limit=200) if pid else []
+        done = [t for t in tasks if (t.get("status") or "") == "done"]
+        active = [t for t in tasks
+                  if (t.get("status") or "") not in TERMINAL_STATES
+                  and (t.get("status") or "") not in ("dismissed",)]
+        out["execution"] = {
+            "tasksTotal": len(tasks),
+            "tasksDone": len(done),
+            "tasksActive": len(active),
+            "recentDone": [{"id": t.get("id"), "title": t.get("title"),
+                            "finishedAt": t.get("finishedAt") or t.get("updatedAt")}
+                           for t in done[:5]],
+        }
+    except Exception:  # noqa: BLE001
+        pass
+    # 解析域: 代码解析物(上下文单元数)——ContextUnitsStore 按 project_id 过滤
+    try:
+        from ....store.conv import ContextUnitsStore
+        units = ContextUnitsStore.all(project_id=pid, limit=1000) if pid else []
+        out["parsed"] = {"contextUnits": len(units)}
+    except Exception:  # noqa: BLE001
+        pass
+    return out
