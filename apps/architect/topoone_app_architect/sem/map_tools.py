@@ -222,7 +222,7 @@ def tool_rules(project: Optional[str] = None) -> str:
         if convs:
             out.append("\n## 命名规约（active）\n")
             for c in convs[:50]:
-                out.append(f"- [{c.get('scenario','')}] {c.get('rule') or c.get('text') or ''}")
+                out.append(f"- [{c.get('scenario','')}] {c.get('ruleText') or c.get('rule') or c.get('text') or ''}")
         glos = store.GlossaryStore.list(pid) or []
         if glos:
             out.append("\n## 词汇表\n")
