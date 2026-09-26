@@ -62,11 +62,18 @@ interface ModuleCard {
   accent: string
 }
 
-// 模块卡全部同源相对路径——跟随当前访问端口（2026-09-25 用户裁决：不绑定网关 3456）。
-// 网关生产态由 gateway 静态挂载/路由承载；dev 态指向当前 vite 实例
-// （workbench vite history fallback + 客户端全捕获路由承接未知路径）。
+// 模块卡路由解析（2026-09-25 用户裁决）：
+// - 生产态（非 dev 端口访问）：同源相对路径，跟随当前访问端口，全部由 gateway 承载；
+// - dev 态（任一 vite dev 端口访问）：各卡指回各自 SPA 的 dev 端口注册表，不绑 3456。
+//   workbench=5173(history /app/) · docs=5174(base /docs/) · architect=5176(hash 路由)
 // 新 tab 由卡片 target=_blank 承担。
-const workbenchHref = '/app/home'
+const host = window.location.hostname
+const port = Number(window.location.port)
+const isDev = [5173, 5174, 5176].includes(port)
+const dev = (p: number, path = '') => `//${host}:${p}${path}`
+const workbenchDev = dev(5173)
+
+const workbenchHref = isDev ? `${workbenchDev}/app/home` : '/app/home'
 
 const modules: ModuleCard[] = [
   {
@@ -77,20 +84,20 @@ const modules: ModuleCard[] = [
   },
   {
     key: 'projects',
-    href: '/projects',
+    href: isDev ? dev(5174, '/docs/') : '/projects',
     icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
     accent: '#10b981',
   },
   {
     key: 'chat',
     // chat FE 并入 workbench（MS7-W3）：规范直达 /app/chat
-    href: '/app/chat',
+    href: isDev ? `${workbenchDev}/app/chat` : '/app/chat',
     icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 9h8M8 13h5',
     accent: '#f59e0b',
   },
   {
     key: 'architect',
-    href: '/architect',
+    href: isDev ? dev(5176) : '/architect',
     icon: 'M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25',
     accent: '#a855f7',
   },
