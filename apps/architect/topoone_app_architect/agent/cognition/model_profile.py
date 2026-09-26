@@ -110,9 +110,9 @@ def probe_model_gated(model_id: str) -> Dict[str, Any]:
         _probe_gate.leave(model_id)
 
 TIERS = {
-    0: "T0 强(≥12B 全能力, 关闭多余兜底)",
-    1: "T1 中(6-12B 标准兜底)",
-    2: "T2 弱(<6B 全面补偿: 结构化指令+核心逻辑图+有界轮次)",
+    0: "T0 强(≥12B: 胜任主 agent 全职能——问询纪律/规约/路由/编排)",
+    1: "T1 中(6-12B: 规约与路由可胜任, 边缘职能走补偿)",
+    2: "T2 弱(<6B: 严格受控问询+全面补偿, 编码类任务必须外派执行器)",
 }
 
 
@@ -264,6 +264,9 @@ def _build_cases() -> Dict[str, List[Dict[str, Any]]]:
         "requirement": _ps.build_requirement_cases(),
         "architecture": _ps.build_architecture_cases(),
         "module": _ps.build_module_design_cases(),
+        # 主 agent 职能域(定位裁决 2026-09-26): 问询纪律 + 路由决策
+        "inquiry": _ps.build_inquiry_cases(),
+        "routing": _ps.build_routing_cases(),
     }
 
 
@@ -359,6 +362,20 @@ def probe_model(model_id: str) -> Dict[str, Any]:
             return {"modelId": model_id, "reachable": False,
                     "summary": "模型不可达(连通性失败), 未执行能力探测"}
         mod_scores.append(_ps.grade_case(case, raw))
+    inquiry_scores: List[float] = []
+    for case in cases["inquiry"]:
+        raw = _run("inquiry", case)
+        if raw is None:
+            return {"modelId": model_id, "reachable": False,
+                    "summary": "模型不可达(连通性失败), 未执行能力探测"}
+        inquiry_scores.append(_ps.grade_case(case, raw))
+    routing_scores: List[float] = []
+    for case in cases["routing"]:
+        raw = _run("routing", case)
+        if raw is None:
+            return {"modelId": model_id, "reachable": False,
+                    "summary": "模型不可达(连通性失败), 未执行能力探测"}
+        routing_scores.append(_ps.grade_case(case, raw))
 
     tool_rate = sum(tool_scores) / len(tool_scores)
     json_rate = sum(json_scores) / len(json_scores)
@@ -366,13 +383,17 @@ def probe_model(model_id: str) -> Dict[str, Any]:
     req_rate = sum(req_scores) / len(req_scores)
     arch_rate = sum(arch_scores) / len(arch_scores)
     mod_rate = sum(mod_scores) / len(mod_scores)
+    inquiry_rate = sum(inquiry_scores) / len(inquiry_scores)
+    routing_rate = sum(routing_scores) / len(routing_scores)
     stability = min(_ps.stability(tool_samples), 0.2 + tool_rate)  # 方差受遵循率制约
 
     score = (_ps.WEIGHTS["tool"] * tool_rate + _ps.WEIGHTS["json"] * json_rate
              + _ps.WEIGHTS["instr"] * instr_score
              + _ps.WEIGHTS["requirement"] * req_rate
              + _ps.WEIGHTS["architecture"] * arch_rate
-             + _ps.WEIGHTS["module"] * mod_rate)
+             + _ps.WEIGHTS["module"] * mod_rate
+             + _ps.WEIGHTS["inquiry"] * inquiry_rate
+             + _ps.WEIGHTS["routing"] * routing_rate)
     tier = _ps.tier_from_score(score)
 
     # T2 补偿复核: 用生产同款补偿形态用例实测「补偿能否修正」(裁决: 不只声明)
@@ -394,12 +415,16 @@ def probe_model(model_id: str) -> Dict[str, Any]:
             "probeScore": round(score, 2),
             "requirementScore": round(req_rate, 2),
             "archScore": round(arch_rate, 2),
-            "moduleScore": round(mod_rate, 2)}
+            "moduleScore": round(mod_rate, 2),
+            "inquiryScore": round(inquiry_rate, 2),
+            "routingScore": round(routing_rate, 2)}
     if compensation_rate is not None:
         caps["compensationRate"] = round(compensation_rate, 2)
     summary = (f"探测完成: 工具 {tool_rate:.0%} / JSON {json_rate:.0%} / "
                f"指令 {instr_score:.0%} / 需求 {req_rate:.0%} / "
-               f"架构 {arch_rate:.0%} / 模块 {mod_rate:.0%} → tier {tier}({TIERS[tier]})")
+               f"架构 {arch_rate:.0%} / 模块 {mod_rate:.0%} / "
+               f"问询 {inquiry_rate:.0%} / 路由 {routing_rate:.0%}"
+               f" → tier {tier}({TIERS[tier]})")
     if compensation_rate is not None:
         summary += (f" → 补偿复核 {'通过' if compensation_rate >= 0.5 else '未通过'}"
                     f"({compensation_rate:.0%})")

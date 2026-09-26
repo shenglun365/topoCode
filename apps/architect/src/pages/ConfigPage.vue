@@ -852,6 +852,10 @@ onMounted(() => { void loadCgStatus() })
                   架构 {{ capProfiles[m.id].caps?.archScore ?? '—' }} ·
                   模块 {{ capProfiles[m.id].caps?.moduleScore ?? '—' }}
                 </div>
+                <div class="font-mono text-ctp-subtext0">
+                  问询 {{ capProfiles[m.id].caps?.inquiryScore ?? '—' }} ·
+                  路由 {{ capProfiles[m.id].caps?.routingScore ?? '—' }}
+                </div>
                 <div class="border-t border-ctp-surface0 pt-1 space-y-1">
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-mono text-ctp-subtext1">执行策略（T0 直通车 / T1 预拆 / T2 步骤补偿）</span>

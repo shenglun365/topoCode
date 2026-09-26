@@ -23,8 +23,9 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 
 # 探针维度权重(A/C 共用; 2026-09-18 裁决: 设计三维参与判档, 轻权重)
-WEIGHTS = {"tool": 0.35, "json": 0.2, "instr": 0.15,
-           "requirement": 0.1, "architecture": 0.1, "module": 0.1}
+WEIGHTS = {"tool": 0.30, "json": 0.15, "instr": 0.10,
+           "requirement": 0.10, "architecture": 0.05, "module": 0.05,
+           "inquiry": 0.15, "routing": 0.10}
 
 # 刻度阈值(综合分 → 档): ≥0.90 强 / ≥0.52 中 / 其余弱(全面补偿)
 TIER_THRESHOLDS = ((0.90, 0), (0.52, 1))
@@ -386,6 +387,76 @@ def build_module_design_cases(count: int = 2) -> List[Dict[str, Any]]:
 
 # 补偿复核通过线: 用例均分 ≥0.5 视为「补偿模式可修正」
 COMP_RESCUE_MIN = 0.5
+
+
+# ── 主 agent 职能域(定位裁决 2026-09-26: 问什么答什么/不扩大化/路由内化) ──
+
+_INQUIRY_STATUS_JSON = (
+    '{"degraded": true, "name": "demo-app",'
+    ' "execution": {"tasksTotal": 7, "tasksDone": 5, "tasksActive": 1,'
+    '  "recentDone": [{"title": "Vite 端口配置"}]},'
+    ' "parsed": {"contextUnits": 187}}')
+
+
+def build_inquiry_cases(count: int = 2) -> List[Dict[str, Any]]:
+    """问询纪律用例(cv-257 教训探测化: 问什么答什么, 不扩大化)。
+
+    场景: 给定项目状态数据, 用户做信息问询。合格 = 只答事实(命中关键数字),
+    不得 ①输出工具调用块 ②宣告已创建需求卡/已启动执行等行动扩大化。
+    (答毕附"建议建立 KB"类提示不算扩大化——那是事实陈述的自然延伸。)
+    判分: 1=事实命中且无扩大化 / 0.5=事实命中但有行动宣告 / 0=无事实或调工具。"""
+    system = ("你是项目架构主 agent。只依据给定的项目状态数据回答用户问题, "
+              "不得虚构数据, 不得调用工具; 信息问询回合不创建需求卡、不发起任何"
+              "执行动作。\n项目状态数据: " + _INQUIRY_STATUS_JSON)
+    asks = [
+        "检查当前项目的完成情况",
+        "项目里还有哪些没做完的？现在具备做架构分析的条件吗？",
+    ][:max(1, int(count))]
+
+    def _grade(raw: str) -> float:
+        if not raw:
+            return 0.0
+        if "[TOOL_CALL" in raw or "[/TOOL_CALL" in raw:
+            return 0.0                       # 问询回合调工具 = 直接不合格
+        # 行动扩大化宣告(不只是建议): 已…创建/起草/发起/启动/开始…需求卡/任务/执行
+        if re.search(r"已[^。]{0,6}?(创建|起草|发起|启动|开始)[^。]{0,8}(需求|任务|执行)", raw):
+            return 0.5
+        facts_ok = ("7" in raw and "187" in raw)
+        return 1.0 if facts_ok else 0.5
+
+    return [{"id": f"inquiry#{i}", "dim": "inquiry", "system": system,
+             "user": a, "max_tokens": 400, "grade": _grade}
+            for i, a in enumerate(asks)]
+
+
+def build_routing_cases(count: int = 3) -> List[Dict[str, Any]]:
+    """路由决策用例(主 agent 职能: 会话输入三向分发, perception/router 同语义)。
+
+    场景池: attachTo=任务 → transfer; 显式指派执行器 → assign;
+    普通问询/对话(资产域可答) → chat。判分: {"action": ...} 精确命中。"""
+    system = ("你是项目架构主 agent 的路由决策器。对每条用户输入判定处置动作, "
+              "只输出一个 ```json 围栏, 内容为 {\"action\": \"...\"}, "
+              "action 取值: transfer(转达给指定活跃任务) / "
+              "assign(指派执行器承接新任务) / chat(主 agent 自身应答)。")
+    asks: List[tuple] = [
+        ("把这条补充说明转达给正在执行的任务 task-42", "transfer"),
+        ("@coder 帮我写一个日志清理脚本", "assign"),
+        ("当前项目的组件地图里有哪些 L0 组件？", "chat"),
+        ("这个改动指派给 codex 执行器去实现", "assign"),
+        ("继续刚才的话题，为什么选这个方案？", "chat"),
+    ][:max(1, int(count))]
+
+    def _grade(want: str) -> Callable[[str], float]:
+        def _g(raw: str) -> float:
+            obj, tr = _parse_fence_obj(raw)
+            if obj is None:
+                return 0.5 if tr else 0.0
+            return 1.0 if str(obj.get("action") or "").strip() == want else 0.0
+        return _g
+
+    return [{"id": f"route#{i}", "dim": "routing", "system": system,
+             "user": ask, "max_tokens": 200, "grade": _grade(want)}
+            for i, (ask, want) in enumerate(asks)]
 
 
 def build_compensation_cases(count: int = 2) -> List[Dict[str, Any]]:

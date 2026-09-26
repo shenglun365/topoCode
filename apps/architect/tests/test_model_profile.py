@@ -100,6 +100,15 @@ def test_probe_model_good_small_model(tmp_path, monkeypatch):
             return {"content": MOD_OK}
         if "modules" in sys0:
             return {"content": ARCH_OK}
+        # 主 agent 职能域(定位 2026-09-26): 问询纪律/路由决策
+        if "项目状态数据" in sys0:
+            return {"content": "项目共 7 个任务(5 完成/1 进行中), "
+                               "代码已解析出 187 个上下文单元。"}
+        if "路由决策器" in sys0:
+            action = ("transfer" if ("转达" in user or "task-" in user)
+                      else "assign" if ("指派" in user or user.startswith("@"))
+                      else "chat")
+            return {"content": f'```json\n{{"action": "{action}"}}\n```'}
         if "req.propose" in sys0 or "调用" in user:
             tool = next((n for n in ("kb.asset.search", "map.overview",
                                      "req.propose") if n in user),
