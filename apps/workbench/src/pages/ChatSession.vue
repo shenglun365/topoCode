@@ -586,9 +586,9 @@ function syncUrl() {
     params.set('noteId', viewingNote.value.id)
     params.set('tab', 'notes')
   } else if (currentId.value) {
+    // 仅记会话 id；tab=chat 是默认值不写参（URL 归一：干净入口落地后保持 /app/chat）
     params.set('sessionId', currentId.value)
-    params.set('tab', 'chat')
-  } else if (tab.value) {
+  } else if (tab.value && tab.value !== 'chat') {
     params.set('tab', tab.value)
   }
   const qs = params.toString()

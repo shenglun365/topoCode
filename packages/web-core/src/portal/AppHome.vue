@@ -64,8 +64,10 @@ interface ModuleCard {
 
 // 模块卡路由解析（2026-09-25 用户裁决）：
 // - 生产态（非 dev 端口访问）：同源相对路径，跟随当前访问端口，全部由 gateway 承载；
-// - dev 态（任一 vite dev 端口访问）：各卡指回各自 SPA 的 dev 端口注册表，不绑 3456。
-//   workbench=5173(history /app/) · docs=5174(base /docs/) · architect=5176(hash 路由)
+// - dev 态（任一 vite dev 端口访问）：各卡指回各自 SPA 的规范入口（与生产路径形态一致，
+//   落地后零 302/零改写）。注册表：workbench=5173(history /app/) ·
+//   docs=5174(双 entry，web-root 规范入口 /docs/web-root.html，/projects 会 302 故直用) ·
+//   architect=5176(hash 路由，入口统一带 /architect 路径与生产同形)
 // 新 tab 由卡片 target=_blank 承担。
 const host = window.location.hostname
 const port = Number(window.location.port)
@@ -84,7 +86,7 @@ const modules: ModuleCard[] = [
   },
   {
     key: 'projects',
-    href: isDev ? dev(5174, '/docs/') : '/projects',
+    href: isDev ? dev(5174, '/docs/web-root.html') : '/projects',  // 直用规范入口(避免 dev /projects 302 链)
     icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
     accent: '#10b981',
   },
@@ -97,7 +99,7 @@ const modules: ModuleCard[] = [
   },
   {
     key: 'architect',
-    href: isDev ? dev(5176) : '/architect',
+    href: isDev ? dev(5176, '/architect') : '/architect',  // 与生产路径同形
     icon: 'M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25',
     accent: '#a855f7',
   },
