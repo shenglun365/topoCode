@@ -126,3 +126,4 @@ async def run_event_pump(*, base: str, job_id: str,
         raise
     except Exception as e:  # noqa: BLE001
         logger.warning("[pumps] pump crashed job=%s: %s", job_id, e)
+        raise   # cv-264: 静默吞掉=僵尸泵(句柄存续+后续输出黑洞), 交调用方收尾

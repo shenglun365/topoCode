@@ -389,3 +389,50 @@ def test_proxy_stream_text_grows_single_card(arch_env, tmp_path,
     finally:
         cards_mod.emit = orig_emit
         _px._PROXY_FLUSH_MS = orig_flush_ms
+
+
+def test_proxy_late_text_after_flush_no_crash(arch_env, tmp_path,
+                                              _isolate_proxy_state):
+    """cv-264 根因锁定: flush 后迟到/重放的 text 事件不得崩泵。
+
+    用户实证(cv-262): 执行器等待输入(⏸ 后缀并入卡) → flush pop 掉缓冲键 →
+    后续 text 事件 KeyError('text') → 泵崩死成僵尸(_PROXY_JOBS 不清) →
+    用户续话被转发给死会话, 执行器响应全部黑洞。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    on_event, _snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-lt", "cline-sdk")
+    on_event({"kind": "text", "text": "第一段"})
+    on_event({"kind": "input_required"})          # flush: pop 掉缓冲键
+    on_event({"kind": "text", "text": "迟到段"})   # 旧行为: KeyError 崩泵
+    on_event({"kind": "done"})
+    msgs = store.ConversationsStore.messages(conv["id"], limit=10)
+    body = [m for m in msgs if (m.get("meta") or {}).get("kind") == "proxy"]
+    assert len(body) == 3, "等待输入卡 + 迟到段新卡 + 会话结束卡"
+    assert "⏸ 执行器等待你的输入" in body[0]["content"]
+    assert "迟到段" in body[1]["content"] and "✅ 本轮完成" in body[1]["content"]
+
+
+def test_proxy_pump_crash_cleans_handle(arch_env, tmp_path, monkeypatch,
+                                        _isolate_proxy_state):
+    """cv-264 僵尸泵根治: 泵核重抛 → _pump 兜底清 _PROXY_JOBS + 落可见回执。
+
+    此前泵核吞异常正常返回 → 兜底不触发 → 死 job 永久占会话, 续话静默黑洞。"""
+    import topoone_app_architect.agent.execution.pumps as _pumps_mod
+
+    async def _boom(**kw):
+        raise RuntimeError("回调崩了(模拟 KeyError 传播)")
+
+    monkeypatch.setattr(_pumps_mod, "run_event_pump", _boom)
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-z", "executor_type": "cline-sdk"}
+    import asyncio as _aio
+
+    async def _drive():
+        proxy._start_pump(conv["id"], "job-z", "cline-sdk")
+        await _aio.sleep(0.01)   # 泵协程调度: boom → 兜底清句柄+落回执
+
+    _aio.run(_drive())
+    assert conv["id"] not in proxy._PROXY_JOBS, "泵崩溃后句柄必须清理"
+    msgs = store.ConversationsStore.messages(conv["id"], limit=10)
+    assert any("事件泵异常退出" in (m.get("content") or "") for m in msgs), \
+        "泵崩溃须落可见回执(用户不蒙在鼓里)"

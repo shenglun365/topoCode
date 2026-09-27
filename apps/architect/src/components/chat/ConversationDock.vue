@@ -339,10 +339,21 @@ const analysisMode = ref<'strict' | 'quick'>('strict')
 const clarifyMode = ref<'auto' | 'forced'>('auto')
 /** worktree 隔离模式(cv-202): 缺省就地。 */
 const isolated = ref(false)
-watch(() => conv.activeId, () => {
-  analysisMode.value = ((conv.activeMeta as any)?.analysisMode as 'strict' | 'quick') || 'strict'
-  clarifyMode.value = ((conv.activeMeta as any)?.clarifyMode as 'auto' | 'forced') || 'auto'
-  isolated.value = !!(conv.activeMeta as any)?.isolated
+// cv-265: 首条消息创建会话时 activeId 先变而 activeMeta 未加载(done 后
+// refreshActiveMeta 才回填)——旧 watcher 此刻把三挡重置为默认, 预置的
+// quick 挡"自动退回 architect"。改为 meta 就绪才同步, 逐字段校验(未加载
+// 不动本地值: 空白态预置/本地即时反馈均不被冲掉)。
+watch([() => conv.activeId, () => conv.activeMeta], () => {
+  if (!conv.activeId) return
+  const m = conv.activeMeta as any
+  if (!m) return
+  if (m.analysisMode === 'strict' || m.analysisMode === 'quick') {
+    analysisMode.value = m.analysisMode
+  }
+  if (m.clarifyMode === 'auto' || m.clarifyMode === 'forced') {
+    clarifyMode.value = m.clarifyMode
+  }
+  if (typeof m.isolated === 'boolean') isolated.value = m.isolated
 })
 async function onSetClarifyMode(mode: 'auto' | 'forced') {
   clarifyMode.value = mode // 本地即时反馈(不等 REST)

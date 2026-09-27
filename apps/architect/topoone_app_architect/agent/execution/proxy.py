@@ -77,7 +77,10 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             cid, m, {"content": text})
 
     def _flush(suffix: str = "") -> None:
-        text = (buf.pop("text", "") or "").strip()
+        # 重置非删键(cv-264): pop 后键缺失, 迟到/重放的 text 事件在
+        # buf["text"] 读取处 KeyError → 泵崩死 → 后续输出全部黑洞。
+        text = (buf.get("text") or "").strip()
+        buf["text"] = ""
         _persist((text + ("\n\n" + suffix if suffix else "")).strip()
                  if (text or suffix) else "")
         buf["row"] = None   # 回合结束, 下轮执行器输出重新建卡
@@ -85,7 +88,8 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
     def on_event(ev: dict) -> None:
         kind = ev.get("kind") or ""
         if kind == "text":
-            buf["text"] = (buf["text"] + str(ev.get("text") or ""))[-6000:]
+            buf["text"] = ((buf.get("text") or "")
+                           + str(ev.get("text") or ""))[-6000:]
             now = _time.monotonic() * 1000
             if now - buf["at"] >= _PROXY_FLUSH_MS:
                 buf["at"] = now

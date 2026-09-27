@@ -871,6 +871,10 @@ async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
             base=RUNNER_BASE, job_id=job_id, runner=_runner,
             on_event=on_event, on_snapshot=on_snapshot,
             on_lost=on_lost, on_finished=on_finished)
+    except Exception as e:  # noqa: BLE001 — 泵核重抛(cv-264): 记因后吞,
+        # 防 create_task unretrieved 噪音; 句柄清理由 finally 统一收口
+        logger.warning("[task-pump] conv=%s job=%s 崩溃退出: %s",
+                       conv_id, job_id, e)
     finally:
         # G5 修复: 泵退出(done/failed/lost/cancel)即清理句柄, 防长会话累积
         # (此前仅 task_stop 弹出; finally 统一收口, 取消路径同样覆盖)
