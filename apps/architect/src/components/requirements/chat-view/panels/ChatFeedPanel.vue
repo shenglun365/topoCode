@@ -9,6 +9,7 @@ import TaskCard from '@/components/chat/TaskCard.vue'
 import ExecutorProcessStrip from '@/components/chat/ExecutorProcessStrip.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import ChoicesCard from '@/components/chat/ChoicesCard.vue'
+import EditSpecModal from '@/components/requirements/EditSpecModal.vue'
 import CollapseChevron from '@/components/chat/CollapseChevron.vue'
 import ChevronSvg from '@/components/chat/ChevronSvg.vue'
 import { useI18n } from 'vue-i18n'
@@ -125,6 +126,17 @@ function isLongMsg(m: any): boolean {
   return m?.role === 'assistant' && String(m?.content || '').length > LONG_MSG_CHARS
 }
 const expandedMsg = ref<{ content: string } | null>(null)
+// cv-279 需求内容编辑浮窗(最新版卡头部铅笔钮触发)
+const specEditing = ref<{ requirementId: string; title: string; desc: string } | null>(null)
+
+function openSpecEdit(m: any) {
+  const s = m.item?.payload?.spec || {}
+  specEditing.value = {
+    requirementId: String(m.item?.payload?.requirementId || ''),
+    title: String(s.title || specCard(m).title || ''),
+    desc: String(s.desc || ''),
+  }
+}
 // cv-277 最小化/展开切换(按消息 id 记态; 缺省=展开 420px 滚动)
 const msgMinimized = ref<Record<string, boolean>>({})
 function msgKey(m: any, i: number): string {
@@ -537,6 +549,15 @@ const emit = defineEmits<{
                 v-if="m.item.payload?.noDesign && !specSuperseded(m)"
                 class="text-[10px] text-ctp-yellow"
               >⚠️ 缺实现方案</span>
+              <!-- cv-279 编辑需求: 仅最新版可编辑(历史快照只读) -->
+              <button
+                v-if="!specSuperseded(m) && m.item.payload?.requirementId"
+                class="text-ctp-overlay0 hover:text-ctp-blue transition-colors p-0.5 shrink-0"
+                title="编辑需求内容 — 保存后生成新版(v+1)，旧版保留"
+                @click="openSpecEdit(m)"
+              >
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L10.582 15.95a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>
+              </button>
               <CollapseChevron
                 class="ml-auto"
                 :collapsed="specCardCollapsed(m)"
@@ -1187,4 +1208,13 @@ const emit = defineEmits<{
         </div>
       </div>
     </Teleport>
-</template>
+    <!-- cv-279 需求内容编辑浮窗 -->
+    <EditSpecModal
+      v-if="specEditing"
+      :requirement-id="specEditing.requirementId"
+      :title="specEditing.title"
+      :desc="specEditing.desc"
+      :conv-id="convId"
+      @close="specEditing = null"
+    />
+  </template>

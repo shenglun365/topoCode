@@ -1,10 +1,12 @@
 """Requirements CRUD + status machine routes (sqlite-backed)."""
+import asyncio
 import re
 from typing import Optional
 from fastapi import APIRouter, Request
 from ..common import _ts, ok, err
 from .knowledge import KB_NOTE
 from .. import store
+from ..agent.tools import req_agent as _req_agent
 
 router = APIRouter()
 
@@ -303,6 +305,21 @@ async def finalize_requirement(req_id: str):
         row = store.RequirementsStore.update(req_id, {"status": "ready"}) or row
     _recompute_flow_of_req(row, "req-finalize")
     return ok(row)   # 已 ready(无草稿态): 原样返回
+
+
+@router.put("/requirements/{req_id}/content")
+async def put_requirement_content(req_id: str, request: Request):
+    """手动编辑需求内容(cv-279): title/desc 修改 → 版本链 append(旧版快照行
+    永不改动)+confirm 收口 → 新版 spec 卡落流。逻辑单源=req_agent.edit_spec_content
+    (与 architect 对话完善规约同链复用, 零并行实现)。"""
+    body = await request.json()
+    res = await asyncio.to_thread(
+        _req_agent.edit_spec_content, req_id,
+        str(body.get("title") or ""), str(body.get("desc") or ""),
+        conv_id=str(body.get("convId") or ""))
+    if not res.get("ok"):
+        return err(400, str(res.get("error") or "编辑失败"))
+    return ok(res)
 
 
 

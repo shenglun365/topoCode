@@ -796,6 +796,41 @@ def log_conv_event(conv_id: str, text: str, meta: Optional[dict] = None) -> None
                 project_id="", **meta)
 
 
+def edit_spec_content(req_id: str, title: str, desc: str, *,
+                      conv_id: str = "",
+                      reason: str = "手动编辑需求") -> Dict[str, Any]:
+    """手动编辑需求内容(cv-279): 与 architect 更新同链复用——spec_append(版本链
+    append, 旧版快照行永不改动)→spec_confirm(手动编辑即就绪)→分析缓存同步→
+    新版 spec 卡落流(自包含载荷, cv-215)。title 空缺沿用当前版。"""
+    row = store.RequirementsStore.get(req_id)
+    if not row:
+        return {"ok": False, "error": "需求不存在"}
+    active = store.RequirementsStore.spec_active(req_id)
+    if not active:
+        return {"ok": False, "error": "该需求无版本快照，无法编辑"}
+    snapshot = {**active,
+                "title": (title or "").strip() or str(active.get("title") or ""),
+                "desc": (desc or "").strip()}
+    entry = store.RequirementsStore.spec_append(
+        req_id, snapshot, actor="user", conv_id=conv_id, reason=reason)
+    store.RequirementsStore.spec_confirm(req_id)
+    _sync_analysis_cache(req_id, snapshot)
+    if conv_id:
+        try:
+            log_conv_event(
+                conv_id,
+                f"📝 **需求卡已编辑**：`{req_id}` → v{entry['ver']}"
+                f"（ready，可直接 `/执行`）",
+                meta={"kind": "specReady", "requirementId": req_id,
+                      "ver": entry["ver"], "updated": True,
+                      "spec": _spec_card_payload(
+                          snapshot, str(row.get("priority") or ""))})
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "requirementId": req_id, "ver": entry["ver"],
+            "title": snapshot["title"]}
+
+
 def _spec_card_payload(snap: dict, priority: str = "") -> dict:
     """spec 卡自包含规约载荷(cv-215): 卡片携带**本版**规约全文——历史版本卡
     即历史快照(渲染不依赖台账当前版), 前端 specCard 优先读卡内载荷。
