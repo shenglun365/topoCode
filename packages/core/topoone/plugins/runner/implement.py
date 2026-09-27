@@ -186,6 +186,8 @@ class ImplementJob:
         self.verify_max_attempts = int((self.verify_config or {}).get("maxAttempts") or 3)
         self.auto_repair = bool((self.verify_config or {}).get("autoRepair", True))
         self.done_mismatch_streak = 0
+        # cv-272: 本作业写入的相对路径清单(终态淘汰 .topo/docs 投影用)
+        self.written_rels: List[str] = []
         self.baseline: Optional[Dict[str, Any]] = None
         self._repair_queue: List[str] = []
         # 活动信号(adapter 刷新; 看门狗消费)
@@ -272,6 +274,7 @@ class ImplementJob:
             self.status = "failed"
             self.error = str(e)
             self._commit_progress()
+            _cleanup_projected_docs(self)
             self.emit("failed", f"作业启动失败: {e}")
 
     def _reset_turn_guard(self) -> None:
@@ -460,6 +463,7 @@ class ImplementJob:
                 self.done_mismatch_streak = 0
                 self.status = "done"
                 self._commit_progress()
+                _cleanup_projected_docs(self)
                 self.emit("done", output, changedFiles=changed,
                           summaryQuality=self._summary_quality(output))
             elif _MARK_NEED in output or True:
@@ -476,6 +480,7 @@ class ImplementJob:
             self.status = "failed"
             self.error = str(e)
             self._commit_progress()
+            _cleanup_projected_docs(self)
             self.emit("failed", f"回合执行失败: {e}")
             # 终态后 SSE 订阅(若有)不再有意义, 停止重连空转
             stop = getattr(self, "sse_stop", None)
@@ -616,6 +621,7 @@ class ImplementJob:
     async def finish(self, keep_worktree: bool = True) -> Dict[str, Any]:
         self.status = "stopped" if self.status != "done" else self.status
         self._commit_progress()
+        _cleanup_projected_docs(self)
         self.emit("finished", f"作业结束(保 worktree={keep_worktree})")
         d = self.diff()
         try:
@@ -699,6 +705,56 @@ def _wt_root_dir() -> str:
     p = os.path.join(d, "runner", "implement")
     os.makedirs(p, exist_ok=True)
     return p
+
+
+def _ensure_git_exclude(wt: str, pattern: str = ".topo/") -> None:
+    """cv-272: 幂等追加 pattern 到 `.git/info/exclude`——非工作树文件,
+    git status 恒干净(融合模式防脏区自干扰; 隔离 worktree 各自 gitdir)。
+    非 git 目录静默跳过; 失败不阻断落盘。"""
+    try:
+        r = _git(["rev-parse", "--git-dir"], cwd=wt, check=False)
+        if r.returncode != 0:
+            return
+        gitdir = r.stdout.strip()
+        base = gitdir if os.path.isabs(gitdir) else os.path.join(wt, gitdir)
+        info = os.path.join(base, "info")
+        os.makedirs(info, exist_ok=True)
+        path = os.path.join(info, "exclude")
+        existing = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+        if pattern not in existing.splitlines():
+            with open(path, "a", encoding="utf-8") as f:
+                if existing and not existing.endswith("\n"):
+                    f.write("\n")
+                f.write(f"# topo managed (architect docs)\n{pattern}\n")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[implement] git exclude 注入失败 wt=%s: %s", wt, e)
+
+
+def _cleanup_projected_docs(job: "ImplementJob") -> None:
+    """cv-272 淘汰: 作业终态删除其写入的 .topo/docs 投影文件(任务轮次作用域,
+    用户裁决'仅限一个大任务轮次')。融合(wt=root)/隔离(worktree)两态统一;
+    空父目录收敛到 .topo/docs 为止; 失败不阻断终态。"""
+    docs_prefix = ".topo/docs/"
+    targets = [rel for rel in getattr(job, "written_rels", []) or []
+               if rel.startswith(docs_prefix)]
+    if not targets:
+        return
+    import shutil as _shutil
+    for rel in targets:
+        try:
+            p = os.path.join(job.wt, rel)
+            if os.path.isfile(p):
+                os.remove(p)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[implement] 投影文档清理失败 %s: %s", rel, e)
+    # 空目录收敛(reqId 目录 → docs)
+    for d in {os.path.dirname(rel) for rel in targets} | {".topo/docs"}:
+        try:
+            absd = os.path.join(job.wt, d)
+            if os.path.isdir(absd) and not os.listdir(absd):
+                os.rmdir(absd)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _write_workspace_files(wt: str, files) -> list:
@@ -804,7 +860,13 @@ def register(app: FastAPI) -> None:
         # 子会话复活: 预置执行器原生会话 id(空=新建会话)
         job.session_id = str(body.get("sessionRef") or "")
         # P5: 规约/规则/agent 配置落盘 worktree（cline .cline/rules|agents、AGENTS.md）
-        written = _write_workspace_files(wt, body.get("workspaceFiles"))
+        _wf = body.get("workspaceFiles")
+        written = _write_workspace_files(wt, _wf)
+        # cv-272: 投影文档经 .topo/ 通道 → git info/exclude 幂等注入(git 干净)
+        if any(str((f or {}).get("path") or "").startswith(".topo/")
+               for f in (_wf if isinstance(_wf, list) else [])):
+            _ensure_git_exclude(wt, ".topo/")
+        job.written_rels = list(written)
         job.turn_task = asyncio.create_task(job.start())
 
         logger.info("[implement] job %s created root=%s branch=%s files=%s",

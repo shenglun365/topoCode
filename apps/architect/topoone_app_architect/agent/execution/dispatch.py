@@ -360,6 +360,50 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
         return {"ok": False, "error": f"task-status={_st}"}
     from ...arch_routes.execution import conv_root_project
     conv_id = conv["id"]
+    def _overlap_warning() -> str:
+        """并行范围重叠软警告(cv-272, 用户裁决: 非硬性绝对控制)——本任务
+        边界文件集 vs 项目全域其它会话活跃任务边界集求交; 交集非空提示建议
+        串行, 不拦派发。KB 组件级预估待资产图映射面(缺 KB 仅文件级, 不虚构)。"""
+        try:
+            trow = store.TasksStore.get(task_id) or {}
+            pid = trow.get("projectId") or ""
+            if not pid or not boundary_files:
+                return ""
+            bset = set(boundary_files)
+            for t in store.TasksStore.of_project(pid):
+                if t["id"] == task_id or (t.get("status") or "") not in (
+                        "running", ST.TASK_WAITING_INPUT) or not t.get("reqId"):
+                    continue
+                ob = set(_eb()._resolve_boundary_files(
+                    t.get("reqId") or "", root, project) or [])
+                inter = sorted(bset & ob)
+                if inter:
+                    return (f"⚠️ 与进行中任务「{t.get('title') or t['id']}」修改范围"
+                            f"重叠({len(inter)} 文件，如 `{inter[0]}`)——建议等待其"
+                            "结束再派发，避免同域互踩。本次仍将按计划执行。")
+        except Exception as e:  # noqa: BLE001 — 预估失败不阻断派发
+            logger.warning("[dispatch] 重叠预估失败: %s", e)
+        return ""
+
+    def _sweep_orphan_docs() -> None:
+        """孤儿文档清扫(cv-272): `.topo/docs/` 下无活跃任务的 reqId 目录移除
+        (正常淘汰在 runner 作业终态; 此处兜底 architect/进程崩溃遗留)。
+        活跃判定=项目全域 running/waiting_input 任务的 req_id; 失败不阻断。"""
+        import shutil
+        docs_root = os.path.join(root, ".topo", "docs")
+        if not os.path.isdir(docs_root):
+            return
+        try:
+            active_rids = {t.get("reqId") for t in store.TasksStore.of_project(
+                (store.TasksStore.get(task_id) or {}).get("projectId") or "")
+                if (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT)}
+            for d in os.listdir(docs_root):
+                if d not in active_rids:
+                    shutil.rmtree(os.path.join(docs_root, d),
+                                  ignore_errors=True)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[dispatch] 孤儿文档清扫失败: %s", e)
+
     # 同会话活跃任务互斥(一次一个 subagent 回合); 命中先惰性自愈——
     # 服务重启可能留下僵尸 running(泵丢失), 核对 runner 实际态后再裁决
     other = next((t for t in store.TasksStore.of_conv(conv_id)
@@ -406,6 +450,8 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     branch = str(task.get("branch") or "").strip() \
         or f"task/{task_id.replace('task-', '')}"
     boundary_files = _eb()._resolve_boundary_files(rid, root, project)
+    _sweep_orphan_docs()
+    overlap_note = _overlap_warning()
     # 范围探针(环节十三): 规约边界为空 → grounding 补全(单次 LLM, 带来源引用),
     # 结果并回需求边界(里程碑回写同款闭环); 失败不阻断执行
     probe_note = ""
@@ -528,11 +574,20 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
         payload["executorType"] = _etype   # 引擎选择以 task 为准(无注册表也可指定)
     # 上下文包(重定位 P2 契约): 规约/资产引用/约束/验收判据 结构化下发——
     # 主 agent「上下文管理」职责的显式化; 缺规约(quick 直出卡)透明降级不阻断。
-    from .context_pack import build_context_pack, render_context_pack_md
+    from .context_pack import (build_context_pack, render_context_pack_md,
+                               render_context_pack_slim)
     pack = build_context_pack(task, conv, root, boundary_files)
     payload["contextPack"] = pack
-    payload["instruction"] = (payload.get("instruction") or "") \
-        + "\n\n" + render_context_pack_md(pack)
+    # cv-272 需求文档投影: 全文进 `.topo/docs/{reqId}/`(workspaceFiles 载荷,
+    # runner 落盘+exclude), 指令瘦身(要点+强指引); 无投影(未绑规约)回落全量
+    from .req_docs import docs_dir_rel, project_docs
+    docs_files = project_docs(rid, boundary_files)
+    if docs_files:
+        payload["instruction"] = (payload.get("instruction") or "") \
+            + "\n\n" + render_context_pack_slim(pack, docs_dir_rel(rid))
+    else:
+        payload["instruction"] = (payload.get("instruction") or "") \
+            + "\n\n" + render_context_pack_md(pack)
     # V1 验收门禁配置透传(P0 显式配置来源; 任务行 verifyConfig → runner 发现链)
     if task.get("verifyConfig"):
         payload["verify"] = task["verifyConfig"]
@@ -546,7 +601,8 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     if task.get("sessionRef"):
         payload["sessionRef"] = task["sessionRef"]
     # P5: 规约/规则/agent 配置落盘 worktree（per-executor 路径映射）
-    workspace_files = _eb()._build_workspace_files(_etype or "", _cfg, task)
+    workspace_files = list(_eb()._build_workspace_files(_etype or "", _cfg, task))
+    workspace_files.extend(docs_files)
     if workspace_files:
         payload["workspaceFiles"] = workspace_files
 
@@ -601,6 +657,17 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     _eb().task_status_card(conv_id, task_id, "running", agent=agent, pid=pid,
                            note=_note)
     _eb()._start_task_pump(conv_id, task_id, sr.job_id, rid, agent)
+    if overlap_note:
+        # 标注走既有 progress JSON 载体(无新列; apply_event 展开保留/FE 合并保留)
+        try:
+            prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+            store.TasksStore.set_progress(task_id, {**prev,
+                                                    "overlapNote": overlap_note})
+        except Exception:  # noqa: BLE001 — 标注失败不影响警告落流
+            pass
+        _eb()._append(conv_id, "assistant", overlap_note,
+                      msg_meta={"kind": "task_overlap", "taskId": task_id},
+                      project_id=(conv or {}).get("projectId") or "")
     t = store.TasksStore.get(task_id) or {}
     _publish_task(conv_id, t)
     _flow_recompute(conv_id, trigger="task-confirm")

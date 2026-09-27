@@ -101,3 +101,29 @@ def render_context_pack_md(pack: Dict[str, Any]) -> str:
     if acc:
         lines.append("### 验收判据\n" + "\n".join(f"- [ ] {a}" for a in acc))
     return "\n\n".join(lines)
+
+
+def render_context_pack_slim(pack: Dict[str, Any],
+                             docs_dir: str = "") -> str:
+    """契约要点版(cv-272): 边界+验收(红线常在)+文档强指引——全文进
+    `.topo/docs/`(req_docs.project_docs 投影), 指令瘦身 ~80%。
+
+    无验收判据时保留缺失声明(契约诚实); 指针缺失(docs_dir 空)回落全量渲染
+    责任在调用方——本函数假定投影已成功。"""
+    lines: List[str] = ["## 上下文包(执行契约)"]
+    if pack.get("incomplete"):
+        lines.append(f"⚠️ 规约要素缺失: {'; '.join(pack.get('missing') or [])}"
+                     "——按现有信息执行, 遇歧义先提问。")
+    acc = pack.get("acceptance") or []
+    if acc:
+        lines.append("### 验收判据(红线)\n"
+                     + "\n".join(f"- [ ] {a}" for a in acc[:12]))
+    cons = pack.get("constraints") or []
+    if cons:
+        lines.append("### 约束\n" + "\n".join(f"- {c}" for c in cons[:6]))
+    if docs_dir:
+        lines.append(f"### 需求文档(执行前必读)\n"
+                     f"先完整阅读 `{docs_dir}/` 下全部文档(SPEC 规约全文/"
+                     "DESIGN 设计方案/ACCEPTANCE 验收判据/BOUNDARY 修改边界)，"
+                     "以上述文档为准执行；本文档目录为本任务运行期快照。")
+    return "\n\n".join(lines)

@@ -181,6 +181,10 @@
     <div v-if="task.status === 'waiting_input'" class="mt-1 text-ctp-peach">
       ⏸ 等待你的输入——直接回复即转达
     </div>
+    <!-- cv-272 并行范围重叠软警告(警告+可继续, 非硬拦) -->
+    <div v-if="progress?.overlapNote" class="mt-1 rounded border border-ctp-yellow/30 bg-ctp-yellow/5 px-2 py-1 text-[10px] text-ctp-yellow">
+      ⚠ {{ progress.overlapNote }}
+    </div>
     <div v-if="task.resultMd && isTerminal" class="mt-1 text-ctp-subtext0 line-clamp-6 whitespace-pre-wrap">{{ task.resultMd }}</div>
     </div>
   </div>

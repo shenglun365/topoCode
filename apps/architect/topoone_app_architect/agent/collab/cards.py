@@ -64,6 +64,7 @@ KIND_TASK_PLAN_DONE = "taskPlanDone"  # 环节十四: 计划全部完成汇总�
 MSG_FLAG_SYNTHETIC = "synthetic"      # 按钮触发的合成用户消息(/执行 等)——前端不回显
 
 KIND_TASK_IGNORED = "task_ignored"    # 2026-09-20: 用户主动忽略任务卡(置灰回执)
+KIND_TASK_OVERLAP = "task_overlap"    # cv-272: 并行范围重叠软警告(警告+可继续)
 KIND_REQ_IGNORED = "req_ignored"      # 2026-09-20: 用户主动忽略需求卡(置灰回执)
 KIND_TASK_STATUS = "task_status"      # cv-203: 任务执行状态卡(同 taskId 单卡原位更新)
 KIND_CHOICES = "choices"              # cv-247: 结构化问询卡(可交互选项/开放题, 三源汇一)
@@ -77,6 +78,7 @@ _KNOWN_KINDS = frozenset(
     (KIND_REQUIREMENT, KIND_TASK_CARD, KIND_TASK_APPROVAL, KIND_TURN_ERROR,
      KIND_DIGEST, KIND_TASK_PLAN, KIND_TASK_PLAN_DONE, KIND_TASK_INPUT_ECHO,
      KIND_TASK_IGNORED, KIND_REQ_IGNORED, KIND_TASK_STATUS,
+     KIND_TASK_OVERLAP,
      *KIND_TASK_RECEIPTS, KIND_CHOICES, KIND_PROXY))
 
 # ── 删除策略(cv-248 liveness): kind → 删除后状态语义(守门全覆盖) ──────
@@ -98,6 +100,7 @@ DELETE_POLICY = {
     KIND_TASK_INPUT_ECHO: DELETE_RECEIPT,
     KIND_PROXY: DELETE_RECEIPT,           # 直通回执(文本形态, 会话删除随清)
     KIND_TASK_IGNORED: DELETE_RECEIPT,
+    KIND_TASK_OVERLAP: DELETE_RECEIPT,     # cv-272 软警告回执(随会话删)
     KIND_REQ_IGNORED: DELETE_RECEIPT,
     **{k: DELETE_RECEIPT for k in KIND_TASK_RECEIPTS},
 }
