@@ -149,3 +149,44 @@ async def test_implement_events_ws(tmp_path, monkeypatch):
         q.get_nowait()                       # 退订后不再收
     # 环内回放语义(snapshot since 语义由 WS 端点使用, 这里验环)
     assert [e["seq"] for e in job.events if e["seq"] > seq0]
+
+
+# ── cv-267 直通对话回合制(sessionRole=chat) ──────────────────────────────
+
+def test_chat_turn_no_marker_completes_and_stays_alive():
+    """chat: 无标记正常收束 → turn_done 事件(非终态, 作业保活)。
+
+    用户实证(cv-262): 任务协议兜底把对话回合标成 waiting_input(⏸ 等待
+    输入), 且 [[IMPLEMENT_DONE]] 会触发验收门——对话语义全部错位。"""
+    j = _job(output="本轮分析结论如下…", session_role="chat")
+    j.status = "running"
+    asyncio.run(j._run_turn("x"))
+    assert j.status == "waiting_input"      # 保活(非终态, 续话复用原生会话)
+    assert j.events[-1]["kind"] == "turn_done"
+
+
+def test_chat_need_input_marker_still_signals():
+    """chat: 显式 [[NEED_INPUT]] → input_required(执行器有事需确认)。"""
+    j = _job(output="请确认 [[NEED_INPUT]] 用哪个方案?", session_role="chat")
+    j.status = "running"
+    asyncio.run(j._run_turn("x"))
+    assert j.status == "waiting_input"
+    assert j.events[-1]["kind"] == "input_required"
+
+
+def test_chat_done_marker_does_not_trigger_verify_gate():
+    """chat: [[IMPLEMENT_DONE]] 不触发验收门也不终态(对话无验收链)。"""
+    j = _job(output="写完了 [[IMPLEMENT_DONE]]", session_role="chat")
+    j.status = "running"
+    asyncio.run(j._run_turn("x"))
+    assert j.status == "waiting_input"
+    assert j.events[-1]["kind"] == "turn_done"
+
+
+def test_task_role_default_unchanged():
+    """缺省 task 角色: 无标记仍兜底 waiting_input(存量行为不变)。"""
+    j = _job(output="我先做了些分析…")
+    j.status = "running"
+    asyncio.run(j._run_turn("x"))
+    assert j.status == "waiting_input"
+    assert j.events[-1]["kind"] == "input_required"

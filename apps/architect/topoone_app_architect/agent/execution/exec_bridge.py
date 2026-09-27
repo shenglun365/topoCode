@@ -1040,6 +1040,9 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                             "permission": cfg.get("permission") or "",
                             "rulesMd": cfg.get("rulesMd") or "",
                             "mcp_servers": cfg.get("mcp_servers") or {},
+                            # cv-267: 会话 system prompt 全文覆盖(高级逃生口,
+                            # cline adapter 既有读取; 缺省=按 sessionRole 分型)
+                            "system_prompt": cfg.get("system_prompt") or "",
                         },
                         "model": model,
                         "basePort": cfg.get("base_port"),

@@ -877,6 +877,20 @@ class ClineTurnAdapter(TurnAdapter):
         "(头文件解耦/前向声明链/重构 include 等一律不做)。"
     )
 
+    # 直通对话版(cv-267): 只给事实(在哪工作/有什么工具), 人格与流程归执行器
+    # 原生约定; workspace 按 job.worktree 标志实话实说(就地≠worktree)。
+    _CHAT_WORKSPACE_INPLACE = (
+        "你在用户的项目目录中直接工作，改动即时生效。")
+    _CHAT_WORKTREE = (
+        "你在 TopoCode 管理的隔离 worktree 中工作，完成后合并回主工作区。")
+    _CHAT_SYSTEM_PROMPT = (
+        "你是与用户直接对话的编码执行器。{workspace}\n"
+        "架构资产地图可经 topocode_asset_map 工具查询（如可用）；"
+        "历史会话上下文可经 MCP 工具 ctx.get / ctx.search 按需检索（如已接线）。\n"
+        "禁止 git push / 改动项目目录之外的路径。"
+        "回合回答完成即自然结束，无需输出任何特殊标记"
+        "（需要用户操作/确认/澄清时输出 [[NEED_INPUT]] 并附具体问题）。")
+
     def __init__(self, config: Dict[str, Any], executor_id: str = "cline"):
         self.executor_id = executor_id
         self.executor_type = "cline-sdk"
@@ -1057,6 +1071,17 @@ class ClineTurnAdapter(TurnAdapter):
 
     # ── TurnAdapter 协议 ──
 
+    def _session_system_prompt(self, job) -> str:
+        """会话角色分型(cv-267): chat=两行事实(工作位置实话+工具指引);
+        task=任务交付协议版(缺省, 存量不变)。显式 config.system_prompt 已在
+        params 组装处优先——此处只管缺省分型。"""
+        if str(getattr(job, "session_role", "") or "") != "chat":
+            return self._DEFAULT_SYSTEM_PROMPT
+        inplace = (bool(getattr(job, "wt", "")) and bool(getattr(job, "root", ""))
+                   and os.path.abspath(job.wt) == os.path.abspath(job.root))
+        workspace = self._CHAT_WORKSPACE_INPLACE if inplace else self._CHAT_WORKTREE
+        return self._CHAT_SYSTEM_PROMPT.format(workspace=workspace)
+
     async def start_session(self, job) -> None:
         sc = self._sidecar()
         await sc.ensure()
@@ -1078,7 +1103,7 @@ class ClineTurnAdapter(TurnAdapter):
             "cwd": job.wt,
             "model": model_cfg,
             "maxIterations": self._max_iterations,
-            "systemPrompt": self._system_prompt or self._DEFAULT_SYSTEM_PROMPT,
+            "systemPrompt": self._system_prompt or self._session_system_prompt(job),
             "toolPolicies": {**self._tool_policies(job), **self._tool_policies_extra},
             "protocolTools": True,
             "checkpointEnabled": True,

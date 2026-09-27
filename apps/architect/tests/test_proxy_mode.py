@@ -408,7 +408,7 @@ def test_proxy_late_text_after_flush_no_crash(arch_env, tmp_path,
     msgs = store.ConversationsStore.messages(conv["id"], limit=10)
     body = [m for m in msgs if (m.get("meta") or {}).get("kind") == "proxy"]
     assert len(body) == 3, "等待输入卡 + 迟到段新卡 + 会话结束卡"
-    assert "⏸ 执行器等待你的输入" in body[0]["content"]
+    assert "⏸ 执行器有事项需要你确认" in body[0]["content"]
     assert "迟到段" in body[1]["content"] and "✅ 本轮完成" in body[1]["content"]
 
 
@@ -465,9 +465,9 @@ def test_history_brief_injected_into_start(arch_env, tmp_path, monkeypatch,
                            executor=EXECUTOR_FIXTURE))
     assert len(starts) == 1
     instr = starts[0]["instruction"]
-    assert "此前对话脉络" in instr, "历史脉络段未注入"
+    assert "此前的对话记录" in instr, "历史脉络段未注入"
     assert "评估一下项目进展" in instr
-    assert "把日志清理脚本写一下" not in instr.split("此前对话脉络")[1], \
+    assert "把日志清理脚本写一下" not in instr.split("此前的对话记录")[1], \
         "本轮 user 消息不应出现在脉络里"
 
 
@@ -565,3 +565,58 @@ def test_mcp_default_wired_and_user_override(arch_env, tmp_path, monkeypatch,
     tools = [f for f in (p.get("workspaceFiles") or [])
              if f["path"] == "TOPO-CONTEXT-TOOLS.md"]
     assert tools and f'ctx.get(conversation="{conv["id"]}")' in tools[0]["content"]
+
+
+# ── cv-267 对话回合制(sessionRole=chat 端到端) ───────────────────────────
+
+def test_start_payload_carries_session_role_chat(arch_env, tmp_path, monkeypatch,
+                                                 _isolate_proxy_state):
+    """直通 start 载荷带 sessionRole=chat(runner 据此走对话回合制)。"""
+    starts = _isolate_proxy_state
+    conv = _mk_conv(arch_env, tmp_path)
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(tmp_path / "proj"), ""))
+    asyncio.run(proxy_turn({}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=EXECUTOR_FIXTURE))
+    assert starts[0].get("sessionRole") == "chat"
+
+
+def test_pump_turn_done_keeps_handle_and_reports(arch_env, tmp_path,
+                                                 _isolate_proxy_state):
+    """chat turn_done: 落"回答已结束"卡但**不清句柄**(作业保活, 续话直达)。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-td", "executor_type": "cline-sdk"}
+    on_event, _snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-td", "cline-sdk")
+    on_event({"kind": "text", "text": "回答正文"})
+    on_event({"kind": "turn_done"})
+    msgs = store.ConversationsStore.messages(conv["id"], limit=10)
+    tail = msgs[-1]
+    assert "本轮回答已结束" in tail["content"]
+    assert proxy.proxy_job_of(conv["id"]) is not None, "turn_done 非终态, 句柄保留"
+
+
+def test_pump_input_required_copy(arch_env, tmp_path, _isolate_proxy_state):
+    """chat input_required 文案: 有事项需确认(替代任务味"等待你的输入")。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-ir", "executor_type": "cline-sdk"}
+    on_event, _snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-ir", "cline-sdk")
+    on_event({"kind": "text", "text": "请选择方案"})
+    on_event({"kind": "input_required"})
+    msgs = store.ConversationsStore.messages(conv["id"], limit=10)
+    assert "有事项需要你确认" in msgs[-1]["content"]
+
+
+def test_hint_whitelist_passes_system_prompt(arch_env, monkeypatch):
+    """cv-267: 执行器配置 system_prompt 经 hint 白名单透传(接通断裂通道)。"""
+    import topoone_app_architect.arch_routes.agent_executors as ae
+    from topoone_app_architect.agent.execution.exec_bridge import (
+        executor_hint_by_id)
+    monkeypatch.setattr(ae, "load_executors", lambda: [
+        {"id": "ex-sp", "type": "cline-sdk", "enabled": True, "default": True,
+         "config": {"system_prompt": "自定义人格", "rulesMd": "# r"}}])
+    hint = executor_hint_by_id("ex-sp") or {}
+    assert (hint.get("executorConfig") or {}).get("system_prompt") == "自定义人格"

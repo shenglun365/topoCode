@@ -99,8 +99,11 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             if now - buf["at"] >= _PROXY_FLUSH_MS:
                 buf["at"] = now
                 _persist(buf["text"])
+        elif kind == "turn_done":
+            # cv-267 对话回合制: 正常收束(非终态, 作业保活——续话直达原生会话)
+            _flush("✅ 本轮回答已结束——继续对话将直接送达执行器。")
         elif kind == "input_required":
-            _flush("⏸ 执行器等待你的输入——直接回复即可(继续直通)。")
+            _flush("⏸ 执行器有事项需要你确认——直接回复即可。")
         elif kind == "notice":
             logger.info("[proxy] %s notice: %s", job_id, str(ev.get("text") or "")[:120])
         elif kind in ("done", "failed", "aborted"):
@@ -301,6 +304,9 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         "instruction": instruction,
         "executorType": etype,
         "executorConfig": ecfg,
+        # cv-267 直通=对话回合制: 执行器原生多回合自管上下文, runner 不拼任务
+        # 协作协议/不跑验收门; 无标记收束=turn_done(作业保活, 续话复用原生会话)
+        "sessionRole": "chat",
     }
     if hint.get("executorId"):
         payload["executorId"] = hint["executorId"]

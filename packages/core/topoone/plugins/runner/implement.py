@@ -114,7 +114,8 @@ class ImplementJob:
                  turn_timeout: float = _TURN_TIMEOUT,
                  stall_sec: float = _DEFAULT_STALL_SEC,
                  project_id: str = "",
-                 verify_config: Optional[Dict[str, Any]] = None):
+                 verify_config: Optional[Dict[str, Any]] = None,
+                 session_role: str = "task"):
         self.id = job_id
         self.root = os.path.abspath(root)
         self.wt = wt
@@ -174,6 +175,10 @@ class ImplementJob:
         self.turn_timeout = float(turn_timeout)
         self.stall_sec = float(stall_sec)
         self.project_id = project_id
+        # 会话角色(cv-267): task=任务交付协议(缺省, 存量不变) / chat=直通对话
+        # (无协作协议拼接·无标记正常收束即本轮完成·无验收门——上下文归执行器
+        # 原生管理, architect 仅冷启动桥接)
+        self.session_role = session_role if session_role in ("task", "chat") else "task"
         # V1 程序化验收门禁: start payload.verify {build?, test?, timeoutMul?,
         # maxAttempts?, autoRepair?}; V4 修复回注计数 + V5 DONE 诚实化连击
         self.verify_config = verify_config if isinstance(verify_config, dict) else {}
@@ -432,6 +437,19 @@ class ImplementJob:
             outcome = await self.adapter.run_turn(self, text)
             output = outcome.output or ""
             changed = self._diff_files() or outcome.changed_files
+            if self.session_role == "chat":
+                # 对话回合制(cv-267): 正常收束=本轮完成(turn_done, 作业保活——
+                # 续话 /input 复用执行器原生会话上下文); 显式 NEED_INPUT 才进入
+                # 等待确认; 不跑验收门(定位裁决: 验收属任务链)。
+                if _MARK_NEED in output:
+                    self.status = "waiting_input"
+                    self._commit_progress()
+                    self.emit("input_required", output, changedFiles=changed)
+                else:
+                    self.status = "waiting_input"
+                    self._commit_progress()
+                    self.emit("turn_done", output, changedFiles=changed)
+                return
             if _MARK_DONE in output:
                 # V4/V5: 先实测验证再定终态——DONE 自述与实测不符时退回/修复回注
                 from . import verify as _verify
@@ -765,8 +783,13 @@ def register(app: FastAPI) -> None:
         except RuntimeError as e:
             # 如 remote-agent 等不适配交互式作业的类型: 明确报错(不静默回退)
             return {"ok": False, "error": str(e)}
+        # 会话角色分版(cv-267): chat 不拼任务协作协议(执行器原生多回合,
+        # 自主收束; [[NEED_INPUT]] 显式提问仍被识别)
+        session_role = "chat" if str(body.get("sessionRole") or "") == "chat" else "task"
         job = ImplementJob(
-            job_id, root, wt, base, branch, instruction + _COLLAB_PROTOCOL,
+            job_id, root, wt, base, branch,
+            instruction if session_role == "chat" else instruction + _COLLAB_PROTOCOL,
+            session_role=session_role,
             model=str(body.get("model") or ""),
             base_port=int(body.get("basePort") or 3478),
             auto_start=bool(body.get("autoStart", True)),

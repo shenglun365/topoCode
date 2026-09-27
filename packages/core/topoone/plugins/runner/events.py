@@ -37,6 +37,7 @@ _KINDS = (
     "tool", "usage", "notice", "turn_outcome", "approval_request",
     "team", "mcp",
     "verify",   # V1 程序化验收门禁: done 后实测验证矩阵(环节级判定+原因码)
+    "turn_done",  # cv-267 对话回合制: chat 角色无标记正常收束(非终态, 作业保活)
 )
 
 # A6.1 反向请求(ServerRequest)类型契约——runner → 宿主(architect) 需应答的事件:

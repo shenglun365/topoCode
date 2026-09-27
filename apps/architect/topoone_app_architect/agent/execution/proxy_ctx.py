@@ -39,8 +39,8 @@ def _history_brief(conv_id: str, cap_chars: int,
     body = "\n".join(lines)
     if len(body) > cap_chars:
         body = body[:cap_chars]
-    return ("以下为本会话此前对话脉络(速览, 截断保护; 完整内容可经 MCP 工具"
-            f" ctx.get(conversation=\"{conv_id}\") 按需检索):\n{body}")
+    return ("以下是本会话此前的对话记录（仅保留要点；完整历史可经 MCP 工具"
+            f' ctx.get(conversation="{conv_id}") 按需检索）：\n{body}')
 
 
 def _merge_mcp_servers(ecfg: dict, etype: str) -> Optional[Dict[str, Any]]:
