@@ -135,8 +135,11 @@ def execute_requirement_now(conv_id: str, req_id: str,
         _bridge.task_set_executor(task["id"], executor_type)
     res = confirm_task(task["id"])
     if not res.get("ok"):
-        return {"ok": False, "error": str(res.get("error") or "confirm-failed"),
-                "taskId": task["id"]}
+        out = {"ok": False, "error": str(res.get("error") or "confirm-failed"),
+               "taskId": task["id"]}
+        if res.get("gateAsk"):
+            out["gateAsk"] = res["gateAsk"]   # cv-282 问询态透传(卡已落流)
+        return out
     return {"ok": True, "taskId": task["id"],
             "status": str((res.get("task") or {}).get("status") or "")}
 
@@ -584,15 +587,23 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     else:
         payload["worktree"] = bool((conv or {}).get("isolated"))
     _ws = "worktree" if bool(payload["worktree"]) else "inplace"
-    # 重定位 P3 门禁(裁决 2026-09-26): 就地执行且主工作区有未提交变更(其它
-    # 开发进程可能在编码) → 显式失败, 不静默开工(cv-257: 与用户并行开发互踩)。
-    # 修复路径: 处理变更, 或开启会话隔离开关(worktree)。readonly 不写盘豁免。
+    # 重定位 P3 门禁(cv-257 实证互踩 → 裁决 2026-09-26; cv-282 问询化):
+    # 就地执行且主工作区有未提交变更(其它开发进程可能在编码) → 不静默开工。
+    # cv-282: 硬失败改问询——task 置 waiting_input + choices 问询卡(选项稳定
+    # key 单源 DIRTY_GATE_CHOICES), 用户裁决后经 resolve_dirty_gate 确定性
+    # 消费(隔离重试/干净后重试/取消), 门禁本身不削弱(无 bypass 通道)。
+    # readonly 不写盘豁免。
     if (not payload["worktree"] and _safety != ST.SAFETY_READONLY
             and _dirty_worktree(root)):
-        _gate_msg = ("工作区有未提交变更(可能来自其它开发进程)——为避免互踩已拒绝"
-                     "融合执行。请先处理变更，或开启会话隔离开关后重试。")
-        store.TasksStore.finish(task_id, "failed", _gate_msg)
-        return {"ok": False, "error": _gate_msg}
+        from . import gate_ask as _gate
+        _gate.land_dirty_gate_ask(conv_id, task_id)
+        store.TasksStore.set_progress(task_id, {"gate": _gate.DIRTY_GATE_ASK})
+        store.TasksStore.update(task_id, {"status": ST.TASK_WAITING_INPUT})
+        _fresh = store.TasksStore.get(task_id) or task
+        _publish_task(conv_id, _fresh)
+        _gate_msg = ("工作区有未提交变更(可能来自其它开发进程)——已暂停等待你的处理方式"
+                     "（见上方问询卡：转会话隔离重试 / 已处理完变更重试 / 取消执行）。")
+        return {"ok": False, "error": _gate_msg, "gateAsk": _gate.DIRTY_GATE_ASK}
     payload["instruction"] = _eb()._task_instruction(task, _eb()._task_chain_brief(conv_id, task_id),
                                                policy=policy,
                                                runtime={"branch": branch, "root": root,

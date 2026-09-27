@@ -34,6 +34,19 @@ async def requirement_execute_now(req_id: str, request: Request):
     return ok(res)
 
 
+@router.post("/tasks/{task_id}/gate-answer")
+async def task_gate_answer(task_id: str, request: Request):
+    """脏区问询确定性消费(cv-282): 单源=gate_ask.resolve_dirty_gate。"""
+    from ..agent.execution import gate_ask as _gate
+    body = await request.json()
+    res = await asyncio.to_thread(
+        _gate.resolve_dirty_gate, task_id,
+        str((body or {}).get("choiceText") or ""))
+    if not res.get("ok") and res.get("error") in ("task-not-waiting",
+                                                  "unknown-choice"):
+        return err(400, str(res.get("error")))
+    return ok(res)
+
 @router.post("/tasks/{task_id}/merge")
 async def task_merge(task_id: str, request: Request):
     """确认合并(本地 PR 语义, 环节十五): 门禁通过后执行合并, 任务记 merged 终态。

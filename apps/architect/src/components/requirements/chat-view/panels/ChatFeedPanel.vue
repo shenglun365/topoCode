@@ -151,6 +151,16 @@ async function execNow(m: any) {
     execNowId.value = ''
   }
 }
+// cv-282 脏区问询卡答复: 确定性消费(gate-answer 端点), 不走普通消息通道
+async function onGateReply(m: any, text: string) {
+  const msgId = String(m.id || m.item?.id || '')
+  choicesAnswered.add(msgId)
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    await apiPost(`/tasks/${encodeURIComponent(String(m.item?.payload?.taskId || ''))}/gate-answer`,
+      { choiceText: text })
+  } catch { /* 回执经主流可见 */ }
+}
 // cv-277 最小化/展开切换(按消息 id 记态; 缺省=展开 420px 滚动)
 const msgMinimized = ref<Record<string, boolean>>({})
 function msgKey(m: any, i: number): string {
@@ -261,7 +271,9 @@ const emit = defineEmits<{
               || answeredByFlow.has(String(m.id || m.item?.id || ''))"
             :draft="choiceDrafts[String(m.id || m.item?.id || '')]"
             @draft-change="(d: any) => scheduleDraftSave(String(m.id || m.item?.id || ''), d)"
-            @reply="(text: string) => onChoicesReply(String(m.id || m.item?.id || ''), text)"
+            @reply="(text: string) => m.item?.payload?.gateAsk
+              ? onGateReply(m, text)
+              : onChoicesReply(String(m.id || m.item?.id || ''), text)"
           />
           <TaskCard
             v-if="m.item?.type === 'task' && taskById(m.item.payload?.taskId)"

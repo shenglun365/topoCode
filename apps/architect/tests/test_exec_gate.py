@@ -60,7 +60,9 @@ def test_dirty_inplace_rejected(arch_env, tmp_path, monkeypatch):
     res = eb.confirm_task(task["id"])
     assert not res["ok"]
     assert "未提交变更" in res["error"]
-    assert (store.TasksStore.get(task["id"]) or {}).get("status") == "failed"
+    # cv-282 问询化: 不再硬失败——waiting_input + 问询卡(等用户裁决)
+    assert res.get("gateAsk") == "dirty_worktree"
+    assert (store.TasksStore.get(task["id"]) or {}).get("status") == "waiting_input"
 
 
 def test_clean_repo_inplace_passes(arch_env, tmp_path, monkeypatch):
