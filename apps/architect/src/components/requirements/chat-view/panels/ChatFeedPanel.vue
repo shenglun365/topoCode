@@ -15,6 +15,11 @@ import { useI18n } from 'vue-i18n'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { useChatWs } from '../key'
 
+// 父层 v-bind="props" 全量下传, 本组件仅声明消费的子集——其余(insertDraft/
+// analysisMode 等状态经 useChatWs 注入流动, 不走 props); 多根 fragment(尾部
+// Teleport)无法自动继承 attrs, 显式关闭以消 extraneous non-props 警告(cv-278)。
+defineOptions({ inheritAttrs: false })
+
 const props = defineProps<{
   turns?: KbAnalysisTurn[]
   busy?: boolean
