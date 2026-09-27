@@ -120,6 +120,15 @@ function isLongMsg(m: any): boolean {
   return m?.role === 'assistant' && String(m?.content || '').length > LONG_MSG_CHARS
 }
 const expandedMsg = ref<{ content: string } | null>(null)
+// cv-277 最小化/展开切换(按消息 id 记态; 缺省=展开 420px 滚动)
+const msgMinimized = ref<Record<string, boolean>>({})
+function msgKey(m: any, i: number): string {
+  return String(m?.id || `idx-${i}`)
+}
+function toggleMsgMin(m: any, i: number) {
+  const k = msgKey(m, i)
+  msgMinimized.value[k] = !msgMinimized.value[k]
+}
 // cv-275 持久会话状态(REST 真相源, 刷新安全): convId 变化/回合结束即查询
 const proxySession = ref<{ active: boolean; executorType: string;
                            sessionRef: string; jobId?: string } | null>(null)
@@ -443,18 +452,31 @@ const emit = defineEmits<{
               && m.item?.type !== 'choices'"
             class="relative group/msg"
           >
-            <!-- cv-276: 长消息高度上限+内部滚动(会话不被撑开)+浮层放大钮 -->
+            <!-- cv-276/277: 长消息高度上限+内部滚动+最小化(头部3行)/展开切换+浮层放大 -->
             <div
-              :class="isLongMsg(m) ? 'max-h-[420px] overflow-y-auto pr-1' : ''"
+              :class="isLongMsg(m)
+                ? (msgMinimized[msgKey(m, i)]
+                    ? 'line-clamp-3 overflow-hidden'
+                    : 'max-h-[420px] overflow-y-auto pr-1')
+                : ''"
             >
               <ChatMessageBlocks :content="m.content" />
             </div>
-            <button
+            <div
               v-if="isLongMsg(m)"
-              class="absolute top-1 right-1 z-10 opacity-0 group-hover/msg:opacity-100 transition-opacity chip !text-[9px] bg-ctp-base/90 text-ctp-subtext0 hover:text-ctp-blue"
-              title="放大查看全文"
-              @click="expandedMsg = { content: m.content }"
-            >⤢ 放大</button>
+              class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity"
+            >
+              <button
+                class="chip !text-[9px] bg-ctp-base/90 text-ctp-subtext0 hover:text-ctp-blue"
+                :title="msgMinimized[msgKey(m, i)] ? '展开(420px 内滚动)' : '最小化(仅头部 3 行)'"
+                @click="toggleMsgMin(m, i)"
+              >{{ msgMinimized[msgKey(m, i)] ? '⌃ 展开' : '⌄ 最小化' }}</button>
+              <button
+                class="chip !text-[9px] bg-ctp-base/90 text-ctp-subtext0 hover:text-ctp-blue"
+                title="放大查看全文"
+                @click="expandedMsg = { content: m.content }"
+              >⤢ 放大</button>
+            </div>
           </div>
 
           <!-- 需求卡(cv-203/205 方案 A): 独立卡片消息 = 唯一宿主——

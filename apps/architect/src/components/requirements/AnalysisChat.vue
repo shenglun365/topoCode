@@ -415,6 +415,11 @@ onUnmounted(() => {
       v-bind="props"
       @toggle-diagram-skill="(v: boolean) => emit('toggle-diagram-skill', v)"
       @stop="emit('stop')"
-    />
+    >
+      <!-- cv-277 恢复插槽转发(两面板化时断裂): 宿主工具条(大纲/引导/摘要/提炼/归档) -->
+      <template #toolbar-extra>
+        <slot name="toolbar-extra" />
+      </template>
+    </ChatBottomPanel>
   </div>
 </template>
