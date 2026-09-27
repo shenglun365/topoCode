@@ -51,7 +51,6 @@ const {
   pickCmd,
   pickExecutor,
   pickRoute,
-  quickLocked,
   quickOn,
   quickTitle,
   routeBtnClass,
@@ -74,7 +73,6 @@ const {
       <button
         class="btn btn-xs !px-1.5"
         :class="quickOn ? 'btn-blue' : 'btn-ghost opacity-50 hover:opacity-100'"
-        :disabled="quickLocked"
         :title="quickTitle"
         @click="toggleQuickMode"
       >
@@ -84,7 +82,6 @@ const {
       <button
         class="btn btn-xs !px-1.5"
         :class="clarifyForced ? 'btn-teal' : 'btn-ghost opacity-50 hover:opacity-100'"
-        :disabled="quickLocked"
         :title="clarifyTitle"
         @click="toggleClarifyMode"
       >
@@ -95,7 +92,6 @@ const {
       <button
         class="btn btn-xs !px-1.5"
         :class="isolatedOn ? 'btn-blue' : 'btn-ghost opacity-50 hover:opacity-100'"
-        :disabled="quickLocked"
         :title="isolatedTitle"
         @click="toggleIsolated"
       >

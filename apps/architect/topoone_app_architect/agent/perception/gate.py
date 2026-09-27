@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from ..governance.gears import GEAR_MODES, normalize_mode
+
 
 @dataclass
 class SessionBinding:
@@ -25,6 +27,27 @@ class SessionBinding:
     error_event: Optional[dict] = field(default=None)  # 非空=闸门拒绝(归档), 回合终止
 
 
+def _create_payload(data: dict) -> dict:
+    """会话创建载荷(两处创建点单源)。cv-260 空白态挡位预置: 三挡位随首条消息
+    载荷生效(口径同 sessions 切换端点; 已存在会话不覆写, 真相源=REST)。"""
+    extra: dict = {}
+    mode = normalize_mode(str(data.get("analysisMode") or "").strip())
+    if mode in GEAR_MODES:
+        extra["analysisMode"] = mode
+    if str(data.get("clarifyMode") or "").strip() in ("auto", "forced"):
+        extra["clarifyMode"] = str(data["clarifyMode"]).strip()
+    if isinstance(data.get("isolated"), bool):
+        extra["isolated"] = data["isolated"]
+    return {
+        "kind": data.get("kind") or "chat",
+        "projectId": data.get("project") or "",
+        "reqId": data.get("reqId") or "",
+        "title": data.get("title") or "",
+        "status": "active", "meta": {"title": data.get("title") or ""},
+        **extra,
+    }
+
+
 def bind_session(data: dict, store, ctx, next_id) -> SessionBinding:
     """解析/创建会话并绑定请求级上下文。error_event 非空时调用方直接回错误。
 
@@ -34,13 +57,7 @@ def bind_session(data: dict, store, ctx, next_id) -> SessionBinding:
     conv = None
     created = False
     if not conv_id:
-        conv = store.ConversationsStore.create({
-            "kind": data.get("kind") or "chat",
-            "projectId": data.get("project") or "",
-            "reqId": data.get("reqId") or "",
-            "title": data.get("title") or "",
-            "status": "active", "meta": {"title": data.get("title") or ""},
-        })
+        conv = store.ConversationsStore.create(_create_payload(data))
         conv_id = conv["id"]
         created = True
     else:
@@ -62,13 +79,7 @@ def bind_session(data: dict, store, ctx, next_id) -> SessionBinding:
             # 自愈降级：浏览器 tab 内存里保留的 chatConvId 可能指向已不存在的会话
             # (服务重启/数据目录迁移/多实例并存导致库漂移)。历史消息全量在
             # payload.messages, 新建会话零丢失; done 事件回传新 conv_id 前端自动跟进。
-            conv = store.ConversationsStore.create({
-                "kind": data.get("kind") or "chat",
-                "projectId": data.get("project") or "",
-                "reqId": data.get("reqId") or "",
-                "title": data.get("title") or "",
-                "status": "active", "meta": {"title": data.get("title") or ""},
-            })
+            conv = store.ConversationsStore.create(_create_payload(data))
             conv_id = conv["id"]
             created = True
     # 请求级上下文(项目库路由/需求定位/证据链回填)

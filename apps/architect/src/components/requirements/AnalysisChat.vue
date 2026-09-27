@@ -237,7 +237,6 @@ const {
   proposalDone,
   proposalState,
   proposalStored,
-  quickLocked,
   quickOn,
   quickTitle,
   reasoningOpen,

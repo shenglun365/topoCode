@@ -301,7 +301,7 @@ export const useConversationStore = defineStore('archConversation', () => {
   }
 
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子; digest=语境摘要(转达下发, text 可空)。 */
-  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string; digest?: string; synthetic?: boolean }) {
+  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string; digest?: string; synthetic?: boolean; analysisMode?: string; clarifyMode?: string; isolated?: boolean }) {
     if (busy.value || (!text.trim() && !opts?.digest)) return
     // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里
     const arr = turns.value
@@ -332,6 +332,9 @@ export const useConversationStore = defineStore('archConversation', () => {
         agent: opts?.agent,
         attachTo: opts?.attachTo,
         digest: opts?.digest,
+        analysisMode: opts?.analysisMode,   // cv-260 空白态预置(仅创建时消费)
+        clarifyMode: opts?.clarifyMode,
+        isolated: opts?.isolated,
         signal: ac.signal,
       }, (ev) => {
         if (ev.conversationId) {

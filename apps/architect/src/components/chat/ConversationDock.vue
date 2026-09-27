@@ -154,6 +154,12 @@ async function onTaskExecutor(p: { taskId: string; executorType: string }) {
 /** 发送入口(语境路由): attachTo=转达任务卡, agent=一次性指派 subagent(后端注入指派契约), digest=语境摘要。 */
 async function onSendChat(p: { text: string; attachTo?: string; agent?: string; digest?: string; synthetic?: boolean }) {
   conv.send(p.text, {
+    // cv-260 空白态挡位预置: 会话未创建时随首条消息生效(gate._preset_fields)
+    ...(!conv.activeId ? {
+      ...(analysisMode.value !== 'strict' ? { analysisMode: analysisMode.value } : {}),
+      ...(clarifyMode.value !== 'auto' ? { clarifyMode: clarifyMode.value } : {}),
+      ...(isolated.value ? { isolated: true } : {}),
+    } : {}),
     ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}),
     ...(props.defaultKind ? { kind: props.defaultKind } : {}),
     ...(p.attachTo ? { attachTo: p.attachTo } : {}),
@@ -339,8 +345,8 @@ watch(() => conv.activeId, () => {
   isolated.value = !!(conv.activeMeta as any)?.isolated
 })
 async function onSetClarifyMode(mode: 'auto' | 'forced') {
-  if (!conv.activeId) return
   clarifyMode.value = mode // 本地即时反馈(不等 REST)
+  if (!conv.activeId) return // cv-260 空白态预置: 首条消息创建会话时随载荷生效
   try {
     const r = await apiPost<{ clarifyMode?: 'auto' | 'forced' }>(`/sessions/${conv.activeId}/clarify-mode`, { mode })
     if (r?.clarifyMode) clarifyMode.value = r.clarifyMode
@@ -349,8 +355,8 @@ async function onSetClarifyMode(mode: 'auto' | 'forced') {
 }
 
 async function onSetIsolated(on: boolean) {
-  if (!conv.activeId) return
   isolated.value = on
+  if (!conv.activeId) return // cv-260 空白态预置
   try {
     const r = await apiPost<{ isolated?: boolean }>(`/sessions/${conv.activeId}/isolated`, { on })
     if (typeof r?.isolated === 'boolean') isolated.value = r.isolated
@@ -359,8 +365,8 @@ async function onSetIsolated(on: boolean) {
 }
 
 async function onSetAnalysisMode(mode: 'strict' | 'quick') {
-  if (!conv.activeId) return
   analysisMode.value = mode // 本地即时反馈(不等 REST)
+  if (!conv.activeId) return // cv-260 空白态预置
   try {
     const r = await apiPost<{ analysisMode?: 'strict' | 'quick' }>(`/sessions/${conv.activeId}/analysis-mode`, { mode })
     if (r?.analysisMode) analysisMode.value = r.analysisMode

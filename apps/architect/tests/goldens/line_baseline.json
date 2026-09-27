@@ -53,7 +53,7 @@
  "agent/orchestrator.py": 512,
  "agent/perception/__init__.py": 5,
  "agent/perception/commands.py": 157,
- "agent/perception/gate.py": 87,
+ "agent/perception/gate.py": 98,
  "agent/perception/intent.py": 15,
  "agent/perception/router.py": 68,
  "agent/planning/__init__.py": 8,

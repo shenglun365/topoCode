@@ -157,6 +157,11 @@ export interface ChatStreamOptions {
   digest?: string
   /** 是否有流式通道可用(后端不可达/未启用时回退一次性回复)。 */
   signal?: AbortSignal
+  /** cv-260 空白态挡位预置: 首条消息创建会话时生效 */
+  analysisMode?: string
+  clarifyMode?: string
+  isolated?: boolean
+
 }
 
 /**
@@ -266,6 +271,9 @@ export async function chatStream(
       attachTo: opts.attachTo,
       digest: opts.digest,
       synthetic: opts.synthetic,
+      analysisMode: opts.analysisMode,   // cv-260 空白态预置(仅创建时消费)
+      clarifyMode: opts.clarifyMode,
+      isolated: opts.isolated,
     })
 
     return await doneP

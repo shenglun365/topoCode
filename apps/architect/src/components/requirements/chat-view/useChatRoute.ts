@@ -76,42 +76,44 @@ function pickRoute(r: RouteTarget) {
 }
 /** 快捷挡直切开关(闪电 icon): architect 模式=关(暗, 需求分析→规约→任务完整链, 按执行器能力档位自动适配) / coding 执行器模式=开(高亮, 直通对话·不走需求/任务——architect 仅通道代理), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
 const quickOn = computed(() => (props.analysisMode || 'strict') === 'quick')
-/** 空白对话(会话未创建)锁定: 挡位是会话级字段, 无 conv_id 可写。 */
-const quickLocked = computed(() => props.hasSession === false)
+/** cv-260: 空白态解锁——挡位本地预置, 首条消息创建会话时随载荷生效。 */
 const quickTitle = computed(() => {
-  if (quickLocked.value) return '模式切换需在已有会话中进行 — 发送首条消息创建会话后可用'
+  if (props.hasSession === false) return (quickOn.value
+    ? 'coding 执行器模式(已预置) — 首条消息创建会话即以直通模式处理'
+    : 'architect 模式(预置) — 首条消息创建会话后生效')
   return quickOn.value
     ? 'coding 执行器模式 — 直通对话·不走需求/任务体系，architect 仅做通道代理（点击切回 architect 模式）'
     : 'architect 模式 — 需求分析→规约→任务，按执行器能力档位自动适配（点击切至 coding 执行器模式）'
 })
 function toggleQuickMode() {
-  if (quickLocked.value) return
   emit('set-analysis-mode', quickOn.value ? 'strict' : 'quick')
 }
 
 /** 需求澄清挡位(cv-190): 自动=规约有缺口才集中提问 / 强制=先澄清后落卡(明确指令自动跳过)。 */
 const clarifyForced = computed(() => (props.clarifyMode || 'auto') === 'forced')
 const clarifyTitle = computed(() => {
-  if (quickLocked.value) return '澄清挡位需在已有会话中切换 — 发送首条消息创建会话后可用'
+  if (props.hasSession === false) return (clarifyForced.value
+    ? '强制澄清(已预置) — 首条消息创建会话即生效'
+    : '自动澄清(预置) — 首条消息创建会话后生效')
   return clarifyForced.value
     ? '强制澄清 — 每个需求回合先集中提问补齐要素再落卡（明确指令自动跳过；点击切回自动）'
     : '自动澄清 — 规约有要素缺口时才集中提问（点击切为强制澄清）'
 })
 function toggleClarifyMode() {
-  if (quickLocked.value) return
   emit('set-clarify-mode', clarifyForced.value ? 'auto' : 'forced')
 }
 
 /** worktree 隔离挡位(cv-202): 缺省就地; 显式开启后任务在 worktree 分支作业。 */
 const isolatedOn = computed(() => !!props.isolated)
 const isolatedTitle = computed(() => {
-  if (quickLocked.value) return '隔离模式需在已有会话中切换 — 发送首条消息创建会话后可用'
+  if (props.hasSession === false) return (isolatedOn.value
+    ? '隔离模式 开(已预置) — 首条消息创建会话即生效'
+    : '隔离模式 关(预置) — 首条消息创建会话后生效')
   return isolatedOn.value
     ? '隔离模式 开 — 任务在独立 worktree 分支作业, 完成后合并回项目目录（点击关闭）'
     : '隔离模式 关 — 直接写入项目目录（点击开启隔离）'
 })
 function toggleIsolated() {
-  if (quickLocked.value) return
   emit('set-isolated', !isolatedOn.value)
 }
 
@@ -151,7 +153,6 @@ function pickExecutor(id: string) {
     lastAssistantAgent,
     pickExecutor,
     pickRoute,
-    quickLocked,
     quickOn,
     quickTitle,
     routeBtnClass,
