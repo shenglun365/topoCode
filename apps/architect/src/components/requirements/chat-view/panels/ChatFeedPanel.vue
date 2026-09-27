@@ -114,6 +114,11 @@ const {
 // 活跃流式=完整条, turn_done 后(busy=false)折叠一行摘要, 终态 finished 帧清除
 const _convStore = useConversationStore()
 const proxyProc = computed(() => _convStore.proxyProgressOf(props.convId))
+// cv-274 渲染层探针: 数据就位但未见条 → 断点在此(与 [arch-live] 日志同风格)
+watch(proxyProc, (p) => {
+  if (p) console.info('[arch-live] 控制条渲染 conv=' + props.convId,
+                      'tools:', p.toolCount, p.folded ? 'FOLDED' : 'LIVE')
+}, { immediate: true })
 const proxyStopping = ref(false)
 async function onProxyStop() {
   if (!props.convId || proxyStopping.value) return
