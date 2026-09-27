@@ -101,6 +101,46 @@ _WRITE_HINT_RE = re.compile(
     r"(写入|修改|删除|重构|新增文件|创建文件|编辑|替换|部署|发布|迁移|安装|卸载|覆写|更新文件)")
 
 
+def execute_requirement_now(conv_id: str, req_id: str,
+                            executor_type: str = "") -> dict:
+    """立即执行(cv-281): 需求→单任务直发(免 GU 计划/确认门)。
+
+    单源复用: propose_task(建卡/同需求 saved 卡改写)→confirm_task(拉起
+    runner)——confirm 时 assemble_task_instruction 自动随注入绑定规约全文
+    (目标/方案/边界/验收), 故 propose 指令仅需需求目标纯文本。
+    gate_diagram=False(计划步骤卡同规豁免: 规约即上下文, 直发卡不附图围栏)。
+    安全三值轴/会话隔离开关消费照旧(confirm 时门禁判定)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return {"ok": False, "error": "conv-not-found"}
+    if str(conv.get("reqId") or "") != str(req_id):
+        return {"ok": False, "error": "req-not-bound-to-conv"}
+    active = store.RequirementsStore.spec_active(req_id) or {}
+    snap = active.get("snapshot") or {}
+    if not active or not snap:
+        return {"ok": False, "error": "spec-snapshot-missing"}
+    for t in store.TasksStore.of_conv(conv_id):
+        if (str(t.get("reqId") or "") == str(req_id)
+                and str(t.get("status") or "") in ST.ACTIVE_STATES):
+            return {"ok": False, "error": "task-active", "taskId": t["id"]}
+    instruction = str(snap.get("desc") or "").strip()
+    if not instruction:
+        return {"ok": False, "error": "spec-desc-empty"}
+    title = str(snap.get("title") or "").strip()[:120] or "实施任务"
+    task = propose_task(conv, title, instruction, gate_diagram=False)
+    if not task.get("ok"):
+        return {"ok": False, "error": str(task.get("error") or "propose-failed")}
+    if executor_type:
+        from . import exec_bridge as _bridge
+        _bridge.task_set_executor(task["id"], executor_type)
+    res = confirm_task(task["id"])
+    if not res.get("ok"):
+        return {"ok": False, "error": str(res.get("error") or "confirm-failed"),
+                "taskId": task["id"]}
+    return {"ok": True, "taskId": task["id"],
+            "status": str((res.get("task") or {}).get("status") or "")}
+
+
 def propose_task(conv: dict, title: str, instruction: str,
                  executor_hint: Optional[dict] = None,
                  gate_diagram: bool = True,

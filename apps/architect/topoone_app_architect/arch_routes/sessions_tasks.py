@@ -15,6 +15,25 @@ router = APIRouter()
 
 # ── v2 统一会话: coding subagent 任务 REST(轻门禁/投递/停止) ──
 
+@router.post("/requirements/{req_id}/execute-now")
+async def requirement_execute_now(req_id: str, request: Request):
+    """立即执行(cv-281): 需求最新版→单任务直发(免 GU 计划/确认门)。
+
+    body: {convId, executorType?}; 逻辑单源=dispatch.execute_requirement_now
+    (propose_task→confirm_task 复用, 规约全文 confirm 时自动随注入)。"""
+    from ..agent.execution import dispatch as _dispatch
+    body = await request.json()
+    conv_id = str((body or {}).get("convId") or "")
+    if not conv_id:
+        return err(400, "convId 必填")
+    res = await asyncio.to_thread(
+        _dispatch.execute_requirement_now, conv_id, req_id,
+        str((body or {}).get("executorType") or ""))
+    if not res.get("ok"):
+        return err(400, str(res.get("error") or "execute-failed"))
+    return ok(res)
+
+
 @router.post("/tasks/{task_id}/merge")
 async def task_merge(task_id: str, request: Request):
     """确认合并(本地 PR 语义, 环节十五): 门禁通过后执行合并, 任务记 merged 终态。

@@ -137,6 +137,20 @@ function openSpecEdit(m: any) {
     desc: String(s.desc || ''),
   }
 }
+// cv-281 立即执行: 免任务计划——需求最新版直接创建单任务并立即执行
+const execNowId = ref('')
+async function execNow(m: any) {
+  const rid = String(m.item?.payload?.requirementId || '')
+  if (!rid || execNowId.value) return
+  execNowId.value = String(m.id || m.item?.id || '')
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    await apiPost(`/requirements/${encodeURIComponent(rid)}/execute-now`,
+      { convId: props.convId })
+  } catch { /* 失败经任务卡/状态卡与回执可见 */ } finally {
+    execNowId.value = ''
+  }
+}
 // cv-277 最小化/展开切换(按消息 id 记态; 缺省=展开 420px 滚动)
 const msgMinimized = ref<Record<string, boolean>>({})
 function msgKey(m: any, i: number): string {
@@ -580,6 +594,15 @@ const emit = defineEmits<{
                   : '按规约生成任务计划——任务卡确认后才开始执行'"
                 @click="emit('send', { text: '/执行' })"
               >{{ specCard(m).active ? '任务执行中' : '任务生成' }}</button>
+              <!-- cv-281 立即执行: 需求最新版单任务直发(免计划/确认门) -->
+              <button
+                class="btn btn-xs btn-ghost"
+                :disabled="busy || specCard(m).active || execNowId === String(m.id || m.item?.id || '')"
+                :title="specCard(m).active
+                  ? `该需求已有进行中的任务（${specCard(m).activeStatus}）`
+                  : '免任务计划——以需求最新版直接创建单任务并立即执行（规约全文自动随注入）'"
+                @click="execNow(m)"
+              >{{ execNowId === String(m.id || m.item?.id || '') ? '启动中…' : '立即执行' }}</button>
               <span
                 v-if="specCard(m).active"
                 class="text-[10px] text-ctp-overlay0"
