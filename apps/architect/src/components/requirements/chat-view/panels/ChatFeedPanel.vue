@@ -342,6 +342,24 @@ const emit = defineEmits<{
                 class="w-3 h-3 text-ctp-green"
               />
             </button>
+            <!-- cv-277: 长消息 最小化(头部3行)/展开(420px 滚动) 切换 + 放大弹窗 -->
+            <button
+              v-if="isLongMsg(m)"
+              class="text-ctp-overlay0 hover:text-ctp-blue transition-colors p-0.5"
+              :title="msgMinimized[msgKey(m, i)] ? '展开(420px 内滚动)' : '最小化(仅头部 3 行)'"
+              @click="toggleMsgMin(m, i)"
+            >
+              <svg v-if="msgMinimized[msgKey(m, i)]" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
+              <svg v-else class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15 3.75 20.25M15 9V4.5M15 9h4.5M15 9l5.25-5.25M15 15v4.5M15 15h4.5M15 15l5.25 5.25" /></svg>
+            </button>
+            <button
+              v-if="isLongMsg(m)"
+              class="text-ctp-overlay0 hover:text-ctp-blue transition-colors p-0.5"
+              title="放大查看全文"
+              @click="expandedMsg = { content: m.content }"
+            >
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" /></svg>
+            </button>
             <button
               v-if="m.role === 'assistant' && !m.item"
               class="text-ctp-overlay0 hover:text-ctp-mauve transition-colors p-0.5"
@@ -467,21 +485,7 @@ const emit = defineEmits<{
             >
               <ChatMessageBlocks :content="m.content" />
             </div>
-            <div
-              v-if="isLongMsg(m)"
-              class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity"
-            >
-              <button
-                class="chip !text-[9px] bg-ctp-base/90 text-ctp-subtext0 hover:text-ctp-blue"
-                :title="msgMinimized[msgKey(m, i)] ? '展开(420px 内滚动)' : '最小化(仅头部 3 行)'"
-                @click="toggleMsgMin(m, i)"
-              >{{ msgMinimized[msgKey(m, i)] ? '⌃ 展开' : '⌄ 最小化' }}</button>
-              <button
-                class="chip !text-[9px] bg-ctp-base/90 text-ctp-subtext0 hover:text-ctp-blue"
-                title="放大查看全文"
-                @click="expandedMsg = { content: m.content }"
-              >⤢ 放大</button>
-            </div>
+
           </div>
 
           <!-- 需求卡(cv-203/205 方案 A): 独立卡片消息 = 唯一宿主——
