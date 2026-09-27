@@ -19,16 +19,21 @@ CAPABILITIES: Dict[str, _CAPA] = {
         "multi_turn": True, "approval": True, "checkpoint": True,
         "readonly_hard": True, "steer": True,
         "workspace_rules": ".cline/rules", "workspace_agents": ".cline/agents",
+        # mcp_servers 载荷形状(turn_adapter 侧约定): cline sidecar=list,
+        # opencode=dict, codex adapter 不消费=""
+        "mcp_shape": "list",
     },
     "opencode": {
         "multi_turn": True, "approval": False, "checkpoint": False,
         "readonly_hard": False, "steer": False,
         "workspace_rules": "", "workspace_agents": "",
+        "mcp_shape": "dict",
     },
     "codex": {
         "multi_turn": True, "approval": False, "checkpoint": False,
         "readonly_hard": True, "steer": False,
         "workspace_rules": "", "workspace_agents": "",
+        "mcp_shape": "",
     },
 }
 

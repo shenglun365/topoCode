@@ -26,6 +26,9 @@ from ...agent.execution.runner_client import RunnerClient
 logger = logging.getLogger(__name__)
 
 RUNNER_BASE = os.environ.get("RUNNER_BASE_URL", "http://127.0.0.1:3458").rstrip("/")
+# architect 自身服务地址(runner 侧 turn_adapter 同名同缺省约定, 跨包一致)——
+# 执行器会话 MCP 默认接线(ctx.* 历史检索)的 URL 基址; env 可覆盖。
+ARCH_BASE = os.environ.get("ARCH_BASE_URL", "http://127.0.0.1:3470").rstrip("/")
 _TERMINAL = ("done", "failed", "stopped", "lost")   # 存量 jobs 账本终态(只读兼容)
 
 

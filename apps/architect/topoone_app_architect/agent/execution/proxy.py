@@ -20,6 +20,11 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger("arch_routes.exec_bridge")
 
+# cv-266 上下文组装(历史脉络/MCP 接线/工具告知)——proxy_ctx 单源, 再导出保住
+# 既有测试接缝(proxy._merge_mcp_servers 等)
+from .proxy_ctx import (  # noqa: E402
+    _HISTORY_CAP_DEFAULT, _history_brief, _merge_mcp_servers, _mcp_tools_brief)
+
 # conv_id -> {job_id, executor_type}（活跃直通会话; 进程级, 与 _TASK_PUMPS 同策略）
 _PROXY_JOBS: Dict[str, Dict[str, str]] = {}
 
@@ -237,8 +242,12 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         elif str(snap.get("status") or "") in _JOB_TERMINAL:
             _PROXY_JOBS.pop(conv_id, None)   # 终态 → 开启新的直通会话
         else:
+            # cv-266: 转达语境摘要(既有 digest 载荷)随 /input 携带, 与任务链同语义
+            _digest = str(data.get("digest") or "").strip()
+            _fwd = text if not _digest else (
+                f"{text}\n\n【用户转达的语境摘要】\n{_digest}")
             r = eb._runner(f"/api/implement/{job['job_id']}/input",
-                           {"text": text}, timeout=_t)
+                           {"text": _fwd}, timeout=_t)
             if r is None:
                 row = eb._append(conv_id, "assistant",
                                  "⚠️ 转发失败: runner 不可达(:3458)。",
@@ -265,7 +274,25 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
 
     from .context_pack import build_context_pack, render_context_pack_md
     pack = build_context_pack({}, conv, root)
-    instruction = (text + "\n\n" + render_context_pack_md(pack)).strip()
+    # cv-266: 历史脉络默认注入(确定性拼接, 容量执行器 config 可调, 0=关)
+    # + 用户"语境摘要"转达(digest 既有载荷, 此前在直通分支被丢弃)
+    parts = [text]
+    digest = str(data.get("digest") or "").strip()
+    if digest:
+        parts.append(f"【用户转达的语境摘要】\n{digest}")
+    hist_cap = ecfg.get("historyContextChars")
+    hist_cap = hist_cap if isinstance(hist_cap, int) and hist_cap >= 0 \
+        else _HISTORY_CAP_DEFAULT
+    brief = (_history_brief(conv_id, hist_cap,
+                            exclude_msg_ids={str(gate.get("last_user_msg_id") or "")})
+             if hist_cap else "")
+    if brief:
+        parts.append(brief)
+    parts.append(render_context_pack_md(pack))
+    instruction = "\n\n".join(p for p in parts if p.strip()).strip()
+    mcp = _merge_mcp_servers(ecfg, etype)
+    if mcp is not None:
+        payload_mcp = mcp
     payload: Dict[str, Any] = {
         "root": root, "projectId": (conv or {}).get("projectId") or "",
         "branchName": f"proxy/{int(time.time() * 1000) % 10 ** 10}",
@@ -286,8 +313,17 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         if isinstance(v, (int, float)) and v > 0:
             payload[k] = float(v)
     workspace_files = eb._build_workspace_files(etype, ecfg, {})
+    # cv-266: MCP 工具告知随约定文件下发(执行器不知工具存在就不会用;
+    # codex 无 MCP 面 → 不告知不虚报)
+    tools_brief = _mcp_tools_brief(conv_id, mcp)
+    if tools_brief:
+        workspace_files = list(workspace_files or [])
+        workspace_files.append({"path": "TOPO-CONTEXT-TOOLS.md",
+                                "content": tools_brief.strip()})
     if workspace_files:
         payload["workspaceFiles"] = workspace_files
+    if mcp is not None:
+        payload["mcp_servers"] = payload_mcp
     if model:
         payload["model"] = model
 
@@ -308,6 +344,7 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
                      msg_meta={"kind": "proxy"}, agent=etype)
     await _send_done(row)
     return True
+
 
 
 def _timeout_of(ecfg: dict) -> float:

@@ -436,3 +436,132 @@ def test_proxy_pump_crash_cleans_handle(arch_env, tmp_path, monkeypatch,
     msgs = store.ConversationsStore.messages(conv["id"], limit=10)
     assert any("事件泵异常退出" in (m.get("content") or "") for m in msgs), \
         "泵崩溃须落可见回执(用户不蒙在鼓里)"
+
+
+# ── cv-266 直通历史上下文(脉络注入/digest 接线/MCP 默认接线) ──────────────
+
+_MCP_ENV = {"topoone_app_architect.agent.execution.exec_bridge.ARCH_BASE":
+            "http://127.0.0.1:3470"}
+
+
+def test_history_brief_injected_into_start(arch_env, tmp_path, monkeypatch,
+                                           _isolate_proxy_state):
+    """有历史 → start instruction 含脉络段(排除本轮 user); 无历史 → 不含。"""
+    starts = _isolate_proxy_state
+    conv = _mk_conv(arch_env, tmp_path)
+    # 预置两轮历史
+    eb_ref = None
+    from topoone_app_architect.agent.execution import exec_bridge as _eb
+    _eb._append(conv["id"], "user", "评估一下项目进展")
+    _eb._append(conv["id"], "assistant", "已完成评估, 共 3 个模块",
+                msg_meta={"kind": "proxy"})
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(tmp_path / "proj"), ""))
+    monkeypatch.setenv("ARCH_DATA_DIR", str(tmp_path / "arch"))
+
+    asyncio.run(proxy_turn({}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=EXECUTOR_FIXTURE))
+    assert len(starts) == 1
+    instr = starts[0]["instruction"]
+    assert "此前对话脉络" in instr, "历史脉络段未注入"
+    assert "评估一下项目进展" in instr
+    assert "把日志清理脚本写一下" not in instr.split("此前对话脉络")[1], \
+        "本轮 user 消息不应出现在脉络里"
+
+
+def test_history_brief_cap_zero_off(arch_env, tmp_path, monkeypatch,
+                                    _isolate_proxy_state):
+    """执行器 config historyContextChars=0 → 关闭注入。"""
+    starts = _isolate_proxy_state
+    conv = _mk_conv(arch_env, tmp_path)
+    from topoone_app_architect.agent.execution import exec_bridge as _eb
+    _eb._append(conv["id"], "user", "历史轮次")
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(tmp_path / "proj"), ""))
+    ex = dict(EXECUTOR_FIXTURE, config={"rulesMd": "# r",
+                                        "historyContextChars": 0})
+    asyncio.run(proxy_turn({}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=ex))
+    assert "此前对话脉络" not in starts[0]["instruction"]
+    assert "把日志清理脚本写一下" in starts[0]["instruction"], "当前消息仍在"
+
+
+def test_digest_wired_into_start_and_forward(arch_env, tmp_path, monkeypatch,
+                                             _isolate_proxy_state):
+    """digest(语境摘要, 既有载荷)在直通分支不再被丢弃: start 并入 instruction,
+    活跃 job 随 /input 携带。"""
+    starts = _isolate_proxy_state
+    conv = _mk_conv(arch_env, tmp_path)
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(tmp_path / "proj"), ""))
+    ex = dict(EXECUTOR_FIXTURE, config={"rulesMd": "# r", "historyContextChars": 0})
+    asyncio.run(proxy_turn({"digest": "摘要: 前情提要ABC"}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=ex))
+    assert "前情提要ABC" in starts[0]["instruction"]
+    # 活跃 job 转发
+    captured: list = []
+    inputs: list = []
+
+    def fake_runner(path, payload=None, timeout=12.0):
+        captured.append((path, payload))
+        if path.startswith("/api/implement/") and path.endswith("/input"):
+            inputs.append(payload)
+            return {"ok": True}
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "job-px", "branch": "b",
+                    "worktree": payload["root"], "sessionId": "s",
+                    "baseCommit": "sha"}
+        return {"ok": True, "status": "running"}
+
+    from topoone_app_architect.agent.execution import exec_bridge as _eb
+    monkeypatch.setattr(_eb, "_runner", fake_runner)
+    asyncio.run(proxy_turn({"digest": "摘要: 续话语境XYZ"}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=ex))
+    assert inputs and "续话语境XYZ" in inputs[-1]["text"], "digest 未随 /input 转发"
+
+
+def test_mcp_default_wired_and_user_override(arch_env, tmp_path, monkeypatch,
+                                             _isolate_proxy_state):
+    """MCP 默认接线: cline=list(McpServerSpec)/opencode=dict; 用户同名自配优先;
+    codex 不注入不告知(不虚报能力)。"""
+    from topoone_app_architect.agent.execution import proxy as _px
+    # cline list 形状 + 工具告知文件
+    merged = _px._merge_mcp_servers({}, "cline-sdk")
+    assert isinstance(merged, list) and merged[0]["name"] == "topo-architect"
+    assert merged[0]["url"].endswith("/mcp")
+    # 用户自配优先(不重复)
+    user = [{"name": "topo-architect", "url": "http://custom/mcp"},
+            {"name": "other", "url": "http://x"}]
+    m2 = _px._merge_mcp_servers({"mcp_servers": user}, "cline-sdk")
+    assert m2 == user
+    # opencode dict 形状 + 同名覆盖
+    m3 = _px._merge_mcp_servers(
+        {"mcp_servers": {"topo-architect": {"url": "http://y"}}}, "opencode")
+    assert m3["topo-architect"]["url"] == "http://y"
+    # codex: 无 MCP 面
+    assert _px._merge_mcp_servers({}, "codex") is None
+    assert _px._mcp_tools_brief("cv-1", None) == ""
+
+    # start 载荷端到端: cline 带 mcp_servers + TOPO-CONTEXT-TOOLS.md 告知
+    starts = _isolate_proxy_state
+    conv = _mk_conv(arch_env, tmp_path)
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(tmp_path / "proj"), ""))
+    ex = dict(EXECUTOR_FIXTURE, config={"rulesMd": "# r", "historyContextChars": 0})
+    asyncio.run(proxy_turn({}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=ex))
+    p = starts[0]
+    assert isinstance(p.get("mcp_servers"), list)
+    assert p["mcp_servers"][0]["name"] == "topo-architect"
+    tools = [f for f in (p.get("workspaceFiles") or [])
+             if f["path"] == "TOPO-CONTEXT-TOOLS.md"]
+    assert tools and f'ctx.get(conversation="{conv["id"]}")' in tools[0]["content"]
