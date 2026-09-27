@@ -15,6 +15,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import SessionOutlineWindow from '@/components/chat/SessionOutlineWindow.vue'
+import ReqDetailWindow from '@/components/requirements/ReqDetailWindow.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { currentProjectParams } from '@/services/project-service'
@@ -434,6 +435,8 @@ const jobState = computed(() =>
 
 // RQ 状态徽标 + 登记簿完成标记(第二入口, 裁决#3/#8)
 const reqStatus = ref<{ id: string; status?: string; activeVer?: number } | null>(null)
+// cv-284 需求大窗(会话列表跟踪条点击入口; 共享组件双入口之二)
+const reqDetail = ref<{ requirementId: string; convId: string } | null>(null)
 const markDoneBusy = ref(false)
 async function refreshReqStatus() {
   if (!conv.activeReqId) { reqStatus.value = null; return }
@@ -888,13 +891,14 @@ async function pollRunningState() {
               :title="t('session.flow.recoverHint')"
               @click="recoverFlow"
             >{{ t('session.flow.recover') }}</button>
-            <span
+            <button
               v-if="reqStatus && (conv.activeMeta as any)?.status !== 'archived'"
-              class="chip !text-[10px]"
+              class="chip !text-[10px] cursor-pointer"
               :class="reqStatus.status === 'ready' ? 'bg-ctp-green/15 text-ctp-green'
                 : reqStatus.status === 'done' ? 'bg-ctp-overlay0/20 text-ctp-overlay1' : 'bg-ctp-surface0/60 text-ctp-subtext1'"
-              :title="t('session.reqState.title')"
-            >{{ conv.activeReqId }} · {{ t(`req.status.${reqStatus.status || 'raw'}`) }}<template v-if="reqStatus.activeVer"> v{{ reqStatus.activeVer }}</template></span>
+              :title="`${t('session.reqState.title')} — 点击放大查看需求(全文/版本/关联任务)`"
+              @click="reqDetail = { requirementId: String(conv.activeReqId), convId: conv.activeId }"
+            >{{ conv.activeReqId }} · {{ t(`req.status.${reqStatus.status || 'raw'}`) }}<template v-if="reqStatus.activeVer"> v{{ reqStatus.activeVer }}</template></button>
             <button
               v-if="reqStatus?.status === 'ready' || reqStatus?.status === 'done'"
               class="btn !py-0 !px-1.5 !text-[10px]"
@@ -963,6 +967,14 @@ async function pollRunningState() {
     <SessionOutlineWindow
       v-if="props.outline && outlineOpen"
       @close="outlineOpen = false"
+    />
+
+    <!-- cv-284 需求大窗(会话列表跟踪条入口): 全文/版本切换/关联任务/立即执行 -->
+    <ReqDetailWindow
+      v-if="reqDetail"
+      :requirement-id="reqDetail.requirementId"
+      :conv-id="reqDetail.convId"
+      @close="reqDetail = null"
     />
   </aside>
 </template>
