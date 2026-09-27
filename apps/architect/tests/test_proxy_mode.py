@@ -348,3 +348,44 @@ def test_executor_model_names_cline_live_projection(monkeypatch):
     assert s._executor_model_names(cline) == ["LMS-a", "LMS-b"]
     other = {"id": "ex", "type": "opencode", "config": {"models": [{"name": "x"}]}}
     assert s._executor_model_names(other) == ["x"]
+
+
+def test_proxy_stream_text_grows_single_card(arch_env, tmp_path,
+                                             _isolate_proxy_state):
+    """cv-263 流式可见性: text 事件增量落单卡(原位生长), 终态收尾同卡。
+
+    用户实证(cv-261): 直通后 3.5 分钟执行期 UI 零反馈——此前 text 只累积,
+    终态才一次性 flush。锁定: ①节流窗口内多段 text → 同一 messageId 原位
+    UPDATE(不刷屏); ②SSE conv-message 随更新发出; ③done 收尾余量+后缀
+    并入同卡; ④终态清 _PROXY_JOBS。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-px", "executor_type": "cline-sdk"}
+    emitted: list = []
+    import topoone_app_architect.agent.collab.cards as cards_mod
+    import topoone_app_architect.agent.execution.proxy as _px
+    orig_flush_ms, _px._PROXY_FLUSH_MS = _px._PROXY_FLUSH_MS, 0
+    orig_emit = cards_mod.emit
+    cards_mod.emit = lambda cid, mid, agent="", kind="": (
+        emitted.append((cid, mid, kind)), orig_emit(cid, mid, agent=agent, kind=kind))
+    try:
+        on_event, _snap, _lost, _flush = _px._make_handlers(
+            conv["id"], "job-px", "cline-sdk")
+        on_event({"kind": "text", "text": "第一段 分析开始\n"})
+        on_event({"kind": "text", "text": "第二段 依赖图\n"})
+        on_event({"kind": "text", "text": "第三段"})
+        msgs = store.ConversationsStore.messages(conv["id"], limit=10)
+        body = [m for m in msgs if (m.get("meta") or {}).get("kind") == "proxy"]
+        assert len(body) == 1, "多段 text 应落同一张卡(原位生长不刷屏)"
+        first_id = body[0]["id"]
+        for seg in ("第一段", "第二段", "第三段"):
+            assert seg in body[0]["content"]
+        on_event({"kind": "done", "text": ""})
+        msgs3 = store.ConversationsStore.messages(conv["id"], limit=10)
+        body3 = [m for m in msgs3 if (m.get("meta") or {}).get("kind") == "proxy"]
+        assert len(body3) == 2, "done 后缀独立收尾卡"
+        assert "✅ 本轮完成" in body3[0]["content"] and "第三段" in body3[0]["content"]
+        assert conv["id"] not in proxy._PROXY_JOBS, "终态清句柄"
+        assert any(e[0] == conv["id"] for e in emitted), "SSE conv-message 已通知"
+    finally:
+        cards_mod.emit = orig_emit
+        _px._PROXY_FLUSH_MS = orig_flush_ms

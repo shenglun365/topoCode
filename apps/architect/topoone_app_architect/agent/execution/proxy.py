@@ -36,25 +36,60 @@ def proxy_job_of(conv_id: str) -> Optional[Dict[str, str]]:
     return _PROXY_JOBS.get(conv_id)
 
 
-def _start_pump(conv_id: str, job_id: str, etype: str) -> None:
-    """直通事件泵(薄壳): 事件→会话 assistant 消息; 终态清 _PROXY_JOBS。"""
-    from ...agent.execution import pumps as _pumps
+# 直通正文卡节流落库间隔: 执行器流式 text 增量原位更新(单卡生长, cv-263——
+# 此前 text 只累积不落库, 3.5 分钟执行期 UI 零反馈, 终态一次性 flush)。
+_PROXY_FLUSH_MS = 400
+
+
+def _make_handlers(conv_id: str, job_id: str, etype: str):
+    """泵回调组(独立函数以便特征测试直接驱动): (on_event, on_snapshot, on_lost)。
+
+    cv-263 流式可见性: text 事件增量落单卡(kind=proxy, jobId 定位)——首段
+    land, 后续原位 UPDATE + SSE 通知(task_status 单卡先例), UI 同一条消息
+    持续生长; 终态/输入等待时收尾余量+状态后缀。"""
+    import time as _time
+    from ...agent.collab import cards as _cards
     from . import exec_bridge as eb
 
-    buf: Dict[str, Any] = {"text": ""}
+    buf: Dict[str, Any] = {"text": "", "row": None, "at": 0.0}
+    meta = {"kind": "proxy", "jobId": job_id}
+
+    def _persist(text: str) -> None:
+        """正文单卡 upsert: 首段 land 建卡, 后续原位 UPDATE + SSE 通知。"""
+        if not text:
+            return
+        if buf["row"] is None:
+            buf["row"] = eb._append(conv_id, "assistant", text,
+                                    msg_meta=dict(meta), agent=etype)
+            return
+        try:
+            row = _store_update(conv_id, meta, text)
+            if row:
+                _cards.emit(conv_id, str(row.get("id") or ""),
+                            agent=etype, kind="proxy")
+        except Exception:  # noqa: BLE001 — 更新失败回落重落新卡
+            buf["row"] = eb._append(conv_id, "assistant", text,
+                                    msg_meta=dict(meta), agent=etype)
+
+    def _store_update(cid: str, m: dict, text: str) -> dict | None:
+        from ... import store as _st
+        return _st.ConversationsStore.update_message_by_meta(
+            cid, m, {"content": text})
 
     def _flush(suffix: str = "") -> None:
         text = (buf.pop("text", "") or "").strip()
-        if text or suffix:
-            eb._append(conv_id, "assistant",
-                       (text + ("\n\n" + suffix if suffix else "")).strip(),
-                       msg_meta={"kind": "proxy"},
-                       agent=etype)
+        _persist((text + ("\n\n" + suffix if suffix else "")).strip()
+                 if (text or suffix) else "")
+        buf["row"] = None   # 回合结束, 下轮执行器输出重新建卡
 
     def on_event(ev: dict) -> None:
         kind = ev.get("kind") or ""
         if kind == "text":
             buf["text"] = (buf["text"] + str(ev.get("text") or ""))[-6000:]
+            now = _time.monotonic() * 1000
+            if now - buf["at"] >= _PROXY_FLUSH_MS:
+                buf["at"] = now
+                _persist(buf["text"])
         elif kind == "input_required":
             _flush("⏸ 执行器等待你的输入——直接回复即可(继续直通)。")
         elif kind == "notice":
@@ -80,6 +115,16 @@ def _start_pump(conv_id: str, job_id: str, etype: str) -> None:
         entry = _PROXY_JOBS.get(conv_id)
         if sid and entry and entry.get("job_id") == job_id:
             entry["session_ref"] = sid
+
+    return on_event, on_snapshot, on_lost, _flush
+
+
+def _start_pump(conv_id: str, job_id: str, etype: str) -> None:
+    """直通事件泵(薄壳): 回调组(_make_handlers)+事件循环挂载; 终态清句柄。"""
+    from ...agent.execution import pumps as _pumps
+    from . import exec_bridge as eb
+    on_event, on_snapshot, on_lost, _flush = _make_handlers(
+        conv_id, job_id, etype)
 
     async def _pump():
         try:
