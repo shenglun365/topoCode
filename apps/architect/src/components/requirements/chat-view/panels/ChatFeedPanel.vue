@@ -576,10 +576,10 @@ const emit = defineEmits<{
                 class="btn btn-xs btn-primary"
                 :disabled="busy || specCard(m).active"
                 :title="specCard(m).active
-                  ? `该需求已有进行中的任务（${specCard(m).activeStatus}）——不可重复执行`
-                  : '按规约启动 coding subagent（融合执行，直接写入项目目录）'"
+                  ? `该需求已有进行中的任务（${specCard(m).activeStatus}）`
+                  : '按规约生成任务计划——任务卡确认后才开始执行'"
                 @click="emit('send', { text: '/执行' })"
-              >{{ specCard(m).active ? '执行中' : '执行' }}</button>
+              >{{ specCard(m).active ? '任务执行中' : '任务生成' }}</button>
               <span
                 v-if="specCard(m).active"
                 class="text-[10px] text-ctp-overlay0"
@@ -587,10 +587,10 @@ const emit = defineEmits<{
               <span
                 v-else
                 class="text-[10px] text-ctp-overlay0"
-              >启动 coding subagent（融合执行）</span>
+              >按规约生成任务计划（任务卡确认后执行）</span>
             </div>
             <div v-else class="mt-1.5 text-[10px] text-ctp-overlay0">
-              历史版本快照——执行请使用最新版需求卡（上下文交接始终取台账最新规约）
+              历史版本快照——任务生成请使用最新版需求卡（上下文交接始终取台账最新规约）
             </div>
           </div>
 
