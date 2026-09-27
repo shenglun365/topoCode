@@ -278,15 +278,20 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
                 await _send_done()   # 纯转发静默成功: 收口清占位泡, 产出经泵+SSE 呈现
             return True
 
-    # 首次启动: 隔离决策(cv-202 同口径: 会话隔离开关) + 脏工作区门禁
+    # 首次启动: 隔离决策(cv-202 同口径: 会话隔离开关) + 脏工作区处置
     worktree = bool((conv or {}).get("isolated"))
+    dirty_note = ""
     if not worktree and root and _dirty_worktree(root):
-        row = eb._append(conv_id, "assistant",
-                         "⚠️ 工作区有未提交变更(可能来自其它开发进程)——直通执行器已拒绝"
-                         "就地启动，避免互踩。请先处理变更，或开启会话隔离开关。",
-                         msg_meta={"kind": "proxy"})
-        await _send_done(row)
-        return True
+        # cv-269 软化(用户实证 cv-264 自干扰死锁: 架构注入文件自身弄脏工作区
+        # → 下轮被拒): 直通=chat 角色(用户逐轮在环, 三原则不强硬保底)——
+        # 警告+边界提醒后继续; 任务链 dispatch 硬闸不变(自治执行仍防互踩)
+        dirty_note = ("⚠️ 工作区存在未提交变更（可能来自其它开发进程）——"
+                      "融合模式已启动，执行器将注意变更边界。")
+        eb._append(conv_id, "assistant",
+                   f"⚠️ 工作区有未提交变更（可能来自其它开发进程）——已以"
+                   f"融合模式继续启动。执行器被要求不回滚/不提交/不清理与"
+                   f"本次诉求无关的变更。如需完全隔离，请开启会话隔离开关。",
+                   msg_meta={"kind": "proxy"})
 
     from .context_pack import build_context_pack, render_context_pack_md
     pack = build_context_pack({}, conv, root)
@@ -304,6 +309,10 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
              if hist_cap else "")
     if brief:
         parts.append(brief)
+    if dirty_note:
+        parts.append("【工作区提示】当前工作区存在未提交变更（可能来自其它开发进程）。"
+                     "不要回滚、提交(stash/checkout/clean/commit)或清理任何与本次诉求"
+                     "无关的变更；你的修改应聚焦本次诉求涉及的范围。")
     parts.append(render_context_pack_md(pack))
     instruction = "\n\n".join(p for p in parts if p.strip()).strip()
     mcp = _merge_mcp_servers(ecfg, etype)
@@ -332,13 +341,14 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         if isinstance(v, (int, float)) and v > 0:
             payload[k] = float(v)
     workspace_files = eb._build_workspace_files(etype, ecfg, {})
-    # cv-266: MCP 工具告知随约定文件下发(执行器不知工具存在就不会用;
-    # codex 无 MCP 面 → 不告知不虚报)
+    # cv-266/cv-269: MCP 工具告知并入 instruction(此前独立落盘
+    # TOPO-CONTEXT-TOOLS.md 会弄脏融合模式工作区 → 脏区门禁自干扰死锁);
+    # codex 无 MCP 面 → 不告知不虚报
     tools_brief = _mcp_tools_brief(conv_id, mcp)
     if tools_brief:
-        workspace_files = list(workspace_files or [])
-        workspace_files.append({"path": "TOPO-CONTEXT-TOOLS.md",
-                                "content": tools_brief.strip()})
+        parts.insert(-1, tools_brief.strip())   # 契约段之前
+        instruction = "\n\n".join(p for p in parts if p.strip()).strip()
+        payload["instruction"] = instruction    # payload 已装配, 同步回写
     if workspace_files:
         payload["workspaceFiles"] = workspace_files
     if mcp is not None:
@@ -358,7 +368,7 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     _start_pump(conv_id, sr.job_id, etype)
     row = eb._append(conv_id, "assistant",
                      f"🔗 已直通执行器 `{etype}`(job `{sr.job_id}`，"
-                     f"{'隔离 worktree' if worktree else '就地模式'})"
+                     f"{'隔离 worktree' if worktree else '融合模式'})"
                      "——本轮起你的消息直接发给执行器，architect 仅做通道。",
                      msg_meta={"kind": "proxy"}, agent=etype)
     await _send_done(row)

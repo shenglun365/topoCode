@@ -23,11 +23,11 @@ def test_runtime_identity_injected():
 
 
 def test_runtime_identity_inplace():
-    """cv-205 就地形态: 事实相反——修改直接生效, 谨慎对待用户环境。"""
+    """cv-205 融合形态: 事实相反——修改直接生效, 谨慎对待用户环境。"""
     text = assemble_task_instruction(
         {"title": "T", "instruction": "改一下登录页"},
         runtime={"root": "/home/u/proj", "workspace": "inplace"})
-    assert "就地执行" in text and "没有隔离副本" in text
+    assert "融合执行" in text and "没有隔离副本" in text
     assert "不在**主目录工作" not in text
     assert "HTTP 探测 200" not in text      # 该红线仅属隔离形态
 

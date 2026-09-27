@@ -474,7 +474,7 @@ const emit = defineEmits<{
                 :disabled="busy || specCard(m).active"
                 :title="specCard(m).active
                   ? `该需求已有进行中的任务（${specCard(m).activeStatus}）——不可重复执行`
-                  : '按规约启动 coding subagent（就地执行，直接写入项目目录）'"
+                  : '按规约启动 coding subagent（融合执行，直接写入项目目录）'"
                 @click="emit('send', { text: '/执行' })"
               >{{ specCard(m).active ? '执行中' : '执行' }}</button>
               <span
@@ -484,7 +484,7 @@ const emit = defineEmits<{
               <span
                 v-else
                 class="text-[10px] text-ctp-overlay0"
-              >启动 coding subagent（就地执行）</span>
+              >启动 coding subagent（融合执行）</span>
             </div>
             <div v-else class="mt-1.5 text-[10px] text-ctp-overlay0">
               历史版本快照——执行请使用最新版需求卡（上下文交接始终取台账最新规约）

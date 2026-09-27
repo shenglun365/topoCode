@@ -504,7 +504,7 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     if (not payload["worktree"] and _safety != ST.SAFETY_READONLY
             and _dirty_worktree(root)):
         _gate_msg = ("工作区有未提交变更(可能来自其它开发进程)——为避免互踩已拒绝"
-                     "就地执行。请先处理变更，或开启会话隔离开关后重试。")
+                     "融合执行。请先处理变更，或开启会话隔离开关后重试。")
         store.TasksStore.finish(task_id, "failed", _gate_msg)
         return {"ok": False, "error": _gate_msg}
     payload["instruction"] = _eb()._task_instruction(task, _eb()._task_chain_brief(conv_id, task_id),
@@ -593,7 +593,7 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     # cv-203: 启动状态独立专用状态卡(原位更新), 不再落 🚀 文本回执——
     # 状态/进度不与文本混流; 就地/隔离形态与回落提示进状态卡附注
     _loc = ("隔离 worktree" if (sr.workspace or "inplace") == "worktree"
-            else "就地模式(直接写入项目目录)")
+            else "融合模式(直接写入项目目录)")
     _note = f"`{sr.job_id}` · {_loc}"
     _warn = str((sr.raw or {}).get("notice") or "")
     if _warn:

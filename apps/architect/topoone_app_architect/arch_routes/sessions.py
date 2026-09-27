@@ -687,7 +687,7 @@ async def set_isolated(conv_id: str, request: Request):
     store.ConversationsStore.update(conv_id, {"isolated": 1 if on else 0})
     return ok({"conversationId": conv_id, "isolated": on,
                "summary": "隔离模式已开启(任务在 worktree 分支作业, 合并后生效)"
-               if on else "就地模式(直接写入项目目录)"})
+               if on else "融合模式(直接写入项目目录)"})
 
 
 @router.post("/sessions/{conv_id}/clarify-mode")

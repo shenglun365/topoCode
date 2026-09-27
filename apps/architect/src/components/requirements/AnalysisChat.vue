@@ -66,7 +66,7 @@ const props = defineProps<{
   analysisMode?: 'strict' | 'quick'
   /** 需求澄清挡位(cv-190): auto(自动, 缺口驱动) | forced(强制, 先澄清后落卡)。 */
   clarifyMode?: 'auto' | 'forced'
-  /** worktree 隔离模式(cv-202): false=就地(缺省) | true=显式要求隔离执行。 */
+  /** worktree 隔离模式(cv-202): false=融合(缺省) | true=显式要求隔离执行。 */
   isolated?: boolean
   /** 会话是否已存在: false=空白对话(记录未创建)——挡位是会话级字段无处可写, 直切钮禁用+提示。 */
   hasSession?: boolean

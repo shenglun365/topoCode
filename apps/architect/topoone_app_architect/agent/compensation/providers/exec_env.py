@@ -28,7 +28,7 @@ def work_env_section(workspace: str = "inplace") -> str:
                 "先浏览仓库(README/构建文件/目录结构)理解项目, 再动手。\n"
                 + common_tail)
     return ("## 工作环境(重要, 先读)\n"
-            "- 你在项目源码目录**就地执行**(pwd 即源码树根), 你的修改**直接生效"
+            "- 你在项目源码目录**融合执行**(pwd 即源码树根), 你的修改**直接生效"
             "于用户的项目目录**——先浏览仓库(README/构建文件/目录结构)理解项目, "
             "再动手。\n"
             "- 就地模式**没有 git 隔离**: 不要执行 git 提交/分支/回退类写操作"
@@ -54,7 +54,7 @@ def runtime_identity_section(workspace: str, branch: str, root: str) -> str:
                      "**禁止**把「主目录服务的 HTTP 探测 200」当作完成依据——"
                      "那不是你的产出。")
         return "\n".join(ident)
-    ident.append("- 你在用户项目目录**就地执行**, 修改直接写入该目录——没有隔离副本。")
+    ident.append("- 你在用户项目目录**融合执行**, 修改直接写入该目录——没有隔离副本。")
     if root:
         ident.append(f"- 项目根: `{root}`——即你的工作目录本身。")
     ident.append("- 验收事实约定: 构建/测试/检查在本目录执行, 结果即真实结果; "

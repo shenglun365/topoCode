@@ -36,7 +36,7 @@ def merge_precheck(task_id: str) -> Dict[str, Any]:
     if str(task.get("workspace") or "") == "inplace":
         return {"ok": True, "checkable": False, "fastForward": None,
                 "mainNewCommits": [], "branchCommits": [],
-                "advice": "就地模式任务——变更已直接生效于项目目录, 无需合并。"}
+                "advice": "融合模式任务——变更已直接生效于项目目录, 无需合并。"}
     base = str(task.get("baseCommit") or "")
     branch = str(task.get("branch") or "")
     conv = store.ConversationsStore.get(task.get("conversationId") or "") or {}
@@ -201,7 +201,7 @@ def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
         return pre
     if not pre.get("checkable"):
         # 就地任务: 变更已生效——直接记 merged 终态(无 git 动作)
-        if "就地模式" in str(pre.get("advice") or ""):
+        if "融合模式" in str(pre.get("advice") or ""):
             import time as _t
             return store.TasksStore.update(task_id, {
                 "mergedAt": int(_t.time() * 1000),

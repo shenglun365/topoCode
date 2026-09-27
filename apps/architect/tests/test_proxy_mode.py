@@ -166,15 +166,20 @@ def test_proxy_followup_forwards_input(arch_env, tmp_path, monkeypatch):
     assert len([p for p, _ in captured if p == "/api/implement"]) == n_impl
 
 
-def test_proxy_dirty_repo_rejected(arch_env, tmp_path, monkeypatch):
+def test_proxy_dirty_repo_warns_and_proceeds(arch_env, tmp_path, monkeypatch,
+                                             _isolate_proxy_state):
+    """cv-269 软化: 直通=chat 角色(用户逐轮在环, 不强硬保底)——脏工作区
+    警告+边界提醒后继续启动; 任务链 dispatch 硬闸不变(自治执行防互踩)。
+
+    根因回归(cv-264): 架构注入文件(TOPO-CONTEXT-TOOLS.md)落盘自弄脏工作区
+    → 下轮被自家门禁拒死。已改 instruction 并入(不落盘)+门禁软化。"""
     import subprocess
     root = tmp_path / "proj"
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     (root / "wip.txt").write_text("其它进程半成品")
     conv = _mk_conv(arch_env, tmp_path)
-    captured: list = []
-    _mock_runner(monkeypatch, captured)
+    starts = _isolate_proxy_state
     monkeypatch.setattr(
         "topoone_app_architect.arch_routes.execution.conv_root_project",
         lambda c: (str(root), ""))
@@ -183,8 +188,11 @@ def test_proxy_dirty_repo_rejected(arch_env, tmp_path, monkeypatch):
     assert asyncio.run(proxy_turn({}, _gate(conv), sn, root=str(root),
                                   project="", executor=EXECUTOR_FIXTURE)) is True
     assert sn.closed
-    assert not [p for p, _ in captured if p == "/api/implement"]
-    assert proxy.proxy_job_of(conv["id"]) is None
+    assert len(starts) == 1, "脏区应警告后继续启动(不再硬拒)"
+    assert "未提交变更" in starts[0]["instruction"], "执行器侧边界提醒缺失"
+    msgs = store.ConversationsStore.messages(conv["id"], limit=10)
+    assert any("融合模式继续启动" in (m.get("content") or "") for m in msgs), \
+        "用户侧提醒收执缺失"
 
 
 def test_proxy_without_executor_explicit_error(arch_env, tmp_path, monkeypatch):
@@ -562,9 +570,10 @@ def test_mcp_default_wired_and_user_override(arch_env, tmp_path, monkeypatch,
     p = starts[0]
     assert isinstance(p.get("mcp_servers"), list)
     assert p["mcp_servers"][0]["name"] == "topo-architect"
-    tools = [f for f in (p.get("workspaceFiles") or [])
-             if f["path"] == "TOPO-CONTEXT-TOOLS.md"]
-    assert tools and f'ctx.get(conversation="{conv["id"]}")' in tools[0]["content"]
+    assert "workspaceFiles" not in p or not [
+        f for f in p["workspaceFiles"] if f["path"] == "TOPO-CONTEXT-TOOLS.md"
+    ], "工具告知不得再落盘(cv-269: 融合模式自弄脏工作区)"
+    assert f'ctx.get(conversation="{conv["id"]}")' in p["instruction"]
 
 
 # ── cv-267 对话回合制(sessionRole=chat 端到端) ───────────────────────────

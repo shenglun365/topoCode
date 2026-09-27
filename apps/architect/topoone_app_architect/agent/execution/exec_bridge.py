@@ -646,7 +646,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         # cv-203 P3: 形态标签按任务 workspace 分叉(就地任务无分支, 分支名是
         # 建卡提案字段——展示它会误导)
         _loc = (f"分支 `{_trow.get('branch') or ''}`(隔离)"
-                if (_trow.get("workspace") or "") == "worktree" else "就地模式")
+                if (_trow.get("workspace") or "") == "worktree" else "融合模式")
         _append(conv_id, "assistant",
                 f"✅ **任务完成**「{title}」· {_loc}\n\n{clean}\n\n"
                 f"**变更文件**：\n{files}\n\n---\n**验收简报**\n{brief}{gap_note}",

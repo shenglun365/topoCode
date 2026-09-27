@@ -103,7 +103,7 @@ function toggleClarifyMode() {
   emit('set-clarify-mode', clarifyForced.value ? 'auto' : 'forced')
 }
 
-/** worktree 隔离挡位(cv-202): 缺省就地; 显式开启后任务在 worktree 分支作业。 */
+/** worktree 隔离挡位(cv-202): 缺省融合模式; 显式开启后任务在 worktree 分支作业。 */
 const isolatedOn = computed(() => !!props.isolated)
 const isolatedTitle = computed(() => {
   if (props.hasSession === false) return (isolatedOn.value
@@ -111,7 +111,7 @@ const isolatedTitle = computed(() => {
     : '隔离模式 关(预置) — 首条消息创建会话后生效')
   return isolatedOn.value
     ? '隔离模式 开 — 任务在独立 worktree 分支作业, 完成后合并回项目目录（点击关闭）'
-    : '隔离模式 关 — 直接写入项目目录（点击开启隔离）'
+    : '融合模式 关 — 直接写入项目目录，改动即时生效（点击切换隔离模式）'
 })
 function toggleIsolated() {
   emit('set-isolated', !isolatedOn.value)

@@ -376,7 +376,7 @@ def test_task_lifecycle_e2e(tmp_path, monkeypatch):
     assert t["branch"] == "task/v2-1"
     _impl_calls = [pl for p, pl in calls["implement"] if p == "/api/implement"]
     assert _impl_calls and _impl_calls[0]["instruction"]          # 指令非空(系统段+正文)
-    assert "就地执行" in _impl_calls[0]["instruction"]            # 环境段注入(缺省就地 cv-205)
+    assert "融合执行" in _impl_calls[0]["instruction"]            # 环境段注入(缺省就地 cv-205)
     assert store.ConversationsStore.get(conv["id"])["workState"] == "running"
     # ③ input_required: 消息 agent=executor + waiting_input
     ctx = eb._task_ctx(conv["id"], task["id"], "job-v2-1", "", "opencode")
@@ -454,7 +454,7 @@ def test_task_instruction_injects_spec_and_env(tmp_path, monkeypatch):
         "instruction": "目标: X\n方案: Y", "status": "pending_confirm"})
     txt = eb._task_instruction(task)
     assert "任务上下文" in txt and "目标: X" in txt          # 正文为主体
-    assert "就地执行" in txt and "[[IMPLEMENT_DONE]]" in txt  # 环境段(缺省就地)+系统段
+    assert "融合执行" in txt and "[[IMPLEMENT_DONE]]" in txt  # 环境段(缺省就地)+系统段
     assert "modules/x/" in txt and "构建通过" in txt          # 规约补充
     assert "方案Z" in txt                                     # designMd
 
@@ -719,7 +719,7 @@ def test_done_receipt_suspect_summary_and_inplace_label(tmp_path, monkeypatch):
     msgs = store.ConversationsStore.messages(conv["id"])
     done = [m for m in msgs if (m.get("meta") or {}).get("kind") == "task_done"][-1]
     assert "未附规范完成摘要" in done["content"]
-    assert "就地模式" in done["content"]
+    assert "融合模式" in done["content"]
     assert "分支" not in done["content"], "就地任务不应显示分支标签"
     assert "a.py" in done["content"] and "b.ts" in done["content"]
     # 台账 result_md 同步降级(不存计划重印)
@@ -747,8 +747,8 @@ def test_exec_env_form_aware(tmp_path, monkeypatch):
     from topoone_app_architect.agent.compensation.providers.exec_env import (
         runtime_identity_section, work_env_section)
     inplace, wt = work_env_section("inplace"), work_env_section("worktree")
-    assert "就地执行" in inplace and "没有 git 隔离" in inplace
-    assert "worktree 分支" in wt and "就地执行" not in wt
+    assert "融合执行" in inplace and "没有 git 隔离" in inplace
+    assert "worktree 分支" in wt and "融合执行" not in wt
     assert work_env_section() == inplace               # 缺省 = 就地
     assert "没有隔离副本" in runtime_identity_section("inplace", "", "/r")
     assert "不在**主目录工作" in runtime_identity_section("worktree", "task/1", "/r")

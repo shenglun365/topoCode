@@ -337,7 +337,7 @@ async function maybeHintWeakModel() {
 const analysisMode = ref<'strict' | 'quick'>('strict')
 /** 需求澄清挡位(cv-190): auto | forced——随会话打开从真相源同步。 */
 const clarifyMode = ref<'auto' | 'forced'>('auto')
-/** worktree 隔离模式(cv-202): 缺省就地。 */
+/** worktree 隔离模式(cv-202): 缺省融合模式。 */
 const isolated = ref(false)
 // cv-265: 首条消息创建会话时 activeId 先变而 activeMeta 未加载(done 后
 // refreshActiveMeta 才回填)——旧 watcher 此刻把三挡重置为默认, 预置的
