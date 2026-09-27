@@ -75,3 +75,13 @@ KB 重建功能**待重新规划**（用户裁决 2026-09-26，稍后再议—�
 **测试超时纪律**: 单文件≤120s/全量≤300s(超时即定位, 不加大超时)。
 | cv-273 | 直通执行器控制与会话延续: 复活链(sessionRef 持久化+start 回传)/停止通道(REST proxy-stop+泵终态收尾)/steer 消费(cline 直达, 他器回落排队)/会话控制条(turnCount+停止钮) | ✅ cfd8f705 |
 | cv-274 | 控制条数据链修复(text 双路进过程流——lastText 预览死面)+FE 诊断布点(到达/落 map/渲染三断点)+渲染探针 | ✅ e5b9bdde/bbb6c8f1，**cv-269 实测通过**(2026-09-27: 渲染 LIVE/工具自计数 0→20/折叠'本轮共 8 次'全对) |
+| cv-275 | 持久会话状态条(REST proxy-state 真相源)+停止分型(running→abort/空闲→finish) | ✅ c55d1cf7 |
+| cv-276/277/278 | 长消息折叠阅读(420px 滚动+⤢放大弹窗+最小化/展开切换 SVG 钮)+toolbar-extra 恢复+ChatFeedPanel attrs | ✅ e2d975bd/dafcb76c/5066a154 |
+| **cv-279~281** | **需求卡细化(用户实证 cv-271)**: 需求卡编辑(EditSpecModal+PUT content, 版本链 append 旧版快照行永不改动——防已执行需求与任务 specVer 对应错乱)/「执行」→「任务生成」改名/「立即执行」单任务直发(execute_requirement_now 单源复用 propose→confirm) | ✅ e616e420/b59d7215/bf3cefd5 |
+| **cv-282** | **脏区门禁问询化**(用户裁决: 硬闸命中给问询提示等反馈后处理): P3 门禁不再一次失败——waiting_input+choices 问询卡(稳定 key 单源/fingerprint 原位更新)+gate_ask.py 拆分(resolve_dirty_gate: 隔离重试/干净后重试/取消, 全程 confirm_task 单源门禁不削弱) | ✅ caed4624 |
+| **cv-283** | **任务卡归一**(用户裁决: proxy 卡升级同构): 直通作业 JobCard(TaskCard 同族)——meta 作业快照键+终态/停止状态回写原位更新+items.py 统一投影 type=job | ✅ 5b6bd4db |
+| **cv-284** | **需求浮层大窗**: ReqDetailWindow 双入口共享组件(消息流放大钮+会话列表跟踪条点击)——全文/版本切换器(specVersions 只读浏览)/编辑入口/任务生成/立即执行/关联任务清单(specVer 标注) | ✅ 6fe487af |
+| **cv-285** | **执行详情窗(方案甲 双源统一)**: exec_control.py 统一视图模型(taskId\|jobId)+单一控制面(pause/resume/stop/input)+ExecutionDetailWindow(入口: TaskCard/JobCard 组件内放大钮自持)+信息补充/问询回答转达 | ✅ 7defd2ff |
+
+**cv-279~285 批次纪律执行**: 单源复用零并行通道(spec_append/propose→confirm/task_input/confirm_task 全链既有); 门禁不削弱(无 bypass); 稳定 key 非 UI 文本匹配; 行数基线登记(dispatch 966/gate_ask 90/proxy 479/sessions_tasks 282/exec_control 146)。门禁: BE 1211+FE 64+TSC 0。
+
