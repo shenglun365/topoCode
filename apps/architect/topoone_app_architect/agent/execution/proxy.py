@@ -119,6 +119,14 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             # 头部 6000 字符被挤掉); 失控保护归 runner loopguard(按输出/
             # 工具频次熔断), architect 侧不再二次截断
             buf["text"] = (buf.get("text") or "") + str(ev.get("text") or "")
+            # cv-273: 过程流同步(0.5s 节流)——控制条活动文本预览(此前 text
+            # 只进卡片缓冲, 过程流 lastText 恒空=预览死面, cv-266 实证)
+            from . import process_stream as _ps
+            prog = _ps.apply_event(_ps.proxy_progress(conv_id), ev)
+            if prog is not None:
+                _ps.proxy_store(conv_id, prog)
+                _ps.publish(conv_id, f"proxy:{conv_id}", prog,
+                            throttle=_ps.sse_throttle("text"), jobId=job_id)
             now = _time.monotonic() * 1000
             if now - buf["at"] >= _PROXY_FLUSH_MS:
                 buf["at"] = now

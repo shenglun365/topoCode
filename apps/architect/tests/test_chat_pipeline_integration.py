@@ -400,3 +400,87 @@ def test_sessions_list_passthrough_meta(client):
     rows = client.get("/api/architect/sessions").json()["data"]
     hit = next(r for r in rows if r["id"] == conv["id"])
     assert hit["meta"]["ctxUsage"]["used"] == 7
+
+
+def test_full_pipeline_proxy_process_events_sse(pipeline, monkeypatch):
+    """cv-273 e2e: 直通回合的 runner 过程事件(text/tool)经真实泵 → SSE progress
+    (conversationId 键, 无 taskId)——控制条数据链后端实锤。
+
+    复现断点排查(用户实证 cv-268 控制条不显示): 后端形状逐帧可查。"""
+    from topoone_app_architect.agent.execution import exec_bridge as eb
+    from topoone_app_architect.agent.collab import sse
+    client, gw, tmp = pipeline
+    store.CollabConfigStore.set("agent.executors", json.dumps([
+        {"id": "cline", "type": "cline-sdk", "enabled": True, "default": True,
+         "config": {"models": [{"name": "M1", "model": "m-1",
+                                "url": "http://x/v1"}]}}]))
+    root = tmp / "proj"
+    root.mkdir()
+    (root / "README.md").write_text("# P\n")
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(root), "proj-it"))
+
+    class _FakeSR:
+        ok = True
+        job_id = "job-pe"
+        branch = "proxy/x"
+        worktree = str(root)
+        session_id = "sess-native-e2e"
+        base_commit = "sha"
+        workspace = "inplace"
+        raw = {}
+        error = ""
+
+    class _FakeClient:
+        def start_implement(self, payload, timeout=20.0):
+            return _FakeSR()
+
+    monkeypatch.setattr(eb, "_client", lambda: _FakeClient())
+    _snap_calls = {"n": 0}
+
+    def _fake_runner(path, payload=None, timeout=12.0):
+        if path.endswith("/events"):      # WS 订阅面(无真 runner WS) → 失败回落
+            return None
+        if path.startswith("/api/implement/job-pe?"):
+            _snap_calls["n"] += 1
+            if _snap_calls["n"] == 1:
+                return {"ok": True, "status": "running", "sessionId": "sess-x",
+                        "seq": 3,
+                        "events": [
+                            {"seq": 1, "kind": "text", "text": "开始分析"},
+                            {"seq": 2, "kind": "tool", "toolName": "read_file"},
+                            {"seq": 3, "kind": "tool", "toolName": "grep"}]}
+            return {"ok": True, "status": "waiting_input", "sessionId": "sess-x",
+                    "seq": 3, "events": []}
+        return {"ok": True}
+
+    monkeypatch.setattr(eb, "_runner", _fake_runner)
+
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t",
+                                            "analysisMode": "quick"})
+    cid = conv["id"]
+    import time as _time
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            _chat(ws, "分析一下", conv_id=cid)
+            deadline = _time.time() + 8
+            progs: list = []
+            while _time.time() < deadline:
+                progs = [e for e in sse.recent_events(200)
+                         if e.get("type") == "progress"
+                         and e.get("conversationId") == cid]
+                if progs and progs[-1].get("toolCount") == 2:
+                    break   # 等 grep 工具事件落地(时序鲁棒)
+                _time.sleep(0.2)
+    progs = [e for e in sse.recent_events(200)
+             if e.get("type") == "progress" and e.get("conversationId") == cid]
+    assert progs, "过程事件未进 SSE 环(后端发射断链)"
+    assert all("taskId" not in p for p in progs), "直通过程帧不应带 taskId(FE 分流键)"
+    newest = progs[0]                       # recent_events 新→旧
+    assert newest.get("lastTool") == "grep" and newest.get("toolCount") == 2, \
+        f"过程帧序列(新→旧): {[(p.get('lastTool'), p.get('toolCount')) for p in progs]}"
+    assert newest.get("lastText"), f"newest 帧: {newest}"
+    # 过程态(内存)与轮次快照面
+    from topoone_app_architect.agent.execution import process_stream as _ps
+    assert _ps.proxy_progress(cid).get("toolCount") == 2

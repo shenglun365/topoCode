@@ -504,6 +504,10 @@ export const useConversationStore = defineStore('archConversation', () => {
   function enqueueEvent(ev: any) {
     if (!ev?.type) return
     if (ev.type === 'progress') {
+      // cv-273 诊断: 直通过程帧到达证据(taskId 空=直通, 有=任务链)
+      if (!ev.taskId) console.info('[arch-live] progress(conv) 到达', ev.conversationId,
+                                   'tool:', ev.lastTool || '', '×', ev.toolCount || 0,
+                                   ev.finished ? 'FINISHED' : '')
       pendingProgress.set(String(ev.taskId || ''), { ev, at: Date.now() })
       scheduleDrain(0)
       return
@@ -586,6 +590,8 @@ export const useConversationStore = defineStore('archConversation', () => {
   function applyProgressPatch(d: any) {
     // cv-268 分流: 无 taskId(直通过程, conversationId 键) → 会话级过程面
     if (!d.taskId && d.conversationId) {
+      console.info('[arch-live] progress(conv) 落 map', d.conversationId,
+                   'tools:', d.process?.length || 0, d.folded ? 'FOLDED' : '')
       if (d.finished) { proxyProgressMap.value[d.conversationId] = null; return }
       proxyProgressMap.value[d.conversationId] = {
         toolCount: d.toolCount || 0, at: d.at || Date.now(),
