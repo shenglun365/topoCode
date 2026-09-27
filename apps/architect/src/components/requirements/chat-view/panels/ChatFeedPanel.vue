@@ -114,6 +114,12 @@ const {
 // 活跃流式=完整条, turn_done 后(busy=false)折叠一行摘要, 终态 finished 帧清除
 const _convStore = useConversationStore()
 const proxyProc = computed(() => _convStore.proxyProgressOf(props.convId))
+// cv-276 长消息折叠阅读: >600 字符 assistant 文本 → 高度上限+内部滚动+浮层放大
+const LONG_MSG_CHARS = 600
+function isLongMsg(m: any): boolean {
+  return m?.role === 'assistant' && String(m?.content || '').length > LONG_MSG_CHARS
+}
+const expandedMsg = ref<{ content: string } | null>(null)
 // cv-275 持久会话状态(REST 真相源, 刷新安全): convId 变化/回合结束即查询
 const proxySession = ref<{ active: boolean; executorType: string;
                            sessionRef: string; jobId?: string } | null>(null)
@@ -431,12 +437,25 @@ const emit = defineEmits<{
               <ChatMessageBlocks :content="specDraftView(i).body" />
             </div>
           </div>
-          <ChatMessageBlocks
+          <div
             v-else-if="!(m.role === 'assistant' && !m.item && specDraftIdx.has(i))
               && m.item?.type !== 'spec' && m.item?.type !== 'task_status'
               && m.item?.type !== 'choices'"
-            :content="m.content"
-          />
+            class="relative group/msg"
+          >
+            <!-- cv-276: 长消息高度上限+内部滚动(会话不被撑开)+浮层放大钮 -->
+            <div
+              :class="isLongMsg(m) ? 'max-h-[420px] overflow-y-auto pr-1' : ''"
+            >
+              <ChatMessageBlocks :content="m.content" />
+            </div>
+            <button
+              v-if="isLongMsg(m)"
+              class="absolute top-1 right-1 z-10 opacity-0 group-hover/msg:opacity-100 transition-opacity chip !text-[9px] bg-ctp-base/90 text-ctp-subtext0 hover:text-ctp-blue"
+              title="放大查看全文"
+              @click="expandedMsg = { content: m.content }"
+            >⤢ 放大</button>
+          </div>
 
           <!-- 需求卡(cv-203/205 方案 A): 独立卡片消息 = 唯一宿主——
                标题/优先级/正文取提案载荷(m.proposal), 状态徽标联动任务;
@@ -1118,4 +1137,23 @@ const emit = defineEmits<{
         </button>
       </div>
     </div>
+
+    <!-- cv-276 长消息放大浮层 -->
+    <Teleport to="body">
+      <div
+        v-if="expandedMsg"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+        @click.self="expandedMsg = null"
+      >
+        <div class="flex w-[82vw] max-w-5xl max-h-[85vh] flex-col rounded-lg border border-ctp-surface1 bg-ctp-base shadow-2xl">
+          <div class="flex shrink-0 items-center justify-between border-b border-ctp-surface1 px-3 py-2">
+            <span class="text-xs font-medium text-ctp-subtext1">执行器输出全文</span>
+            <button class="btn btn-xs btn-ghost" @click="expandedMsg = null">✕ 关闭</button>
+          </div>
+          <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <ChatMessageBlocks :content="expandedMsg.content" />
+          </div>
+        </div>
+      </div>
+    </Teleport>
 </template>
