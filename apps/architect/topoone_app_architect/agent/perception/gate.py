@@ -93,6 +93,11 @@ def bind_session(data: dict, store, ctx, next_id) -> SessionBinding:
             ctx.set_req(conv["reqId"])
     except Exception:  # noqa: BLE001
         pass
+    if created:
+        # 形状归一(cv-262): create() 返回 snake 列名 payload, 而回合管线消费
+        # camel API 形状(quick 挡判定/conv_root_project 等)——首回合误读为
+        # strict 走 architect 管线的实证根因。回读一次统一与存量会话同形。
+        conv = store.ConversationsStore.get(conv_id) or conv
     user_message_id = next_id("m")
     return SessionBinding(conv_id=conv_id, conv=conv,
                           user_message_id=user_message_id, created=created)

@@ -94,3 +94,24 @@ def test_invalid_preset_values_dropped(tmp_path, monkeypatch):
     assert conv["analysisMode"] == "strict"
     assert conv["clarifyMode"] == "auto"
     assert conv["isolated"] == 0
+
+
+def test_blank_state_quick_preset_routes_proxy_on_first_turn(tmp_path, monkeypatch):
+    """cv-262 路由级锁定: 预置 quick 的首条消息(会话创建回合)即走直通分支。
+
+    根因回归: bind_session 曾把 create() 的 snake payload 直接交给回合管线,
+    conv.get("analysisMode") 误读为 strict → 首回合仍走 architect 管线,
+    第二回合经行读(camel)才生效。无执行器 → 直通分支显式报错收束(kind=proxy)。"""
+    import topoone_app_architect.arch_routes.agent_executors as ae
+    monkeypatch.setattr(ae, "load_executors", lambda: [])
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            _chat(ws, None, analysisMode="quick")
+            ev = _recv_until(ws, "done")
+    conv_id = ev["conversationId"]
+    assert store.ConversationsStore.get(conv_id)["analysisMode"] == "quick"
+    msgs = store.ConversationsStore.messages(conv_id, limit=20)
+    assert any((m.get("meta") or {}).get("kind") == "proxy" for m in msgs), \
+        "首回合未走直通分支(无 proxy 回执)"
+    assert not any((m.get("meta") or {}).get("kind") == "turnError" for m in msgs)
