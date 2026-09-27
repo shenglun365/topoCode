@@ -592,6 +592,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         lastText: d.lastText ?? '', lastTool: d.lastTool ?? '',
         process: d.process ?? [], inputTokens: d.inputTokens || 0,
         outputTokens: d.outputTokens || 0,
+        folded: !!d.folded,   // cv-270 turn_done 折叠快照(toolCount=本轮环长)
       }
       return
     }

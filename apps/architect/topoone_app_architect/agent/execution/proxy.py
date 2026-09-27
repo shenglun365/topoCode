@@ -102,6 +102,11 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
         elif kind == "turn_done":
             # cv-267 对话回合制: 正常收束(非终态, 作业保活——续话直达原生会话)
             _flush("✅ 本轮回答已结束——继续对话将直接送达执行器。")
+            # cv-270 折叠快照: toolCount=本轮环长, 过程态清空(下一轮从零);
+            # 快照经 SSE 交 FE 折叠显示("本轮共 N 次工具调用")
+            from . import process_stream as _ps
+            snap = _ps.proxy_fold_snapshot(conv_id)
+            _ps.publish(conv_id, f"proxy:{conv_id}", snap, jobId=job_id)
         elif kind == "input_required":
             _flush("⏸ 执行器有事项需要你确认——直接回复即可。")
         elif kind in ("tool", "usage", "progress"):
@@ -281,17 +286,17 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     # 首次启动: 隔离决策(cv-202 同口径: 会话隔离开关) + 脏工作区处置
     worktree = bool((conv or {}).get("isolated"))
     dirty_note = ""
+    dirty_warn = ""
     if not worktree and root and _dirty_worktree(root):
         # cv-269 软化(用户实证 cv-264 自干扰死锁: 架构注入文件自身弄脏工作区
         # → 下轮被拒): 直通=chat 角色(用户逐轮在环, 三原则不强硬保底)——
         # 警告+边界提醒后继续; 任务链 dispatch 硬闸不变(自治执行仍防互踩)
-        dirty_note = ("⚠️ 工作区存在未提交变更（可能来自其它开发进程）——"
-                      "融合模式已启动，执行器将注意变更边界。")
-        eb._append(conv_id, "assistant",
-                   f"⚠️ 工作区有未提交变更（可能来自其它开发进程）——已以"
-                   f"融合模式继续启动。执行器被要求不回滚/不提交/不清理与"
-                   f"本次诉求无关的变更。如需完全隔离，请开启会话隔离开关。",
-                   msg_meta={"kind": "proxy"})
+        dirty_note = ("【工作区提示】当前工作区存在未提交变更（可能来自其它开发进程）。"
+                      "不要回滚、提交(stash/checkout/clean/commit)或清理任何与本次诉求"
+                      "无关的变更；你的修改应聚焦本次诉求涉及的范围。")
+        # cv-270: 警告并入直通回执(不再独立落卡——信息流污染实证 cv-266)
+        dirty_warn = ("\n⚠️ 工作区有未提交变更（可能来自其它开发进程）——"
+                      "执行器被要求不动无关变更；如需完全隔离，请开启会话隔离开关。")
 
     from .context_pack import build_context_pack, render_context_pack_md
     pack = build_context_pack({}, conv, root)
@@ -310,9 +315,7 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     if brief:
         parts.append(brief)
     if dirty_note:
-        parts.append("【工作区提示】当前工作区存在未提交变更（可能来自其它开发进程）。"
-                     "不要回滚、提交(stash/checkout/clean/commit)或清理任何与本次诉求"
-                     "无关的变更；你的修改应聚焦本次诉求涉及的范围。")
+        parts.append(dirty_note)
     parts.append(render_context_pack_md(pack))
     instruction = "\n\n".join(p for p in parts if p.strip()).strip()
     mcp = _merge_mcp_servers(ecfg, etype)
@@ -369,7 +372,8 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     row = eb._append(conv_id, "assistant",
                      f"🔗 已直通执行器 `{etype}`(job `{sr.job_id}`，"
                      f"{'隔离 worktree' if worktree else '融合模式'})"
-                     "——本轮起你的消息直接发给执行器，architect 仅做通道。",
+                     "——本轮起你的消息直接发给执行器，architect 仅做通道。"
+                     + dirty_warn,
                      msg_meta={"kind": "proxy"}, agent=etype)
     await _send_done(row)
     return True

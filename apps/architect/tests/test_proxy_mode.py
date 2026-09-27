@@ -191,8 +191,17 @@ def test_proxy_dirty_repo_warns_and_proceeds(arch_env, tmp_path, monkeypatch,
     assert len(starts) == 1, "脏区应警告后继续启动(不再硬拒)"
     assert "未提交变更" in starts[0]["instruction"], "执行器侧边界提醒缺失"
     msgs = store.ConversationsStore.messages(conv["id"], limit=10)
-    assert any("融合模式继续启动" in (m.get("content") or "") for m in msgs), \
+    proxy_cards = [m for m in msgs if (m.get("meta") or {}).get("kind") == "proxy"]
+    assert any("未提交变更" in (m.get("content") or "") for m in proxy_cards), \
         "用户侧提醒收执缺失"
+    # cv-270: 警告并入直通回执单卡(独立警告卡=信息流污染实证 cv-266)
+    receipt = [m for m in proxy_cards if "已直通执行器" in (m.get("content") or "")]
+    assert receipt and "未提交变更" in receipt[0]["content"], \
+        "警告应并入直通回执, 不应独立落卡"
+    assert not [m for m in proxy_cards
+                if "已直通执行器" not in (m.get("content") or "")
+                and "工作区有未提交变更" in (m.get("content") or "")], \
+        "独立警告卡不应存在"
 
 
 def test_proxy_without_executor_explicit_error(arch_env, tmp_path, monkeypatch):
@@ -629,3 +638,35 @@ def test_hint_whitelist_passes_system_prompt(arch_env, monkeypatch):
          "config": {"system_prompt": "自定义人格", "rulesMd": "# r"}}])
     hint = executor_hint_by_id("ex-sp") or {}
     assert (hint.get("executorConfig") or {}).get("system_prompt") == "自定义人格"
+
+
+def test_pump_turn_done_folds_with_real_tool_count(arch_env, tmp_path,
+                                                   _isolate_proxy_state):
+    """cv-270 折叠快照: turn_done → folded SSE(toolCount=本轮环长) + 内存清空。
+
+    用户实证(cv-266): "本轮共 0 次工具调用"——toolCount 依赖 progress 报数,
+    而 cline 只发 tool 事件 → 恒 0。修复后 tool 自计数(取大) + 折叠快照。"""
+    from topoone_app_architect.agent.execution import process_stream as _ps
+    emitted: list = []
+    from topoone_app_architect.agent.collab import sse as _sse
+    orig = _sse.emit
+    _sse.emit = lambda t, cid, **kw: emitted.append((t, cid, kw))
+    try:
+        conv = _mk_conv(arch_env, tmp_path)
+        proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-f", "executor_type": "cline-sdk"}
+        on_event, _snap, _lost, _flush = proxy._make_handlers(
+            conv["id"], "job-f", "cline-sdk")
+        on_event({"kind": "tool", "toolName": "read_file"})
+        on_event({"kind": "tool", "toolName": "edit_file"})
+        on_event({"kind": "tool", "toolName": "run_command"})
+        assert _ps.proxy_progress(conv["id"])["toolCount"] == 3, "tool 自计数"
+        on_event({"kind": "turn_done"})
+        # 折叠快照: folded + 本轮环长; 过程态清空(下一轮从零)
+        folds = [kw for t, _c, kw in emitted
+                 if t == "progress" and kw.get("folded")]
+        assert folds and folds[-1]["toolCount"] == 3, \
+            "折叠快照 toolCount 应为本轮真实环长"
+        assert _ps.proxy_progress(conv["id"]) == {}, "折叠后过程态应清空"
+    finally:
+        _sse.emit = orig
+        _ps.proxy_clear(conv["id"])

@@ -1045,7 +1045,7 @@ const emit = defineEmits<{
       <!-- cv-268 直通执行器过程条(消息区尾部; turn_done 后折叠) -->
       <ExecutorProcessStrip
         v-if="proxyProc"
-        :folded="!busy"
+        :folded="!busy || !!proxyProc.folded"
         :process="proxyProc.process || []"
         :last-text="proxyProc.lastText || ''"
         :last-tool="proxyProc.lastTool || ''"

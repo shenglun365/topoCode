@@ -34,7 +34,8 @@ def apply_event(prev: Dict[str, Any], ev: dict) -> Optional[Dict[str, Any]]:
     text = (ev.get("text") or "").strip()
     prog = {**(prev or {}), "at": _ts()}
     if kind == "progress":
-        prog["toolCount"] = int(ev.get("toolCount") or 0)
+        prog["toolCount"] = max(int(ev.get("toolCount") or 0),
+                                int(prev.get("toolCount") or 0))
         prog["msgCount"] = int(ev.get("msgCount") or 0)
         return prog
     if kind == "text":
@@ -47,6 +48,11 @@ def apply_event(prev: Dict[str, Any], ev: dict) -> Optional[Dict[str, Any]]:
                  {"at": prog["at"], "s": f"▸ {name}"}][-_RING_MAX:]
         prog["lastTool"] = name
         prog["process"] = trail
+        # cv-270 自计数: cline 只发 tool 不发 progress(progress 报数恒缺)
+        # → 取 max(自计数, progress 报数), 两种口径并存不回退
+        prog["toolCount"] = max(int(prev.get("toolCount") or 0) + 1,
+                                int(prev.get("_toolSelf") or 0) + 1)
+        prog["_toolSelf"] = int(prev.get("_toolSelf") or 0) + 1
         return prog
     if kind == "usage":
         prog["inputTokens"] = int(ev.get("inputTokens") or 0)
@@ -65,7 +71,8 @@ def publish(conv_id: str, key: str, prog: Dict[str, Any],
         _SSE_LAST[key] = now
     try:
         from ...agent.collab.sse import emit
-        emit("progress", conv_id, **extra, **prog)
+        payload = {k: v for k, v in prog.items() if not str(k).startswith("_")}
+        emit("progress", conv_id, **extra, **payload)
     except Exception:  # noqa: BLE001
         pass
 
@@ -88,6 +95,15 @@ def proxy_store(conv_id: str, prog: Dict[str, Any]) -> None:
 def proxy_clear(conv_id: str) -> None:
     _PROXY_PROGRESS.pop(conv_id, None)
     _SSE_LAST.pop(f"proxy:{conv_id}", None)
+
+
+def proxy_fold_snapshot(conv_id: str) -> Dict[str, Any]:
+    """turn_done 折叠快照(cv-270): toolCount=本轮环长, 然后清空过程态——
+    下一轮从零开始; 快照经 SSE 交 FE 折叠显示(纯内存瞬态不变)。"""
+    prog = _PROXY_PROGRESS.pop(conv_id, None) or {}
+    _SSE_LAST.pop(f"proxy:{conv_id}", None)
+    return {"folded": True, "toolCount": len(prog.get("process") or []),
+            "at": _ts()}
 
 
 def proxy_finish(conv_id: str, note: str = "") -> None:
