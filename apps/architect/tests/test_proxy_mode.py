@@ -691,3 +691,109 @@ def test_pump_long_output_head_preserved(arch_env, tmp_path, _isolate_proxy_stat
     assert full.startswith("报告开头"), "头部必须完整保留"
     assert len(full) > 10000, "全文累积(无 6000 上限)"
     assert "✅ 本轮回答已结束" in full
+
+
+# ── cv-273 停止/复活/steer ─────────────────────────────────────────────
+
+def test_session_ref_persisted_on_snapshot(arch_env, tmp_path):
+    """复活链①: 泵快照回写 session_ref → 会话行持久化(变化才写)。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-sr", "executor_type": "cline-sdk"}
+    on_event, on_snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-sr", "cline-sdk")
+    on_snap({"sessionId": "sess-native-1"})
+    row = store.ConversationsStore.get(conv["id"])
+    assert row["sessionRef"] == "sess-native-1", "sessionRef 应持久化到会话行"
+
+
+def test_start_payload_carries_session_ref_for_revive(arch_env, tmp_path,
+                                                      monkeypatch,
+                                                      _isolate_proxy_state):
+    """复活链②: 会话行有 sessionRef → start 载荷携带(runner 复活原生会话)。"""
+    starts = _isolate_proxy_state
+    conv = _mk_conv(arch_env, tmp_path)
+    store.ConversationsStore.update(conv["id"], {"sessionRef": "sess-native-9"})
+    conv = store.ConversationsStore.get(conv["id"])   # cv-262 同款: 门禁重读新行
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(tmp_path / "proj"), ""))
+    asyncio.run(proxy_turn({}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=EXECUTOR_FIXTURE))
+    assert starts[0].get("sessionRef") == "sess-native-9"
+
+
+def test_forward_input_carries_steer_flag(arch_env, tmp_path, monkeypatch,
+                                          _isolate_proxy_state):
+    """cv-273 steer 消费: 转发 /input 带 steer=true——runner 按能力分流
+    (cline 直达 turn/steer; 不支持回落排队, a64 语义 runner 侧已有)。"""
+    inputs: list = []
+
+    def fake_runner(path, payload=None, timeout=12.0):
+        if path.endswith("/input"):
+            inputs.append(payload)
+            return {"ok": True}
+        if path == "/api/implement":
+            return {"ok": True, "jobId": "job-px", "branch": "b",
+                    "worktree": payload["root"], "sessionId": "s",
+                    "baseCommit": "sha"}
+        return {"ok": True, "status": "running"}
+
+    from topoone_app_architect.agent.execution import exec_bridge as _eb
+    monkeypatch.setattr(_eb, "_runner", fake_runner)
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-px",
+                                     "executor_type": "cline-sdk"}
+    asyncio.run(proxy_turn({}, _gate(conv), _Send(),
+                           root=str(tmp_path / "proj"), project="",
+                           executor=EXECUTOR_FIXTURE))
+    assert inputs and inputs[-1].get("steer") is True
+
+
+def test_proxy_stop_helper_aborts_runner(arch_env, tmp_path, monkeypatch):
+    """cv-273 停止: 活跃句柄 → runner /abort; aborted 事件经泵清句柄;
+    会话行 sessionRef 保留(恢复语义)。"""
+    aborts: list = []
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-stop",
+                                     "executor_type": "cline-sdk",
+                                     "session_ref": "sess-keep"}
+    store.ConversationsStore.update(conv["id"], {"sessionRef": "sess-keep"})
+
+    def fake_runner(path, payload=None, timeout=12.0):
+        if path.endswith("/abort"):
+            aborts.append(path)
+            return {"ok": True}
+        return {"ok": True, "status": "running"}
+
+    from topoone_app_architect.agent.execution import exec_bridge as _eb
+    monkeypatch.setattr(_eb, "_runner", fake_runner)
+    r = proxy.proxy_stop(conv["id"])
+    assert r["ok"] and r["job_id"] == "job-stop"
+    assert aborts, "runner /abort 未调用"
+    # 泵收 aborted 终态(清句柄)——会话行 sessionRef 保留(恢复语义)
+    on_event, _snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-stop", "cline-sdk")
+    on_event({"kind": "aborted"})
+    assert proxy.proxy_job_of(conv["id"]) is None
+    assert store.ConversationsStore.get(conv["id"])["sessionRef"] == "sess-keep"
+
+
+def test_proxy_stop_without_active_job(arch_env, tmp_path):
+    r = proxy.proxy_stop("cv-none")
+    assert not r["ok"] and "无进行中" in r["error"]
+
+
+def test_fold_snapshot_carries_turn_count(arch_env, tmp_path,
+                                          _isolate_proxy_state):
+    """折叠快照含累计轮次(turn_done 计数, 跨折叠)。"""
+    from topoone_app_architect.agent.execution import process_stream as _ps
+    conv = _mk_conv(arch_env, tmp_path)
+    on_event, _snap, _lost, _flush = _ps and proxy._make_handlers(
+        conv["id"], "job-tc", "cline-sdk")
+    on_event({"kind": "tool", "toolName": "t1"})
+    on_event({"kind": "turn_done"})
+    on_event({"kind": "turn_done"})   # 边界: 连续 turn_done 轮次累计
+    emitted: list = []
+    # 直接断言模块态计数
+    assert _ps._PROXY_TURNS.get(conv["id"], 0) == 2

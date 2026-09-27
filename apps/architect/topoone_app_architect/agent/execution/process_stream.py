@@ -17,6 +17,7 @@ import time
 # SSE 文本节流登记(键: task_id 或 f"proxy:{conv_id}")
 _SSE_LAST: Dict[str, float] = {}
 _PROXY_PROGRESS: Dict[str, Dict[str, Any]] = {}
+_PROXY_TURNS: Dict[str, int] = {}          # 直通会话轮次计数(跨折叠累计)
 _TEXT_THROTTLE = 0.5
 _RING_MAX = 30
 
@@ -103,12 +104,19 @@ def proxy_fold_snapshot(conv_id: str) -> Dict[str, Any]:
     prog = _PROXY_PROGRESS.pop(conv_id, None) or {}
     _SSE_LAST.pop(f"proxy:{conv_id}", None)
     return {"folded": True, "toolCount": len(prog.get("process") or []),
+            "turnCount": _PROXY_TURNS.get(conv_id, 0),
             "at": _ts()}
+
+
+def proxy_turn_done(conv_id: str) -> None:
+    """turn_done 轮次计数(折叠快照消费)。"""
+    _PROXY_TURNS[conv_id] = _PROXY_TURNS.get(conv_id, 0) + 1
 
 
 def proxy_finish(conv_id: str, note: str = "") -> None:
     """终态: 清过程态 + 下发 finished 帧(FE 据此撤过程条)。"""
     proxy_clear(conv_id)
+    _PROXY_TURNS.pop(conv_id, None)
     try:
         from ...agent.collab.sse import emit
         emit("progress", conv_id, finished=True, note=note, at=_ts())

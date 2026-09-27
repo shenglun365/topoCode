@@ -1232,3 +1232,18 @@ async def session_guide(conv_id: str):
     if not content:
         return _fallback()
     return ok({"text": content, "fallback": False})
+
+
+@router.post("/sessions/{conv_id}/proxy-stop")
+async def proxy_stop_endpoint(conv_id: str):
+    """停止直通执行器当前回合(cv-273)。
+
+    主动中断: runner /abort 中止本轮; 会话行 sessionRef 保留——发消息即复活
+    同执行器会话(暂停/恢复语义, 上下文延续)。无活跃直通会话 → 404。"""
+    from ..agent.execution.proxy import proxy_stop
+    r = proxy_stop(conv_id)
+    if not r.get("ok"):
+        return err(404 if "无进行中" in (r.get("error") or "") else 502,
+                   r.get("error") or "停止失败")
+    return ok({"conversationId": conv_id, "jobId": r.get("job_id") or "",
+               "summary": "已停止本轮执行（会话保留——发消息继续）"})

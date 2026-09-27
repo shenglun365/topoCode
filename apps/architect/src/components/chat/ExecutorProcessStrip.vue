@@ -20,6 +20,9 @@ const props = withDefaults(defineProps<{
   outputTokens?: number
   /** 折叠态: 单行摘要(本轮工具次数), 不展开轨迹与文本 */
   folded?: boolean
+  /** 会话控制(cv-273): 轮次累计 + 停止钮(仅活跃非折叠时可见) */
+  turnCount?: number
+  stoppable?: boolean
   /** 紧凑模式(任务卡内嵌): 去外框 */
   dense?: boolean
 }>(), {
@@ -31,7 +34,10 @@ const props = withDefaults(defineProps<{
   outputTokens: 0,
   folded: false,
   dense: false,
+  turnCount: 0,
+  stoppable: false,
 })
+const emit = defineEmits<{ stop: [] }>()
 
 import { computed } from 'vue'
 
@@ -44,9 +50,10 @@ function fmtTok(n: any): string {
 </script>
 
 <template>
-  <!-- 折叠态: 单行摘要(turn_done 后) -->
-  <div v-if="folded" class="font-mono text-[9px] text-ctp-overlay0">
-    ⚙ 本轮共 {{ toolCount }} 次工具调用
+  <!-- 折叠态: 单行摘要(turn_done 后; 含轮次累计) -->
+  <div v-if="folded" class="flex items-center gap-2 font-mono text-[9px] text-ctp-overlay0">
+    <span>⚙ 本轮共 {{ toolCount }} 次工具调用<template v-if="turnCount"> · 累计 {{ turnCount }} 轮</template></span>
+    <button v-if="stoppable" class="chip !text-[9px] hover:text-ctp-red" title="停止执行器本轮(会话保留, 发消息继续)" @click="emit('stop')">停止</button>
   </div>
   <div v-else-if="lastText || lastTool || process.length"
        class="rounded border border-ctp-surface1 bg-ctp-base/70 px-2 py-1.5"
@@ -54,8 +61,9 @@ function fmtTok(n: any): string {
     <div class="flex items-center gap-1.5">
       <span class="font-mono text-[10px] text-ctp-blue animate-pulse">● {{ lastTool || '执行中' }}</span>
       <span class="font-mono text-[9px] text-ctp-overlay0">
-        工具 ×{{ toolCount }}<template v-if="inputTokens"> · {{ fmtTok(inputTokens) }}→{{ fmtTok(outputTokens) }} tok</template>
+        工具 ×{{ toolCount }}<template v-if="turnCount"> · {{ turnCount }} 轮</template><template v-if="inputTokens"> · {{ fmtTok(inputTokens) }}→{{ fmtTok(outputTokens) }} tok</template>
       </span>
+      <button v-if="stoppable" class="chip ml-auto !text-[9px] hover:text-ctp-red" title="停止执行器本轮(会话保留, 发消息继续)" @click="emit('stop')">停止</button>
     </div>
     <div
       v-if="lastText"

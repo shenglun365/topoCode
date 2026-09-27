@@ -114,6 +114,17 @@ const {
 // 活跃流式=完整条, turn_done 后(busy=false)折叠一行摘要, 终态 finished 帧清除
 const _convStore = useConversationStore()
 const proxyProc = computed(() => _convStore.proxyProgressOf(props.convId))
+const proxyStopping = ref(false)
+async function onProxyStop() {
+  if (!props.convId || proxyStopping.value) return
+  proxyStopping.value = true
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    await apiPost(`/sessions/${props.convId}/proxy-stop`, {})
+  } catch { /* 停止失败保留过程条(泵终态兜底) */ } finally {
+    proxyStopping.value = false
+  }
+}
 const emit = defineEmits<{
   'task-confirm': [id: string]
   'task-cancel': [id: string]
@@ -1042,7 +1053,7 @@ const emit = defineEmits<{
         </div>
       </div>
 
-      <!-- cv-268 直通执行器过程条(消息区尾部; turn_done 后折叠) -->
+      <!-- cv-268/273 直通执行器会话控制条(消息区尾部; turn_done 折叠; 停止钮) -->
       <ExecutorProcessStrip
         v-if="proxyProc"
         :folded="!busy || !!proxyProc.folded"
@@ -1050,8 +1061,11 @@ const emit = defineEmits<{
         :last-text="proxyProc.lastText || ''"
         :last-tool="proxyProc.lastTool || ''"
         :tool-count="proxyProc.toolCount || 0"
+        :turn-count="proxyProc.turnCount || 0"
         :input-tokens="proxyProc.inputTokens || 0"
         :output-tokens="proxyProc.outputTokens || 0"
+        :stoppable="!!props.busy"
+        @stop="onProxyStop"
       />
       <div
         v-if="busy"

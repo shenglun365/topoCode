@@ -32,6 +32,28 @@ _PROXY_JOBS: Dict[str, Dict[str, str]] = {}
 _JOB_TERMINAL = ("done", "failed", "stopped")
 
 
+def proxy_stop(conv_id: str) -> Dict[str, Any]:
+    """停止直通执行器当前回合(cv-273 用户主动中断)。
+
+    runner /abort → adapter 中止回合 → aborted 事件经泵收尾(清句柄+落卡)。
+    会话行 sessionRef 保留——发消息即复活同会话(暂停/恢复语义)。
+    返回 {ok, job_id?, error?}。"""
+    entry = _PROXY_JOBS.get(conv_id)
+    if not entry:
+        return {"ok": False, "error": "无进行中的直通会话"}
+    job_id = entry["job_id"]
+    from . import exec_bridge as eb
+    r = eb._runner(f"/api/implement/{job_id}/abort", {}, 12.0)
+    if r is None:
+        return {"ok": False, "error": "runner 不可达(:3458)", "job_id": job_id}
+    if r.get("ok") is False:
+        # adapter.abort False=执行器中止调用失败——如实透传(回合可能仍在等待)
+        return {"ok": False, "error": r.get("error") or "中止调用失败",
+                "job_id": job_id}
+    # aborted 事件经泵异步收尾(此处句柄仍存续, 泵终态统一清)
+    return {"ok": True, "job_id": job_id}
+
+
 def proxy_enabled(conv: Optional[dict]) -> bool:
     """quick 挡 = coding 执行器模式(直通对话)。"""
     return str((conv or {}).get("analysisMode") or "") == "quick"
@@ -107,7 +129,8 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             # cv-270 折叠快照: toolCount=本轮环长, 过程态清空(下一轮从零);
             # 快照经 SSE 交 FE 折叠显示("本轮共 N 次工具调用")
             from . import process_stream as _ps
-            snap = _ps.proxy_fold_snapshot(conv_id)
+            _ps.proxy_turn_done(conv_id)
+            snap = _ps.proxy_fold_snapshot(conv_id)   # 含 turnCount(本轮累计)
             _ps.publish(conv_id, f"proxy:{conv_id}", snap, jobId=job_id)
         elif kind == "input_required":
             _flush("⏸ 执行器有事项需要你确认——直接回复即可。")
@@ -124,7 +147,8 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             logger.info("[proxy] %s notice: %s", job_id, str(ev.get("text") or "")[:120])
         elif kind in ("done", "failed", "aborted"):
             _flush("✅ 本轮完成。" if kind == "done"
-                   else f"⚠️ 本轮结束({kind})。")
+                   else ("🛑 已停止本轮执行（会话保留——发消息即可继续）。"
+                         if kind == "aborted" else f"⚠️ 本轮结束({kind})。"))
             _PROXY_JOBS.pop(conv_id, None)
             from . import process_stream as _ps
             _ps.proxy_finish(conv_id)
@@ -142,11 +166,19 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
                    msg_meta={"kind": "proxy"}, agent=etype)
 
     def on_snapshot(snap: dict) -> None:
-        # 校准快照: 回写执行器原生会话 id(断线重挂/审计用)
+        # 校准快照: 回写执行器原生会话 id(断线重挂/审计用); 变化时持久化到
+        # 会话行(cv-273 复活链——作业终态后, 下条消息带 sessionRef 复活同会话)
         sid = str((snap or {}).get("sessionId") or "").strip()
         entry = _PROXY_JOBS.get(conv_id)
         if sid and entry and entry.get("job_id") == job_id:
-            entry["session_ref"] = sid
+            if entry.get("session_ref") != sid:
+                entry["session_ref"] = sid
+                try:
+                    from ... import store as _st
+                    _st.ConversationsStore.update(conv_id, {"sessionRef": sid})
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[proxy] sessionRef 持久化失败 conv=%s: %s",
+                                   conv_id, e)
 
     return on_event, on_snapshot, on_lost, _flush
 
@@ -270,7 +302,7 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
             _fwd = text if not _digest else (
                 f"{text}\n\n【用户转达的语境摘要】\n{_digest}")
             r = eb._runner(f"/api/implement/{job['job_id']}/input",
-                           {"text": _fwd}, timeout=_t)
+                           {"text": _fwd, "steer": True}, timeout=_t)
             if r is None:
                 row = eb._append(conv_id, "assistant",
                                  "⚠️ 转发失败: runner 不可达(:3458)。",
@@ -334,6 +366,9 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         # cv-267 直通=对话回合制: 执行器原生多回合自管上下文, runner 不拼任务
         # 协作协议/不跑验收门; 无标记收束=turn_done(作业保活, 续话复用原生会话)
         "sessionRole": "chat",
+        # cv-273 复活链: 会话行持久化的执行器原生会话 id → 新 job 复活同会话
+        **({"sessionRef": str((conv or {}).get("sessionRef") or "")}
+           if (conv or {}).get("sessionRef") else {}),
     }
     if hint.get("executorId"):
         payload["executorId"] = hint["executorId"]
