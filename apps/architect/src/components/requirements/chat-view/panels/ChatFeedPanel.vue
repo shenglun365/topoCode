@@ -7,6 +7,7 @@ import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRight
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
 import ExecutorProcessStrip from '@/components/chat/ExecutorProcessStrip.vue'
+import JobCard from '@/components/chat/JobCard.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import ChoicesCard from '@/components/chat/ChoicesCard.vue'
 import EditSpecModal from '@/components/requirements/EditSpecModal.vue'
@@ -189,6 +190,12 @@ watch(proxyProc, (p) => {
                       'tools:', p.toolCount, p.folded ? 'FOLDED' : 'LIVE')
 }, { immediate: true })
 const proxyStopping = ref(false)
+// cv-283 JobCard 活动态覆写: REST 真相源(jobId 匹配且活跃)优先于卡内快照
+function proxyJobLiveState(jobId?: string): string {
+  const s = proxySession.value
+  if (!s || !jobId || s.jobId !== jobId) return ''
+  return s.active ? 'running' : 'idle'
+}
 async function onProxyStop() {
   if (!props.convId || proxyStopping.value) return
   proxyStopping.value = true
@@ -262,6 +269,16 @@ const emit = defineEmits<{
             <span class="font-mono">{{ (m as any).agent || 'architect' }}</span>
           </div>
           <!-- A6.2 守门: 渲染只经统一投影(m.item), 禁历史卡片键/执行器类型分支 -->
+          <!-- cv-283 直通作业卡: 统一投影 type=job 且 jobCard=1 才渲染 JobCard,
+               其余 proxy 文本回执走普通消息流 -->
+          <JobCard
+            v-if="m.item?.type === 'job' && m.item?.payload?.jobCard"
+            class="mb-2"
+            :payload="(m.item!.payload || {}) as any"
+            :live-state="proxyJobLiveState(m.item!.payload?.jobId)"
+            :stopping="proxyStopping"
+            @stop="onProxyStop"
+          />
           <ChoicesCard
             v-if="m.item?.type === 'choices'"
             class="mb-2"

@@ -185,6 +185,7 @@ CARD_ITEM_MAP: Dict[str, Dict[str, Any]] = {
     "specCreated": {"type": "spec", "status": "created", "payload": "meta"},
     "specReady": {"type": "spec", "status": "ready", "payload": "meta"},
     "choices": {"type": "choices", "payload": "meta"},   # cv-247 问询卡
+    "proxy": {"type": "job", "payload": "meta"},   # cv-283 直通作业卡(仅 jobCard=1 渲染 JobCard, 其余文本回执)
 }
 
 

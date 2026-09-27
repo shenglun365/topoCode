@@ -67,6 +67,8 @@ def proxy_stop(conv_id: str) -> Dict[str, Any]:
     if r.get("ok") is False:
         return {"ok": False, "error": r.get("error") or f"{action} 调用失败",
                 "job_id": job_id}
+    # cv-283 JobCard 状态回写: abort=暂停(idle, 会话保留)/finish=结束(ended)
+    _set_job_card_state(conv_id, "idle" if action == "abort" else "ended")
     return {"ok": True, "job_id": job_id, "action": action,
             "summary": ("已暂停——会话保留，发消息即恢复" if running
                         else "已结束直通会话——下条消息将开启全新会话")}
@@ -79,6 +81,26 @@ def proxy_enabled(conv: Optional[dict]) -> bool:
 
 def proxy_job_of(conv_id: str) -> Optional[Dict[str, str]]:
     return _PROXY_JOBS.get(conv_id)
+
+
+def _job_card_fp(conv_id: str) -> str:
+    return f"proxyjob:{conv_id}"
+
+
+def _set_job_card_state(conv_id: str, state: str) -> None:
+    """JobCard 状态回写(cv-283): fingerprint 原位更新 meta.jobState + SSE。
+    词汇=running|idle|ended(执行器作业状态轴同源, 不自造)。"""
+    from ... import store as _st
+    from ...agent.collab import cards as _cards
+    try:
+        row = _st.ConversationsStore.update_message_by_meta(
+            conv_id, {"kind": "proxy", "fingerprint": _job_card_fp(conv_id)},
+            {"meta": {"jobState": state}})
+        if row:
+            _cards.emit(conv_id, str(row.get("id") or ""), kind="proxy")
+    except Exception:  # noqa: BLE001 — 状态回写失败不阻断主流程
+        logger.warning("[proxy] JobCard 状态回写失败 conv=%s state=%s",
+                       conv_id, state)
 
 
 # 直通正文卡节流落库间隔: 执行器流式 text 增量原位更新(单卡生长, cv-263——
@@ -172,6 +194,7 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
         elif kind == "notice":
             logger.info("[proxy] %s notice: %s", job_id, str(ev.get("text") or "")[:120])
         elif kind in ("done", "failed", "aborted"):
+            _set_job_card_state(conv_id, "ended")   # cv-283 作业终态回写
             _flush("✅ 本轮完成。" if kind == "done"
                    else ("🛑 已停止本轮执行（会话保留——发消息即可继续）。"
                          if kind == "aborted" else f"⚠️ 本轮结束({kind})。"))
@@ -185,6 +208,7 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
 
     def on_lost(reason: str) -> None:
         _PROXY_JOBS.pop(conv_id, None)
+        _set_job_card_state(conv_id, "ended")   # cv-283 失联回写
         from . import process_stream as _ps
         _ps.proxy_finish(conv_id)
         eb._append(conv_id, "assistant",
@@ -432,12 +456,19 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
 
     _PROXY_JOBS[conv_id] = {"job_id": sr.job_id, "executor_type": etype}
     _start_pump(conv_id, sr.job_id, etype)
+    # cv-283 JobCard: 直通作业以任务卡同族卡呈现——meta 携作业快照键
+    # (jobCard/jobState/executorType/mode) + fingerprint(状态回写原位更新)
     row = eb._append(conv_id, "assistant",
                      f"🔗 已直通执行器 `{etype}`(job `{sr.job_id}`，"
                      f"{'隔离 worktree' if worktree else '融合模式'})"
                      "——本轮起你的消息直接发给执行器，architect 仅做通道。"
                      + dirty_warn,
-                     msg_meta={"kind": "proxy"}, agent=etype)
+                     msg_meta={"kind": "proxy", "jobId": sr.job_id,
+                               "jobCard": 1, "jobState": "running",
+                               "executorType": etype,
+                               "mode": "worktree" if worktree else "inplace",
+                               "fingerprint": _job_card_fp(conv_id)},
+                     agent=etype)
     await _send_done(row)
     return True
 
