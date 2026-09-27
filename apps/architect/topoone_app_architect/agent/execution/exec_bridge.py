@@ -697,39 +697,19 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                                    pid)
         except Exception as e:  # noqa: BLE001
             logger.warning("[exec-bridge] 失败回执沉淀失败 task=%s: %s", task_id, e)
-    elif kind == "progress":
+    elif kind in ("progress", "text", "tool", "usage"):
+        # cv-268: 过程落地单源(process_stream.apply_event), 行为与原四分支等价
+        # (text 节流 0.5/tool·progress 不节流/usage 仅落库; tool 挂状态卡刷新
+        # ——cv-205: cline 只发 tool 不发 progress, 刷新必须挂 tool 活动)
+        from . import process_stream as _ps
         prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
-        prog = {**prev,
-                "toolCount": int(ev.get("toolCount") or 0),
-                "msgCount": int(ev.get("msgCount") or 0), "at": _ts()}
-        store.TasksStore.set_progress(task_id, prog)
-        _publish_progress(conv_id, task_id, prog)
-        _status_card_refresh(conv_id, task_id, agent, pid)
-    elif kind == "text":
-        # 准流式执行预览: 滚动文本尾(600 字符)+节流 SSE(0.5s), 不落消息(防刷屏)。
-        # UI 过程面板随 progress 事件实时变化, 终态回执仍走 done/failed。
-        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
-        prog = {**prev,
-                "lastText": ((prev.get("lastText") or "") + text)[-600:], "at": _ts()}
-        store.TasksStore.set_progress(task_id, prog)
-        _publish_progress(conv_id, task_id, prog, throttle=0.5)
-    elif kind == "tool":
-        # 工具轨迹: process 环形尾(30 条)随 SSE 全量下发, TaskCard 渲染过程流
-        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
-        name = str(ev.get("toolName") or text or "")
-        trail = [*(((prev.get("process") or []))), {"at": _ts(), "s": f"▸ {name}"}][-30:]
-        prog = {**prev, "lastTool": name, "process": trail, "at": _ts()}
-        store.TasksStore.set_progress(task_id, prog)
-        _publish_progress(conv_id, task_id, prog)
-        # cv-205 衔接修复: cline 事件流只发 tool/usage(不发 progress)——
-        # 运行态状态卡刷新必须挂到 tool 活动(节流), 否则卡冻结在启动时刻
-        _status_card_refresh(conv_id, task_id, agent, pid)
-    elif kind == "usage":
-        prev = (store.TasksStore.get(task_id) or {}).get("progress") or {}
-        prog = {**prev,
-                "inputTokens": int(ev.get("inputTokens") or 0),
-                "outputTokens": int(ev.get("outputTokens") or 0), "at": _ts()}
-        store.TasksStore.set_progress(task_id, prog)
+        prog = _ps.apply_event(prev, ev)
+        if prog is not None:
+            th = _ps.sse_throttle(kind)
+            store.TasksStore.set_progress(task_id, prog)
+            _publish_progress(conv_id, task_id, prog, throttle=th)
+            if kind in ("progress", "tool"):
+                _status_card_refresh(conv_id, task_id, agent, pid)
     elif kind == "approval_request":
         # 越界审批桥: 落可操作消息(meta 携 jobId/requestId), 前端渲染批准/拒绝
         tool_name = str(ev.get("toolName") or "工具")

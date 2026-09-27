@@ -584,6 +584,17 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   /** 执行进展 patch(自 Dock 收编; 瞬态修饰态——任务状态真相走 task 事件+拉取)。 */
   function applyProgressPatch(d: any) {
+    // cv-268 分流: 无 taskId(直通过程, conversationId 键) → 会话级过程面
+    if (!d.taskId && d.conversationId) {
+      if (d.finished) { proxyProgressMap.value[d.conversationId] = null; return }
+      proxyProgressMap.value[d.conversationId] = {
+        toolCount: d.toolCount || 0, at: d.at || Date.now(),
+        lastText: d.lastText ?? '', lastTool: d.lastTool ?? '',
+        process: d.process ?? [], inputTokens: d.inputTokens || 0,
+        outputTokens: d.outputTokens || 0,
+      }
+      return
+    }
     const patch = {
       toolCount: d.toolCount || 0, msgCount: d.msgCount || 0, at: d.at || Date.now(),
       lastText: d.lastText ?? '', lastTool: d.lastTool ?? '',
@@ -593,6 +604,12 @@ export const useConversationStore = defineStore('archConversation', () => {
     if (t) t.progress = { ...(t.progress || {}), ...patch }
     const rr = (activeMeta.value as any)?.runningRole
     if (rr) rr.progress = { ...(rr.progress || {}), ...patch }
+  }
+
+  /** 直通会话过程态(cv-268): convId → SSE progress patch(纯内存瞬态)。 */
+  const proxyProgressMap = ref<Record<string, any>>({})
+  function proxyProgressOf(convId?: string) {
+    return (convId && proxyProgressMap.value[convId]) || null
   }
 
   // ── SSE 连接(store 单例单连接; 自 Dock 收编) ─────────────────────────
@@ -637,7 +654,7 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   return {
     flushPendingMsgRefresh,
-    enqueueEvent, connectEvents,
+    enqueueEvent, connectEvents, proxyProgressOf,
     dockOpen, setDockOpen, toggleDock,
     scope, setScope,
     activeId, activeTitle, activeReqId, activeMeta,

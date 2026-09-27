@@ -39,7 +39,7 @@ def test_tool_event_updates_progress(monkeypatch):
     monkeypatch.setattr(eb.store.TasksStore, "get", lambda tid: _task())
     monkeypatch.setattr(eb.store.TasksStore, "set_progress",
                         lambda tid, p: seen.update(p))
-    monkeypatch.setattr(eb, "_publish_progress", lambda c, t, p: seen.update(p))
+    monkeypatch.setattr(eb, "_publish_progress", lambda c, t, p, **kw: seen.update(p))
     monkeypatch.setattr(eb, "_append", lambda *a, **k: None)
     eb._handle_task_event({"kind": "tool", "text": "▶ editor",
                            "toolName": "editor"}, _ctx())
@@ -119,7 +119,7 @@ def test_verify_event_feedback(monkeypatch):
     monkeypatch.setattr(eb.store.TasksStore, "get", lambda tid: _task(progress=seen))
     monkeypatch.setattr(eb.store.TasksStore, "set_progress",
                         lambda tid, p: seen.update(p))
-    monkeypatch.setattr(eb, "_publish_progress", lambda c, t, p: seen.update(p))
+    monkeypatch.setattr(eb, "_publish_progress", lambda c, t, p, **kw: seen.update(p))
     def fake_append(conv_id, role, content, msg_meta=None, **kw):
         appended.append(msg_meta or {})
     monkeypatch.setattr(eb, "_append", fake_append)

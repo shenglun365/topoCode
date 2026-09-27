@@ -6,6 +6,8 @@ import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, wat
 import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon, CpuChipIcon } from '@heroicons/vue/24/outline'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
+import ExecutorProcessStrip from '@/components/chat/ExecutorProcessStrip.vue'
+import { useConversationStore } from '@/stores/conversation-store'
 import ChoicesCard from '@/components/chat/ChoicesCard.vue'
 import CollapseChevron from '@/components/chat/CollapseChevron.vue'
 import ChevronSvg from '@/components/chat/ChevronSvg.vue'
@@ -108,6 +110,10 @@ const {
   toggleSpecCard,
   trailOpen,
 } = useChatWs()
+// cv-268 直通过程条: SSE progress(conversationId 键) → 会话级过程态;
+// 活跃流式=完整条, turn_done 后(busy=false)折叠一行摘要, 终态 finished 帧清除
+const _convStore = useConversationStore()
+const proxyProc = computed(() => _convStore.proxyProgressOf(props.convId))
 const emit = defineEmits<{
   'task-confirm': [id: string]
   'task-cancel': [id: string]
@@ -1036,6 +1042,17 @@ const emit = defineEmits<{
         </div>
       </div>
 
+      <!-- cv-268 直通执行器过程条(消息区尾部; turn_done 后折叠) -->
+      <ExecutorProcessStrip
+        v-if="proxyProc"
+        :folded="!busy"
+        :process="proxyProc.process || []"
+        :last-text="proxyProc.lastText || ''"
+        :last-tool="proxyProc.lastTool || ''"
+        :tool-count="proxyProc.toolCount || 0"
+        :input-tokens="proxyProc.inputTokens || 0"
+        :output-tokens="proxyProc.outputTokens || 0"
+      />
       <div
         v-if="busy"
         class="flex items-center gap-2 text-xs text-ctp-blue animate-pulse"

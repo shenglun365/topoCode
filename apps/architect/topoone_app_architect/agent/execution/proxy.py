@@ -104,12 +104,23 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             _flush("✅ 本轮回答已结束——继续对话将直接送达执行器。")
         elif kind == "input_required":
             _flush("⏸ 执行器有事项需要你确认——直接回复即可。")
+        elif kind in ("tool", "usage", "progress"):
+            # cv-268 过程感知单源: 落内存环形(瞬态) + SSE progress
+            # (conversationId 键无 taskId → FE 分流到消息区过程条)
+            from . import process_stream as _ps
+            prog = _ps.apply_event(_ps.proxy_progress(conv_id), ev)
+            if prog is not None:
+                _ps.proxy_store(conv_id, prog)
+                _ps.publish(conv_id, f"proxy:{conv_id}", prog,
+                            throttle=_ps.sse_throttle(kind), jobId=job_id)
         elif kind == "notice":
             logger.info("[proxy] %s notice: %s", job_id, str(ev.get("text") or "")[:120])
         elif kind in ("done", "failed", "aborted"):
             _flush("✅ 本轮完成。" if kind == "done"
                    else f"⚠️ 本轮结束({kind})。")
             _PROXY_JOBS.pop(conv_id, None)
+            from . import process_stream as _ps
+            _ps.proxy_finish(conv_id)
             suffix = ("会话已结束——继续对话将开启新的执行器会话。"
                       if kind in ("done", "aborted") else "可重试或改走任务链路。")
             eb._append(conv_id, "assistant", suffix,
@@ -117,6 +128,8 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
 
     def on_lost(reason: str) -> None:
         _PROXY_JOBS.pop(conv_id, None)
+        from . import process_stream as _ps
+        _ps.proxy_finish(conv_id)
         eb._append(conv_id, "assistant",
                    f"⚠️ 直通会话与 runner 失去联系({reason})。",
                    msg_meta={"kind": "proxy"}, agent=etype)

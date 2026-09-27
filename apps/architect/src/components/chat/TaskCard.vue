@@ -162,29 +162,17 @@
         </p>
       </div>
     </div>
-    <!-- 执行过程(准流式): 工具轨迹 + 滚动文本尾, 随 SSE progress 实时变化 -->
-    <div
+    <!-- 执行过程(准流式): cv-268 共享组件(工具轨迹+滚动文本尾, SSE progress 实时) -->
+    <ExecutorProcessStrip
       v-if="isLive && progress && (progress.lastText || progress.lastTool || (progress.process || []).length)"
-      class="mt-1.5 rounded border border-ctp-surface1 bg-ctp-base/70 px-2 py-1.5"
-    >
-      <div class="flex items-center gap-1.5">
-        <span class="font-mono text-[10px] text-ctp-blue animate-pulse">● {{ progress.lastTool || '执行中' }}</span>
-        <span class="font-mono text-[9px] text-ctp-overlay0">
-          工具 ×{{ progress.toolCount ?? 0 }}<template v-if="progress.inputTokens"> · {{ fmtTok(progress.inputTokens) }}→{{ fmtTok(progress.outputTokens) }} tok</template>
-        </span>
-      </div>
-      <div
-        v-if="progress.lastText"
-        class="mt-1 font-mono text-[10px] leading-relaxed text-ctp-subtext1 whitespace-pre-wrap line-clamp-5"
-      >{{ progress.lastText }}</div>
-      <div v-if="(progress.process || []).length" class="mt-1 flex flex-wrap gap-1">
-        <span
-          v-for="(p, i) in processTail"
-          :key="i"
-          class="chip !text-[9px] font-mono bg-ctp-surface0/70 text-ctp-overlay1"
-        >{{ p.s }}</span>
-      </div>
-    </div>
+      dense
+      :process="progress.process || []"
+      :last-text="progress.lastText || ''"
+      :last-tool="progress.lastTool || ''"
+      :tool-count="progress.toolCount ?? 0"
+      :input-tokens="progress.inputTokens || 0"
+      :output-tokens="progress.outputTokens || 0"
+    />
     <StreamItems
       v-if="convId"
       :conv-id="convId"
@@ -205,6 +193,7 @@ import { apiPost } from '@/services/api-client'
 import { useCardCollapse } from '@/composables/useCardCollapse'
 import CollapseChevron from './CollapseChevron.vue'
 import StreamItems from './StreamItems.vue'
+import ExecutorProcessStrip from './ExecutorProcessStrip.vue'
 
 const props = defineProps<{ task: Record<string, any>; convId?: string }>()
 const emit = defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
@@ -274,11 +263,6 @@ function toggleCollapse() {
 }
 const progress = computed(() => (typeof props.task.progress === 'object' && props.task.progress) || null)
 const isLive = computed(() => ['running', 'waiting_input'].includes(props.task.status))
-const processTail = computed(() => ((props.task.progress?.process) || []).slice(-8))
-function fmtTok(n: any): string {
-  const v = Number(n) || 0
-  return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)
-}
 const statusTone = computed(() => ({
   pending_confirm: 'border-ctp-yellow/30',
   running: 'border-ctp-blue/30',
