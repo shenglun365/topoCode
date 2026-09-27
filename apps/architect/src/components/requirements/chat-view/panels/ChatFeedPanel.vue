@@ -280,6 +280,7 @@ const emit = defineEmits<{
             :payload="(m.item!.payload || {}) as any"
             :live-state="proxyJobLiveState(m.item!.payload?.jobId)"
             :stopping="proxyStopping"
+            :conv-id="convId"
             @stop="onProxyStop"
           />
           <ChoicesCard

@@ -22,6 +22,14 @@
         :title="`消息 ×${progress.msgCount ?? 0} · ${new Date(progress.at || 0).toLocaleTimeString()}`"
       >⚙ ×{{ progress.toolCount ?? 0 }}</span>
       <span class="flex-1" />
+      <!-- cv-285 执行详情窗入口(组件层自持, 双入口之一) -->
+      <button
+        class="text-ctp-overlay0 hover:text-ctp-blue transition-colors p-0.5 shrink-0"
+        title="放大查看执行详情 — 指令/结果/控制(暂停/继续/停止/转达)"
+        @click="showDetail = true"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" /></svg>
+      </button>
       <!-- 执行器设定(未开始时可换): cline/opencode/codex -->
       <span v-if="task.status === 'pending_confirm' || task.status === 'saved'" class="flex items-center gap-0.5">
         <button
@@ -187,6 +195,13 @@
     </div>
     <div v-if="task.resultMd && isTerminal" class="mt-1 text-ctp-subtext0 line-clamp-6 whitespace-pre-wrap">{{ task.resultMd }}</div>
     </div>
+    <!-- cv-285 执行详情窗(组件内自持挂载) -->
+    <ExecutionDetailWindow
+      v-if="showDetail"
+      :task-id="task.id"
+      :conv-id="convId"
+      @close="showDetail = false"
+    />
   </div>
 </template>
 
@@ -197,10 +212,14 @@ import { apiPost } from '@/services/api-client'
 import { useCardCollapse } from '@/composables/useCardCollapse'
 import CollapseChevron from './CollapseChevron.vue'
 import StreamItems from './StreamItems.vue'
+import ExecutionDetailWindow from './ExecutionDetailWindow.vue'
 import ExecutorProcessStrip from './ExecutorProcessStrip.vue'
 
 const props = defineProps<{ task: Record<string, any>; convId?: string }>()
 const emit = defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
+
+// cv-285 执行详情窗(组件内自持挂载, 零宿主胶水——消息流/会话中心同卡同入口)
+const showDetail = ref(false)
 
 // 连点防重: 首次点击即锁定(慢路径秒级——后端 confirm 含探针/runner start),
 // 任务状态翻转(running/失败等)后解锁。后端同会话锁+幂等为最终兜底。

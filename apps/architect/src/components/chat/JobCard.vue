@@ -5,13 +5,15 @@
 // 宿主经 proxy-state REST 覆写(liveState)。控制: ⏸暂停(abort 保会话)/
 // ⏹结束会话(finish)——复用 cv-275 proxy-stop 分型端点; 补充指引=直接发消息
 // (steer 语义, 会话存活时自动转达)。
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import ExecutionDetailWindow from './ExecutionDetailWindow.vue'
 
 const props = defineProps<{
   payload: { jobId?: string; jobState?: string; executorType?: string;
              mode?: string; fingerprint?: string }
   liveState?: string      // 活动态覆写(running|idle|ended|'')
   stopping?: boolean
+  convId?: string         // cv-285 执行详情窗数据源
 }>()
 
 const emit = defineEmits<{ stop: [] }>()
@@ -24,6 +26,8 @@ const stateView = computed(() => ({
 }[state.value] || { label: state.value, cls: 'bg-ctp-surface1 text-ctp-subtext0', icon: '⚙️' }))
 
 const alive = computed(() => state.value !== 'ended')
+// cv-285 执行详情窗(组件内自持挂载)
+const showDetail = ref(false)
 </script>
 
 <template>
@@ -47,6 +51,15 @@ const alive = computed(() => state.value !== 'ended')
         :class="stateView.cls"
       >{{ stateView.label }}</span>
       <span class="flex-1" />
+      <!-- cv-285 执行详情窗入口(双源之二: 直通作业) -->
+      <button
+        v-if="payload.jobId"
+        class="text-ctp-overlay0 hover:text-ctp-blue transition-colors p-0.5 shrink-0"
+        title="放大查看执行详情 — 控制(暂停/继续/停止/转达)"
+        @click="showDetail = true"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" /></svg>
+      </button>
       <button
         v-if="alive"
         class="btn btn-xs btn-ghost shrink-0"
@@ -59,5 +72,12 @@ const alive = computed(() => state.value !== 'ended')
       v-if="alive"
       class="mt-1 text-[10px] text-ctp-overlay0"
     >补充对话指引：直接在输入框发消息（会话存活时自动转达执行器）；过程详见下方执行器输出与控制条。</div>
+    <!-- cv-285 执行详情窗(组件内自持挂载) -->
+    <ExecutionDetailWindow
+      v-if="showDetail"
+      :job-id="payload.jobId"
+      :conv-id="convId"
+      @close="showDetail = false"
+    />
   </div>
 </template>
