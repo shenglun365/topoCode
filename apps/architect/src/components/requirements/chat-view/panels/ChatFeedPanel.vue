@@ -114,6 +114,19 @@ const {
 // 活跃流式=完整条, turn_done 后(busy=false)折叠一行摘要, 终态 finished 帧清除
 const _convStore = useConversationStore()
 const proxyProc = computed(() => _convStore.proxyProgressOf(props.convId))
+// cv-275 持久会话状态(REST 真相源, 刷新安全): convId 变化/回合结束即查询
+const proxySession = ref<{ active: boolean; executorType: string;
+                           sessionRef: string; jobId?: string } | null>(null)
+const proxySessionBusy = ref(false)
+async function refreshProxySession() {
+  if (!props.convId) { proxySession.value = null; return }
+  try {
+    const { apiGet } = await import('@/services/api-client')
+    proxySession.value = await apiGet(`/sessions/${props.convId}/proxy-state`)
+  } catch { proxySession.value = null }
+}
+watch([() => props.convId, () => props.busy], () => { void refreshProxySession() },
+      { immediate: true })
 // cv-274 渲染层探针: 数据就位但未见条 → 断点在此(与 [arch-live] 日志同风格)
 watch(proxyProc, (p) => {
   if (p) console.info('[arch-live] 控制条渲染 conv=' + props.convId,
@@ -125,7 +138,10 @@ async function onProxyStop() {
   proxyStopping.value = true
   try {
     const { apiPost } = await import('@/services/api-client')
-    await apiPost(`/sessions/${props.convId}/proxy-stop`, {})
+    const r = await apiPost<{ summary?: string }>(
+      `/sessions/${props.convId}/proxy-stop`, {})
+    _convStore.pushLocalHint(r?.summary || '已停止')
+    void refreshProxySession()
   } catch { /* 停止失败保留过程条(泵终态兜底) */ } finally {
     proxyStopping.value = false
   }
@@ -1058,6 +1074,20 @@ const emit = defineEmits<{
         </div>
       </div>
 
+      <!-- cv-275 持久会话状态条(REST 真相源, 刷新安全): 会话存活常驻 -->
+      <div v-if="proxySession?.active" class="flex items-center gap-2 rounded border border-ctp-surface1 bg-ctp-base/70 px-2 py-1">
+        <span class="font-mono text-[10px]" :class="busy ? 'text-ctp-blue animate-pulse' : 'text-ctp-overlay1'">
+          ⚙ 编码执行器会话
+        </span>
+        <span class="font-mono text-[9px] text-ctp-overlay0">{{ busy ? '执行中' : '空闲(发消息继续)' }}</span>
+        <span class="flex-1" />
+        <button
+          class="chip !text-[9px] hover:text-ctp-red"
+          :disabled="proxySessionBusy"
+          :title="busy ? '暂停——中止本轮执行(会话保留)' : '结束直通会话(下条消息开启全新会话)'"
+          @click="onProxyStop"
+        >{{ busy ? '⏸ 暂停' : '⏹ 结束会话' }}</button>
+      </div>
       <!-- cv-268/273 直通执行器会话控制条(消息区尾部; turn_done 折叠; 停止钮) -->
       <ExecutorProcessStrip
         v-if="proxyProc"
@@ -1069,7 +1099,7 @@ const emit = defineEmits<{
         :turn-count="proxyProc.turnCount || 0"
         :input-tokens="proxyProc.inputTokens || 0"
         :output-tokens="proxyProc.outputTokens || 0"
-        :stoppable="!!props.busy"
+        :stoppable="!!proxyProc"
         @stop="onProxyStop"
       />
       <div

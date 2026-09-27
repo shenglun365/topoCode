@@ -797,3 +797,49 @@ def test_fold_snapshot_carries_turn_count(arch_env, tmp_path,
     emitted: list = []
     # 直接断言模块态计数
     assert _ps._PROXY_TURNS.get(conv["id"], 0) == 2
+
+
+def test_proxy_state_endpoint_shape(arch_env, tmp_path):
+    """cv-275: proxy_state 查询——活跃句柄+会话行 sessionRef(刷新安全真相源)。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    st = proxy.proxy_state(conv["id"])
+    assert st["active"] is False and st["sessionRef"] == ""
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-st", "executor_type": "cline-sdk",
+                                     "session_ref": "sess-x"}
+    store.ConversationsStore.update(conv["id"], {"sessionRef": "sess-x"})
+    st2 = proxy.proxy_state(conv["id"])
+    assert st2 == {"active": True, "jobId": "job-st",
+                   "executorType": "cline-sdk", "sessionRef": "sess-x"}
+
+
+def test_proxy_stop_dispatch_by_job_status(arch_env, tmp_path, monkeypatch):
+    """cv-275 停止分型: running→abort(暂停语义) / 空闲→finish(结束会话)。"""
+    calls: list = []
+
+    def fake_runner(path, payload=None, timeout=12.0):
+        calls.append(path)
+        if path.endswith("/abort"):
+            return {"ok": True}
+        if path.endswith("/finish"):
+            return {"ok": True}
+        return {"ok": True, "status": "running"}
+
+    from topoone_app_architect.agent.execution import exec_bridge as _eb
+    monkeypatch.setattr(_eb, "_runner", fake_runner)
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-dd", "executor_type": "cline-sdk"}
+    r1 = proxy.proxy_stop(conv["id"])
+    assert r1["ok"] and r1["action"] == "abort" and any(
+        p.endswith("/abort") for p in calls), "执行中应走 abort(暂停)"
+    # 空闲(waiting_input)
+    def idle_runner(path, payload=None, timeout=12.0):
+        calls.append(path)
+        if path.endswith("/abort"):
+            return {"ok": True}
+        if path.endswith("/finish"):
+            return {"ok": True}
+        return {"ok": True, "status": "waiting_input"}
+    monkeypatch.setattr(_eb, "_runner", idle_runner)
+    r2 = proxy.proxy_stop(conv["id"])
+    assert r2["ok"] and r2["action"] == "finish" and any(
+        p.endswith("/finish") for p in calls), "空闲应走 finish(结束会话)"

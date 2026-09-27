@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<{
   stoppable: false,
 })
 const emit = defineEmits<{ stop: [] }>()
+// cv-275: 按钮分型——LIVE=⏸暂停(中止本轮, 会话保留) / 折叠=⏹结束会话(下条全新)
 
 import { computed } from 'vue'
 
@@ -63,7 +64,10 @@ function fmtTok(n: any): string {
       <span class="font-mono text-[9px] text-ctp-overlay0">
         工具 ×{{ toolCount }}<template v-if="turnCount"> · {{ turnCount }} 轮</template><template v-if="inputTokens"> · {{ fmtTok(inputTokens) }}→{{ fmtTok(outputTokens) }} tok</template>
       </span>
-      <button v-if="stoppable" class="chip ml-auto !text-[9px] hover:text-ctp-red" title="停止执行器本轮(会话保留, 发消息继续)" @click="emit('stop')">停止</button>
+      <button v-if="stoppable" class="chip ml-auto !text-[9px] hover:text-ctp-red" title="暂停——中止本轮执行(会话保留, 发消息即恢复)" @click="emit('stop')">⏸ 暂停</button>
+    </div>
+    <div v-if="stoppable" class="mt-1 text-[9px] text-ctp-overlay0">
+      💡 执行中可直接输入——消息将就近送达执行器（cline 即时转向；其它执行器下一轮生效）
     </div>
     <div
       v-if="lastText"

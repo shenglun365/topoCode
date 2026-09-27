@@ -32,26 +32,44 @@ _PROXY_JOBS: Dict[str, Dict[str, str]] = {}
 _JOB_TERMINAL = ("done", "failed", "stopped")
 
 
-def proxy_stop(conv_id: str) -> Dict[str, Any]:
-    """停止直通执行器当前回合(cv-273 用户主动中断)。
+def proxy_state(conv_id: str) -> Dict[str, Any]:
+    """直通会话状态(cv-275): FE 持久状态条数据源(REST 查询, 刷新安全)。
 
-    runner /abort → adapter 中止回合 → aborted 事件经泵收尾(清句柄+落卡)。
-    会话行 sessionRef 保留——发消息即复活同会话(暂停/恢复语义)。
-    返回 {ok, job_id?, error?}。"""
+    {active, jobId, sessionRef, executorType}——active=有活跃直通作业
+    (内存句柄; 后端重启后句柄清空但会话行 sessionRef 仍可复活)。"""
+    entry = _PROXY_JOBS.get(conv_id) or {}
+    from ... import store as _st
+    row = _st.ConversationsStore.get(conv_id) or {}
+    return {"active": bool(entry),
+            "jobId": entry.get("job_id") or "",
+            "executorType": entry.get("executor_type") or "",
+            "sessionRef": row.get("sessionRef") or ""}
+
+
+def proxy_stop(conv_id: str) -> Dict[str, Any]:
+    """停止直通执行器(cv-273/275): 按作业状态分型——
+
+    running → /abort(暂停语义: 中止本轮, 会话保留, 发消息即恢复);
+    空闲(waiting_input) → /finish(结束会话: 下条消息开启全新会话)。
+    会话行 sessionRef 恒保留(finish 亦不清——用户可随时复活续上下文)。"""
     entry = _PROXY_JOBS.get(conv_id)
     if not entry:
         return {"ok": False, "error": "无进行中的直通会话"}
     job_id = entry["job_id"]
     from . import exec_bridge as eb
-    r = eb._runner(f"/api/implement/{job_id}/abort", {}, 12.0)
+    snap = eb._runner(f"/api/implement/{job_id}", None, 12.0) or {}
+    running = (snap.get("status") or "") not in ("waiting_input", "done",
+                                                 "failed", "stopped")
+    action = "abort" if running else "finish"
+    r = eb._runner(f"/api/implement/{job_id}/{action}", {}, 12.0)
     if r is None:
         return {"ok": False, "error": "runner 不可达(:3458)", "job_id": job_id}
     if r.get("ok") is False:
-        # adapter.abort False=执行器中止调用失败——如实透传(回合可能仍在等待)
-        return {"ok": False, "error": r.get("error") or "中止调用失败",
+        return {"ok": False, "error": r.get("error") or f"{action} 调用失败",
                 "job_id": job_id}
-    # aborted 事件经泵异步收尾(此处句柄仍存续, 泵终态统一清)
-    return {"ok": True, "job_id": job_id}
+    return {"ok": True, "job_id": job_id, "action": action,
+            "summary": ("已暂停——会话保留，发消息即恢复" if running
+                        else "已结束直通会话——下条消息将开启全新会话")}
 
 
 def proxy_enabled(conv: Optional[dict]) -> bool:

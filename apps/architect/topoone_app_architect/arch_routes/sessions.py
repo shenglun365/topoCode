@@ -1234,6 +1234,13 @@ async def session_guide(conv_id: str):
     return ok({"text": content, "fallback": False})
 
 
+@router.get("/sessions/{conv_id}/proxy-state")
+async def proxy_state_endpoint(conv_id: str):
+    """直通会话状态(cv-275): FE 持久状态条数据源(刷新安全)。"""
+    from ..agent.execution.proxy import proxy_state
+    return ok(proxy_state(conv_id))
+
+
 @router.post("/sessions/{conv_id}/proxy-stop")
 async def proxy_stop_endpoint(conv_id: str):
     """停止直通执行器当前回合(cv-273)。
