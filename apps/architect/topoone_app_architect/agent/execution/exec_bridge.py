@@ -622,6 +622,12 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
         task_status_card(conv_id, task_id, "waiting", agent=agent, pid=pid)
     elif kind == "done":
+        # cv-285 用户先行终态守卫: 执行详情窗 stop→cancelled 与泵 done 事件
+        # 并发竞态——cancelled/ignored(用户语义终态)不被事件覆写; done/failed
+        # 行先行落态时事件仍处理(计划回填钩子依赖, 既有测试语义)。
+        if (store.TasksStore.get(task_id) or {}).get("status") in (
+                "cancelled", "ignored"):
+            return
         clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()
         clean = re.sub(r'\{"result"\s*:\s*"outcome recorded[^}]*\}', "", clean).strip()
         # cv-203 P2: 摘要质量降级——计划重印/空摘要(与上轮待输入正文同文或
@@ -674,6 +680,10 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("[exec-bridge] 回执沉淀失败 task=%s: %s", task_id, e)
     elif kind == "failed":
+        # cv-285 用户先行终态守卫(与 done 分支同规)。
+        if (store.TasksStore.get(task_id) or {}).get("status") in (
+                "cancelled", "ignored"):
+            return
         _append(conv_id, "assistant",
                 f"❌ **任务失败**「{title}」：{text}\n可重新发起。",
                 msg_meta={"kind": "task_failed", "taskId": task_id},

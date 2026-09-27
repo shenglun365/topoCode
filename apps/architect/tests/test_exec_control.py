@@ -97,6 +97,13 @@ def test_control_stop_task_finishes_cancelled(arch_env, tmp_path, monkeypatch):
     task = store.TasksStore.get(task_id)
     assert (task.get("status") or "") == "cancelled"
     assert "停止" in str(task.get("resultMd") or "")
+    # cv-285 终态幂等守卫: stop 后泵迟到的 done/failed 事件不覆写 cancelled
+    from topoone_app_architect.agent.execution.exec_bridge import _handle_task_event, _task_ctx
+    ctx = _task_ctx(conv_id, task_id, "job-ctl-1", "", "cline-sdk")
+    _handle_task_event({"kind": "done", "text": "迟到完成", "changedFiles": []}, ctx)
+    _handle_task_event({"kind": "failed", "text": "迟到失败"}, ctx)
+    task = store.TasksStore.get(task_id)
+    assert (task.get("status") or "") == "cancelled", "终态不覆写"
 
 
 def test_control_job_source_proxy(arch_env, tmp_path, monkeypatch):
