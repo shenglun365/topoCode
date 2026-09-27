@@ -93,8 +93,10 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
     def on_event(ev: dict) -> None:
         kind = ev.get("kind") or ""
         if kind == "text":
-            buf["text"] = ((buf.get("text") or "")
-                           + str(ev.get("text") or ""))[-6000:]
+            # cv-271: 不设上限——缓冲即交付物, 截断=数据丢失(cv-266 实证
+            # 头部 6000 字符被挤掉); 失控保护归 runner loopguard(按输出/
+            # 工具频次熔断), architect 侧不再二次截断
+            buf["text"] = (buf.get("text") or "") + str(ev.get("text") or "")
             now = _time.monotonic() * 1000
             if now - buf["at"] >= _PROXY_FLUSH_MS:
                 buf["at"] = now

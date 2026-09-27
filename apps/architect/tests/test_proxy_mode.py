@@ -670,3 +670,24 @@ def test_pump_turn_done_folds_with_real_tool_count(arch_env, tmp_path,
     finally:
         _sse.emit = orig
         _ps.proxy_clear(conv["id"])
+
+
+def test_pump_long_output_head_preserved(arch_env, tmp_path, _isolate_proxy_state):
+    """cv-271 头部截断回归: 缓冲即交付物, >6000 字符不丢开头。
+
+    用户实证(cv-266): buf[-6000:] 尾部保留使长报告开头被逐步挤掉
+    (m-2117 落库 6013 字符, HEAD 是 ASCII 图中间)。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-lg", "executor_type": "cline-sdk"}
+    on_event, _snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-lg", "cline-sdk")
+    head = "报告开头：项目全景评估。\n"
+    on_event({"kind": "text", "text": head})
+    on_event({"kind": "text", "text": "填充" * 5000})   # 10000 字符
+    on_event({"kind": "turn_done"})
+    msgs = store.ConversationsStore.messages(conv["id"], limit=10)
+    body = [m for m in msgs if (m.get("meta") or {}).get("kind") == "proxy"]
+    full = body[0]["content"]
+    assert full.startswith("报告开头"), "头部必须完整保留"
+    assert len(full) > 10000, "全文累积(无 6000 上限)"
+    assert "✅ 本轮回答已结束" in full
