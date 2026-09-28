@@ -44,6 +44,6 @@ async def execution_control(request: Request):
         str((body or {}).get("text") or ""))
     if not res.get("ok") and res.get("error") in (
             "task-not-found", "no-target", "unknown-action:"
-            + action, "text-empty", "task-not-running"):
+            + action, "text-empty", "task-not-running", "task-terminal"):
         return err(400, str(res.get("error")))
     return ok(res)

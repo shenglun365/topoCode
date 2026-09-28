@@ -56,22 +56,35 @@ watch(() => [props.convId, props.taskId, props.jobId],
 // 控制钮可见性=状态机单谓词(避免散落 v-if)
 const alive = computed(() =>
   ['running', 'waiting_input', 'pending_confirm'].includes(detail.value?.status || ''))
+const failed = computed(() => detail.value?.status === 'failed')
+const userTerminal = computed(() =>
+  ['cancelled', 'ignored'].includes(detail.value?.status || ''))
 const canPause = computed(() =>
   alive.value && !!detail.value?.jobId && detail.value?.runnerStatus === 'running')
 const canResume = computed(() =>
-  alive.value && !!detail.value?.jobId && detail.value?.runnerStatus !== 'running')
+  (alive.value && !!detail.value?.jobId && detail.value?.runnerStatus !== 'running')
+  || failed.value)   // cv-285c: 失败卡「继续执行」=重试(附补充, 失败分支续跑)
 const canStop = computed(() => alive.value)
+const canSupplement = computed(() => (alive.value || failed.value) && !userTerminal.value)
 
 async function control(action: string, text = '') {
   if (actionBusy.value) return
   actionBusy.value = action
   try {
-    await apiPost('/execution/control', {
-      convId: props.convId, action,
-      taskId: props.taskId || '', jobId: props.jobId || '', text,
-    })
-    if (action === 'stop') { await load() }
-    if (action === 'input') supplementMsg.value = '已转达'
+    const res = await apiPost<{ ok?: boolean; error?: string; retried?: boolean }>(
+      '/execution/control', {
+        convId: props.convId, action,
+        taskId: props.taskId || '', jobId: props.jobId || '', text,
+      })
+    if (res && res.ok === false) {
+      // cv-285c: 后端拒绝显式透出(此前静默"已转达")
+      supplementMsg.value = `⚠ ${res.error || '操作失败'}`
+      return
+    }
+    if (action === 'stop' || res?.retried) await load()
+    if (action === 'input') {
+      supplementMsg.value = res?.retried ? '已附带补充并重试执行' : '已转达'
+    }
   } catch (e) {
     supplementMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -165,9 +178,11 @@ async function sendSupplement() {
               v-if="canResume"
               class="btn btn-xs btn-ghost"
               :disabled="!!actionBusy"
-              title="继续执行——向执行器转达「继续」"
+              :title="failed
+                ? '重试执行——输入框内容将作为【用户补充】随指令下发(失败分支续跑)'
+                : '继续执行——向执行器转达「继续」'"
               @click="control('resume')"
-            >▶ 继续执行</button>
+            >{{ failed ? '↻ 重试执行' : '▶ 继续执行' }}</button>
             <button
               v-if="canStop"
               class="btn btn-xs btn-ghost text-ctp-red!"
@@ -177,18 +192,23 @@ async function sendSupplement() {
             >⏹ 停止</button>
             <input
               v-model="supplement"
-              class="min-w-0 flex-1 rounded-md border border-ctp-surface1 bg-ctp-mantle px-2.5 py-1.5 text-[11px] text-ctp-text outline-none focus:border-ctp-blue"
-              :placeholder="detail.source === 'task'
-                ? '信息补充 / 问询回答——转达给任务执行器'
-                : '信息补充——转达给直通会话'"
+              class="min-w-0 flex-1 rounded-md border border-ctp-surface1 bg-ctp-mantle px-2.5 py-1.5 text-[11px] text-ctp-text outline-none focus:border-ctp-blue disabled:opacity-40"
+              :disabled="!canSupplement"
+              :placeholder="userTerminal
+                ? '任务已取消/忽略——不可转达'
+                : detail?.source === 'task' && failed
+                  ? '信息补充——将附带重试执行(失败分支续跑)'
+                  : detail?.source === 'task'
+                    ? '信息补充 / 问询回答——转达给任务执行器'
+                    : '信息补充——转达给直通会话'"
               @keydown.enter="sendSupplement"
             >
             <button
               class="btn btn-xs btn-blue shrink-0"
-              :disabled="!!actionBusy || !supplement.trim()"
-              title="转达给执行器"
+              :disabled="!!actionBusy || !supplement.trim() || !canSupplement"
+              :title="canSupplement ? '转达给执行器' : '当前状态不可转达'"
               @click="sendSupplement"
-            >转达</button>
+            >{{ failed ? '补充并重试' : '转达' }}</button>
           </div>
           <div
             v-if="supplementMsg"

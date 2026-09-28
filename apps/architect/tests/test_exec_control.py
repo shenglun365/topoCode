@@ -28,7 +28,8 @@ def _mk_task_env(arch_env, tmp_path, monkeypatch, *, status="running"):
         "status": status, "executorType": "cline-sdk",
         "runnerJobId": "job-ctl-1", "specVer": 2,
         "branch": "topo/req-ctl"})
-    captured = {"abort": [], "finish": [], "input": [], "client_input": []}
+    captured = {"abort": [], "finish": [], "input": [], "client_input": [],
+                "start": []}
 
     def _fake_runner(path, payload=None, timeout=12.0):
         if path.endswith("/abort"):
@@ -43,6 +44,9 @@ def _mk_task_env(arch_env, tmp_path, monkeypatch, *, status="running"):
         return {"ok": True}
 
     from topoone_app_architect.agent.execution import exec_bridge as eb
+    monkeypatch.setattr(
+        "topoone_app_architect.arch_routes.execution.conv_root_project",
+        lambda c: (str(tmp_path), ""))
     monkeypatch.setattr(eb, "_runner", _fake_runner)
 
     class _Snap:
@@ -59,6 +63,22 @@ def _mk_task_env(arch_env, tmp_path, monkeypatch, *, status="running"):
             captured["client_input"].append((job_id, text, steer))
             from topoone_app_architect.agent.execution.runner_client import InputResult
             return InputResult(ok=True, queued=False, delivery="steered")
+
+        def start_implement(self, payload, timeout):
+            captured["start"].append(payload)
+
+            class _S:
+                ok = True
+                job_id = "job-new-1"
+                error = ""
+                branch = "topo/req-ctl"
+                worktree = str(tmp_path / "wt")
+                workspace = "inplace"
+                session_id = "s-new"
+                base_commit = "sha"
+                raw: dict = {}
+
+            return _S()
 
     monkeypatch.setattr(eb, "_client", lambda: _Client())
     return conv_id, task["id"], captured
@@ -142,6 +162,46 @@ def _jobcard_state(conv_id: str) -> str:
 def test_control_unknown_action(arch_env, tmp_path, monkeypatch):
     conv_id, task_id, _c = _mk_task_env(arch_env, tmp_path, monkeypatch)
     assert not ec.control_execution(conv_id, "reboot", task_id=task_id)["ok"]
+
+
+def test_failed_task_input_retries_with_supplement(arch_env, tmp_path, monkeypatch):
+    """cv-285c 用户实证: failed 卡转达被 task-not-active 静默拒绝——
+    语义修正: 附【用户补充】翻回 saved + confirm 重跑(失败分支续跑)。"""
+    conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    store.TasksStore.finish(task_id, "failed", "炸了")
+    res = ec.control_execution(conv_id, "input", task_id=task_id,
+                               text="补充: 排除 node_modules 再扫描")
+    assert res["ok"] and res.get("retried"), res
+    task = store.TasksStore.get(task_id)
+    assert (task.get("status") or "") == "running"
+    assert "【用户补充(失败重试)】补充: 排除 node_modules 再扫描" in (
+        task.get("instruction") or "")
+
+
+def test_failed_task_resume_retries_plain(arch_env, tmp_path, monkeypatch):
+    conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    store.TasksStore.finish(task_id, "failed", "炸了")
+    res = ec.control_execution(conv_id, "resume", task_id=task_id)
+    assert res["ok"] and res.get("retried")
+    assert (store.TasksStore.get(task_id).get("status") or "") == "running"
+
+
+def test_cancelled_task_input_rejected(arch_env, tmp_path, monkeypatch):
+    conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    store.TasksStore.finish(task_id, "cancelled")
+    res = ec.control_execution(conv_id, "input", task_id=task_id, text="x")
+    assert not res["ok"] and res["error"] == "task-terminal"
+    r = client_route_cancelled(arch_env, tmp_path, task_id)
+    assert r.status_code == 400
+
+
+def client_route_cancelled(arch_env, tmp_path, task_id):
+    from fastapi.testclient import TestClient
+    from topoone_app_architect.server import build_app
+    c = TestClient(build_app(data_dir=arch_env))
+    return c.post("/api/architect/execution/control",
+                  json={"convId": "cv-1", "action": "input",
+                        "taskId": task_id, "text": "x"})
 
 
 def test_routes_roundtrip(arch_env, tmp_path, monkeypatch, client):
