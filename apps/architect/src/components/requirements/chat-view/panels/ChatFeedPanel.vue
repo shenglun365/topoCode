@@ -404,7 +404,7 @@ const emit = defineEmits<{
             <button
               v-if="isLongMsg(m)"
               class="text-ctp-overlay0 hover:text-ctp-blue transition-colors p-0.5"
-              :title="msgMinimized[msgKey(m, i)] ? '展开(420px 内滚动)' : '最小化(仅头部 3 行)'"
+              :title="msgMinimized[msgKey(m, i)] ? '展开(420px 内滚动)' : '最小化(3 行内滚动)'"
               @click="toggleMsgMin(m, i)"
             >
               <svg v-if="msgMinimized[msgKey(m, i)]" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>
@@ -533,11 +533,12 @@ const emit = defineEmits<{
               && m.item?.type !== 'choices'"
             class="relative group/msg"
           >
-            <!-- cv-276/277: 长消息高度上限+内部滚动+最小化(头部3行)/展开切换+浮层放大 -->
+            <!-- cv-276/277/285f: 长消息两档同机制——最小化(3 行内滚动)/展开(420px 内滚动);
+                 差异仅在 max-height, 均可滚动(用户实证: 最小化也要能滚) -->
             <div
               :class="isLongMsg(m)
                 ? (msgMinimized[msgKey(m, i)]
-                    ? 'line-clamp-3 overflow-hidden'
+                    ? 'max-h-[3.4rem] overflow-y-auto pr-1'
                     : 'max-h-[420px] overflow-y-auto pr-1')
                 : ''"
             >
