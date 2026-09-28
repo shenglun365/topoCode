@@ -1,5 +1,5 @@
 import type { AssetDiagramResult, SemanticAsset, SemanticAssetDetail, SemanticAssetKind, SemanticAssetLevel } from '@/types'
-import { apiGet, apiPost } from './api-client'
+import { apiGet, apiPost, apiPut } from './api-client'
 import { currentProjectParams } from './project-service'
 
 /**
@@ -228,6 +228,68 @@ export interface CodegraphStatus {
     stale: boolean
     staleCount: number
   }
+}
+
+/** KB 基线就绪状态(baseline.readiness 无状态推导)。 */
+export interface BaselineReadiness {
+  state: 'no_project' | 'importing' | 'no_analysis' | 'analyzing' | 'unmounted' | 'ready'
+  projectId?: string
+  taskId?: string
+  taskName?: string
+  taskType?: string
+  taskStatus?: string
+  root?: string
+  mountedTaskIds?: string[]
+}
+
+/** 组件快速命名状态(analysis_tasks.result_data.naming)。 */
+export interface NamingStatus {
+  taskId: string
+  taskStatus?: string
+  naming?: {
+    status: 'running' | 'done' | 'error' | string
+    named?: number
+    reason?: string
+    inherited?: number
+    error?: string
+    startedAt?: string
+    finishedAt?: string
+  } | null
+}
+
+/** 工作区符号快照节点(稳定 ID 契约, 可与基线图谱对齐)。 */
+export interface WorkspaceSymbolNode {
+  id: string
+  kind: string
+  name: string
+  qualifiedName: string
+  file: string
+  language: string
+  startLine: number
+  endLine: number
+  isExported: boolean
+}
+
+export interface WorkspaceSnapshot {
+  projectId: string
+  base: string
+  explicitFiles: boolean
+  filesRequested: number
+  truncated: boolean
+  nodeCount: number
+  nodes: WorkspaceSymbolNode[]
+}
+
+/** 符号源选择器状态(与 codegraph on/off/auto 正交)。 */
+export interface SymbolSourceStatus {
+  pref: 'auto' | 'codegraph' | 'native'
+  effective: { mode?: string; source?: string }
+  nativeAvailable: boolean
+  corePid: string
+  head?: string
+  lastHead?: string
+  dirty?: number
+  stale?: boolean
 }
 
 /** 基线(lastHead) → 工作区 变更文件集（三视图 diff 数据源）。 */
@@ -475,6 +537,71 @@ export const semanticAssetService = {
   async coldStart(): Promise<{ started: boolean; projectId?: string; taskId?: string; requestId?: string; head?: string; message?: string } | undefined> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/cold-start', { root, project })
+  },
+
+  /** KB 基线就绪状态(无状态推导): no_project→importing→no_analysis→analyzing→unmounted→ready。 */
+  async baselineReadiness(): Promise<BaselineReadiness | undefined> {
+    const c = ctx()
+    return await apiGet<BaselineReadiness>(`/kb/semantic/baseline-readiness${c ? `?${c}` : ''}`)
+  },
+
+  /** 一键确保 KB 基线就绪(幂等编排: 建项→fast 全量分析→自动挂载)。
+   *  initGit: 工作目录非 git 仓库时授权 TopoCode 自动初始化(按钮点击即授权)。 */
+  async ensureBaselineReady(taskType: 'fast' | 'full' = 'fast', initGit = true): Promise<BaselineReadiness | undefined> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/ensure-baseline', { root, project, taskType, initGit })
+  },
+
+  /** 组件快速命名状态(result_data.naming; 缺 taskId 时按就绪态解析当前任务)。 */
+  async namingStatus(taskId?: string): Promise<NamingStatus | undefined> {
+    const c = ctx()
+    return await apiGet<NamingStatus | undefined>(`/kb/semantic/naming-status${c ? `?${c}` : ''}${taskId ? `&task_id=${encodeURIComponent(taskId)}` : ''}`)
+  },
+
+  /** 组件快速命名手动重试(B3): KB 后台执行, 轮询 namingStatus 跟踪。 */
+  async namingRerun(taskId?: string): Promise<{ started: boolean; reason?: string; taskId?: string } | undefined> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/naming-rerun', { root, project, taskId })
+  },
+
+  /** 驱动就绪状态机直至 ready(ensureReady 单步语义, 调用方须轮询推进:
+   *  建项 importing → 建任务 analyzing → 完成后自动挂载 ready)。
+   *  onProgress 每轮回调实时状态; 上限 ≈10 分钟, 连续 no_project 判死循环。 */
+  async driveBaselineReady(onProgress?: (r: BaselineReadiness) => void): Promise<BaselineReadiness | undefined> {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    const MAX_ROUNDS = 240
+    let last = ''
+    let r: BaselineReadiness | undefined
+    for (let i = 0; i < MAX_ROUNDS; i++) {
+      r = await this.ensureBaselineReady()
+      onProgress?.(r)
+      const st = r?.state ?? ''
+      if (st === 'ready') break
+      if (st === 'no_project' && last === 'no_project' && i > 2) break
+      last = st
+      await sleep(st === 'analyzing' || st === 'importing' ? 2500 : 300)
+    }
+    return r
+  },
+
+  /** 工作区(非基线)AST 实时快照 — KB 通道(稳定节点 ID, 可与基线图谱对齐跟踪)。 */
+  async workspaceSymbols(opts?: { base?: string; files?: string[] }): Promise<WorkspaceSnapshot | undefined> {
+    const { root, project } = currentProjectParams()
+    return await apiPost<WorkspaceSnapshot>('/kb/semantic/workspace-symbols', {
+      root, project, base: opts?.base, files: opts?.files,
+    })
+  },
+
+  /** 符号源选择器(与 codegraph on/off/auto 正交): auto|codegraph|native。 */
+  async symbolSource(): Promise<SymbolSourceStatus | undefined> {
+    const c = ctx()
+    return await apiGet<SymbolSourceStatus>(`/kb/semantic/symbol-source${c ? `?${c}` : ''}`)
+  },
+
+  async setSymbolSource(pref: 'auto' | 'codegraph' | 'native'): Promise<boolean> {
+    const { root, project } = currentProjectParams()
+    await apiPut<unknown>('/kb/semantic/symbol-source', { root, project, pref })
+    return true
   },
 
   /** 检索已提取的语义资产。 */

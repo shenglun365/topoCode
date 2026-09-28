@@ -3,6 +3,7 @@
  * 裁决对齐: 无流程实体；分类=元数据(标题/时间/模块/自定义分组)；备案文档随时提取。
  */
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from './api-client'
+import { currentProjectParams } from './project-service'
 import type { CtxUsage } from '@/types'
 
 export interface SessionTags {
@@ -165,10 +166,16 @@ export const sessionService = {
   },
   // ── 开发简报(P4) ──
   async generateDigest(sinceDays = 7): Promise<SessionDoc> {
-    return apiPost<SessionDoc>('/digest', { sinceDays })
+    // 项目定位随行(BE 按 projectId/root 解析; 此前缺失 → 恒 400 无素材)
+    const { root, project } = currentProjectParams()
+    return apiPost<SessionDoc>('/digest', { sinceDays, root, projectId: project })
   },
   async digests(limit = 10): Promise<DigestInfo[]> {
-    return apiGet<DigestInfo[]>(`/digest?limit=${limit}`)
+    const { root, project } = currentProjectParams()
+    const qs = new URLSearchParams({ limit: String(limit) })
+    if (root) qs.set('root', root)
+    if (project) qs.set('project', project)
+    return apiGet<DigestInfo[]>(`/digest?${qs.toString()}`)
   },
 }
 

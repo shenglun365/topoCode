@@ -1,12 +1,7 @@
-"""开发简报(P4) —— SE 流程的「汇总面」。
+"""开发简报(P4) — 会话摘要/落地执行/备案文档 → LLM 总结 → dev_digest 文档。
 
-数据流: 会话摘要单元 + 执行回执单元 + 备案文档 + 落地执行(分支/提交)
-        → LLM 结构化总结 → dev_digest 备案文档(带 refs 图文深链)。
-用途: 项目概览驾驶舱；用户高效全面了解开发走向。
-
-refs.entries 结构: [{type(exec|session|doc), execId, conversationId, title,
-                     branch, commit, landedAt}] —— 前端据此渲染深链
-(会话→会话中心 select；执行资产变化→基线管理 merge 视图)。
+refs.entries: [{type(exec|session|doc), conversationId, title, branch, commit,
+landedAt}] — 前端据此渲染深链(会话→会话中心, 执行→基线 merge 视图)。
 """
 import logging
 import time
@@ -33,11 +28,13 @@ _DIGEST_SCHEMA = {
 
 
 def _collect(project_id: str, since_ms: int) -> dict:
-    """采集时间窗内的简报素材(项目库路由按当前项目)。"""
+    """采集时间窗内的简报素材(项目域过滤, 防多项目串数据)。"""
     landed = []
+    if not project_id:
+        return {"landed": [], "sessions": [], "docs": []}
 
     sessions = []
-    for c in store.ConversationsStore.all(limit=200):
+    for c in store.ConversationsStore.all(project_id=project_id, limit=200):
         ts = c.get("updatedAt") or 0
         if ts < since_ms:
             continue
@@ -46,7 +43,7 @@ def _collect(project_id: str, since_ms: int) -> dict:
         sessions.append(c)
     sessions.sort(key=lambda c: c.get("updatedAt") or 0, reverse=True)
 
-    docs = [d for d in store.DocsStore.all(limit=100)
+    docs = [d for d in store.DocsStore.all(project_id=project_id, limit=100)
             if (d.get("updatedAt") or 0) >= since_ms]
     docs.sort(key=lambda d: d.get("updatedAt") or 0, reverse=True)
     return {"landed": landed, "sessions": sessions, "docs": docs}
@@ -95,6 +92,13 @@ async def generate_digest(request: Request):
     except Exception:
         body = {}
     project_id = (body.get("projectId") or "").strip()
+    if not project_id:  # FE 未携带时按 (root, project) 定位(此前缺失即恒 400)
+        from .project import resolve_project
+        proj = resolve_project(body.get("root"),
+                               body.get("projectId") or body.get("project"))
+        project_id = (proj or {}).get("id") or ""
+    if not project_id:
+        return err(400, "未定位到项目(缺 projectId/root), 无法生成开发简报")
     since_days = min(max(int(body.get("sinceDays") or 7), 1), 180)
     since_ms = _ts() - since_days * 86400000
 
@@ -146,8 +150,14 @@ async def generate_digest(request: Request):
 
 
 @router.get("/digest")
-async def list_digests(limit: int = 10):
-    docs = store.DocsStore.all(type_="dev_digest", limit=limit)
+async def list_digests(limit: int = 10, root: Optional[str] = None,
+                       project: Optional[str] = None):
+    """开发简报列表(项目定位过滤, 防多项目串数据)。"""
+    from .project import resolve_project
+    proj = resolve_project(root, project)
+    project_id = (proj or {}).get("id") or ""
+    docs = store.DocsStore.all(project_id=project_id or None,
+                               type_="dev_digest", limit=limit)
     return ok([{
         "id": d["id"], "title": d.get("title") or "",
         "contentMd": d.get("contentMd") or "",

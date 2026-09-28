@@ -13,7 +13,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-import topoone_app_architect.arch_routes.project as P
+# 簇已拆分(§8.2): 候选匹配子系统在 kb_link
+import topoone_app_architect.arch_routes.kb_link as P
 
 
 def _rows():

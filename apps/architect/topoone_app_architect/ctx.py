@@ -201,3 +201,11 @@ def delete_project_db(project_id: str) -> None:
             os.rmdir(d)
     except OSError:
         pass
+    # 遗留扁平命名 {pid}-arch.db(旧版路径, 现行为 architect/{pid}/arch.db)一并清除
+    legacy = os.path.join(project_db_dir(), f"{project_id}-arch.db")
+    for p in (legacy, legacy + "-wal", legacy + "-shm"):
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except OSError:
+            pass

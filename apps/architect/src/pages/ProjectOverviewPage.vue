@@ -11,6 +11,7 @@ import { projectService } from '@/services/project-service'
 import { sessionService, type DigestInfo } from '@/services/session-service'
 import type { KbMatchResult, ProjectOverview, ProjectOverviewComponent } from '@/types'
 import KbLinkDialog from '@/components/project/KbLinkDialog.vue'
+import BaselineInitCard from '@/components/overview/BaselineInitCard.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useRouter } from 'vue-router'
 import {
@@ -290,6 +291,9 @@ function toggleAllComps() {
         </template>
         <p v-else class="py-4 text-center text-xs text-ctp-overlay0">{{ t('digest.empty') }}</p>
       </section>
+
+      <!-- ①.5 KB 基线就绪(git / codegraph / KB 状态识别 + 初始化按钮组) -->
+      <BaselineInitCard />
 
       <!-- ② 知识库关联 -->
       <section class="panel p-5">

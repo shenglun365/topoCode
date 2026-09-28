@@ -53,6 +53,22 @@ def _ensure_dir(path: str) -> bool:
 
 # ── 工程实现目录(agent 工作副本)读取 ────────────────────────────
 
+def is_git_repo(root: str) -> bool:
+    """目录是否已 git 初始化(与 KB git_service 同判定口径)。"""
+    return bool(root) and os.path.isdir(os.path.join(root, ".git"))
+
+
+def ensure_git_repo(root: str) -> dict:
+    """自动初始化 git(概览页按钮授权): init + add -A + topocode 首提交。"""
+    if not root or not os.path.isdir(root):
+        raise ValueError(f"directory not found: {root}")
+    _git(["init"], cwd=root)
+    _git(["add", "-A"], cwd=root)
+    _git(["-c", "user.name=topocode", "-c", "user.email=topocode@local", "commit", "-m", "topocode: init baseline"], cwd=root)
+    st = repo_status(root)
+    return {"head": st.get("commit", ""), "branch": st.get("branch", "") or "main"}
+
+
 def repo_status(root: str) -> dict:
     """root 仓库状态(真实)。返回 { branch, commit, dirty, ahead, behind }。"""
     branch = _git(["branch", "--show-current"], cwd=root) or ""

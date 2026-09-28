@@ -143,4 +143,20 @@ export const namingService = {
   }> {
     return apiGet(`/semantic/assets/${assetId}/names${qsWith('')}`)
   },
+
+  /** 规约违约检查(agent 通道): active 规约 × 变更符号 → 带证据违约清单。 */
+  async checkConventions(opts?: { base?: string; files?: string[] }): Promise<{
+    violations: { ruleId: string; symbol: string; file: string; line?: number; evidence: string; suggestion?: string; severity: 'error' | 'warn' | 'info' }[]
+    checkedSymbols: number
+    rules: number
+    files: string[]
+    base?: string
+    truncated?: boolean
+    notes?: string
+  }> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/naming/conventions/check', {
+      root, project, base: opts?.base, files: opts?.files,
+    })
+  },
 }

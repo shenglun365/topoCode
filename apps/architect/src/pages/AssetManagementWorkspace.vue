@@ -9,6 +9,9 @@ import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, ArrowPathIcon,
   CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon,
+  ArrowsRightLeftIcon, ClipboardDocumentListIcon,
+  ChevronDownIcon, ChevronRightIcon,
+  SparklesIcon, StopIcon, TrashIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'

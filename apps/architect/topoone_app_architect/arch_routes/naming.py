@@ -296,6 +296,25 @@ async def api_conventions_induce(request: Request):
     return ok(row)
 
 
+@router.post("/naming/conventions/check")
+async def api_conventions_check(request: Request):
+    """规约违约检查(agent 通道): active 规约 × 变更符号 → 带证据违约清单。
+
+    body: {root?, project?, base?, files?: [..]}; files 缺省 = 基线..工作区
+    变更文件。裁决 = LLM structured(规则语义由模型读); 取证 = KB 工作区符号
+    快照(稳定 ID/行号); 每条违约经 ruleId/文件归属防伪过滤。
+    """
+    import asyncio
+    body = await request.json() or {}
+    from ..sem.convention_check import convention_check
+    res = await asyncio.to_thread(
+        convention_check, body.get("root"), body.get("project"),
+        body.get("base") or "", body.get("files") or None)
+    if isinstance(res, dict) and res.get("error"):
+        return err(400, res["error"])
+    return ok(res)
+
+
 # ── 术语表 ────────────────────────────────────────────────────
 
 @router.get("/naming/glossary")

@@ -546,8 +546,16 @@ async function runCgColdStart() {
   cgColdStarting.value = true
   cgColdStartMsg.value = ''
   try {
-    const r = await semanticAssetService.coldStart()
-    cgColdStartMsg.value = r?.message || ''
+    // 驱动就绪状态机直至 ready(共享 driveBaselineReady; initGit=true 按钮点击
+    // 即授权: 非 git 工作目录自动初始化)。实时状态经 onProgress 显示。
+    const r = await semanticAssetService.driveBaselineReady((s) => {
+      const st = s?.state ?? ''
+      const extra = s?.taskId ? ` (任务 ${s.taskId}${s.taskType ? '/' + s.taskType : ''})` : ''
+      cgColdStartMsg.value = `状态: ${st}${extra} …`
+    })
+    if (r?.state === 'ready') {
+      cgColdStartMsg.value = `状态: ready (任务 ${(r?.mountedTaskIds ?? []).join(',') || r?.taskId})`
+    }
     void loadCgStatus()
   } catch (e: any) {
     cgColdStartMsg.value = e?.message || String(e)

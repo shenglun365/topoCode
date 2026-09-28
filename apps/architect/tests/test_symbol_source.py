@@ -373,3 +373,25 @@ def test_symbol_sync_endpoint_initiates_pull_request(tmp_path, monkeypatch):
     # 跟踪 KV 已记录(发起请求即对齐 head)
     kv = _sym._read_state_kv("proj-sync")
     assert kv.get("lastHead") == params["head"]
+
+
+def test_resolve_core_pid_mirror_root_via_local_repo_path(tmp_path, monkeypatch):
+    """git-local 导入项目 root_path=镜像 worktree, 原始根只在 local_repo_path/
+    remote_url —— 原始根反查须命中(列感知, 缺列 schema 回退 root_path)。"""
+    root = tmp_path / "repo-orig"
+    root.mkdir(parents=True)
+    data = tmp_path / "core-data2"
+    data.mkdir()
+    db = data / "topoone.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE projects(id TEXT PRIMARY KEY, root_path TEXT NOT NULL,"
+              " local_repo_path TEXT, remote_url TEXT)")
+    mirror = str(tmp_path / "cache" / "proj-x" / "worktree")
+    c.execute("INSERT INTO projects VALUES('proj-x', ?, ?, ?)",
+              (mirror, os.path.abspath(root), os.path.abspath(root)))
+    c.commit()
+    c.close()
+    monkeypatch.setenv("TOPOCODE_DB_DIR", str(data))
+    _sym.invalidate_native_cache()
+    assert _sym._resolve_core_pid(str(root)) == "proj-x"
+    assert _sym._resolve_core_pid(mirror) == "proj-x"

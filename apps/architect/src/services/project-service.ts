@@ -1,4 +1,4 @@
-import type { KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
+import type { GitInfoLite, KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import router from '@/router'
 
@@ -94,6 +94,15 @@ export const projectService = {
   /** 解除选择(URL 参数清除由 store 处理)。 */
   async unbind(): Promise<boolean> {
     return apiPost<boolean>('/project/unbind')
+  },
+  /** 工作目录 git 状态轻量探测(不依赖 KB 关联)。 */
+  async gitInfo(): Promise<GitInfoLite | null> {
+    const qs = projectQuery().toString()
+    return apiGet<GitInfoLite | null>(`/project/git-info${qs ? '?' + qs : ''}`)
+  },
+  /** 自动初始化工作目录 git 仓库(按钮点击即授权; 已是 repo 幂等返回)。 */
+  async initGit(): Promise<{ alreadyRepo?: boolean; initialized?: boolean; branch?: string; head?: string }> {
+    return apiPost('/project/init-git', currentProjectParams())
   },
   async status(): Promise<RepoStatus | null> {
     const qs = projectQuery().toString()

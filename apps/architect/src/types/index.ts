@@ -1252,3 +1252,12 @@ export interface DesignRelation {
   type: string
   key: string
 }
+
+/** 工作目录 git 状态轻量探测(概览页初始化卡片; 不依赖 KB 关联)。 */
+export interface GitInfoLite {
+  isRepo: boolean
+  root: string
+  branch?: string
+  head?: string
+  dirty?: boolean
+}

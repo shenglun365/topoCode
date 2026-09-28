@@ -62,10 +62,10 @@ def codegraph_status() -> dict:
     p = codegraph_cli()
     st = {'cli': bool(p), 'cliPath': p or ''}
     try:
-        from .symbols import _resolve_core_pid, _open_core_conn
+        from .symbols import resolve_live_core_pid, _open_core_conn
         _pid_ctx = ctx.get_project()
         _root_ctx = (store.ProjectsStore.get(_pid_ctx) or {}).get('rootPath', '') if _pid_ctx else ''
-        pid = _resolve_core_pid(_root_ctx)
+        pid = resolve_live_core_pid(_root_ctx)
         st['corePid'] = pid or ''
         if pid:
             conn = _open_core_conn(pid)

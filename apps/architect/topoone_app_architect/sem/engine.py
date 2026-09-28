@@ -2269,7 +2269,8 @@ def semantic_graph(root: Optional[str], project: Optional[str],
                    level: str = "", limit: int = 2000,
                    focus: str = "", hops: int = 1,
                    include_indirect: bool = False,
-                   file: str = "", files: str = "") -> Dict[str, Any]:
+                   file: str = "", files: str = "",
+                   change_base: str = "") -> Dict[str, Any]:
     """语义层图谱：节点=语义资产，边=资产间 relations，锚点=AST 引用。
 
     边 = 存库基础 relations(按 id/name/nameAlias/符号解析) ∪ 程序化派生边
@@ -2282,6 +2283,9 @@ def semantic_graph(root: Optional[str], project: Optional[str],
     file: 文件范围——仅返回锚定该文件的资产子图(文件级图谱入口)。
     files: 多文件范围(逗号分隔)——大项目图谱 >500 资产时由文件索引浮窗
     手动圈定范围(资产索引同款交互)，与 file 取并集。
+    change_base: 变更着色基准 commit(缺省关闭)。给出时经 compare 口径
+    给每个节点标 changeStatus(changed/new/removed, 含 strong 符号级证据)
+    并返回 changeSummary —— 资产变更图谱 = 图谱 × 变更着色, 不另建图谱。
     """
     _lazy_reconcile(root, project)
     pid = project_id_for(root, project)
@@ -2399,8 +2403,37 @@ def semantic_graph(root: Optional[str], project: Optional[str],
             nodes = [n for n in nodes if n["id"] in keep]
             merged = [e for e in merged if e.get("from") in keep and e.get("to") in keep]
             anchors = [a for a in anchors if a.get("assetId") in keep]
+    # 变更着色(compare 口径复用): changed/new/removed + 符号级 strong 证据
+    change_summary = None
+    if (change_base or "").strip():
+        from . import compare as _cmp
+        cmp = _cmp.cached_compare(root, project, (change_base or "").strip(), "worktree")
+        if isinstance(cmp, dict) and not cmp.get("error"):
+            assets_delta = cmp.get("assets") or {}
+            overlay: Dict[str, Dict[str, Any]] = {}
+            for status, entries, strong_default in (
+                    ("changed", assets_delta.get("changed"), None),
+                    ("new", assets_delta.get("new"), True),
+                    ("removed", assets_delta.get("removed"), True)):
+                for e in entries or []:
+                    eid = e.get("id")
+                    if not eid:
+                        continue
+                    strong = e.get("strong") if e.get("strong") is not None else strong_default
+                    overlay[eid] = {"changeStatus": status, "changeStrong": bool(strong)}
+            for n in nodes:
+                mark = overlay.get(n.get("id") or "")
+                if mark:
+                    n.update(mark)
+            change_summary = {
+                "base": cmp.get("base"), "head": cmp.get("head"),
+                "noChanges": cmp.get("noChanges"), "counts": cmp.get("counts"),
+                "marked": len(overlay),
+                "pending": (assets_delta.get("pending") or {}).get("count", 0),
+            }
     return {"nodes": nodes, "edges": merged, "anchors": anchors,
-            "count": len(nodes)}
+            "count": len(nodes),
+            "changeSummary": change_summary}
 
 
 # ═══ briefs（原第 briefs 段，纯移动）═══
@@ -4430,7 +4463,7 @@ async def api_purge_semantic(request: Request):
 async def api_codegraph_status(root: Optional[str] = None, project: Optional[str] = None):
     from .. import ctx
     from .codegraph import codegraph_status, effective_mode, kv_mode
-    from .symbols import symbol_source_state, _resolve_core_pid, _open_core_conn
+    from .symbols import symbol_source_state, resolve_live_core_pid, _open_core_conn
     mode = effective_mode()
     st = codegraph_status()
     # root 解析：显式参数 > 请求上下文(注册项目 rootPath)
@@ -4440,7 +4473,7 @@ async def api_codegraph_status(root: Optional[str] = None, project: Optional[str
         _root = (store.ProjectsStore.get(_pid_ctx) or {}).get('rootPath', '') if _pid_ctx else ''
     _root = _root or ''
     # native 统计（root 优先于 codegraph_status 内部上下文解析）
-    _core_pid = _resolve_core_pid(_root)
+    _core_pid = resolve_live_core_pid(_root)
     _merge = (mode == 'auto')
     if _core_pid:
         _conn = _open_core_conn(_core_pid, root=_root, merge=_merge)
@@ -4480,6 +4513,90 @@ async def api_codegraph_set(body: dict = None):
     if not set_kv_mode(mode):
         return err(400, "mode 必须为 on/off/auto")
     return ok({"mode": mode})
+
+
+# ── 符号源选择器(与 codegraph on/off/auto 正交: 选哪个通道, 不开关通道) ──
+# pref: auto(默认, codegraph 优先 native 兜底) / codegraph / native(KB)
+_SOURCE_PREF_KEY = 'arch.symbolSource.pref'
+_SOURCE_PREFS = ('auto', 'codegraph', 'native')
+
+
+def _get_source_pref() -> str:
+    from .codegraph import ensure_arch_settings_table
+    ensure_arch_settings_table()
+    try:
+        row = ctx.db().fetchone(
+            "SELECT value FROM arch_settings WHERE key=?", (_SOURCE_PREF_KEY,))
+        v = (row["value"] or "").strip() if row else ""
+        return v if v in _SOURCE_PREFS else 'auto'
+    except Exception:
+        return 'auto'
+
+
+def _set_source_pref(pref: str) -> bool:
+    from .codegraph import ensure_arch_settings_table
+    if pref not in _SOURCE_PREFS:
+        return False
+    ensure_arch_settings_table()
+    d = ctx.db()
+    d.execute("INSERT INTO arch_settings(key, value) VALUES(?,?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+              (_SOURCE_PREF_KEY, pref))
+    d.commit()
+    return True
+
+
+@router.get("/kb/semantic/symbol-source")
+async def api_symbol_source(root: Optional[str] = None, project: Optional[str] = None):
+    """当前符号源选择 + 各通道可用性(架构工作台选择依据)。"""
+    from .. import ctx as _ctx
+    from .symbols import symbol_source_state, _resolve_core_pid
+    _root = (root or '').strip() or ((store.ProjectsStore.get(project or _ctx.get_project()) or {})
+                                     .get('rootPath', ''))
+    st = symbol_source_state(_root or None, project)
+    core_pid = _resolve_core_pid(_root or None)
+    return ok({"pref": _get_source_pref(),
+               "effective": {"mode": st.get('mode'), "source": st.get('source')},
+               "nativeAvailable": bool(st.get('nativeAvailable')),
+               "corePid": st.get('corePid') or (core_pid or ''),
+               "head": st.get('head'), "lastHead": st.get('lastHead'),
+               "dirty": st.get('dirty'), "stale": st.get('stale')})
+
+
+@router.put("/kb/semantic/symbol-source")
+async def api_symbol_source_set(body: dict = None):
+    body = body or {}
+    pref = str(body.get("pref") or "").strip()
+    if not _set_source_pref(pref):
+        return err(400, f"pref 必须为 {'/'.join(_SOURCE_PREFS)}")
+    return ok({"pref": pref})
+
+
+@router.post("/kb/semantic/workspace-symbols")
+async def api_workspace_symbols(body: dict = None):
+    """工作区(非基线)AST 实时快照 — KB 通道(workspace.snapshot, 无状态不落库)。
+
+    body: {root?, project?, base?, files?: [..]}; files 缺省 =
+    base(缺省=当前基线 commit)..工作区 变更文件集。节点 ID 为稳定契约,
+    可与基线图谱直接对齐跟踪。
+    """
+    from .. import ctx as _ctx
+    from ..kb_gateway import call_kb
+    from .symbols import _resolve_core_pid
+    body = body or {}
+    proj = body.get('project') or _ctx.get_project()
+    root = resolve_root(body.get('root') or None, proj)
+    root = (root or '').strip()
+    if not root:
+        return err(400, "项目 root 解析失败")
+    pid = _resolve_core_pid(root)
+    if not pid:
+        return err(400, "KB 注册表无此仓库对应项目，请先建立 KB 基线")
+    res = call_kb('workspace.snapshot', project_id=pid,
+                  files=body.get('files') or None, base=body.get('base') or '')
+    if res is None:
+        return err(503, "KB 服务不可达或 workspace.snapshot 失败")
+    return ok(res)
 
 
 @router.post("/kb/semantic/symbol-sync")
@@ -4607,6 +4724,111 @@ def api_cold_start(body: dict = None):
                "message": "冷启动完成：项目已建项+初始基线，全量分析进行中（图谱/社区完成后符号源即生效）"})
 
 
+@router.get("/kb/semantic/baseline-readiness")
+async def api_baseline_readiness(root: Optional[str] = None, project: Optional[str] = None):
+    """KB 基线就绪状态(无状态推导: no_project→…→ready)。"""
+    from .. import ctx as _ctx
+    from ..kb_gateway import call_kb
+    from .paths import resolve_root
+    proj = project or _ctx.get_project()
+    root_r = (resolve_root(root or None, proj) or '').strip()
+    res = call_kb('baseline.readiness', root=root_r)
+    if res is None:
+        return err(503, "KB 服务不可达")
+    return ok(res)
+
+
+@router.post("/kb/semantic/ensure-baseline")
+async def api_ensure_baseline(body: dict = None):
+    """一键确保 KB 基线就绪(幂等编排: 建项→fast 全量分析→自动挂载)。
+
+    与 cold-start 的差异: cold-start 仅适用于未注册仓库的一次性自举;
+    本端点覆盖全生命周期(已有项目补任务/补挂载), 任务类型 fast
+    (静态管线+组件快速命名, 跳过 AI 项目摘要)。
+    """
+    from .. import ctx as _ctx
+    from ..kb_gateway import call_kb
+    from .paths import resolve_root
+    body = body or {}
+    proj = body.get('project') or _ctx.get_project()
+    root_r = (resolve_root(body.get('root') or None, proj) or '').strip()
+    if not root_r:
+        return err(400, "项目 root 解析失败")
+    res = call_kb('baseline.ensureReady', root=root_r,
+                  task_type=(body.get('taskType') or 'fast'),
+                  init_git=bool(body.get('initGit')))
+    if res is None:
+        return err(503, "KB 服务不可达或 ensureReady 失败")
+    # 冷启动自动关联: KB 项目建立后即绑定到 architect 项目 —— 与概览页
+    # 「查找关联」(/project/link)共用同一校验与落库核心, 用户无需再手动
+    # 关联。失败仅记日志不阻塞(手动关联路径保持可用)。
+    kb_pid = (res or {}).get('projectId') or ''
+    state = (res or {}).get('state') or ''
+    if kb_pid and state not in ('no_project', 'importing'):
+        try:
+            from ..arch_routes.project import resolve_project, link_arch_to_kb
+            arch_proj = resolve_project(root_r, proj or None)
+            if arch_proj:
+                link_ok, link_data = link_arch_to_kb(arch_proj, kb_pid)
+                if not link_ok:
+                    logger.warning("[ensure-baseline] auto-link failed: %s", link_data)
+        except Exception as e:
+            logger.warning("[ensure-baseline] auto-link error: %s", e)
+    return ok(res)
+
+
+@router.get("/kb/semantic/naming-status")
+async def api_naming_status(root: Optional[str] = None, project: Optional[str] = None,
+                            task_id: Optional[str] = None):
+    """组件快速命名状态(result_data.naming): 概览卡片 B2 失败透出/重试状态源。"""
+    from .. import ctx as _c
+    from ..kb_gateway import call_kb
+    from .paths import resolve_root
+    tid = (task_id or '').strip()
+    if not tid:
+        root_r = (resolve_root(root, _c.get_project()) or '').strip()
+        if not root_r:
+            return err(400, "项目 root 解析失败")
+        read = call_kb('baseline.readiness', root=root_r) or {}
+        tid = (read or {}).get('taskId') or ''
+    if not tid:
+        return ok({"taskId": "", "naming": None})
+    task = call_kb('analysis.getTask', taskId=tid)
+    if task is None:
+        return ok({"taskId": tid, "naming": None})
+    rd = task.get('result_data') or {}
+    if isinstance(rd, str):
+        import json as _json
+        try:
+            rd = _json.loads(rd)
+        except Exception:
+            rd = {}
+    return ok({"taskId": tid, "taskStatus": task.get('status') or '',
+               "naming": (rd or {}).get('naming')})
+
+
+@router.post("/kb/semantic/naming-rerun")
+async def api_naming_rerun(body: dict = None):
+    """组件快速命名手动重试(B3) → KB analysis.rerunNaming(后台执行)。"""
+    from .. import ctx as _c
+    from ..kb_gateway import call_kb
+    from .paths import resolve_root
+    body = body or {}
+    tid = (body.get('taskId') or '').strip()
+    if not tid:
+        root_r = (resolve_root(body.get('root'), _c.get_project()) or '').strip()
+        if not root_r:
+            return err(400, "项目 root 解析失败")
+        read = call_kb('baseline.readiness', root=root_r) or {}
+        tid = (read or {}).get('taskId') or ''
+    if not tid:
+        return err(400, "无已完成的基线任务可重试命名")
+    res = call_kb('analysis.rerunNaming', taskId=tid)
+    if res is None:
+        return err(503, "KB 服务不可达或 rerunNaming 失败")
+    return ok(res)
+
+
 @router.get("/kb/semantic/mappings")
 async def api_mappings(root: Optional[str] = None, project: Optional[str] = None,
                        asset_ids: str = ""):
@@ -4664,7 +4886,7 @@ async def api_semantic_stats(root: Optional[str] = None, project: Optional[str] 
 async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
                     kind: str = "", scope: str = "", level: str = "", limit: int = 2000,
                     focus: str = "", hops: int = 1, include_indirect: bool = False,
-                    file: str = "", files: str = ""):
+                    file: str = "", files: str = "", change_base: str = ""):
     """语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。
 
     scope: 逗号分隔的组件范围(scope_key)；kind: 资产种类过滤；level: 抽象粒度过滤。
@@ -4672,12 +4894,15 @@ async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
     include_indirect: 追加 1 跳中转间接边(虚线展示，默认关)。
     file: 文件范围(锚定该文件的资产子图；文件级图谱入口)。
     files: 多文件范围(逗号分隔；大项目 >500 资产时文件索引浮窗圈定)。
+    change_base: 变更着色基准 commit(缺省关闭)——节点标 changeStatus(changed/
+    new/removed+strong 证据)，返回 changeSummary；即"资产变更图谱"视图。
     """
     scopes = [s.strip() for s in (scope or "").split(",") if s.strip()] or None
     lvl = level if level in SEMANTIC_LEVELS else ""
     return ok(semantic_graph(root, project, kind, scopes, level=lvl, limit=limit,
                              focus=focus, hops=hops,
-                             include_indirect=include_indirect, file=file, files=files))
+                             include_indirect=include_indirect, file=file,
+                             files=files, change_base=change_base))
 
 @router.get("/kb/semantic/asset-compare")
 async def api_asset_compare(root: Optional[str] = None, project: Optional[str] = None,

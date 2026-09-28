@@ -25,27 +25,19 @@ from typing import Optional, Tuple
 
 from . import codegraph as _cg_mod
 from .codegraph import effective_mode, logger
-
 _native_cache = {}   # (core_pid, merge) -> (conn, ts)
 _state_cache = {}    # root -> (state, ts)
-_core_pid_cache = {} # root -> (core_pid|None, ts)
 _diff_cache = {}     # root -> (diff, ts)
 _NATIVE_TTL = 300.0
 _STATE_TTL = 60.0
-_PID_TTL = 300.0
 _STATE_KV_KEY = "arch.symbolSource."   # + core_pid
 
-
-def _core_data_dir() -> str:
-    return os.environ.get("TOPOCODE_DB_DIR") or ctx_data_dir()
-
-
-def ctx_data_dir() -> str:
-    try:
-        from .. import ctx
-        return ctx.data_dir()
-    except Exception:
-        return os.path.join(os.path.expanduser("~"), ".topocode")
+# pid 解析子系统自本文件拆出(§8.2 行数门禁); re-export 兼容既有引用
+# (codegraph/engine/tests 均经 symbols 取 _resolve_core_pid/_core_pid_cache)
+from .core_pid import (  # noqa: E402,F401
+    _core_pid_cache, _PID_TTL, _core_data_dir, ctx_data_dir,
+    _resolve_core_pid,
+)
 
 
 def _git(root: str, args: list, timeout: float = 20.0):
@@ -56,39 +48,6 @@ def _git(root: str, args: list, timeout: float = 20.0):
         return p.stdout if p.returncode == 0 else None
     except Exception:
         return None
-
-
-def _resolve_core_pid(root: Optional[str]):
-    """仓库 root → core 注册表项目 id。签名优先，root_path 反查兜底。无 → None。TTL 300s。"""
-    if not root:
-        return None
-    now = time.time()
-    hit = _core_pid_cache.get(root)
-    if hit and now - hit[1] < _PID_TTL:
-        return hit[0]
-    pid = None
-    try:
-        sig = os.path.join(root, ".topocode", "proj-id")
-        if os.path.isfile(sig):
-            with open(sig, 'r', encoding='utf-8') as f:
-                pid = f.read().strip() or None
-    except Exception:
-        pid = None
-    if not pid:
-        try:
-            db = os.path.join(_core_data_dir(), "topoone.db")
-            if os.path.isfile(db):
-                c = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
-                try:
-                    r = c.execute("SELECT id FROM projects WHERE root_path=?",
-                                  (os.path.abspath(root),)).fetchone()
-                    pid = r[0] if r else None
-                finally:
-                    c.close()
-        except Exception:
-            pid = None
-    _core_pid_cache[root] = (pid, now)
-    return pid
 
 
 # kind 归并类(身份对齐): 两源对同一符号的 kind 判定可能不同
@@ -112,6 +71,21 @@ def _cg_path_norm(root: str) -> str:
     esc = (root or "").replace("'", "''").rstrip("/")
     return (f"REPLACE(CASE WHEN file_path LIKE '{esc}/%' "
             f"THEN substr(file_path, {len(esc) + 2}) ELSE file_path END, '\\', '/')")
+
+
+def resolve_live_core_pid(root: Optional[str]):
+    """解析 + 活性校验：项目库已被删除(打开失败) → 清 TTL 缓存并返回 None。
+
+    防删除残影：project.remove 后 _core_pid_cache 仍持旧 pid 至多 5 分钟
+    (TTL 300s)，期间 codegraph 状态误报已连接 → 冷启动按钮被藏。
+    """
+    pid = _resolve_core_pid(root)
+    if not pid:
+        return None
+    if _open_core_conn(pid) is None:
+        _core_pid_cache.pop(root or "", None)
+        return None
+    return pid
 
 
 def _open_core_conn(core_pid: str, root: str = "", merge: bool = False):
