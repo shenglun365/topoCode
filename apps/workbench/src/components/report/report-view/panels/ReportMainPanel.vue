@@ -3,6 +3,16 @@
 /** MS6-W4 自 ReportHome 模板整块迁出(逐行未动)；状态经 WS_KEY 注入。 */
 
 import { useI18n } from 'vue-i18n'
+import {
+  DocumentMagnifyingGlassIcon,
+  ChartBarIcon,
+  ExclamationTriangleIcon,
+  XMarkIcon,
+  MinusIcon,
+  PlusIcon,
+} from '@heroicons/vue/24/outline'
+import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
+import CommunityArchitecturePanel from '@/components/report/CommunityArchitecturePanel.vue'
 import { useReportWs } from '../key'
 
 const { t } = useI18n()
@@ -369,7 +379,7 @@ const emit = defineEmits<{
         <CommunityArchitecturePanel
           :task-id="props.taskId"
           :tab-id="props.tabId"
-          :project-id="projectId"
+          :project-id="projectId || ''"
           :task-updated-at="taskDetail?.updatedAt || ''"
           :has-any-community="hasAnyCommunity"
           :total-scope-files="totalScopeFiles"

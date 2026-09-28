@@ -14,7 +14,7 @@ export default { analysis: {
   taskList: 'Task List',
   viewTitle: 'Baseline View',
   viewMountedCount: '{count} task(s) mounted',
-    viewVersionHint: 'Baseline view version — incremented on every mount/unmount',
+    viewVersionHint: 'Baseline view generation — incremented on every mount/unmount; v0 = nothing published (no task mounted)',
   viewHistory: 'History',
   viewHistoryEmpty: 'No changes yet',
   vhMount: 'Mount',

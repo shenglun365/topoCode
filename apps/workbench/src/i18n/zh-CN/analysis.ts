@@ -14,7 +14,7 @@ export default { analysis: {
   taskList: '任务列表',
   viewTitle: '基线视图',
   viewMountedCount: '已挂载 {count} 个任务',
-    viewVersionHint: '基线视图版本号——每次挂载/卸载 +1',
+    viewVersionHint: '基线视图代际——每次挂载/卸载 +1；v0 = 未挂载（尚未对外发布）',
   viewHistory: '变更记录',
   viewHistoryEmpty: '暂无变更记录',
   vhMount: '挂载',

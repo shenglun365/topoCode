@@ -2,8 +2,26 @@
 
 /** MS6-W4 自 ProjectCard 模板整块迁出(逐行未动)；状态经 WS_KEY 注入。 */
 
-import { BookOpenIcon, FolderIcon } from '@heroicons/vue/24/outline'
+import {
+  BookOpenIcon,
+  FolderIcon,
+  ArrowPathIcon,
+  EllipsisVerticalIcon,
+  PencilIcon,
+  TrashIcon,
+  MagnifyingGlassIcon,
+  ExclamationTriangleIcon,
+  ArchiveBoxXMarkIcon,
+  XMarkIcon,
+  CheckIcon,
+  DocumentPlusIcon,
+  DocumentMinusIcon,
+} from '@heroicons/vue/24/outline'
+import { StarIcon, ArrowUpOnSquareIcon } from '@heroicons/vue/24/solid'
 import { languageBadge } from '@/utils/languageBadge'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import ClearCacheDialog from '../../ClearCacheDialog.vue'
+import VersionUpdateDialog from '../../VersionUpdateDialog.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@/composables/useComponentId'

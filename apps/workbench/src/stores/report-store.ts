@@ -93,18 +93,14 @@ export const useReportStore = defineStore('report', () => {
 
     const promise = (async () => {
       try {
-        console.log('[report-store] loadDashboard sending getReportDashboard', { taskId })
         const dash = await ipc.analysis.getReportDashboard(taskId)
-        console.log('[report-store] loadDashboard received', { taskId, hasFileStats: !!dash?.fileStats, hasUniLevels: !!dash?.uniLevels })
         if (dash) {
           dashboardCache.value = { ...dashboardCache.value, [taskId]: dash }
           // 注入社区数据到 communityStore
           const { useCommunityStore } = await import('./community-store')
           const commStore = useCommunityStore()
           if (dash.uniLevels || dash.fileStats) {
-            console.log('[report-store] loadDashboard calling loadCommunitiesFromDashboard')
             await commStore.loadCommunitiesFromDashboard(taskId, dash)
-            console.log('[report-store] loadDashboard loadCommunitiesFromDashboard done')
           }
           // 加载外部依赖统计（并行，不阻塞）
           commStore.loadExternalStats(taskId).catch(() => {})

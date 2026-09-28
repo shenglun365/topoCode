@@ -266,10 +266,8 @@ function createRealIPC() {
         return await api.analysis.listRunningTasks()
       },
       createTask: async (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => {
-        console.log('[IPC] createTask -> api.analysis.createTask:', JSON.stringify(params))
         try {
           const result = await api.analysis.createTask(params)
-          console.log('[IPC] createTask result:', JSON.stringify(result))
           return adaptTask(result)
         } catch (err: any) {
           console.error('[IPC] createTask error:', err.message, err)
@@ -319,7 +317,6 @@ function createRealIPC() {
         return await api.analysis.updateTaskConfig(params)
       },
       scanFileStats: async (projectId: string, options?: ScanOptions) => {
-        console.log('[IPC] scanFileStats -> api.analysis.scanFileStats:', { projectId, options: JSON.stringify(options) })
         const scopes = options?.scopes
         const selectedExtensions = options?.selectedExtensions
         const rest: Record<string, any> = { ...options }
@@ -327,10 +324,8 @@ function createRealIPC() {
         delete rest.selectedExtensions
         // JSON round-trip 去除 Vue reactive Proxy（contextBridge structuredClone 拒绝 Proxy）
         const callParams: Record<string, any> = JSON.parse(JSON.stringify({ ...rest, scopes, selectedExtensions }))
-        console.log('[IPC] scanFileStats callParams:', JSON.stringify(callParams))
         try {
           const result = await api.analysis.scanFileStats(projectId, callParams)
-          console.log('[IPC] scanFileStats result:', JSON.stringify(result))
           return result
         } catch (err: any) {
           console.error('[IPC] scanFileStats error:', err.message, err)
