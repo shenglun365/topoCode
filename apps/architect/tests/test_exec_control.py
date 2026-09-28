@@ -174,7 +174,7 @@ def test_failed_task_input_retries_with_supplement(arch_env, tmp_path, monkeypat
     assert res["ok"] and res.get("retried"), res
     task = store.TasksStore.get(task_id)
     assert (task.get("status") or "") == "running"
-    assert "【用户补充(失败重试)】补充: 排除 node_modules 再扫描" in (
+    assert "【用户补充(重执行)】补充: 排除 node_modules 再扫描" in (
         task.get("instruction") or "")
 
 
@@ -186,9 +186,41 @@ def test_failed_task_resume_retries_plain(arch_env, tmp_path, monkeypatch):
     assert (store.TasksStore.get(task_id).get("status") or "") == "running"
 
 
-def test_cancelled_task_input_rejected(arch_env, tmp_path, monkeypatch):
+def test_cancelled_send_unified(arch_env, tmp_path, monkeypatch):
+    """cv-285e 统一转达语义: cancelled+文本=附补充重执行; 空文本=原样重试。"""
     conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
-    store.TasksStore.finish(task_id, "cancelled")
+    store.TasksStore.finish(task_id, "cancelled", "用户停止")
+    res = ec.control_execution(conv_id, "input", task_id=task_id,
+                               text="补充: 换个扫描入口")
+    assert res["ok"] and res.get("retried")
+    assert "【用户补充(重执行)】补充: 换个扫描入口" in str(
+        store.TasksStore.get(task_id).get("instruction") or "")
+    store.TasksStore.finish(task_id, "cancelled", "再次停止")
+    res2 = ec.control_execution(conv_id, "input", task_id=task_id, text="")
+    assert res2["ok"] and res2.get("retried")
+    instr = str(store.TasksStore.get(task_id).get("instruction") or "")
+    assert instr.count("用户补充") == 1, "空转达=原样重试, 不新增补充段"
+
+
+def test_alive_send_empty_means_continue(arch_env, tmp_path, monkeypatch):
+    """cv-285e: 空消息转达=继续执行(running→task_input 继续)。"""
+    conv_id, task_id, cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    res = ec.control_execution(conv_id, "input", task_id=task_id, text="")
+    assert res["ok"] and not res.get("retried")
+    assert cap["client_input"][-1][1] == "继续"
+
+
+def test_job_send_empty_means_continue(arch_env, tmp_path, monkeypatch):
+    """cv-285e: 直通源空转达=继续(steer 继续)。"""
+    conv_id, _t, cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    res = ec.control_execution(conv_id, "input", job_id="job-px-x", text="")
+    assert res["ok"]
+    assert cap["input"][-1][1]["text"] == "继续"
+
+
+def test_ignored_send_rejected_route400(arch_env, tmp_path, monkeypatch):
+    conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    store.TasksStore.finish(task_id, "ignored")
     res = ec.control_execution(conv_id, "input", task_id=task_id, text="x")
     assert not res["ok"] and res["error"] == "task-terminal"
     r = client_route_cancelled(arch_env, tmp_path, task_id)

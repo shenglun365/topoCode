@@ -16,28 +16,27 @@ ACTIONS = ("pause", "resume", "stop", "input")
 
 _JOB_ALIVE = ("running", "waiting_input")
 
-def _task_resume_or_input(task: Dict[str, Any], task_id: str,
-                          text: str, action: str = "input") -> Dict[str, Any]:
-    """转达/重执行按状态词汇分型(cv-285c 实证 failed 转达静默拒;
-    cv-285d: cancelled 卡无再执行入口——统一消费 ST.TASK_REVIVABLE 词汇)。
+def _task_send(task: Dict[str, Any], task_id: str, text: str) -> Dict[str, Any]:
+    """转达/继续统一通道(cv-285e 用户裁决: 空消息转达=继续执行)。
 
-    resume(显式重执行): alive→task_input(「继续」); saved/pending/revivable
-    (failed/cancelled)→confirm 重跑; ignored→拒绝。
-    input(被动转达): alive→task_input; failed→附【用户补充】confirm;
-    saved/pending→confirm; cancelled/ignored→拒绝(被动动作不复活)。"""
+    alive → task_input(text 留空="继续");
+    ignored → 拒绝(用户主动忽略不复活);
+    saved/pending/revivable(failed/cancelled) → text=附【用户补充(重执行)】
+    confirm / 空=指令原样 confirm——失败分支续跑(cv-177), 脏区问询透传。
+    resume 与 input 是同一语义面(区别仅在文本有无), 不再分权。"""
     from . import exec_bridge as eb
     st = str(task.get("status") or "")
-    if st == ST.TASK_IGNORED or (st == ST.TASK_CANCELLED and action == "input"):
+    if st == ST.TASK_IGNORED:
         return {"ok": False, "error": "task-terminal"}
     if st in _JOB_ALIVE:
-        res = eb.task_input(task_id, text)
+        res = eb.task_input(task_id, text or "继续")
         return {"ok": bool(res.get("ok")), "queued": bool(res.get("queued"))}
     if st not in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM, *ST.TASK_REVIVABLE):
         return {"ok": False, "error": f"task-status={st}"}
-    if st == ST.TASK_FAILED and action == "input" and text:
+    if text:
         instr = str(task.get("instruction") or "")
         store.TasksStore.update(task_id, {
-            "instruction": (instr + f"\n\n【用户补充(失败重试)】{text}")[:8000],
+            "instruction": (instr + f"\n\n【用户补充(重执行)】{text}")[:8000],
             "status": ST.TASK_SAVED})
     res = _confirm_saved(task_id)
     out: Dict[str, Any] = {"ok": bool(res.get("ok")), "retried": True,
@@ -133,14 +132,9 @@ def control_execution(conv_id: str, action: str,
                 return {"ok": False, "error": "task-not-running"}
             r = eb._runner(f"/api/implement/{job}/abort", {}, 12.0)
             return {"ok": bool(r and r.get("ok")), "action": action}
-        if action == "resume":
-            return _task_resume_or_input(task, task_id, text.strip() or "继续",
-                                         action="resume")
-        if action == "input":
-            if not text.strip():
-                return {"ok": False, "error": "text-empty"}
-            return _task_resume_or_input(task, task_id, text.strip(),
-                                         action="input")
+        if action in ("resume", "input"):
+            # cv-285e: 转达/继续同一语义面——空文本=继续执行/原样重试
+            return _task_send(task, task_id, text.strip())
         # stop: 结束作业(保留 worktree/分支) + 任务终态
         if job:
             r = eb._runner(f"/api/implement/{job}/finish",
@@ -160,10 +154,8 @@ def control_execution(conv_id: str, action: str,
                 _px._set_job_card_state(conv_id, "idle")
             return {"ok": ok_, "action": action}
         if action in ("resume", "input"):
-            if not text.strip():
-                return {"ok": False, "error": "text-empty"}
             r = eb._runner(f"/api/implement/{job_id}/input",
-                           {"text": text.strip(), "steer": True}, 12.0)
+                           {"text": text.strip() or "继续", "steer": True}, 12.0)
             ok_ = bool(r and r.get("ok") is not False)
             if ok_:
                 _px._set_job_card_state(conv_id, "running")

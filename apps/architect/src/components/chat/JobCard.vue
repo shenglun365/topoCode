@@ -6,6 +6,7 @@
 // ⏹结束会话(finish)——复用 cv-275 proxy-stop 分型端点; 补充指引=直接发消息
 // (steer 语义, 会话存活时自动转达)。
 import { computed, ref } from 'vue'
+import ExecutorProcessStrip from './ExecutorProcessStrip.vue'
 import ExecutionDetailWindow from './ExecutionDetailWindow.vue'
 
 const props = defineProps<{
@@ -14,6 +15,10 @@ const props = defineProps<{
   liveState?: string      // 活动态覆写(running|idle|ended|'')
   stopping?: boolean
   convId?: string         // cv-285 执行详情窗数据源
+  /** cv-285e 过程流(store 单源, SSE 实时): 轨迹/turnCount 并入本卡 */
+  proc?: { process?: Array<{ at: number; s: string }>; lastText?: string;
+           lastTool?: string; toolCount?: number; inputTokens?: number;
+           outputTokens?: number; turnCount?: number; folded?: boolean } | null
 }>()
 
 const emit = defineEmits<{ stop: [] }>()
@@ -21,7 +26,7 @@ const emit = defineEmits<{ stop: [] }>()
 const state = computed(() => props.liveState || props.payload.jobState || 'running')
 const stateView = computed(() => ({
   running: { label: '执行中', cls: 'bg-ctp-green/15 text-ctp-green', icon: '⚙️' },
-  idle: { label: '已暂停 · 会话保留', cls: 'bg-ctp-yellow/15 text-ctp-yellow', icon: '⏸' },
+  idle: { label: '空闲(发消息继续)', cls: 'bg-ctp-yellow/15 text-ctp-yellow', icon: '⏸' },
   ended: { label: '已结束', cls: 'bg-ctp-overlay0/15 text-ctp-overlay0', icon: '⏹' },
 }[state.value] || { label: state.value, cls: 'bg-ctp-surface1 text-ctp-subtext0', icon: '⚙️' }))
 
@@ -68,10 +73,25 @@ const showDetail = ref(false)
         @click="emit('stop')"
       >{{ stopping ? '处理中…' : '⏸ 暂停 / ⏹ 结束' }}</button>
     </div>
+    <!-- cv-285e: 过程条并入任务卡(轨迹/turnCount/文本尾, SSE 实时)——feed 底部独立条已撤 -->
+    <ExecutorProcessStrip
+      v-if="proc"
+      class="mt-1"
+      dense
+      :stoppable="false"
+      :folded="state !== 'running' || !!proc.folded"
+      :process="proc.process || []"
+      :last-text="proc.lastText || ''"
+      :last-tool="proc.lastTool || ''"
+      :tool-count="proc.toolCount || 0"
+      :turn-count="proc.turnCount || 0"
+      :input-tokens="proc.inputTokens || 0"
+      :output-tokens="proc.outputTokens || 0"
+    />
     <div
       v-if="alive"
       class="mt-1 text-[10px] text-ctp-overlay0"
-    >补充对话指引：直接在输入框发消息（会话存活时自动转达执行器）；过程详见下方执行器输出与控制条。</div>
+    >补充对话指引：直接在输入框发消息（会话存活时自动转达执行器）；🔍 可开执行详情窗。</div>
     <!-- cv-285 执行详情窗(组件内自持挂载) -->
     <ExecutionDetailWindow
       v-if="showDetail"

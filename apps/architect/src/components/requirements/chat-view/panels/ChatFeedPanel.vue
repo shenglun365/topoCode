@@ -6,7 +6,6 @@ import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, wat
 import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon, CpuChipIcon } from '@heroicons/vue/24/outline'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
-import ExecutorProcessStrip from '@/components/chat/ExecutorProcessStrip.vue'
 import JobCard from '@/components/chat/JobCard.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import ChoicesCard from '@/components/chat/ChoicesCard.vue'
@@ -177,7 +176,6 @@ function toggleMsgMin(m: any, i: number) {
 // cv-275 持久会话状态(REST 真相源, 刷新安全): convId 变化/回合结束即查询
 const proxySession = ref<{ active: boolean; executorType: string;
                            sessionRef: string; jobId?: string } | null>(null)
-const proxySessionBusy = ref(false)
 async function refreshProxySession() {
   if (!props.convId) { proxySession.value = null; return }
   try {
@@ -281,6 +279,7 @@ const emit = defineEmits<{
             :live-state="proxyJobLiveState(m.item!.payload?.jobId)"
             :stopping="proxyStopping"
             :conv-id="convId"
+            :proc="proxyProc"
             @stop="onProxyStop"
           />
           <ChoicesCard
@@ -1210,34 +1209,8 @@ const emit = defineEmits<{
         </div>
       </div>
 
-      <!-- cv-275 持久会话状态条(REST 真相源, 刷新安全): 会话存活常驻 -->
-      <div v-if="proxySession?.active" class="flex items-center gap-2 rounded border border-ctp-surface1 bg-ctp-base/70 px-2 py-1">
-        <span class="font-mono text-[10px]" :class="busy ? 'text-ctp-blue animate-pulse' : 'text-ctp-overlay1'">
-          ⚙ 编码执行器会话
-        </span>
-        <span class="font-mono text-[9px] text-ctp-overlay0">{{ busy ? '执行中' : '空闲(发消息继续)' }}</span>
-        <span class="flex-1" />
-        <button
-          class="chip !text-[9px] hover:text-ctp-red"
-          :disabled="proxySessionBusy"
-          :title="busy ? '暂停——中止本轮执行(会话保留)' : '结束直通会话(下条消息开启全新会话)'"
-          @click="onProxyStop"
-        >{{ busy ? '⏸ 暂停' : '⏹ 结束会话' }}</button>
-      </div>
-      <!-- cv-268/273 直通执行器会话控制条(消息区尾部; turn_done 折叠; 停止钮) -->
-      <ExecutorProcessStrip
-        v-if="proxyProc"
-        :folded="!busy || !!proxyProc.folded"
-        :process="proxyProc.process || []"
-        :last-text="proxyProc.lastText || ''"
-        :last-tool="proxyProc.lastTool || ''"
-        :tool-count="proxyProc.toolCount || 0"
-        :turn-count="proxyProc.turnCount || 0"
-        :input-tokens="proxyProc.inputTokens || 0"
-        :output-tokens="proxyProc.outputTokens || 0"
-        :stoppable="!!proxyProc"
-        @stop="onProxyStop"
-      />
+      <!-- cv-285e: 会话状态条+过程条已并入 JobCard(消息流内)——此处不再重复渲染 -->
+
       <div
         v-if="busy"
         class="flex items-center gap-2 text-xs text-ctp-blue animate-pulse"

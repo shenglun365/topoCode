@@ -5,7 +5,9 @@
 // 入口: TaskCard/JobCard 组件内放大钮(组件层自持, 零宿主胶水)。
 import { computed, ref, watch } from 'vue'
 import { apiGet, apiPost } from '@/services/api-client'
+import { useConversationStore } from '@/stores/conversation-store'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
+import ExecutorProcessStrip from './ExecutorProcessStrip.vue'
 
 const props = defineProps<{
   convId?: string
@@ -62,13 +64,10 @@ const userTerminal = computed(() =>
 const userTerminalIgnored = computed(() => detail.value?.status === 'ignored')
 const canPause = computed(() =>
   alive.value && !!detail.value?.jobId && detail.value?.runnerStatus === 'running')
-const canResume = computed(() =>
-  userTerminalIgnored.value
-    ? false
-    : (alive.value && !!detail.value?.jobId && detail.value?.runnerStatus !== 'running')
-      || failed.value || detail.value?.status === 'cancelled')
 const canStop = computed(() => alive.value)
-const canSupplement = computed(() => (alive.value || failed.value) && !userTerminal.value)
+// cv-285e: 过程流(store 单源, SSE 实时)——直通会话窗口内嵌渲染
+const _convStore = useConversationStore()
+const proc = computed(() => _convStore.proxyProgressOf(props.convId))
 
 async function control(action: string, text = '') {
   if (actionBusy.value) return
@@ -86,7 +85,9 @@ async function control(action: string, text = '') {
     }
     if (action === 'stop' || res?.retried) await load()
     if (action === 'input') {
-      supplementMsg.value = res?.retried ? '已附带补充并重试执行' : '已转达'
+      supplementMsg.value = res?.retried
+        ? (text ? '已附带补充并重试执行' : '已重新执行')
+        : '已转达'
     }
   } catch (e) {
     supplementMsg.value = e instanceof Error ? e.message : String(e)
@@ -96,7 +97,7 @@ async function control(action: string, text = '') {
 }
 
 async function sendSupplement() {
-  if (!supplement.value.trim()) return
+  if (userTerminalIgnored.value || actionBusy.value) return
   await control('input', supplement.value)
   supplement.value = ''
 }
@@ -137,6 +138,21 @@ async function sendSupplement() {
             :class="alive ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-overlay0/15 text-ctp-overlay0'"
           >{{ detail.runnerStatus || detail.status }}{{ detail.progress?.toolCount ? ` · 工具 ×${detail.progress.toolCount}` : '' }}</span>
           <span class="flex-1" />
+          <!-- cv-285e: 暂停/停止上移头部(关闭钮左侧) -->
+          <button
+            v-if="canPause"
+            class="btn btn-xs btn-ghost"
+            :disabled="!!actionBusy"
+            title="暂停本轮执行——会话保留，发消息即恢复"
+            @click="control('pause')"
+          >⏸ 暂停</button>
+          <button
+            v-if="canStop"
+            class="btn btn-xs btn-ghost text-ctp-red!"
+            :disabled="!!actionBusy"
+            title="停止——结束作业(保留分支与改动)"
+            @click="control('stop')"
+          >⏹ 停止</button>
           <button class="btn btn-xs btn-ghost" @click="emit('close')">✕ 关闭</button>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto px-5 py-3">
@@ -144,6 +160,24 @@ async function sendSupplement() {
             v-if="errMsg"
             class="text-[11px] text-ctp-red"
           >⚠ {{ errMsg }}</div>
+          <!-- cv-285e: 执行过程内嵌(过程渲染单源 strip, dense 无框; SSE 经 store 实时) -->
+          <div
+            v-if="detail?.source === 'job' && proc"
+            class="mb-3"
+          >
+            <ExecutorProcessStrip
+              dense
+              :stoppable="false"
+              :folded="false"
+              :process="proc.process || []"
+              :last-text="proc.lastText || ''"
+              :last-tool="proc.lastTool || ''"
+              :tool-count="proc.toolCount || 0"
+              :turn-count="proc.turnCount || 0"
+              :input-tokens="proc.inputTokens || 0"
+              :output-tokens="proc.outputTokens || 0"
+            />
+          </div>
           <template v-if="detail">
             <div
               v-if="detail.instruction"
@@ -169,51 +203,27 @@ async function sendSupplement() {
           v-if="detail"
           class="shrink-0 border-t border-ctp-surface1 px-4 py-2"
         >
+          <!-- cv-285e: 转达/继续合并为一钮——空消息=继续执行(原样重试) -->
           <div class="flex items-center gap-2">
-            <button
-              v-if="canPause"
-              class="btn btn-xs btn-ghost"
-              :disabled="!!actionBusy"
-              title="暂停本轮执行——会话保留，发消息即恢复"
-              @click="control('pause')"
-            >⏸ 暂停</button>
-            <button
-              v-if="canResume"
-              class="btn btn-xs btn-ghost"
-              :disabled="!!actionBusy"
-              :title="failed
-                ? '重试执行——输入框内容将作为【用户补充】随指令下发(失败分支续跑)'
-                : detail?.status === 'cancelled'
-                  ? '重新执行——指令原样重跑(取消的分支续跑); 主工作区脏时将弹出问询'
-                  : '继续执行——向执行器转达「继续」'"
-              @click="control('resume')"
-            >{{ failed ? '↻ 重试执行' : detail?.status === 'cancelled' ? '↻ 重新执行' : '▶ 继续执行' }}</button>
-            <button
-              v-if="canStop"
-              class="btn btn-xs btn-ghost text-ctp-red!"
-              :disabled="!!actionBusy"
-              title="停止——结束作业(保留分支与改动)"
-              @click="control('stop')"
-            >⏹ 停止</button>
             <input
               v-model="supplement"
               class="min-w-0 flex-1 rounded-md border border-ctp-surface1 bg-ctp-mantle px-2.5 py-1.5 text-[11px] text-ctp-text outline-none focus:border-ctp-blue disabled:opacity-40"
-              :disabled="!canSupplement"
-              :placeholder="userTerminal
-                ? '任务已取消/忽略——不可转达'
-                : detail?.source === 'task' && failed
-                  ? '信息补充——将附带重试执行(失败分支续跑)'
-                  : detail?.source === 'task'
-                    ? '信息补充 / 问询回答——转达给任务执行器'
-                    : '信息补充——转达给直通会话'"
+              :disabled="userTerminalIgnored"
+              :placeholder="userTerminalIgnored
+                ? '任务已忽略——不可转达'
+                : alive
+                  ? '转达给执行器（留空 = 继续执行）'
+                  : failed || detail?.status === 'cancelled'
+                    ? '补充后转达 = 附补充重试（留空 = 原样重执行）'
+                    : '可补充说明（留空 = 直接执行）'"
               @keydown.enter="sendSupplement"
             >
             <button
               class="btn btn-xs btn-blue shrink-0"
-              :disabled="!!actionBusy || !supplement.trim() || !canSupplement"
-              :title="canSupplement ? '转达给执行器' : '当前状态不可转达'"
+              :disabled="!!actionBusy || userTerminalIgnored"
+              :title="alive ? '转达；留空即继续执行' : '重试执行；有文本则作为补充随指令下发'"
               @click="sendSupplement"
-            >{{ failed ? '补充并重试' : '转达' }}</button>
+            >{{ alive ? '转达 / 继续' : '执行' }}</button>
           </div>
           <div
             v-if="supplementMsg"
