@@ -195,6 +195,37 @@ def test_cancelled_task_input_rejected(arch_env, tmp_path, monkeypatch):
     assert r.status_code == 400
 
 
+def test_cancelled_task_resume_revives(arch_env, tmp_path, monkeypatch):
+    """cv-285d: cancelled 卡有再执行入口——显式 resume(ST.TASK_REVIVABLE)
+    经 confirm 单门复活重跑; 被动 input 仍拒绝(同词汇两动作分权)。"""
+    conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    store.TasksStore.finish(task_id, "cancelled", "用户停止")
+    res = ec.control_execution(conv_id, "resume", task_id=task_id)
+    assert res["ok"] and res.get("retried"), res
+    task = store.TasksStore.get(task_id)
+    assert (task.get("status") or "") == "running"
+    # 指令原样(无补充段)——重新执行 ≠ 补充重试
+    assert "用户补充" not in str(task.get("instruction") or "")
+
+
+def test_ignored_task_resume_rejected(arch_env, tmp_path, monkeypatch):
+    """ignored 不在 REVIVABLE 词汇——用户主动忽略不复活。"""
+    conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    store.TasksStore.finish(task_id, "ignored")
+    res = ec.control_execution(conv_id, "resume", task_id=task_id)
+    assert not res["ok"]
+
+
+def test_confirm_revives_cancelled_at_dispatch_gate(arch_env, tmp_path, monkeypatch):
+    """confirm 单门(唯一再执行门)直接消费 REVIVABLE 词汇。"""
+    conv_id, task_id, _cap = _mk_task_env(arch_env, tmp_path, monkeypatch)
+    store.TasksStore.finish(task_id, "cancelled", "用户停止")
+    from topoone_app_architect.agent.execution import dispatch
+    res = dispatch.confirm_task(task_id)
+    assert res["ok"], res
+    assert (store.TasksStore.get(task_id).get("status") or "") == "running"
+
+
 def client_route_cancelled(arch_env, tmp_path, task_id):
     from fastapi.testclient import TestClient
     from topoone_app_architect.server import build_app

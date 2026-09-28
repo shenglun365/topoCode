@@ -16,44 +16,35 @@ ACTIONS = ("pause", "resume", "stop", "input")
 
 _JOB_ALIVE = ("running", "waiting_input")
 
-# 用户语义终态: 转达/重试不复活(与泵终态守卫同词汇)
-_USER_TERMINAL = ("cancelled", "ignored")
-
-
 def _task_resume_or_input(task: Dict[str, Any], task_id: str,
-                          text: str) -> Dict[str, Any]:
-    """转达/继续执行按任务状态分型(cv-285c 用户实证: failed 卡转达被
-    task-not-active 静默拒绝)。
+                          text: str, action: str = "input") -> Dict[str, Any]:
+    """转达/重执行按状态词汇分型(cv-285c 实证 failed 转达静默拒;
+    cv-285d: cancelled 卡无再执行入口——统一消费 ST.TASK_REVIVABLE 词汇)。
 
-    running/waiting_input → task_input 单源转达(现状);
-    saved → confirm 直接开始;
-    failed → 附【用户补充】翻回 saved + confirm 重跑(失败分支续跑 cv-177
-    ——重跑不再从零开始), 补充文本随指令下发;
-    cancelled/ignored → 明确拒绝(用户语义终态不复活)。"""
+    resume(显式重执行): alive→task_input(「继续」); saved/pending/revivable
+    (failed/cancelled)→confirm 重跑; ignored→拒绝。
+    input(被动转达): alive→task_input; failed→附【用户补充】confirm;
+    saved/pending→confirm; cancelled/ignored→拒绝(被动动作不复活)。"""
     from . import exec_bridge as eb
     st = str(task.get("status") or "")
-    if st in _USER_TERMINAL:
+    if st == ST.TASK_IGNORED or (st == ST.TASK_CANCELLED and action == "input"):
         return {"ok": False, "error": "task-terminal"}
     if st in _JOB_ALIVE:
         res = eb.task_input(task_id, text)
         return {"ok": bool(res.get("ok")), "queued": bool(res.get("queued"))}
-    if st == ST.TASK_SAVED:
-        res = _confirm_saved(task_id)
-        return {"ok": bool(res.get("ok")), "retried": True,
-                "error": str(res.get("error") or "")}
-    if st == "failed":
+    if st not in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM, *ST.TASK_REVIVABLE):
+        return {"ok": False, "error": f"task-status={st}"}
+    if st == ST.TASK_FAILED and action == "input" and text:
         instr = str(task.get("instruction") or "")
-        supplement = f"\n\n【用户补充(失败重试)】{text}"
         store.TasksStore.update(task_id, {
-            "instruction": (instr + supplement)[:8000],
+            "instruction": (instr + f"\n\n【用户补充(失败重试)】{text}")[:8000],
             "status": ST.TASK_SAVED})
-        res = _confirm_saved(task_id)
-        out = {"ok": bool(res.get("ok")), "retried": True,
-               "error": str(res.get("error") or "")}
-        if res.get("gateAsk"):
-            out["gateAsk"] = res["gateAsk"]   # 脏区问询态透传(卡已落流)
-        return out
-    return {"ok": False, "error": f"task-status={st}"}
+    res = _confirm_saved(task_id)
+    out: Dict[str, Any] = {"ok": bool(res.get("ok")), "retried": True,
+                           "error": str(res.get("error") or "")}
+    if res.get("gateAsk"):
+        out["gateAsk"] = res["gateAsk"]   # 脏区问询态透传(卡已落流)
+    return out
 
 
 def _confirm_saved(task_id: str) -> Dict[str, Any]:
@@ -143,11 +134,13 @@ def control_execution(conv_id: str, action: str,
             r = eb._runner(f"/api/implement/{job}/abort", {}, 12.0)
             return {"ok": bool(r and r.get("ok")), "action": action}
         if action == "resume":
-            return _task_resume_or_input(task, task_id, text.strip() or "继续")
+            return _task_resume_or_input(task, task_id, text.strip() or "继续",
+                                         action="resume")
         if action == "input":
             if not text.strip():
                 return {"ok": False, "error": "text-empty"}
-            return _task_resume_or_input(task, task_id, text.strip())
+            return _task_resume_or_input(task, task_id, text.strip(),
+                                         action="input")
         # stop: 结束作业(保留 worktree/分支) + 任务终态
         if job:
             r = eb._runner(f"/api/implement/{job}/finish",

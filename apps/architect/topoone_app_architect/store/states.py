@@ -38,6 +38,10 @@ TASK_FAILED = "failed"
 TASK_CANCELLED = "cancelled"
 TASK_IGNORED = "ignored"    # 用户主动忽略(软删终态: 流内置灰, 可追溯)
 ACTIVE_STATES = (TASK_PENDING_CONFIRM, TASK_RUNNING, TASK_WAITING_INPUT)
+# 未成功终态(cv-285d): 显式重执行动作(重新执行/重试)可复活——confirm 门与
+# 控制面/前端谓词统一消费本词汇, 禁逐状态散落分支。done 不在内(完成后重跑
+# 走新需求迭代); ignored 不在内(用户主动忽略不复活)。
+TASK_REVIVABLE = (TASK_FAILED, TASK_CANCELLED)
 
 # 规约版本
 SPEC_DRAFT = "draft"

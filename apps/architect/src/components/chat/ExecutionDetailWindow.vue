@@ -59,11 +59,14 @@ const alive = computed(() =>
 const failed = computed(() => detail.value?.status === 'failed')
 const userTerminal = computed(() =>
   ['cancelled', 'ignored'].includes(detail.value?.status || ''))
+const userTerminalIgnored = computed(() => detail.value?.status === 'ignored')
 const canPause = computed(() =>
   alive.value && !!detail.value?.jobId && detail.value?.runnerStatus === 'running')
 const canResume = computed(() =>
-  (alive.value && !!detail.value?.jobId && detail.value?.runnerStatus !== 'running')
-  || failed.value)   // cv-285c: 失败卡「继续执行」=重试(附补充, 失败分支续跑)
+  userTerminalIgnored.value
+    ? false
+    : (alive.value && !!detail.value?.jobId && detail.value?.runnerStatus !== 'running')
+      || failed.value || detail.value?.status === 'cancelled')
 const canStop = computed(() => alive.value)
 const canSupplement = computed(() => (alive.value || failed.value) && !userTerminal.value)
 
@@ -180,9 +183,11 @@ async function sendSupplement() {
               :disabled="!!actionBusy"
               :title="failed
                 ? '重试执行——输入框内容将作为【用户补充】随指令下发(失败分支续跑)'
-                : '继续执行——向执行器转达「继续」'"
+                : detail?.status === 'cancelled'
+                  ? '重新执行——指令原样重跑(取消的分支续跑); 主工作区脏时将弹出问询'
+                  : '继续执行——向执行器转达「继续」'"
               @click="control('resume')"
-            >{{ failed ? '↻ 重试执行' : '▶ 继续执行' }}</button>
+            >{{ failed ? '↻ 重试执行' : detail?.status === 'cancelled' ? '↻ 重新执行' : '▶ 继续执行' }}</button>
             <button
               v-if="canStop"
               class="btn btn-xs btn-ghost text-ctp-red!"

@@ -399,7 +399,9 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
     _st = task.get("status") or ""
     if _st in (ST.TASK_RUNNING, ST.TASK_WAITING_INPUT):
         return {"ok": True, "task": task, "duplicate": True}
-    if _st not in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM):
+    # cv-285d: 未成功终态(failed/cancelled)显式重执行可复活——状态机词汇
+    # 单源(ST.TASK_REVIVABLE), confirm 是唯一再执行门(指令原样, 直接开工)。
+    if _st not in (ST.TASK_SAVED, ST.TASK_PENDING_CONFIRM, *ST.TASK_REVIVABLE):
         return {"ok": False, "error": f"task-status={_st}"}
     from ...arch_routes.execution import conv_root_project
     conv_id = conv["id"]

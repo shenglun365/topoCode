@@ -74,6 +74,21 @@
         :disabled="acted"
         @click="act('cancel', task.id)"
       >⏹ 停止</button>
+      <!-- cv-285d: 未成功终态(failed/cancelled)显式重执行——ST.TASK_REVIVABLE 同源谓词 -->
+      <template v-else-if="revivable">
+        <button
+          class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30 disabled:opacity-40"
+          :disabled="acted"
+          title="重新执行——指令原样重跑(失败/取消的分支续跑); 主工作区脏时将弹出问询"
+          @click="reexecute"
+        >↻ 重新执行</button>
+        <button
+          class="btn-mini bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1"
+          :disabled="acted"
+          title="回执已阅——不合并、不建下张卡(留痕可追溯)"
+          @click="$emit('dismiss', task.id)"
+        >✓ 已阅</button>
+      </template>
       <!-- 完成 → 已阅(reviewing 消化出口; 幂等) -->
       <button
         v-else-if="task.status === 'done' && !task.dismissedAt"
@@ -210,6 +225,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 import { apiPost } from '@/services/api-client'
 import { useCardCollapse } from '@/composables/useCardCollapse'
+import { useConversationStore } from '@/stores/conversation-store'
 import CollapseChevron from './CollapseChevron.vue'
 import StreamItems from './StreamItems.vue'
 import ExecutionDetailWindow from './ExecutionDetailWindow.vue'
@@ -220,6 +236,28 @@ const emit = defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', task
 
 // cv-285 执行详情窗(组件内自持挂载, 零宿主胶水——消息流/会话中心同卡同入口)
 const showDetail = ref(false)
+// cv-285d: 未成功终态可复活(ST.TASK_REVIVABLE = failed|cancelled 同源)
+const revivable = computed(() =>
+  ['failed', 'cancelled'].includes(props.task.status || ''))
+const reexecuting = ref(false)
+async function reexecute() {
+  if (reexecuting.value || !props.convId) return
+  reexecuting.value = true
+  acted.value = true
+  try {
+    const r = await apiPost<{ ok?: boolean; error?: string; gateAsk?: string }>(
+      '/execution/control', {
+        convId: props.convId, action: 'resume',
+        taskId: props.task.id, jobId: '', text: '',
+      })
+    if (r && r.ok === false) {
+      useConversationStore().pushLocalHint(`⚠ 重新执行失败：${r.error || '未知错误'}`)
+    }
+    // 成功/脏区问询均经 SSE task 事件刷新卡片状态
+  } catch { /* 状态未翻转, acted 由 status watch 复位 */ } finally {
+    reexecuting.value = false
+  }
+}
 
 // 连点防重: 首次点击即锁定(慢路径秒级——后端 confirm 含探针/runner start),
 // 任务状态翻转(running/失败等)后解锁。后端同会话锁+幂等为最终兜底。
