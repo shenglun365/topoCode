@@ -74,7 +74,7 @@ def test_view_change_log_and_history(mdb):
     e = h["entries"]
     assert len(e) == 3
     assert [x["action"] for x in e] == ["mount", "unmount", "mount"]   # 倒序
-    assert [x["version"] for x in e] == [4, 3, 2]   # 初始 v1 + 三次变更
+    assert [x["version"] for x in e] == [3, 2, 1]   # 初始 v0(未发布) + 三次代际更替
     assert e[0]["taskId"] == "task-aaaaaaaa"
     assert e[0]["taskName"] == "task-aaaaaaaa"
     assert e[0]["taskExists"] is True

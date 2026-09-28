@@ -63,6 +63,20 @@ COMMUNITY_UNIFIED_SCORE_CALL = 1.0        # 仲裁打分 call 权重（密度归
 COMMUNITY_MIN_NODE_UNIFIED = 6            # UNIFIED 独立最小节点数
 COMMUNITY_UNIFIED_FORCE_ASSIGN = True     # F3-bis 强制归入级联（关闭退回 ORPHAN 终态）
 
+# ==================== 组件快速命名(agent 工具调用通道) ====================
+FAST_NAMING_MAX_TURNS = 8           # agent 多轮上限(防失控; 超限以已有产出收束)
+FAST_NAMING_MAX_COMPONENTS = 60     # 单任务命名组件总量上限(全层级累计, 防深层级大项目 LLM 成本跑飞)
+FAST_NAMING_SNIPPET_MAX_LINES = 60  # source_snippet 单次最大行数
+FAST_NAMING_SNIPPET_MAX_BYTES = 8192  # source_snippet 单次最大字节
+FAST_NAMING_AST_MAX_SYMBOLS = 200   # ast_structure 单文件符号上限(截断防上下文爆炸)
+FAST_NAMING_TOP_SYMBOLS = 5         # list_components 每组件展示的枢纽符号数
+
+# ==================== 基线自适应增量 ====================
+# 变更文件比例 > 阈值 → 全量重建(fast 任务); 否则逐文件增量(含社区重划分)
+FULL_REBUILD_CHANGE_RATIO = 0.3
+# 全量重建后新旧社区成员(文件集) Jaccard ≥ 阈值 → 继承旧命名(含 name_manual)
+NAME_INHERIT_JACCARD = 0.5
+
 # 枢纽节点过滤：度 > max(HUB_MIN_DEGREE, total_nodes * HUB_DEGREE_RATIO) 时视为枢纽
 HUB_DEGREE_RATIO = 0.3            # 度超过总节点30%
 HUB_MIN_DEGREE = 50               # 至少50度才触发（小项目不误判）

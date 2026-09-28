@@ -57,7 +57,7 @@ _CORE_RPC_ROUTES = {
     "project": "kb", "analysis": "kb", "group": "kb",
     "version": "kb", "module": "kb", "system": "kb", "plugin": "kb",
     "dir": "kb", "settings": "kb", "report": "kb", "model": "kb", "graph": "kb",
-    "view": "kb",
+    "view": "kb", "baseline": "kb", "workspace": "kb",
     "llm": "llm", "session": "llm", "analysisSession": "llm", "promptTemplate": "llm",
     "agent": "agent", "skill": "agent", "tool": "agent",
 }

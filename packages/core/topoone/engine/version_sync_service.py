@@ -25,6 +25,7 @@ from datetime import datetime
 
 from topoone.db.manager import MultiDBManager, SQLiteContext
 from topoone.engine.service._common import _simple_hash
+from topoone.config import FULL_REBUILD_CHANGE_RATIO
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,65 @@ _version_seq = 0
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+# ── 全量重建(自适应增量的对偶路径) ────────────────────────────
+
+def decide_rebuild(total_changed: int, manifest_total: int, branch_switched: bool,
+                   stages: dict | None) -> bool:
+    """自适应决策(纯函数): 是否走全量重建而非逐文件增量。
+
+    规则(config.FULL_REBUILD_CHANGE_RATIO):
+    - 调用方显式指定 stages(KB 确认流的环节选择) → 永远按显式选择增量执行;
+    - 无变更 → 不重建;
+    - 分支切换 或 变更文件比例超阈值 → 全量重建。
+    """
+    if stages is not None or total_changed <= 0:
+        return False
+    if branch_switched:
+        return True
+    return total_changed / max(1, manifest_total) > FULL_REBUILD_CHANGE_RATIO
+
+
+async def _rebuild_coro(server, multi_db, project_id: str, task_id: str,
+                        run_id: str) -> None:
+    """把 fast 重建任务送入统一分析队列(与 analysis.runTask 同执行路径)。"""
+    from topoone.engine.analyst_runner import enqueue_analysis_task
+    await enqueue_analysis_task(server, multi_db, task_id, run_id, time.time())
+
+
+def _launch_rebuild(server, multi_db, project_id: str, label: str = "") -> dict:
+    """创建 fast 重建任务并入队(在引擎主事件循环上)。
+
+    ⚠️ enqueue_analysis_task 使用模块级全局队列, 必须在主循环 create_task;
+    无事件循环上下文(库内直调/测试)时返回 launched=False 由调用方决策。
+    任务完成后由 analyst_runner fast 分支自动: 命名继承 → 快速命名 →
+    auto 挂载换代(见 baseline_readiness.swap_auto_mounts)。
+    """
+    if server is None:
+        return {"launched": False, "reason": "no_server"}
+    import asyncio
+    from topoone.engine.store.task_store import TaskStore
+
+    store = TaskStore(multi_db.main_db)
+    task = store.create_task({
+        "project_id": project_id, "type": "fast",
+        "name": f"rebuild-{label or 'auto'}",
+    })
+    run = store.create_run(task["id"], {})
+    store.update_task_status(task["id"], "running", progress=0, error="")
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # 理论不可达(RPC handler 均在主循环); 兜底: 任务标记错误防止悬挂
+        store.update_task_status(task["id"], "error", error="no event loop")
+        return {"launched": False, "reason": "no_event_loop",
+                "taskId": task["id"]}
+    loop.create_task(_rebuild_coro(server, multi_db, project_id,
+                                   task["id"], run["id"]))
+    logger.info("[version.sync] full rebuild task=%s launched (project=%s label=%s)",
+                task["id"], project_id, label)
+    return {"launched": True, "taskId": task["id"], "runId": run["id"]}
 
 
 def _new_version_id() -> str:
@@ -397,10 +457,31 @@ def register_version(multi_db: MultiDBManager, project_id: str, *,
     }
 
 
+def _assert_no_running_analysis(main_db: SQLiteContext, project_id: str) -> None:
+    """A·解析互斥守卫：基线解析进行中时拒绝版本更新。
+
+    版本更新(pull/worktree 变更工作树 + baseline.git 快照 + graph/δ 归档写入)
+    与全量解析并发会产生混合状态基线与图谱写冲突。单向守卫（解析→更新）：
+    - running/queued 拦截：任务已入队/执行中，物理占用工作树与项目库；
+    - pending 不拦：建而未跑的任务不占资源，拦截会永久锁死更新入口。
+    残余竞态（守卫通过后任务才转 running）由 update_task_status 的
+    单线程泵语义覆盖，不做跨模块锁。
+    """
+    row = main_db.fetchone(
+        "SELECT id, name FROM analysis_tasks WHERE project_id = ? "
+        "AND status IN ('running','queued') ORDER BY created_at DESC LIMIT 1",
+        (project_id,))
+    if row:
+        raise ValueError(
+            f"版本更新被拒绝：解析任务进行中（{row['id']} {row['name']}），"
+            "请等待完成或停止该任务后重试")
+
+
 def sync(multi_db: MultiDBManager, project_id: str, *,
          branch: str = "", head: str = "", label: str = "",
          stages: dict | None = None, force: bool = False,
-         request_id: str | None = None, task_id: str | None = None) -> dict:
+         request_id: str | None = None, task_id: str | None = None,
+         server=None) -> dict:
     """执行一次 KB 基线更新（增量 δ 归档，git 核心机制）。
 
     1. 快照当前 worktree 进 baseline.git（git 为唯一事实源）
@@ -415,6 +496,7 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
     project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
     if not project:
         raise ValueError(f"Project not found: {project_id}")
+    _assert_no_running_analysis(main_db, project_id)
 
     project_db = multi_db.get_project_db(project_id)
     root = project["root_path"]
@@ -488,9 +570,19 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
     stage_plan = build_stage_plan(project_id, project_db, main_db, delta, branch_switched)
     stage_plan["delta"] = delta
 
-    # 逐环节增量执行（P1: ast/graph 已实现；presummary/community/llm 为 planned 占位）
+    # ── 自适应策略: decide_rebuild(纯函数) — 显式环节选择永远优先;
+    # 重建 = fast 任务(完成后自动命名继承 + auto 挂载换代)。
+    adaptive_rebuild = decide_rebuild(total_changed, len(new_manifest),
+                                      branch_switched, stages)
+
     incremental_results = {}
-    if total_changed > 0:
+    rebuild: dict = {"applied": False}
+    if total_changed > 0 and adaptive_rebuild:
+        rebuild = _launch_rebuild(server, multi_db, project_id,
+                                  label=label or change_type)
+        rebuild["applied"] = rebuild.get("launched", False)
+        rebuild["strategy"] = "full-rebuild"
+    elif total_changed > 0:
         selected = stages or dict(DEFAULT_SYNC_STAGES)
         if any(v for k, v in selected.items() if k in ("ast", "graph", "presummary", "community", "llm")):
             target_task = task_id or _latest_done_task(main_db, project_id)
@@ -526,6 +618,7 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
         "stagePlan": stage_plan,
         "stagesRequested": stages or DEFAULT_STAGES,
         "incrementalResults": incremental_results,
+        "rebuild": rebuild,
         "requestId": request_id,
     }
 
@@ -815,6 +908,7 @@ def confirm_update(multi_db: MultiDBManager, request_id: str, method: str = "pul
     project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
     if not project:
         raise ValueError(f"Project not found: {project_id}")
+    _assert_no_running_analysis(main_db, project_id)
 
     branch = req["branch"] or ""
     head = req["head"] or ""

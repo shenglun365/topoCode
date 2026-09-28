@@ -17,6 +17,7 @@ from typing import Optional
 
 from .node_types import NodeKind, EdgeKind, Provenance
 from .symbol_model import Node, Edge, FileSymbolTable
+from .ids import make_edge_id
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class GraphEmitter:
         rows = []
         for e in edges:
             rows.append({
-                "id": _make_edge_id(e.source, e.target, e.kind),
+                "id": make_edge_id(e.source, e.target, e.kind),
                 "task_id": self.task_id,
                 "source_id": e.source,
                 "target_id": e.target,
@@ -140,13 +141,7 @@ class GraphEmitter:
 
 # ── helper ───────────────────────────────────────────────
 
-import hashlib
 import json
-
-
-def _make_edge_id(source: str, target: str, kind: EdgeKind) -> str:
-    raw = f"{source}->{target}:{kind.value}"
-    return hashlib.md5(raw.encode()).hexdigest()[:16]
 
 
 def _json_list(items: list) -> str:

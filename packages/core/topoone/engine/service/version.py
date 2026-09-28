@@ -36,7 +36,7 @@ def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
         return vss.sync(multi_db, project_id or projectId,
                         branch=branch, head=head, label=label, stages=stages,
                         force=force, request_id=request_id or requestId,
-                        task_id=task_id or taskId)
+                        task_id=task_id or taskId, server=server)
 
     @server.register("version.diff")
     def version_diff(project_id: str = None, from_id: str = None, to_id: str = None,

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-12T06:24:09+00:00",
-  "count": 218,
+  "generated_at": "2026-09-28T14:02:01+00:00",
+  "count": 223,
   "methods": [
     "agent.getConfig",
     "analysis.analyzeComponents",
@@ -45,6 +45,7 @@
     "analysis.rebuildStatus",
     "analysis.rebuildUnified",
     "analysis.rerunFileSummary",
+    "analysis.rerunNaming",
     "analysis.resolveComponentNameConflicts",
     "analysis.runTask",
     "analysis.saveCommunityResult",
@@ -73,6 +74,8 @@
     "backend.start",
     "backend.stop",
     "backend.testPort",
+    "baseline.ensureReady",
+    "baseline.readiness",
     "dir.analyze",
     "dir.create",
     "dir.list",
@@ -123,6 +126,7 @@
     "project.checkPathValidity",
     "project.clearSampleData",
     "project.detectGitInfo",
+    "project.gc",
     "project.get",
     "project.getConfig",
     "project.getFileTree",
@@ -219,6 +223,7 @@
     "view.mount",
     "view.status",
     "view.summary",
-    "view.unmount"
+    "view.unmount",
+    "workspace.snapshot"
   ]
 }

@@ -48,10 +48,15 @@ def unified_l0_components(db, task_id: str) -> list:
     禁止经 DuckDB 级联读取（分析副本存在同步滞后）。
     返回 [{id, qualityScore}]，按 node_count 降序。
     """
+    return unified_components(db, task_id, "L0")
+
+
+def unified_components(db, task_id: str, comm_lv: str = "L0") -> list:
+    """UNIFIED 指定层级组件清单(命名通道全层级使用; 同读取口径)。"""
     rows = db.execute(
         "SELECT comm_id, quality_score FROM community_hierarchy "
-        "WHERE task_id=? AND edge_type='UNIFIED' AND comm_lv='L0' "
-        "ORDER BY node_count DESC", (task_id,)
+        "WHERE task_id=? AND edge_type='UNIFIED' AND comm_lv=? "
+        "ORDER BY node_count DESC", (task_id, comm_lv)
     ).fetchall()
     return [{"id": r["comm_id"], "qualityScore": r["quality_score"] or 0} for r in rows]
 

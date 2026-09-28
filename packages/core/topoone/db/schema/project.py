@@ -241,6 +241,8 @@ PROJECT_DB_TABLES_SQL = """
         name_manual     TEXT,
         component_type  TEXT    DEFAULT 'community',
         status          TEXT    DEFAULT 'completed',
+        -- 命名产物来源: detail=文件摘要详细通道 / fast-agent=快速命名通道
+        source          TEXT    DEFAULT 'detail',
         created_at      TEXT    DEFAULT (datetime('now')),
         updated_at      TEXT    DEFAULT (datetime('now')),
         UNIQUE(task_id, edge_type, comm_lv, comm_id)

@@ -37,7 +37,7 @@ GOLDEN_MAIN_DB_TABLES_SQL = MAIN_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS analysis_tasks (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('ast', 'call-chain', 'dependency', 'dataflow', 'full')),
+        type TEXT NOT NULL CHECK(type IN ('ast', 'call-chain', 'dependency', 'dataflow', 'full', 'fast')),
         name TEXT NOT NULL,
         status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'modified', 'running', 'done', 'error', 'cancelled')),
         progress INTEGER DEFAULT 0,
@@ -66,9 +66,10 @@ GOLDEN_MAIN_DB_TABLES_SQL = MAIN_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_analysis_tasks_created ON analysis_tasks(created_at);
 
     -- 基线视图：项目对外唯一生效视图（外部调用方零任务感知；任务显式挂载才对外可见）
+    -- version 起点为 0(未挂载=未发布任何代际)；每次挂载/卸载 +1
     CREATE TABLE IF NOT EXISTS project_views (
         project_id TEXT PRIMARY KEY,
-        version INTEGER NOT NULL DEFAULT 1,
+        version INTEGER NOT NULL DEFAULT 0,
         baseline_version_id TEXT DEFAULT '',
         overlap_warned INTEGER NOT NULL DEFAULT 0,
         published_at TEXT,
@@ -78,6 +79,8 @@ GOLDEN_MAIN_DB_TABLES_SQL = MAIN_DB_TABLES_SQL = """
         project_id TEXT NOT NULL,
         task_id TEXT NOT NULL,
         mounted_files INTEGER NOT NULL DEFAULT 0,
+        -- 挂载来源: manual=用户显式操作(永不自动替换) / auto=ensureReady 自动挂载
+        mount_origin TEXT NOT NULL DEFAULT 'manual' CHECK(mount_origin IN ('manual','auto')),
         mounted_at TEXT DEFAULT (datetime('now')),
         PRIMARY KEY (project_id, task_id)
     );
@@ -837,6 +840,8 @@ GOLDEN_PROJECT_DB_TABLES_SQL = PROJECT_DB_TABLES_SQL = """
         name_manual     TEXT,
         component_type  TEXT    DEFAULT 'community',
         status          TEXT    DEFAULT 'completed',
+        -- 命名产物来源: detail=文件摘要详细通道 / fast-agent=快速命名通道
+        source          TEXT    DEFAULT 'detail',
         created_at      TEXT    DEFAULT (datetime('now')),
         updated_at      TEXT    DEFAULT (datetime('now')),
         UNIQUE(task_id, edge_type, comm_lv, comm_id)

@@ -655,12 +655,22 @@ class AnalysisStore:
                 r.get("model_id"), r.get("template_id"),
                 r.get("component_type", "community"),
                 r.get("status", "completed"),
+                r.get("source", "detail"),
             ))
+        # UPSERT(非 REPLACE): 重跑通道只刷新通道产物; name_manual(人工命名)
+        # 永不被任何通道覆盖 — REPLACE 语义会整行删除导致人工命名丢失。
         self._db.executemany("""
-            INSERT OR REPLACE INTO community_llm_results
+            INSERT INTO community_llm_results
                 (task_id, edge_type, comm_lv, comm_id, name, summary, model_id, template_id,
-                 component_type, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 component_type, status, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_id, edge_type, comm_lv, comm_id) DO UPDATE SET
+                name=excluded.name, summary=excluded.summary,
+                model_id=excluded.model_id, template_id=excluded.template_id,
+                component_type=excluded.component_type, status=excluded.status,
+                source=excluded.source,
+                name_manual=community_llm_results.name_manual,
+                updated_at=datetime('now')
         """, insert_rows)
         self._db.commit()
         logger.info("[AnalysisStore] bulk_insert_llm_results DONE count=%d", len(results))

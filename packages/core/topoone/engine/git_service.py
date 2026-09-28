@@ -145,22 +145,31 @@ def pull(path: str, branch: Optional[str] = None, timeout: int = 900) -> str:
 
 def worktree(path: str, branch: str, new_dir: str, head: Optional[str] = None,
              timeout: int = 900) -> str:
-    """为 branch/head 创建/切换到独立工作树。
+    """为 branch/head 创建/切换到独立工作树( detached 锚定)。
 
-    - 目标分支在 path 仓库中不存在时，从 origin/<branch> 新建。
+    - new_dir 已存在时幂等重建：先正规注销（清注册表+目录）；注册表残骸态
+      （目录被外力删除/半初始化）再 rmtree+prune 兜底 —— 否则 stale 注册
+      会让后续 worktree add 永久失败。
+    - head 缺省锚定本地 branch 顶端；本地分支不存在时回退 origin/<branch>。
     - 返回目标工作树解析出的 head commit。
     """
     if os.path.exists(new_dir):
-        shutil.rmtree(new_dir, ignore_errors=True)
+        try:
+            _run_git(path, "worktree", "remove", "--force", new_dir, timeout=timeout)
+        except GitError:
+            shutil.rmtree(new_dir, ignore_errors=True)
+            _run_git(path, "worktree", "prune", timeout=timeout)
     os.makedirs(os.path.dirname(new_dir), exist_ok=True)
     fetch(path, timeout=timeout)
+    # 一律 --detach：KB 镜像是只读锚定快照，detached 与 head 路径语义一致；
+    # 且规避 "branch already checked out" 陷阱(同分支更新时 add 必败并残留
+    # 半注册状态)。本地分支缺失时回退 origin/<branch>(-f 覆盖残骸注册)。
     try:
-        if head:
-            _run_git(path, "worktree", "add", "--detach", new_dir, head, timeout=timeout)
-        else:
-            _run_git(path, "worktree", "add", new_dir, branch, timeout=timeout)
+        _run_git(path, "worktree", "add", "--detach", new_dir,
+                 head or branch, timeout=timeout)
     except GitError:
-        _run_git(path, "worktree", "add", new_dir, f"origin/{branch}", timeout=timeout)
+        _run_git(path, "worktree", "add", "-f", "--detach", new_dir,
+                 f"origin/{branch}", timeout=timeout)
     return rev_parse(new_dir, "HEAD", timeout=timeout)
 
 

@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import sys
@@ -28,6 +27,7 @@ from tree_sitter import Node as SyntaxNode, Parser
 
 from .node_types import NodeKind, EdgeKind, Provenance
 from .symbol_model import Node, Edge, UnresolvedReference, FileSymbolTable
+from .ids import make_node_id, make_edge_id
 from ..languages import LanguageExtractor
 from ..language_loader import get_language, get_parser
 
@@ -101,16 +101,6 @@ def _detect_language(file_path: str) -> Optional[str]:
     return _EXT_MAP.get(ext)
 
 
-def _make_node_id(file_path: str, kind: NodeKind, name: str, line: int) -> str:
-    raw = f"{file_path}:{kind.value}:{name}:{line}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
-def _make_edge_id(source: str, target: str, kind: EdgeKind) -> str:
-    raw = f"{source}->{target}:{kind.value}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
 def _node_text(node: SyntaxNode, source: bytes) -> str:
     try:
         return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
@@ -182,6 +172,8 @@ class TreeSitterWalker:
         # 状态
         self.node_stack: list[str] = []           # 当前 scope 节点 ID 栈
         self._node_index: dict[str, Node] = {}    # id → Node 快速查找
+        # 同文件 (kind, qualified_name) 出现计数 — 重载符号 #N 消歧(源码序)
+        self._qn_counts: dict[tuple, int] = {}
         # 标识符使用候选(遍历期收集，flush 期过滤落 refs):
         # (name, category(passes/assigns/references), line, col, scope_id)
         self._usage_candidates: list[tuple] = []
@@ -410,8 +402,13 @@ class TreeSitterWalker:
         if not name or name == "<anonymous>":
             return None
 
-        node_id = _make_node_id(self.file_path, kind, name, ast_node.start_point[0] + 1)
+        # 稳定身份: 先按作用域链算限定名, 再派生 ID(不含行号, 见 core/ids.py)。
+        # 同 (kind, 限定名) 的重载按源码序 #N 消歧, 防止 ID 静默碰撞覆盖。
         qualified_name = self._build_qualified_name(name)
+        qn_key = (kind.value, qualified_name)
+        ordinal = self._qn_counts.get(qn_key, 0) + 1
+        self._qn_counts[qn_key] = ordinal
+        node_id = make_node_id(self.file_path, kind, qualified_name, ordinal)
 
         new_node = Node(
             id=node_id,

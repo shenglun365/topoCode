@@ -1106,6 +1106,61 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
 
 # ==================== asyncio 调度 ====================
 
+def _record_naming_status(multi_db, task_id: str, res: dict) -> None:
+    """命名结果落 analysis_tasks.result_data.naming(B2 失败透出/重试状态查询
+    单一事实源)。仅收尾链与 rerunNaming 调用。"""
+    try:
+        from topoone.engine.store.task_store import TaskStore
+        TaskStore(multi_db.main_db).merge_result_data(task_id, {
+            "naming": {"status": "done", "named": res.get("named", 0),
+                       "reason": res.get("reason", ""),
+                       "inherited": res.get("inherited", 0),
+                       "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%S")}})
+    except Exception as e:
+        logger.warning("[fast-naming] result_data write failed task=%s: %s", task_id, e)
+
+
+def _record_naming_error(multi_db, task_id: str, err: Exception) -> None:
+    try:
+        from topoone.engine.store.task_store import TaskStore
+        TaskStore(multi_db.main_db).merge_result_data(task_id, {
+            "naming": {"status": "error", "error": str(err)[:400],
+                       "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%S")}})
+    except Exception as e:
+        logger.warning("[fast-naming] result_data error-write failed task=%s: %s", task_id, e)
+
+
+async def _run_naming_recorded(multi_db, project_id: str, task_id: str) -> dict:
+    """run_fast_naming + 状态落库(收尾链与 rerunNaming 共用单源)。失败上抛。"""
+    from topoone.engine.component_naming_fast import run_fast_naming
+    try:
+        res = await run_fast_naming(multi_db, project_id, task_id)
+    except Exception as e:
+        _record_naming_error(multi_db, task_id, e)
+        raise
+    _record_naming_status(multi_db, task_id, res)
+    return res
+
+
+async def _launch_fast_naming(server, multi_db, task_id: str, project_id: str):
+    """fast 任务完成后的收尾链: 命名继承 → 快速命名 → auto 挂载换代。
+
+    每步独立容错: 命名失败不阻塞挂载换代(图谱已就绪), 反之亦然;
+    任务状态早已 done, 本链任何失败仅记日志(不回滚)。
+    """
+    try:
+        res = await _run_naming_recorded(multi_db, project_id, task_id)
+        logger.info("[fast-naming] done task=%s res=%s", task_id, res)
+    except Exception as e:
+        logger.warning("[fast-naming] task=%s failed: %s", task_id, e, exc_info=True)
+    try:
+        from topoone.engine.service.baseline_readiness import swap_auto_mounts
+        res = swap_auto_mounts(multi_db, project_id, task_id)
+        logger.info("[fast-naming] mount swap task=%s: %s", task_id, res)
+    except Exception as e:
+        logger.warning("[fast-naming] mount swap task=%s failed: %s", task_id, e)
+
+
 async def _execute_task(server, multi_db, task_id: str, run_id: str,
                         start_time: float):
     """
@@ -1140,12 +1195,19 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
             # 先运行 AI 项目摘要（涉及 LLM 调用，可能耗时）
             # 前端进度此时停留在 99，让用户感知"摘要生成中"
             pid = None
+            task_type = "full"
             logger.info(f"[EXECUTE] task={task_id} calling get_task")
             task = task_store.get_task(task_id)
             logger.info(f"[EXECUTE] task={task_id} get_task done: {task is not None}")
             if task:
                 pid = task.get("project_id")
-            if pid:
+                task_type = (task.get("type") or "full").lower()
+            if pid and task_type == "fast":
+                # fast 语义: 跳过 AI 项目摘要(非快速通道目标), 完成后由
+                # _launch_fast_naming 派发组件快速命名(见任务类型语义文档
+                # service/baseline_readiness.py)。
+                logger.info(f"[EXECUTE] task={task_id} fast type: skip project summary")
+            elif pid:
                 _t_log = time.perf_counter()
                 _update_progress(server, multi_db, task_id, run_id, progress=95)
                 _dt = time.perf_counter() - _t_log
@@ -1170,6 +1232,9 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
                         "taskId": task_id, "runId": run_id,
                         "status": "done", "progress": 100,
                     })
+                if pid and task_type == "fast":
+                    asyncio.create_task(
+                        _launch_fast_naming(server, multi_db, task_id, pid))
             except Exception as e:
                 logger.error(f"[EXECUTE] task={task_id} post-process error: {e}", exc_info=True)
 

@@ -234,7 +234,7 @@ KB 项目库的版本化方案（`ensure_history_table`）：
 | 表 | 用途 | 关键列 / 要点 |
 |---|---|---|
 | `projects` | 项目注册表（中心枢纽） | `root_path UNIQUE`；`status`(synced/syncing/error)；`import_mode`(static/git-local/git-remote)；`current_version_id`；存储统计缓存列 `db_size_bytes/source_size_bytes/storage_checked_at`（避免首页扫描各项目库） |
-| `analysis_tasks` | 分析任务配置持久化 | `type`(ast/call-chain/dependency/dataflow/full)；`status`(pending/modified/running/done/error/cancelled)；配置列族 scope/scopes/extensions/exclude_dirs/report_types/pattern*；`config_version`+`last_run_id`；FK→projects CASCADE；idx(project_id, status, created_at) |
+| `analysis_tasks` | 分析任务配置持久化 | `type`(ast/call-chain/dependency/dataflow/full/fast)；`status`(pending/modified/running/done/error/cancelled)；配置列族 scope/scopes/extensions/exclude_dirs/report_types/pattern*；`config_version`+`last_run_id`；FK→projects CASCADE；idx(project_id, status, created_at)。`fast`=轻量管线(静态 6 步+组件快速命名, 跳过 AI 项目摘要) |
 | `task_config_history` | 任务配置变更历史 | FK→analysis_tasks；按 config_version 存档 |
 | `analysis_task_runs` | 运行记录（一次运行一条） | `run_number`、`duration_ms`、snapshot_* 冻结当时配置 |
 | `analysis_reports` | 分析报告（大对象） | `ast_data/call_chain/dependencies/dataflow/summary/logs` 均 TEXT 大 JSON；关联 run_id |
@@ -280,7 +280,7 @@ KB 项目库的版本化方案（`ensure_history_table`）：
 | `graph_doc` | 社区分层分析结果 | comm_lv 层级 + parent_comm_id 父链 + quality_score；UNIQUE(task_id, edge_type, comm_id)（迁移去重后补建） |
 | `community_hierarchy` | 社区层级元数据 | UNIQUE(task_id, edge_type, comm_lv, comm_id) |
 | `report_subdocs` | 分析报告子文档 | (task_id, comm_id, created_at) 排序索引 |
-| `community_llm_results` | 社区 LLM 命名/摘要 | UNIQUE(task_id, edge_type, comm_lv, comm_id)；component_type/status 兼容列 |
+| `community_llm_results` | 社区 LLM 命名/摘要 | UNIQUE(task_id, edge_type, comm_lv, comm_id)；component_type/status 兼容列；`source`(detail=文件摘要详细通道/fast-agent=快速命名通道/inherit=重建命名继承)；写入走 UPSERT——`name_manual`(人工命名)永不被任何通道覆盖 |
 | `arch_snapshots` / `arch_snapshot_communities` | 架构快照及社区明细 | snapshot↔community UNIQUE；node_list/file_list/edge_list JSON |
 | `graph_node_positions` | 图节点拖拽位置 | 两个部分唯一索引区分「活动布局(snapshot IS NULL)」与「快照布局」 |
 | `community_overrides` | 用户手动组件划分 | action(rename/merge/split/reassign/freeze)；增量更新不覆盖手动划分 |

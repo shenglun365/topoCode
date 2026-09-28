@@ -98,6 +98,26 @@ class TaskStore:
             params,
         )
 
+    def merge_result_data(self, task_id: str, patch: dict) -> dict:
+        """浅合并写入 result_data(JSON 列)。此前该列只读; 现为任务收尾链
+        (组件快速命名等)的状态落点 —— B2 失败透出/rerunNaming 状态查询的
+        单一事实源。返回合并后的完整 result_data。"""
+        row = self._db.fetchone(
+            "SELECT result_data FROM analysis_tasks WHERE id = ?", (task_id,))
+        cur: dict = {}
+        if row and row.get("result_data"):
+            try:
+                loaded = json.loads(row["result_data"])
+                cur = loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                cur = {}
+        cur.update(patch)
+        self._db.execute(
+            "UPDATE analysis_tasks SET result_data = ?, "
+            "updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(cur, ensure_ascii=False), task_id))
+        return cur
+
     def update_task_config(self, task_id: str, config: dict) -> dict:
         """
         更新任务配置（保存历史 + 版本号++）

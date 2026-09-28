@@ -9,6 +9,8 @@
 import logging
 from typing import List, Dict, Optional, Any
 
+from .core.ids import make_edge_id as _make_edge_id  # noqa: F401 — 单源 ID 契约
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,9 +147,3 @@ class SQLiteAdapter:
     def clear_all(self):
         """清理任务的所有数据"""
         self._store.clear_task_data(self._task_id)
-
-
-def _make_edge_id(source: str, target: str, kind: str) -> str:
-    import hashlib
-    raw = f"{source}->{target}:{kind}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]

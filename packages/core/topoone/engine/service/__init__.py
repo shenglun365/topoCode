@@ -12,6 +12,7 @@ from topoone.engine.service.version import register_version_methods
 from topoone.engine.service.settings import register_settings_methods
 from topoone.engine.service.backend import register_backend_methods
 from topoone.engine.service.module import register_module_methods
+from topoone.engine.service.baseline_readiness import register_baseline_readiness_methods
 from topoone.engine.report_service import register_report_methods
 
 def register_all_engine_methods(server, multi_db, module_manager=None, plugin_manager=None):
@@ -22,5 +23,6 @@ def register_all_engine_methods(server, multi_db, module_manager=None, plugin_ma
     register_settings_methods(server, multi_db)
     register_backend_methods(server, multi_db, plugin_manager)
     register_module_methods(server, module_manager)
+    register_baseline_readiness_methods(server, multi_db)
     register_report_methods(server, multi_db)
     return server

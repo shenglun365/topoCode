@@ -24,13 +24,17 @@ def _now() -> str:
 # ── 内部工具 ─────────────────────────────────────────────────────
 
 def _ensure_view(main_db, project_id: str) -> dict:
-    """取视图行，不存在则创建(视图随项目唯一，惰性创建)。"""
+    """取视图行，不存在则创建(视图随项目唯一，惰性创建)。
+
+    version 起点为 0：未挂载 = 尚未发布任何代际，外部消费方无从读取；
+    每次挂载/卸载 +1(代际更替，含退化为空视图——消费方据此失效缓存)。
+    """
     row = main_db.fetchone("SELECT * FROM project_views WHERE project_id = ?", (project_id,))
     if row:
         return dict(row)
     main_db.execute(
         "INSERT OR IGNORE INTO project_views (project_id, version, published_at, updated_at) "
-        "VALUES (?, 1, ?, ?)", (project_id, _now(), _now()))
+        "VALUES (?, 0, ?, ?)", (project_id, _now(), _now()))
     main_db.commit()
     row = main_db.fetchone("SELECT * FROM project_views WHERE project_id = ?", (project_id,))
     return dict(row) if row else {}
@@ -88,7 +92,7 @@ def view_history(multi_db, project_id: str, limit: int = 100) -> dict:
 
 def _mounts(main_db, project_id: str) -> list:
     return [dict(r) for r in main_db.fetchall(
-        "SELECT task_id, mounted_files, mounted_at FROM view_mounts "
+        "SELECT task_id, mounted_files, mounted_at, mount_origin FROM view_mounts "
         "WHERE project_id = ? ORDER BY mounted_at", (project_id,))]
 
 
@@ -187,8 +191,15 @@ def view_summary(multi_db, project_id: str) -> dict:
 
 # ── RPC: view.mount / view.unmount / view.status ─────────────────
 
-def mount_task(multi_db, project_id: str, task_id: str, force: bool = False) -> dict:
-    """挂载任务到基线视图(严格重合检测)。"""
+def mount_task(multi_db, project_id: str, task_id: str, force: bool = False,
+               origin: str = "manual") -> dict:
+    """挂载任务到基线视图(严格重合检测)。
+
+    origin: manual=用户显式操作(默认); auto=ensureReady 自动挂载。
+    auto 挂载可被后续自动编排替换, manual 永不自动碰(显式挂载哲学)。
+    """
+    if origin not in ("manual", "auto"):
+        raise ValueError(f"invalid mount origin: {origin}")
     if not project_id or not task_id:
         raise ValueError("project_id and task_id are required")
     main_db = multi_db.main_db
@@ -220,8 +231,8 @@ def mount_task(multi_db, project_id: str, task_id: str, force: bool = False) -> 
                 f"请先卸载冲突任务或使用 force=true 强制挂载")
 
     main_db.execute(
-        "INSERT OR REPLACE INTO view_mounts (project_id, task_id, mounted_files, mounted_at) "
-        "VALUES (?, ?, ?, ?)", (project_id, task_id, len(cand), _now()))
+        "INSERT OR REPLACE INTO view_mounts (project_id, task_id, mounted_files, mount_origin, mounted_at) "
+        "VALUES (?, ?, ?, ?, ?)", (project_id, task_id, len(cand), origin, _now()))
     _bump(main_db, project_id, overlap_warned=bool(force))
     _log_change(main_db, project_id, "mount", task_id, task.get("name") or "")
     logger.info("[view.mount] project=%s task=%s files=%d force=%s",
@@ -283,6 +294,7 @@ def view_status(multi_db, project_id: str) -> dict:
             "status": t.get("status") or "",
             "files": len(analyzed),
             "selectedFiles": len(selected),
+            "mountOrigin": m.get("mount_origin") or "manual",
             "declared": {
                 "scopes": _json_list(t.get("scopes")) or ([t.get("scope")] if t.get("scope") else []),
                 "extensions": _json_list(t.get("extensions")),

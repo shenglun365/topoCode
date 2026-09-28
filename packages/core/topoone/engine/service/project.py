@@ -258,6 +258,29 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             return {"status": "unknown"}
         return dict(job)
 
+    @server.register("project.gc")
+    def project_gc(confirm: bool = False):
+        """孤儿项目清扫：注册表(projects)无记录、但残留主库行/项目库目录/
+        源码镜像的 pid。默认 dry-run 只返回报告; confirm=true 物理执行
+        (与 project.remove 同口径级联)。在途导入/删除作业的 pid 自动跳过。"""
+        from topoone.engine.service._common import _IMPORT_JOBS, _DELETE_JOBS
+        busy = {j.get("projectId") for j in
+                list(_IMPORT_JOBS.values()) + list(_DELETE_JOBS.values())
+                if isinstance(j, dict) and j.get("projectId")}
+        pids = _gc_orphan_pids(main_db, multi_db, busy=busy)
+        report = {"orphans": pids, "purged": None, "taskOrphans": None}
+        if confirm:
+            purged = {}
+            for p in pids:
+                try:
+                    purged[p] = _gc_purge_project(main_db, multi_db, p)
+                except Exception as e:
+                    purged[p] = {"error": str(e)}
+            report["purged"] = purged
+            report["taskOrphans"] = _gc_purge_task_orphans(main_db)
+            logger.info("[project.gc] purged %d orphan(s): %s", len(pids), list(pids))
+        return report
+
     @server.register("project.updateMeta")
     def update_project_meta(id: str, **kwargs):
         """更新项目元数据 (group, favorite, pinned, sort_order, name)"""
@@ -2104,6 +2127,125 @@ def register_module_methods(server: ZMQServer, module_manager=None):
 # ==================== 辅助函数 ====================
 
 
+def _project_keyed_tables(main_db) -> dict:
+    """动态派生项目级联表清单(schema 单一事实源, 加表免维护):
+    {表名: 键列} —— 含 project_id 列的表走直键; 仅含 task_id 列的表
+    (task_config_history 等)经项目任务集合间接删除。sqlite 内部表排除。"""
+    out: dict = {}
+    for row in main_db.fetchall("SELECT name FROM sqlite_master WHERE type='table'"):
+        t = row["name"]
+        if not t or t.startswith("sqlite_"):
+            continue
+        try:
+            cols = {c["name"] for c in main_db.fetchall(f"PRAGMA table_info({t})")}
+        except Exception:
+            continue
+        if "project_id" in cols:
+            out[t] = "project_id"
+        elif "task_id" in cols:
+            out[t] = "task_id"
+    return out
+
+
+def _cascade_delete_project_rows(main_db, pid: str, task_ids: list) -> dict:
+    """删除主库中所有归属 pid 的行(project_id 直键 + task_id 间接键)。
+    projects 行由调用方最后删除。返回 {表: 删除行数} 供日志与进度。"""
+    deleted: dict = {}
+    for t, key in _project_keyed_tables(main_db).items():
+        if t == "projects":
+            continue
+        try:
+            if key == "project_id":
+                n = main_db.delete(t, "project_id=?", (pid,))
+            else:
+                if not task_ids:
+                    continue
+                ph = ",".join("?" for _ in task_ids)
+                n = main_db.delete(t, f"task_id IN ({ph})", tuple(task_ids))
+            if n:
+                deleted[t] = n
+        except Exception as e:
+            logger.warning("[cascade] delete %s failed for %s: %s", t, pid, e)
+    return deleted
+
+
+def _gc_purge_task_orphans(main_db) -> dict:
+    """全局清扫 task 间接键孤儿: task_id 已不存在于 analysis_tasks 的行
+    (历史删除先清 tasks 后崩/旧版仅删 tasks 所致, pid 反查不可达)。"""
+    cleaned: dict = {}
+    for t, key in _project_keyed_tables(main_db).items():
+        if key != "task_id" or t == "analysis_tasks":
+            continue
+        try:
+            n = main_db.delete(
+                t, "task_id NOT IN (SELECT id FROM analysis_tasks)")
+            if n:
+                cleaned[t] = n
+        except Exception as e:
+            logger.warning("[gc] task-orphan sweep %s failed: %s", t, e)
+    if cleaned:
+        main_db.conn.commit()
+    return cleaned
+
+
+def _gc_orphan_pids(main_db, multi_db: MultiDBManager, busy: set = None) -> list:
+    """扫描孤儿项目 pid 候选: 主库残留行 / 项目库目录 / 源码镜像中
+    出现、但 projects 注册表无记录的 pid。busy 中的 pid(在途导入/删除)
+    跳过。只读扫描, 删除由调用方执行。"""
+    try:
+        live = {r["id"] for r in main_db.fetchall("SELECT id FROM projects")}
+    except Exception as e:
+        logger.error("[gc] projects 表不可读, 跳过本轮扫描: %s", e)
+        return []
+    busy = busy or set()
+    cand: set = set()
+    for t, key in _project_keyed_tables(main_db).items():
+        if key != "project_id":
+            continue
+        try:
+            for r in main_db.fetchall(f"SELECT DISTINCT project_id AS pid FROM {t}"):
+                if r["pid"]:
+                    cand.add(r["pid"])
+        except Exception:
+            continue
+    try:
+        proj_root = os.path.join(multi_db.data_dir, "projects")
+        if os.path.isdir(proj_root):
+            # 仅目录是候选 pid(根下游离 project.db 等文件是历史 bug 产物, 单独清)
+            cand.update(d for d in os.listdir(proj_root)
+                        if os.path.isdir(os.path.join(proj_root, d)))
+        sc_dir = os.path.dirname(multi_db.source_cache_dir_for("_probe_"))  # {镜像根}
+        if os.path.isdir(sc_dir):
+            cand.update(d for d in os.listdir(sc_dir) if d.startswith("proj-"))
+    except Exception as e:
+        logger.warning("[gc] 目录扫描部分失败(继续): %s", e)
+    return sorted(p for p in cand - live if p not in busy)
+
+
+def _gc_purge_project(main_db, multi_db: MultiDBManager, pid: str) -> dict:
+    """对单个孤儿 pid 执行与 project.remove 同口径的物理清扫
+    (主库行 + 项目库目录 + 源码镜像)。返回清扫报告。"""
+    report: dict = {"rows": {}, "files": []}
+    task_ids = [t["id"] for t in main_db.fetchall(
+        "SELECT id FROM analysis_tasks WHERE project_id=?", (pid,))]
+    report["rows"] = _cascade_delete_project_rows(main_db, pid, task_ids)
+    main_db.conn.commit()
+    try:
+        multi_db.delete_project_db(pid)
+        report["files"].append(f"projects/{pid}/project.db")
+    except Exception as e:
+        logger.warning("[gc] project db delete failed %s: %s", pid, e)
+    for d in (os.path.join(multi_db.data_dir, "projects", pid),
+              multi_db.source_cache_dir_for(pid)):
+        try:
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+                report["files"].append(d)
+        except Exception as e:
+            logger.warning("[gc] rmtree failed %s: %s", d, e)
+    return report
+
+
 def _remove_project_impl(server, main_db, multi_db: MultiDBManager, pid: str,
                          root_path: str, request_id: str):
     """项目删除实现：tasks → database → source → record 四阶段，进度写入 _DELETE_JOBS 并推送事件。"""
@@ -2138,6 +2280,13 @@ def _remove_project_impl(server, main_db, multi_db: MultiDBManager, pid: str,
     # 阶段 2: 项目库文件
     _set("database", 25)
     multi_db.delete_project_db(pid)
+    # 项目库目录一并清除(delete_project_db 只删 project.db 文件, 目录残留)
+    try:
+        pdb_dir = os.path.join(multi_db.data_dir, "projects", pid)
+        if os.path.isdir(pdb_dir):
+            shutil.rmtree(pdb_dir, ignore_errors=True)
+    except Exception as e:
+        logger.warning("[remove] project db dir cleanup failed %s: %s", pid, e)
     _set("database", 60)
 
     # 阶段 3: 源码镜像缓存（按字节计进度，大目录的主要耗时来源）
@@ -2172,14 +2321,25 @@ def _remove_project_impl(server, main_db, multi_db: MultiDBManager, pid: str,
         shutil.rmtree(src_dir, ignore_errors=True)
     _set("source", 90)
 
-    # 阶段 4: 签名 + 主库记录
+    # 阶段 4: 签名 + 主库记录 + 级联清扫
     _set("record", 92)
     if root_path:
         try:
             multi_db.remove_proj_signature(root_path)
         except Exception:
             pass
+    # 级联清扫所有 pid 键行(versions/version_files/update_requests/
+    # storage_stats/git_info/group_map/doc_map/task_config_history/
+    # view_* 等, 动态派生) —— 此前仅删 tasks/runs, 其余全部残留为孤儿。
+    try:
+        task_ids = [t["id"] for t in tasks]
+        swept = _cascade_delete_project_rows(main_db, pid, task_ids)
+        if swept:
+            logger.info(f"[remove] cascade swept {pid}: {swept}")
+    except Exception as e:
+        logger.warning(f"[remove] cascade sweep failed for {pid}: {e}")
     main_db.delete("projects", "id = ?", (pid,))
+    main_db.conn.commit()
     # 基线视图随项目删除（视图行 + 挂载记录）
     try:
         from topoone.engine.view_service import remove_project_view

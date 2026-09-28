@@ -441,6 +441,10 @@ class MultiDBManager:
                 ("source_size_bytes", "INTEGER DEFAULT 0"),
                 ("storage_checked_at", "TEXT"),
             ],
+            "view_mounts": [
+                # 存量库补挂载来源(建表 DDL 已含; ALTER 无法加 CHECK, 校验在写入侧)
+                ("mount_origin", "TEXT NOT NULL DEFAULT 'manual'"),
+            ],
         }
         for table, columns in columns_to_add.items():
             if not columns:
@@ -470,6 +474,78 @@ class MultiDBManager:
             );
             CREATE INDEX IF NOT EXISTS idx_project_group_map_group ON project_group_map(group_id);
         """)
+
+        # 迁移: 更新 analysis_tasks 的 type CHECK 约束(新增 'fast' 任务类型)
+        # ALTER 无法改 CHECK → 整表重建(照 model_configs 先例; 全列拷贝零丢失)
+        try:
+            row = self.main_db.fetchone(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='analysis_tasks'"
+            )
+            ddl = (row.get('sql', '') if row else '') or ''
+            if ddl and "'fast'" not in ddl:
+                logger.info("[migrate] Old analysis_tasks type CHECK detected, migrating...")
+                # 表重建须临时关闭 FK(task_config_history 等子表引用本表,
+                # DROP 期间触发 FOREIGN KEY constraint failed)——SQLite 官方
+                # 12 步重建流程的标准步骤; 结束后恢复(finally)。
+                self.main_db.conn.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    self.main_db.conn.executescript("""
+                        DROP TABLE IF EXISTS analysis_tasks_new;
+                        CREATE TABLE analysis_tasks_new (
+                            id TEXT PRIMARY KEY,
+                            project_id TEXT NOT NULL,
+                            type TEXT NOT NULL CHECK(type IN ('ast', 'call-chain', 'dependency', 'dataflow', 'full', 'fast')),
+                            name TEXT NOT NULL,
+                            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'modified', 'running', 'done', 'error', 'cancelled')),
+                            progress INTEGER DEFAULT 0,
+                            total INTEGER DEFAULT 100,
+                            current INTEGER DEFAULT 0,
+                            error TEXT,
+                            result_data TEXT,
+                            favorite INTEGER DEFAULT 0,
+                            pinned INTEGER DEFAULT 0,
+                            tags TEXT,
+                            scope TEXT,
+                            scopes TEXT,
+                            extensions TEXT,
+                            exclude_dirs TEXT,
+                            report_types TEXT,
+                            pattern_type TEXT,
+                            pattern TEXT,
+                            config_version INTEGER DEFAULT 1,
+                            last_run_id TEXT,
+                            created_at TEXT DEFAULT (datetime('now')),
+                            updated_at TEXT DEFAULT (datetime('now')),
+                            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                        );
+                        INSERT INTO analysis_tasks_new
+                            (id, project_id, type, name, status, progress, total,
+                             current, error, result_data, favorite, pinned, tags,
+                             scope, scopes, extensions, exclude_dirs, report_types,
+                             pattern_type, pattern, config_version, last_run_id,
+                             created_at, updated_at)
+                        SELECT
+                            id, project_id, type, name, status, progress, total,
+                            current, error, result_data, favorite, pinned, tags,
+                            scope, scopes, extensions, exclude_dirs, report_types,
+                            pattern_type, pattern, config_version, last_run_id,
+                            created_at, updated_at
+                        FROM analysis_tasks;
+                        DROP TABLE analysis_tasks;
+                        ALTER TABLE analysis_tasks_new RENAME TO analysis_tasks;
+                        CREATE INDEX IF NOT EXISTS idx_analysis_tasks_project ON analysis_tasks(project_id);
+                        CREATE INDEX IF NOT EXISTS idx_analysis_tasks_status ON analysis_tasks(status);
+                        CREATE INDEX IF NOT EXISTS idx_analysis_tasks_created ON analysis_tasks(created_at);
+                    """)
+                    self.main_db.conn.commit()
+                    logger.info("[migrate] analysis_tasks type CHECK updated (+fast)")
+                finally:
+                    try:
+                        self.main_db.conn.execute("PRAGMA foreign_keys=ON")
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.error(f"[migrate] analysis_tasks CHECK migration failed: {e}")
 
         # 迁移: 更新 model_configs 的 provider/status CHECK 约束
         try:
@@ -705,8 +781,14 @@ class MultiDBManager:
         try:
             cursor = project_db.execute("PRAGMA table_info(community_llm_results)")
             llm_cols = {row[1] for row in cursor.fetchall()}
-            for col in ('component_type', 'status'):
-                if col not in llm_cols:
+            for col in ('component_type', 'status',
+                        # 命名产物来源: detail=文件摘要详细通道 / fast-agent=快速命名通道
+                        ('source', "TEXT DEFAULT 'detail'")):
+                if isinstance(col, tuple):
+                    if col[0] not in llm_cols:
+                        project_db.execute(
+                            f'ALTER TABLE community_llm_results ADD COLUMN "{col[0]}" {col[1]}')
+                elif col not in llm_cols:
                     project_db.execute(f'ALTER TABLE community_llm_results ADD COLUMN "{col}" TEXT')
         except Exception:
             pass

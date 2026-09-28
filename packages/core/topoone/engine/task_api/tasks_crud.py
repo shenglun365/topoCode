@@ -15,6 +15,7 @@ from topoone.engine.store.task_store import TaskStore
 from topoone.engine.store.analysis_store import AnalysisStore
 from topoone.engine.analysis_utils import get_cascade_levels_impl, get_l0_comps
 from topoone.engine.community_data import unified_l0_components
+
 from topoone.engine.analyst_runner import (
     _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task,
 )
@@ -24,6 +25,7 @@ from .common import (
     _compute_file_ranks,
     _count_batched_source_files,
     _reset_tasks_to_pending,
+    _PARSE_CACHE_TABLES,
     _with_fixed_report_types,
     _ensure_project_db,
     _ensure_table,
@@ -461,3 +463,53 @@ def register(server, multi_db, S):
         store = TaskStore(multi_db.main_db)
         return store.update_task_config(tid, update_params)
 
+    @server.register("analysis.rerunNaming")
+    async def rerun_naming(task_id=None, taskId=None):
+        """组件快速命名手动重试(B3): 复用 fast 收尾链命名器, 后台执行,
+        状态/结果落 result_data.naming(经 analysis.getTask 查询)。
+
+        守卫: 仅 done 任务(运行中任务的收尾链在并发, 重复命名互踩);
+        命名进行中(上次 rerun 未结束)拒绝重复启动。
+        """
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task not found: {tid}")
+        if task.get("status") != "done":
+            raise ValueError(f"task not done (status={task.get('status')}), "
+                             "等待任务完成后再重试命名")
+        naming = _naming_status_of(multi_db.main_db, tid)
+        if naming.get("status") == "running":
+            return {"started": False, "reason": "naming already running",
+                    "naming": naming}
+        store.merge_result_data(tid, {"naming": {
+            "status": "running",
+            "startedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")}})
+        project_id = task.get("project_id")
+        asyncio.create_task(_rerun_naming_bg(multi_db, project_id, tid))
+        logger.info("[rerunNaming] started task=%s project=%s", tid, project_id)
+        return {"started": True, "taskId": tid}
+
+
+
+async def _rerun_naming_bg(multi_db: MultiDBManager, project_id: str, task_id: str) -> None:
+    """rerunNaming 后台执行体: 复用 fast 收尾链命名器(含 result_data 状态落库)。"""
+    from topoone.engine.analyst_runner import _run_naming_recorded
+    try:
+        res = await _run_naming_recorded(multi_db, project_id, task_id)
+        logger.info("[rerunNaming] done task=%s res=%s", task_id, res)
+    except Exception as e:
+        logger.warning("[rerunNaming] task=%s failed: %s", task_id, e)
+
+
+def _naming_status_of(main_db, task_id: str) -> dict:
+    rd = (TaskStore(main_db).get_task(task_id) or {}).get("result_data") or {}
+    if isinstance(rd, str):
+        try:
+            rd = json.loads(rd)
+        except Exception:
+            rd = {}
+    return (rd or {}).get("naming") or {}
