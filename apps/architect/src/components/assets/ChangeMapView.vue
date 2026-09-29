@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { TableCellsIcon, ShareIcon, ChatBubbleLeftRightIcon, DocumentTextIcon } from '@heroicons/vue/24/outline'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import CodeChangeModal from './CodeChangeModal.vue'
+import EvolutionStoryPanel from './EvolutionStoryPanel.vue'
 import type { ArchChangeReport, CodeChangeItem } from '@/services/arch-change-service'
 
 const props = defineProps<{ report: ArchChangeReport | null }>()
@@ -11,6 +12,8 @@ const { t } = useI18n()
 
 type MapCategory = 'structure' | 'dependency' | 'calls'
 const active = ref<MapCategory>('structure')
+/** 演化播放模式：快照序列 → 帧序列补间（TopoStory）；false = 现行单帧图卡 */
+const storyMode = ref(false)
 
 const tabs = [
   { key: 'structure', icon: TableCellsIcon },
@@ -52,8 +55,28 @@ const selected = ref<CodeChangeItem | null>(null)
       </button>
     </div>
 
+    <!-- 单帧/演化模式切换 -->
+    <div class="flex items-center gap-2">
+      <div class="flex rounded-lg bg-ctp-crust/60 p-0.5">
+        <button
+          class="px-2.5 py-1 rounded-md text-[11px] transition-colors"
+          :class="!storyMode ? 'bg-ctp-surface1 text-ctp-text' : 'text-ctp-subtext0 hover:text-ctp-text'"
+          @click="storyMode = false"
+        >{{ t('archChange.singleFrame') }}</button>
+        <button
+          class="px-2.5 py-1 rounded-md text-[11px] transition-colors"
+          :class="storyMode ? 'bg-ctp-surface1 text-ctp-teal' : 'text-ctp-subtext0 hover:text-ctp-text'"
+          @click="storyMode = true"
+        >{{ t('archChange.evolution') }}</button>
+      </div>
+    </div>
+
+    <!-- 演化播放：快照序列帧补间（TopoStory） -->
+    <EvolutionStoryPanel v-if="storyMode" :category="active" />
+
     <!-- 当前图 -->
     <DiagramCard
+      v-else
       :title="currentTitle"
       :diagrams="currentDiagram"
       :badges="[currentBadge]"

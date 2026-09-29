@@ -32,6 +32,7 @@ async function loadNaming() {
 }
 const gitBusy = ref(false)
 const cgBusy = ref(false)
+const cgMsg = ref('')
 const kbBusy = ref(false)
 const kbMsg = ref('')
 const namingBusy = ref(false)
@@ -52,13 +53,20 @@ async function loadGit() {
 async function loadCg() {
   cg.value = await semanticAssetService.codegraphStatus().catch(() => undefined) ?? null
 }
+/** 静默自动同步: CLI 可用即后台 ensure_synced(检测+init/sync), 完成刷新。 */
+async function autoSyncCg() {
+  const st = await semanticAssetService.codegraphStatus().catch(() => null)
+  if (!st?.cli) return
+  await semanticAssetService.codegraphSync().catch(() => null)
+  await loadCg()
+}
 async function loadKb() {
   kb.value = await semanticAssetService.baselineReadiness().catch(() => undefined) ?? null
 }
 function loadAll() {
   void loadGit(); void loadCg(); void loadKb()
 }
-onMounted(() => { loadAll(); setTimeout(() => void loadNaming(), 400) })
+onMounted(() => { loadAll(); void autoSyncCg(); setTimeout(() => void loadNaming(), 400) })
 onUnmounted(stopNamingPoll)
 
 async function initGit() {
@@ -73,11 +81,27 @@ async function initGit() {
 
 async function syncCodegraph() {
   cgBusy.value = true
+  cgMsg.value = ''
   try {
-    await semanticAssetService.symbolSync()
+    // 真同步 codegraph CLI 索引(检测+init/sync, 本地快操作)
+    const r = await semanticAssetService.codegraphSync()
+    cgMsg.value = r?.synced ? '' : (r?.message || '同步失败')
     await loadCg()
+  } catch (e: any) {
+    cgMsg.value = e?.message || String(e)
   } finally {
     cgBusy.value = false
+  }
+}
+
+/** KB 基线更新: 仅发起请求(knowledge.pullRequest), 基线管理页确认执行后过期消除。 */
+async function updateBaseline() {
+  kbMsg.value = ''
+  try {
+    const r = await semanticAssetService.symbolSync()
+    kbMsg.value = r?.message || ''
+  } catch (e: any) {
+    kbMsg.value = e?.message || String(e)
   }
 }
 
@@ -155,6 +179,7 @@ async function driveKb() {
         <span v-if="cg?.state?.stale" class="text-ctp-peach"> · {{ t('overviewHome.baselineInit.cgStale') }}</span>
       </span>
       <span v-else class="text-ctp-overlay0">{{ t('overviewHome.baselineInit.cgIdle') }}</span>
+      <span v-if="cgMsg" class="text-ctp-overlay0 truncate max-w-[16rem]" :title="cgMsg">{{ cgMsg }}</span>
       <button
         v-if="cg?.cli"
         class="btn !py-1 !px-3 !text-xs ml-auto"

@@ -31,6 +31,12 @@ pip install -e packages/core \
             -e apps/workbench/chat_service \
             -e apps/architect
 
+# ── 2.5 git submodule（external/topo-animation，@topo/engine file: 依赖源）──
+# ⚠ 必须先于 npm install：graph-kernel 依赖 file:../../external/topo-animation/packages/engine
+echo "==> git submodule update --init ..."
+git config protocol.file.allow always   # 本地 file:// submodule 源（正式仓 URL 后可移除）
+git submodule update --init --recursive || echo "WARN: submodule 初始化失败（检查 external/topo-animation 源可达）"
+
 # ── 3. 前端 workspaces（npm install）──────────────────────────────────
 echo "==> npm install（workspaces）..."
 npm install

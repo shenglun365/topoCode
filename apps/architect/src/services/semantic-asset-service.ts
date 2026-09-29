@@ -218,6 +218,7 @@ export interface CodegraphStatus {
   kv?: string | null
   source: 'env' | 'kv' | 'default'
   corePid?: string
+  /** codegraph CLI 索引统计(.codegraph/codegraph.db) —— 与 KB 基线图谱正交。 */
   native?: { nodes?: number; edges?: number }
   /** auto 合并语义: native∪codegraph 合并统计(仅 auto+codegraph 可用时返回)。 */
   mergeStats?: { nativeNodes?: number; cgNodes?: number; cgMapped?: number; lineDrift?: number }
@@ -456,6 +457,12 @@ export const semanticAssetService = {
   async setCodegraphMode(mode: 'on' | 'off' | 'auto'): Promise<boolean> {
     await apiPost<unknown>('/kb/semantic/codegraph', { mode })
     return true
+  },
+
+  /** 检测并同步 codegraph CLI 索引(未初始化自动 init + sync 增量; 本地快操作)。 */
+  async codegraphSync(): Promise<{ synced: boolean; nodes: number; edges: number; message?: string } | undefined> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/codegraph-sync', { root, project })
   },
 
   /** 发起基线变更请求（职责划分：architect 仅发起，KB 知识库管理确认执行）。 */
