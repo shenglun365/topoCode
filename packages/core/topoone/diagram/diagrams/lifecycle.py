@@ -1,9 +1,9 @@
-"""DiagramServices: owns the PlantUML sidecar + headless render pool.
+"""DiagramServices: owns the PlantUML CLI renderer + headless render pool.
 
 Host services (standalone dev harness, main-project docs service) call
 ``await services.start()`` / ``await services.stop()`` from their lifespan.
 Every component is optional and degrades gracefully:
-- no plantuml jar -> sidecar stays down (endpoints fall back / 503)
+- no plantuml jar -> cli stays down (endpoints fall back / 503)
 - no playwright/chromium/bundle -> pool stays down (render endpoints 503)
 """
 
@@ -13,7 +13,7 @@ import asyncio
 import logging
 from typing import Any
 
-from .plantuml_sidecar import PlantUmlError, PlantUmlSidecar, find_plantuml_jar
+from .plantuml_cli import PlantUmlCli, PlantUmlError, find_plantuml_jar
 from .render_pool import RenderPool
 from .settings import DiagramSettings
 
@@ -30,7 +30,7 @@ _DRIVER_EOF_MSG = "Connection closed while reading from the driver"
 class DiagramServices:
     def __init__(self, settings: DiagramSettings | None = None):
         self.settings = settings or DiagramSettings()
-        self.sidecar: PlantUmlSidecar | None = None
+        self.sidecar: PlantUmlCli | None = None
         self.pool: RenderPool | None = None
         self.started = False
         self._noise_loop: asyncio.AbstractEventLoop | None = None
@@ -82,7 +82,7 @@ class DiagramServices:
         self._noise_loop = None
         self._prev_exc_handler = None
 
-    # ── sidecar ────────────────────────────────────────────────
+    # ── plantuml cli ───────────────────────────────────────────
 
     def _init_sidecar(self) -> None:
         s = self.settings
@@ -90,9 +90,9 @@ class DiagramServices:
             return
         jar = find_plantuml_jar(s.plantuml_jar)
         if jar is None:
-            logger.info("[topo-one] plantuml jar not found; sidecar disabled")
+            logger.info("[topo-one] plantuml jar not found; cli disabled")
             return
-        self.sidecar = PlantUmlSidecar(jar=jar, port=s.plantuml_port, java=s.plantuml_java, host=s.plantuml_host)
+        self.sidecar = PlantUmlCli(jar=jar, java=s.plantuml_java)
 
     def sidecar_up(self) -> bool:
         return bool(self.sidecar and self.sidecar.is_up())
@@ -109,13 +109,9 @@ class DiagramServices:
 
     async def start(self) -> None:
         self._init_sidecar()
-        if self.sidecar is not None:
-            try:
-                self.sidecar.start()
-                logger.info("[topo-one] plantuml sidecar up on :%d", self.sidecar.port)
-            except PlantUmlError as e:
-                logger.warning("[topo-one] plantuml sidecar failed: %s", e)
-                self.sidecar = None
+        if self.sidecar is not None and not self.sidecar.is_up():
+            logger.info("[topo-one] plantuml cli unavailable (java/jar missing); endpoints fall back")
+            self.sidecar = None
 
         self._init_pool()
         if self.pool is not None:
@@ -135,11 +131,6 @@ class DiagramServices:
         if self.pool is not None:
             try:
                 await self.pool.stop()
-            except Exception:
-                pass
-        if self.sidecar is not None:
-            try:
-                self.sidecar.stop()
             except Exception:
                 pass
         self._restore_noise_filter()

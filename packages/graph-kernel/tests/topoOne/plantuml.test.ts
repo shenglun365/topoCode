@@ -16,9 +16,20 @@ function mockFetch(status: number, body: string) {
 describe('PlantUmlEngine', () => {
   beforeEach(() => vi.unstubAllGlobals());
 
-  it('renders via GET /svg/{encoded} and keeps data-entity attrs', async () => {
+  it('renders via POST {base}/svg JSON by default and keeps data-entity attrs', async () => {
     mockFetch(200, SVG_OK);
-    const engine = new PlantUmlEngine({ baseUrl: 'http://test' });
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test/api/topo/plantuml' });
+    const res = await engine.render({ container: document.createElement('div'), code: '@startuml\nA\n@enduml' });
+    expect(res.svg).toContain('data-entity-uid');
+    const [url, init] = [vi.mocked(fetch).mock.calls[0][0] as string, vi.mocked(fetch).mock.calls[0][1]!];
+    expect(url).toBe('http://test/api/topo/plantuml/svg');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ source: '@startuml\nA\n@enduml' });
+  });
+
+  it('legacy get-encoded protocol still renders via GET /svg/{encoded}', async () => {
+    mockFetch(200, SVG_OK);
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test', protocol: 'get-encoded' });
     const res = await engine.render({
       container: document.createElement('div'),
       code: '@startuml\nA\n@enduml',

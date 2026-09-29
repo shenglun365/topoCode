@@ -21,9 +21,8 @@ class DiagramSettings(BaseSettings):
     render_timeout_ms: int = 20000
     render_bundle: Path = REPO_ROOT / "packages" / "web-core" / "dist-topoone" / "topo-one.js"
 
-    # PlantUML sidecar (resident JVM). jar=None -> discovery (see find_plantuml_jar).
+    # PlantUML CLI (java -jar … -pipe on demand; LRU + serial in-process).
+    # jar=None -> discovery (see find_plantuml_jar).
     plantuml_enabled: bool = True
-    plantuml_port: int = 3491
-    plantuml_host: str = "127.0.0.1"
     plantuml_jar: Path | None = None
     plantuml_java: str = "java"

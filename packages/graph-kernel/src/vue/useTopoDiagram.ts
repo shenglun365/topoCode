@@ -98,7 +98,7 @@ export function useTopoDiagram(opts: UseTopoDiagramOptions): TopoDiagramApi {
       themeVariables: opts.themeVariables,
       interactions,
       animation: opts.animation,
-      engineOptions: { baseUrl: opts.plantUmlBaseUrl ?? '/api/topo', headers: kernelAuthHeaders() },
+      engineOptions: { baseUrl: opts.plantUmlBaseUrl ?? '/api/topo/plantuml', headers: kernelAuthHeaders() },
       onReady: (v) => {
         ready.value = true;
         opts.onReady?.(v);

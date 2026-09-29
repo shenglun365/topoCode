@@ -47,8 +47,9 @@ export interface TimelineStep {
 export interface EngineOptions {
   /** Base URL of the rendering server (plantuml engine). */
   baseUrl?: string;
-  /** 'get-encoded' = GET /svg/{encoded} (plantuml native); 'post-raw' = POST /plantuml/svg (kroki). */
-  protocol?: 'get-encoded' | 'post-raw';
+  /** 'post-json' = POST {base}/svg JSON {source}（CLI 统一端点，默认）;
+      'get-encoded' = GET {base}/svg/{encoded}; 'post-raw' = POST {base}/svg text/plain. */
+  protocol?: 'post-json' | 'get-encoded' | 'post-raw';
   /** Extra fetch headers (e.g. the host app's auth bearer). Host-injected; the kernel stays agnostic. */
   headers?: Record<string, string>;
 }

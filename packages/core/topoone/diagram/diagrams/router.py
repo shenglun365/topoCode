@@ -36,7 +36,7 @@ from ..encoder import decode as decode_plantuml
 from ..report import ReportEntry, build_report
 from ..validation import validate_schema_document
 from .lifecycle import DiagramServices
-from .plantuml_sidecar import PlantUmlError
+from .plantuml_cli import PlantUmlError
 from .render_pool import RenderError, build_worker_html
 
 FALLBACK_RENDERER = Callable[[str], bytes]
@@ -59,7 +59,7 @@ def resolve_engine(engine: str, diagram_type: str) -> str:
     return engine
 
 
-# ── plantuml: sidecar-first, injected fallback ──────────────────────────────
+# ── plantuml: cli-first, injected fallback ────────────────────────────────
 
 
 def _render_plantuml(services: DiagramServices, code: str, fmt: str,
@@ -75,7 +75,7 @@ def _render_plantuml(services: DiagramServices, code: str, fmt: str,
             return fallback(code)
         except Exception as e:
             raise HTTPException(502, f"plantuml fallback render failed: {e}")
-    raise HTTPException(503, "plantuml unavailable: sidecar down and no fallback configured")
+    raise HTTPException(503, "plantuml unavailable: cli down and no fallback configured")
 
 
 def _validate_plantuml(services: DiagramServices, code: str,
@@ -90,10 +90,10 @@ def _validate_plantuml(services: DiagramServices, code: str,
             return {"valid": True, "error": None}
         except Exception as e:
             return {"valid": False, "error": str(e)}
-    raise HTTPException(503, "plantuml unavailable: sidecar down and no fallback configured")
+    raise HTTPException(503, "plantuml unavailable: cli down and no fallback configured")
 
 
-# ── L5 render-level checks (async facilities: sidecar / pool) ───────────────
+# ── L5 render-level checks (async facilities: plantuml cli / pool) ─────────
 
 
 def _unavailable(path: str, message: str) -> dict:
@@ -266,8 +266,16 @@ def create_topo_router(
 
     @router.post("/plantuml/svg")
     async def plantuml_svg(request: Request) -> Response:
-        """Kroki-style alias: raw plantuml body -> image/svg+xml (engine 'post-raw' protocol)."""
-        body = (await request.body()).decode("utf-8", errors="replace")
+        """Unified CLI endpoint: accepts JSON {source} (engine 'post-json' protocol,
+        topo-animation contract docs/plantuml-cli-migration.md) or raw body
+        (kroki-style 'post-raw' alias). -> image/svg+xml; 400 + error svg on syntax error."""
+        ctype = (request.headers.get("content-type") or "").lower()
+        if "application/json" in ctype:
+            payload = await request.json()
+            body = payload.get("source") if isinstance(payload, dict) else None
+            body = body if isinstance(body, str) else ""
+        else:
+            body = (await request.body()).decode("utf-8", errors="replace")
         if not body.strip():
             raise HTTPException(400, "empty plantuml code")
         data = _render_plantuml(services, body, "svg", fallback_renderer)

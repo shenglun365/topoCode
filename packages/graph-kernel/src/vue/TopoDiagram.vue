@@ -35,7 +35,7 @@ const props = withDefaults(
       mode?: 'reveal' | 'highlight';
       stepMs?: number;
     };
-    /** PlantUml engine only: rendering server base URL. */
+    /** PlantUml engine only: rendering server base URL (默认 /api/topo/plantuml，CLI 统一端点)。*/
     plantUmlBaseUrl?: string;
   }>(),
   { engine: 'auto', theme: 'dark', autoPlay: false, interactions: true },

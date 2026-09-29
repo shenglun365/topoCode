@@ -1,20 +1,17 @@
-"""PlantUML 渲染服务 - 通过 HTTP 调用 PlantUML Server"""
+"""PlantUML 渲染服务 - 本地 CLI（java -jar … -pipe 子进程 + LRU/串行）
+
+远程服务器分支已按「一切本地运行」隐私原则移除（topo-animation
+docs/plantuml-cli-migration.md 统一契约）；use_remote 参数保留但忽略（调用面兼容）。"""
 
 import html
 import logging
 import os
 import re
-import subprocess
 from typing import Optional
-
-import requests
 
 logger = logging.getLogger(__name__)
 
-# PlantUML 服务器地址 (可配置)
-PLANTUML_SERVER = os.environ.get('PLANTUML_SERVER', 'http://www.plantuml.com/plantuml')
-
-# 本地 PlantUML jar 路径
+# 本地 PlantUML jar 路径（模块级缓存）
 PLANTUML_JAR: Optional[str] = None
 
 
@@ -128,121 +125,63 @@ def _plantuml_b64encode(data: bytes) -> str:
     return ''.join(result)
 
 
+def _get_cli():
+    """惰性单例 PlantUmlCli（进程级 LRU 缓存 + JVM 串行）。jar 发现兼容本模块多路径约定。"""
+    global _CLI
+    if _CLI is not None:
+        return _CLI
+    jar = find_plantuml_jar()
+    if not jar:
+        return None
+    from topoone.diagram.diagrams.plantuml_cli import PlantUmlCli
+    _CLI = PlantUmlCli(jar=jar)
+    return _CLI
+
+
+_CLI = None
+
+
 def render_plantuml(
     code: str,
     format: str = 'svg',
     use_remote: bool = True,
 ) -> bytes:
-    """
-    渲染 PlantUML diagram
+    """渲染 PlantUML（本地 CLI 子进程；use_remote 参数已弃用并忽略）。
 
     Args:
         code: PlantUML 源码
-        format: 输出格式 ('svg', 'png')
-        use_remote: 是否使用远程服务器 (False 时使用本地 jar)
+        format: 输出格式 ('svg' | 'png')
+        use_remote: 已弃用（外部服务器分支移除，保留签名兼容）
 
     Returns:
-        渲染后的图像数据
+        渲染后的图像数据 (bytes)
     """
-    encoded = encode_plantuml(code)
-
-    if use_remote:
-        return _render_remote(encoded, format)
-    else:
-        return _render_local(encoded, format)
+    cli = _get_cli()
+    if cli is None:
+        raise RuntimeError("PlantUML jar not found. Set TOPOONE_PLANTUML_JAR or place ~/.topocode/plantuml.jar")
+    if format not in ('svg', 'png'):
+        raise RuntimeError(f"unsupported format: {format}")
+    return cli.render(code, format)
 
 
 def _extract_error_from_svg(svg: str) -> str:
     """从 PlantUML 返回的错误 SVG 中提取文本内容"""
-    import re
     texts = re.findall(r'>([^<]+)</text>', svg)
     lines = [t.strip() for t in texts if t.strip() and 'plantuml' not in t.lower()[:20]]
     return ' | '.join(lines) if lines else ''
 
 
-def _render_remote(encoded: str, format: str) -> bytes:
-    """使用远程 PlantUML 服务器渲染 (GET /svg/<encoded>)"""
-    url = f"{PLANTUML_SERVER}/svg/{encoded}"
-    logger.info(f"GET /svg/... len={len(encoded)}")
-
-    try:
-        response = requests.get(url, timeout=30)
-    except requests.RequestException as e:
-        logger.error(f"Remote PlantUML request failed: {e}")
-        raise RuntimeError(f"PlantUML render failed: {e}")
-    ct = response.headers.get('content-type', '')
-    logger.info(f"Response {response.status_code}, Content-Type: {ct}, body_len={len(response.content)}")
-    if response.status_code != 200:
-        body = response.text or ''
-        detail = _extract_error_from_svg(body) or body[:300]
-        logger.error(f"Remote PlantUML returned {response.status_code}: {detail[:200]}")
-        raise RuntimeError(f"PlantUML render failed: {response.status_code} - {detail}")
-    return response.content
-
-
-def _render_local(encoded: str, format: str) -> bytes:
-    """使用本地 PlantUML jar 渲染"""
+def test_plantuml_connection(use_remote: bool = True) -> dict:
+    """探测本地 CLI 可用性（use_remote 参数已弃用并忽略）"""
+    test_code = "@startuml\nbox \"Test\"\nend\n@enduml"
     jar_path = find_plantuml_jar()
     if not jar_path:
-        raise RuntimeError("PlantUML jar not found. Set PLANTUML_JAR or use remote server")
-
-    # 生成临时文件
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=f'.{format}', delete=False) as f:
-        output_path = f.name
-
+        return {'status': 'not-found', 'server': 'local'}
     try:
-        # 调用 PlantUML jar
-        cmd = [
-            'java', '-jar', jar_path,
-            '-tpipe', format,
-        ]
-
-        process = subprocess.run(
-            cmd,
-            input=code.encode('utf-8'),
-            capture_output=True,
-            timeout=30,
-        )
-
-        if process.returncode != 0:
-            error = process.stderr.decode('utf-8', errors='replace')
-            raise RuntimeError(f"PlantUML jar error: {error}")
-
-        return process.stdout
-
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
-
-
-def test_plantuml_connection(use_remote: bool = True) -> dict:
-    """测试 PlantUML 连接"""
-    test_code = "@startuml\nbox \"Test\"\nend\n@enduml"
-
-    try:
-        if use_remote:
-            data = render_plantuml(test_code, 'svg', use_remote=True)
-            return {
-                'status': 'connected',
-                'server': 'remote',
-                'url': PLANTUML_SERVER,
-                'size': len(data),
-            }
-        else:
-            jar_path = find_plantuml_jar()
-            if not jar_path:
-                return {'status': 'not-found', 'server': 'local'}
-
-            data = render_plantuml(test_code, 'svg', use_remote=False)
-            return {
-                'status': 'connected',
-                'server': 'local',
-                'jar': jar_path,
-                'size': len(data),
-            }
+        data = render_plantuml(test_code, 'svg')
+        return {'status': 'connected', 'server': 'local-cli', 'jar': jar_path, 'size': len(data)}
     except Exception as e:
-        return {'status': 'error', 'error': str(e)}
+        return {'status': 'error', 'server': 'local-cli', 'error': str(e)}
 
 
 def validate_mermaid(code: str) -> bool:

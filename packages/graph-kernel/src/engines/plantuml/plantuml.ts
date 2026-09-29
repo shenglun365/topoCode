@@ -32,14 +32,15 @@ export class PlantUmlEngine implements DiagramEngine {
   readonly name = 'plantuml';
   readonly capabilities = getCapability('plantuml')!;
   private baseUrl: string;
-  private protocol: 'get-encoded' | 'post-raw';
+  private protocol: 'post-json' | 'get-encoded' | 'post-raw';
   private headers: Record<string, string>;
 
   constructor(options: EngineOptions = {}) {
-    // 缺省走同源网关(/api/topo)：相对 URL 随浏览器访问的主机+端口自适应，
-    // 由网关代理到 sidecar，避免写死 127.0.0.1 导致远程访问连接被拒。
-    this.baseUrl = (options.baseUrl ?? '/api/topo').replace(/\/+$/, '');
-    this.protocol = options.protocol ?? 'get-encoded';
+    // 缺省走同源网关的 CLI 统一端点（POST {base}/svg JSON {source}，
+    // topo-animation docs/plantuml-cli-migration.md 契约）；相对 URL 随浏览器
+    // 访问的主机+端口自适应。旧 get-encoded 调用面传 protocol:'get-encoded' + base '/api/topo'。
+    this.baseUrl = (options.baseUrl ?? '/api/topo/plantuml').replace(/\/+$/, '');
+    this.protocol = options.protocol ?? 'post-json';
     this.headers = options.headers ?? {};
   }
 
@@ -49,7 +50,13 @@ export class PlantUmlEngine implements DiagramEngine {
 
   private async fetchSvg(code: string): Promise<{ status: number; body: string }> {
     let res: Response;
-    if (this.protocol === 'get-encoded') {
+    if (this.protocol === 'post-json') {
+      res = await fetch(`${this.baseUrl}/svg`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...this.headers },
+        body: JSON.stringify({ source: code }),
+      });
+    } else if (this.protocol === 'get-encoded') {
       res = await fetch(`${this.baseUrl}/svg/${plantumlEncode(code)}`, { headers: this.headers });
     } else {
       res = await fetch(`${this.baseUrl}/plantuml/svg`, {

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from ._harness import create_app
 from topoone.diagram.diagrams import DiagramServices, DiagramSettings
-from topoone.diagram.diagrams.plantuml_sidecar import PlantUmlError
+from topoone.diagram.diagrams.plantuml_cli import PlantUmlError
 from topoone.diagram.diagrams.render_pool import RenderError
 
 FLOWCHART_SCHEMA = {
@@ -160,10 +160,10 @@ def test_render_errors_map_to_400(tmp_path: Path):
     assert "invalid schema" in r.json()["detail"]
 
 
-# ── plantuml: sidecar-first + injected fallback ────────────────────────────
+# ── plantuml: cli-first + injected fallback ────────────────────────────────
 
 
-def test_plantuml_fallback_used_when_sidecar_down(tmp_path: Path):
+def test_plantuml_fallback_used_when_cli_down(tmp_path: Path):
     from topoone.diagram.diagrams.router import create_topo_router
     from fastapi import FastAPI
 
@@ -186,7 +186,7 @@ def test_plantuml_fallback_used_when_sidecar_down(tmp_path: Path):
     assert r.headers["content-type"].startswith("image/svg+xml")
 
 
-def test_plantuml_503_when_sidecar_down_and_no_fallback(tmp_path: Path):
+def test_plantuml_503_when_cli_down_and_no_fallback(tmp_path: Path):
     from topoone.diagram.diagrams.router import create_topo_router
     from fastapi import FastAPI
 
@@ -219,8 +219,7 @@ def test_plantuml_fallback_error_maps_to_502(tmp_path: Path):
     assert "Syntax Error" in str(r.json()["detail"])
 
 
-def test_plantuml_sidecar_syntax_error_maps_to_400(tmp_path: Path):
-    from topoone.diagram.diagrams.plantuml_sidecar import PlantUmlSidecar
+def test_plantuml_cli_syntax_error_maps_to_400(tmp_path: Path):
     from fastapi import FastAPI
     from topoone.diagram.diagrams.router import create_topo_router
 
