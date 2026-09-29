@@ -17,6 +17,10 @@ import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView from '@/components/assets/SemanticGraphView.vue'
+import EvolutionStoryPanel from '@/components/assets/EvolutionStoryPanel.vue'
+
+/** 图谱 tab 内置「演化时间轴」页(固定不可关, 与资源图谱 tab 并列)。 */
+const TIMELINE_TAB = '__timeline__'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
 import { useSplitPane } from '@/composables/useSplitPane'
@@ -54,7 +58,7 @@ const {
   registerChatHook, askAgent, seedConventionIds,
   onConventionConfirm, onConventionIgnore, referenceComp, referenceAsset,
   diffMode, diffLoading, baselineDiffData, toggleDiffMode,
-  cmpBase, cmpTarget, commitOptions, baselineSha, compareData, compareError, compareLoading,
+  cmpBase, cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
   loadCommitOptions, runCompare,
   extractingPending, pendingExtractable, extractPendingAndRecompare,
   changeMarkById, diffFileCounts, pendingFileSet, addedFileSet,
@@ -132,7 +136,7 @@ onMounted(async () => {
             :key="tb.id"
             class="btn btn-xs"
             :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
-            @click="tab = tb.id; onSearch()"
+            @click="tab = tb.id; if (tab === 'graph' && !activeGraphTab) activeGraphTab = TIMELINE_TAB; onSearch()"
           >
             {{ tb.label }}
           </button>
@@ -212,6 +216,7 @@ onMounted(async () => {
         <!-- 重新对比按钮已删：选择即对比(@change)/提取闭环自带重比；工作区有新改动时重选目标即可触发 -->
         <span v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</span>
         <span v-else-if="compareError" class="text-[10px] text-ctp-red truncate max-w-[40%]" :title="compareError">{{ compareError }}</span>
+        <span v-else-if="compareHint" class="text-[10px] text-ctp-peach truncate max-w-[40%]" :title="compareHint">{{ compareHint }}</span>
         <!-- 结果数字不再重复在此：统一在下方「对比结果明细」统计行(缓存态/资产变化/待提取) -->
         <template v-else-if="compareData && !compareData.noChanges">
           <!-- 提取闭环(通用)：pending 中「目标侧内容==工作区内容」的子集可经工作区提取锚定；
@@ -499,39 +504,53 @@ onMounted(async () => {
           v-if="tab === 'graph'"
           class="flex-1 min-h-0 overflow-hidden flex flex-col"
         >
-          <div
-            v-if="!graphTabs.length"
-            class="flex-1 min-h-0 flex items-center justify-center text-xs text-ctp-overlay0"
-          >
-            {{ t('assetMgmt.graph.noTab') }}
-          </div>
-          <template v-else>
-            <div class="shrink-0 flex items-stretch border-b border-ctp-surface1 px-1 pt-1 overflow-x-auto">
-              <button
-                v-for="gt in graphTabs"
-                :key="gt.id"
-                class="group relative flex items-center gap-1.5 max-w-[200px] px-3 py-1.5 text-[11px] whitespace-nowrap rounded-t-lg border border-b-0 transition-colors shrink-0"
-                :class="activeGraphTab === gt.id
-                  ? 'bg-ctp-mantle text-ctp-text border-ctp-surface1 font-semibold'
-                  : 'bg-ctp-surface0/50 text-ctp-subtext0 border-transparent hover:bg-ctp-surface0 hover:text-ctp-subtext1'"
-                :title="gt.title"
-                @click="activeGraphTab = gt.id"
+          <div class="shrink-0 flex items-stretch border-b border-ctp-surface1 px-1 pt-1 overflow-x-auto">
+            <button
+              class="group relative flex items-center gap-1.5 max-w-[200px] px-3 py-1.5 text-[11px] whitespace-nowrap rounded-t-lg border border-b-0 transition-colors shrink-0"
+              :class="activeGraphTab === TIMELINE_TAB
+                ? 'bg-ctp-mantle text-ctp-text border-ctp-surface1 font-semibold'
+                : 'bg-ctp-surface0/50 text-ctp-subtext0 border-transparent hover:bg-ctp-surface0 hover:text-ctp-subtext1'"
+              @click="activeGraphTab = TIMELINE_TAB"
+            >
+              {{ t('assetMgmt.graph.timelineTab') }}
+            </button>
+            <button
+              v-for="gt in graphTabs"
+              :key="gt.id"
+              class="group relative flex items-center gap-1.5 max-w-[200px] px-3 py-1.5 text-[11px] whitespace-nowrap rounded-t-lg border border-b-0 transition-colors shrink-0"
+              :class="activeGraphTab === gt.id
+                ? 'bg-ctp-mantle text-ctp-text border-ctp-surface1 font-semibold'
+                : 'bg-ctp-surface0/50 text-ctp-subtext0 border-transparent hover:bg-ctp-surface0 hover:text-ctp-subtext1'"
+              :title="gt.title"
+              @click="activeGraphTab = gt.id"
+            >
+              <span class="truncate">{{ gt.title }}</span>
+              <span
+                role="button"
+                class="flex items-center justify-center w-4 h-4 rounded text-ctp-overlay1 hover:text-ctp-red hover:bg-ctp-red/15 cursor-pointer shrink-0"
+                :title="t('assetMgmt.graph.closeTab')"
+                @click.stop="closeGraphTab(gt.id)"
               >
-                <span class="truncate">{{ gt.title }}</span>
-                <span
-                  role="button"
-                  class="flex items-center justify-center w-4 h-4 rounded text-ctp-overlay1 hover:text-ctp-red hover:bg-ctp-red/15 cursor-pointer shrink-0"
-                  :title="t('assetMgmt.graph.closeTab')"
-                  @click.stop="closeGraphTab(gt.id)"
-                >
-                  <XMarkIcon class="w-3 h-3" />
-                </span>
-              </button>
-            </div>
-            <div class="flex-1 min-h-0">
+                <XMarkIcon class="w-3 h-3" />
+              </span>
+            </button>
+          </div>
+          <div class="flex-1 min-h-0">
+            <EvolutionStoryPanel
+              v-if="activeGraphTab === TIMELINE_TAB"
+              class="h-full overflow-auto"
+            />
+            <template v-else>
+              <div
+                v-if="!graphTabs.length"
+                class="h-full flex items-center justify-center text-xs text-ctp-overlay0"
+              >
+                {{ t('assetMgmt.graph.noTab') }}
+              </div>
               <SemanticGraphView
                 v-for="gt in graphTabs"
                 v-show="activeGraphTab === gt.id"
+                v-else
                 :key="gt.id"
                 :tab="gt"
                 :diff-files="changedFilesForGraph"
@@ -540,8 +559,8 @@ onMounted(async () => {
                 :comp-names="graphCompNames"
                 @close="closeGraphTab"
               />
-            </div>
-          </template>
+            </template>
+          </div>
         </div>
         <div
           v-else

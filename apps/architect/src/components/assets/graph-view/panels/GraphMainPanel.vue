@@ -22,7 +22,6 @@ const {
   activeFileTab,
   activeRelTab,
   activeTabSegs,
-  animating,
   applyFileScope,
   beginCardDrag,
   cardDragging,
@@ -89,7 +88,6 @@ const {
   regenerateNodeBrief,
   relTabEl,
   relTabSegs,
-  replayTick,
   scopeTotal,
   scopedEdges,
   scopedNodes,
@@ -155,15 +153,15 @@ const {
           v-else
           ref="diagRef"
           class="h-full"
-          :key="`${cardFullscreen ? 'fs' : 'inline'}-${replayTick}`"
+          :key="`${cardFullscreen ? 'fs' : 'inline'}`"
           :code="diagrams[cardLang]"
           :engine="cardLang"
           :theme="themeMode"
           :theme-variables="themeVars"
           security-level="loose"
+          :auto-play="false"
           :zoom-fit-min-scale="0.3"
           :zoom-max-scale="24"
-          :auto-play="animating"
           @ready="onDiagramReady"
           @node-click="onNodeClick"
         />

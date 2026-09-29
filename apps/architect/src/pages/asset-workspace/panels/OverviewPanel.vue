@@ -13,6 +13,7 @@ const {
   compCatalog,
   compareData,
   compareError,
+  compareHint,
   compareLoading,
   coverageInfo,
   diffLoading,
@@ -298,6 +299,7 @@ const {
               <div class="px-3 pb-3 pt-2 mt-1 border-t border-ctp-surface0 space-y-2">
                 <p v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</p>
                 <p v-else-if="compareError" class="text-[10px] text-ctp-red">{{ compareError }}</p>
+                <p v-if="!compareError && compareHint" class="text-[10px] text-ctp-peach">{{ compareHint }}</p>
                 <template v-else-if="compareData">
                   <p v-if="compareData.noChanges" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.noChanges') }}</p>
                   <template v-else>

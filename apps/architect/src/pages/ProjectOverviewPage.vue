@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { useAppDialog } from '@/composables/useAppDialog'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon, DocumentTextIcon, CubeIcon,
   CodeBracketIcon, CheckCircleIcon, XCircleIcon, MagnifyingGlassIcon, ChevronRightIcon,
-  ExclamationTriangleIcon,
+  ExclamationTriangleIcon, ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
 import { projectService } from '@/services/project-service'
 import { sessionService, type DigestInfo } from '@/services/session-service'
+import { semanticAssetService, type NamingStatus } from '@/services/semantic-asset-service'
 import type { KbMatchResult, ProjectOverview, ProjectOverviewComponent } from '@/types'
 import KbLinkDialog from '@/components/project/KbLinkDialog.vue'
 import BaselineInitCard from '@/components/overview/BaselineInitCard.vue'
@@ -200,6 +201,48 @@ function toggleAllComps() {
     ? new Set()
     : new Set(compTree.value.map((n) => n.c.id))
 }
+
+/** 存在可折叠层级(父子关系)才显示「全部展开/收起」——扁平列表点了无视觉效果。 */
+const hasCompHierarchy = computed(() => compTree.value.some((r) => r.children.length))
+
+// ---- 组件命名状态(自 BaselineInitCard 迁入: 命名归属「组件变更情况」语境) ----
+const naming = ref<NamingStatus | null>(null)
+const namingBusy = ref(false)
+let namingPoll: ReturnType<typeof setInterval> | null = null
+
+function stopNamingPoll() {
+  if (namingPoll) { clearInterval(namingPoll); namingPoll = null }
+}
+async function loadNaming() {
+  naming.value = await semanticAssetService.namingStatus().catch(() => null)
+  if (naming.value?.naming?.status === 'running' && !namingPoll) {
+    namingPoll = setInterval(() => { void loadNaming() }, 5000)
+  }
+  if (naming.value?.naming?.status !== 'running') stopNamingPoll()
+}
+const namingText = computed(() => {
+  const n = naming.value?.naming
+  if (!n?.status) {
+    // 存量任务无命名记录: 已关联 KB 即显示"未执行过命名"
+    return overview.value?.kb.linked ? t('overviewHome.baselineInit.namingNotRun') : ''
+  }
+  if (n.status === 'running') return t('overviewHome.baselineInit.namingRunning')
+  if (n.status === 'done') {
+    return n.named ? `${t('overviewHome.baselineInit.namingDone')} ${n.named}` : t('overviewHome.baselineInit.namingNone')
+  }
+  return `${t('overviewHome.baselineInit.namingFail')}: ${(n.error || n.reason || '').slice(0, 60)}`
+})
+async function rerunNaming() {
+  namingBusy.value = true
+  try {
+    await semanticAssetService.namingRerun()
+    await loadNaming()
+  } finally {
+    namingBusy.value = false
+  }
+}
+onMounted(() => { setTimeout(() => void loadNaming(), 600) })
+onUnmounted(stopNamingPoll)
 </script>
 
 <template>
@@ -420,9 +463,21 @@ function toggleAllComps() {
         <div class="flex items-center gap-2 mb-3">
           <CubeIcon class="w-4 h-4 text-ctp-mauve" />
           <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.componentChanges') }}</span>
+          <span
+            v-if="namingText"
+            class="text-[11px] truncate max-w-[20rem]"
+            :class="naming?.naming?.status === 'error' ? 'text-ctp-peach' : 'text-ctp-overlay0'"
+            :title="naming?.naming?.error || ''"
+          >{{ t('overviewHome.baselineInit.namingLabel') }}: {{ namingText }}</span>
+          <button
+            v-if="overview.kb.linked && naming?.naming?.status !== 'running'"
+            class="btn btn-ghost !px-1.5 !py-0.5 !text-[10px]"
+            :disabled="namingBusy"
+            @click="rerunNaming"
+          ><ArrowPathIcon v-if="namingBusy" class="w-3 h-3 animate-spin" />{{ t('overviewHome.baselineInit.namingRerun') }}</button>
           <span class="flex-1" />
           <button
-            v-if="overview.kb.linked && compTree.length"
+            v-if="hasCompHierarchy"
             class="btn btn-ghost !px-1.5 !py-0.5 !text-[10px]"
             @click="toggleAllComps"
           >{{ allExpanded ? t('overviewHome.collapseAll') : t('overviewHome.expandAll') }}</button>

@@ -684,6 +684,85 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
     })
 
 
+@router.get("/project/versions")
+async def get_project_versions(root: Optional[str] = None, project: Optional[str] = None):
+    """KB 基线版本列表(宏观概览「版本历史」数据源)：label/head/创建时间，新→旧。"""
+    from ..kb_gateway import call_kb
+    proj = resolve_project(root, project)
+    if not proj or not proj.get("kbProjectId"):
+        return ok([])
+    try:
+        versions = call_kb("version.list", projectId=proj["kbProjectId"]) or []
+    except Exception:
+        versions = []
+    return ok([
+        {"id": v.get("id"), "label": v.get("label") or v.get("id"), "head": v.get("head") or "",
+         "createdAt": v.get("created_at") or v.get("createdAt") or ""}
+        for v in versions
+    ])
+
+
+@router.get("/project/evolution-frames")
+async def get_evolution_frames(root: Optional[str] = None, project: Optional[str] = None,
+                               base: Optional[str] = None, head: Optional[str] = None,
+                               layer: Optional[str] = None):
+    """演化帧序列(B2+ 真数据): 任意 base..head ref 对 → 组件图谱帧推演。
+
+    ref 接受 baseline/KB version id/branch/commit sha(前缀)/HEAD；缺省
+    base=baselineCommit, head=HEAD。anchor 图谱 = KB 挂载版本组件全集，
+    逐帧按 ls-tree 文件存在性推演存活 + diff 交集标 change(added/modified/same)。
+    """
+    from ..kb_gateway import call_kb
+    from .evolution import build_graph_frames, resolve_ref
+    proj = resolve_project(root, project)
+    if not proj:
+        return err(400, "未定位到项目")
+    work_dir = proj.get("rootPath") or ""
+    if not work_dir:
+        return err(400, "项目无工作目录")
+    baseline_commit = proj.get("baselineCommit") or ""
+    # KB 版本链: version id → head 映射(ref 解析) + head → 版本名(帧标注)
+    version_heads: dict = {}
+    version_names: dict = {}
+    if proj.get("kbProjectId"):
+        try:
+            versions = call_kb("version.list", projectId=proj["kbProjectId"]) or []
+        except Exception:
+            versions = []
+        for v in versions:
+            vhead = (v.get("head") or "").strip()
+            if vhead:
+                version_heads[v.get("id") or ""] = vhead
+                version_names[vhead] = v.get("label") or v.get("id") or ""
+                version_names[vhead[:7]] = version_names[vhead]
+    if not baseline_commit and proj.get("kbProjectId") and proj.get("baselineId"):
+        baseline_commit = _kb_baseline_head(proj["kbProjectId"], proj["baselineId"]) or ""
+    base_ref = resolve_ref(work_dir, base or "baseline", baseline_commit, version_heads)
+    head_ref = resolve_ref(work_dir, head or "HEAD", baseline_commit, version_heads)
+    if not base_ref or not head_ref:
+        return err(400, f"ref 解析失败: base={base or 'baseline'} head={head or 'HEAD'}")
+    if layer != "file":
+        # anchor 用组件目录(architecture.catalog)：唯一 id + owns + LLM 业务名。
+        # ⚠️ 不用 architecture.model——其 components 被拍平(parentId 丢失、id 重复、
+        # 名字退化为路径族如 packages)，正是 _by_kb_components 注释记录过的同一个坑。
+        try:
+            from ..common import build_component_catalog
+            catalog = build_component_catalog(work_dir, proj.get("id"))
+        except Exception as e:
+            return err(502, f"KB 组件图谱不可用: {e}")
+        anchor = [
+            {"id": c.get("id"), "name": c.get("name"), "owns": c.get("owns") or [],
+             "dependsOn": c.get("dependsOn") or []}
+            for c in (catalog.get("components") or []) if c.get("id")
+        ]
+    if layer == "file":
+        # 文件层: 纯 git diff 推演, 不需要 KB 组件锚
+        return ok(build_graph_frames(work_dir, base_ref, head_ref, [], version_names, layer="file"))
+    if not anchor:
+        return err(400, "KB 组件图谱为空（未关联知识库或基线未挂载），无法推演演化帧")
+    return ok(build_graph_frames(work_dir, base_ref, head_ref, anchor, version_names))
+
+
 @router.get("/project/snapshots")
 async def get_snapshots(root: Optional[str] = None, project: Optional[str] = None):
     proj = resolve_project(root, project)

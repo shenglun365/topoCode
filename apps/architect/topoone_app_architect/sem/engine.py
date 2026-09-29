@@ -1225,17 +1225,33 @@ def extract_scope(root: Optional[str], project: Optional[str],
                           "head": (_ns.get('head') or '')[:12]}
         except Exception:
             pass
+    # 零产出诊断: 纯常量/桶文件/启动脚本本就无可提取符号(正确语义), 逐文件归因供 FE 明示。
+    empty_files: List[dict] = []
+    if not saved:
+        try:
+            from ..arch_routes.asset_rules import RuleContext as _RC, candidates_for_file as _cff
+            _by_file: Dict[str, List[dict]] = {}
+            for _n in ctx.get("nodes") or []:
+                _by_file.setdefault(_n.get("file_path") or "", []).append(_n)
+            _node_by_id = {_n.get("id"): _n for _n in (ctx.get("nodes") or [])}
+            _rc = _RC(ctx.get("edges") or [], ctx.get("implDetails") or {}, _node_by_id,
+                      extra_names=ctx.get("calleeNames"))
+            for _f in sorted(set((ctx.get("files") or files or []))):
+                _ns = _by_file.get(_f) or []
+                if not _ns:
+                    empty_files.append({"file": _f, "why": "no_symbols"})
+                elif not _cff(root, _ns, _rc, kinds):
+                    empty_files.append({"file": _f, "why": "no_extractable_kind"})
+        except Exception as _e:
+            logger.warning("[semantic] 零产出诊断失败: %s", _e)
     return {"assets": saved, "source": ctx.get("source"),
             "symbolSource": _src, "degraded": degraded,
-            "reason": reason, "count": len(saved), **_stale}
+            "reason": reason, "count": len(saved), "emptyFiles": empty_files, **_stale}
 
 
 def _resolve_extract_levels(level: str) -> Tuple[str, ...]:
-    """请求粒度 → 需提取的层级。显式层级只产该级；缺省/all 仅产 implementation。
-
-    业务层+逻辑层当前暂停再生：默认只专注实现层。显式请求 logic/business
-    (如单资产重提/按需聚合)仍可单独产出，不影响已落库资产的只读展示。
-    """
+    """请求粒度 → 需提取层级。显式层级只产该级；缺省仅产 implementation
+    (业务/逻辑层暂停再生，统一实现层定向管线)。"""
     if level in SEMANTIC_LEVELS:
         return (level,)
     return ("implementation",)
@@ -4462,8 +4478,8 @@ async def api_purge_semantic(request: Request):
 @router.get("/kb/semantic/codegraph")
 async def api_codegraph_status(root: Optional[str] = None, project: Optional[str] = None):
     from .. import ctx
-    from .codegraph import codegraph_status, effective_mode, kv_mode
-    from .symbols import symbol_source_state, resolve_live_core_pid, _open_core_conn
+    from .codegraph import codegraph_status, effective_mode, kv_mode, cg_index_stats
+    from .symbols import symbol_source_state, resolve_live_core_pid
     mode = effective_mode()
     st = codegraph_status()
     # root 解析：显式参数 > 请求上下文(注册项目 rootPath)
@@ -4472,27 +4488,11 @@ async def api_codegraph_status(root: Optional[str] = None, project: Optional[str
         _pid_ctx = ctx.get_project()
         _root = (store.ProjectsStore.get(_pid_ctx) or {}).get('rootPath', '') if _pid_ctx else ''
     _root = _root or ''
-    # native 统计（root 优先于 codegraph_status 内部上下文解析）
+    # native = codegraph CLI 索引计数(用户裁决, 非 KB 图谱); corePid/state 供 KB 行
+    st['nativeNodes'], st['nativeEdges'] = cg_index_stats(_root)
     _core_pid = resolve_live_core_pid(_root)
-    _merge = (mode == 'auto')
     if _core_pid:
-        _conn = _open_core_conn(_core_pid, root=_root, merge=_merge)
-        if _conn is not None:
-            try:
-                st['corePid'] = _core_pid
-                st['nativeNodes'] = _conn.execute("SELECT COUNT(*) FROM graph_node").fetchone()[0]
-                st['nativeEdges'] = _conn.execute("SELECT COUNT(*) FROM graph_edge").fetchone()[0]
-            except Exception:
-                st['nativeNodes'] = st['nativeEdges'] = 0
-            if _merge:
-                try:
-                    st['mergeStats'] = {r[0]: r[1] for r in
-                                        _conn.execute("SELECT k, v FROM merge_stats").fetchall()}
-                except Exception:
-                    pass
-        else:
-            st['corePid'] = _core_pid
-            st['nativeNodes'] = st['nativeEdges'] = 0
+        st['corePid'] = _core_pid
     ns = symbol_source_state(_root, project or ctx.get_project())
     return ok({"mode": mode, "env": os.environ.get("ARCH_CODEGRAPH", "").strip().lower(),
                "cli": st["cli"], "cliPath": st["cliPath"],
@@ -4503,6 +4503,23 @@ async def api_codegraph_status(root: Optional[str] = None, project: Optional[str
                "state": {"head": ns['head'], "lastHead": ns['lastHead'],
                          "dirty": ns['dirty'], "stale": ns['stale'],
                          "staleCount": len(ns['staleFiles'])}})
+
+
+@router.post("/kb/semantic/codegraph-sync")
+async def api_codegraph_sync(body: dict = None):
+    """检测并同步 codegraph CLI 索引(未初始化自动 init 首建+sync 增量, 本地快操作,
+    与 KB 基线更新正交) — 概览卡「同步索引」真实语义。"""
+    from .. import ctx
+    from .codegraph import ensure_synced, cg_index_stats
+    body = body or {}
+    proj = body.get('project') or ctx.get_project()
+    root = (resolve_root(body.get('root') or None, proj) or '').strip()
+    if not root or not os.path.isdir(root):
+        return err(400, "项目 root 解析失败")
+    synced = ensure_synced(root)
+    nodes, edges = cg_index_stats(root)
+    return ok({"synced": synced, "nodes": nodes, "edges": edges,
+               "message": "" if synced else "codegraph 同步未完成(CLI 缺失或通道被关闭)"})
 
 
 @router.post("/kb/semantic/codegraph")
@@ -4604,8 +4621,8 @@ async def api_symbol_sync(body: dict = None):
     """发起基线变更请求（职责划分：architect 仅发起，执行在 KB 知识库管理）。
 
     调 KB knowledge.pullRequest 写入待更新标记(pending)，由 KB 知识库管理界面
-    确认后执行 updateConfirm(拉取/预览) + version.sync(增量分析+社区重划分) +
-    cleanup(物理清除腐烂旧基线数据)。请求成功后记录跟踪状态 head。
+    确认后执行 updateConfirm + version.sync + cleanup。⚠️ 此处不 record_sync——
+    发起≠完成(图谱未重建)，对齐记录由执行链收尾(baseline_commit 惰性回写)。
 
     ⚠️ 双模式（勿"统一"，决策见 api_cold_start docstring）：仓库已有 core 项目
     → 走本端点（发起-确认-执行，防误同步）；仅冷启动(无项目、KB 管理无入口
@@ -4613,7 +4630,7 @@ async def api_symbol_sync(body: dict = None):
     """
     from .. import ctx
     from ..kb_gateway import call_kb
-    from .symbols import _resolve_core_pid, record_sync, _git
+    from .symbols import _resolve_core_pid, _git
     body = body or {}
     proj = body.get('project') or ctx.get_project()
     root = resolve_root(body.get('root') or None, proj)
@@ -4632,7 +4649,6 @@ async def api_symbol_sync(body: dict = None):
         return err(500, f"基线变更请求失败: {e}")
     if res is None:
         return err(503, "KB 服务不可达，请稍后重试")
-    record_sync(pid, head)
     return ok({"requested": True, "requestId": (res or {}).get('requestId'),
                 "corePid": pid, "head": head,
                 "message": "已在 KB 知识库管理创建待确认的基线变更请求"})

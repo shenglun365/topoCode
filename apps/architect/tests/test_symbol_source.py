@@ -370,9 +370,37 @@ def test_symbol_sync_endpoint_initiates_pull_request(tmp_path, monkeypatch):
     assert method == "knowledge.pullRequest"
     assert params["project_id"] == "proj-sync"
     assert len(params["head"]) == 40
-    # 跟踪 KV 已记录(发起请求即对齐 head)
-    kv = _sym._read_state_kv("proj-sync")
-    assert kv.get("lastHead") == params["head"]
+    # 发起≠完成：不得伪对齐(图谱未重建却推进 lastHead) —— 对齐由执行链收尾
+    assert not (_sym._read_state_kv("proj-sync") or {}).get("lastHead")
+
+
+def test_codegraph_sync_endpoint_and_cli_index_semantics(tmp_path, monkeypatch):
+    """codegraph 行语义(用户裁决): status.native = codegraph CLI 索引
+    (.codegraph/codegraph.db)计数, KB 基线图谱(graph_node)不得混入;
+    sync 端点 = ensure_synced(检测+init/sync) + 索引统计, CLI 缺失 →
+    synced=False 且 message 可行动。"""
+    root, _ = _mk_git_repo(tmp_path, "repo-cgsync")
+    # with_db=True: KB 库含 3 个 graph_node —— 若混入即测试失败
+    data = _mk_core_env(tmp_path, str(root), "proj-cgsync", with_db=True)
+    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
+    monkeypatch.setattr(_sem_codegraph, "_cli_cache", ("", 0.0))  # CLI 缺失
+    _sym.invalidate_native_cache()
+    c = _client()
+    r = c.post("/api/architect/kb/semantic/codegraph-sync",
+               json={"root": str(root), "project": None})
+    assert r.status_code == 200
+    body = r.json()["data"]
+    assert body["synced"] is False
+    assert body["message"]  # 可行动提示
+    assert body["nodes"] == 0
+    # status: KB 的 3 个 graph_node 不得混入 native(换源 CLI 索引库)
+    r2 = c.get("/api/architect/kb/semantic/codegraph",
+               params={"root": str(root), "project": None})
+    assert r2.status_code == 200
+    st = r2.json()["data"]
+    assert st["native"]["nodes"] == 0
+    # KB 基线状态仍随行(供 KB 行基线落后展示)
+    assert "state" in st and "staleCount" in st["state"]
 
 
 def test_resolve_core_pid_mirror_root_via_local_repo_path(tmp_path, monkeypatch):

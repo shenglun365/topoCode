@@ -1,10 +1,6 @@
-"""codegraph 后端适配（符号源主源侧）。
+"""codegraph 后端适配（符号源主源侧, 裁决⑤）；native/KB(symbols.py) 为基线认知源+兜底。
 
-【SLA（裁决⑤）】本模块 = architect 实时符号事实主源；native/KB(symbols.py TEMP
-视图) 为基线认知源+兜底。effective_mode() 的 auto 语义 = 可用即用主源。
-
-原 semantic_assets.py 5555 行 god-file 按段拆出；本模块由构建脚本生成段内容，
-跨模块引用为显式 import。每步拆分均跑 28 个后端测试文件保护。
+原 semantic_assets.py god-file 按段拆出；跨模块引用为显式 import。
 """
 from __future__ import annotations
 
@@ -185,6 +181,19 @@ def _open_cg(root: str) -> Optional[sqlite3.Connection]:
     except Exception as e:
         logger.warning("[semantic] open codegraph.db failed: %s", e)
         return None
+
+
+def cg_index_stats(root: str) -> Tuple[int, int]:
+    """codegraph CLI 索引统计(nodes, edges)——概览卡数据源, 与 KB graph_node 正交。"""
+    conn = _open_cg(root)
+    try:
+        return (tuple(int(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
+                      for t in ("nodes", "edges")) if conn else (0, 0))  # type: ignore[return-value]
+    except Exception:
+        return 0, 0
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _query_nodes(conn: sqlite3.Connection, files: Optional[List[str]] = None,

@@ -519,6 +519,44 @@ export interface Snapshot {
   model: ArchitectureModel
 }
 
+/** 演化帧(B2+ 真数据): ref 点上的组件图谱推演快照。 */
+/** 统一图 JSON（canonical + 存在性投影）——动画机制重裁后的演化帧数据。 */
+export interface EvolutionGraphNode {
+  key: string
+  label: string
+  container?: string
+}
+
+export interface EvolutionGraphEdge {
+  key?: string
+  from: string
+  to: string
+}
+
+export interface EvolutionGraphFrame {
+  id: string
+  ref: string
+  label: string
+  /** 该帧存在的节点/边 key（边存在 = 两端节点均在场） */
+  nodes: string[]
+  edges: string[]
+  /** 该帧 change=modified 的节点 key（播放层高亮脉冲） */
+  modified: string[]
+}
+
+export interface EvolutionFrames {
+  base: string
+  head: string
+  /** 帧粒度: component(组件依赖) | file(变更文件) */
+  layer?: 'component' | 'file'
+  canonical: {
+    nodes: EvolutionGraphNode[]
+    edges: EvolutionGraphEdge[]
+    containers: { key: string; label: string }[]
+  }
+  frames: EvolutionGraphFrame[]
+}
+
 
 
 

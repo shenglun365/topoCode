@@ -416,7 +416,9 @@ export function useAssetCore(D: WsDeps) {
     // 「未归属」组(单一分组)：KB owns 未覆盖的文件 ∪ 无组件归属的孤儿资产。
     // 文件并集去重——已提取资产挂其锚点文件下(与组件组同构)；仅存在于 owns 缺口
     // 清单的文件显示「未提取」。同受组头开合(compOpen)与树层级(treeLevel)控制。
-    const unownedFiles: UnownedFileEntryLite[] = D.unowned?.unownedFiles ?? []
+    // ⚠️ D 为普通对象(非 reactive)，跨域 ref 须显式 .value——MS6-W1 搬移漏改，
+    // 孤儿资产为空时 if 不进入而静默失效，非空即 .map 崩(实测 2026-09-29)。
+    const unownedFiles: UnownedFileEntryLite[] = D.unowned?.unownedFiles?.value ?? []
     if ((otherFiles.size || otherDirect.length || unownedFiles.length)
         && (all || sel.has(OTHER_KEY))) {
       const fileAssets = new Map<string, SemanticAsset[]>(otherFiles)

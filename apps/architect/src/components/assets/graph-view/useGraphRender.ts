@@ -97,49 +97,11 @@ function openCardFullscreen() {
 function closeCardFullscreen() {
   cardFullscreen.value = false
 }
-/** 重播：默认(加载/重渲染)直接呈现最终完成图；点图内工具栏的重播按钮才按步骤播放。 */
+/** 旧「逐批加载/重播」动画机制已删除(2026-09-29 裁决：未完成的验证性效果，
+ *  架构感知图谱直接呈现最终完成图；帧间过渡由演化时间轴的补间承担)。 */
 const diagRef = ref<InstanceType<typeof TopoDiagram> | null>(null)
-const replayTick = ref(0)
-const animating = ref(false)
-function replayGraph() {
-  replayTick.value += 1
-  animating.value = true
-}
-/** 把重播按钮注入图内浮动工具栏(.td-toolbar，与缩放/导出按钮同排，置首)。 */
-function injectReplayBtn(tries = 0) {
-  const host = diagRef.value?.containerRef
-  if (!host) return
-  if (host.querySelector('[data-td-replay]')) return
-  const bar = host.querySelector('.td-toolbar')
-  if (!bar) {
-    if (tries < 10) setTimeout(() => injectReplayBtn(tries + 1), 100)
-    return
-  }
-  const btn = makeButton('↻', t('assetMgmt.graph.replay'), replayGraph)
-  btn.dataset.tdReplay = '1'
-  bar.prepend(btn)
-}
-/** 播放到最后一步后关掉动画态：之后主题/语言/全屏等重渲染不再重播。 */
 function onDiagramReady() {
-  injectReplayBtn()
   void nextTick(() => { applySelectedNodeStyle(); applyNodeTooltips(); applyDiffNodeStyles() })
-  if (!animating.value) return
-  const tryWatch = (tries = 0) => {
-    const ctrl = diagRef.value?.getAnimation() ?? null
-    if (!ctrl || ctrl.total <= 0) {
-      // 不支持动画的类型(无 plan)：稍候放弃，图本身已是完整态。
-      if (tries < 20) setTimeout(() => tryWatch(tries + 1), 100)
-      else animating.value = false
-      return
-    }
-    const stopWatch = ctrl.subscribe((st) => {
-      if (!st.playing && st.index >= ctrl.total - 1) {
-        stopWatch()
-        animating.value = false
-      }
-    })
-  }
-  tryWatch()
 }
 /** 节点是否已在可视区域内：节点屏幕 bbox 外扩 margin 逆映射到根用户空间后
  *  完全落在 svg 元素可视范围内(对 zoom-pan 的 transform/viewBox 实现均成立)。
@@ -684,7 +646,6 @@ watch(D.detail.sel, (n) => {
     KIND_CHIP,
     KIND_TEXT,
     LEGEND_W,
-    animating,
     applyDiffNodeStyles,
     applyNodeTooltips,
     applySelectedNodeStyle,
@@ -718,7 +679,6 @@ watch(D.detail.sel, (n) => {
     flashing,
     iconPulseTimer,
     indexOpen,
-    injectReplayBtn,
     kindBgClass,
     kindChipClass,
     kindTextClass,
@@ -735,8 +695,6 @@ watch(D.detail.sel, (n) => {
     onMatrixSelect,
     onNodeClick,
     openCardFullscreen,
-    replayGraph,
-    replayTick,
     resizeEdge,
     resizeStart,
     resolveNodeIdFromEl,

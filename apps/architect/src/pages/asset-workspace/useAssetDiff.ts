@@ -50,6 +50,8 @@ export function useAssetDiff(D: WsDeps) {
   const baselineSha = ref('')
   const compareData = ref<AssetCompareResult | null>(null)
   const compareError = ref('')
+  /** 非阻断弱提示(基线图谱落后等)——区别于 compareError(真错误)。 */
+  const compareHint = ref('')
   const compareLoading = ref(false)
 
   async function loadCommitOptions() {
@@ -61,6 +63,7 @@ export function useAssetDiff(D: WsDeps) {
   async function runCompare() {
     compareLoading.value = true
     compareError.value = ''
+    compareHint.value = ''
     try {
       compareData.value = await semanticAssetService.assetCompare(
         cmpBase.value || undefined,
@@ -89,11 +92,21 @@ export function useAssetDiff(D: WsDeps) {
     if (!(await dialog.confirm(t('assetMgmt.diff.extractConfirm', { n: files.length })))) return
     extractingPending.value = true
     let extracted = 0
+    const noCandidateFiles: string[] = []
     try {
       const BATCH = 10
       for (let i = 0; i < files.length; i += BATCH) {
         const res = await semanticAssetService.extract({ type: 'files', files: files.slice(i, i + BATCH) })
         extracted += res?.count ?? 0
+        // 基线图谱落后仅为比对口径提示——提取候选来自符号源(CLI 索引/native 实时)，
+        // 不受其影响，完整执行不中断(此前误作硬拦截，实测误挡正常提取 2026-09-29)
+        if (res?.indexStale) {
+          compareHint.value = t('assetMgmt.diff.extractBaselineHint', { n: res.staleCount ?? 0 })
+        }
+        // 零产出逐文件归因：纯常量表/re-export 桶/启动脚本本就无可提取符号(正确语义)
+        for (const ef of res?.emptyFiles ?? []) {
+          if (!noCandidateFiles.includes(ef.file)) noCandidateFiles.push(ef.file)
+        }
       }
     } catch (e) {
       // 失败即止：保留错误信息(不再自动重比冲掉)，用户可手动「重新对比」
@@ -104,8 +117,11 @@ export function useAssetDiff(D: WsDeps) {
       extractingPending.value = false
     }
     if (!extracted) {
-      // 全程零产出(清单多为不可提取文件 / LLM 不可用降级)：如实提示而非静默重比
-      compareError.value = t('assetMgmt.diff.extractZero')
+      // 全程零产出：若逐文件归因为"无可提取类别符号"(纯常量/桶文件/启动脚本)
+      // 则属正确语义——明示跳过清单而非笼统报错；否则维持通用提示
+      compareError.value = noCandidateFiles.length
+        ? `${t('assetMgmt.diff.extractNoCandidates', { n: noCandidateFiles.length })} ${noCandidateFiles.slice(0, 4).map((f) => f.split('/').pop()).join('、')}${noCandidateFiles.length > 4 ? '…' : ''}`
+        : t('assetMgmt.diff.extractZero')
       return
     }
     await Promise.all([core.loadSemantic(), runCompare()])
@@ -239,7 +255,7 @@ export function useAssetDiff(D: WsDeps) {
 
   return {
     diffMode, diffLoading, baselineDiffData, loadBaselineDiff, toggleDiffMode,
-    cmpBase, cmpTarget, commitOptions, baselineSha, compareData, compareError, compareLoading,
+    cmpBase, cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
     loadCommitOptions, runCompare,
     extractingPending, pendingExtractable, extractPendingAndRecompare,
     changedFileMap, assetChangeMark, cmpBucketById, changeMarkById, diffFileCounts,

@@ -39,6 +39,14 @@ export interface SemanticExtractResult {
   reason?: string
   count: number
   error?: string
+  /** 符号索引相对 HEAD 的对齐诊断(产出 0 时定位: 索引重建中/落后即候选可能为空)。 */
+  indexStale?: boolean
+  staleCount?: number
+  lastHead?: string
+  head?: string
+  /** 零产出逐文件诊断: 无符号(no_symbols) / 无可提取类别符号(no_extractable_kind)。
+   *  纯常量表/re-export 桶/启动脚本属正确语义——文件本就无可提取资产。 */
+  emptyFiles?: Array<{ file: string; why: 'no_symbols' | 'no_extractable_kind' }>
   /** 业务级(high)聚合产出数；highReason 为聚合失败原因(ok/llm/parse/empty)。 */
   high?: number
   highReason?: string

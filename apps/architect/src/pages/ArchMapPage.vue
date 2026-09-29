@@ -1,40 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import PageHeader from '@/components/PageHeader.vue'
-import ChangeSummaryBar from '@/components/assets/ChangeSummaryBar.vue'
-import ChangeMapView from '@/components/assets/ChangeMapView.vue'
+import ImpactOverview from '@/components/baseline/ImpactOverview.vue'
 import ImpactAnalysisView from '@/components/assets/ImpactAnalysisView.vue'
 import MergeBaselineWorkspace from '@/components/assets/MergeBaselineWorkspace.vue'
-import { useArchProjectStore } from '@/stores/project-store'
-import { useArchStagingStore } from '@/stores/staging-store'
-import { computeArchChange } from '@/services/arch-change-service'
-import type { ArchChangeReport } from '@/services/arch-change-service'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const project = useArchProjectStore()
-const staging = useArchStagingStore()
-staging.load()
 
-// S4 菜单重构：基线管理单入口，页内双视图（基线=merge / 影响=impact）
+// S4 菜单重构：基线管理单入口，页内双视图（基线=merge / 概览=impact）
+// P3 瘦身裁决：影响分析视图改为「宏观概览」（统计+组件汇总图+版本历史），
+// 图谱细节(组件/文件/符号粒度+演化时间轴)统一在资产地图 → 图谱。
 const view = computed(() => (route.query.view === 'impact' ? 'impact' : 'merge'))
 
 function switchView(v: 'merge' | 'impact') {
   router.replace({ query: { ...route.query, view: v } })
 }
-
-const report = ref<ArchChangeReport | null>(null)
-watch(
-  () => [project.snapshots, view.value, staging.model?.affectedComponents] as const,
-  async () => {
-    if (view.value !== 'impact') return
-    report.value = await computeArchChange('snap-v0', 'snap-v1', staging.model?.affectedComponents ?? [])
-  },
-  { immediate: true },
-)
 </script>
 
 <template>
@@ -44,7 +28,7 @@ watch(
       :desc="t('archMap.desc')"
     />
 
-    <!-- 视图切换：基线管理 / 影响分析（菜单单入口，页内切换） -->
+    <!-- 视图切换：基线管理 / 宏观概览（菜单单入口，页内切换） -->
     <div class="flex items-center gap-1.5">
       <button
         class="btn btn-sm"
@@ -62,10 +46,9 @@ watch(
       </button>
     </div>
 
-    <!-- 架构变更视图: 累计变更影响概要 + 详细变更地图 + A6 整体基线变更分析 -->
+    <!-- 宏观概览: 变更统计 + 组件汇总图 + 版本历史 + 语义资产影响分析 -->
     <template v-if="view === 'impact'">
-      <ChangeSummaryBar :report="report" />
-      <ChangeMapView :report="report" />
+      <ImpactOverview />
       <ImpactAnalysisView />
     </template>
 

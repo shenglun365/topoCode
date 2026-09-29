@@ -1,4 +1,4 @@
-import type { GitInfoLite, KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
+import type { EvolutionFrames, GitInfoLite, KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import router from '@/router'
 
@@ -115,5 +115,21 @@ export const projectService = {
   async snapshots(): Promise<Snapshot[]> {
     const qs = projectQuery().toString()
     return apiGet<Snapshot[]>(`/project/snapshots${qs ? '?' + qs : ''}`)
+  },
+
+  /** KB 基线版本列表(基线管理宏观概览「版本历史」)：新→旧。 */
+  async versions(): Promise<Array<{ id: string; label: string; head: string; createdAt: string }>> {
+    const qs = projectQuery().toString()
+    return apiGet<Array<{ id: string; label: string; head: string; createdAt: string }>>(`/project/versions${qs ? '?' + qs : ''}`)
+  },
+
+  /** 演化帧序列(B2+ 真数据): 任意 base..head ref 对 → 组件图谱帧推演。
+   *  ref 接受 baseline / KB version id / branch / commit sha(前缀) / HEAD；缺省 baseline→HEAD。 */
+  async evolutionFrames(base?: string, head?: string, layer?: 'component' | 'file'): Promise<EvolutionFrames | null> {
+    const qs = projectQuery()
+    if (base?.trim()) qs.set('base', base.trim())
+    if (head?.trim()) qs.set('head', head.trim())
+    if (layer) qs.set('layer', layer)
+    return apiGet<EvolutionFrames | null>(`/project/evolution-frames?${qs.toString()}`)
   },
 }
