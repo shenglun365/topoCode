@@ -25,6 +25,8 @@ export type {
 export { MermaidEngine } from './engines/mermaid/mermaid';
 export { PlantUmlEngine } from './engines/plantuml/plantuml';
 export { createInteractionPlugins, serializeSvg, svgToDataUrl } from './plugins';
+export { useTopoStory, resolveStoryBackend } from './story/useTopoStory';
+export type { StoryEngineName, TopoStoryApi, TopoStorySource, UseTopoStoryOptions } from './story/useTopoStory';
 export type { InteractionOptions, PluginSet, ZoomPanApi } from './plugins';
 export type { DiagramPlugin, NodeClickEvent, PluginContext, SharedInteractionState } from './plugins/types';
 export {
