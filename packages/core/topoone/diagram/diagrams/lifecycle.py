@@ -32,6 +32,8 @@ class DiagramServices:
         self.settings = settings or DiagramSettings()
         self.sidecar: PlantUmlCli | None = None
         self.pool: RenderPool | None = None
+        # 异步渲染任务层(惰性: 首个 jobs 端点/路由工厂创建, 见 router.create_topo_router)
+        self.jobs: Any = None
         self.started = False
         self._noise_loop: asyncio.AbstractEventLoop | None = None
         self._prev_exc_handler: Any = None

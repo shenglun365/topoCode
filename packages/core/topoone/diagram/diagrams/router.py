@@ -220,9 +220,20 @@ def create_topo_router(
     services: DiagramServices,
     *,
     fallback_renderer: FALLBACK_RENDERER | None = None,
+    cache_get: Callable[[str], "str | None"] | None = None,
+    cache_put: Callable[[str, str, str], None] | None = None,
     prefix: str = "/topo",
 ) -> APIRouter:
     router = APIRouter(prefix=prefix)
+
+    # 异步渲染任务层(惰性单例): 持久缓存由宿主注入(docs 服务复用 plantuml_cache)
+    if services.jobs is None:
+        from .render_jobs import RenderJobManager
+
+        def _job_render(code: str, fmt: str) -> bytes:
+            return _render_plantuml(services, code, fmt, fallback_renderer)
+
+        services.jobs = RenderJobManager(_job_render, cache_get=cache_get, cache_put=cache_put)
 
     def _pool():
         pool = services.pool
@@ -280,6 +291,27 @@ def create_topo_router(
             raise HTTPException(400, "empty plantuml code")
         data = _render_plantuml(services, body, "svg", fallback_renderer)
         return Response(content=data, media_type="image/svg+xml")
+
+    @router.post("/plantuml/jobs")
+    async def plantuml_job_submit(req: RenderPlantUmlRequest) -> dict:
+        """异步渲染任务: 提交即回(jobId 幂等=sha256(fmt+code))。done 时直接带 svg
+        (cached=true); queued/running 由 GET /plantuml/jobs/{jobId} 轮询。
+        页面刷新后重提交同源文 → 幂等命中同任务/缓存(刷新不中断解析)。"""
+        if req.format != "svg":
+            raise HTTPException(400, f"async jobs support svg only, got {req.format!r}")
+        if not req.code.strip():
+            raise HTTPException(400, "empty plantuml code")
+        try:
+            return services.jobs.submit(req.code, "svg")
+        except RuntimeError as e:
+            raise HTTPException(503, str(e))
+
+    @router.get("/plantuml/jobs/{job_id}")
+    async def plantuml_job_status(job_id: str) -> dict:
+        st = services.jobs.status(job_id)
+        if st["status"] == "unknown":
+            raise HTTPException(404, f"unknown render job: {job_id}")
+        return st
 
     @router.get("/svg/{encoded}")
     async def plantuml_svg_encoded(encoded: str) -> Response:

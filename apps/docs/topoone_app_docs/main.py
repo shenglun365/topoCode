@@ -79,7 +79,10 @@ def build_app(data_dir: str, port: int = 3481):
     app = create_service_app(server, multi_db, title="docs-service", lifespan=_topo_lifespan)
     app.include_router(viewer_router)
     app.include_router(web_root_router)
-    app.include_router(create_topo_router(diagram_services, fallback_renderer=_fallback_pu, prefix="/api/topo"))
+    # 异步渲染任务持久缓存: 复用 viewer 的 plantuml_cache(跨重启命中, 刷新不中断)
+    app.include_router(create_topo_router(
+        diagram_services, fallback_renderer=_fallback_pu, prefix="/api/topo",
+        cache_get=common._get_cached_plantuml, cache_put=common._set_cached_plantuml))
     app.state.multi_db = multi_db
     return app
 
