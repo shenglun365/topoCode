@@ -11,10 +11,4 @@ export type {
   UseTopoDiagramOptions,
 } from './useTopoDiagram';
 export { catppuccinDark, catppuccinLight, themeVariablesFor } from './themes';
-export { useTopoStory, resolveStoryBackend } from '../story/useTopoStory';
-export type {
-  StoryEngineName,
-  TopoStoryApi,
-  TopoStorySource,
-  UseTopoStoryOptions,
-} from '../story/useTopoStory';
+export { useGraphStory } from '../story/useTopoStory';

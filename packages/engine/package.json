@@ -1,0 +1,27 @@
+{
+  "name": "@topo/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "vitest",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "echo \"no lint configured\"",
+    "build:runtime": "esbuild src/story/runtime-entry.ts --bundle --format=esm --outfile=assets/story-runtime.mjs",
+    "build:cli": "esbuild scripts/topo-check.mjs --bundle --platform=node --format=esm --outfile=assets/topo-check.mjs",
+    "topo:check": "npm run build:cli && node assets/topo-check.mjs"
+  },
+  "devDependencies": {
+    "@hpcc-js/wasm-graphviz": "^1",
+    "esbuild": "^0.28.2",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.3.2",
+    "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "elkjs": "^0.12.0"
+  }
+}
