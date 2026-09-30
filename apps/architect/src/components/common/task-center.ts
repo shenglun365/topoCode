@@ -42,6 +42,9 @@ const jobs = ref<SemanticJob[]>([])
 /** 本地「停止中」标记（协作式取消有批次延迟，须即时反馈；终态后清除）。 */
 const cancelling = ref<Set<string>>(new Set())
 let timer: ReturnType<typeof setInterval> | null = null
+let intervalMs = 0
+/** 已见过的活跃作业 id（识别「新任务进入」→ 自动展开）。 */
+const seenActiveIds = new Set<string>()
 
 const active = computed(() => jobs.value.filter((j) => j.state === 'queued' || j.state === 'running'))
 const recent = computed(() => jobs.value.slice(0, 30))
@@ -66,29 +69,48 @@ async function refresh(): Promise<void> {
         }
       }
     }
+    // 新任务进入 → 自动展开浮窗（已展开则保持；手动收起后新任务仍会再次展开）
+    for (const a of jobs.value) {
+      if ((a.state === 'queued' || a.state === 'running') && !seenActiveIds.has(a.id)) {
+        seenActiveIds.add(a.id)
+        if (!visible.value) visible.value = true
+      } else if (a.state !== 'queued' && a.state !== 'running') {
+        seenActiveIds.delete(a.id)
+      }
+    }
+    // 轮询频率：有活跃(或展开) → 2.5s；空闲且收起 → 6s 低频探测(新任务进入仍可被发现)
+    ensurePolling(jobs.value.some((j) => j.state === 'queued' || j.state === 'running') || visible.value
+      ? 2500 : 6000)
   } catch {
     /* 轮询失败静默，下轮重试 */
   }
 }
 
-function ensurePolling(): void {
-  if (timer) return
-  timer = setInterval(refresh, 2500)
+function ensurePolling(ms = 2500): void {
+  if (timer && intervalMs === ms) return
+  if (timer) clearInterval(timer)
+  intervalMs = ms
+  timer = setInterval(() => void refresh(), ms)
   void refresh()
 }
 
 function stopPolling(): void {
   if (timer) { clearInterval(timer); timer = null }
+  intervalMs = 0
 }
 
 export function useTaskCenter() {
   const open = (): void => { visible.value = true; ensurePolling() }
   const toggle = (): void => {
     visible.value = !visible.value
-    if (visible.value) ensurePolling()
-    else if (!active.value.length) stopPolling()
+    ensurePolling(visible.value || active.value.length ? 2500 : 6000)
   }
-  const close = (): void => { visible.value = false }
+  const close = (): void => {
+    visible.value = false
+    ensurePolling(active.value.length ? 2500 : 6000)
+  }
+  // 常驻低频探测：任务进入(含后端自动提交)时自动展开并升级到 2.5s
+  ensurePolling(6000)
 
   async function cancel(id: string): Promise<void> {
     const { project, root } = currentProjectParams()
@@ -139,10 +161,9 @@ export function useTaskCenter() {
     return Math.min(100, Math.round(((j.progress?.done ?? 0) / t) * 100))
   }
 
-  // 活跃作业存在 → 持续轮询（badge）；空闲且浮窗收起 → 停轮询
+  // 活跃作业存在 → 高频轮询；空闲收起 → 低频探测（不再全停，任务进入需被发现）
   watch(active, (a) => {
-    if (a.length) ensurePolling()
-    else if (!visible.value) stopPolling()
+    ensurePolling(a.length || visible.value ? 2500 : 6000)
   })
 
   onBeforeUnmount(stopPolling)
