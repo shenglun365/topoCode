@@ -116,7 +116,7 @@ const {
                   </div>
                   <div class="border border-ctp-green/20 rounded-lg px-3 py-2 flex-1">
                     <div class="text-lg font-semibold text-ctp-green">
-                      {{ overviewStats?.status?.active ?? statusCounts.active ?? 0 }}
+                      {{ overviewStats?.status?.active ?? 0 }}
                     </div>
                     <div class="text-[9px] text-ctp-overlay0">
                       {{ t('assetMgmt.overview.active') }}
@@ -157,10 +157,10 @@ const {
                     {{ t('assetMgmt.overview.statusLabel') }}
                   </div>
                   <div class="flex flex-wrap gap-1.5">
-                    <span class="chip bg-ctp-green/15 text-ctp-green">active · {{ overviewStats?.status?.active ?? statusCounts.active ?? 0 }}</span>
-                    <span class="chip bg-ctp-yellow/15 text-ctp-yellow">stale · {{ overviewStats?.status?.stale ?? statusCounts.stale ?? 0 }}</span>
-                    <span class="chip bg-ctp-red/15 text-ctp-red">deleted · {{ overviewStats?.status?.deleted ?? statusCounts.deleted ?? 0 }}</span>
-                    <span class="chip bg-ctp-overlay0/20 text-ctp-overlay1">needsUpdate · {{ overviewStats?.status?.needsUpdate ?? statusCounts.needsUpdate ?? 0 }}</span>
+                    <span class="chip bg-ctp-green/15 text-ctp-green">active · {{ overviewStats?.status?.active ?? 0 }}</span>
+                    <span class="chip bg-ctp-yellow/15 text-ctp-yellow">stale · {{ overviewStats?.status?.stale ?? 0 }}</span>
+                    <span class="chip bg-ctp-red/15 text-ctp-red">deleted · {{ overviewStats?.status?.deleted ?? 0 }}</span>
+                    <span class="chip bg-ctp-overlay0/20 text-ctp-overlay1">needsUpdate · {{ overviewStats?.status?.needsUpdate ?? 0 }}</span>
                   </div>
                 </div>
 

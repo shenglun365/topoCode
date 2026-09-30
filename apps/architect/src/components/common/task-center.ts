@@ -7,6 +7,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { apiGet, apiPost } from '@/services/api-client'
 import { currentProjectParams } from '@/services/project-service'
+import { notifyJobFinished } from '@/pages/asset-workspace/invalidate-bus'
 
 export interface SemanticJob {
   id: string
@@ -49,8 +50,17 @@ async function refresh(): Promise<void> {
     const qs = new URLSearchParams()
     if (project) qs.set('project', project)
     if (root) qs.set('root', root)
+    const prev = jobs.value
     const r = await apiGet<{ jobs: SemanticJob[] }>(`/kb/semantic/jobs?${qs.toString()}`)
     jobs.value = r?.jobs ?? []
+    // 作业完成 → 失效总线（资产工作区等订阅方刷新）
+    for (const j of jobs.value) {
+      const before = prev.find((x) => x.id === j.id)
+      if (before && (before.state === 'running' || before.state === 'queued')
+        && j.state !== 'running' && j.state !== 'queued') {
+        notifyJobFinished(j)
+      }
+    }
   } catch {
     /* 轮询失败静默，下轮重试 */
   }

@@ -5,6 +5,7 @@
  * 会话钩子注册/轮询接管/初始加载) + 模板。模板逐行未动。
  */
 import { onMounted, onUnmounted, provide } from 'vue'
+import { onAssetsInvalidated, type Listener } from './asset-workspace/invalidate-bus'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, ArrowPathIcon,
@@ -107,8 +108,19 @@ onUnmounted(() => {
   ws.stopSyncJobPolling()
 })
 
+let offInvalidate: (() => void) | null = null
 onMounted(async () => {
-  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage(), loadUnownedFiles(), loadUnownedLinks()])
+  // 首屏关键链(资产树/概览/状态)；未归属清单非首屏必需 → idle 延迟(批4-3 懒加载)
+  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage()])
+  const idle = (fn: () => void) => (window.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 800)))(fn)
+  idle(() => { void loadUnownedFiles(); void loadUnownedLinks() })
+  // 失效总线(批4-3)：任务中心作业完成 → 核心数据刷新（防抖合并在总线内）
+  offInvalidate = onAssetsInvalidated(() => {
+    void loadSemantic()
+    void refreshStatus()
+    void loadOverview()
+    void loadUnownedFiles()
+  })
   // 引导消息只在对话为空时种一次(turns 是全局 store, 页面反复挂载不重复种)
   if (turns.value.length === 0) {
     turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
@@ -120,6 +132,11 @@ onMounted(async () => {
   void ws.pollSyncJobOnce().then(() => {
     if (syncJob.value?.running) ws.startSyncJobPolling()
   })
+})
+
+onUnmounted(() => {
+  offInvalidate?.()
+  offInvalidate = null
 })
 </script>
 
