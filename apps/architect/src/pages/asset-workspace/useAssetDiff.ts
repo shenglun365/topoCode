@@ -134,8 +134,8 @@ export function useAssetDiff(D: WsDeps) {
     return 1
   }
 
-  async function extractPendingAndRecompare(preselected?: string[]) {
-    let files = preselected
+  async function extractPendingAndRecompare(preselected?: string[] | Event) {
+    let files = Array.isArray(preselected) ? preselected : undefined
     if (!files) {
       files = pendingExtractable.value
       if (!files.length) return

@@ -292,7 +292,7 @@ const {
                     :title="pendingExtractable.length < compareData.assets.pending.count
                       ? t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length }) + ' ' + t('assetMgmt.diff.extractDiverged', { m: compareData.assets.pending.count - pendingExtractable.length })
                       : t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length })"
-                    @click="extractPendingAndRecompare"
+                    @click="extractPendingAndRecompare()"
                   >
                     <SparklesIcon class="w-2.5 h-2.5" />{{ t('assetMgmt.diff.extractRecompare', { n: pendingExtractable.length }) }}
                   </button>
