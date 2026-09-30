@@ -6,3 +6,8 @@ facade(semantic_assets.py) 与 arch_routes/__init__ 经此引用。
 from fastapi import APIRouter
 
 router = APIRouter()
+
+# 作业子系统(批1-3/1-4)：统一调度器注册三 daemon 执行体 + jobs API 路由。
+from . import sync_extract as _sync_extract  # noqa: E402,F401  (注册 extract_delta)
+from . import unowned as _unowned  # noqa: E402,F401  (注册 extract_unowned)
+from . import jobs_api as _jobs_api  # noqa: E402,F401  (jobs 列表/取消路由)

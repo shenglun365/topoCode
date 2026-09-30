@@ -23,7 +23,7 @@ class SemanticAssetsStore:
     # 当前文件 md5 比对判定内容真变。列清单须与建表列保持同步。
     LIGHT_COLUMNS = (
         "id, project_id, kind, level, name, desc, ast_refs, scope_type, scope_key, "
-        "scope_comm_id, source, src_hash, change, status, meta, anchor_hashes, "
+        "scope_comm_id, rev, source, src_hash, change, status, meta, anchor_hashes, "
         "canonical_key, renamed_from, name_alias, needs_update, last_checked_at, "
         "deleted_at, created_at, updated_at, parent_id, voided_reason, voided_at, "
         "voided_by, voided_framework_version, stale_by_framework"
@@ -107,10 +107,21 @@ class SemanticAssetsStore:
         return f"({' OR '.join(parts)})", params
 
     @classmethod
+    def _rev_cond(cls, rev: str) -> tuple:
+        """锚点视角过滤(批1-1)：指定视角 = 底座(legacy ''/baseline:*) ∪ 该视角增量行。
+
+        底座行是基线静态资产，各视角共享；head:/workspace 行是覆盖层。
+        rev 空 = 不过滤(全量，兼容旧消费方)。
+        """
+        if not rev:
+            return "", []
+        return "(rev = ? OR rev = '' OR rev LIKE 'baseline:%')", [rev]
+
+    @classmethod
     def search(cls, project_id: str, text: str = "", kind: str = "",
                limit: int = 20, offset: int = 0,
                scopes: Optional[list] = None, level: str = "",
-               light: bool = False) -> list[dict]:
+               light: bool = False, rev: str = "") -> list[dict]:
         """全文朴素检索：名称/描述命中，支持分页(limit/offset)与范围/粒度过滤。
 
         scopes: 组件 id 列表；含哨兵 "__other__" 表示非 comm 范围资产(scope_type != 'comm')。
@@ -134,6 +145,10 @@ class SemanticAssetsStore:
         if scope_sql:
             conds.append(scope_sql)
             params += scope_params
+        rev_sql, rev_params = cls._rev_cond(rev)
+        if rev_sql:
+            conds.append(rev_sql)
+            params += rev_params
         sql = (f"SELECT {cols} FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
                f"ORDER BY updated_at DESC LIMIT ? OFFSET ?")
         params += [int(limit), int(offset)]
@@ -142,7 +157,7 @@ class SemanticAssetsStore:
 
     @classmethod
     def count(cls, project_id: str, text: str = "", kind: str = "",
-              scopes: Optional[list] = None, level: str = "") -> int:
+              scopes: Optional[list] = None, level: str = "", rev: str = "") -> int:
         """满足检索条件的资产总数(与 search 同一条件)。"""
         conds = ["project_id = ?", "status = 'active'"]
         params: list = [project_id]
@@ -160,6 +175,10 @@ class SemanticAssetsStore:
         if scope_sql:
             conds.append(scope_sql)
             params += scope_params
+        rev_sql, rev_params = cls._rev_cond(rev)
+        if rev_sql:
+            conds.append(rev_sql)
+            params += rev_params
         mode, db = _route_read(cls.TABLE, project_id or None)
         if mode == "empty":
             return 0

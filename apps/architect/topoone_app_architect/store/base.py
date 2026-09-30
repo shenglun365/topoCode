@@ -186,6 +186,8 @@ PROJECT_TABLES = frozenset({
     "arch_acceptance_reports", "arch_acceptance_facts", "arch_acceptance_opinions",
     # 需求跟踪台账(会话中心左栏, 跨库统一视图)
     "arch_tracking_items",
+    # 语义作业(批1-3)：统一异步任务(项目库, 多实例按项目隔离)
+    "arch_semantic_jobs",
 })
 
 # WS8 认知层→主库提升: 主库全局桶哨兵 project_id(设计稿 global-promotion-design.md)

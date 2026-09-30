@@ -48,11 +48,12 @@ def _anchor_hashes(root: str, ast_refs: List[dict]) -> Dict[str, str]:
 
 
 def _canonical_key(kind: str, level: str, ast_refs: List[dict],
-                   name: str = "", scope_type: str = "", scope_key: str = "") -> str:
-    """稳定规范标识 canonicalKey：逻辑类型 + 抽象粒度 + 代码锚点(文件:符号) 的确定性指纹。
+                   name: str = "", scope_type: str = "", scope_key: str = "",
+                   rev: str = "") -> str:
+    """稳定规范标识 canonicalKey：逻辑类型 + 抽象粒度 + 代码锚点(文件:符号) + 锚点视角 的确定性指纹。
 
-    资产身份 = 代码(锚点)，**与提取它的组件口径(INCLUDE/CALL)无关**：
-    同一段代码(同一组锚点)在任一组件下提取都得到同一个 canonicalKey，id 复用不重复。
+    资产身份 = 代码(锚点) + rev 视角(批1-1)：同一符号在基线/head/工作区视角下
+    是不同资产行(语义增强可分别进行)；rev 空字符串与旧口径指纹兼容(legacy 行)。
     kind+level 纳入指纹，避免同一锚点在行为/规则与 high/medium/low 间误合并。
     无 AST 锚点的资产(纯语义/合成，如 H 级聚合)退化为名称派生 key(scope 仅作碰撞消解)。
     """
@@ -61,9 +62,9 @@ def _canonical_key(kind: str, level: str, ast_refs: List[dict],
         for r in ast_refs if r.get("file")
     })
     if anchors:
-        seed = f"{kind}|{level}|{'|'.join(anchors)}"
+        seed = f"{kind}|{level}|{'|'.join(anchors)}|{rev}"
     else:
-        seed = f"{kind}|{level}|{scope_type}|{scope_key}|name:{name}"
+        seed = f"{kind}|{level}|{scope_type}|{scope_key}|name:{name}|{rev}"
     return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:24]
 
 

@@ -12,8 +12,6 @@ calls/imports/... 边（符号库 codegraph/native 合并视图），按组件�
 from __future__ import annotations
 
 import logging
-import threading
-import time
 from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -268,8 +266,6 @@ def unowned_cross_links(root: Optional[str], project: Optional[str],
 # 单飞：每项目同时至多一个作业。作业线程内逐批「取当前未提取前 N → extract_scope」，
 # 每批后重算清单(assetCount>0 自然退出待提取集)——中断/续传/幂等语义与前端旧循环一致。
 
-_jobs: Dict[str, dict] = {}          # pid → 作业状态(进程内，不落库)
-_jobs_lock = threading.Lock()
 _JOB_MAX_BATCHES = 80                # 循环保险丝(500 cap / 批 10 → 理论 ≤50 批)
 
 
@@ -283,39 +279,46 @@ def _pending_unowned(rid: str, project: Optional[str]) -> List[str]:
             if not f.get("activeCount") and f.get("extractable", True)]
 
 
-def _extract_job_loop(pid: str, rid: str, project: Optional[str],
-                      batch: int, level: str) -> None:
-    job = _jobs.get(pid) or {}
-    try:
-        from .engine import extract_scope
-        tried: set = set()          # 本作业已尝试文件：产出为 0 的文件 assetCount 恒 0，
-                                    # 不记录会每批重进待提取集 → 死循环(实测 44 批回归)
-        for _ in range(_JOB_MAX_BATCHES):
-            if job.get("stop"):
-                job["stopped"] = True
-                break
-            pending = [f for f in _pending_unowned(rid, project) if f not in tried]
-            if not pending:
-                break
-            files = pending[:max(1, batch)]
-            tried.update(files)
-            try:
-                res = extract_scope(rid, project, "files", "", files=files, level=level)
-                if isinstance(res, dict) and res.get("error"):
-                    job["errors"] = (job.get("errors") or [])[-4:] + [
-                        {"files": files, "error": str(res.get("error"))[:200]}]
-                    break           # 范围/符号库类错误：继续批大概率同样失败，停住如实上报
-                job["saved"] = job.get("saved", 0) + (res.get("count") or 0)
-            except Exception as e:  # noqa: BLE001 — 作业线程必须吞异常保状态一致
-                logger.warning("[unowned] 批量提取作业异常: %s", e, exc_info=True)
-                job["errors"] = (job.get("errors") or [])[-4:] + [
-                    {"files": files, "error": str(e)[:200]}]
-                break
-            job["done"] = job.get("done", 0) + len(files)
-            job["batches"] = job.get("batches", 0) + 1
-    finally:
-        job["running"] = False
-        job["finishedAt"] = time.time()
+def _extract_job_loop(ctx) -> dict:
+    """批 1-4 收编：进度走 job 行，取消走 cancelRequested 协作标记。"""
+    from .engine import extract_scope
+    rid = (ctx.scope or {}).get("root") or ""
+    project = (ctx.scope or {}).get("project") or ""
+    batch = max(1, int((ctx.scope or {}).get("batch") or 10))
+    level = (ctx.scope or {}).get("level") or "implementation"
+    tried: set = set()          # 本作业已尝试文件：产出为 0 的文件 assetCount 恒 0，
+                                # 不记录会每批重进待提取集 → 死循环(实测 44 批回归)
+    done = saved = batches = 0
+    errors: list = []
+    for _ in range(_JOB_MAX_BATCHES):
+        if ctx.cancelled():
+            return {"saved": saved, "errors": errors, "summary": f"已取消({done})"}
+        pending = [f for f in _pending_unowned(rid, project) if f not in tried]
+        if not pending:
+            break
+        files = pending[:batch]
+        tried.update(files)
+        ctx.progress(done=done, saved=saved, batch=batches, current=files[0])
+        try:
+            res = extract_scope(rid, project, "files", "", files=files, level=level)
+            if isinstance(res, dict) and res.get("error"):
+                errors = (errors or [])[-4:] + [
+                    {"files": files, "error": str(res.get("error"))[:200]}]
+                break           # 范围/符号库类错误：继续批大概率同样失败，停住如实上报
+            saved += (res.get("count") or 0)
+        except Exception as e:  # noqa: BLE001 — 作业线程必须吞异常保状态一致
+            logger.warning("[unowned] 批量提取作业异常: %s", e, exc_info=True)
+            errors = (errors or [])[-4:] + [
+                {"files": files, "error": str(e)[:200]}]
+            break
+        done += len(files)
+        batches += 1
+        ctx.progress(done=done, saved=saved, batch=batches)
+    return {"saved": saved, "errors": errors, "summary": f"完成({done} 文件/{batches} 批)"}
+
+
+from . import job_runner as _job_runner
+_job_runner.register("extract_unowned", _extract_job_loop)
 
 
 def unowned_extract_start(root: Optional[str], project: Optional[str],
@@ -335,63 +338,69 @@ def unowned_extract_start(root: Optional[str], project: Optional[str],
     breakdown = {"unowned": len(files),
                  "withAssets": sum(1 for f in files if f.get("activeCount")),
                  "noSymbols": sum(1 for f in files if f.get("extractable") is False)}
-    with _jobs_lock:
-        job = _jobs.get(pid)
-        if job and job.get("running"):
-            return {"started": False, "reason": "already_running",
-                    "progress": _job_public(job)}
-        # 互斥：「校验并提取」快照作业在跑时不启动(同项目同时至多一个提取循环)
-        try:
-            from .sync_extract import sync_extract_status
-            if (sync_extract_status(root, project) or {}).get("running"):
-                return {"started": False, "reason": "sync_running"}
-        except Exception:
-            pass
-        if not pending:
-            return {"started": False, "reason": "nothing_to_extract", "total": 0,
-                    **breakdown}
-        job = {"running": True, "total": len(pending), "done": 0, "saved": 0,
-               "batches": 0, "errors": [], "stopped": False,
-               "startedAt": time.time(), "level": level, "batch": batch,
-               **breakdown}
-        _jobs[pid] = job
-    threading.Thread(target=_extract_job_loop,
-                     args=(pid, rid, project, batch, level),
-                     daemon=True, name=f"unowned-extract-{pid}").start()
-    logger.info("[unowned] 批量提取作业启动: pid=%s total=%d batch=%d level=%s",
-                pid, len(pending), batch, level)
-    return {"started": True, "total": len(pending), **breakdown}
-
-
-def _job_public(job: dict) -> dict:
-    return {k: job.get(k) for k in
-            ("running", "total", "done", "saved", "batches", "errors",
-             "stopped", "startedAt", "finishedAt", "level", "batch",
-             "unowned", "withAssets", "noSymbols")}
+    # 互斥：「校验并提取」快照作业在跑时不启动(同项目同时至多一个提取循环)
+    try:
+        from .sync_extract import sync_extract_status
+        if (sync_extract_status(root, project) or {}).get("running"):
+            return {"started": False, "reason": "sync_running"}
+    except Exception:
+        pass
+    if not pending:
+        return {"started": False, "reason": "nothing_to_extract", "total": 0,
+                **breakdown}
+    from . import job_runner
+    r = job_runner.start_job(
+        pid, "extract_unowned",
+        scope={"type": "project", "root": rid, "project": project,
+               "batch": max(1, batch), "level": level},
+        llm=True)
+    if r.get("started"):
+        logger.info("[unowned] 批量提取作业启动: pid=%s total=%d batch=%d level=%s",
+                    pid, len(pending), batch, level)
+        return {"started": True, "total": len(pending),
+                "jobId": (r.get("job") or {}).get("id") or "", **breakdown}
+    if r.get("reason") == "already_running":
+        return {"started": False, "reason": "already_running",
+                "progress": unowned_extract_status(root, project)}
+    return {"started": False, "reason": r.get("reason") or "unknown"}
 
 
 def unowned_extract_status(root: Optional[str], project: Optional[str]) -> dict:
-    """作业进度(无作业/已完成 → running=False 携带末次统计)。"""
+    """作业进度(批 1-4：读 job 行映射旧响应形状，FE 兼容)。"""
     rid = (resolve_root(root, project) or "").strip()
     if not rid:
         return {"running": False}
     pid = project_id_for(root, project)
-    with _jobs_lock:
-        job = _jobs.get(pid)
-        if not job:
-            return {"running": False}
-        return _job_public(job)
+    from . import job_runner
+    job = job_runner.active_job(pid, "extract_unowned")
+    if not job:
+        return {"running": False}
+    p = job.get("progress") or {}
+    result = job.get("result") or {}
+    return {
+        "running": job.get("state") == "running",
+        "total": p.get("total") or 0, "done": p.get("done") or 0,
+        "saved": p.get("saved") or 0, "batches": p.get("batch") or 0,
+        "errors": result.get("errors") or [],
+        "stopped": job.get("state") == "cancelled",
+        "startedAt": job.get("startedAt") or 0,
+        "finishedAt": job.get("finishedAt") or 0,
+        "level": (job.get("scope") or {}).get("level") or "implementation",
+        "batch": (job.get("scope") or {}).get("batch") or 10,
+        "current": p.get("current") or "",
+        "jobId": job.get("id") or "", "jobState": job.get("state") or "",
+    }
 
 
 def unowned_extract_stop(root: Optional[str], project: Optional[str]) -> dict:
-    """请求停止作业(当前批完成后退出；已落库资产保留)。"""
+    """请求停止作业(协作式取消；已落库资产保留)。"""
     rid = (resolve_root(root, project) or "").strip()
     if not rid:
         return {"stopped": False}
     pid = project_id_for(root, project)
-    with _jobs_lock:
-        job = _jobs.get(pid)
-        if job and job.get("running"):
-            job["stop"] = True
-            return {"stopped": True}
-    return {"stopped": False}
+    from . import job_runner
+    job = job_runner.active_job(pid, "extract_unowned")
+    if not job:
+        return {"stopped": False}
+    r = job_runner.cancel_job(pid, job["id"])
+    return {"stopped": bool(r.get("cancelled"))}

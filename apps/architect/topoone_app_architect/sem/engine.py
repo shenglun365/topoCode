@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .. import store
 from ..common import _ts, err, ok  # noqa: F401
+from . import job_runner
 from . import router
 from .anchors import _attach_step_refs, _node_to_ref, logger, resolve_ast_refs
 from fastapi import Request
@@ -1039,10 +1040,12 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
             meta["symbols"] = (ctx.get("symbols") or [])[:200]
         canonical_key = _canonical_key(a["kind"], a.get("level") or "logic", ast_refs,
                                        name=a.get("name") or "",
-                                       scope_type=scope_type, scope_key=scope_key)
+                                       scope_type=scope_type, scope_key=scope_key,
+                                       rev=ctx.get("rev") or "")
         payload = {
             "projectId": project_id, "kind": a["kind"],
             "level": a.get("level") or "logic",
+            "rev": ctx.get("rev") or "",
             "name": a["name"], "desc": a.get("desc") or "",
             "detail": detail, "astRefs": ast_refs[:40],
             "scopeType": scope_type, "scopeKey": scope_key,
@@ -1126,7 +1129,8 @@ def extract_scope(root: Optional[str], project: Optional[str],
                   kinds: Optional[List[str]] = None,
                    model_id: Optional[str] = None,
                    use_llm: bool = True,
-                   level: str = "implementation") -> Dict[str, Any]:
+                   level: str = "implementation",
+                   rev: str = "workspace") -> Dict[str, Any]:
     """按范围提取语义资产并落库。返回 {assets, source, degraded, count}。
 
     level: 抽象粒度 implementation|logic|business。
@@ -1139,6 +1143,8 @@ def extract_scope(root: Optional[str], project: Optional[str],
     if level == "business":
         return {"assets": [], "source": "none", "degraded": False, "count": 0}
     root = resolve_root(root, project)
+    # 锚点视角(批1-1)：缺省 workspace；baseline:/head:/workspace(空串按 legacy 处理不写入)
+    rev = (rev or "workspace").strip()
     if not root:
         logger.warning("[semantic] extract_scope 中止: 项目 root 解析失败 (root=%r project=%r)", root, project)
         return {"assets": [], "source": "none", "degraded": True, "count": 0}
@@ -1148,6 +1154,7 @@ def extract_scope(root: Optional[str], project: Optional[str],
     ctx = None
     try:
         ctx = collect_context(root, scope_type, scope_key, files, symbols, project)
+        ctx["rev"] = rev
     except Exception as e:
         logger.exception("[semantic] collect_context 异常: scope=%s(%s)", scope_type, scope_key or "-")
         return {"assets": [], "source": "error", "degraded": True, "count": 0}
@@ -3016,18 +3023,14 @@ async def api_edge_notes(asset_id: str, root: Optional[str] = None, project: Opt
         generate_edge_notes, asset_id, root, project, model_id, force))
 
 
-# ── 存量资产描述批量增强(后台线程 + 进度查询)：节点简介(按文件批量) + 出边关系描述 ──
+# ── 存量资产描述批量增强(批 1-4 收编：job 行 + 统一调度器，原进程内 _ENHANCE 单例退役) ──
 
-_ENHANCE: Dict[str, Any] = {"running": False, "done": 0, "total": 0,
-                            "nodeBriefs": 0, "edgeNotes": 0, "error": ""}
-
-
-def _enhance_state() -> Dict[str, Any]:
-    return {k: _ENHANCE.get(k) for k in ("running", "done", "total", "nodeBriefs", "edgeNotes", "error")}
-
-
-def _enhance_worker(pid: str, root: Optional[str], project: Optional[str],
-                    model_id: Optional[str], force: bool) -> None:
+def _enhance_worker(ctx) -> dict:
+    """节点简介(按文件批量) + 出边关系描述。进度落 job 行，取消协作。"""
+    pid = ctx.pid
+    sc = ctx.scope or {}
+    root, project = sc.get("root") or "", sc.get("project") or ""
+    model_id, force = sc.get("modelId") or "", bool(sc.get("force"))
     try:
         rows = [a for a in store.SemanticAssetsStore.all_status(pid, limit=4000)
                 if a.get("status") == "active"]
@@ -3040,51 +3043,81 @@ def _enhance_worker(pid: str, root: Optional[str], project: Optional[str],
             if (a.get("detail") or {}).get("relations") and \
                     (force or not (a.get("edgeNotes") or "").strip()):
                 edge_todo.append(a)
-        _ENHANCE["total"] = len(by_file) + len(edge_todo)
-        _ENHANCE["done"] = 0
+        total = len(by_file) + len(edge_todo)
+        done = briefs = edge_notes = 0
         for file, group in by_file.items():
+            if ctx.cancelled():
+                return {"summary": f"已取消({done}/{total})",
+                        "nodeBriefs": briefs, "edgeNotes": edge_notes}
             try:
-                _ENHANCE["nodeBriefs"] += generate_node_briefs_batch(
+                briefs += generate_node_briefs_batch(
                     pid, file, group, root, project, model_id)
             except Exception as e:
                 logger.warning("[semantic] enhance briefs(%s): %s", file, e)
-            _ENHANCE["done"] += 1
+            done += 1
+            ctx.progress(total=total, done=done, saved=briefs)
         for a in edge_todo:
+            if ctx.cancelled():
+                return {"summary": f"已取消({done}/{total})",
+                        "nodeBriefs": briefs, "edgeNotes": edge_notes}
             try:
                 r = generate_edge_notes(a.get("id") or "", root, project, model_id, force)
                 if not r.get("degraded"):
-                    _ENHANCE["edgeNotes"] += len(r.get("notes") or {})
+                    edge_notes += len(r.get("notes") or {})
             except Exception as e:
                 logger.warning("[semantic] enhance edge notes: %s", e)
-            _ENHANCE["done"] += 1
-        _ENHANCE["error"] = ""
+            done += 1
+            ctx.progress(total=total, done=done, saved=briefs)
+        return {"nodeBriefs": briefs, "edgeNotes": edge_notes,
+                "summary": f"完成(简介 {briefs}/关系 {edge_notes})"}
     except Exception as e:
         logger.warning("[semantic] enhance worker failed: %s", e)
-        _ENHANCE["error"] = str(e)
-    finally:
-        _ENHANCE["running"] = False
+        return {"error": str(e)[:300]}
+
+
+job_runner.register("enhance_desc", _enhance_worker)
+
+
+def _enhance_state_of(job: Optional[dict]) -> Dict[str, Any]:
+    p = (job or {}).get("progress") or {}
+    r = (job or {}).get("result") or {}
+    return {
+        "running": (job or {}).get("state") == "running",
+        "done": p.get("done") or 0, "total": p.get("total") or 0,
+        "nodeBriefs": r.get("nodeBriefs") or p.get("saved") or 0,
+        "edgeNotes": r.get("edgeNotes") or 0,
+        "error": r.get("error") or "",
+        "jobId": (job or {}).get("id") or "",
+        "jobState": (job or {}).get("state") or "",
+    }
 
 
 @router.post("/kb/semantic/enhance-desc")
 async def api_enhance_desc(root: Optional[str] = None, project: Optional[str] = None,
                            model_id: Optional[str] = None, force: bool = False):
-    """存量资产描述批量增强(后台线程)：节点简介(按文件批量) + 出边关系描述。"""
+    """存量资产描述批量增强(LLM 类任务，统一调度器全局串行)。"""
     pid = project_id_for(root, project)
     if not pid:
         return err(400, "缺少项目")
-    if _ENHANCE.get("running"):
-        return ok({"started": False, **_enhance_state()})
-    _ENHANCE.update({"running": True, "done": 0, "total": 0,
-                     "nodeBriefs": 0, "edgeNotes": 0, "error": ""})
-    threading.Thread(target=_enhance_worker,
-                     args=(pid, resolve_root(root, project), project, model_id, force),
-                     daemon=True).start()
-    return ok({"started": True, **_enhance_state()})
+    from . import job_runner
+    r = job_runner.start_job(
+        pid, "enhance_desc",
+        scope={"type": "project", "root": resolve_root(root, project),
+               "project": project, "modelId": model_id, "force": force},
+        llm=True)
+    return ok({"started": bool(r.get("started")),
+               "reason": r.get("reason") or "",
+               **_enhance_state_of(r.get("job"))})
 
 
 @router.get("/kb/semantic/enhance-desc/status")
-async def api_enhance_desc_status():
-    return ok(_enhance_state())
+async def api_enhance_desc_status(root: Optional[str] = None, project: Optional[str] = None):
+    from . import job_runner
+    pid = project_id_for(root, project)
+    if not pid:
+        return ok({"running": False, "done": 0, "total": 0,
+                   "nodeBriefs": 0, "edgeNotes": 0, "error": ""})
+    return ok(_enhance_state_of(job_runner.active_job(pid, "enhance_desc")))
 
 
 @router.get("/kb/semantic/{asset_id}/in-edges")

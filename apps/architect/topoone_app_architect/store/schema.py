@@ -339,6 +339,28 @@ ARCH_PROJECT_TABLES_SQL = """
         root_path TEXT DEFAULT ''
     );
 
+    -- 语义作业(批1-3)：统一异步任务表(项目库, 多实例按项目隔离)。收编原三套
+    -- daemon 的进程内 _jobs 状态(重启失忆)——持久化+恢复对账+取消协作。
+    CREATE TABLE IF NOT EXISTS arch_semantic_jobs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT DEFAULT '',
+        kind TEXT DEFAULT '',               -- extract_delta | extract_unowned | enhance_desc | extract_impl | enhance_semantic | extract_logic | gen_component_view
+        scope TEXT DEFAULT '{}',            -- JSON: {type: project|component|file|asset, keys: []}
+        state TEXT DEFAULT 'queued',        -- queued | running | done | failed | cancelled | lost
+        progress TEXT DEFAULT '{}',         -- JSON: {total, done, current, batch}
+        stages TEXT DEFAULT '[]',           -- JSON: 级联阶段(如 ["impl","logic"])
+        stage_index INTEGER DEFAULT 0,
+        result TEXT DEFAULT '{}',           -- JSON: {saved, skipped, errors[], summary}
+        llm INTEGER DEFAULT 0,              -- LLM 类任务(全局限并发闸门)
+        cancel_requested INTEGER DEFAULT 0, -- 协作式取消标记(handler 轮询)
+        created_by TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        started_at INTEGER DEFAULT 0,
+        finished_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_jobs_state ON arch_semantic_jobs(project_id, state);
+
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,
         schema_version INTEGER DEFAULT 1,  -- K1 格式版本化(登记: docs/architect/kb-schema-versions.md)
@@ -353,6 +375,7 @@ ARCH_PROJECT_TABLES_SQL = """
         scope_type TEXT DEFAULT '',         -- files | symbols | comm
         scope_key TEXT DEFAULT '',
         scope_comm_id TEXT DEFAULT '',
+        rev TEXT DEFAULT '',                -- 锚点视角(批1-1): baseline:<kbVersion> | head:<sha> | workspace | ''(legacy)
         source TEXT DEFAULT 'codegraph',    -- codegraph | live | kb
         src_hash TEXT DEFAULT '',           -- 输入指纹(增量 change 判定)
         change TEXT DEFAULT 'same',         -- same | added | modified | deleted
@@ -373,6 +396,7 @@ ARCH_PROJECT_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_scope ON arch_semantic_assets(project_id, scope_type, scope_key);
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_status ON arch_semantic_assets(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_canonical ON arch_semantic_assets(project_id, canonical_key);
+    CREATE INDEX IF NOT EXISTS idx_arch_semantic_rev ON arch_semantic_assets(project_id, rev);
 
     CREATE TABLE IF NOT EXISTS arch_ast_cache (
         project_id TEXT NOT NULL,
@@ -773,6 +797,8 @@ def _project_migrations(db) -> None:
         ("stale_by_framework", "INTEGER DEFAULT 0"),
         # WS8 提升通道: 全局桶行记录来源项目
         ("origin_project_id", "TEXT DEFAULT ''"),
+        # 锚点视角(批1-1): baseline:<kbVersion> | head:<sha> | workspace | ''(legacy)
+        ("rev", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_naming_conventions", [
         ("origin_project_id", "TEXT DEFAULT ''"),
@@ -851,6 +877,8 @@ def _project_migrations(db) -> None:
         ("name_alias", "TEXT"),
         ("level", "TEXT DEFAULT 'interaction'"),
         ("parent_id", "TEXT DEFAULT ''"),
+        # 锚点视角(批1-1): baseline:<kbVersion> | head:<sha> | workspace | ''(legacy)
+        ("rev", "TEXT DEFAULT ''"),
     ])
     # kind/level 规范化: 旧五类/四粒度 → 新六类/三粒度(默认 logic 粒度)。
     # rule 在新六类中是一级类别(配置化规则)，不得并入 decision。
