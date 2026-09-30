@@ -143,6 +143,13 @@ def _run_job(job_id: str) -> None:
             SemanticJobsStore.finish(job_id, state="failed",
                                      result={"summary": str(e)[:300]})
         finally:
+            # 提取类作业完成后失效 compare 派生缓存：否则重比命中旧结果（提取前口径），
+            # pending 不消失 → 用户重复点击重复提交作业（交互提取闭环实测问题 2026-09-30）
+            try:
+                from .compare import invalidate_compare_cache
+                invalidate_compare_cache(job.get("projectId") or "")
+            except Exception:
+                pass
             with _lock:
                 _local_running.discard(job_id)
     finally:

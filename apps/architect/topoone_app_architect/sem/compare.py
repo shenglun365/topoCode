@@ -487,6 +487,10 @@ def cached_compare(root: Optional[str], project: Optional[str],
     return res
 
 
-def invalidate_compare_cache() -> None:
-    """测试/强制刷新用：清空对比缓存。"""
-    _cmp_cache.clear()
+def invalidate_compare_cache(pid: str = "") -> None:
+    """作业完成/数据变更后失效对比缓存（纯派生数据，清 pid 条目或全清）。"""
+    if not pid:
+        _cmp_cache.clear()
+        return
+    for k in [k for k in _cmp_cache if k[0] == pid]:
+        _cmp_cache.pop(k, None)

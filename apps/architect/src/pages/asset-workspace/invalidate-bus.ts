@@ -14,7 +14,7 @@ let timer: ReturnType<typeof setTimeout> | null = null
 /** 语义域作业 kind → 需要失效资产数据 */
 const SEMANTIC_KINDS = new Set([
   'extract_delta', 'extract_unowned', 'extract_impl', 'extract_logic',
-  'enhance_desc', 'enhance_semantic', 'gen_component_view',
+  'extract_scope', 'enhance_desc', 'enhance_semantic', 'gen_component_view',
 ])
 
 export function invalidateAssets(reason: string): void {

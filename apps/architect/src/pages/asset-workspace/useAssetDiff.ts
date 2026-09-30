@@ -87,6 +87,7 @@ export function useAssetDiff(D: WsDeps) {
   let scopeResolver: ((files: string[] | null) => void) | null = null
   /** 弹窗选择提取范围；resolve 选中的文件（取消 → null）。 */
   function pickScope(title: string, files: string[]): Promise<string[] | null> {
+    if (scopeResolver) return Promise.resolve(null)   // 弹窗已开：忽略重复触发
     scopeModal.value = { open: true, title, files }
     return new Promise((resolve) => { scopeResolver = resolve })
   }
@@ -117,11 +118,12 @@ export function useAssetDiff(D: WsDeps) {
     return { ok: false, error: 'timeout' }
   }
 
-  /** 提交范围提取作业并等待完成；返回 saved 数（-1 = 失败/未启动）。 */
+  /** 提交范围提取作业并等待完成；返回 saved 数（-1 = 失败/未启动）。
+   *  already_running → 直接等待现有作业（同一源码状态不重复执行）。 */
   async function runScopeJob(files: string[]): Promise<number> {
     const r = await semanticAssetService.startExtractScope({ scopeType: 'files', files })
     const jobId = r?.job?.id
-    if (!r?.started || !jobId) {
+    if (!jobId || (!r?.started && r?.reason !== 'already_running')) {
       compareError.value = t('assetMgmt.diff.cmpFailed')
       return -1
     }
@@ -134,32 +136,41 @@ export function useAssetDiff(D: WsDeps) {
     return 1
   }
 
+  /** 已完成基线提取的 rev（同一源码状态节点只提取一次；对比刷新后 baseAssetsMissing 自然转 false）。 */
+  let baselineExtractedSha = ''
+
   async function extractPendingAndRecompare(preselected?: string[] | Event) {
+    if (extractingPending.value) return
     let files = Array.isArray(preselected) ? preselected : undefined
     if (!files) {
       files = pendingExtractable.value
       if (!files.length) return
+      extractingPending.value = true   // 弹窗期间即锁定（防双击重复弹窗）
       files = await pickScope(t('assetMgmt.diff.extractScopeTitle'), files) ?? []
+      extractingPending.value = false
     }
     if (!files.length) return
     extractingPending.value = true
     try {
       // ① 基准侧资产缺失 → 先基线提取（rev=baselineCommit 的结构化作业，rev 内容锚定），
-      //    完成后再走目标侧提取与比对（需求：校验基线资产，无则先提取基线再比对）
+      //    完成后再走目标侧提取与比对（需求：校验基线资产，无则先提取基线再比对）。
+      //    同一 rev 只提一次（本地标记）；作业后端幂等兜底(already_running 等待现有)
       const cmp = compareData.value
-      if (cmp?.baseAssetsMissing && baselineSha.value) {
+      if (cmp?.baseAssetsMissing && baselineSha.value && baselineSha.value !== baselineExtractedSha) {
         const baselineFiles = files.filter((f) => cmp.files.modified.includes(f))
         if (baselineFiles.length) {
           compareHint.value = t('assetMgmt.diff.baselineExtracting', { n: baselineFiles.length })
           const r = await semanticAssetService.startExtractImpl({ rev: baselineSha.value, files: baselineFiles })
-          if (r?.started && r.job?.id) {
-            const done = await waitForJob(r.job.id)
+          const jobId = r?.job?.id
+          if (jobId && (r?.started || r?.reason === 'already_running')) {
+            const done = await waitForJob(jobId)
             if (!done.ok) {
               compareError.value = done.error === 'timeout'
                 ? t('assetMgmt.diff.jobTimeout') : (done.error || t('assetMgmt.diff.cmpFailed'))
               return
             }
           }
+          baselineExtractedSha = baselineSha.value
           compareHint.value = ''
         }
       }
