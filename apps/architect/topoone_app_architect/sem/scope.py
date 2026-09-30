@@ -26,21 +26,13 @@ from .paths import _norm_path
 # ── 范围解析 ──────────────────────────────────────────────────
 
 def _comm_components(root: str, project: Optional[str] = None) -> List[dict]:
-    """组件全集：组件目录(architecture.catalog)为主，架构模型兜底（去重 by id）。"""
-    from ..common import build_component_catalog, build_architecture_model
-    comps: List[dict] = []
-    seen: set = set()
-    for fetch in (lambda: build_component_catalog(root, project),
-                  lambda: build_architecture_model(root, project)):
-        try:
-            for c in fetch().get("components") or []:
-                cid = c.get("id") or ""
-                if cid and cid not in seen:
-                    seen.add(cid)
-                    comps.append(c)
-        except Exception as e:
-            logger.warning("[semantic] 组件来源解析失败: %s", e, exc_info=True)
-    return comps
+    """组件全集：统一组件目录（批 0-2 收编；catalog→model 降级去重已内置）。"""
+    from .catalog import component_catalog
+    try:
+        return component_catalog(root, project).get("components") or []
+    except Exception as e:
+        logger.warning("[semantic] 组件来源解析失败: %s", e, exc_info=True)
+        return []
 
 
 def _comm_match(comps: List[dict], comm_key: str) -> Tuple[Optional[dict], List[dict]]:

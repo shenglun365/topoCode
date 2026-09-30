@@ -3519,49 +3519,11 @@ def refresh_scope(root: Optional[str], project: Optional[str],
 
 # ── 批量管理(选定组件范围: 提取/清除/更新) ──────────────────────
 
-# 组件文件映射短 TTL 缓存：目录极少变化，而提取任务逐文件落库(每文件一次归属装配)，
-# 无缓存时 N 文件 = N 次 KB 调用；KB 瞬时失败也不应让整批资产丢失组件归属。
-_COMP_FILE_MAP_TTL = 60.0
-_comp_file_map_cache: Dict[tuple, tuple] = {}  # (root, project) -> (ts, {cid: frozenset(files)})
-
-
 def _component_file_map(root: str, project: Optional[str]) -> Dict[str, set]:
-    """组件 → 文件集合。以组件目录(跨 INCLUDE/CALL × L0/L1，即组件列表完整来源)为准，
-    目录为空(降级/无基线)时回退架构模型兜底(与 `_comm_files` 解析口径一致)。
-    结果按 (root, project) 短 TTL 缓存。失败返回空。"""
-    key = (root or "", project or "")
-    now = time.time()
-    hit = _comp_file_map_cache.get(key)
-    if hit and now - hit[0] < _COMP_FILE_MAP_TTL:
-        return {k: set(v) for k, v in hit[1].items()}
-    comp_files: Dict[str, set] = {}
-    try:
-        from ..common import build_component_catalog
-        catalog = build_component_catalog(root, project)
-        for c in catalog.get("components") or []:
-            cid = c.get("id")
-            if not cid:
-                continue
-            for f in (c.get("owns") or []):
-                if f:
-                    comp_files.setdefault(cid, set()).add(_norm_path(f))
-    except Exception as e:
-        logger.warning("[semantic] component file map(catalog) failed: %s", e)
-    if not comp_files:
-        try:
-            from ..common import build_architecture_model
-            model = build_architecture_model(root, project)
-            for c in model.get("components") or []:
-                cid = c.get("id")
-                if not cid:
-                    continue
-                for f in (c.get("owns") or []):
-                    if f:
-                        comp_files.setdefault(cid, set()).add(_norm_path(f))
-        except Exception as e:
-            logger.warning("[semantic] component file map(model fallback) failed: %s", e)
-    _comp_file_map_cache[key] = (now, {k: frozenset(v) for k, v in comp_files.items()})
-    return {k: set(v) for k, v in comp_files.items()}
+    """组件 → 文件集合。统一走 sem/catalog（批 0-2 收编：catalog→model 降级、
+    归一化、TTL 缓存均在适配层内）。"""
+    from .catalog import file_to_components
+    return file_to_components(root, project)
 
 
 def _component_asset_ids(pid: str, comp_files: Dict[str, set],

@@ -54,11 +54,8 @@ def _item(**kw):
 
 
 def _fake_extract(monkeypatch, assets):
-    def _extract(root, project, scope_type, scope_key, files=None, symbols=None,
-                 kinds=None, model_id=None, use_llm=True, level="implementation"):
-        return {"assets": assets, "source": "mock", "degraded": False,
-                "count": len(assets)}
-    monkeypatch.setattr(S, "extract_scope", _extract)
+    """批 0-4 剥离后验收读资产库——mock 取数函数 acceptance._assets_for_files。"""
+    monkeypatch.setattr(AC, "_assets_for_files", lambda pid, files: list(assets))
     monkeypatch.setattr(S, "changed_files",
                         lambda root, project: {"added": ["m.py"],
                                                "modified": [], "deleted": []})

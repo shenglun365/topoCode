@@ -247,21 +247,25 @@ def _apply_change(project_id: str, config: Dict[str, Any], change_kind: str,
 
 # ── 覆盖度统计（概览徽标 / 覆盖度图层） ────────────────────────
 
-def coverage(project_id: str) -> Dict[str, Any]:
+def coverage(project_id: str, root: Optional[str] = None,
+             project: Optional[str] = None) -> Dict[str, Any]:
     """按组件统计语义资产覆盖：已提取/过期/作废 + 未提取组件清单。
 
-    组件来源 = KB 组件目录(build_component_catalog)；资产归属 = scope_key
-    (comm-*) 或锚点文件反查。诚实呈现部分真相（plan-C §4.3）。
+    组件来源 = 统一组件目录(sem/catalog，批 0-1 修复：原 build_component_catalog(None,None)
+    恒空目录导致 componentsTotal 恒 0)；资产归属 = scope_key(comm-*) 或锚点文件
+    反查(统一 owners_of 匹配)。诚实呈现部分真相（plan-C §4.3）。
     含 active + stale（作废 voided 不计入覆盖）。
     """
+    from ..sem import catalog as _catalog
     try:
-        from ..common import build_component_catalog
-        catalog = (build_component_catalog(None, None) or {}).get("components") or []
+        cat = _catalog.component_catalog(root, project)
     except Exception as e:
         logger.warning("[framework] 组件目录获取失败: %s", e)
-        catalog = []
+        cat = {"byId": {}, "ownIndex": []}
+
     comps = [{"id": c.get("id"), "name": c.get("name") or c.get("id"),
-              "owns": c.get("owns") or []} for c in catalog if c.get("id")]
+              "owns": c.get("owns") or []} for c in (cat.get("components") or [])
+             if c.get("id")]
 
     rows, _ = _fetchall_routed(
         "arch_semantic_assets",
@@ -279,7 +283,7 @@ def coverage(project_id: str) -> Dict[str, Any]:
             refs = a.get("astRefs") or []
             f0 = (refs[0] or {}).get("file") if refs else None
             if f0:
-                cids = [c["id"] for c in comps if f0 in (c.get("owns") or [])]
+                cids = _catalog.owners_of(f0, cat)
         if not cids:
             unowned += 1
             continue
@@ -387,4 +391,4 @@ async def api_semantic_coverage(project: Optional[str] = None,
     if not pid:
         return ok({"extracted": 0, "stale": 0, "unowned": 0,
                    "componentsTotal": 0, "componentsCovered": 0, "components": []})
-    return ok(coverage(pid))
+    return ok(coverage(pid, root, project))

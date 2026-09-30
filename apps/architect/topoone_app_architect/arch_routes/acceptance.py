@@ -18,10 +18,8 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
-
 from fastapi import APIRouter, Request
 
-from . import asset_framework
 from .. import store as _store
 from ..common import err, ok
 from ..store import AcceptanceStore, ContractItemStore, ContractPackageStore
@@ -39,6 +37,25 @@ def _pid(body: Optional[dict]) -> str:
 
 def _norm(p: str) -> str:
     return (p or "").strip().replace("\\", "/").lstrip("./")
+
+
+def _assets_for_files(pid: str, files: List[str]) -> List[Dict[str, Any]]:
+    """资产库现状读取（批 0-4）：首锚点文件 ∈ 范围 的 active/stale 资产。
+
+    与旧即时提取的路径口径差异用双向后缀对齐兜底（git 相对路径 vs 锚点存储路径）。
+    """
+    from .. import store
+    want = {_norm(f) for f in files if f}
+    out: List[Dict[str, Any]] = []
+    for a in (store.SemanticAssetsStore.all_status(pid, limit=20000) or []):
+        if (a.get("status") or "active") not in ("active", "stale"):
+            continue
+        refs = a.get("astRefs") or []
+        f0 = _norm((refs[0] or {}).get("file") or "") if refs else ""
+        if f0 and any(f0 == w or f0.endswith("/" + w) or w.endswith("/" + f0)
+                      for w in want):
+            out.append(a)
+    return out
 
 
 # ── L1 覆盖性 / L2 行为符合性（机械比对 = 事实） ─────────────────
@@ -249,8 +266,7 @@ def run_acceptance(pid: str, root: str, project: str, package_id: str,
 
     条目 → verifying（等待设计者判定）；不自动判定、不自动激活 L3。
     """
-    from .agent_roles import role_model_id
-    from .semantic_assets import changed_files, extract_scope
+    from .semantic_assets import changed_files
 
     pkg = ContractPackageStore.get(package_id, pid)
     if not pkg:
@@ -279,14 +295,11 @@ def run_acceptance(pid: str, root: str, project: str, package_id: str,
         files = sorted({_norm((it.get("target") or {}).get("file") or "")
                         for it in items if (it.get("target") or {}).get("file")})
 
-    # 2) 严 profile 提取（规则候选 + LLM 定向互证；提取角色模型映射生效）
-    res = extract_scope(root, project, "files", "acceptance", files=files,
-                        kinds=asset_framework.allowed_kinds(pid),
-                        model_id=role_model_id("extract"),
-                        use_llm=True, level="implementation")
-    extracted = res.get("assets") or []
-    logger.info("[acceptance] 严 profile 提取: files=%d assets=%d degraded=%s",
-                len(files), len(extracted), res.get("degraded"))
+    # 2) 比对数据源 = 资产库现状（批 0-4 剥离：不再内嵌即时提取——旧 LLM 提取
+    #    管线将重写为两段式，验收改为消费资产管理产出；范围文件无资产 → 该条目
+    #    L1 记 miss。任务级联（缺资产自动触发提取）留待后续迭代）。
+    extracted = _assets_for_files(pid, files)
+    logger.info("[acceptance] 资产库取数: files=%d assets=%d", len(files), len(extracted))
 
     # 3) 逐条目 L1/L2 机械比对（facts 落库；条目 → verifying）
     report = AcceptanceStore.create_report(
@@ -309,7 +322,8 @@ def run_acceptance(pid: str, root: str, project: str, package_id: str,
             n_pass += 1
     summary = {"total": len(items), "pass": n_pass, "fail": n_fail,
                "awaitingHuman": n_partial,
-               "degraded": bool(res.get("degraded")),
+               # 批 0-4 剥离后无即时提取降级概念；资产缺失本身由 L1 miss 表达
+               "degraded": False,
                "l3AwaitingHuman": (n_fail + n_partial) > 0}
     AcceptanceStore.update_summary(report["id"], summary)
     return AcceptanceStore.report_detail(report["id"], pid) or {}

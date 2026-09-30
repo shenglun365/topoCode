@@ -426,21 +426,6 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
     })
 
 
-def _comp_depth(comp_id: str, by_id: dict) -> int:
-    """组件在 parentId 链上的深度(根=0)；带环保护(访问过即止)。"""
-    depth, cur, seen = 0, comp_id, set()
-    while cur:
-        if cur in seen:
-            break
-        seen.add(cur)
-        parent = (by_id.get(cur) or {}).get("parentId") or ""
-        if not parent or parent not in by_id:
-            break
-        depth += 1
-        cur = parent
-    return depth
-
-
 def _by_kb_components(files: list, proj: dict) -> list:
     """按 KB 组件汇总工作树变更(概览页「组件变更情况」口径)。
 
@@ -454,37 +439,27 @@ def _by_kb_components(files: list, proj: dict) -> list:
     if not kb_id:
         return []
     try:
-        # 组件目录(architecture.catalog)：唯一 id + parentId + owns，含 L0-L2 父子层级。
+        # 统一组件目录(sem/catalog，批 0-2 收编)：唯一 id + parentId + owns + 层级深度。
         # ⚠️ 不用 architecture.model——其 components 被拍平(parentId 丢失、id 序号重复)，
         # 无法构建组件树(实测 nginx-src：catalog 99 组件带层级 vs model 21 组件 id 重复)。
-        from ..common import build_component_catalog
-        catalog = build_component_catalog(proj.get("rootPath"), proj.get("id"))
-        comps = catalog.get("components") or []
+        from ..sem.catalog import component_catalog, owners_of
+        cat = component_catalog(proj.get("rootPath"), proj.get("id"))
+        comps = cat.get("components") or []
     except Exception:
         return []
     by_id = {c.get("id"): c for c in comps if c.get("id")}
     if not by_id:
         return []
-    depth = {cid: _comp_depth(cid, by_id) for cid in by_id}
+    depth = cat.get("depths") or {}
     children = {cid: [] for cid in by_id}
     for cid, c in by_id.items():
         pid = c.get("parentId") or ""
         if pid in by_id:
             children[pid].append(cid)
 
-    # 路径对齐：catalog owns 相对 KB 镜像根(仓库根)，变更文件相对 architect 工作目录
-    # (可能是仓库的子目录，如 nginx-src/src)。双向后缀匹配兼容两种基准。
-    def _owns_match(owned: str, changed: str) -> bool:
-        return (owned == changed
-                or owned.endswith("/" + changed)
-                or changed.endswith("/" + owned))
-
     def _owner_of(path: str) -> str:
-        from ..sem.paths import _norm_path
-        p = _norm_path(path)
-        owners = [cid for cid, c in by_id.items()
-                  if any(_owns_match(_norm_path(o), p) for o in (c.get("owns") or []))]
-        return max(owners, key=lambda cid: depth[cid]) if owners else "__unowned__"
+        owners = owners_of(path, cat)
+        return owners[0] if owners else "__unowned__"
 
     own = {cid: {"added": 0, "modified": 0, "deleted": 0, "files": []} for cid in by_id}
     unowned = {"added": 0, "modified": 0, "deleted": 0, "files": []}

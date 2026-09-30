@@ -189,51 +189,6 @@ def file_delta(root: str, base: str, target: str) -> Dict[str, List[str]]:
     return _name_status(root, [base, target])
 
 
-def _component_maps(model: dict) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """KB 组件模型 → (id→展示名表, 文件→组件id 归属表)。归属取最深组件(父子重叠不重复计)。"""
-    comps = model.get("components") or []
-    by_id = {c.get("id"): c for c in comps if c.get("id")}
-    names = {cid: ((c.get("name") or "").strip() or cid) for cid, c in by_id.items()}
-    depth: Dict[str, int] = {}
-
-    def _depth(cid: str, seen: Optional[set] = None) -> int:
-        seen = seen if seen is not None else set()
-        if cid in depth:
-            return depth[cid]
-        if cid in seen:
-            return 0
-        seen.add(cid)
-        pid = (by_id.get(cid) or {}).get("parentId") or ""
-        d = 0 if pid not in by_id else _depth(pid, seen) + 1
-        depth[cid] = d
-        return d
-
-    owner: Dict[str, str] = {}
-    for cid, c in by_id.items():
-        for f in c.get("owns") or []:
-            nf = _norm_path(f)
-            if not nf:
-                continue
-            cur = owner.get(nf)
-            if cur is None or _depth(cid) > _depth(cur):
-                owner[nf] = cid
-    return names, owner
-
-
-def _owner_of(owner: Dict[str, str], p: str) -> str:
-    """文件 → 组件 id：精确命中优先；未命中做双向后缀对齐——
-    git diff 在工作目录(可为仓库子目录)执行产出 workDir 相对路径，
-    而 KB owns 为镜像根相对路径，两侧基准不同，精确匹配会大面积漏归「其他」。"""
-    if not p or not owner:
-        return ""
-    if p in owner:
-        return owner[p]
-    for o, cid in owner.items():
-        if o and (p.endswith("/" + o) or o.endswith("/" + p)):
-            return cid
-    return ""
-
-
 def _asset_brief(a: dict, files: List[str], comp: str) -> dict:
     return {"id": a.get("id") or "", "name": a.get("name") or "",
             "kind": a.get("kind") or "", "level": a.get("level") or "",
@@ -319,20 +274,23 @@ def compare_changes(root: Optional[str], project: Optional[str],
     added, modified, deleted = set(files["added"]), set(files["modified"]), set(files["deleted"])
     changed_files = added | modified | deleted
 
-    # ── 组件口径：KB owns 归属；未归属 → 「其他」(__other__) ──
+    # ── 组件口径：统一组件目录(sem/catalog) owns 归属；未归属 → 「其他」(__other__) ──
+    # 批 0-2 收编：原用 architecture.model(拍平、id 重复)，现统一 catalog(完整树+层级)。
     names: Dict[str, str] = {}
-    owner: Dict[str, str] = {}
+    cat: Optional[dict] = None
     try:
-        from ..common import build_architecture_model
-        model = build_architecture_model(root, project)
-        names, owner = _component_maps(model if isinstance(model, dict) else {})
+        from .catalog import component_catalog, owners_of
+        cat = component_catalog(root, project)
+        names = {cid: ((c.get("name") or "").strip() or cid)
+                 for cid, c in (cat.get("byId") or {}).items()}
     except Exception as e:
-        logger.warning("[compare] 组件模型获取失败(变更全部归入其他): %s", e)
+        logger.warning("[compare] 组件目录获取失败(变更全部归入其他): %s", e)
 
     comp_delta: Dict[str, dict] = {}
     for k in ("added", "modified", "deleted"):
         for p in files[k]:
-            cid = _owner_of(owner, p) or OTHER
+            cid = (owners_of(p, cat) or [""])[0] if cat else ""
+            cid = cid or OTHER
             bucket = comp_delta.setdefault(cid, {"id": cid, "name": names.get(cid) or "",
                                                  "added": 0, "modified": 0, "deleted": 0})
             bucket[k] += 1
@@ -365,7 +323,8 @@ def compare_changes(root: Optional[str], project: Optional[str],
         af = {f for f in af if f}
         if not af:
             continue
-        comp = _owner_of(owner, next(iter(af))) or OTHER
+        comp = (owners_of(next(iter(af)), cat) or [""])[0] if cat else ""
+        comp = comp or OTHER
         hit_del = af & deleted
         hit_mod = af & modified
         hit_add = af & added

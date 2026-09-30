@@ -13,6 +13,8 @@ import os
 import sqlite3
 import sys
 
+import pytest
+
 _repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 sys.path.insert(0, _repo)
 
@@ -35,10 +37,19 @@ def _patch_all(monkeypatch, name, value):
 
 from topoone_app_architect.arch_routes import semantic_assets as S
 from topoone_app_architect.sem import context as _sem_context
+from topoone_app_architect.sem import catalog as _catalog_mod
 from topoone_app_architect.sem import engine as _sem_engine
 from topoone_app_architect.sem import scope as _sem_scope
 from topoone_app_architect.sem import incremental as _sem_incremental
 from topoone_app_architect.sem import codegraph as _sem_codegraph
+
+
+@pytest.fixture(autouse=True)
+def _clear_catalog_cache():
+    """统一组件目录 TTL 缓存跨用例串扰防护（mock 环境下缓存会固化旧目录）。"""
+    _catalog_mod._cache.clear()
+    yield
+    _catalog_mod._cache.clear()
 
 
 def _ctx(tmp_path, monkeypatch):
@@ -173,7 +184,7 @@ def test_file_scope_extraction_multi_component_scopes(tmp_path, monkeypatch):
 def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
     """组件文件映射短 TTL 缓存：提取任务逐文件落库不再每文件打一次 KB。"""
     _ctx(tmp_path, monkeypatch)
-    S._comp_file_map_cache.clear()
+    _catalog_mod._cache.clear()
     calls = {"n": 0}
 
     def _fake_catalog(root, project):
@@ -193,13 +204,13 @@ def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
         assert m1["c2"] == {"a/x.py", "a/y.py"}
         assert m1["c1"] == {"a/x.py"}
     finally:
-        S._comp_file_map_cache.clear()
+        _catalog_mod._cache.clear()
 
 
 def test_component_file_map_model_fallback(tmp_path, monkeypatch):
     """组件目录为空(降级/无基线) → 回退架构模型装配组件文件映射(与 _comm_files 口径一致)。"""
     _ctx(tmp_path, monkeypatch)
-    S._comp_file_map_cache.clear()
+    _catalog_mod._cache.clear()
     monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": []})
     monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
@@ -210,7 +221,7 @@ def test_component_file_map_model_fallback(tmp_path, monkeypatch):
         m = S._component_file_map("/root-fb", "proj-fb")
         assert m == {"m1": {"b/z.py"}}
     finally:
-        S._comp_file_map_cache.clear()
+        _catalog_mod._cache.clear()
 
 
 def test_save_assets_change_detection(tmp_path, monkeypatch):
