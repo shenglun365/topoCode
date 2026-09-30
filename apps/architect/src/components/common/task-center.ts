@@ -96,12 +96,15 @@ export function useTaskCenter() {
     } catch { /* 忽略 */ }
   }
 
-  /** 删除单条已结束作业记录（终态：done/failed/cancelled/lost；进行中后端 409 拒绝）。 */
+  /** 删除单条已结束作业记录（终态：done/failed/cancelled/lost；进行中后端 409 拒绝）。
+   *  失败须可见提示——静默吞掉会表现为「清了又被轮询拉回来」。 */
   async function remove(id: string): Promise<void> {
     try {
       await apiDelete(`/kb/semantic/jobs/${id}`)
       jobs.value = jobs.value.filter((j) => j.id !== id)
-    } catch { /* 忽略，下轮轮询校正 */ }
+    } catch {
+      alert('删除失败：后端不可用或版本较旧（需重启服务后重试）')
+    }
   }
 
   /** 一键清除全部已结束记录（进行中不受影响）。 */
@@ -113,7 +116,9 @@ export function useTaskCenter() {
     try {
       await apiPost(`/kb/semantic/jobs/clear?${qs.toString()}`, {})
       jobs.value = jobs.value.filter((j) => j.state === 'queued' || j.state === 'running')
-    } catch { /* 忽略 */ }
+    } catch {
+      alert('清除失败：后端不可用或版本较旧（需重启服务后重试）')
+    }
   }
 
   const labelOf = (j: SemanticJob): string => KIND_LABEL[j.kind] || j.kind

@@ -111,6 +111,44 @@ def test_job_delete_and_clear_finished(tmp_path, monkeypatch):
     assert SemanticJobsStore.clear_finished(PID) == 0
 
 
+def test_job_delete_api(tmp_path, monkeypatch):
+    """API 层：DELETE 单删(活跃 409/缺失 404)与 POST clear 全通——「清了又回来」的端点自证。"""
+    _ctx_setup(tmp_path, monkeypatch)
+    # clear 端点按 project id 解析 pid(resolve_project 查登记行)——登记后解析一致
+    from topoone_app_architect.store import ProjectsStore
+    ProjectsStore.upsert(PID, {"name": "t", "rootPath": str(tmp_path)})
+    import asyncio, json
+    from topoone_app_architect.sem import jobs_api
+
+    def body(resp):
+        return json.loads(resp.body) if hasattr(resp, "body") else resp
+
+    done = SemanticJobsStore.create(PID, "extract_impl")
+    SemanticJobsStore.finish(done["id"], state="done", result={})
+    running = SemanticJobsStore.create(PID, "enhance_desc", llm=True)
+    SemanticJobsStore.update(running["id"], {"state": "running", "startedAt": _now()})
+    # 活跃删除 → 409
+    out = body(asyncio.run(jobs_api.api_jobs_delete(running["id"])))
+    assert out.get("status") == 409 or out.get("_error") or out.get("message")
+    # 终态删除 → ok；再删 → 404
+    out = body(asyncio.run(jobs_api.api_jobs_delete(done["id"])))
+    assert (out.get("data") or {}).get("deleted") == done["id"]
+    out = body(asyncio.run(jobs_api.api_jobs_delete(done["id"])))
+    assert out.get("status") == 404 or out.get("_error") or out.get("message")
+    # clear：终态清零、running 保留
+    keep = SemanticJobsStore.create(PID, "extract_delta")
+    SemanticJobsStore.update(keep["id"], {"state": "running", "startedAt": _now()})
+    stale = SemanticJobsStore.create(PID, "extract_delta")
+    SemanticJobsStore.finish(stale["id"], state="failed", result={})
+    class _Req:  # 最小 request 桩
+        async def json(self):
+            return {"project": PID}
+    out = body(asyncio.run(jobs_api.api_jobs_clear(_Req())))
+    assert (out.get("data") or {}).get("cleared") == 1
+    ids = {j["id"] for j in SemanticJobsStore.list(PID)}
+    assert keep["id"] in ids and stale["id"] not in ids
+
+
 def test_job_recover_lost(tmp_path, monkeypatch):
     _ctx_setup(tmp_path, monkeypatch)
     job = SemanticJobsStore.create(PID, "enhance_desc", llm=True)
