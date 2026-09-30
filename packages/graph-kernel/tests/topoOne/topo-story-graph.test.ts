@@ -101,7 +101,7 @@ describe('TopoStory (graph 形态, jsdom 挂载)', () => {
     while (!w.vm.api.state.ready && Date.now() - t0 < 4000) await sleep(20);
     expect(w.vm.api.state.ready).toBe(true);
     await sleep(80); // rAF 挂载 + fit
-    const svg = w.find('svg.topo-story__graph');
+    const svg = w.find('svg.scene-canvas__graph');
     expect(svg.exists()).toBe(true);
     // canonical 全量 6 元素(3 节点+2 边)常驻 DOM
     const keys = w.findAll('g[data-ta-key]').map((n) => n.attributes('data-ta-key'));

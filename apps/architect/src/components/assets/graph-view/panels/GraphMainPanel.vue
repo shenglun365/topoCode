@@ -8,6 +8,12 @@ import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
+import TopoStory from '@topo/graph-kernel/vue/TopoStory.vue'
+
+/** 统一内核 node-click(key) → 旧详情卡 NodeClickEvent(nodeId/label=key=资产 id) */
+function onKernelNodeClick(key: string) {
+  onNodeClick({ nodeId: key, label: key } as Parameters<typeof onNodeClick>[0])
+}
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
 import { useI18n } from 'vue-i18n'
 import type { GraphTabDef } from '../../SemanticGraphView.vue'
@@ -20,6 +26,8 @@ const {
   FILE_BUDGET,
   MAX_SEGMENTS,
   activeFileTab,
+  kernelMode,
+  sceneGraph,
   activeRelTab,
   activeTabSegs,
   applyFileScope,
@@ -149,6 +157,17 @@ const {
           v-if="cardSrcOpen"
           class="h-full m-0 overflow-auto rounded-lg bg-ctp-mantle border border-ctp-surface1 p-3 font-mono text-[11px] leading-relaxed whitespace-pre text-ctp-subtext0"
         >{{ diagrams[cardLang] }}</pre>
+        <!-- 统一渲染内核(批4-2)：graph-scene 布局 + SceneCanvas 交互；
+             kernelMode=false 回退旧 mermaid/plantuml DSL 渲染(双轨过渡) -->
+        <TopoStory
+          v-if="kernelMode && sceneGraph"
+          class="h-full"
+          :graph="sceneGraph"
+          :auto-play="true"
+          :step-ms="1800"
+          height="100%"
+          @node-click="onKernelNodeClick"
+        />
         <TopoDiagram
           v-else
           ref="diagRef"

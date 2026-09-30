@@ -2293,7 +2293,7 @@ def semantic_graph(root: Optional[str], project: Optional[str],
                    focus: str = "", hops: int = 1,
                    include_indirect: bool = False,
                    file: str = "", files: str = "",
-                   change_base: str = "") -> Dict[str, Any]:
+                   change_base: str = "", rev: str = "") -> Dict[str, Any]:
     """语义层图谱：节点=语义资产，边=资产间 relations，锚点=AST 引用。
 
     边 = 存库基础 relations(按 id/name/nameAlias/符号解析) ∪ 程序化派生边
@@ -2313,7 +2313,8 @@ def semantic_graph(root: Optional[str], project: Optional[str],
     _lazy_reconcile(root, project)
     pid = project_id_for(root, project)
     rows = store.SemanticAssetsStore.search(pid, text="", kind=kind,
-                                            limit=limit, scopes=scopes, level=level)
+                                            limit=limit, scopes=scopes, level=level,
+                                            rev=rev)
     # stale 资产同样入图：列表可见「需更新」徽标，图谱却查不到会让
     # 文件级/资产级入口空图(实测：文件资产全 stale → "暂无语义资产")。
     # 仅排除 deleted；kind/level/scope 过滤与 search 同口径。
@@ -4904,7 +4905,8 @@ async def api_semantic_stats(root: Optional[str] = None, project: Optional[str] 
 async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
                     kind: str = "", scope: str = "", level: str = "", limit: int = 2000,
                     focus: str = "", hops: int = 1, include_indirect: bool = False,
-                    file: str = "", files: str = "", change_base: str = ""):
+                    file: str = "", files: str = "", change_base: str = "",
+                    rev: str = ""):
     """语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。
 
     scope: 逗号分隔的组件范围(scope_key)；kind: 资产种类过滤；level: 抽象粒度过滤。
@@ -4920,7 +4922,7 @@ async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
     return ok(semantic_graph(root, project, kind, scopes, level=lvl, limit=limit,
                              focus=focus, hops=hops,
                              include_indirect=include_indirect, file=file,
-                             files=files, change_base=change_base))
+                             files=files, change_base=change_base, rev=rev))
 
 @router.get("/kb/semantic/asset-compare")
 async def api_asset_compare(root: Optional[str] = None, project: Optional[str] = None,

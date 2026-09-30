@@ -1,7 +1,8 @@
+import SceneCanvas from './SceneCanvas.vue';
 import TopoDiagram from './TopoDiagram.vue';
 import TopoStory from './TopoStory.vue';
 
-export { TopoDiagram, TopoStory };
+export { SceneCanvas, TopoDiagram, TopoStory };
 export { useTopoDiagram } from './useTopoDiagram';
 export type {
   EngineName,
