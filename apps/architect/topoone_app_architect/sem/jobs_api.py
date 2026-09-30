@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
+from fastapi import Request
+
 from ..common import err, ok
 from . import router
 from .paths import project_id_for
@@ -42,3 +44,23 @@ async def api_jobs_get(job_id: str):
     if not job:
         return err(404, "作业不存在")
     return ok(job)
+
+
+@router.post("/kb/semantic/extract-impl")
+async def api_extract_impl(request: Request = None):
+    """结构化提取作业提交（批2-4）：{rev?, keys?(组件id[]), files?, base?}。
+
+    档位：无 keys/files=全量变化量(工作区) 或全量目录(baseline)；
+    keys=单/多组件(owns 展开)；files=显式清单。无 LLM。
+    """
+    from .structural_extract import start_extract_impl
+    body = await request.json() if request else {}
+    root = body.get("root")
+    project = body.get("project")
+    r = await asyncio.to_thread(
+        start_extract_impl, root, project,
+        rev=body.get("rev") or "workspace",
+        keys=body.get("keys") or None,
+        files=body.get("files") or None,
+        base=body.get("base") or "HEAD")
+    return ok(r)

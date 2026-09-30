@@ -95,3 +95,39 @@ def test_job_recover_lost(tmp_path, monkeypatch):
     job_runner._recovered.discard(PID)
     job_runner.recover(PID)
     assert SemanticJobsStore.get(job["id"])["state"] == "lost"
+
+
+# ── 结构化提取骨架(批2-3, 纯函数) ─────────────────────────────
+
+def test_build_file_skeleton_mapping():
+    from topoone_app_architect.sem.structural_extract import build_file_skeleton
+    parsed = {
+        "symbols": [
+            {"name": "Order", "kind": "interface", "qualifiedName": "m::Order",
+             "startLine": 1, "endLine": 10, "signature": "interface Order",
+             "docstring": "订单实体"},
+            {"name": "create", "kind": "function", "qualifiedName": "m::create",
+             "startLine": 12, "endLine": 20, "signature": None},
+        ],
+        "implDetails": {
+            "statements": [
+                {"type": "loop", "condition": "for it in items", "startLine": 13,
+                 "endLine": 15, "enclosing": "create"},
+            ],
+            "constants": [
+                {"name": "id", "value": "string;", "line": 2},
+                {"name": "n", "value": "number;", "line": 3},
+            ],
+        },
+    }
+    out = build_file_skeleton("m/a.ts", parsed)
+    ent = [a for a in out if a["kind"] == "entity"]
+    proc = [a for a in out if a["kind"] == "process"]
+    assert len(ent) == 1 and len(proc) == 1
+    assert ent[0]["detail"]["fields"] == [{"name": "id", "type": "string"}, {"name": "n", "type": "number"}]
+    assert ent[0]["desc"] == "订单实体"
+    assert proc[0]["detail"]["trigger"] == ""
+    assert len(proc[0]["detail"]["steps"]) == 1
+    assert "loop" in proc[0]["detail"]["steps"][0]["semantic"]
+    # 锚点 kind 归一化(func)——过 _asset_anchor_kind_ok 白名单
+    assert proc[0]["astRefs"][0]["kind"] == "func"

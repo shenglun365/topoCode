@@ -396,7 +396,6 @@ ARCH_PROJECT_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_scope ON arch_semantic_assets(project_id, scope_type, scope_key);
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_status ON arch_semantic_assets(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_canonical ON arch_semantic_assets(project_id, canonical_key);
-    CREATE INDEX IF NOT EXISTS idx_arch_semantic_rev ON arch_semantic_assets(project_id, rev);
 
     CREATE TABLE IF NOT EXISTS arch_ast_cache (
         project_id TEXT NOT NULL,
@@ -800,6 +799,9 @@ def _project_migrations(db) -> None:
         # 锚点视角(批1-1): baseline:<kbVersion> | head:<sha> | workspace | ''(legacy)
         ("rev", "TEXT DEFAULT ''"),
     ])
+    # 索引须在补列之后创建(存量表 rev 靠 _add_cols 补齐，DDL 段建索引会失败)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_arch_semantic_rev "
+               "ON arch_semantic_assets(project_id, rev)")
     _add_cols(db, "arch_naming_conventions", [
         ("origin_project_id", "TEXT DEFAULT ''"),
     ])

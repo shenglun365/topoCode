@@ -7,7 +7,8 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-# 作业子系统(批1-3/1-4)：统一调度器注册三 daemon 执行体 + jobs API 路由。
+# 作业子系统(批1-3/1-4/2-4)：统一调度器注册执行体 + jobs API 路由。
 from . import sync_extract as _sync_extract  # noqa: E402,F401  (注册 extract_delta)
 from . import unowned as _unowned  # noqa: E402,F401  (注册 extract_unowned)
+from . import structural_extract as _structural_extract  # noqa: E402,F401  (注册 extract_impl)
 from . import jobs_api as _jobs_api  # noqa: E402,F401  (jobs 列表/取消路由)
