@@ -54,6 +54,13 @@ const graph = ref<SemanticGraphResult | null>(null)
 /** 统一渲染内核模式(批4-2 双轨)：graph-scene/SceneCanvas 路径(默认开, D9 裁决整体迁入；
  *  旧 mermaid 渲染保留为回退开关)。 */
 const kernelMode = ref((localStorage.getItem('arch.graph.kernel') ?? '1') !== '0')
+/** 图谱视角(需求 6.3)：工作区默认；可切 head:<sha>（该视角未提取时后端底座∪视角语义=基线骨架）。
+ *  baseline:<kbVersion> / 其他分支 head 锚定需先跑 extract_impl(rev=锚点) 产数据。 */
+const graphRev = ref('workspace')
+function setGraphRev(r: string) {
+  graphRev.value = r
+  void load(true)
+}
 function setKernelMode(v: boolean) {
   kernelMode.value = v
   try { localStorage.setItem('arch.graph.kernel', v ? '1' : '0') } catch { /* ignore */ }
@@ -277,7 +284,7 @@ async function load(reset = false) {
     } else if (props.tab.kind === 'asset') {
       focus = props.tab.assetId
     }
-    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value, file, files })
+    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value, file, files, rev: graphRev.value })
     if (reset) {
       // 打开/切换 tab：类型重置为全部；粒度默认=组件级取该组件最高可用层级，其余取全部。
       kindFilter.value = ''
@@ -362,5 +369,7 @@ watch(() => props.compareData, () => {
     kernelMode,
     setKernelMode,
     sceneGraph,
+    graphRev,
+    setGraphRev,
   }
 }

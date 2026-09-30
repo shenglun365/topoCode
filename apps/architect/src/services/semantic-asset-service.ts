@@ -822,7 +822,7 @@ export const semanticAssetService = {
   },
 
   /** 语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。 */
-  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number; includeIndirect?: boolean; file?: string; files?: string[] }): Promise<SemanticGraphResult> {
+  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number; includeIndirect?: boolean; file?: string; files?: string[]; rev?: string }): Promise<SemanticGraphResult> {
     const parts: string[] = []
     if (kind) parts.push(`kind=${encodeURIComponent(kind)}`)
     if (level) parts.push(`level=${encodeURIComponent(level)}`)
@@ -832,6 +832,7 @@ export const semanticAssetService = {
     if (opts?.includeIndirect) parts.push('include_indirect=true')
     if (opts?.file) parts.push(`file=${encodeURIComponent(opts.file)}`)
     if (opts?.files?.length) parts.push(`files=${encodeURIComponent(opts.files.join(','))}`)
+    if (opts?.rev && opts.rev !== 'workspace') parts.push(`rev=${encodeURIComponent(opts.rev)}`)
     // limit 10000：2000 上限在大项目(3.7k+ 资产)会把较早的活跃资产截掉——
     // 文件级/聚焦图谱查不到明明存在的资产(实测回归)。
     parts.push('limit=10000')

@@ -1853,6 +1853,7 @@ export default {
       diagram: '图形',
       fullscreen: '全屏放大',
       closeFullscreen: '退出全屏',
+      export: '导出图谱',
       focusHint: '聚焦到选中资产周围 N 跳邻域，只渲染相关子图（缓解大图拥挤/过宽/过长）',
       focusHops: '跳数',
       focusLockHint: '范围锁定：锁定后切换选中节点不再跟随刷新关系视角(便于在固定子图内浏览)；解锁恢复漫游。',

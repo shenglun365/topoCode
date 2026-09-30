@@ -1812,6 +1812,7 @@ export default {
       diagram: 'Diagram',
       fullscreen: 'Fullscreen',
       closeFullscreen: 'Exit fullscreen',
+      export: 'Export graph',
       focusHint: 'Focus on the N-hop neighborhood of the selected asset; renders only the relevant subgraph (eases dense / over-wide / over-long graphs)',
       focusHops: 'hops',
       focusLockHint: 'Lock scope: switching selection no longer re-queries the relation view (browse within a fixed subgraph); unlock to resume roaming.',
