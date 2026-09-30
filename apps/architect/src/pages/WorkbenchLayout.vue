@@ -5,6 +5,7 @@ import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import GuidePanel from '@/components/project/GuidePanel.vue'
 import TaskCenter from '@/components/common/TaskCenter.vue'
+import ChangeWatch from '@/components/common/ChangeWatch.vue'
 
 const project = useArchProjectStore()
 const requirement = useArchRequirementStore()
@@ -27,4 +28,6 @@ onMounted(async () => {
   <GuidePanel />
   <!-- 全局任务中心(批1-5)：语义作业浮窗，右下角 badge 呼出 -->
   <TaskCenter />
+  <!-- 生命周期感知(批5)：代码变更轮询提示(需求 5/2-F) -->
+  <ChangeWatch />
 </template>

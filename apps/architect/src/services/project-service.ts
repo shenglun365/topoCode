@@ -125,11 +125,14 @@ export const projectService = {
 
   /** 演化帧序列(B2+ 真数据): 任意 base..head ref 对 → 组件图谱帧推演。
    *  ref 接受 baseline / KB version id / branch / commit sha(前缀) / HEAD；缺省 baseline→HEAD。 */
-  async evolutionFrames(base?: string, head?: string, layer?: 'component' | 'file'): Promise<EvolutionFrames | null> {
+  async evolutionFrames(base?: string, head?: string, layer?: 'component' | 'file',
+                        refs?: string[]): Promise<EvolutionFrames | null> {
     const qs = projectQuery()
     if (base?.trim()) qs.set('base', base.trim())
     if (head?.trim()) qs.set('head', head.trim())
     if (layer) qs.set('layer', layer)
+    // 显式帧序列(需求 7)：指定分支/head 列表作为 step 帧
+    if (refs?.length) qs.set('refs', refs.filter((r) => r.trim()).join(','))
     return apiGet<EvolutionFrames | null>(`/project/evolution-frames?${qs.toString()}`)
   },
 }

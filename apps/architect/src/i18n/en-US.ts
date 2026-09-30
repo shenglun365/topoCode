@@ -76,6 +76,7 @@ export default {
       agents: 'Agent Sessions',
       archMap: 'Architecture Change View',
       impact: 'Impact Analysis',
+      evolution: 'Evolution',
       mergeBaseline: 'Baseline',
       external: 'External',
       mcp: 'MCP Service',

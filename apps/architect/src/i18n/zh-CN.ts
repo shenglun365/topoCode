@@ -76,6 +76,7 @@ export default {
       agents: 'Agent 会话',
       archMap: '架构变更视图',
       impact: '影响分析',
+      evolution: '演化播放',
       mergeBaseline: '基线管理',
       external: '外部调用',
       mcp: 'MCP 服务',

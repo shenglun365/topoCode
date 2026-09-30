@@ -680,7 +680,7 @@ async def get_project_versions(root: Optional[str] = None, project: Optional[str
 @router.get("/project/evolution-frames")
 async def get_evolution_frames(root: Optional[str] = None, project: Optional[str] = None,
                                base: Optional[str] = None, head: Optional[str] = None,
-                               layer: Optional[str] = None):
+                               layer: Optional[str] = None, refs: Optional[str] = None):
     """演化帧序列(B2+ 真数据): 任意 base..head ref 对 → 组件图谱帧推演。
 
     ref 接受 baseline/KB version id/branch/commit sha(前缀)/HEAD；缺省
@@ -735,7 +735,10 @@ async def get_evolution_frames(root: Optional[str] = None, project: Optional[str
         return ok(build_graph_frames(work_dir, base_ref, head_ref, [], version_names, layer="file"))
     if not anchor:
         return err(400, "KB 组件图谱为空（未关联知识库或基线未挂载），无法推演演化帧")
-    return ok(build_graph_frames(work_dir, base_ref, head_ref, anchor, version_names))
+    # 批5(需求7)：refs=逗号分隔显式帧序列(分支/head)——替代 base..head 自动采样
+    ref_points = [r.strip() for r in (refs or "").split(",") if r.strip()] or None
+    return ok(build_graph_frames(work_dir, base_ref, head_ref, anchor, version_names,
+                                 ref_points=ref_points))
 
 
 @router.get("/project/snapshots")

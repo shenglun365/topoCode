@@ -215,7 +215,8 @@ def _build_file_frames(root: str, base: str, head: str,
 def build_frames(root: str, base: str, head: str,
                  anchor_components: list[dict],
                  version_names: Optional[dict] = None,
-                 layer: str = "component") -> dict:
+                 layer: str = "component",
+                 ref_points: Optional[list] = None) -> dict:
     """推演帧序列。
 
     layer=component: anchor_components(KB 组件目录 [{id,name,owns,dependsOn}])
@@ -231,12 +232,24 @@ def build_frames(root: str, base: str, head: str,
     version_names = version_names or {}
 
     # 帧点 = base + (base..head commits) + head；去重保序
-    refs = [base]
-    for sha, _subj in _commit_list(root, base, head):
-        if sha != refs[-1]:
-            refs.append(sha)
-    if refs[-1] != head:
-        refs.append(head)
+    # 批5(需求7)：ref_points 显式指定帧序列(分支/head 列表)——替代自动采样
+    if ref_points:
+        refs = [base] + [r for r in ref_points if r] 
+        if refs[-1] != head:
+            refs.append(head)
+        # 去重保序
+        seen_r: list = []
+        for r in refs:
+            if r not in seen_r:
+                seen_r.append(r)
+        refs = seen_r
+    else:
+        refs = [base]
+        for sha, _subj in _commit_list(root, base, head):
+            if sha != refs[-1]:
+                refs.append(sha)
+        if refs[-1] != head:
+            refs.append(head)
 
     # 逐帧文件存在集合 + 相邻变更集(一次 diff, 复用于相邻帧对)
     exist: dict[str, set] = {}
@@ -292,7 +305,8 @@ def build_frames(root: str, base: str, head: str,
 def build_graph_frames(root: str, base: str, head: str,
                        anchor_components: list[dict],
                        version_names: Optional[dict] = None,
-                       layer: str = "component") -> dict:
+                       layer: str = "component",
+                       ref_points: Optional[list] = None) -> dict:
     """统一图 JSON（canonical + 存在性投影）——动画机制重裁的核心输出。
 
     在 build_frames（每帧 components 推演）之上做全帧汇聚：
@@ -303,7 +317,8 @@ def build_graph_frames(root: str, base: str, head: str,
       边在场 = 两端节点均在帧内；modified = 该帧 change=modified 的节点。
     消费方（graph 播放组件）只布局一次，帧推进做存在性切换。
     """
-    legacy = build_frames(root, base, head, anchor_components, version_names, layer)
+    legacy = build_frames(root, base, head, anchor_components, version_names, layer,
+                          ref_points=ref_points)
     frames = legacy.get("frames") or []
 
     names: dict = {}
