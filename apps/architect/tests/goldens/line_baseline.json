@@ -146,7 +146,7 @@
  "sem/compare.py": 529,
  "sem/context.py": 727,
  "sem/engine.py": 5094,
- "sem/incremental.py": 69,
+ "sem/incremental.py": 85,
  "sem/map_tools.py": 306,
  "sem/paths.py": 55,
  "sem/scope.py": 157,

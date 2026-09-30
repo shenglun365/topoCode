@@ -71,6 +71,24 @@ async def api_jobs_clear(request: Request = None):
     return ok({"cleared": n})
 
 
+@router.post("/kb/semantic/extract-scope")
+async def api_extract_scope(request: Request = None):
+    """范围提取作业提交（交互提取闭环）：{scopeType: files|comm, key?, files[], kinds?, level?, modelId?}。LLM 类。"""
+    from .scope_extract import start_extract_scope
+    body = await request.json() if request else {}
+    sc = {
+        "scopeType": body.get("scopeType") or "files",
+        "key": body.get("key") or "",
+        "files": body.get("files") or [],
+    }
+    r = await asyncio.to_thread(
+        start_extract_scope, body.get("root"), body.get("project"), sc,
+        kinds=body.get("kinds") or None,
+        level=body.get("level") or "implementation",
+        model_id=body.get("modelId") or "")
+    return ok(r)
+
+
 @router.post("/kb/semantic/extract-impl")
 async def api_extract_impl(request: Request = None):
     """结构化提取作业提交（批2-4）：{rev?, keys?(组件id[]), files?, base?}。

@@ -113,6 +113,11 @@ def extract_structural(root: str, project: Optional[str], files: List[str],
         try:
             ctx = {"root": rid, "project": project, "source": "structural",
                    "rev": rev, "files": [rel], "srcHash": rev, "table": {}}
+            if historical:
+                # rev 视角锚定：哈希取 rev 内容（磁盘已非该版本），否则 side 归属全错
+                ah = _rev_anchor_hash(rid, rel, rev)
+                if ah:
+                    ctx["anchorHashesOverride"] = {rel: ah}
             saved = _save_assets(_pid_of(rid, project), "files", rel,
                                  skeletons, ctx)
             saved_total += len(saved or [])
@@ -120,6 +125,12 @@ def extract_structural(root: str, project: Optional[str], files: List[str],
             logger.warning("[structural] save %s failed: %s", rel, e)
     return {"saved": saved_total, "files": done, "parseFailures": parse_fail,
             "summary": f"结构化提取 {saved_total} 骨架 / {done} 文件"}
+
+
+def _rev_anchor_hash(rid: str, rel: str, rev: str) -> str:
+    """历史 rev 提取的锚定哈希（rev:file 内容 md5，与 compare 侧归属同源）。"""
+    from .incremental import _blob_md5
+    return _blob_md5(rid, rev, rel)
 
 
 def _pid_of(root: str, project: Optional[str]) -> str:
@@ -195,6 +206,10 @@ def _job_extract_impl(ctx) -> dict:
                 sctx = {"root": rid, "project": sc.get("project"),
                         "source": "structural", "rev": rev,
                         "files": [rel], "srcHash": rev, "table": {}}
+                if rev != "workspace" and not rev.startswith("baseline:"):
+                    ah = _rev_anchor_hash(rid, rel, rev)
+                    if ah:
+                        sctx["anchorHashesOverride"] = {rel: ah}
                 saved_total += len(_save_assets(
                     project_id_for(rid, sc.get("project")), "files", rel,
                     skeletons, sctx) or [])

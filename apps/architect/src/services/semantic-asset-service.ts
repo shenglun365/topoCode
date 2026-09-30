@@ -431,6 +431,8 @@ export interface AssetCompareResult {
   targetIsWorktree: boolean
   head: string
   noChanges: boolean
+  /** 基准侧资产缺失(有变更但无可锚定基线的资产)——提取闭环需先基线提取 */
+  baseAssetsMissing?: boolean
   files: { added: string[]; modified: string[]; deleted: string[] }
   counts: { added: number; modified: number; deleted: number }
   components: AssetCompareComponent[]
@@ -705,6 +707,27 @@ export const semanticAssetService = {
   /** 批量增强进度。 */
   async enhanceDescStatus(): Promise<{ running: boolean; done: number; total: number; nodeBriefs: number; edgeNotes: number; error?: string }> {
     return apiGet(`/kb/semantic/enhance-desc/status${qsWith('')}`)
+  },
+
+  /** 范围提取作业提交(LLM, 后台任务)：{scopeType: files|comm, key?, files[], ...}。 */
+  async startExtractScope(scope: { scopeType: 'files' | 'comm'; key?: string; files: string[] },
+                          opts?: { kinds?: string[]; level?: string; modelId?: string }): Promise<{ started: boolean; reason?: string; job?: { id: string } }> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/kb/semantic/extract-scope', {
+      root, project, ...scope,
+      kinds: opts?.kinds, level: opts?.level, modelId: opts?.modelId,
+    })
+  },
+
+  /** 结构化提取作业提交(无 LLM)：rev='baseline:<sha>'/'head:<sha>' 时按 rev 内容解析。 */
+  async startExtractImpl(payload: { rev?: string; files?: string[]; keys?: string[]; base?: string }): Promise<{ started: boolean; reason?: string; job?: { id: string } }> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/kb/semantic/extract-impl', { root, project, ...payload })
+  },
+
+  /** 作业详情(轮询终态用)。 */
+  async getJob(jobId: string): Promise<{ id: string; state: string; result?: { summary?: string; saved?: number; error?: string } } | undefined> {
+    return apiGet(`/kb/semantic/jobs/${encodeURIComponent(jobId)}`)
   },
 
   /** 按范围即时提取并落库。 */

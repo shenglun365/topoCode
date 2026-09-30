@@ -65,36 +65,39 @@ export function useFramework(D: WsDeps) {
     }
   }
 
-  /** 按需提取：确定性直调 REST(不走对话模型——小模型可能不按工具协议执行而编造报告)。
-   *  过程与结果以对话回合呈现；完成后刷新资产数据。 */
+  /** 按需提取（范围确认弹窗 → 后台任务）：弹窗列组件 owns 文件(可勾选缩小范围)，
+   *  确认后提交 extract_scope 作业；过程与结果以对话回合呈现，完成后刷新资产数据。 */
   async function askExtractComponent(key: string, name: string) {
     if (D.chat.extractBusy.value) return
+    const comp = core.treeComps.find((c) => c.id === key)
+    const owns = (comp?.owns ?? []).filter(Boolean)
+    if (!owns.length) return
+    const picked = await D.diff.pickScope(t('assetMgmt.compExtractScopeTitle', { name }), owns)
+    if (!picked?.length) return
     turns.value.push({ role: 'user', content: t('assetMgmt.compExtractUser', { name, key }) })
-    const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
+    const idx = turns.value.push({
+      role: 'assistant',
+      content: t('assetMgmt.compExtractJobSubmitted', { n: picked.length }),
+    }) - 1
     D.chat.extractBusy.value = true
-    const ac = new AbortController(); D.chat.extractAbort.value = ac
     try {
-      const res = await semanticAssetService.extract(
-        { type: 'comm', key },
-        core.kinds.map((k: { value: string }) => k.value),
-        { level: 'implementation' },
-      )
-      const n = res.count ?? res.assets?.length ?? 0
-      if (res.error) {
-        turns.value[idx].content = `${t('assetMgmt.compExtractFailed')}\n${res.error}`
-        const cands: { id: string; name: string }[] = (res as { candidates?: { id: string; name: string }[] }).candidates ?? []
-        if (cands.length) {
-          turns.value[idx].content += '\n' + t('assetMgmt.compExtractCandidates')
-          for (const c of cands.slice(0, 8)) turns.value[idx].content += `\n· ${c.name} (${c.id})`
-        }
-      } else {
-        turns.value[idx].content = res.degraded
-          ? (res.reason === 'index_missing' || (res.source && res.source !== 'codegraph')
-              ? t('assetMgmt.compExtractDegradedIndex', { n })
-              : t('assetMgmt.compExtractDegraded', { n }))
-          : t('assetMgmt.compExtractDone', { n })
-        turns.value[idx].assets = res.assets ?? []
+      const r = await semanticAssetService.startExtractScope(
+        { scopeType: 'comm', key, files: picked },
+        { kinds: core.kinds.map((k: { value: string }) => k.value), level: 'implementation' })
+      const jobId = r?.job?.id
+      if (!r?.started || !jobId) {
+        turns.value[idx].content = r?.reason === 'already_running'
+          ? t('assetMgmt.compExtractAlreadyRunning')
+          : t('assetMgmt.compExtractFailed')
+        return
       }
+      const done = await D.diff.waitForJob(jobId)
+      if (!done.ok) {
+        turns.value[idx].content = `${t('assetMgmt.compExtractFailed')}\n${done.error || ''}`
+        return
+      }
+      turns.value[idx].content = t('assetMgmt.compExtractJobDone')
+        + (done.summary ? `\n${done.summary}` : '')
       // 数据变更 → 刷新列表/状态/覆盖度(与对话提取联动同口径)
       D.chat.refreshAfterExtract()
     } catch (err: any) {

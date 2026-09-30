@@ -445,6 +445,10 @@ def compare_changes(root: Optional[str], project: Optional[str],
         "target": target, "targetIsWorktree": target == "worktree",
         "head": head,
         "noChanges": not changed_files,
+        # 基准侧资产缺失：有变更但 stable/changed/removed 全 0（无锚定资产可比基线）——
+        # 提取闭环入口据此提示先执行基线提取(rev=baselineCommit)再比对
+        "baseAssetsMissing": bool(changed_files) and len(pending_files) > 0
+        and (stable_n + changed_total + removed_total) == 0,
         "files": files_cap,
         "counts": counts,
         "components": components,

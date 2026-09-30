@@ -5,7 +5,6 @@
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppDialog } from '@/composables/useAppDialog'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import type { AssetCompareResult, BaselineDiff } from '@/services/semantic-asset-service'
 import { gitService, type GitLogEntry } from '@/services/git-service'
@@ -14,7 +13,6 @@ import type { WsDeps } from './useAssetCore'
 
 export function useAssetDiff(D: WsDeps) {
   const { t } = useI18n()
-  const dialog = useAppDialog()
   const core = D.core
   const items = core.items as Ref<SemanticAsset[]>
   const treeComps = core.treeComps
@@ -83,45 +81,98 @@ export function useAssetDiff(D: WsDeps) {
     return p.extractable?.length ? p.extractable : (p.extractableCount === 0 ? [] : p.files)
   })
 
-  async function extractPendingAndRecompare() {
-    const files = pendingExtractable.value
+  // ---- 提取范围弹窗（交互提取闭环共用：本域入口 + 按组件/按文件经 ctx 复用） ----
+  const scopeModal = ref<{ open: boolean; title: string; files: string[] }>(
+    { open: false, title: '', files: [] })
+  let scopeResolver: ((files: string[] | null) => void) | null = null
+  /** 弹窗选择提取范围；resolve 选中的文件（取消 → null）。 */
+  function pickScope(title: string, files: string[]): Promise<string[] | null> {
+    scopeModal.value = { open: true, title, files }
+    return new Promise((resolve) => { scopeResolver = resolve })
+  }
+  function confirmScope(files: string[]): void {
+    scopeModal.value.open = false
+    scopeResolver?.(files)
+    scopeResolver = null
+  }
+  function cancelScope(): void {
+    scopeModal.value.open = false
+    scopeResolver?.(null)
+    scopeResolver = null
+  }
+
+  /** 轮询作业至终态（任务中心可见进度；完成/失败分别回执）。 */
+  async function waitForJob(jobId: string, timeoutMs = 10 * 60 * 1000): Promise<{ ok: boolean; summary?: string; error?: string }> {
+    const t0 = Date.now()
+    while (Date.now() - t0 < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 2000))
+      try {
+        const j = await semanticAssetService.getJob(jobId)
+        if (!j) break
+        if (j.state === 'done') return { ok: true, summary: j.result?.summary }
+        if (j.state === 'failed') return { ok: false, error: j.result?.summary || 'failed' }
+        if (j.state === 'cancelled' || j.state === 'lost') return { ok: false, error: j.state }
+      } catch { /* 轮询失败静默重试 */ }
+    }
+    return { ok: false, error: 'timeout' }
+  }
+
+  /** 提交范围提取作业并等待完成；返回 saved 数（-1 = 失败/未启动）。 */
+  async function runScopeJob(files: string[]): Promise<number> {
+    const r = await semanticAssetService.startExtractScope({ scopeType: 'files', files })
+    const jobId = r?.job?.id
+    if (!r?.started || !jobId) {
+      compareError.value = t('assetMgmt.diff.cmpFailed')
+      return -1
+    }
+    const done = await waitForJob(jobId)
+    if (!done.ok) {
+      compareError.value = done.error === 'timeout'
+        ? t('assetMgmt.diff.jobTimeout') : (done.error || t('assetMgmt.diff.cmpFailed'))
+      return -1
+    }
+    return 1
+  }
+
+  async function extractPendingAndRecompare(preselected?: string[]) {
+    let files = preselected
+    if (!files) {
+      files = pendingExtractable.value
+      if (!files.length) return
+      files = await pickScope(t('assetMgmt.diff.extractScopeTitle'), files) ?? []
+    }
     if (!files.length) return
-    if (!(await dialog.confirm(t('assetMgmt.diff.extractConfirm', { n: files.length })))) return
     extractingPending.value = true
-    let extracted = 0
-    const noCandidateFiles: string[] = []
     try {
-      const BATCH = 10
-      for (let i = 0; i < files.length; i += BATCH) {
-        const res = await semanticAssetService.extract({ type: 'files', files: files.slice(i, i + BATCH) })
-        extracted += res?.count ?? 0
-        // 基线图谱落后仅为比对口径提示——提取候选来自符号源(CLI 索引/native 实时)，
-        // 不受其影响，完整执行不中断(此前误作硬拦截，实测误挡正常提取 2026-09-29)
-        if (res?.indexStale) {
-          compareHint.value = t('assetMgmt.diff.extractBaselineHint', { n: res.staleCount ?? 0 })
-        }
-        // 零产出逐文件归因：纯常量表/re-export 桶/启动脚本本就无可提取符号(正确语义)
-        for (const ef of res?.emptyFiles ?? []) {
-          if (!noCandidateFiles.includes(ef.file)) noCandidateFiles.push(ef.file)
+      // ① 基准侧资产缺失 → 先基线提取（rev=baselineCommit 的结构化作业，rev 内容锚定），
+      //    完成后再走目标侧提取与比对（需求：校验基线资产，无则先提取基线再比对）
+      const cmp = compareData.value
+      if (cmp?.baseAssetsMissing && baselineSha.value) {
+        const baselineFiles = files.filter((f) => cmp.files.modified.includes(f))
+        if (baselineFiles.length) {
+          compareHint.value = t('assetMgmt.diff.baselineExtracting', { n: baselineFiles.length })
+          const r = await semanticAssetService.startExtractImpl({ rev: baselineSha.value, files: baselineFiles })
+          if (r?.started && r.job?.id) {
+            const done = await waitForJob(r.job.id)
+            if (!done.ok) {
+              compareError.value = done.error === 'timeout'
+                ? t('assetMgmt.diff.jobTimeout') : (done.error || t('assetMgmt.diff.cmpFailed'))
+              return
+            }
+          }
+          compareHint.value = ''
         }
       }
+      // ② 目标侧补提（LLM 范围提取作业；任务中心可见进度）
+      const extracted = await runScopeJob(files)
+      if (extracted < 0) return
+      // ③ 重新对比
+      await Promise.all([core.loadSemantic(), runCompare()])
     } catch (e) {
-      // 失败即止：保留错误信息(不再自动重比冲掉)，用户可手动「重新对比」
       compareError.value = e instanceof Error && e.message ? e.message : t('assetMgmt.diff.cmpFailed')
-      extractingPending.value = false
-      return
     } finally {
       extractingPending.value = false
     }
-    if (!extracted) {
-      // 全程零产出：若逐文件归因为"无可提取类别符号"(纯常量/桶文件/启动脚本)
-      // 则属正确语义——明示跳过清单而非笼统报错；否则维持通用提示
-      compareError.value = noCandidateFiles.length
-        ? `${t('assetMgmt.diff.extractNoCandidates', { n: noCandidateFiles.length })} ${noCandidateFiles.slice(0, 4).map((f) => f.split('/').pop()).join('、')}${noCandidateFiles.length > 4 ? '…' : ''}`
-        : t('assetMgmt.diff.extractZero')
-      return
-    }
-    await Promise.all([core.loadSemantic(), runCompare()])
   }
 
   /** 变更文件 → 类别 快查表（语义行徽标 / 图谱节点着色用）。
@@ -251,6 +302,7 @@ export function useAssetDiff(D: WsDeps) {
     diffLoading, baselineDiffData, loadBaselineDiff, initCompare,
     cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
     loadCommitOptions, runCompare,
+    scopeModal, pickScope, confirmScope, cancelScope, waitForJob,
     extractingPending, pendingExtractable, extractPendingAndRecompare,
     changedFileMap, assetChangeMark, cmpBucketById, changeMarkById, diffFileCounts,
     treeFileOf, pendingFileSet, addedFileSet, diffFileUniverse,

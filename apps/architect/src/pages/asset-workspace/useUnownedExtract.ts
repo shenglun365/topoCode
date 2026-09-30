@@ -54,24 +54,32 @@ export function useUnownedExtract(D: WsDeps) {
   async function extractUnownedFile(path: string) {
     if (unownedExtractingOne.value) return
     if (unownedExtracting.value) return
+    // 范围确认弹窗（交互提取闭环统一交互）：确认后生成任务开始分析
+    const picked = await D.diff.pickScope(t('assetMgmt.unowned.fileScopeTitle', { file: path }), [path])
+    if (!picked?.length) return
     turns.value.push({ role: 'user', content: t('assetMgmt.unowned.chatOne', { file: path }) })
-    const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
+    const idx = turns.value.push({
+      role: 'assistant',
+      content: t('assetMgmt.compExtractJobSubmitted', { n: picked.length }),
+    }) - 1
     unownedExtractingOne.value = path
     try {
-      const res = await semanticAssetService.extract(
-        { type: 'files', files: [path] },
-        core.kinds.map((k: { value: string }) => k.value),
-        { level: 'implementation' },
-      )
-      const n = res.count ?? res.assets?.length ?? 0
-      if (res.error) {
-        turns.value[idx].content = `${t('assetMgmt.unowned.chatOneFailed')}\n${res.error}`
-      } else if (n > 0) {
-        turns.value[idx].content = t('assetMgmt.unowned.chatOneDone', { n })
-        turns.value[idx].assets = res.assets ?? []
-      } else {
-        turns.value[idx].content = t('assetMgmt.unowned.chatOneEmpty')
+      const r = await semanticAssetService.startExtractScope(
+        { scopeType: 'files', files: picked },
+        { kinds: core.kinds.map((k: { value: string }) => k.value), level: 'implementation' })
+      const jobId = r?.job?.id
+      if (!r?.started || !jobId) {
+        turns.value[idx].content = r?.reason === 'already_running'
+          ? t('assetMgmt.compExtractAlreadyRunning')
+          : t('assetMgmt.unowned.chatOneFailed')
+        return
       }
+      const done = await D.diff.waitForJob(jobId)
+      if (!done.ok) {
+        turns.value[idx].content = `${t('assetMgmt.unowned.chatOneFailed')}\n${done.error || ''}`
+        return
+      }
+      turns.value[idx].content = done.summary || t('assetMgmt.unowned.chatOneDone', { n: 0 })
       D.chat.refreshAfterExtract()
       await loadUnownedFiles()
     } catch (err: any) {

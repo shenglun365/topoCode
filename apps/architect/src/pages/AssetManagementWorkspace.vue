@@ -31,6 +31,7 @@ import { useAssetWorkspace, ASSET_WS_KEY } from './asset-workspace'
 import OverviewPanel from './asset-workspace/panels/OverviewPanel.vue'
 import SemanticTreePanel from './asset-workspace/panels/SemanticTreePanel.vue'
 import WorkspaceModals from './asset-workspace/panels/WorkspaceModals.vue'
+import ExtractScopeModal from './asset-workspace/panels/ExtractScopeModal.vue'
 import { OTHER_KEY } from './asset-workspace/useAssetCore'
 
 const { t } = useI18n()
@@ -59,6 +60,7 @@ const {
   registerChatHook, askAgent, seedConventionIds,
   onConventionConfirm, onConventionIgnore, referenceComp, referenceAsset,
   compareData,
+  scopeModal, confirmScope, cancelScope,
   extractingPending, extractPendingAndRecompare,
   changeMarkById, diffFileCounts, pendingFileSet, addedFileSet,
   diffMarkLabel, changedFilesForGraph, initCompare,
@@ -554,6 +556,14 @@ onUnmounted(() => {
     :compare-data="compareData"
     @close="fileCard = null"
     @goto="locateAsset"
+  />
+  <!-- 提取范围确认弹窗（基线对比/按组件/按文件 提取闭环共用） -->
+  <ExtractScopeModal
+    :open="scopeModal.open"
+    :title="scopeModal.title"
+    :files="scopeModal.files"
+    @confirm="confirmScope"
+    @close="cancelScope"
   />
 </template>
 

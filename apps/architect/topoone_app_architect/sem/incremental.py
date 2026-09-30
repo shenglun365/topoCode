@@ -29,6 +29,21 @@ def _cache_content_hash(root: str, rel: str) -> str:
     return f"{_AST_CACHE_VERSION}-{_file_md5(root, rel)}"
 
 
+def _blob_md5(root: str, rev: str, rel: str) -> str:
+    """rev:file 内容 md5（基线/head 视角提取的锚定哈希；与 compare 侧归属同口径）。缺失 → ''。"""
+    import subprocess as _sp
+    if not root or not rev or rev == "workspace" or not rel:
+        return ""
+    try:
+        p = _sp.run(["git", "-C", root, "show", f"{rev}:{rel}"],
+                    capture_output=True, timeout=20)
+        if p.returncode != 0 or not p.stdout:
+            return ""
+        return hashlib.md5(p.stdout).hexdigest()[:16]
+    except Exception:
+        return ""
+
+
 def _file_md5(root: str, rel: str) -> str:
     """文件内容哈希签名(对应要求①：AST 节点 ↔ 文件哈希)。"""
     if not root or not rel:
