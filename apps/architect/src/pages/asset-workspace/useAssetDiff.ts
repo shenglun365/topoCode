@@ -139,14 +139,40 @@ export function useAssetDiff(D: WsDeps) {
   /** 已完成基线提取的 rev（同一源码状态节点只提取一次；对比刷新后 baseAssetsMissing 自然转 false）。 */
   let baselineExtractedSha = ''
 
+  /** 代码扩展过滤（与 BE compare._CODE_EXTS 同口径）：文档/配置提取不出符号。 */
+  const CODE_EXTS = new Set([
+    '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs',
+    '.py', '.pyw', '.java', '.c', '.h', '.cpp', '.hpp', '.cc', '.cxx',
+    '.go', '.rs', '.cs', '.swift', '.rb', '.kt', '.kts', '.php',
+    '.dart', '.scala', '.lua', '.m', '.mm', '.vue',
+  ])
+  const isCodeFile = (f: string): boolean => {
+    const i = f.lastIndexOf('.')
+    return i > f.lastIndexOf('/') && CODE_EXTS.has(f.slice(i).toLowerCase())
+  }
+
   async function extractPendingAndRecompare(preselected?: string[] | Event) {
     if (extractingPending.value) return
     let files = Array.isArray(preselected) ? preselected : undefined
     if (!files) {
-      files = pendingExtractable.value
-      if (!files.length) return
+      const cmp = compareData.value
+      // 基线资产缺失 → 列全量组件文件(KB owns ∪ 资产锚点 ∪ 变更, 代码扩展)：
+      // 只列变更文件会让基线侧只有零星锚定，分析遗漏未变更文件的资产
+      if (cmp?.baseAssetsMissing) {
+        const universe = new Set(diffFileUniverse.value)
+        for (const f of [...cmp.files.added, ...cmp.files.modified]) universe.add(f)
+        files = [...universe].filter(isCodeFile).sort()
+      } else {
+        files = pendingExtractable.value
+        if (!files.length) return
+      }
       extractingPending.value = true   // 弹窗期间即锁定（防双击重复弹窗）
-      files = await pickScope(t('assetMgmt.diff.extractScopeTitle'), files) ?? []
+      files = await pickScope(
+        cmp?.baseAssetsMissing
+          ? t('assetMgmt.diff.extractScopeTitleBaseline')
+          : t('assetMgmt.diff.extractScopeTitle'),
+        files,
+      ) ?? []
       extractingPending.value = false
     }
     if (!files.length) return

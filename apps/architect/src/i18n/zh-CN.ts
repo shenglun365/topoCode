@@ -1682,6 +1682,7 @@ export default {
     worktree: '工作区（含未提交）',
     cached: '缓存',
     extractScopeTitle: '提取并重新对比 —— 确认提取范围',
+    extractScopeTitleBaseline: '提取并重新对比 —— 基线资产缺失，默认列出全量组件文件（可取消勾选缩小范围）',
     baselineExtracting: '基准侧资产缺失，先执行基线提取（{n} 个变更文件）…',
     jobTimeout: '提取作业超时未完成，请稍后在任务中心查看',
     scopeModal: {

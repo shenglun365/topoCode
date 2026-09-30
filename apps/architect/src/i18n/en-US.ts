@@ -1641,6 +1641,7 @@ export default {
       worktree: 'Working tree (incl. uncommitted)',
       cached: 'cached',
       extractScopeTitle: 'Extract & re-compare — confirm scope',
+    extractScopeTitleBaseline: 'Extract & re-compare — baseline assets missing; all component files listed by default (uncheck to narrow)',
     baselineExtracting: 'Baseline-side assets missing; running baseline extraction ({n} changed files) first…',
     jobTimeout: 'Extraction job timed out; check the Task Center',
     scopeModal: {
