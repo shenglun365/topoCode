@@ -3,8 +3,11 @@ import { computed } from 'vue'
 import type { SemanticJob } from './task-center'
 import { useTaskCenter } from './task-center'
 
-const { visible, jobs, active, close, cancel, remove, clearFinished, labelOf, stateOf, pctOf }
+const { visible, jobs, active, cancelling, close, cancel, remove, clearFinished, labelOf, stateOf, pctOf }
   = useTaskCenter()
+const stateText = (j: SemanticJob): string =>
+  cancelling.value.has(j.id) && (j.state === 'queued' || j.state === 'running')
+    ? '停止中…' : stateOf(j)
 
 /** 终态作业可删除；进行中仅可停止。 */
 const isFinal = (j: SemanticJob): boolean => j.state !== 'queued' && j.state !== 'running'
@@ -55,7 +58,7 @@ function fmtTime(ts?: number): string {
       >
         <div class="flex items-center gap-1.5">
           <span class="font-semibold text-ctp-text">{{ labelOf(j) }}</span>
-          <span class="text-[11px]" :class="STATE_CLS[j.state] || 'text-ctp-overlay1'">{{ stateOf(j) }}</span>
+          <span class="text-[11px]" :class="STATE_CLS[j.state] || 'text-ctp-overlay1'">{{ stateText(j) }}</span>
           <span class="flex-1 text-right text-[11px] tabular-nums text-ctp-overlay0">{{ fmtTime(j.startedAt || j.createdAt) }}</span>
           <button
             v-if="!isFinal(j)"

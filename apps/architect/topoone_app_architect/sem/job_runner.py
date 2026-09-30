@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from ..store.jobs import SemanticJobsStore
+from ..store.jobs import SemanticJobsStore, _now
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,10 @@ def _run_job(job_id: str) -> None:
         job = SemanticJobsStore.get(job_id) or job
         if job.get("state") == "cancelled":
             return
+        # 置 running：否则 state 恒 queued 直到终态（任务中心全程显示「排队中」，
+        # 完成直接跳完成；重启对账 running→lost 也无从生效）——实测缺口 2026-09-30
+        SemanticJobsStore.update(job_id, {"state": "running", "startedAt": _now()})
+        job = SemanticJobsStore.get(job_id) or job
         handler = _handlers.get(job.get("kind") or "")
         if handler is None:
             SemanticJobsStore.finish(job_id, state="failed",

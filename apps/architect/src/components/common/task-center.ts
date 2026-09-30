@@ -39,6 +39,8 @@ const STATE_LABEL: Record<string, string> = {
 
 const visible = ref(false)
 const jobs = ref<SemanticJob[]>([])
+/** 本地「停止中」标记（协作式取消有批次延迟，须即时反馈；终态后清除）。 */
+const cancelling = ref<Set<string>>(new Set())
 let timer: ReturnType<typeof setInterval> | null = null
 
 const active = computed(() => jobs.value.filter((j) => j.state === 'queued' || j.state === 'running'))
@@ -59,6 +61,9 @@ async function refresh(): Promise<void> {
       if (before && (before.state === 'running' || before.state === 'queued')
         && j.state !== 'running' && j.state !== 'queued') {
         notifyJobFinished(j)
+        if (cancelling.value.has(j.id)) {
+          const c = new Set(cancelling.value); c.delete(j.id); cancelling.value = c
+        }
       }
     }
   } catch {
@@ -90,10 +95,15 @@ export function useTaskCenter() {
     const qs = new URLSearchParams()
     if (project) qs.set('project', project)
     if (root) qs.set('root', root)
+    const next = new Set(cancelling.value)
+    next.add(id)
+    cancelling.value = next
     try {
       await apiPost(`/kb/semantic/jobs/${id}/cancel?${qs.toString()}`, {})
       void refresh()
-    } catch { /* 忽略 */ }
+    } catch {
+      const c = new Set(cancelling.value); c.delete(id); cancelling.value = c
+    }
   }
 
   /** 删除单条已结束作业记录（终态：done/failed/cancelled/lost；进行中后端 409 拒绝）。
@@ -137,5 +147,5 @@ export function useTaskCenter() {
 
   onBeforeUnmount(stopPolling)
 
-  return { visible, jobs: recent, active, open, toggle, close, refresh, cancel, remove, clearFinished, labelOf, stateOf, pctOf }
+  return { visible, jobs: recent, active, cancelling, open, toggle, close, refresh, cancel, remove, clearFinished, labelOf, stateOf, pctOf }
 }

@@ -14,7 +14,7 @@ def _job_extract_scope(ctx) -> dict:
     """extract_scope 作业执行体：scope = {root, project, scopeType(files|comm),
     key(组件id), files[], kinds[], level, modelId}。
 
-    按 5 文件/批调 engine.extract_scope 并逐批推进进度——整体一次调用会让作业
+    按 2 文件/批调 engine.extract_scope 并逐批推进进度——整体一次调用会让作业
     长时间停在 0%（running 无中间态，任务中心观感为「等待后直接完成」）。"""
     from .engine import extract_scope
     from .paths import resolve_root
@@ -28,7 +28,7 @@ def _job_extract_scope(ctx) -> dict:
     total = len(files)
     ctx.progress(total=total, done=0)
     saved_total = 0
-    BATCH = 5
+    BATCH = 2   # 取消响应粒度：批内 LLM 调用不可中断，批越小停止越快
     for i in range(0, total, BATCH):
         if ctx.cancelled():
             return {"saved": saved_total,
