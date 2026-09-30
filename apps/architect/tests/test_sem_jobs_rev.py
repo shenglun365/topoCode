@@ -140,10 +140,8 @@ def test_job_delete_api(tmp_path, monkeypatch):
     SemanticJobsStore.update(keep["id"], {"state": "running", "startedAt": _now()})
     stale = SemanticJobsStore.create(PID, "extract_delta")
     SemanticJobsStore.finish(stale["id"], state="failed", result={})
-    class _Req:  # 最小 request 桩
-        async def json(self):
-            return {"project": PID}
-    out = body(asyncio.run(jobs_api.api_jobs_clear(_Req())))
+    # FE 同款：参数在 query（body 空）——回归守护(曾因只读 body 清错库)
+    out = body(asyncio.run(jobs_api.api_jobs_clear(request=None, root=None, project=PID)))
     assert (out.get("data") or {}).get("cleared") == 1
     ids = {j["id"] for j in SemanticJobsStore.list(PID)}
     assert keep["id"] in ids and stale["id"] not in ids

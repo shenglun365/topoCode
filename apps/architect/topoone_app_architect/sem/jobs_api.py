@@ -60,11 +60,16 @@ async def api_jobs_delete(job_id: str):
 
 
 @router.post("/kb/semantic/jobs/clear")
-async def api_jobs_clear(request: Request = None):
-    """清除全部已结束作业记录（终态行物理删除；进行中不受影响）。"""
+async def api_jobs_clear(request: Request = None, root: Optional[str] = None,
+                         project: Optional[str] = None):
+    """清除全部已结束作业记录（终态行物理删除；进行中不受影响）。
+
+    ⚠️ 参数走 query(FE clearFinished 把 project 放 query)——只读 body 会拿到
+    空参 → project_id_for 兜底解析成 md5("") 假 pid → 清错库，作业行原封不动
+    (实测「清了又被轮询拉回」2026-09-30)。body 作兼容兜底。"""
     body = await request.json() if request else {}
     from ..store.jobs import SemanticJobsStore
-    pid = project_id_for(body.get("root"), body.get("project"))
+    pid = project_id_for(root or body.get("root"), project or body.get("project"))
     if not pid:
         return err(400, "缺少项目")
     n = await asyncio.to_thread(SemanticJobsStore.clear_finished, pid)
