@@ -6,6 +6,7 @@ import pytest
 
 import topoone_app_architect.ctx as C
 from topoone_app_architect.store import SemanticAssetsStore, SemanticJobsStore
+from topoone_app_architect.store.jobs import _now
 from topoone_app_architect.sem.incremental import _canonical_key
 
 PID = ""
@@ -85,6 +86,29 @@ def test_job_lifecycle(tmp_path, monkeypatch):
     # 列表过滤
     assert SemanticJobsStore.list(PID, state="cancelled")[0]["id"] == job["id"]
     assert SemanticJobsStore.active(PID) == []
+
+
+def test_job_delete_and_clear_finished(tmp_path, monkeypatch):
+    """终态作业可删（活跃拒绝）；清除只删终态行。"""
+    _ctx_setup(tmp_path, monkeypatch)
+    done = SemanticJobsStore.create(PID, "extract_impl", {"type": "files"})
+    SemanticJobsStore.finish(done["id"], state="done", result={"summary": "ok"})
+    cancel = SemanticJobsStore.create(PID, "extract_delta")
+    SemanticJobsStore.finish(cancel["id"], state="cancelled")
+    running = SemanticJobsStore.create(PID, "enhance_desc", llm=True)
+    SemanticJobsStore.update(running["id"], {"state": "running", "startedAt": _now()})
+    # 活跃作业删除拒绝
+    with pytest.raises(ValueError):
+        SemanticJobsStore.delete(running["id"])
+    # 终态单删
+    assert SemanticJobsStore.delete(cancel["id"]) is True
+    assert SemanticJobsStore.get(cancel["id"]) is None
+    # 清除：只删终态（done），running 保留
+    assert SemanticJobsStore.clear_finished(PID) == 1
+    assert SemanticJobsStore.get(done["id"]) is None
+    assert SemanticJobsStore.get(running["id"]) is not None
+    # 再清一次无终态可清
+    assert SemanticJobsStore.clear_finished(PID) == 0
 
 
 def test_job_recover_lost(tmp_path, monkeypatch):

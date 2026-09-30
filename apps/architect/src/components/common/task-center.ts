@@ -5,7 +5,7 @@
  * 各页面可按需引用 `taskCenterVisible` 呼出。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { apiGet, apiPost } from '@/services/api-client'
+import { apiDelete, apiGet, apiPost } from '@/services/api-client'
 import { currentProjectParams } from '@/services/project-service'
 import { notifyJobFinished } from '@/pages/asset-workspace/invalidate-bus'
 
@@ -96,6 +96,26 @@ export function useTaskCenter() {
     } catch { /* 忽略 */ }
   }
 
+  /** 删除单条已结束作业记录（终态：done/failed/cancelled/lost；进行中后端 409 拒绝）。 */
+  async function remove(id: string): Promise<void> {
+    try {
+      await apiDelete(`/kb/semantic/jobs/${id}`)
+      jobs.value = jobs.value.filter((j) => j.id !== id)
+    } catch { /* 忽略，下轮轮询校正 */ }
+  }
+
+  /** 一键清除全部已结束记录（进行中不受影响）。 */
+  async function clearFinished(): Promise<void> {
+    const { project, root } = currentProjectParams()
+    const qs = new URLSearchParams()
+    if (project) qs.set('project', project)
+    if (root) qs.set('root', root)
+    try {
+      await apiPost(`/kb/semantic/jobs/clear?${qs.toString()}`, {})
+      jobs.value = jobs.value.filter((j) => j.state === 'queued' || j.state === 'running')
+    } catch { /* 忽略 */ }
+  }
+
   const labelOf = (j: SemanticJob): string => KIND_LABEL[j.kind] || j.kind
   const stateOf = (j: SemanticJob): string => STATE_LABEL[j.state] || j.state
   const pctOf = (j: SemanticJob): number => {
@@ -112,5 +132,5 @@ export function useTaskCenter() {
 
   onBeforeUnmount(stopPolling)
 
-  return { visible, jobs: recent, active, open, toggle, close, refresh, cancel, labelOf, stateOf, pctOf }
+  return { visible, jobs: recent, active, open, toggle, close, refresh, cancel, remove, clearFinished, labelOf, stateOf, pctOf }
 }

@@ -46,6 +46,31 @@ async def api_jobs_get(job_id: str):
     return ok(job)
 
 
+@router.delete("/kb/semantic/jobs/{job_id}")
+async def api_jobs_delete(job_id: str):
+    """删除单条作业记录（仅终态：done/failed/cancelled/lost）。"""
+    from ..store.jobs import SemanticJobsStore
+    try:
+        removed = await asyncio.to_thread(SemanticJobsStore.delete, job_id)
+    except ValueError as e:
+        return err(409, str(e))
+    if not removed:
+        return err(404, "作业不存在")
+    return ok({"deleted": job_id})
+
+
+@router.post("/kb/semantic/jobs/clear")
+async def api_jobs_clear(request: Request = None):
+    """清除全部已结束作业记录（终态行物理删除；进行中不受影响）。"""
+    body = await request.json() if request else {}
+    from ..store.jobs import SemanticJobsStore
+    pid = project_id_for(body.get("root"), body.get("project"))
+    if not pid:
+        return err(400, "缺少项目")
+    n = await asyncio.to_thread(SemanticJobsStore.clear_finished, pid)
+    return ok({"cleared": n})
+
+
 @router.post("/kb/semantic/extract-impl")
 async def api_extract_impl(request: Request = None):
     """结构化提取作业提交（批2-4）：{rev?, keys?(组件id[]), files?, base?}。

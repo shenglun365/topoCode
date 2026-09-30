@@ -13,7 +13,8 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
-from .base import _dumps, _fetchall_routed, _get, _insert, _row_to_api, _target_db, _to_snake, _update, next_id
+from .base import (_delete, _dumps, _fetchall_routed, _get, _insert, _row_to_api,
+                   _target_db, _to_snake, _update, next_id)
 
 TABLE = "arch_semantic_jobs"
 
@@ -131,6 +132,26 @@ class SemanticJobsStore:
     @classmethod
     def request_cancel(cls, job_id: str) -> Optional[dict]:
         return cls.update(job_id, {"cancelRequested": 1})
+
+    @classmethod
+    def delete(cls, job_id: str) -> bool:
+        """删除单条作业行——仅终态可删（queued/running 须先取消）。"""
+        job = cls.get(job_id)
+        if not job:
+            return False
+        if job.get("state") in _ACTIVE_STATES:
+            raise ValueError("作业仍在进行中，请先停止")
+        return _delete(TABLE, job_id)
+
+    @classmethod
+    def clear_finished(cls, project_id: str) -> int:
+        """清除项目内全部终态作业行（done/failed/cancelled/lost），返回清除数。"""
+        db = _target_db(TABLE, project_id)
+        cur = db.execute(
+            f"DELETE FROM {TABLE} WHERE project_id=? AND state NOT IN ('queued','running')",
+            (project_id,))
+        db.commit()
+        return cur.rowcount or 0
 
     @classmethod
     def recover_lost(cls, project_id: str) -> int:
