@@ -1965,18 +1965,18 @@ export default {
     compExtractFailed: '定向提取失败：',
     compExtractCandidates: '组件ID 未命中，可选组件：',
     framework: {
-      title: '认知框架标准',
+      title: '分析框架',
       active: '当前',
       kindsUnit: '类',
       levelsUnit: '层',
-      hint: '切换标准会作废全部已提取资产（命名不迁移），需按需重新提取。代码变更（标准不变）不受影响，走过期/刷新机制。',
-      confirmMsg: '即将切换认知框架标准。\n\n将作废 {n} 个已提取资产（{dist}），命名不迁移，需按需重新提取。\n\n确认执行？',
+      hint: '切换分析框架会作废全部已提取资产（命名不迁移），需按需重新提取。代码变更（框架不变）不受影响，走过期/刷新机制。',
+      confirmMsg: '即将切换分析框架。\n\n将作废 {n} 个已提取资产（{dist}），命名不迁移，需按需重新提取。\n\n确认执行？',
       switchFailed: '框架切换失败',
-      tier: { low: '低配', mid: '中配', high: '高配' },
+      tier: { low: '精简模式', mid: '标准模式', high: '高级 自定义模式' },
       tierDesc: {
         low: '精简：5 类本体·实现层·无治理轴，验收仅覆盖性',
         mid: '标准：6 类本体·3 层粒度·轻量治理条目',
-        high: '完整：全量+自建框架与自定义值域开放',
+        high: '高级自定义：全量+自建框架与自定义值域开放',
       },
     },
     coverage: {
