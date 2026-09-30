@@ -342,7 +342,7 @@ export function useAssetCore(D: WsDeps) {
     const diffSums = new Map<string, { changed: number; added: number; deleted: number }>()
     const diffDirect = new Map<string, { changed: number; added: number; deleted: number }>()
     const cmpBucketById: Map<string, 'modified' | 'added' | 'deleted'> = D.diff?.cmpBucketById ?? new Map()
-    if (D.diff?.diffMode.value && cmpBucketById.size) {
+    if (cmpBucketById.size) {
       const byId = new Map(items.value.map((x) => [x.id, x]))
       for (const [id, bucket] of cmpBucketById) {
         const a = byId.get(id)

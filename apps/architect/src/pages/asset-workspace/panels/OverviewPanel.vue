@@ -11,13 +11,15 @@ const { t } = useI18n()
 const {
   baselineDiffData,
   compCatalog,
+  cmpTarget,
+  commitOptions,
+  baselineSha,
   compareData,
   compareError,
   compareHint,
   compareLoading,
   coverageInfo,
   diffLoading,
-  diffMode,
   extractPendingAndRecompare,
   extractingPending,
   frameworkInfo,
@@ -29,6 +31,7 @@ const {
   levels,
   overviewStats,
   purging,
+  runCompare,
   runPurge,
   statusCounts,
   switchTier,
@@ -259,13 +262,27 @@ const {
               </div>
             </div>
 
-            <!-- 基线变更（三视图 diff · 概览：变更文件清单） -->
-            <div v-if="diffMode" class="panel overflow-hidden">
+            <!-- 基线对比（常驻信息卡 · 三视图 diff）：基准固定=KB 基线，目标可选(默认工作区) -->
+            <div class="panel overflow-hidden">
               <div class="panel-header">
                 <span class="flex items-center gap-2">
                   <ArrowsRightLeftIcon class="w-4 h-4 text-ctp-blue" />{{ t('assetMgmt.diff.title') }}
                 </span>
-                <span class="flex items-center gap-1">
+                <span class="flex items-center gap-1 flex-wrap">
+                  <span
+                    class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono !text-[9px]"
+                    :title="t('assetMgmt.diff.cmpBaseHint')"
+                  >{{ t('assetMgmt.diff.cmpBase') }}: {{ t('assetMgmt.diff.kbBaseline') }}{{ baselineSha ? ` (${baselineSha.slice(0, 8)})` : '' }}</span>
+                  <span class="text-[10px] text-ctp-overlay0 shrink-0">→</span>
+                  <select
+                    v-model="cmpTarget"
+                    class="input !py-0.5 !px-1.5 !text-[10px] w-auto max-w-[200px]"
+                    :title="t('assetMgmt.diff.cmpTargetHint')"
+                    @change="runCompare"
+                  >
+                    <option value="worktree">{{ t('assetMgmt.diff.worktree') }}</option>
+                    <option v-for="c in commitOptions" :key="`t-${c.oid}`" :value="c.oid">{{ c.oid.slice(0, 8) }} {{ c.subject.slice(0, 26) }}</option>
+                  </select>
                   <span v-if="baselineDiffData?.aligned" class="chip bg-ctp-green/15 text-ctp-green">{{ t('assetMgmt.diff.aligned') }}</span>
                   <span v-else-if="baselineDiffData?.stale" class="chip bg-ctp-yellow/15 text-ctp-yellow">{{ t('assetMgmt.diff.stale', { n: totalChanged }) }}</span>
                   <span v-else class="chip bg-ctp-surface0 text-ctp-subtext0">{{ t('assetMgmt.diff.noBaseline') }}</span>
@@ -295,7 +312,7 @@ const {
                 {{ t('assetMgmt.diff.dirty') }}: {{ baselineDiffData.dirty }}
               </div>
 
-              <!-- 对比结果明细：资产变化 + 组件变化(其他桶) + 跨域联系；起止 head 在顶部工具栏选择 -->
+              <!-- 对比结果明细：资产变化 + 组件变化(其他桶) + 跨域联系；基准固定基线，目标在卡头选择 -->
               <div class="px-3 pb-3 pt-2 mt-1 border-t border-ctp-surface0 space-y-2">
                 <p v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</p>
                 <p v-else-if="compareError" class="text-[10px] text-ctp-red">{{ compareError }}</p>

@@ -1,6 +1,7 @@
 /**
- * 资产工作区 · 基线对比域（MS6-W1 自 AssetManagementWorkspace.vue 搬移，纯移动零逻辑改动）。
- * 三视图 diff（基线 lastHead → 工作区）+ 任意 head 对比 + 待提取闭环 + 变更标记族。
+ * 资产工作区 · 基线对比域（MS6-W1 自 AssetManagementWorkspace.vue 搬移；常驻化改造）。
+ * 基准固定 = KB 基线(baselineCommit)；对比目标可选(工作区默认/任意提交)。
+ * 三视图 diff 叠加(概览卡/语义行徽标/图谱着色)常驻生效，无开关。
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -18,8 +19,7 @@ export function useAssetDiff(D: WsDeps) {
   const items = core.items as Ref<SemanticAsset[]>
   const treeComps = core.treeComps
 
-  // ---- 基线对比模式（三视图 diff：基线 lastHead → 工作区 变更文件集）----
-  const diffMode = ref(false)
+  // ---- 基线对比（常驻：基线 lastHead → 工作区 变更文件集）----
   const diffLoading = ref(false)
   const baselineDiffData = ref<BaselineDiff | null>(null)
 
@@ -34,17 +34,14 @@ export function useAssetDiff(D: WsDeps) {
     }
   }
 
-  function toggleDiffMode() {
-    diffMode.value = !diffMode.value
-    if (diffMode.value) {
-      loadBaselineDiff()
-      void loadCommitOptions()
-      void runCompare()
-    }
+  /** 常驻初始化（页面挂载 idle 调用）：变更集 + 提交选项 + 首次对比。 */
+  function initCompare() {
+    loadBaselineDiff()
+    void loadCommitOptions()
+    void runCompare()
   }
 
-  // ---- 任意 head 对 vs head/工作区 资产/组件对比(基准缺省=KB 基线 baselineCommit；缓存态) ----
-  const cmpBase = ref('')            // '' = KB 基线(baselineCommit)
+  // ---- 资产/组件对比：基准固定=KB 基线(baselineCommit)，目标可选(缓存态) ----
   const cmpTarget = ref('worktree')  // 'worktree' = 工作区(含未提交/未跟踪)
   const commitOptions = ref<GitLogEntry[]>([])
   const baselineSha = ref('')
@@ -66,7 +63,7 @@ export function useAssetDiff(D: WsDeps) {
     compareHint.value = ''
     try {
       compareData.value = await semanticAssetService.assetCompare(
-        cmpBase.value || undefined,
+        undefined,
         cmpTarget.value || 'worktree',
       ) ?? null
     } catch (e) {
@@ -143,7 +140,6 @@ export function useAssetDiff(D: WsDeps) {
    *  ⚠️ 模板勿直接调用本函数：它遍历 astRefs，行内多次调用会重复求值；
    *  请用 changeMarkById（每资产仅算一次）。 */
   function assetChangeMark(a: SemanticAsset): 'added' | 'modified' | 'deleted' | '' {
-    if (!diffMode.value) return ''
     const files = a.astRefs?.map((r) => r.file) ?? []
     let mark: 'added' | 'modified' | 'deleted' | '' = ''
     for (const f of files) {
@@ -155,12 +151,12 @@ export function useAssetDiff(D: WsDeps) {
     return mark
   }
 
-  /** 资产 id → 变更类别（语义行徽标渲染入口：diffMode/变更集变化时统一重算一次）。
+  /** 资产 id → 变更类别（语义行徽标渲染入口：对比数据/变更集变化时统一重算一次）。
    *  对比口径(compare)优先：资产级 side/strong 判定精确到符号段，文件级口径仅兜底。 */
   const cmpBucketById = computed<Map<string, 'modified' | 'added' | 'deleted'>>(() => {
     const m = new Map<string, 'modified' | 'added' | 'deleted'>()
     const c = compareData.value
-    if (!diffMode.value || !c) return m
+    if (!c) return m
     for (const a of c.assets.changed) m.set(a.id, 'modified')
     for (const a of c.assets.new) m.set(a.id, 'added')
     for (const a of c.assets.removed) m.set(a.id, 'deleted')
@@ -169,7 +165,6 @@ export function useAssetDiff(D: WsDeps) {
 
   const changeMarkById = computed<Map<string, 'added' | 'modified' | 'deleted'>>(() => {
     const m = new Map<string, 'added' | 'modified' | 'deleted'>()
-    if (!diffMode.value) return m
     const buckets = cmpBucketById.value
     for (const a of items.value) {
       const mark = buckets.get(a.id) ?? assetChangeMark(a)
@@ -182,7 +177,6 @@ export function useAssetDiff(D: WsDeps) {
    *  compare 资产经 items 反查(锚点路径与树同基准)；结果供文件行彩色计数 chip。 */
   const diffFileCounts = computed<Map<string, { changed: number; added: number; deleted: number }>>(() => {
     const m = new Map<string, { changed: number; added: number; deleted: number }>()
-    if (!diffMode.value) return m
     const byId = new Map(items.value.map((x) => [x.id, x]))
     const buckets = cmpBucketById.value
     for (const [id, bucket] of buckets) {
@@ -209,7 +203,7 @@ export function useAssetDiff(D: WsDeps) {
   }
   const pendingFileSet = computed<Set<string>>(() => {
     const s = new Set<string>()
-    if (diffMode.value && compareData.value) {
+    if (compareData.value) {
       for (const f of compareData.value.assets.pending.files) {
         const t = treeFileOf(f)
         if (t) s.add(t)
@@ -219,7 +213,7 @@ export function useAssetDiff(D: WsDeps) {
   })
   const addedFileSet = computed<Set<string>>(() => {
     const s = new Set<string>()
-    if (diffMode.value && compareData.value) {
+    if (compareData.value) {
       for (const f of compareData.value.files.added) {
         const t = treeFileOf(f)
         if (t) s.add(t)
@@ -254,8 +248,8 @@ export function useAssetDiff(D: WsDeps) {
   })
 
   return {
-    diffMode, diffLoading, baselineDiffData, loadBaselineDiff, toggleDiffMode,
-    cmpBase, cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
+    diffLoading, baselineDiffData, loadBaselineDiff, initCompare,
+    cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
     loadCommitOptions, runCompare,
     extractingPending, pendingExtractable, extractPendingAndRecompare,
     changedFileMap, assetChangeMark, cmpBucketById, changeMarkById, diffFileCounts,

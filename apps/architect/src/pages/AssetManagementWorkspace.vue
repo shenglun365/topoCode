@@ -58,12 +58,10 @@ const {
   ensureAssetConversation, importHistory, onImportNewConversation,
   registerChatHook, askAgent, seedConventionIds,
   onConventionConfirm, onConventionIgnore, referenceComp, referenceAsset,
-  diffMode, diffLoading, baselineDiffData, toggleDiffMode,
-  cmpBase, cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
-  loadCommitOptions, runCompare,
-  extractingPending, pendingExtractable, extractPendingAndRecompare,
+  compareData,
+  extractingPending, extractPendingAndRecompare,
   changeMarkById, diffFileCounts, pendingFileSet, addedFileSet,
-  diffMarkLabel, changedFilesForGraph, totalChanged,
+  diffMarkLabel, changedFilesForGraph, initCompare,
   frameworkInfo, coverageInfo, fwLoading, fwSwitching, fwPreview,
   loadFramework, loadCoverage, switchTier, askExtractComponent,
   compCoverage, copiedKey, copyCompRef,
@@ -113,7 +111,7 @@ onMounted(async () => {
   // 首屏关键链(资产树/概览/状态)；未归属清单非首屏必需 → idle 延迟(批4-3 懒加载)
   await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage()])
   const idle = (fn: () => void) => (window.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 800)))(fn)
-  idle(() => { void loadUnownedFiles(); void loadUnownedLinks() })
+  idle(() => { void loadUnownedFiles(); void loadUnownedLinks(); initCompare() })
   // 失效总线(批4-3)：任务中心作业完成 → 核心数据刷新（防抖合并在总线内）
   offInvalidate = onAssetsInvalidated(() => {
     void loadSemantic()
@@ -159,20 +157,6 @@ onUnmounted(() => {
           </button>
         </div>
         <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">{{ statusText }}</span>
-        <button
-          class="btn btn-xs"
-          :class="diffMode ? 'btn-blue' : 'btn-ghost'"
-          :title="t('assetMgmt.diff.hint')"
-          @click="toggleDiffMode"
-        >
-          <ArrowsRightLeftIcon class="w-3.5 h-3.5" :class="diffLoading ? 'animate-spin' : ''" />
-          {{ t('assetMgmt.diff.toggle') }}
-        </button>
-        <span v-if="diffMode && baselineDiffData" class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">
-          <template v-if="baselineDiffData.aligned">{{ t('assetMgmt.diff.aligned') }}</template>
-          <template v-else-if="baselineDiffData.stale">{{ t('assetMgmt.diff.stale', { n: totalChanged }) }}</template>
-          <template v-else>{{ t('assetMgmt.diff.noBaseline') }}</template>
-        </span>
          <div class="flex-1" />
          <button
            class="btn btn-sm btn-ghost"
@@ -208,49 +192,6 @@ onUnmounted(() => {
            <StopIcon class="w-3.5 h-3.5" />
          </button>
        </div>
-      <!-- 基线对比 · 对比起止 head 选择(任意 head 对 vs head/工作区；全 tab 可见) + 紧凑结果 -->
-      <div v-if="diffMode" class="mt-2.5 flex items-center gap-1.5 flex-wrap">
-        <span class="text-[10px] text-ctp-overlay0 shrink-0">{{ t('assetMgmt.diff.cmpBase') }}</span>
-        <select
-          v-model="cmpBase"
-          class="input !py-0.5 !px-1.5 !text-[10px] min-w-0 max-w-[30%]"
-          :title="t('assetMgmt.diff.cmpBaseHint')"
-          @change="runCompare"
-        >
-          <option value="">{{ t('assetMgmt.diff.kbBaseline') }}{{ baselineSha ? ` (${baselineSha.slice(0, 8)})` : '' }}</option>
-          <option v-for="c in commitOptions" :key="`b-${c.oid}`" :value="c.oid">{{ c.oid.slice(0, 8) }} {{ c.subject.slice(0, 26) }}</option>
-        </select>
-        <span class="text-ctp-overlay0 shrink-0">→</span>
-        <select
-          v-model="cmpTarget"
-          class="input !py-0.5 !px-1.5 !text-[10px] min-w-0 max-w-[30%]"
-          :title="t('assetMgmt.diff.cmpTargetHint')"
-          @change="runCompare"
-        >
-          <option value="worktree">{{ t('assetMgmt.diff.worktree') }}</option>
-          <option v-for="c in commitOptions" :key="`t-${c.oid}`" :value="c.oid">{{ c.oid.slice(0, 8) }} {{ c.subject.slice(0, 26) }}</option>
-        </select>
-        <!-- 重新对比按钮已删：选择即对比(@change)/提取闭环自带重比；工作区有新改动时重选目标即可触发 -->
-        <span v-if="compareLoading" class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diff.cmpRunning') }}</span>
-        <span v-else-if="compareError" class="text-[10px] text-ctp-red truncate max-w-[40%]" :title="compareError">{{ compareError }}</span>
-        <span v-else-if="compareHint" class="text-[10px] text-ctp-peach truncate max-w-[40%]" :title="compareHint">{{ compareHint }}</span>
-        <!-- 结果数字不再重复在此：统一在下方「对比结果明细」统计行(缓存态/资产变化/待提取) -->
-        <template v-else-if="compareData && !compareData.noChanges">
-          <!-- 提取闭环(通用)：pending 中「目标侧内容==工作区内容」的子集可经工作区提取锚定；
-               内容已分叉的自动排除(提取历史内容会覆盖现役资产摘要)。完成后自动重新对比 -->
-          <button
-            v-if="pendingExtractable.length && !extractingPending"
-            class="btn btn-xs btn-blue !py-0.5 shrink-0"
-            :title="pendingExtractable.length < compareData.assets.pending.count
-              ? t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length }) + ' ' + t('assetMgmt.diff.extractDiverged', { m: compareData.assets.pending.count - pendingExtractable.length })
-              : t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length })"
-            @click="extractPendingAndRecompare"
-          >
-            <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.diff.extractRecompare', { n: pendingExtractable.length }) }}
-          </button>
-          <span v-if="extractingPending" class="inline-flex items-center gap-1 text-[10px] text-ctp-overlay0"><ArrowPathIcon class="w-3 h-3 animate-spin" />{{ t('assetMgmt.diff.extracting') }}</span>
-        </template>
-      </div>
     </div>
 
     <div

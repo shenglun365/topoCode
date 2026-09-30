@@ -26,7 +26,6 @@ const {
   detailLoading,
   diffFileCounts,
   diffMarkLabel,
-  diffMode,
   diffRollup,
   expanded,
   extractAllUnowned,
@@ -146,7 +145,7 @@ const {
                 </template>
                 <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ subtreeCount.get(g.key) ?? 0 }}</span>
                 <!-- 基线对比 · 组件(子树)变化上卷：需更新/新增/移除 彩色计数 -->
-                <template v-if="diffMode && diffRollup.get(g.key)">
+                <template v-if="diffRollup.get(g.key)">
                   <span
                     v-if="diffRollup.get(g.key)!.changed"
                     class="chip !text-[8px] bg-ctp-yellow/15 text-ctp-yellow shrink-0 font-mono"
@@ -264,7 +263,7 @@ const {
                   <CodeBracketIcon class="w-3 h-3" />
                 </button>
                 <!-- 基线对比 · 文件级变化归属：需更新/新增/移除彩色计数 + 待提取/新增文件 -->
-                <template v-if="diffMode && row.file">
+                <template v-if="row.file">
                   <span
                     v-if="diffFileCounts.get(row.file)?.changed"
                     class="chip !text-[8px] bg-ctp-yellow/15 text-ctp-yellow shrink-0 font-mono"
@@ -373,7 +372,7 @@ const {
                     class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
                   >{{ t('assetMgmt.modified') }}</span>
                   <span
-                    v-if="diffMode && changeMarkById.get(a.id)"
+                    v-if="changeMarkById.get(a.id)"
                     class="chip !text-[9px] shrink-0"
                     :class="changeMarkById.get(a.id) === 'added' ? 'bg-ctp-green/15 text-ctp-green' : changeMarkById.get(a.id) === 'deleted' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-yellow/15 text-ctp-yellow'"
                     :title="diffMarkLabel(changeMarkById.get(a.id))"
