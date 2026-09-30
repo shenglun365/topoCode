@@ -12,7 +12,7 @@ import {
   CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon,
   ArrowsRightLeftIcon, ClipboardDocumentListIcon,
   ChevronDownIcon, ChevronRightIcon,
-  SparklesIcon, StopIcon, TrashIcon, XMarkIcon,
+  SparklesIcon, TrashIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'
@@ -71,8 +71,6 @@ const {
   unownedJob, unownedExtracting, unownedJobHint,
   extractAllUnowned, stopUnownedExtract,
   unownedLinks, unownedLinkOf, unownedLinkTitle, unownedLinkByAssetId,
-  syncPlan, syncPlanOpen, syncPlanLoading, syncJob, syncExtracting,
-  planSyncExtract, cancelSyncExtract, confirmSyncExtract, stopSyncExtract,
   purgeOpen, purgeResult, purgeBusy, runPurge, confirmPurge, cancelPurge,
   batchOpen, batchRunning, batchAction, batchLast, batchPreview, runBatch,
   graphTabs, activeGraphTab, openGraphTab, closeGraphTab,
@@ -128,7 +126,7 @@ onMounted(async () => {
     if (unownedJob.value?.running) ws.startUnownedJobPolling()
   })
   void ws.pollSyncJobOnce().then(() => {
-    if (syncJob.value?.running) ws.startSyncJobPolling()
+    if (ws.syncJob.value?.running) ws.startSyncJobPolling()
   })
 })
 
@@ -163,33 +161,6 @@ onUnmounted(() => {
            @click="historyOpen = true"
          >
            <ClipboardDocumentListIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.historyButton') }}
-         </button>
-         <!-- 校验并提取：先校验变化量 → 确认 → 快照批量作业(后端，页面关闭不影响) -->
-         <button
-           class="btn btn-sm"
-           :class="syncExtracting ? 'btn-primary' : 'btn-primary'"
-           :disabled="syncPlanLoading || syncExtracting"
-           :title="syncExtracting
-             ? (syncJob?.current
-                ? t('assetMgmt.sync.extractingCurrent', { saved: syncJob?.saved ?? 0, current: syncJob.current })
-                : t('assetMgmt.sync.extractingHint', { saved: syncJob?.saved ?? 0 }))
-             : t('assetMgmt.sync.hint')"
-           @click="planSyncExtract"
-         >
-            <ArrowPathIcon
-              class="w-3.5 h-3.5"
-              :class="syncPlanLoading || syncExtracting ? 'animate-spin' : ''"
-            />{{ syncExtracting
-             ? t('assetMgmt.sync.extracting', { done: syncJob?.done ?? 0, total: syncJob?.total ?? 0 })
-             : (syncPlanLoading ? t('assetMgmt.sync.planning') : t('assetMgmt.sync.button')) }}
-         </button>
-         <button
-           v-if="syncExtracting"
-           class="btn btn-sm btn-ghost"
-           :title="t('assetMgmt.sync.stop')"
-           @click="stopSyncExtract"
-         >
-           <StopIcon class="w-3.5 h-3.5" />
          </button>
        </div>
     </div>
