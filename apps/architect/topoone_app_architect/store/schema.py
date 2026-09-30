@@ -361,6 +361,23 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_jobs_state ON arch_semantic_jobs(project_id, state);
 
+    -- 组件级聚合视图缓存(批3)：LLM 归并产物的持久缓存(虚拟节点内容，可清除重生成)。
+    -- 组成关系不落此表——成员为运行时动态解析(需求 3-C)。
+    CREATE TABLE IF NOT EXISTS arch_component_views (
+        id TEXT PRIMARY KEY,
+        project_id TEXT DEFAULT '',
+        component_id TEXT DEFAULT '',
+        rev TEXT DEFAULT 'workspace',
+        facets TEXT DEFAULT '{}',           -- JSON: 4 面(capability/interface_facet/control_logic/data_ownership)
+        members TEXT DEFAULT '[]',          -- JSON: 生成时的成员资产 id 快照(溯源)
+        status TEXT DEFAULT 'active',       -- active | stale
+        model_id TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        generated_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_compview ON arch_component_views(project_id, component_id, rev);
+
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,
         schema_version INTEGER DEFAULT 1,  -- K1 格式版本化(登记: docs/architect/kb-schema-versions.md)

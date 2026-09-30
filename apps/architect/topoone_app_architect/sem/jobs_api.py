@@ -64,3 +64,66 @@ async def api_extract_impl(request: Request = None):
         files=body.get("files") or None,
         base=body.get("base") or "HEAD")
     return ok(r)
+
+
+@router.post("/kb/semantic/extract-logic")
+async def api_extract_logic(request: Request = None):
+    """逻辑级提取作业提交（批3，需求 3-E）：{files?, rev?, modelId?, scopeKey?}。
+
+    级联前置：范围内无实现级骨架自动先跑结构化提取(stages=impl→logic)。LLM 类。
+    """
+    from .logic_extract import start_extract_logic
+    body = await request.json() if request else {}
+    r = await asyncio.to_thread(
+        start_extract_logic, body.get("root"), body.get("project"),
+        rev=body.get("rev") or "workspace",
+        files=body.get("files") or None,
+        model_id=body.get("modelId") or None,
+        scope_key=body.get("scopeKey") or "")
+    return ok(r)
+
+
+@router.get("/kb/semantic/logic/{asset_id}/members")
+async def api_logic_members(asset_id: str):
+    """逻辑链组成成员动态解析（需求 3-C：运行时取成员当前状态）。"""
+    from ..store import SemanticAssetsStore
+    from .logic_extract import resolve_members
+    a = SemanticAssetsStore.get(asset_id)
+    if not a:
+        return err(404, "资产不存在")
+    if (a.get("level") or "") != "logic":
+        return err(400, "非逻辑级资产")
+    return ok({"members": await asyncio.to_thread(resolve_members, a)})
+
+
+@router.get("/kb/semantic/component-view/{component_id}")
+async def api_component_view(component_id: str, root: Optional[str] = None,
+                             project: Optional[str] = None,
+                             rev: str = "workspace"):
+    """组件聚合视图读取（缓存 active 直返；stale 带 regenerate 标记）。"""
+    from .component_view import get_component_view
+    r = await asyncio.to_thread(get_component_view, root, project, component_id, rev)
+    return ok(r)
+
+
+@router.post("/kb/semantic/component-view")
+async def api_component_view_gen(request: Request = None):
+    """组件聚合视图生成作业提交（批3，需求 4.1）：{keys: [组件id], rev?, modelId?}。LLM 类。"""
+    from .component_view import start_gen_component_view
+    body = await request.json() if request else {}
+    r = await asyncio.to_thread(
+        start_gen_component_view, body.get("root"), body.get("project"),
+        body.get("keys") or [],
+        rev=body.get("rev") or "workspace",
+        model_id=body.get("modelId") or None)
+    return ok(r)
+
+
+@router.delete("/kb/semantic/component-view/{component_id}")
+async def api_component_view_delete(component_id: str, root: Optional[str] = None,
+                                    project: Optional[str] = None,
+                                    rev: str = "workspace"):
+    """清除组件视图缓存（需求 4.1：手动清除后可重生成）。"""
+    from .component_view import clear_component_view
+    r = await asyncio.to_thread(clear_component_view, root, project, component_id, rev)
+    return ok(r)

@@ -3980,6 +3980,13 @@ def invalidate_assets_for_files(pid: str, files: List[str], *,
         except Exception:
             pass
         invalidated.append(a["id"])
+    # 上层影响辐射(批3)：实现级资产失效 → 依赖其成员快照的组件聚合视图打脏
+    if invalidated:
+        try:
+            from .component_view import mark_stale_for_assets
+            mark_stale_for_assets(pid, invalidated)
+        except Exception as e:  # noqa: BLE001 — 辐射失败不影响主失效流程
+            logger.warning("[semantic] 组件视图辐射失败: %s", e)
     return invalidated
 
 

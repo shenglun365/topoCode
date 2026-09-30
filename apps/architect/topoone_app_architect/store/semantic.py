@@ -15,7 +15,11 @@ class SemanticAssetsStore:
     def _api(cls, row: dict) -> dict:
         return _row_to_api_v("arch_semantic_assets", row)
 
-    KINDS = ("entity", "contract", "state", "rule", "process", "decision")
+    # 类型全集：实现级 6 类 + 逻辑级 4 链(批3, 需求 1-B)。
+    # 组件级 4 面(capability 等)不落本表(虚拟节点, arch_component_views), 不入此列。
+    KINDS = ("entity", "contract", "state", "rule", "process", "decision",
+             "process_chain", "validation_chain", "aggregation_chain",
+             "orchestration_chain")
     LEVELS = ("implementation", "logic", "business")
     # 列表瘦身列(仅排除 pseudo/detail/line_notes/node_brief/edge_notes)：
     # 树/列表/图谱仅需元数据+ast_refs；detail(3776 行实测≈2MB)等大字段只在
