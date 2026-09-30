@@ -66,7 +66,8 @@ export function useFramework(D: WsDeps) {
   }
 
   /** 按需提取（范围确认弹窗 → 后台任务）：弹窗列组件 owns 文件(可勾选缩小范围)，
-   *  确认后提交 extract_scope 作业；过程与结果以对话回合呈现，完成后刷新资产数据。 */
+   *  确认后提交 extract_scope 作业。不写对话消息——进度/结果在任务中心，
+   *  完成经失效总线自动刷新资产数据。 */
   async function askExtractComponent(key: string, name: string) {
     if (D.chat.extractBusy.value) return
     const comp = core.compById.value.get(key)
@@ -74,38 +75,19 @@ export function useFramework(D: WsDeps) {
     if (!owns.length) return
     const picked = await D.diff.pickScope(t('assetMgmt.compExtractScopeTitle', { name }), owns)
     if (!picked?.length) return
-    turns.value.push({ role: 'user', content: t('assetMgmt.compExtractUser', { name, key }) })
-    const idx = turns.value.push({
-      role: 'assistant',
-      content: t('assetMgmt.compExtractJobSubmitted', { n: picked.length }),
-    }) - 1
     D.chat.extractBusy.value = true
     try {
       const r = await semanticAssetService.startExtractScope(
         { scopeType: 'comm', key, files: picked },
         { kinds: core.kinds.map((k: { value: string }) => k.value), level: 'implementation' })
-      const jobId = r?.job?.id
-      if (!r?.started || !jobId) {
-        turns.value[idx].content = r?.reason === 'already_running'
+      if (!r?.started || !r.job?.id) {
+        await dialog.alert(r?.reason === 'already_running'
           ? t('assetMgmt.compExtractAlreadyRunning')
-          : t('assetMgmt.compExtractFailed')
-        return
+          : t('assetMgmt.compExtractFailed'))
       }
-      const done = await D.diff.waitForJob(jobId)
-      if (!done.ok) {
-        turns.value[idx].content = `${t('assetMgmt.compExtractFailed')}\n${done.error || ''}`
-        return
-      }
-      turns.value[idx].content = t('assetMgmt.compExtractJobDone')
-        + (done.summary ? `\n${done.summary}` : '')
-      // 数据变更 → 刷新列表/状态/覆盖度(与对话提取联动同口径)
-      D.chat.refreshAfterExtract()
-    } catch (err: any) {
-      turns.value[idx].content = err?.name === 'AbortError'
-        ? t('requirement.chat.semanticStopped')
-        : (err?.message || t('assetMgmt.batchFailed'))
+    } catch (e: any) {
+      await dialog.alert(e?.message || t('assetMgmt.batchFailed'))
     } finally {
-      D.chat.extractAbort.value = null
       D.chat.extractBusy.value = false
     }
   }
