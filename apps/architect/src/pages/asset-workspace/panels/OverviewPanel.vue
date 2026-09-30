@@ -22,6 +22,7 @@ const {
   diffLoading,
   extractPendingAndRecompare,
   extractingPending,
+  pendingExtractable,
   frameworkInfo,
   fwLoading,
   fwSwitching,
@@ -283,6 +284,19 @@ const {
                     <option value="worktree">{{ t('assetMgmt.diff.worktree') }}</option>
                     <option v-for="c in commitOptions" :key="`t-${c.oid}`" :value="c.oid">{{ c.oid.slice(0, 8) }} {{ c.subject.slice(0, 26) }}</option>
                   </select>
+                  <!-- 提取闭环：待提取文件按范围补提(仅工作区目标可用)，完成后自动重新对比 -->
+                  <button
+                    v-if="compareData && !compareData.noChanges && compareData.targetIsWorktree
+                      && pendingExtractable.length && !extractingPending"
+                    class="btn btn-xs btn-blue !py-0 !px-1.5 !text-[9px] shrink-0"
+                    :title="pendingExtractable.length < compareData.assets.pending.count
+                      ? t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length }) + ' ' + t('assetMgmt.diff.extractDiverged', { m: compareData.assets.pending.count - pendingExtractable.length })
+                      : t('assetMgmt.diff.extractRecompareHint', { n: pendingExtractable.length })"
+                    @click="extractPendingAndRecompare"
+                  >
+                    <SparklesIcon class="w-2.5 h-2.5" />{{ t('assetMgmt.diff.extractRecompare', { n: pendingExtractable.length }) }}
+                  </button>
+                  <span v-if="extractingPending" class="inline-flex items-center gap-1 text-[10px] text-ctp-overlay0 shrink-0"><ArrowPathIcon class="w-3 h-3 animate-spin" />{{ t('assetMgmt.diff.extracting') }}</span>
                   <span v-if="baselineDiffData?.aligned" class="chip bg-ctp-green/15 text-ctp-green">{{ t('assetMgmt.diff.aligned') }}</span>
                   <span v-else-if="baselineDiffData?.stale" class="chip bg-ctp-yellow/15 text-ctp-yellow">{{ t('assetMgmt.diff.stale', { n: totalChanged }) }}</span>
                   <span v-else class="chip bg-ctp-surface0 text-ctp-subtext0">{{ t('assetMgmt.diff.noBaseline') }}</span>
@@ -374,15 +388,6 @@ const {
                     <div v-if="compareData.assets.pending.count" class="space-y-0.5">
                       <div class="flex items-center gap-2">
                         <span class="text-[9px] text-ctp-peach">{{ t('assetMgmt.diff.pendingFiles', { n: compareData.assets.pending.count }) }}</span>
-                        <button
-                          v-if="compareData.targetIsWorktree && !extractingPending"
-                          class="btn btn-xs btn-blue !py-0 !px-1.5 !text-[9px]"
-                          :title="t('assetMgmt.diff.extractRecompareHint', { n: compareData.assets.pending.count })"
-                          @click="extractPendingAndRecompare"
-                        >
-                          <SparklesIcon class="w-2.5 h-2.5" />{{ t('assetMgmt.diff.extractRecompare', { n: compareData.assets.pending.count }) }}
-                        </button>
-                        <span v-if="extractingPending" class="inline-flex items-center gap-1 text-[9px] text-ctp-overlay0"><ArrowPathIcon class="w-2.5 h-2.5 animate-spin" />{{ t('assetMgmt.diff.extracting') }}</span>
                       </div>
                       <div v-for="f in compareData.assets.pending.files.slice(0, 30)" :key="f" class="font-mono text-[9px] text-ctp-subtext0 truncate" :title="f">{{ f }}</div>
                       <div v-if="compareData.assets.pending.files.length > 30" class="text-[9px] text-ctp-overlay0">+{{ compareData.assets.pending.files.length - 30 }}</div>
