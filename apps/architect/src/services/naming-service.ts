@@ -59,18 +59,6 @@ export interface GlossaryTerm {
   updatedAt: number
 }
 
-export interface NameTombstone {
-  id: string
-  projectId: string
-  filePath?: string
-  symbol?: string
-  name: string
-  source?: string
-  reason?: string
-  assetId?: string
-  note?: string
-  createdAt: number
-}
 
 // ── 服务 ──────────────────────────────────────────────────────
 
@@ -129,11 +117,7 @@ export const namingService = {
       '/naming/glossary/import', { ...body(), path })
   },
 
-  async tombstones(q = ''): Promise<NameTombstone[]> {
-    return apiGet<NameTombstone[]>(`/naming/tombstones${qsWith(`q=${encodeURIComponent(q)}`)}`)
-  },
-
-  /** 资产命名历史（墓碑 + overlay 改名重放 + 行内溯源）。 */
+  /** 资产命名历史（行内溯源；批6 移除墓碑/overlay）。 */
   async assetNames(assetId: string): Promise<{
     assetId: string
     currentName: string

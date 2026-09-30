@@ -120,7 +120,7 @@ def _snapshot_loop(ctx) -> dict:
     批 1-4 收编：进度走 job 行(原进程内 dict)，取消走 cancelRequested 协作标记。
     """
     from . import job_runner
-    from .engine import extract_scope
+    from .structural_extract import extract_structural
     snapshot = list((ctx.scope or {}).get("files") or [])
     level = (ctx.scope or {}).get("level") or "implementation"
     rid = (ctx.scope or {}).get("root") or ""
@@ -134,8 +134,18 @@ def _snapshot_loop(ctx) -> dict:
             return {"saved": saved, "summary": f"已取消({done}/{total})"}
         ctx.progress(total=total, done=done, saved=saved, current=f)
         try:
-            res = extract_scope(rid, project, "files", "", files=[f], level=level)
-            if isinstance(res, dict) and res.get("error"):
+            # 批6：批量同步走结构化提取(无 LLM，需求 2-G「同步提取不调 LLM」)；
+            # 语义增强由用户按需触发(enahnce 类作业)。
+            res = extract_structural(rid, project, [f], rev="workspace")
+            failed = bool((res or {}).get("parseFailures"))
+            if failed:
+                consecutive_errors += 1
+                errors = (errors or [])[-4:] + [
+                    {"files": [f], "error": "解析失败(符号库/KB 不可达?)"}]
+                if consecutive_errors >= 5:
+                    return {"saved": saved, "error": f"连续 {consecutive_errors} 文件解析失败，熔断",
+                            "errors": errors, "summary": f"熔断({done}/{total})"}
+            elif isinstance(res, dict) and res.get("error"):
                 consecutive_errors += 1
                 errors = (errors or [])[-4:] + [
                     {"files": [f], "error": str(res.get("error"))[:200]}]
@@ -192,7 +202,7 @@ def sync_extract_start(root: Optional[str], project: Optional[str],
         pid, "extract_delta",
         scope={"type": "project", "files": snapshot, "level": level,
                "root": rid, "project": project, "batch": max(1, batch)},
-        llm=True)   # 提取环后含 LLM 单文件解析 → 计入 LLM 闸门
+        llm=False)   # 结构化提取无 LLM(批6) → 并行档
     if r.get("started"):
         logger.info("[sync-extract] 作业启动: pid=%s total=%d batch=%d",
                     pid, len(snapshot), batch)

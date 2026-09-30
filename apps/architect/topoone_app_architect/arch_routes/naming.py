@@ -16,7 +16,6 @@ REST（/api/architect 前缀）：
   PUT    /naming/glossary/{id}                   更新术语
   DELETE /naming/glossary/{id}                   删除术语
   POST   /naming/glossary/import                 从项目文档导入
-  GET    /naming/tombstones?q=                   参考池查询（管理视图）
   GET    /semantic/assets/{id}/names             命名历史（墓碑 + overlay 重放视图）
 """
 import json
@@ -28,8 +27,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Request
 
 from ..common import err, ok
-from ..store import (GlossaryStore, NameTombstoneStore, NamingConventionStore,
-                    UserOverlayStore)
+from ..store import GlossaryStore, NamingConventionStore
 
 logger = logging.getLogger(__name__)
 
@@ -447,19 +445,7 @@ async def api_glossary_import(request: Request):
     return ok({"imported": len(imported), "sourceRef": rel, "terms": imported})
 
 
-# ── 墓碑参考池（管理视图） ────────────────────────────────────
-
-@router.get("/naming/tombstones")
-async def api_tombstones(project: Optional[str] = None, root: Optional[str] = None,
-                         q: str = "", limit: int = 100):
-    from .semantic_assets import project_id_for
-    pid = project_id_for(root, project)
-    if not pid:
-        return ok([])
-    return ok(NameTombstoneStore.search(pid, q=q, limit=limit))
-
-
-# ── 资产命名历史（墓碑 + overlay 改名重放视图） ────────────────
+# ── 资产命名历史（行内溯源；批6 移除墓碑/overlay 死机制） ──────────
 
 @router.get("/semantic/assets/{asset_id}/names")
 async def api_asset_names(asset_id: str,
@@ -473,22 +459,7 @@ async def api_asset_names(asset_id: str,
     # 以资产行自身 projectId 为准（无 root/project 上下文时也能正确路由）
     pid = asset.get("projectId") or project_id_for(root, project) or ""
     history: List[Dict[str, Any]] = []
-    # 1) 墓碑（标准不变的代码变更生命周期：旧名参考池）
-    for ref in (asset.get("astRefs") or [])[:3]:
-        for tomb in NameTombstoneStore.lookup(
-                pid or "", ref.get("file") or "", ref.get("symbol") or "", limit=10):
-            history.append({"type": "tombstone", "at": tomb.get("createdAt") or 0,
-                            "name": tomb.get("name"), "symbol": tomb.get("symbol"),
-                            "file": tomb.get("filePath"),
-                            "reason": tomb.get("reason"), "source": tomb.get("source")})
-    # 2) overlay 改名重放（用户编辑层，seq 有序）
-    for ov in UserOverlayStore.list_active(pid or ""):
-        if ov.get("op") == "rename" and asset_id in (ov.get("targetAssetIds") or []):
-            payload = ov.get("payload") or {}
-            history.append({"type": "overlay", "at": ov.get("createdAt") or 0,
-                            "seq": ov.get("seq"), "name": payload.get("newName"),
-                            "author": ov.get("author"), "reason": ov.get("reason")})
-    # 3) 资产行内溯源（renamedFrom + nameAlias 历史名列表）
+    # 资产行内溯源（renamedFrom + nameAlias 历史名列表）
     history.append({"type": "asset_row", "at": asset.get("updatedAt") or 0,
                     "renamedFrom": asset.get("renamedFrom") or "",
                     "nameAlias": asset.get("nameAlias") or []})

@@ -9,13 +9,13 @@ import {
 import {
   namingService,
   type ConventionScenario, type ConventionStatus, type GlossaryTerm,
-  type NameTombstone, type NamingConvention,
+  type NamingConvention,
 } from '@/services/naming-service'
 
 const { t } = useI18n()
 const dialog = useAppDialog()
 
-const sub = ref<'conventions' | 'glossary' | 'tombstones'>('conventions')
+const sub = ref<'conventions' | 'glossary'>('conventions')
 
 // ── 命名规约 ──────────────────────────────────────────────────
 
@@ -163,27 +163,9 @@ async function doImport() {
   }
 }
 
-// ── 墓碑参考池 ────────────────────────────────────────────────
-
-const tombQ = ref('')
-const tombstones = ref<NameTombstone[]>([])
-const tombLoading = ref(false)
-
-async function loadTombstones() {
-  tombLoading.value = true
-  try {
-    tombstones.value = await namingService.tombstones(tombQ.value.trim())
-  } catch {
-    tombstones.value = []
-  } finally {
-    tombLoading.value = false
-  }
-}
-
 onMounted(() => {
   void loadConventions()
   void loadTerms()
-  void loadTombstones()
 })
 </script>
 
@@ -195,7 +177,6 @@ onMounted(() => {
         v-for="s in ([
           { key: 'conventions', label: t('naming.tabConventions'), icon: BookOpenIcon },
           { key: 'glossary', label: t('naming.tabGlossary'), icon: SparklesIcon },
-          { key: 'tombstones', label: t('naming.tabTombstones'), icon: ArchiveBoxIcon },
         ] as const)"
         :key="s.key"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors"
@@ -429,49 +410,5 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 命名历史（墓碑参考池：新提取命名前查参考池） -->
-    <div
-      v-else
-      class="panel overflow-hidden"
-    >
-      <div class="panel-header">
-        <div class="flex items-center gap-2">
-          <ArchiveBoxIcon class="w-4 h-4 text-ctp-peach" />{{ t('naming.tombstonesTitle') }}
-          <div class="relative">
-            <MagnifyingGlassIcon class="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-ctp-overlay0" />
-            <input
-              v-model="tombQ"
-              class="input !py-1 !pl-7 !px-2 !text-[11px] w-44"
-              :placeholder="t('naming.searchTombstone')"
-              @keyup.enter="loadTombstones()"
-            >
-          </div>
-          <span v-if="tombLoading" class="text-[11px] text-ctp-overlay1">{{ t('common.loading') }}</span>
-        </div>
-      </div>
-      <div class="p-3">
-        <p class="text-[11px] text-ctp-overlay1 mb-2">{{ t('naming.tombstonesHint') }}</p>
-        <div class="space-y-1">
-          <div
-            v-for="tb in tombstones"
-            :key="tb.id"
-            class="flex items-center gap-2 border-b border-ctp-surface0 last:border-0 py-1.5 text-[11px]"
-          >
-            <span class="font-medium text-ctp-text w-40 truncate">{{ tb.name }}</span>
-            <span class="font-mono text-ctp-subtext0 truncate flex-1">
-              {{ [tb.filePath, tb.symbol].filter(Boolean).join('::') || '—' }}
-            </span>
-            <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext1 shrink-0">{{ tb.reason }}</span>
-            <span class="text-[9px] text-ctp-overlay0 shrink-0">{{ new Date(tb.createdAt).toLocaleDateString() }}</span>
-          </div>
-          <p
-            v-if="!tombstones.length && !tombLoading"
-            class="text-[11px] text-ctp-overlay0 text-center py-4"
-          >
-            {{ t('naming.noTombstones') }}
-          </p>
-        </div>
-      </div>
-    </div>
   </div>
 </template>

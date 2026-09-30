@@ -35,8 +35,8 @@ from topoone_app_architect.sem import context as _sem_context
 from topoone_app_architect.arch_routes.naming import (  # noqa: E402
     _parse_terms_file)
 from topoone_app_architect.store import (  # noqa: E402
-    GlossaryStore, NameTombstoneStore, NamingConventionStore,
-    SemanticAssetsStore, UserOverlayStore)
+    GlossaryStore, NamingConventionStore,
+    SemanticAssetsStore)
 
 
 def _ctx_setup(tmp_path, monkeypatch):
@@ -201,50 +201,6 @@ def _call(coro_factory):
     return out
 
 
-# ── 墓碑 + 命名历史 ───────────────────────────────────────────
-
-class TestNamesHistory:
-    def test_tombstone_search(self, tmp_path, monkeypatch):
-        _ctx_setup(tmp_path, monkeypatch)
-        pid = _pid(tmp_path)
-        NameTombstoneStore.add(pid, "创建订单(旧)", file_path="m.py",
-                               symbol="create_order", source="llm")
-        rows = NameTombstoneStore.search(pid, q="旧")
-        assert rows and rows[0]["name"] == "创建订单(旧)"
-        assert NameTombstoneStore.search(pid, q="不存在的") == []
-
-    def test_asset_names_history(self, tmp_path, monkeypatch):
-        _ctx_setup(tmp_path, monkeypatch)
-        _fake_collect(monkeypatch, str(tmp_path))
-        pid = _pid(tmp_path)
-        res = S.save_agent_assets(str(tmp_path), None, [{
-            "name": "创建订单", "kind": "process", "level": "implementation",
-            "desc": "创建订单过程",
-            "astRefs": [{"file": "m.py", "symbol": "create_order",
-                         "startLine": 1, "endLine": 10}]},
-        ])
-        asset = res["saved"][0]
-        # 墓碑：该锚点的历史旧名
-        NameTombstoneStore.add(pid, "下单", file_path="m.py",
-                               symbol="create_order", source="llm")
-        # overlay：用户改名
-        UserOverlayStore.add(pid, "rename", [asset["id"]],
-                             {"newName": "创建订单(校验版)"},
-                             [{"file": "m.py", "symbol": "create_order"}],
-                             author="designer", reason="区分校验版本")
-        # 资产行内溯源
-        SemanticAssetsStore.update(asset["id"], {"renamedFrom": "下单"})
-        from topoone_app_architect.arch_routes.naming import api_asset_names
-        out = _call(lambda: api_asset_names(asset["id"]))
-        detail = out.get("data", out)
-        assert detail["currentName"] == "创建订单"
-        assert detail["renamedFrom"] == "下单"
-        types = {h["type"] for h in detail["history"]}
-        assert "tombstone" in types and "overlay" in types and "asset_row" in types
-        overlay_rows = [h for h in detail["history"] if h["type"] == "overlay"]
-        assert overlay_rows[0]["name"] == "创建订单(校验版)"
-
-
 # ── 就地认知编辑（rename/merge/split；R5 main-KB 拒绝） ─────────
 
 def _mk_asset(pid, name, refs, kind="entity", level="implementation"):
@@ -271,9 +227,6 @@ class TestCognitiveEdit:
         assert data["asset"]["name"] == "下单(校验版)"
         assert data["asset"]["renamedFrom"] == "创建订单"
         assert data["asset"]["nameAlias"] == ["创建订单"]
-        ovl = UserOverlayStore.list_active(pid)
-        assert any(o["op"] == "rename" and o["payload"]["newName"] == "下单(校验版)"
-                   for o in ovl)
         # 同名拒绝
         out2 = _call(lambda: api_asset_rename(_req(
             {"assetId": aid, "newName": "下单(校验版)"})))
@@ -301,7 +254,6 @@ class TestCognitiveEdit:
             row = SemanticAssetsStore.get(t["id"])
             assert row["status"] == "deleted"
             assert row["meta"]["mergedInto"] == into["id"]
-        assert any(o["op"] == "merge" for o in UserOverlayStore.list_active(pid))
 
     def test_split_endpoint(self, tmp_path, monkeypatch):
         _ctx_setup(tmp_path, monkeypatch)

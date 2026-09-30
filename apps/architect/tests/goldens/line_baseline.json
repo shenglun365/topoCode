@@ -152,7 +152,7 @@
  "sem/scope.py": 157,
  "sem/skill_docs.py": 286,
  "sem/symbols.py": 526,
- "sem/sync_extract.py": 235,
+ "sem/sync_extract.py": 254,
  "sem/taxonomy.py": 93,
  "sem/unowned.py": 397,
  "store/__init__.py": 21,

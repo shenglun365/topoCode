@@ -849,14 +849,6 @@ def _inherit_names(pid: str, assets: List[dict]) -> List[dict]:
                 a = dict(a)
                 a["name"] = old_name  # 用户改名优先，re-extract 不覆盖
                 assets[i] = a
-        else:
-            f0 = (refs[0] or {}).get("file") or ""
-            s0 = (refs[0] or {}).get("symbol") or ""
-            hits = store.NameTombstoneStore.lookup(pid, f0, s0, limit=1)
-            if hits and hits[0].get("name"):
-                a = dict(a)
-                a["name"] = hits[0]["name"]  # 捞回历史命名
-                assets[i] = a
     return assets
 
 
@@ -1319,14 +1311,6 @@ def save_agent_assets(root: Optional[str], project: Optional[str],
                                  "keptName": old_name})
                 a = dict(a)
                 a["name"] = old_name  # 旧行名优先，LLM 提议不直接生效
-        else:
-            # 墓碑承接：新资产查参考池（同名文件+符号的历史命名）
-            f0 = (refs[0] or {}).get("file") or ""
-            s0 = (refs[0] or {}).get("symbol") or ""
-            hits = store.NameTombstoneStore.lookup(pid, f0, s0, limit=1)
-            if hits and hits[0].get("name"):
-                a = dict(a)
-                a["name"] = hits[0]["name"]  # 捞回历史命名
         accepted.append(a)
         for r in refs:
             if r.get("file") and r["file"] not in scope_files:
@@ -3380,7 +3364,7 @@ def _asset_anchor_basis(asset: dict) -> List[str]:
 
 
 def rename_asset(asset_id: str, new_name: str, author: str = "") -> Dict[str, Any]:
-    """资产改名（认知层编辑）：旧名 → renamedFrom + nameAlias 历史；overlay 审计。"""
+    """资产改名（认知层编辑）：旧名 → renamedFrom + nameAlias 历史(批6 移除 overlay 审计)。"""
     new_name = (new_name or "").strip()
     if not new_name:
         raise ValueError("newName 不能为空")
@@ -3400,12 +3384,8 @@ def rename_asset(asset_id: str, new_name: str, author: str = "") -> Dict[str, An
         "name": new_name, "renamedFrom": old_name, "nameAlias": alias,
         "updatedAt": _ts(),
     })
-    overlay = store.UserOverlayStore.add(
-        asset.get("projectId") or "", "rename", [asset_id],
-        {"newName": new_name, "oldName": old_name},
-        _asset_anchor_basis(asset), author=author)
-    logger.info("[semantic] rename %s: %r -> %r (ovl=%s)", asset_id, old_name, new_name, overlay.get("id"))
-    return {"asset": updated, "overlayId": overlay.get("id")}
+    logger.info("[semantic] rename %s: %r -> %r", asset_id, old_name, new_name)
+    return {"asset": updated}
 
 
 def edit_asset_desc(asset_id: str, desc: str, author: str = "") -> Dict[str, Any]:
@@ -3417,10 +3397,7 @@ def edit_asset_desc(asset_id: str, desc: str, author: str = "") -> Dict[str, Any
         raise ValueError(f"资产非 active 状态({asset.get('status')})，不可编辑")
     _check_main_kb_policy(asset.get("projectId") or "")
     updated = store.SemanticAssetsStore.update(asset_id, {"desc": desc or "", "updatedAt": _ts()})
-    overlay = store.UserOverlayStore.add(
-        asset.get("projectId") or "", "edit_desc", [asset_id],
-        {"desc": desc or ""}, _asset_anchor_basis(asset), author=author)
-    return {"asset": updated, "overlayId": overlay.get("id")}
+    return {"asset": updated}
 
 
 def merge_assets(into_id: str, target_ids: List[str],
@@ -3465,12 +3442,8 @@ def merge_assets(into_id: str, target_ids: List[str],
             alias.insert(0, old)
         patch.update({"name": target_name, "renamedFrom": old, "nameAlias": alias})
     updated = store.SemanticAssetsStore.update(into_id, patch)
-    overlay = store.UserOverlayStore.add(
-        into.get("projectId") or "", "merge", [into_id] + merged,
-        {"intoId": into_id, "targetIds": merged, "targetName": target_name or ""},
-        anchor_basis, author=author)
-    logger.info("[semantic] merge into=%s merged=%d (ovl=%s)", into_id, len(merged), overlay.get("id"))
-    return {"asset": updated, "merged": merged, "overlayId": overlay.get("id")}
+    logger.info("[semantic] merge into=%s merged=%d", into_id, len(merged))
+    return {"asset": updated, "merged": merged}
 
 
 def split_asset(asset_id: str, parts: List[Dict[str, Any]],
@@ -3523,11 +3496,8 @@ def split_asset(asset_id: str, parts: List[Dict[str, Any]],
     store.SemanticAssetsStore.update(asset_id, {
         "status": "deleted", "deletedAt": now, "meta": meta, "updatedAt": now,
     })
-    overlay = store.UserOverlayStore.add(
-        pid, "split", [asset_id] + new_ids,
-        {"parts": parts_payload}, _asset_anchor_basis(asset), author=author)
-    logger.info("[semantic] split %s -> %s (ovl=%s)", asset_id, new_ids, overlay.get("id"))
-    return {"deletedAssetId": asset_id, "created": created, "overlayId": overlay.get("id")}
+    logger.info("[semantic] split %s -> %s", asset_id, new_ids)
+    return {"deletedAssetId": asset_id, "created": created}
 
 
 def refresh_scope(root: Optional[str], project: Optional[str],
@@ -4888,14 +4858,17 @@ async def api_semantic_stats(root: Optional[str] = None, project: Optional[str] 
     by_level: Dict[str, int] = {}
     for lv in SEMANTIC_LEVELS:
         by_level[lv] = store.SemanticAssetsStore.count(pid, level=lv)
-    rows = store.SemanticAssetsStore.all_status(pid, limit=4000)
+    rows = store.SemanticAssetsStore.all_status(pid, limit=20000, light=True)
     status = {"active": 0, "stale": 0, "deleted": 0, "needsUpdate": 0}
     for a in rows:
         status[a.get("status") or "active"] = status.get(a.get("status") or "active", 0) + 1
         if a.get("needsUpdate"):
             status["needsUpdate"] += 1
+    # 口径单源化(批6)：total=分立总数(active+stale+deleted，与 /status 同一口径)。
+    # 旧值 sum(by_kind) 只数 active 命中的 kind——542 vs 584 漂移的直接来源。
     return ok({
-        "total": sum(by_kind.values()),
+        "total": len(rows),
+        "activeTotal": sum(by_kind.values()),
         "byKind": by_kind,
         "byLevel": by_level,
         "status": status,

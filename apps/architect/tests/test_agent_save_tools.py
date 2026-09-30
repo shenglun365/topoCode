@@ -30,7 +30,7 @@ from topoone_app_architect.arch_routes import asset_framework as F
 from topoone_app_architect.agent.tools.req_agent import (
     tool_asset_semantic_save, tool_code_read_symbols)
 from topoone_app_architect.store import (
-    NameTombstoneStore, SemanticAssetsStore)
+    SemanticAssetsStore)
 
 
 def _ctx_setup(tmp_path, monkeypatch):
@@ -102,17 +102,6 @@ class TestSaveAgentAssets:
         assert p["proposedName"] == "下单流程" and p["keptName"] == "创建订单"
         saved = SemanticAssetsStore.all(S.project_id_for(str(tmp_path), None))
         assert [a["name"] for a in saved if a["kind"] == "process"] == ["创建订单"]
-
-    def test_tombstone_name_adopted_for_new_asset(self, tmp_path, monkeypatch):
-        _ctx_setup(tmp_path, monkeypatch)
-        _fake_collect(monkeypatch, str(tmp_path))
-        pid = S.project_id_for(str(tmp_path), None)
-        NameTombstoneStore.add(pid, "历史命名·下单", file_path="m.py",
-                               symbol="create_order", source="user")
-        res = S.save_agent_assets(str(tmp_path), None, [_asset("全新名字")])
-        assert res["count"] == 1
-        saved = SemanticAssetsStore.all(pid)
-        assert saved[0]["name"] == "历史命名·下单"  # 参考池捞回，非 LLM 新名
 
     def test_missing_ast_refs_rejected(self, tmp_path, monkeypatch):
         _ctx_setup(tmp_path, monkeypatch)

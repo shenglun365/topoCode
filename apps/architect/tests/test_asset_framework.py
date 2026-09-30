@@ -12,8 +12,8 @@ import topoone_app_architect.ctx as C
 from topoone_app_architect.arch_routes import asset_framework as F
 from topoone_app_architect import store
 from topoone_app_architect.store import (
-    FrameworkConfigStore, GlossaryStore, NameTombstoneStore,
-    NamingConventionStore, SemanticAssetsStore, UserOverlayStore,
+    FrameworkConfigStore, GlossaryStore,
+    NamingConventionStore, SemanticAssetsStore,
 )
 
 
@@ -112,12 +112,6 @@ class TestStandardChange:
         # 行保留可溯源（不物理删除）
         assert _get_raw("sa-1") is not None
 
-    def test_framework_change_writes_no_tombstones(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        _mk_asset("sa-10", "process")
-        F.switch_tier(PID, "low")
-        assert NameTombstoneStore.search(PID) == []  # R1: 命名不跨框架迁移
-
     def test_voided_assets_excluded_from_active_queries(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
         _mk_asset("sa-20", "process")
@@ -139,45 +133,6 @@ class TestStandardChange:
         assert pv["voidedAssets"] == 2
         assert pv["byKind"] == {"process": 1, "entity": 1}
         assert pv["namingMigrated"] is False
-
-
-# ── 墓碑（参考池，代码变更生命周期用） ──────────────────────────
-
-class TestTombstones:
-    def test_add_and_lookup(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        NameTombstoneStore.add(PID, "订单实体", file_path="m.py",
-                               symbol="Order", source="user")
-        NameTombstoneStore.add(PID, "订单", file_path="m.py",
-                               symbol="Order", source="llm")
-        hits = NameTombstoneStore.lookup(PID, "m.py", "Order")
-        assert len(hits) == 2
-        assert {h["name"] for h in hits} == {"订单实体", "订单"}
-        # 不同符号不命中
-        assert NameTombstoneStore.lookup(PID, "m.py", "Other") == []
-
-    def test_search_by_keyword(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        NameTombstoneStore.add(PID, "风控拦截", file_path="r.py", symbol="risk_check")
-        assert len(NameTombstoneStore.search(PID, "风控")) == 1
-        assert NameTombstoneStore.search(PID, "不存在") == []
-
-
-# ── overlay（用户编辑层） ──────────────────────────────────────
-
-class TestOverlay:
-    def test_seq_ordering_and_orphan(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        o1 = UserOverlayStore.add(PID, "rename", ["sa-1"], {"newName": "采购订单"},
-                                  [{"file": "a.py", "symbol": "sa-1"}], author="u1",
-                                  reason="语义更准")
-        o2 = UserOverlayStore.add(PID, "edit_desc", ["sa-2"], {"desc": "x"},
-                                  [{"file": "b.py", "symbol": "sa-2"}])
-        rows = UserOverlayStore.list_active(PID)
-        assert [r["id"] for r in rows] == [o1["id"], o2["id"]]
-        assert rows[0]["seq"] < rows[1]["seq"]
-        UserOverlayStore.mark_status(o2["id"], "orphaned")
-        assert [r["id"] for r in UserOverlayStore.list_active(PID)] == [o1["id"]]
 
 
 # ── 命名规约（场景标签 R7） ────────────────────────────────────

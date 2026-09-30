@@ -179,7 +179,7 @@ PROJECT_TABLES = frozenset({
     "arch_snapshot_records", "arch_kb_snapshots",
     "arch_semantic_assets", "arch_ast_cache", "arch_semantic_refs",
     # M0 冻结 schema（plan-C-M0.md §6）
-    "arch_framework_configs", "arch_name_tombstones", "arch_user_overlays",
+    "arch_framework_configs",
     "arch_naming_conventions", "arch_glossary",
     "arch_capability_proposals",
     "arch_contract_items", "arch_contract_packages",

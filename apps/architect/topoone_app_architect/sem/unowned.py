@@ -281,7 +281,7 @@ def _pending_unowned(rid: str, project: Optional[str]) -> List[str]:
 
 def _extract_job_loop(ctx) -> dict:
     """批 1-4 收编：进度走 job 行，取消走 cancelRequested 协作标记。"""
-    from .engine import extract_scope
+    from .structural_extract import extract_structural
     rid = (ctx.scope or {}).get("root") or ""
     project = (ctx.scope or {}).get("project") or ""
     batch = max(1, int((ctx.scope or {}).get("batch") or 10))
@@ -300,12 +300,17 @@ def _extract_job_loop(ctx) -> dict:
         tried.update(files)
         ctx.progress(done=done, saved=saved, batch=batches, current=files[0])
         try:
-            res = extract_scope(rid, project, "files", "", files=files, level=level)
+            # 批6：批量提取走结构化(无 LLM)；语义增强用户按需触发
+            res = extract_structural(rid, project, files, rev="workspace")
+            if (res or {}).get("parseFailures") == len(files):
+                errors = (errors or [])[-4:] + [
+                    {"files": files, "error": "解析失败(符号库/KB 不可达?)"}]
+                break   # 整批全失败 → 停住如实上报
             if isinstance(res, dict) and res.get("error"):
                 errors = (errors or [])[-4:] + [
                     {"files": files, "error": str(res.get("error"))[:200]}]
                 break           # 范围/符号库类错误：继续批大概率同样失败，停住如实上报
-            saved += (res.get("count") or 0)
+            saved += (res.get("saved") or 0)
         except Exception as e:  # noqa: BLE001 — 作业线程必须吞异常保状态一致
             logger.warning("[unowned] 批量提取作业异常: %s", e, exc_info=True)
             errors = (errors or [])[-4:] + [
@@ -353,7 +358,7 @@ def unowned_extract_start(root: Optional[str], project: Optional[str],
         pid, "extract_unowned",
         scope={"type": "project", "root": rid, "project": project,
                "batch": max(1, batch), "level": level},
-        llm=True)
+        llm=False)   # 结构化提取无 LLM(批6) → 并行档
     if r.get("started"):
         logger.info("[unowned] 批量提取作业启动: pid=%s total=%d batch=%d level=%s",
                     pid, len(pending), batch, level)
