@@ -69,7 +69,7 @@ export function useFramework(D: WsDeps) {
    *  确认后提交 extract_scope 作业；过程与结果以对话回合呈现，完成后刷新资产数据。 */
   async function askExtractComponent(key: string, name: string) {
     if (D.chat.extractBusy.value) return
-    const comp = core.treeComps.find((c) => c.id === key)
+    const comp = core.compById.value.get(key)
     const owns = (comp?.owns ?? []).filter(Boolean)
     if (!owns.length) return
     const picked = await D.diff.pickScope(t('assetMgmt.compExtractScopeTitle', { name }), owns)
