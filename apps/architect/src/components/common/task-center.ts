@@ -1,7 +1,7 @@
 /**
  * 全局任务中心（批 1-5）：语义作业浮窗。
  * 数据源 /kb/semantic/jobs（持久化作业行，跨页面/刷新存活）；轮询 2.5s
- * （仅展开或 badge 有活跃作业时激活）。入口：WorkbenchLayout 全局挂载，
+ * （仅展开或 tag 有活跃作业时激活）。入口：底部状态栏 tag（StatusBar 挂载），
  * 各页面可按需引用 `taskCenterVisible` 呼出。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-/** 全局任务中心浮窗（批 1-5）：右下角可折叠面板，语义作业进度/取消/历史。 */
+/** 全局任务中心浮窗（批 1-5；UI 改版：入口为底部状态栏 tag，本组件仅浮窗面板）。 */
 import { useTaskCenter } from './task-center'
 
-const { visible, jobs, active, toggle, close, cancel, labelOf, stateOf, pctOf } = useTaskCenter()
+const { visible, jobs, active, close, cancel, labelOf, stateOf, pctOf } = useTaskCenter()
 
 function fmtTime(ts?: number): string {
   if (!ts) return ''
@@ -12,17 +12,6 @@ function fmtTime(ts?: number): string {
 </script>
 
 <template>
-  <!-- 悬浮触发器：badge = 活跃作业数 -->
-  <button
-    class="tc-trigger"
-    :class="{ on: active.length }"
-    :title="active.length ? `任务中心：${active.length} 个进行中` : '任务中心'"
-    @click="toggle"
-  >
-    <span class="tc-trigger-icon">⚙</span>
-    <span v-if="active.length" class="tc-badge">{{ active.length }}</span>
-  </button>
-
   <div v-if="visible" class="tc-panel">
     <div class="tc-head">
       <span class="tc-title">任务中心</span>
@@ -59,22 +48,8 @@ function fmtTime(ts?: number): string {
 </template>
 
 <style scoped>
-.tc-trigger {
-  position: fixed; right: 18px; bottom: 18px; z-index: 2200;
-  width: 40px; height: 40px; border-radius: 50%;
-  border: 1px solid var(--bd, #3a3f4b); background: var(--panel, #1e222b);
-  color: var(--fg, #cfd6e4); cursor: pointer; font-size: 17px;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
-}
-.tc-trigger.on { border-color: #4a8fd4; }
-.tc-badge {
-  position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px;
-  border-radius: 9px; background: #d46a4a; color: #fff; font-size: 11px;
-  display: flex; align-items: center; justify-content: center; padding: 0 4px;
-}
 .tc-panel {
-  position: fixed; right: 18px; bottom: 68px; z-index: 2200;
+  position: fixed; right: 12px; bottom: 32px; z-index: 2200;
   width: 340px; max-height: 60vh; display: flex; flex-direction: column;
   background: var(--panel, #1e222b); border: 1px solid var(--bd, #3a3f4b);
   border-radius: 8px; box-shadow: 0 6px 24px rgb(0 0 0 / 45%);

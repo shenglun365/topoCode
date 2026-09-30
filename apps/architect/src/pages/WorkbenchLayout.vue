@@ -4,7 +4,6 @@ import { useArchProjectStore } from '@/stores/project-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import GuidePanel from '@/components/project/GuidePanel.vue'
-import TaskCenter from '@/components/common/TaskCenter.vue'
 import ChangeWatch from '@/components/common/ChangeWatch.vue'
 
 const project = useArchProjectStore()
@@ -26,8 +25,6 @@ onMounted(async () => {
   <!-- 对话栏只在 会话管理/资产管理 两页内嵌渲染(ConversationDock inline),
        其余功能大项不再显示会话框与会话气泡(悬浮 dock 已移除)。 -->
   <GuidePanel />
-  <!-- 全局任务中心(批1-5)：语义作业浮窗，右下角 badge 呼出 -->
-  <TaskCenter />
   <!-- 生命周期感知(批5)：代码变更轮询提示(需求 5/2-F) -->
   <ChangeWatch />
 </template>
