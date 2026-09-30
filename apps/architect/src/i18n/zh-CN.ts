@@ -1673,7 +1673,7 @@ export default {
       toggle: '基线对比',
       hint: '对比当前代码相对已同步基线(lastHead)的变更：概览列变更文件、语义资产行级标记、图谱节点着色。core 图谱/资产无版本快照，故按「变更文件集 × 当前引用」叠加。',
       aligned: '与基线一致',
-      stale: '落后基线 {n} 个文件',
+      stale: '基线差异：{n} 个文件',
       noBaseline: '尚未对齐基线',
     cmpBase: '基准',
     cmpBaseHint: '对比基准：缺省为 KB 基线(baselineCommit)，可选基线之后的任意提交',

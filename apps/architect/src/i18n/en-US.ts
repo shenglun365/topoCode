@@ -1632,7 +1632,7 @@ export default {
       toggle: 'Baseline Diff',
       hint: 'Compare the current code against the synced baseline (lastHead): overview lists changed files, semantic assets get row-level marks, graph nodes are colored. Core graph/assets have no version snapshots, so diff overlays the "changed file set × current references".',
       aligned: 'In sync with baseline',
-      stale: '{n} files behind baseline',
+      stale: 'Baseline diff: {n} files',
       noBaseline: 'Not aligned to a baseline',
       cmpBase: 'Base',
       cmpBaseHint: 'Comparison base: defaults to the KB baseline (baselineCommit); any commit after it may be chosen',
