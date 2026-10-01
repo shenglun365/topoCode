@@ -207,6 +207,53 @@ from ..sem import job_runner as _job_runner
 _job_runner.register("draft_ai", _job_draft_ai)
 
 
+MAX_PICKER_KW = 5       # 关键字数量上限(空格分割)
+PICKER_PAGE_DEFAULT = 10
+
+
+@router.get("/sessions/picker")
+async def list_sessions_picker(kw: str = "", limit: int = PICKER_PAGE_DEFAULT,
+                               offset: int = 0, project: str = ""):
+    """发布目标会话选择器（需求草稿发布配套；归入草稿域避免 sessions.py 膨胀）：
+
+    - 只显示**活跃**会话（archived/closed 不显示）；
+    - kw 多关键字（空格分割，上限 5，超限截断）：AND 组合优先（全部命中）；
+      AND 无结果自动降级 OR（任一命中），响应 orFallback=true 标注；
+      匹配字段：标题/摘要/预览；
+    - limit/offset 分页，默认每页 10；返回 {items, total, offset, orFallback}。
+    """
+    from .. import store
+    rows = store.ConversationsStore.summaries(
+        limit=400, project_id=project or None, all_scopes=bool(project))
+    rows = [c for c in rows
+            if (c.get("kind") or "") != "coding"
+            and (c.get("status") or "active") == "active"]
+
+    def _haystack(c: dict) -> str:
+        return " ".join([
+            c.get("title") or "", c.get("summary") or "", c.get("preview") or ""]).lower()
+
+    keywords = [k for k in (kw or "").lower().split() if k.strip()][:MAX_PICKER_KW]
+    or_fallback = False
+    if keywords:
+        pool = [{"row": c, "hay": _haystack(c)} for c in rows]
+        hit = [p["row"] for p in pool if all(k in p["hay"] for k in keywords)]
+        if not hit:
+            hit = [p["row"] for p in pool if any(k in p["hay"] for k in keywords)]
+            or_fallback = bool(hit)
+        rows = hit
+    total = len(rows)
+    page = rows[int(offset):int(offset) + max(1, int(limit))]
+    items = [{
+        "id": c["id"], "title": c.get("title") or "",
+        "reqId": c.get("reqId") or "",
+        "updatedAt": c.get("updatedAt") or 0,
+    } for c in page]
+    return ok({"items": items, "total": total, "offset": int(offset),
+               "limit": int(limit), "orFallback": or_fallback,
+               "keywords": keywords})
+
+
 @router.post("/req-drafts/{draft_id}/publish")
 async def api_req_drafts_publish(draft_id: str, request: Request = None):
     """发布草稿为需求卡（批F，2.4/2.5）：目标=新会话或已有会话。

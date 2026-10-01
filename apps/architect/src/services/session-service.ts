@@ -96,6 +96,11 @@ function qs(params?: Record<string, string | number | undefined>): string {
 }
 
 export const sessionService = {
+  /** 发布目标会话选择器（需求草稿发布）：活跃会话 + 多关键字智能匹配(AND→OR 降级) + 分页。 */
+  async picker(params?: { kw?: string; limit?: number; offset?: number }): Promise<{ items: { id: string; title: string; reqId?: string; updatedAt?: number }[]; total: number; offset: number; limit: number; orFallback: boolean }> {
+    return apiGet(`/sessions/picker${qs(params)}`)
+  },
+
   async list(params?: { kind?: string; q?: string; limit?: number; scope?: string; project?: string }): Promise<ConversationMeta[]> {
     return apiGet<ConversationMeta[]>(`/sessions${qs(params)}`)
   },

@@ -221,3 +221,43 @@ def test_draft_publish_flow(monkeypatch):
     out = _body(asyncio.run(api.api_req_drafts_publish(
         d4["id"], _Req({"project": PID, "targetConvId": conv2["id"]}))))
     assert out.get("data", {}).get("requirementId")
+
+
+def test_sessions_picker():
+    """发布目标选择器：活跃过滤 + 多关键字 AND→OR + 分页。"""
+    from topoone_app_architect.arch_routes import req_drafts as sapi
+    from topoone_app_architect import store
+
+    def _mk(title, status="active", summary=""):
+        c = store.ConversationsStore.create({
+            "kind": "requirement", "projectId": PID, "title": title,
+            "status": status, "roles": ["architect"],
+            "tags": {"modules": [], "groups": []}})
+        if summary:
+            store.ConversationsStore.update(c["id"], {"summary": summary})
+        return c["id"]
+
+    _mk("订单 支付 对账")
+    _mk("订单 退款")
+    _mk("归档旧会话", status="archived")
+    _mk("库存 盘点")
+
+    out = _body(asyncio.run(sapi.list_sessions_picker(project=PID)))
+    r = out["data"]
+    # 活跃过滤：归档不显示；总数 3
+    assert r["total"] == 3 and len(r["items"]) == 3
+    # AND 匹配
+    out = _body(asyncio.run(sapi.list_sessions_picker(project=PID, kw="订单 退款")))
+    r = out["data"]
+    assert r["total"] == 1 and r["orFallback"] is False
+    # AND 无结果 → OR 降级（订单×2 + 盘点×1 = 3）
+    out = _body(asyncio.run(sapi.list_sessions_picker(project=PID, kw="订单 盘点")))
+    r = out["data"]
+    assert r["total"] == 3 and r["orFallback"] is True
+    # 分页：每页 2，第 2 页
+    out = _body(asyncio.run(sapi.list_sessions_picker(project=PID, limit=2, offset=2)))
+    r = out["data"]
+    assert r["total"] == 3 and len(r["items"]) == 1
+    # 关键字超限截断(6 个取前 5)
+    out = _body(asyncio.run(sapi.list_sessions_picker(project=PID, kw="a b c d e f")))
+    assert len(out["data"]["keywords"]) == 5

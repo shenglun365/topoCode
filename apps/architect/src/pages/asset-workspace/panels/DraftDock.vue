@@ -117,24 +117,58 @@ const filterCounts = computed(() => ({
 }))
 
 // ---- 发布（批F）：草稿 → 需求卡 → 会话（新会话 or 已有会话覆盖确认） ----
-interface ConvOption { id: string; title: string }
+interface ConvOption { id: string; title: string; reqId?: string }
 const publishOpen = ref(false)
 const publishBusy = ref(false)
 const publishTarget = ref<'new' | string>('new')
 const convOptions = ref<ConvOption[]>([])
 const publishMsg = ref('')
+// picker 分页 + 搜索（活跃会话；多关键字 AND→OR 智能匹配，上限 5 个由后端截断）
+const pickerPage = ref(0)
+const pickerTotal = ref(0)
+const pickerOrFallback = ref(false)
+const pickerLoading = ref(false)
+const pickerQuery = ref('')
+let pickerSearchTimer: ReturnType<typeof setTimeout> | null = null
+const PICKER_PAGE_SIZE = 10
+const pickerPageCount = computed(() => Math.max(1, Math.ceil(pickerTotal.value / PICKER_PAGE_SIZE)))
+
+async function loadPicker(page = 0, kw = pickerQuery.value.trim()) {
+  pickerLoading.value = true
+  try {
+    const r = await sessionService.picker({
+      kw: kw || undefined,
+      limit: PICKER_PAGE_SIZE,
+      offset: page * PICKER_PAGE_SIZE,
+    })
+    convOptions.value = r?.items ?? []
+    pickerTotal.value = r?.total ?? 0
+    pickerOrFallback.value = !!r?.orFallback
+    pickerPage.value = page
+    if (publishTarget.value !== 'new' && !convOptions.value.some((c) => c.id === publishTarget.value)) {
+      publishTarget.value = convOptions.value[0]?.id ?? 'new'
+    }
+  } catch {
+    convOptions.value = []
+    pickerTotal.value = 0
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+function onPickerSearch() {
+  if (pickerSearchTimer) clearTimeout(pickerSearchTimer)
+  pickerSearchTimer = setTimeout(() => { void loadPicker(0) }, 300)
+}
 
 async function openPublish() {
   if (!current.value || archived.value || !(current.value.contentMd || '').trim()) return
   if (dirty.value) await saveDraft()   // 发布以已保存正文为准
   publishMsg.value = ''
   publishTarget.value = 'new'
+  pickerQuery.value = ''
   publishOpen.value = true
-  try {
-    const rows = await sessionService.list({}) as { id: string; title?: string }[]
-    convOptions.value = (rows || []).slice(0, 50)
-      .map((r) => ({ id: r.id, title: r.title || r.id }))
-  } catch { convOptions.value = [] }
+  await loadPicker(0, '')
 }
 
 async function doPublish(overwrite = false) {
@@ -507,26 +541,50 @@ onMounted(() => { void loadList() })
               <input v-model="publishTarget" type="radio" value="new" class="accent-ctp-blue">
               {{ t('draft.publish.newConv') }}
             </label>
-            <label class="flex cursor-pointer items-center gap-2 text-xs text-ctp-text">
-              <input v-model="publishTarget" type="radio" value="" class="accent-ctp-blue" :disabled="!convOptions.length">
+            <label class="flex items-center gap-2 text-xs text-ctp-text">
+              <input v-model="publishTarget" type="radio" :value="convOptions[0]?.id ?? ''" class="accent-ctp-blue" :disabled="!convOptions.length">
               {{ t('draft.publish.existingConv') }}
             </label>
-            <select
-              v-model="publishTarget"
-              class="input w-full !py-1 !text-xs"
-              :disabled="!convOptions.length"
-              @focus="publishTarget = convOptions[0]?.id ?? ''"
-            >
-              <option v-if="!convOptions.length" value="">{{ t('draft.publish.noConv') }}</option>
-              <option v-for="c in convOptions" :key="c.id" :value="c.id">{{ c.title }}</option>
-            </select>
+            <!-- 活跃会话选择器：关键字搜索(空格分割多关键字 AND→OR) + 分页 -->
+            <div class="flex items-center gap-1">
+              <input
+                v-model="pickerQuery"
+                class="input !py-0.5 !px-1.5 !text-[11px] min-w-0 flex-1"
+                :placeholder="t('draft.publish.searchPlaceholder')"
+                :disabled="pickerLoading"
+                @input="onPickerSearch"
+              >
+              <span v-if="pickerLoading" class="text-[10px] text-ctp-overlay0">…</span>
+            </div>
+            <p v-if="pickerOrFallback" class="text-[9px] text-ctp-peach">{{ t('draft.publish.orFallback') }}</p>
+            <div class="max-h-44 overflow-y-auto rounded-md border border-ctp-surface0">
+              <label
+                v-for="c in convOptions" :key="c.id"
+                class="flex cursor-pointer items-center gap-2 border-b border-ctp-surface0/60 px-2 py-1 text-[11px] last:border-0 hover:bg-ctp-surface0/40"
+                :class="publishTarget === c.id ? 'bg-ctp-surface0/60' : ''"
+              >
+                <input v-model="publishTarget" type="radio" :value="c.id" class="accent-ctp-blue">
+                <span class="min-w-0 flex-1 truncate text-ctp-text" :title="c.title">{{ c.title || c.id }}</span>
+                <span v-if="c.reqId" class="chip bg-ctp-yellow/15 text-ctp-yellow !text-[8px] shrink-0" :title="t('draft.publish.boundReq')">{{ t('draft.publish.boundReq') }}</span>
+              </label>
+              <p v-if="!convOptions.length && !pickerLoading" class="py-3 text-center text-[10px] text-ctp-overlay0">
+                {{ pickerQuery ? t('draft.publish.noMatch') : t('draft.publish.noConv') }}
+              </p>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-ctp-overlay1">
+              <button class="btn btn-xs btn-ghost !px-1.5" :disabled="pickerPage <= 0 || pickerLoading" @click="loadPicker(pickerPage - 1)">‹</button>
+              <span class="tabular-nums">{{ pickerPageCount > 1 ? `${pickerPage + 1}/${pickerPageCount}` : `${pickerTotal}` }}</span>
+              <button class="btn btn-xs btn-ghost !px-1.5" :disabled="pickerPage >= pickerPageCount - 1 || pickerLoading" @click="loadPicker(pickerPage + 1)">›</button>
+              <span class="flex-1" />
+              <span>{{ t('draft.publish.activeOnly') }}</span>
+            </div>
           </div>
           <p v-if="publishMsg" class="mt-2 text-[11px] text-ctp-red">{{ publishMsg }}</p>
           <div class="mt-3 flex justify-end gap-2">
             <button class="btn btn-ghost text-xs" :disabled="publishBusy" @click="publishOpen = false">{{ t('common.cancel') }}</button>
             <button
               class="btn btn-blue text-xs"
-              :disabled="publishBusy || (!convOptions.length && publishTarget !== 'new')"
+              :disabled="publishBusy || (publishTarget !== 'new' && !convOptions.some((c) => c.id === publishTarget))"
               @click="doPublish(false)"
             >{{ publishBusy ? t('draft.publish.publishing') : t('draft.publish.confirm') }}</button>
           </div>
