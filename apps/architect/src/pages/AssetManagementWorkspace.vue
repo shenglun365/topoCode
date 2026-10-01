@@ -31,6 +31,7 @@ import OverviewPanel from './asset-workspace/panels/OverviewPanel.vue'
 import SemanticTreePanel from './asset-workspace/panels/SemanticTreePanel.vue'
 import WorkspaceModals from './asset-workspace/panels/WorkspaceModals.vue'
 import ExtractScopeModal from './asset-workspace/panels/ExtractScopeModal.vue'
+import DraftDock from './asset-workspace/panels/DraftDock.vue'
 import { OTHER_KEY } from './asset-workspace/useAssetCore'
 
 const { t } = useI18n()
@@ -506,11 +507,10 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- 右：需求草稿停靠位(批A 会话移除；批C 落 DraftDock 编辑器) -->
+      <!-- 右：需求草稿(批C)：AI 辅助需求文本编辑/分析，终产物=需求卡发布到会话 -->
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div class="panel flex-1 flex flex-col items-center justify-center gap-2 text-ctp-overlay0">
-          <DocumentTextIcon class="w-8 h-8" />
-          <span class="text-xs">{{ t('assetMgmt.draftPlaceholder') }}</span>
+        <div class="panel flex-1 min-h-0 overflow-hidden">
+          <DraftDock />
         </div>
       </div>
     </div>
