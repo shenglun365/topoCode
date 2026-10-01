@@ -378,6 +378,24 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_compview ON arch_component_views(project_id, component_id, rev);
 
+    -- 需求草稿(批B)：非会话模式的 AI 辅助需求文本编辑载体；终产物=需求卡(发布到会话)。
+    -- last_proposed_md：AI 处理产物(未采纳也保留，仅 UI 参考，不进下轮上下文)。
+    CREATE TABLE IF NOT EXISTS arch_req_drafts (
+        id TEXT PRIMARY KEY,
+        project_id TEXT DEFAULT '',
+        title TEXT DEFAULT '',
+        content_md TEXT DEFAULT '',            -- 正文(md；可含 mermaid/plantuml/dot 块与 agent 指令标记块)
+        last_proposed_md TEXT DEFAULT '',      -- 最近一轮 AI 产物(未采纳参考；采纳时拷入 content_md 并清空)
+        last_proposed_at INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'editing',         -- editing | archived(已发布只读)
+        parent_id TEXT DEFAULT '',             -- 续写溯源(归档草稿的副本)
+        published_conv_id TEXT DEFAULT '',     -- 发布目标会话
+        published_req_id TEXT DEFAULT '',      -- 产出的需求卡
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_reqdrafts ON arch_req_drafts(project_id, status, updated_at);
+
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,
         schema_version INTEGER DEFAULT 1,  -- K1 格式版本化(登记: docs/architect/kb-schema-versions.md)

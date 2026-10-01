@@ -190,6 +190,7 @@ PROJECT_TABLES = frozenset({
     "arch_semantic_jobs",
     # 组件级聚合视图缓存(批3)：虚拟节点内容(可清除重生成)
     "arch_component_views",
+    "arch_req_drafts",
 })
 
 # WS8 认知层→主库提升: 主库全局桶哨兵 project_id(设计稿 global-promotion-design.md)
