@@ -78,9 +78,9 @@ def test_draft_store_list_order_and_copy_missing():
 
 def test_draft_ai_split_agent_blocks():
     from topoone_app_architect.arch_routes.req_drafts import split_agent_blocks
-    md = "# 需求\n\n正文A\n\n```agent\n补充性能指标\n```\n\n正文B\n\n```agent\n再补充验收\n```\n"
+    md = "# 需求\n\n正文A\n\n```topo-cmd\n补充性能指标\n```\n\n正文B\n\n```topo-cmd\n再补充验收\n```\n"
     clean, embedded = split_agent_blocks(md)
-    assert "```agent" not in clean and "正文A" in clean and "正文B" in clean
+    assert "```topo-cmd" not in clean and "正文A" in clean and "正文B" in clean
     assert embedded == ["补充性能指标", "再补充验收"]
     # 无标记块
     clean2, emb2 = split_agent_blocks("纯文本")

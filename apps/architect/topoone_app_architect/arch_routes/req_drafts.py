@@ -2,7 +2,7 @@
 
 AI 处理（批D，需求草稿概念设计 2.6-2.9）：
 - 单轮对话 + 多轮工具调用（run_tools_loop 非会话同步通道）；
-- 上下文 = 草稿全文(标记块剥离) + 指令（预设按钮 or 自定义 or ```agent 标记块嵌入）；
+- 上下文 = 草稿全文(标记块剥离) + 指令（预设按钮 or 自定义 or ```topo-cmd 标记块嵌入）；
 - 工具白名单 = 只读查询类（语义资产/代码/图谱/结构图生成）；
 - 产物写 last_proposed_md（未采纳保留仅 UI 参考，不进下轮上下文——用户裁决）。
 """
@@ -98,13 +98,13 @@ async def api_req_drafts_copy(draft_id: str, request: Request = None):
 
 import re as _re
 
-_AGENT_FENCE_RE = _re.compile(r"```agent[ \t]*\r?\n(.*?)```", _re.S)
+_AGENT_FENCE_RE = _re.compile(r"```topo-cmd[ \t]*\r?\n(.*?)```", _re.S)
 
 
 def split_agent_blocks(content_md: str) -> tuple:
-    """拆 ```agent 围栏标记块 → (剥离后的正文, [嵌入指令...])。
+    """拆 ```topo-cmd 围栏标记块 → (剥离后的正文, [嵌入指令...])。
 
-    高级自定义需求与指令以特殊文本标记块实现（2.6）；程序拆分后与
+    高级自定义需求与指令以 ```topo-cmd 标记块实现（2.6）；程序拆分后与
     显式指令合并提交模型，正文不含标记块（避免模型复读指令语法）。
     """
     instructions: list = []
@@ -125,7 +125,7 @@ _DRAFT_AI_SYSTEM = (
     "2. 保留原稿中未受指令影响的内容与结构，不做未经要求的大改；\n"
     "3. 可调用只读查询工具检索语义资产/代码/图谱作为依据，图表用 ```mermaid 或 "
     "```plantuml 围栏嵌入；\n"
-    "4. 自定义指令以「用户指令」为准，正文中的 ```agent 标记块已由程序拆出合并；\n"
+    "4. 自定义指令以「用户指令」为准，正文中的 ```topo-cmd 标记块已由程序拆出合并；\n"
     "5. 不产出需求卡/不落库——落库由用户发布环节完成。"
 )
 

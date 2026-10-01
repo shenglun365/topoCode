@@ -1,15 +1,19 @@
 <script setup lang="ts">
 /**
- * 需求草稿停靠面板（批C 骨架）：草稿列表 + md 编辑器（编辑/分栏/预览）。
- * 预览支持 mermaid/plantuml/dot 图表块渲染（纯文本则纯文本预览）。
- * AI 工具条（批D）、diff 采纳流（批E）、发布（批F）后续批次接入。
+ * 需求草稿停靠面板（重构版）：
+ * - Tab 模型：草稿文档（编辑）/ MD 预览——都可关；启动为空态，点列表项/新建只开编辑 tab；
+ *   预览经工具栏按钮按需打开（打开期间跟随内容刷新），关闭即清空。
+ * - 自动保存（无按钮）：2s 节流写 LS；10s 轮询发现修改才 PUT 回写；关键动作与 tab 关闭即时 flush。
+ * - 悬浮工具栏：AI 预设/执行指令块(topo-cmd)+预览+发布——可拖动、可折叠单 icon。
+ * - 草稿列表在右侧：点击打开（仅编辑 tab）、✎ 行内改名、删除、归档只读+续写。
+ * - 自定义指令：正文 ```topo-cmd 标记块（预览过滤不解析）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  DocumentTextIcon, PlusIcon, TrashIcon, ArrowPathIcon,
-  PencilSquareIcon, EyeIcon, Squares2X2Icon, ArchiveBoxIcon,
-  SparklesIcon, ChevronRightIcon, CheckIcon, PaperAirplaneIcon,
+  DocumentTextIcon, PlusIcon, TrashIcon, EyeIcon, XMarkIcon,
+  PencilSquareIcon, ArchiveBoxIcon, SparklesIcon, ChevronRightIcon, CheckIcon,
+  PaperAirplaneIcon, PlayCircleIcon, LinkIcon, CheckBadgeIcon, WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
 import MarkdownView from '@/components/MarkdownView.vue'
@@ -17,87 +21,25 @@ import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { parseMessageBlocks } from '@/services/parse-message-blocks'
 import { renderDiagram } from '@/services/topo-render'
 import { semanticAssetService } from '@/services/semantic-asset-service'
-import { reqDraftService, type ReqDraft } from '@/services/req-draft-service'
 import { sessionService } from '@/services/session-service'
+import { reqDraftService, type ReqDraft } from '@/services/req-draft-service'
+import { currentProjectParams } from '@/services/project-service'
 import { diffLines, diffStat } from '@/utils/diff-lines'
 
 const { t } = useI18n()
 const dialog = useAppDialog()
+/** 行内改名输入自动聚焦。 */
+const vFocus = { mounted: (el: HTMLElement) => el.focus() }
 
-// ---- 列表与当前草稿 ----
+// ══════════ 列表与当前草稿（单实例） ══════════
 const drafts = ref<ReqDraft[]>([])
 const current = ref<ReqDraft | null>(null)
 const loading = ref(false)
-const saving = ref(false)
-const dirty = ref(false)
-/** 编辑缓冲（title/contentMd 本地编辑，保存落库）。 */
+/** 编辑缓冲（title/contentMd 本地）。 */
 const titleDraft = ref('')
 const contentDraft = ref('')
 
-async function loadList(keepId?: string) {
-  loading.value = true
-  try {
-    drafts.value = await reqDraftService.list()
-    const target = keepId
-      ? drafts.value.find((d) => d.id === keepId)
-      : (drafts.value.find((d) => d.status === 'editing') ?? drafts.value[0])
-    if (target) await openDraft(target)
-    else current.value = null
-  } finally {
-    loading.value = false
-  }
-}
-
-async function openDraft(d: ReqDraft) {
-  if (dirty.value && current.value && !(await dialog.confirm(t('draft.unsavedConfirm')))) return
-  loading.value = true
-  try {
-    current.value = await reqDraftService.get(d.id) ?? null
-    titleDraft.value = current.value?.title ?? ''
-    contentDraft.value = current.value?.contentMd ?? ''
-    dirty.value = false
-  } finally {
-    loading.value = false
-  }
-}
-
-async function createDraft() {
-  const d = await reqDraftService.create({ title: t('draft.untitled') })
-  await loadList(d.id)
-}
-
-async function saveDraft() {
-  if (!current.value || current.value.status === 'archived') return
-  saving.value = true
-  try {
-    current.value = await reqDraftService.update(current.value.id, {
-      title: titleDraft.value, contentMd: contentDraft.value,
-    })
-    dirty.value = false
-    const idx = drafts.value.findIndex((x) => x.id === current.value!.id)
-    if (idx >= 0) drafts.value[idx] = { ...drafts.value[idx], ...current.value }
-  } finally {
-    saving.value = false
-  }
-}
-
-async function removeDraft() {
-  if (!current.value) return
-  if (!(await dialog.confirm(t('draft.deleteConfirm', { title: current.value.title || t('draft.untitled') }), { danger: true }))) return
-  await reqDraftService.remove(current.value.id)
-  await loadList()
-}
-
-/** 续写：归档草稿复制副本继续编写。 */
-async function copyDraft() {
-  if (!current.value) return
-  const cp = await reqDraftService.copy(current.value.id)
-  await loadList(cp.id)
-}
-
-const archived = computed(() => current.value?.status === 'archived')
-
-// ---- 草稿列表视图（功能2）：状态过滤(全部/活跃/归档) + 关键字搜索；默认更新时间倒序(新在上) ----
+// ---- 列表视图（状态过滤 + 搜索；更新时间倒序为服务端既有排序） ----
 type ListFilter = 'all' | 'editing' | 'archived'
 const listFilter = ref<ListFilter>('all')
 const listQuery = ref('')
@@ -115,15 +57,357 @@ const filterCounts = computed(() => ({
   editing: drafts.value.filter((d) => (d.status || 'editing') === 'editing').length,
   archived: drafts.value.filter((d) => d.status === 'archived').length,
 }))
+const archived = computed(() => current.value?.status === 'archived')
 
-// ---- 发布（批F）：草稿 → 需求卡 → 会话（新会话 or 已有会话覆盖确认） ----
+/** 待回写状态点（列表项）：本地与基线有差异且未落库。 */
+function pendingOf(id: string): boolean {
+  return id === current.value?.id && pending.value
+}
+
+// ══════════ 自动保存引擎（LS 2s 节流 + DB 10s 轮询按需回写） ══════════
+/** 基线：与服务器一致的内容（打开/回写成功后同步）。 */
+let baseTitle = ''
+let baseContent = ''
+/** 有未回写修改。 */
+const pending = ref(false)
+const saving = ref(false)
+let lsTimer: ReturnType<typeof setInterval> | null = null
+let dbTimer: ReturnType<typeof setInterval> | null = null
+
+function lsKey(id: string): string {
+  const { project } = currentProjectParams()
+  return `draft-dock:${project || ''}:${id}`
+}
+
+function isDirty(): boolean {
+  return !!current.value && (titleDraft.value !== baseTitle || contentDraft.value !== baseContent)
+}
+
+function lsWrite(): void {
+  if (!current.value || archived.value) return
+  try {
+    localStorage.setItem(lsKey(current.value.id), JSON.stringify({
+      title: titleDraft.value, contentMd: contentDraft.value, ts: Date.now(),
+    }))
+  } catch { /* LS 满等静默 */ }
+}
+
+function lsClear(id: string): void {
+  try { localStorage.removeItem(lsKey(id)) } catch { /* 忽略 */ }
+}
+
+/** flush：有修改立即 PUT 回写（关键动作/tab 关闭调用）。 */
+async function flush(): Promise<void> {
+  if (!current.value || archived.value || !isDirty() || saving.value) return
+  saving.value = true
+  try {
+    current.value = await reqDraftService.update(current.value.id, {
+      title: titleDraft.value, contentMd: contentDraft.value,
+    })
+    baseTitle = titleDraft.value
+    baseContent = contentDraft.value
+    pending.value = false
+    lsClear(current.value.id)
+    syncListRow()
+  } catch { /* 回写失败保留 LS，下轮重试 */ } finally {
+    saving.value = false
+  }
+}
+
+/** 10s 轮询：有修改才回写（无修改不发请求）。 */
+function dbTick(): void {
+  if (pending.value || isDirty()) void flush()
+}
+
+/** 2s 节流：dirty 时写 LS。 */
+function lsTick(): void {
+  if (isDirty()) lsWrite()
+}
+
+function startAutosave(): void {
+  if (!lsTimer) lsTimer = setInterval(lsTick, 2000)
+  if (!dbTimer) dbTimer = setInterval(dbTick, 10000)
+}
+function stopAutosave(): void {
+  if (lsTimer) { clearInterval(lsTimer); lsTimer = null }
+  if (dbTimer) { clearInterval(dbTimer); dbTimer = null }
+}
+
+function syncListRow(): void {
+  if (!current.value) return
+  const idx = drafts.value.findIndex((x) => x.id === current.value!.id)
+  if (idx >= 0) drafts.value[idx] = { ...drafts.value[idx], ...current.value }
+}
+
+// ---- LS 恢复（刷新接续）：LS.ts 比服务端新 → 恢复继续编辑 ----
+function lsRestore(d: ReqDraft): boolean {
+  try {
+    const raw = localStorage.getItem(lsKey(d.id))
+    if (!raw) return false
+    const saved = JSON.parse(raw) as { title: string; contentMd: string; ts: number }
+    if ((saved.ts ?? 0) <= (d.updatedAt ?? 0)) {
+      lsClear(d.id)
+      return false
+    }
+    titleDraft.value = saved.title ?? ''
+    contentDraft.value = saved.contentMd ?? ''
+    baseTitle = d.title ?? ''
+    baseContent = d.contentMd ?? ''
+    pending.value = true
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ══════════ Tab 模型（都可关；启动空态） ══════════
+type Tab = 'edit' | 'preview'
+const tabs = ref<Tab[]>([])
+const activeTab = ref<Tab>('edit')
+/** 当前编辑 tab 是否有效（有打开的草稿）。空态=无 tab。 */
+
+function closeTab(tab: Tab): void {
+  if (tab === 'edit') {
+    // 关编辑 tab = 关闭当前草稿：先 flush 再回空态
+    void flush().finally(() => {
+      current.value = null
+      titleDraft.value = ''
+      contentDraft.value = ''
+      baseTitle = ''
+      baseContent = ''
+      pending.value = false
+      tabs.value = []
+      activeTab.value = 'edit'
+    })
+    return
+  }
+  // 关预览 tab = 清空
+  tabs.value = tabs.value.filter((x) => x !== 'preview')
+  if (activeTab.value === 'preview') activeTab.value = 'edit'
+}
+
+/** 打开草稿（列表点击 / LS 恢复）：只开编辑 tab；旧草稿先 flush。 */
+async function openDraft(d: ReqDraft): Promise<void> {
+  if (current.value?.id === d.id) {
+    activeTab.value = 'edit'
+    if (!tabs.value.includes('edit')) tabs.value.push('edit')
+    return
+  }
+  await flush()   // 旧草稿落库（自动保存取代人工确认）
+  loading.value = true
+  try {
+    const full = await reqDraftService.get(d.id)
+    if (!full) return
+    current.value = full
+    baseTitle = full.title ?? ''
+    baseContent = full.contentMd ?? ''
+    pending.value = false
+    if (lsRestore(full)) { /* LS 较新：恢复离线编辑接续 */ }
+    else {
+      titleDraft.value = full.title ?? ''
+      contentDraft.value = full.contentMd ?? ''
+    }
+    tabs.value = ['edit']   // 预览不自动开；需经工具栏按钮
+    activeTab.value = 'edit'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function createDraft(): Promise<void> {
+  await flush()
+  loading.value = true
+  try {
+    const d = await reqDraftService.create({ title: t('draft.untitled') })
+    await loadList()
+    await openDraft(d)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadList(selectId?: string): Promise<void> {
+  loading.value = true
+  try {
+    drafts.value = await reqDraftService.list()
+    if (selectId) {
+      const target = drafts.value.find((d) => d.id === selectId)
+      if (target) await openDraft(target)
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// ---- 列表项：行内改名（✎ → input，Enter/失焦提交，Esc 取消） ----
+const renamingId = ref('')
+const renameDraft = ref('')
+function startRename(d: ReqDraft): void {
+  if (d.status === 'archived') return
+  renamingId.value = d.id
+  renameDraft.value = d.title || ''
+}
+async function commitRename(): Promise<void> {
+  const id = renamingId.value
+  if (!id) return
+  renamingId.value = ''
+  const title = renameDraft.value.trim()
+  const row = drafts.value.find((x) => x.id === id)
+  if (!row || !title || title === row.title) return
+  const updated = await reqDraftService.update(id, { title })
+  if (current.value?.id === id) {
+    current.value = updated
+    titleDraft.value = updated.title
+    baseTitle = updated.title
+  }
+  syncListRow()
+}
+function cancelRename(): void {
+  renamingId.value = ''
+}
+
+async function removeDraft(): Promise<void> {
+  if (!current.value) return
+  if (!(await dialog.confirm(t('draft.deleteConfirm', { title: current.value.title || t('draft.untitled') }), { danger: true }))) return
+  const id = current.value.id
+  lsClear(id)
+  await reqDraftService.remove(id)
+  current.value = null
+  tabs.value = []
+  await loadList()
+}
+
+/** 续写：归档草稿复制副本继续编写。 */
+async function copyDraft(): Promise<void> {
+  if (!current.value) return
+  const cp = await reqDraftService.copy(current.value.id)
+  await loadList(cp.id)
+}
+
+// ══════════ 悬浮工具栏（可拖动/可折叠） ══════════
+const { project: projKey } = currentProjectParams()
+const tbPos = ref({ x: 12, y: 8 })
+const tbCollapsed = ref(false)
+try {
+  const saved = JSON.parse(localStorage.getItem(`draft-dock-toolbar:${projKey || ''}`) || '{}')
+  if (typeof saved.x === 'number') tbPos.value = { x: saved.x, y: saved.y }
+  if (typeof saved.collapsed === 'boolean') tbCollapsed.value = saved.collapsed
+} catch { /* 忽略 */ }
+
+function persistToolbar(): void {
+  try {
+    localStorage.setItem(`draft-dock-toolbar:${projKey || ''}`,
+      JSON.stringify({ x: tbPos.value.x, y: tbPos.value.y, collapsed: tbCollapsed.value }))
+  } catch { /* 忽略 */ }
+}
+
+let dragStart: { px: number; py: number; x: number; y: number } | null = null
+function onToolbarDown(e: PointerEvent): void {
+  const target = e.target as HTMLElement
+  if (target.closest('button')) return   // 按钮不触发拖动
+  dragStart = { px: e.clientX, py: e.clientY, x: tbPos.value.x, y: tbPos.value.y }
+  const move = (ev: PointerEvent): void => {
+    if (!dragStart) return
+    const host = (e.currentTarget as HTMLElement).parentElement
+    const maxX = (host?.clientWidth ?? 800) - 60
+    const maxY = (host?.clientHeight ?? 400) - 30
+    tbPos.value = {
+      x: Math.max(4, Math.min(maxX, dragStart.x + ev.clientX - dragStart.px)),
+      y: Math.max(4, Math.min(maxY, dragStart.y + ev.clientY - dragStart.py)),
+    }
+  }
+  const up = (): void => {
+    dragStart = null
+    persistToolbar()
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+
+// ══════════ AI 处理（指令=正文 topo-cmd 块；无专用输入框） ══════════
+const aiBusy = ref(false)
+const aiStatus = ref('')
+let aiJobTimer: ReturnType<typeof setInterval> | null = null
+
+function hasCmdBlock(): boolean {
+  return /```topo-cmd[ \t]*\r?\n[\s\S]*?```/.test(contentDraft.value)
+}
+
+async function runAi(preset: 'generate' | 'review' | 'relate' | 'custom'): Promise<void> {
+  if (!current.value || aiBusy.value || archived.value) return
+  if (preset === 'custom' && !hasCmdBlock()) {
+    aiStatus.value = t('draft.ai.noCmdBlock')
+    return
+  }
+  await flush()   // AI 上下文=已保存正文
+  aiBusy.value = true
+  aiStatus.value = t('draft.ai.submitting')
+  try {
+    const r = await reqDraftService.runAi(current.value.id, { preset })
+    const jobId = r?.job?.id
+    if (!jobId || (!r?.started && r?.reason !== 'already_running')) {
+      aiStatus.value = r?.reason === 'already_running'
+        ? t('assetMgmt.compExtractAlreadyRunning') : t('draft.ai.submitFailed')
+      return
+    }
+    await new Promise<void>((resolve) => {
+      aiJobTimer = setInterval(async () => {
+        try {
+          const j = await semanticAssetService.getJob(jobId)
+          if (!j || j.state === 'done') resolve()
+          else if (j.state === 'failed' || j.state === 'cancelled' || j.state === 'lost') {
+            aiStatus.value = t('draft.ai.failed')
+            resolve()
+          } else aiStatus.value = t('draft.ai.running', { current: j.result?.summary || j.state })
+        } catch { /* 轮询失败静默 */ }
+      }, 2000)
+    })
+    if (aiJobTimer) { clearInterval(aiJobTimer); aiJobTimer = null }
+    current.value = await reqDraftService.get(current.value.id) ?? current.value
+    aiStatus.value = current.value.lastProposedMd ? t('draft.ai.done') : t('draft.ai.failed')
+  } catch (e) {
+    aiStatus.value = e instanceof Error && e.message ? e.message : t('draft.ai.submitFailed')
+  } finally {
+    if (aiJobTimer) { clearInterval(aiJobTimer); aiJobTimer = null }
+    aiBusy.value = false
+  }
+}
+
+// ══════════ AI 产物比对（git diff；采纳/放弃保留参考） ══════════
+const proposedOpen = ref(false)
+const adopting = ref(false)
+const proposedDiff = computed(() =>
+  current.value?.lastProposedMd
+    ? diffLines(current.value.contentMd || '', current.value.lastProposedMd)
+    : [])
+const proposedStat = computed(() => diffStat(proposedDiff.value))
+
+async function adoptProposal(): Promise<void> {
+  if (!current.value || adopting.value) return
+  adopting.value = true
+  try {
+    current.value = await reqDraftService.adopt(current.value.id)
+    contentDraft.value = current.value.contentMd
+    titleDraft.value = current.value.title
+    baseTitle = current.value.title
+    baseContent = current.value.contentMd
+    pending.value = false
+    lsClear(current.value.id)
+    syncListRow()
+  } finally {
+    adopting.value = false
+  }
+}
+
+// ══════════ 发布（草稿 → 需求卡 → 会话） ══════════
 interface ConvOption { id: string; title: string; reqId?: string }
 const publishOpen = ref(false)
 const publishBusy = ref(false)
 const publishTarget = ref<'new' | string>('new')
 const convOptions = ref<ConvOption[]>([])
 const publishMsg = ref('')
-// picker 分页 + 搜索（活跃会话；多关键字 AND→OR 智能匹配，上限 5 个由后端截断）
 const pickerPage = ref(0)
 const pickerTotal = ref(0)
 const pickerOrFallback = ref(false)
@@ -133,13 +417,11 @@ let pickerSearchTimer: ReturnType<typeof setTimeout> | null = null
 const PICKER_PAGE_SIZE = 10
 const pickerPageCount = computed(() => Math.max(1, Math.ceil(pickerTotal.value / PICKER_PAGE_SIZE)))
 
-async function loadPicker(page = 0, kw = pickerQuery.value.trim()) {
+async function loadPicker(page = 0, kw = pickerQuery.value.trim()): Promise<void> {
   pickerLoading.value = true
   try {
     const r = await sessionService.picker({
-      kw: kw || undefined,
-      limit: PICKER_PAGE_SIZE,
-      offset: page * PICKER_PAGE_SIZE,
+      kw: kw || undefined, limit: PICKER_PAGE_SIZE, offset: page * PICKER_PAGE_SIZE,
     })
     convOptions.value = r?.items ?? []
     pickerTotal.value = r?.total ?? 0
@@ -156,14 +438,14 @@ async function loadPicker(page = 0, kw = pickerQuery.value.trim()) {
   }
 }
 
-function onPickerSearch() {
+function onPickerSearch(): void {
   if (pickerSearchTimer) clearTimeout(pickerSearchTimer)
   pickerSearchTimer = setTimeout(() => { void loadPicker(0) }, 300)
 }
 
-async function openPublish() {
-  if (!current.value || archived.value || !(current.value.contentMd || '').trim()) return
-  if (dirty.value) await saveDraft()   // 发布以已保存正文为准
+async function openPublish(): Promise<void> {
+  if (!current.value || archived.value || !(contentDraft.value || '').trim()) return
+  await flush()
   publishMsg.value = ''
   publishTarget.value = 'new'
   pickerQuery.value = ''
@@ -171,7 +453,7 @@ async function openPublish() {
   await loadPicker(0, '')
 }
 
-async function doPublish(overwrite = false) {
+async function doPublish(overwrite = false): Promise<void> {
   if (!current.value || publishBusy.value) return
   publishBusy.value = true
   publishMsg.value = ''
@@ -182,10 +464,11 @@ async function doPublish(overwrite = false) {
     })
     current.value = r.draft
     publishOpen.value = false
-    dirty.value = false
+    pending.value = false
+    lsClear(current.value.id)
+    syncListRow()
   } catch (e: unknown) {
     const msg = e instanceof Error && e.message ? e.message : String(e)
-    // 未完结需求卡覆盖冲突 → 确认后 overwrite 重发
     if (msg.includes('未完结需求卡') && await dialog.confirm(msg + '\n\n' + t('draft.publish.overwriteConfirm'))) {
       publishBusy.value = false
       await doPublish(true)
@@ -197,131 +480,51 @@ async function doPublish(overwrite = false) {
   }
 }
 
-// ---- AI 处理（批D）：单轮对话+多轮工具；产物落 lastProposedMd（diff 比对批E 接入） ----
-const aiBusy = ref(false)
-const aiStatus = ref('')
-const aiInstruction = ref('')
-let aiJobTimer: ReturnType<typeof setInterval> | null = null
-
-async function runAi(preset: 'generate' | 'review' | 'relate' | 'custom') {
-  if (!current.value || aiBusy.value || archived.value) return
-  if (preset === 'custom' && !aiInstruction.value.trim()) return
-  if (dirty.value) await saveDraft()   // AI 上下文=已保存的 contentMd
-  aiBusy.value = true
-  aiStatus.value = t('draft.ai.submitting')
-  try {
-    const r = await reqDraftService.runAi(current.value.id, {
-      preset, instruction: preset === 'custom' ? aiInstruction.value.trim() : undefined,
-    })
-    const jobId = r?.job?.id
-    if (!jobId || (!r?.started && r?.reason !== 'already_running')) {
-      aiStatus.value = t('draft.ai.submitFailed')
-      return
-    }
-    await new Promise<void>((resolve) => {
-      aiJobTimer = setInterval(async () => {
-        try {
-          const j = await semanticAssetService.getJob(jobId)
-          if (!j || j.state === 'done') { resolve() }
-          else if (j.state === 'failed' || j.state === 'cancelled' || j.state === 'lost') {
-            aiStatus.value = t('draft.ai.failed')
-            resolve()
-          } else {
-            aiStatus.value = t('draft.ai.running', { current: j.result?.summary || j.state })
-          }
-        } catch { /* 轮询失败静默 */ }
-      }, 2000)
-    })
-    if (aiJobTimer) { clearInterval(aiJobTimer); aiJobTimer = null }
-    // 完成：拉取草稿（lastProposedMd 已更新）
-    current.value = await reqDraftService.get(current.value.id) ?? current.value
-    aiStatus.value = current.value.lastProposedMd ? t('draft.ai.done') : t('draft.ai.failed')
-  } catch (e) {
-    aiStatus.value = e instanceof Error && e.message ? e.message : t('draft.ai.submitFailed')
-  } finally {
-    if (aiJobTimer) { clearInterval(aiJobTimer); aiJobTimer = null }
-    aiBusy.value = false
-  }
-}
-
-const proposedOpen = ref(false)
-const adopting = ref(false)
-/** diff 视图（当前已保存正文 vs AI 产物，git diff 模式行级比对）。 */
-const proposedDiff = computed(() =>
-  current.value?.lastProposedMd
-    ? diffLines(current.value.contentMd || '', current.value.lastProposedMd)
-    : [])
-const proposedStat = computed(() => diffStat(proposedDiff.value))
-
-/** 采纳：contentMd ← lastProposedMd（后端清空产物）；编辑缓冲同步。 */
-async function adoptProposal() {
-  if (!current.value || adopting.value) return
-  adopting.value = true
-  try {
-    current.value = await reqDraftService.adopt(current.value.id)
-    contentDraft.value = current.value.contentMd
-    titleDraft.value = current.value.title
-    dirty.value = false
-    const idx = drafts.value.findIndex((x) => x.id === current.value!.id)
-    if (idx >= 0) drafts.value[idx] = { ...drafts.value[idx], ...current.value }
-  } finally {
-    adopting.value = false
-  }
-}
-
-// ---- 编辑/预览 ----
-type ViewMode = 'edit' | 'split' | 'preview'
-const viewMode = ref<ViewMode>('split')
-
+// ══════════ 预览（MD tab；topo-cmd 块过滤不解析） ══════════
 interface PreviewBlock {
   kind: 'text' | 'mermaid' | 'plantuml' | 'diagram' | 'dot'
   text?: string
   code?: string
-  schema?: unknown
 }
-/** 预览块序列：```mermaid/plantuml/diagram 围栏拆出渲染；dot 走 plantuml 服务端通道。 */
+const CMD_FENCE_RE = /```topo-cmd[ \t]*\r?\n[\s\S]*?```/g
+/** 预览源：正文剥离 topo-cmd 指令块（MD 预览过滤不解析）。 */
+const previewSource = computed(() => (contentDraft.value || '').replace(CMD_FENCE_RE, ''))
 const previewBlocks = computed<PreviewBlock[]>(() => {
-  const src = contentDraft.value || ''
+  const src = previewSource.value
   const out: PreviewBlock[] = []
-  // dot 围栏独立拆（parse-message-blocks 未覆盖 dot）
   const DOT_RE = /```dot[ \t]*\r?\n([\s\S]*?)```/g
   const dotSpans: [number, number, string][] = []
   let m: RegExpExecArray | null
   while ((m = DOT_RE.exec(src))) dotSpans.push([m.index, m.index + m[0].length, m[1]])
   let cursor = 0
   for (const blocks of parseMessageBlocks(src)) {
-    const kind = blocks.type
-    const text = blocks.type === 'text' ? blocks.text : ''
-    // 在 text 块内找 dot 围栏（按位置切分）
-    if (kind === 'text') {
+    if (blocks.type === 'diagram') continue
+    if (blocks.type === 'text') {
+      const text = blocks.text
       const absStart = src.indexOf(text, cursor)
       let localCursor = 0
-      for (const [s, e, code] of dotSpans.filter(([s]) => s >= absStart && s < absStart + text.length)) {
-        const rel = s - absStart
+      for (const [sPos, ePos, code] of dotSpans.filter(([sp]) => sp >= absStart && sp < absStart + text.length)) {
+        const rel = sPos - absStart
         const before = text.slice(localCursor, rel)
         if (before.trim()) out.push({ kind: 'text', text: before })
         out.push({ kind: 'dot', code })
-        localCursor = e - absStart
+        localCursor = ePos - absStart
       }
       const rest = text.slice(localCursor)
       if (rest.trim()) out.push({ kind: 'text', text: rest })
       cursor = absStart + text.length
-    } else if (kind === 'diagram') {
-      out.push({ kind: 'diagram', schema: blocks.schema })
     } else {
-      out.push({ kind, code: blocks.code })
+      out.push({ kind: blocks.type, code: blocks.code })
     }
   }
   return out
 })
 
-/** dot 块渲染（PlantUML 服务端原生支持 GraphViz DOT）。
- *  服务端不可用时降级为源码展示：首次失败短路本预览内后续 dot 块的
- *  重复请求（避免每块都等一次超时），并给出可见提示。 */
+/** dot 块渲染（PlantUML 服务端原生支持 GraphViz DOT；失败降级源码+短路）。 */
 const dotSvgs = ref<Record<number, string>>({})
 const plantumlDown = ref(false)
 watch(previewBlocks, async (blocks, prev) => {
-  if (blocks !== prev) plantumlDown.value = false   // 预览变化重置（服务可能恢复）
+  if (blocks !== prev) plantumlDown.value = false
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]
     if (b.kind !== 'dot' || !b.code) continue
@@ -336,80 +539,146 @@ watch(previewBlocks, async (blocks, prev) => {
   }
 }, { immediate: true })
 
+/** 打开 MD 预览 tab（工具栏按钮；切换草稿后预览关闭需再次打开）。 */
+function openPreviewTab(): void {
+  if (!current.value) return
+  if (!tabs.value.includes('preview')) tabs.value.push('preview')
+  activeTab.value = 'preview'
+}
+
 function fmtTime(ts: number): string {
   return ts ? new Date(ts).toLocaleString() : ''
 }
 
-onMounted(() => { void loadList() })
+// ══════════ 生命周期 ══════════
+function onBeforeUnload(): void {
+  if (current.value && isDirty()) lsWrite()
+}
+
+onMounted(() => {
+  startAutosave()
+  window.addEventListener('beforeunload', onBeforeUnload)
+  void loadList()
+})
+onBeforeUnmount(() => {
+  void flush()
+  stopAutosave()
+  if (aiJobTimer) clearInterval(aiJobTimer)
+  if (pickerSearchTimer) clearTimeout(pickerSearchTimer)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+})
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <!-- 顶栏：标题 + 保存 + 视图切换 -->
-    <div class="flex shrink-0 items-center gap-1.5 border-b border-ctp-surface0 px-2 py-1.5">
-      <input
-        v-model="titleDraft"
-        class="input !py-0.5 !px-2 !text-xs min-w-0 flex-1"
-        :placeholder="t('draft.untitled')"
-        :disabled="archived"
-        @input="dirty = true"
-      >
-      <span v-if="archived" class="chip bg-ctp-surface0 text-ctp-overlay1 !text-[9px] shrink-0">{{ t('draft.archived') }}</span>
-      <span v-else-if="dirty" class="text-[9px] text-ctp-peach shrink-0">{{ t('draft.dirty') }}</span>
-      <button
-        class="btn btn-xs" :class="dirty ? 'btn-blue' : 'btn-ghost'"
-        :disabled="archived || !dirty || saving"
-        title="Ctrl/⌘+S" @click="saveDraft"
-      ><ArrowPathIcon class="h-3 w-3" :class="saving ? 'animate-spin' : ''" />{{ t('common.save') }}</button>
-      <button
-        class="btn btn-xs btn-primary shrink-0"
-        :disabled="archived || aiBusy"
-        :title="t('draft.publish.hint')"
-        @click="openPublish"
-      ><PaperAirplaneIcon class="h-3 w-3" />{{ t('draft.publish.button') }}</button>
-      <div class="flex items-center overflow-hidden rounded-md border border-ctp-surface1">
-        <button
-          v-for="vm in (['edit', 'split', 'preview'] as const)" :key="vm"
-          class="px-1.5 py-0.5 text-[10px]"
-          :class="viewMode === vm ? 'bg-ctp-surface0 text-ctp-text' : 'text-ctp-overlay1 hover:text-ctp-subtext1'"
-          :title="t(`draft.view.${vm}`)"
-          @click="viewMode = vm"
+    <!-- Tab 栏：草稿文档 / MD预览（都可关；空态无 tab） -->
+    <div class="flex h-8 shrink-0 items-center gap-1 border-b border-ctp-surface0 px-2">
+      <template v-if="tabs.length">
+        <div
+          v-for="tab in tabs" :key="tab"
+          class="flex items-center gap-1 rounded-t-md px-2 py-1 text-[11px] cursor-pointer"
+          :class="activeTab === tab ? 'bg-ctp-surface0 text-ctp-text' : 'text-ctp-overlay1 hover:text-ctp-subtext1'"
+          @click="activeTab = tab"
         >
-          <PencilSquareIcon v-if="vm === 'edit'" class="h-3 w-3" />
-          <Squares2X2Icon v-else-if="vm === 'split'" class="h-3 w-3" />
-          <EyeIcon v-else class="h-3 w-3" />
+          <DocumentTextIcon class="h-3 w-3" />
+          {{ tab === 'edit' ? t('draft.tab.edit') : t('draft.tab.preview') }}
+          <button class="text-ctp-overlay0 hover:text-ctp-red" @click.stop="closeTab(tab)">
+            <XMarkIcon class="h-3 w-3" />
+          </button>
+        </div>
+        <span class="ml-2 min-w-0 truncate text-[10px] text-ctp-overlay0" :title="current?.title">
+          {{ current?.title || t('draft.untitled') }}<span v-if="pending" class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-ctp-peach" />
+        </span>
+      </template>
+      <template v-else>
+        <span class="text-[11px] text-ctp-overlay0">{{ t('draft.emptyTabs') }}</span>
+        <button class="btn btn-xs btn-ghost ml-1" @click="createDraft">
+          <PlusIcon class="h-3 w-3" />{{ t('draft.newDraft') }}
         </button>
-      </div>
+      </template>
     </div>
 
-    <!-- AI 工具条：固定指令按钮 + 自定义指令（标记块指令在正文中 ```agent 围栏） -->
-    <div class="flex shrink-0 items-center gap-1 border-b border-ctp-surface0 px-2 py-1">
-      <SparklesIcon class="h-3.5 w-3.5 text-ctp-mauve shrink-0" />
-      <button class="btn btn-xs btn-ghost" :disabled="aiBusy || archived" @click="runAi('generate')">{{ t('draft.ai.generate') }}</button>
-      <button class="btn btn-xs btn-ghost" :disabled="aiBusy || archived" @click="runAi('review')">{{ t('draft.ai.review') }}</button>
-      <button class="btn btn-xs btn-ghost" :disabled="aiBusy || archived" @click="runAi('relate')">{{ t('draft.ai.relate') }}</button>
-      <input
-        v-model="aiInstruction"
-        class="input !py-0.5 !px-1.5 !text-[11px] min-w-0 flex-1"
-        :placeholder="t('draft.ai.instructionPlaceholder')"
-        :disabled="aiBusy || archived"
-        @keydown.enter="runAi('custom')"
-      >
-      <button class="btn btn-xs btn-blue shrink-0" :disabled="aiBusy || archived || (aiInstruction && !aiInstruction.trim())" @click="runAi('custom')">{{ t('draft.ai.run') }}</button>
-    </div>
+    <!-- AI 状态行 -->
     <div v-if="aiBusy || aiStatus" class="shrink-0 px-2 py-0.5 text-[10px]" :class="aiBusy ? 'text-ctp-sky' : 'text-ctp-overlay1'">
       {{ aiBusy ? t('draft.ai.running', { current: aiStatus }) : aiStatus }}
     </div>
 
     <div class="flex min-h-0 flex-1">
-      <!-- 左：草稿列表（替换原对话列表） -->
-      <div class="flex w-44 shrink-0 flex-col border-r border-ctp-surface0">
+      <!-- 左：主区（编辑/预览 + 悬浮工具栏） -->
+      <div class="relative flex min-h-0 min-w-0 flex-1">
+        <!-- 悬浮工具栏（拖动/折叠）：AI + 预览 + 发布 -->
+        <div
+          v-if="tabs.length && !archived"
+          class="absolute z-20 flex items-center gap-0.5 rounded-lg border border-ctp-surface1 bg-ctp-mantle/95 px-1 py-0.5 shadow-lg"
+          :style="{ top: tbPos.y + 'px', left: tbPos.x + 'px' }"
+          @pointerdown="onToolbarDown"
+        >
+          <template v-if="!tbCollapsed">
+            <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.generate')" @click="runAi('generate')"><SparklesIcon class="h-3.5 w-3.5" /></button>
+            <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.review')" @click="runAi('review')"><CheckBadgeIcon class="h-3.5 w-3.5" /></button>
+            <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.relate')" @click="runAi('relate')"><LinkIcon class="h-3.5 w-3.5" /></button>
+            <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.runCmd')" @click="runAi('custom')"><PlayCircleIcon class="h-3.5 w-3.5" /></button>
+            <span class="mx-0.5 h-4 w-px bg-ctp-surface1" />
+            <button class="tb-btn" :title="t('draft.toolbar.preview')" @click="openPreviewTab"><EyeIcon class="h-3.5 w-3.5" /></button>
+            <span class="mx-0.5 h-4 w-px bg-ctp-surface1" />
+            <button class="tb-btn" :disabled="!(contentDraft || '').trim()" :title="t('draft.publish.hint')" @click="openPublish"><PaperAirplaneIcon class="h-3.5 w-3.5" /></button>
+          </template>
+          <button class="tb-btn" :title="tbCollapsed ? t('draft.toolbar.expand') : t('draft.toolbar.collapse')" @click="tbCollapsed = !tbCollapsed; persistToolbar()">
+            <WrenchScrewdriverIcon v-if="tbCollapsed" class="h-3.5 w-3.5 text-ctp-mauve" />
+            <ChevronRightIcon v-else class="h-3.5 w-3.5 rotate-180" />
+          </button>
+        </div>
+
+        <!-- 空态 -->
+        <div v-if="!tabs.length" class="flex flex-1 flex-col items-center justify-center gap-2 text-ctp-overlay0">
+          <DocumentTextIcon class="h-8 w-8" />
+          <span class="text-xs">{{ t('draft.emptyTabsBody') }}</span>
+          <button class="btn btn-xs btn-blue" @click="createDraft">
+            <PlusIcon class="h-3 w-3" />{{ t('draft.newDraft') }}
+          </button>
+        </div>
+
+        <!-- 编辑 tab -->
+        <textarea
+          v-else-if="activeTab === 'edit'"
+          v-model="contentDraft"
+          class="h-full min-w-0 flex-1 resize-none bg-transparent p-3 pt-10 font-mono text-[12px] leading-relaxed text-ctp-text outline-none"
+          :disabled="archived"
+          :placeholder="t('draft.editorPlaceholder')"
+          @input="pending = true"
+        />
+
+        <!-- 预览 tab -->
+        <div v-else class="h-full min-w-0 flex-1 overflow-y-auto p-3">
+          <template v-for="(b, i) in previewBlocks" :key="i">
+            <MarkdownView v-if="b.kind === 'text'" :content="b.text ?? ''" />
+            <DiagramCard
+              v-else-if="b.kind === 'mermaid'" :title="t('draft.diagram')" headerless
+              :diagrams="{ mermaid: b.code ?? '' }" :allowed-langs="['mermaid']"
+            />
+            <DiagramCard
+              v-else-if="b.kind === 'plantuml'" :title="t('draft.diagram')" headerless
+              :diagrams="{ plantuml: b.code ?? '' }" :allowed-langs="['plantuml']"
+            />
+            <div v-else-if="b.kind === 'dot'" class="my-2 overflow-x-auto rounded-md border border-ctp-surface0 bg-ctp-crust/60 p-2">
+              <span v-if="dotSvgs[i]" class="block text-center" v-html="dotSvgs[i]" />
+              <template v-else>
+                <p class="mb-1 text-[9px] text-ctp-overlay0">{{ t('draft.dotUnavailable') }}</p>
+                <pre class="overflow-x-auto text-[10px] text-ctp-subtext0">{{ b.code }}</pre>
+              </template>
+            </div>
+          </template>
+          <p v-if="!previewBlocks.length" class="py-8 text-center text-[11px] text-ctp-overlay0">{{ t('draft.previewEmpty') }}</p>
+        </div>
+      </div>
+
+      <!-- 右：草稿列表 -->
+      <div class="flex w-44 shrink-0 flex-col border-l border-ctp-surface0">
         <button
           class="m-1.5 flex items-center gap-1 rounded-md border border-dashed border-ctp-surface1 px-2 py-1 text-[11px] text-ctp-overlay1 hover:border-ctp-blue/50 hover:text-ctp-text"
           @click="createDraft"
         ><PlusIcon class="h-3 w-3" />{{ t('draft.newDraft') }}</button>
-        <!-- 状态过滤(全部/活跃/归档 + 计数) + 关键字搜索 -->
-        <div class="flex items-center gap-0.5 overflow-hidden rounded-md border border-ctp-surface1 mx-1.5 text-[10px]">
+        <div class="mx-1.5 flex items-center gap-0.5 overflow-hidden rounded-md border border-ctp-surface1 text-[10px]">
           <button
             v-for="f in (['all', 'editing', 'archived'] as const)" :key="f"
             class="flex-1 px-1 py-0.5"
@@ -419,7 +688,7 @@ onMounted(() => { void loadList() })
         </div>
         <input
           v-model="listQuery"
-          class="input !py-0.5 !px-1.5 !text-[10px] mx-1.5 mt-1 w-auto"
+          class="input mx-1.5 mt-1 w-auto !px-1.5 !py-0.5 !text-[10px]"
           :placeholder="t('draft.searchPlaceholder')"
         >
         <div class="min-h-0 flex-1 overflow-y-auto px-1.5 py-1 pb-1.5">
@@ -429,67 +698,40 @@ onMounted(() => { void loadList() })
             :class="current?.id === d.id ? 'bg-ctp-surface0/80' : 'hover:bg-ctp-surface0/40'"
             @click="openDraft(d)"
           >
-            <div class="flex items-center gap-1">
-              <DocumentTextIcon class="h-3 w-3 shrink-0" :class="d.status === 'archived' ? 'text-ctp-overlay0' : 'text-ctp-blue'" />
-              <span class="min-w-0 flex-1 truncate text-[11px]" :class="d.status === 'archived' ? 'text-ctp-overlay1' : 'text-ctp-text'">{{ d.title || t('draft.untitled') }}</span>
-              <button
-                class="hidden shrink-0 text-ctp-overlay0 group-hover:block hover:text-ctp-red"
-                :title="t('common.delete')"
-                @click.stop="current = d; removeDraft()"
-              ><TrashIcon class="h-3 w-3" /></button>
-            </div>
-            <div class="truncate text-[9px] text-ctp-overlay0" :title="d.excerpt">{{ d.excerpt || '—' }}</div>
+            <template v-if="renamingId === d.id">
+              <input
+                v-model="renameDraft" v-focus
+                class="input !py-0 !px-1 !text-[11px] w-full"
+                @keydown.enter.prevent="commitRename"
+                @keydown.esc="cancelRename"
+                @blur="commitRename"
+              >
+            </template>
+            <template v-else>
+              <div class="flex items-center gap-1">
+                <DocumentTextIcon class="h-3 w-3 shrink-0" :class="d.status === 'archived' ? 'text-ctp-overlay0' : 'text-ctp-blue'" />
+                <span class="min-w-0 flex-1 truncate text-[11px]" :class="d.status === 'archived' ? 'text-ctp-overlay1' : 'text-ctp-text'">{{ d.title || t('draft.untitled') }}</span>
+                <span v-if="pendingOf(d.id)" class="h-1.5 w-1.5 shrink-0 rounded-full bg-ctp-peach" :title="t('draft.pendingBadge')" />
+                <button
+                  class="hidden shrink-0 text-ctp-overlay0 group-hover:block hover:text-ctp-blue"
+                  :title="t('draft.rename')" @click.stop="startRename(d)"
+                ><PencilSquareIcon class="h-3 w-3" /></button>
+                <button
+                  class="hidden shrink-0 text-ctp-overlay0 group-hover:block hover:text-ctp-red"
+                  :title="t('common.delete')" @click.stop="current = d; removeDraft()"
+                ><TrashIcon class="h-3 w-3" /></button>
+              </div>
+              <div class="truncate text-[9px] text-ctp-overlay0" :title="d.excerpt">{{ d.excerpt || '—' }}</div>
+            </template>
           </div>
           <p v-if="!filteredDrafts.length && !loading" class="py-4 text-center text-[10px] text-ctp-overlay0">
             {{ drafts.length ? t('draft.noMatch') : t('draft.empty') }}
           </p>
         </div>
       </div>
-
-      <!-- 右：编辑/预览 -->
-      <div class="flex min-h-0 min-w-0 flex-1">
-        <template v-if="current">
-          <textarea
-            v-if="viewMode !== 'preview'"
-            v-model="contentDraft"
-            class="h-full min-w-0 flex-1 resize-none bg-transparent p-3 font-mono text-[12px] leading-relaxed text-ctp-text outline-none"
-            :class="viewMode === 'split' ? 'border-r border-ctp-surface0' : ''"
-            :disabled="archived"
-            :placeholder="t('draft.editorPlaceholder')"
-            @input="dirty = true"
-            @keydown.ctrl.s.prevent="saveDraft"
-            @keydown.meta.s.prevent="saveDraft"
-          />
-          <div v-if="viewMode !== 'edit'" class="h-full min-w-0 flex-1 overflow-y-auto p-3">
-            <template v-for="(b, i) in previewBlocks" :key="i">
-              <MarkdownView v-if="b.kind === 'text'" :content="b.text ?? ''" />
-              <DiagramCard
-                v-else-if="b.kind === 'mermaid'" :title="t('draft.diagram')" headerless
-                :diagrams="{ mermaid: b.code ?? '' }" :allowed-langs="['mermaid']"
-              />
-              <DiagramCard
-                v-else-if="b.kind === 'plantuml'" :title="t('draft.diagram')" headerless
-                :diagrams="{ plantuml: b.code ?? '' }" :allowed-langs="['plantuml']"
-              />
-              <div v-else-if="b.kind === 'dot'" class="my-2 overflow-x-auto rounded-md border border-ctp-surface0 bg-ctp-crust/60 p-2">
-                <span v-if="dotSvgs[i]" class="block text-center" v-html="dotSvgs[i]" />
-                <template v-else>
-                  <p class="mb-1 text-[9px] text-ctp-overlay0">{{ t('draft.dotUnavailable') }}</p>
-                  <pre class="overflow-x-auto text-[10px] text-ctp-subtext0">{{ b.code }}</pre>
-                </template>
-              </div>
-            </template>
-            <p v-if="!previewBlocks.length" class="py-8 text-center text-[11px] text-ctp-overlay0">{{ t('draft.previewEmpty') }}</p>
-          </div>
-        </template>
-        <div v-else class="flex flex-1 flex-col items-center justify-center gap-2 text-ctp-overlay0">
-          <DocumentTextIcon class="h-8 w-8" />
-          <span class="text-xs">{{ t('draft.noneSelected') }}</span>
-        </div>
-      </div>
     </div>
 
-    <!-- AI 产物比对（git diff 模式）：采纳覆盖 / 放弃保留参考（可改指令再处理，新产物覆盖） -->
+    <!-- AI 产物比对（git diff）：采纳覆盖 / 放弃保留参考 -->
     <div v-if="current?.lastProposedMd" class="shrink-0 border-t border-ctp-surface0">
       <button
         class="flex w-full items-center gap-1 px-2 py-1 text-[10px] text-ctp-overlay1 hover:text-ctp-text"
@@ -511,8 +753,6 @@ onMounted(() => { void loadList() })
             <CheckIcon class="h-3 w-3" />{{ t('draft.proposed.adopt') }}
           </button>
           <button class="btn btn-xs btn-ghost" @click="proposedOpen = false">{{ t('draft.proposed.discard') }}</button>
-          <span class="flex-1" />
-          <span v-if="dirty" class="text-[9px] text-ctp-peach">{{ t('draft.proposed.dirtyNote') }}</span>
         </div>
         <div class="max-h-64 overflow-auto border-t border-ctp-surface0 bg-ctp-crust/60 font-mono text-[10px] leading-5">
           <div
@@ -530,7 +770,17 @@ onMounted(() => { void loadList() })
       </div>
     </div>
 
-    <!-- 发布弹窗：新会话 or 已有会话（未完结需求卡覆盖确认） -->
+    <!-- 底栏：归档草稿续写入口 -->
+    <div v-if="archived" class="flex shrink-0 items-center gap-2 border-t border-ctp-surface0 px-2 py-1">
+      <span class="min-w-0 flex-1 truncate text-[10px] text-ctp-overlay1" :title="current?.publishedReqId">
+        {{ t('draft.publishedInfo', { req: current?.publishedReqId || '—' }) }} · {{ fmtTime(current?.updatedAt ?? 0) }}
+      </span>
+      <button class="btn btn-xs btn-ghost" @click="copyDraft">
+        <ArchiveBoxIcon class="h-3 w-3" />{{ t('draft.continue') }}
+      </button>
+    </div>
+
+    <!-- 发布弹窗 -->
     <Teleport to="body">
       <div v-if="publishOpen" class="fixed inset-0 z-[240] flex items-center justify-center bg-black/45 p-4" @click.self="publishOpen = false">
         <div class="w-[26rem] max-w-full rounded-xl border border-ctp-surface0 bg-ctp-mantle p-4 shadow-2xl">
@@ -545,7 +795,6 @@ onMounted(() => { void loadList() })
               <input v-model="publishTarget" type="radio" :value="convOptions[0]?.id ?? ''" class="accent-ctp-blue" :disabled="!convOptions.length">
               {{ t('draft.publish.existingConv') }}
             </label>
-            <!-- 活跃会话选择器：关键字搜索(空格分割多关键字 AND→OR) + 分页 -->
             <div class="flex items-center gap-1">
               <input
                 v-model="pickerQuery"
@@ -591,15 +840,15 @@ onMounted(() => { void loadList() })
         </div>
       </div>
     </Teleport>
-
-    <!-- 底栏：归档草稿续写入口 -->
-    <div v-if="archived" class="flex shrink-0 items-center gap-2 border-t border-ctp-surface0 px-2 py-1">
-      <span class="min-w-0 flex-1 truncate text-[10px] text-ctp-overlay1" :title="current?.publishedReqId">
-        {{ t('draft.publishedInfo', { req: current?.publishedReqId || '—' }) }} · {{ fmtTime(current?.updatedAt ?? 0) }}
-      </span>
-      <button class="btn btn-xs btn-ghost" @click="copyDraft">
-        <ArchiveBoxIcon class="h-3 w-3" />{{ t('draft.continue') }}
-      </button>
-    </div>
   </div>
 </template>
+
+<style scoped>
+.tb-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px; border-radius: 4px; color: rgb(var(--ctp-subtext1));
+  cursor: pointer;
+}
+.tb-btn:hover:not(:disabled) { background: rgb(var(--ctp-surface0)); color: rgb(var(--ctp-text)); }
+.tb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
