@@ -15,7 +15,6 @@ export function useFramework(D: WsDeps) {
   const { t } = useI18n()
   const dialog = useAppDialog()
   const core = D.core
-  const turns = D.chat.turns as Ref<{ role: string; content: string; assets?: any[] }[]>
 
   // ── M1 认知框架（框架即配置；概览 tab 面板 + 标准变更确认流） ──
 

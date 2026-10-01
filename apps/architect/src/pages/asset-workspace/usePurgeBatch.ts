@@ -14,7 +14,6 @@ export function usePurgeBatch(D: WsDeps) {
   const { t } = useI18n()
   const dialog = useAppDialog()
   const core = D.core
-  const turns = D.chat.turns as Ref<{ role: string; content: string }[]>
 
   /** 清理确认弹窗状态(先 dry-run 展示影响范围，确认后再真正删除)。 */
   const purgeOpen = ref(false)
@@ -30,7 +29,8 @@ export function usePurgeBatch(D: WsDeps) {
       purgeResult.value = res
       purgeOpen.value = true
     } catch (err: any) {
-      turns.value.push({ role: 'assistant', content: t('assetMgmt.purgeImpactFailed', { msg: String(err?.message || err) }) })
+      console.warn('[purge] impact failed:', err?.message)
+      purgeResult.value = null
     } finally {
       core.purging.value = false
     }
@@ -43,18 +43,10 @@ export function usePurgeBatch(D: WsDeps) {
     try {
       const res = await semanticAssetService.purge({ staleDays: 7, confirm: true })
       const impact = res.impact
-      turns.value.push({
-        role: 'assistant',
-        content: [
-          t('assetMgmt.purgeDone', { n: res.purged }),
-          impact.reqCount ? t('assetMgmt.purgeImpactReqs', { n: impact.reqCount }) : '',
-          impact.taskCount ? t('assetMgmt.purgeImpactTasks', { n: impact.taskCount }) : '',
-        ].filter(Boolean).join(' '),
-      })
       await Promise.all([core.loadOverview(), core.refreshStatus()])
       purgeOpen.value = false
     } catch (err: any) {
-      turns.value.push({ role: 'assistant', content: t('assetMgmt.purgeFailed', { msg: String(err?.message || err) }) })
+      console.warn('[purge] failed:', err?.message)
     } finally {
       purgeBusy.value = false
     }

@@ -12,7 +12,6 @@ import type { Ref } from 'vue'
 export function useSyncExtract(D: WsDeps) {
   const { t } = useI18n()
   const core = D.core
-  const turns = D.chat.turns as Ref<{ role: string; content: string }[]>
 
   // ---- 更新语义资产(原「校验并提取」)：变化量计划 → 用户确认 → 快照批量作业(后端，页面关闭不影响) ----
   const syncPlan = ref<ExtractPlanResult | null>(null)
