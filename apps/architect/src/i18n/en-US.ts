@@ -1613,6 +1613,10 @@ export default {
     unsavedConfirm: 'Current draft has unsaved changes; switching will discard them. Continue?',
     deleteConfirm: 'Delete draft "{title}"? This cannot be undone.',
     view: { edit: 'Edit', split: 'Split', preview: 'Preview' },
+    dotUnavailable: 'Diagram rendering service (PlantUML) unavailable; degraded to source view',
+    searchPlaceholder: 'Search title/excerpt…',
+    noMatch: 'No matching drafts',
+    filter: { all: 'All', editing: 'Active', archived: 'Archived' },
     publish: {
       button: 'Publish',
       hint: 'Publish as a requirement card into session management (new or existing conversation)',

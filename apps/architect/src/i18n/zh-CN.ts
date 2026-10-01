@@ -1654,6 +1654,10 @@ export default {
     unsavedConfirm: '当前草稿有未保存修改，切换将丢弃。继续？',
     deleteConfirm: '删除草稿「{title}」？此操作不可恢复。',
     view: { edit: '编辑', split: '分栏', preview: '预览' },
+    dotUnavailable: '结构图渲染服务不可用（PlantUML 服务端），已降级为源码展示',
+    searchPlaceholder: '搜索标题/摘要…',
+    noMatch: '无匹配草稿',
+    filter: { all: '全部', editing: '活跃', archived: '归档' },
     publish: {
       button: '发布',
       hint: '发布为需求卡到会话管理（新会话或已有会话）',

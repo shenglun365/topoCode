@@ -97,6 +97,25 @@ async function copyDraft() {
 
 const archived = computed(() => current.value?.status === 'archived')
 
+// ---- 草稿列表视图（功能2）：状态过滤(全部/活跃/归档) + 关键字搜索；默认更新时间倒序(新在上) ----
+type ListFilter = 'all' | 'editing' | 'archived'
+const listFilter = ref<ListFilter>('all')
+const listQuery = ref('')
+const filteredDrafts = computed(() => {
+  const q = listQuery.value.trim().toLowerCase()
+  return drafts.value.filter((d) => {
+    if (listFilter.value !== 'all' && (d.status || 'editing') !== listFilter.value) return false
+    if (!q) return true
+    return (d.title || '').toLowerCase().includes(q)
+      || (d.excerpt || '').toLowerCase().includes(q)
+  })
+})
+const filterCounts = computed(() => ({
+  all: drafts.value.length,
+  editing: drafts.value.filter((d) => (d.status || 'editing') === 'editing').length,
+  archived: drafts.value.filter((d) => d.status === 'archived').length,
+}))
+
 // ---- 发布（批F）：草稿 → 需求卡 → 会话（新会话 or 已有会话覆盖确认） ----
 interface ConvOption { id: string; title: string }
 const publishOpen = ref(false)
@@ -262,16 +281,23 @@ const previewBlocks = computed<PreviewBlock[]>(() => {
   return out
 })
 
-/** dot 块渲染（PlantUML 服务端原生支持 GraphViz DOT；失败降级代码块）。 */
+/** dot 块渲染（PlantUML 服务端原生支持 GraphViz DOT）。
+ *  服务端不可用时降级为源码展示：首次失败短路本预览内后续 dot 块的
+ *  重复请求（避免每块都等一次超时），并给出可见提示。 */
 const dotSvgs = ref<Record<number, string>>({})
-watch(previewBlocks, async (blocks) => {
+const plantumlDown = ref(false)
+watch(previewBlocks, async (blocks, prev) => {
+  if (blocks !== prev) plantumlDown.value = false   // 预览变化重置（服务可能恢复）
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]
     if (b.kind !== 'dot' || !b.code) continue
+    if (plantumlDown.value) { dotSvgs.value[i] = '' }
     try {
       dotSvgs.value[i] = await renderDiagram('plantuml', b.code.trim())
+      plantumlDown.value = false
     } catch {
       dotSvgs.value[i] = ''
+      plantumlDown.value = true
     }
   }
 }, { immediate: true })
@@ -348,9 +374,23 @@ onMounted(() => { void loadList() })
           class="m-1.5 flex items-center gap-1 rounded-md border border-dashed border-ctp-surface1 px-2 py-1 text-[11px] text-ctp-overlay1 hover:border-ctp-blue/50 hover:text-ctp-text"
           @click="createDraft"
         ><PlusIcon class="h-3 w-3" />{{ t('draft.newDraft') }}</button>
-        <div class="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
+        <!-- 状态过滤(全部/活跃/归档 + 计数) + 关键字搜索 -->
+        <div class="flex items-center gap-0.5 overflow-hidden rounded-md border border-ctp-surface1 mx-1.5 text-[10px]">
+          <button
+            v-for="f in (['all', 'editing', 'archived'] as const)" :key="f"
+            class="flex-1 px-1 py-0.5"
+            :class="listFilter === f ? 'bg-ctp-surface0 text-ctp-text' : 'text-ctp-overlay1 hover:text-ctp-subtext1'"
+            @click="listFilter = f"
+          >{{ t(`draft.filter.${f}`) }}<span class="ml-0.5 font-mono text-ctp-overlay0">{{ filterCounts[f] }}</span></button>
+        </div>
+        <input
+          v-model="listQuery"
+          class="input !py-0.5 !px-1.5 !text-[10px] mx-1.5 mt-1 w-auto"
+          :placeholder="t('draft.searchPlaceholder')"
+        >
+        <div class="min-h-0 flex-1 overflow-y-auto px-1.5 py-1 pb-1.5">
           <div
-            v-for="d in drafts" :key="d.id"
+            v-for="d in filteredDrafts" :key="d.id"
             class="group mb-0.5 cursor-pointer rounded px-1.5 py-1"
             :class="current?.id === d.id ? 'bg-ctp-surface0/80' : 'hover:bg-ctp-surface0/40'"
             @click="openDraft(d)"
@@ -366,7 +406,9 @@ onMounted(() => { void loadList() })
             </div>
             <div class="truncate text-[9px] text-ctp-overlay0" :title="d.excerpt">{{ d.excerpt || '—' }}</div>
           </div>
-          <p v-if="!drafts.length && !loading" class="py-4 text-center text-[10px] text-ctp-overlay0">{{ t('draft.empty') }}</p>
+          <p v-if="!filteredDrafts.length && !loading" class="py-4 text-center text-[10px] text-ctp-overlay0">
+            {{ drafts.length ? t('draft.noMatch') : t('draft.empty') }}
+          </p>
         </div>
       </div>
 
@@ -397,7 +439,10 @@ onMounted(() => { void loadList() })
               />
               <div v-else-if="b.kind === 'dot'" class="my-2 overflow-x-auto rounded-md border border-ctp-surface0 bg-ctp-crust/60 p-2">
                 <span v-if="dotSvgs[i]" class="block text-center" v-html="dotSvgs[i]" />
-                <pre v-else class="overflow-x-auto text-[10px] text-ctp-subtext0">{{ b.code }}</pre>
+                <template v-else>
+                  <p class="mb-1 text-[9px] text-ctp-overlay0">{{ t('draft.dotUnavailable') }}</p>
+                  <pre class="overflow-x-auto text-[10px] text-ctp-subtext0">{{ b.code }}</pre>
+                </template>
               </div>
             </template>
             <p v-if="!previewBlocks.length" class="py-8 text-center text-[11px] text-ctp-overlay0">{{ t('draft.previewEmpty') }}</p>
