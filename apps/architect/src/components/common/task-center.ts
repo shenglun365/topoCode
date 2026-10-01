@@ -28,7 +28,8 @@ export const KIND_LABEL: Record<string, string> = {
   extract_impl: '实现级提取',
   enhance_desc: '描述增强',
   enhance_semantic: '语义增强',
-  extract_logic: '逻辑级提取',
+  extract_logic: '逻辑视图归纳',
+  analyze_logic: '逻辑视图分析',
   gen_component_view: '组件聚合',
 }
 
