@@ -61,6 +61,12 @@ export const reqDraftService = {
     return apiPost<ReqDraft>(`/req-drafts/${encodeURIComponent(id)}/copy`, { root, project })
   },
 
+  /** 发布草稿为需求卡：{targetConvId?, overwrite?}——未完结需求卡覆盖冲突 409。 */
+  async publish(id: string, payload: { targetConvId?: string; overwrite?: boolean }): Promise<{ draft: ReqDraft; convId: string; requirementId: string; amended: boolean }> {
+    const { root, project } = currentProjectParams()
+    return apiPost(`/req-drafts/${encodeURIComponent(id)}/publish`, { root, project, ...payload })
+  },
+
   /** 采纳 AI 产物：contentMd ← lastProposedMd 并清空。 */
   async adopt(id: string): Promise<ReqDraft> {
     return apiPost<ReqDraft>(`/req-drafts/${encodeURIComponent(id)}/adopt`, {})

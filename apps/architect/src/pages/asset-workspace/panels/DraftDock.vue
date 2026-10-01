@@ -9,7 +9,7 @@ import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon, PlusIcon, TrashIcon, ArrowPathIcon,
   PencilSquareIcon, EyeIcon, Squares2X2Icon, ArchiveBoxIcon,
-  SparklesIcon, ChevronRightIcon, CheckIcon,
+  SparklesIcon, ChevronRightIcon, CheckIcon, PaperAirplaneIcon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
 import MarkdownView from '@/components/MarkdownView.vue'
@@ -18,6 +18,7 @@ import { parseMessageBlocks } from '@/services/parse-message-blocks'
 import { renderDiagram } from '@/services/topo-render'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import { reqDraftService, type ReqDraft } from '@/services/req-draft-service'
+import { sessionService } from '@/services/session-service'
 import { diffLines, diffStat } from '@/utils/diff-lines'
 
 const { t } = useI18n()
@@ -95,6 +96,53 @@ async function copyDraft() {
 }
 
 const archived = computed(() => current.value?.status === 'archived')
+
+// ---- 发布（批F）：草稿 → 需求卡 → 会话（新会话 or 已有会话覆盖确认） ----
+interface ConvOption { id: string; title: string }
+const publishOpen = ref(false)
+const publishBusy = ref(false)
+const publishTarget = ref<'new' | string>('new')
+const convOptions = ref<ConvOption[]>([])
+const publishMsg = ref('')
+
+async function openPublish() {
+  if (!current.value || archived.value || !(current.value.contentMd || '').trim()) return
+  if (dirty.value) await saveDraft()   // 发布以已保存正文为准
+  publishMsg.value = ''
+  publishTarget.value = 'new'
+  publishOpen.value = true
+  try {
+    const rows = await sessionService.list({}) as { id: string; title?: string }[]
+    convOptions.value = (rows || []).slice(0, 50)
+      .map((r) => ({ id: r.id, title: r.title || r.id }))
+  } catch { convOptions.value = [] }
+}
+
+async function doPublish(overwrite = false) {
+  if (!current.value || publishBusy.value) return
+  publishBusy.value = true
+  publishMsg.value = ''
+  try {
+    const r = await reqDraftService.publish(current.value.id, {
+      targetConvId: publishTarget.value === 'new' ? undefined : publishTarget.value,
+      overwrite,
+    })
+    current.value = r.draft
+    publishOpen.value = false
+    dirty.value = false
+  } catch (e: unknown) {
+    const msg = e instanceof Error && e.message ? e.message : String(e)
+    // 未完结需求卡覆盖冲突 → 确认后 overwrite 重发
+    if (msg.includes('未完结需求卡') && await dialog.confirm(msg + '\n\n' + t('draft.publish.overwriteConfirm'))) {
+      publishBusy.value = false
+      await doPublish(true)
+      return
+    }
+    publishMsg.value = msg
+  } finally {
+    publishBusy.value = false
+  }
+}
 
 // ---- AI 处理（批D）：单轮对话+多轮工具；产物落 lastProposedMd（diff 比对批E 接入） ----
 const aiBusy = ref(false)
@@ -253,6 +301,12 @@ onMounted(() => { void loadList() })
         :disabled="archived || !dirty || saving"
         title="Ctrl/⌘+S" @click="saveDraft"
       ><ArrowPathIcon class="h-3 w-3" :class="saving ? 'animate-spin' : ''" />{{ t('common.save') }}</button>
+      <button
+        class="btn btn-xs btn-primary shrink-0"
+        :disabled="archived || aiBusy"
+        :title="t('draft.publish.hint')"
+        @click="openPublish"
+      ><PaperAirplaneIcon class="h-3 w-3" />{{ t('draft.publish.button') }}</button>
       <div class="flex items-center overflow-hidden rounded-md border border-ctp-surface1">
         <button
           v-for="vm in (['edit', 'split', 'preview'] as const)" :key="vm"
@@ -396,6 +450,44 @@ onMounted(() => { void loadList() })
         </div>
       </div>
     </div>
+
+    <!-- 发布弹窗：新会话 or 已有会话（未完结需求卡覆盖确认） -->
+    <Teleport to="body">
+      <div v-if="publishOpen" class="fixed inset-0 z-[240] flex items-center justify-center bg-black/45 p-4" @click.self="publishOpen = false">
+        <div class="w-[26rem] max-w-full rounded-xl border border-ctp-surface0 bg-ctp-mantle p-4 shadow-2xl">
+          <p class="text-sm font-semibold text-ctp-text">{{ t('draft.publish.title') }}</p>
+          <p class="mt-1 text-[11px] leading-relaxed text-ctp-overlay1">{{ t('draft.publish.desc') }}</p>
+          <div class="mt-3 space-y-2">
+            <label class="flex cursor-pointer items-center gap-2 text-xs text-ctp-text">
+              <input v-model="publishTarget" type="radio" value="new" class="accent-ctp-blue">
+              {{ t('draft.publish.newConv') }}
+            </label>
+            <label class="flex cursor-pointer items-center gap-2 text-xs text-ctp-text">
+              <input v-model="publishTarget" type="radio" value="" class="accent-ctp-blue" :disabled="!convOptions.length">
+              {{ t('draft.publish.existingConv') }}
+            </label>
+            <select
+              v-model="publishTarget"
+              class="input w-full !py-1 !text-xs"
+              :disabled="!convOptions.length"
+              @focus="publishTarget = convOptions[0]?.id ?? ''"
+            >
+              <option v-if="!convOptions.length" value="">{{ t('draft.publish.noConv') }}</option>
+              <option v-for="c in convOptions" :key="c.id" :value="c.id">{{ c.title }}</option>
+            </select>
+          </div>
+          <p v-if="publishMsg" class="mt-2 text-[11px] text-ctp-red">{{ publishMsg }}</p>
+          <div class="mt-3 flex justify-end gap-2">
+            <button class="btn btn-ghost text-xs" :disabled="publishBusy" @click="publishOpen = false">{{ t('common.cancel') }}</button>
+            <button
+              class="btn btn-blue text-xs"
+              :disabled="publishBusy || (!convOptions.length && publishTarget !== 'new')"
+              @click="doPublish(false)"
+            >{{ publishBusy ? t('draft.publish.publishing') : t('draft.publish.confirm') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 底栏：归档草稿续写入口 -->
     <div v-if="archived" class="flex shrink-0 items-center gap-2 border-t border-ctp-surface0 px-2 py-1">

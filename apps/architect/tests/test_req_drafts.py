@@ -154,3 +154,70 @@ def test_draft_adopt(monkeypatch):
     ReqDraftsStore.update(d["id"], {"status": "archived", "lastProposedMd": "# v3"})
     out = _body(asyncio.run(api.api_req_drafts_adopt(d["id"])))
     assert out.get("code") == 409
+
+
+def test_draft_publish_flow(monkeypatch):
+    """发布：新会话 propose / 未完结覆盖 409→overwrite amend / 归档回填。"""
+    import topoone_app_architect.arch_routes.req_drafts as api
+    from topoone_app_architect import store
+    from topoone_app_architect.agent.planning import req_spec
+
+    d = store.ReqDraftsStore.create(PID, "发布", "# 需求A\n内容")
+
+    class _Req:
+        def __init__(self, payload):
+            self._p = payload
+
+        async def json(self):
+            return self._p
+
+    # 打桩 apply_spec_payload：不落真实需求库，验证调用与回执
+    stub_calls = {}
+
+    def _fake_apply(payload, req_id="", project="", root=""):
+        stub_calls["payload"] = payload
+        stub_calls["req_id"] = req_id
+        rid = req_id or "req-stub-1"
+        stub_calls.setdefault("rids", []).append(rid)
+        return {"ok": True, "requirementId": rid, "summary": "stub"}
+
+    monkeypatch.setattr(req_spec, "apply_spec_payload", _fake_apply)
+
+    # ① 新会话发布
+    out = _body(asyncio.run(api.api_req_drafts_publish(d["id"], _Req({"project": PID}))))
+    r = out["data"]
+    assert r["requirementId"] == "req-stub-1" and r["amended"] is False
+    conv = store.ConversationsStore.get(r["convId"])
+    assert conv and conv.get("title") == "发布"
+    # 草稿已归档 + 回填
+    d2 = store.ReqDraftsStore.get(d["id"])
+    assert d2["status"] == "archived" and d2["publishedReqId"] == "req-stub-1"
+    # 会话消息已写
+    msgs = store.ConversationsStore.messages(r["convId"])
+    assert any("需求草稿发布" in (m.get("content") or "") for m in msgs)
+
+    # ② 已有会话 + 未完结需求 → 409；overwrite → amend
+    d3 = store.ReqDraftsStore.create(PID, "再发布", "# 需求B")
+    conv2 = store.ConversationsStore.create({
+        "kind": "requirement", "projectId": PID, "title": "目标会话",
+        "status": "active", "roles": ["architect"], "tags": {"modules": [], "groups": []},
+        "reqId": "req-live-1"})
+    store.RequirementsStore.create({
+        "id": "req-live-1", "projectId": PID, "title": "既有需求",
+        "status": "draft", "requirementMd": "# 旧"})
+    monkeypatch.setattr(req_spec, "_plan_delivered", lambda rid: False)  # 未完结
+    out = _body(asyncio.run(api.api_req_drafts_publish(
+        d3["id"], _Req({"project": PID, "targetConvId": conv2["id"]}))))
+    assert out.get("code") == 409
+    out = _body(asyncio.run(api.api_req_drafts_publish(
+        d3["id"], _Req({"project": PID, "targetConvId": conv2["id"], "overwrite": True}))))
+    r2 = out["data"]
+    assert r2["amended"] is True and stub_calls["req_id"] == "req-live-1"
+    assert store.ReqDraftsStore.get(d3["id"])["status"] == "archived"
+
+    # ③ 已完结需求 → 无需 overwrite 直接发布(propose 语义由打桩承载)
+    d4 = store.ReqDraftsStore.create(PID, "完结后", "# 需求C")
+    monkeypatch.setattr(req_spec, "_plan_delivered", lambda rid: True)
+    out = _body(asyncio.run(api.api_req_drafts_publish(
+        d4["id"], _Req({"project": PID, "targetConvId": conv2["id"]}))))
+    assert out.get("data", {}).get("requirementId")

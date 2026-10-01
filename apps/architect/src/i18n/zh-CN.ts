@@ -1654,6 +1654,18 @@ export default {
     unsavedConfirm: '当前草稿有未保存修改，切换将丢弃。继续？',
     deleteConfirm: '删除草稿「{title}」？此操作不可恢复。',
     view: { edit: '编辑', split: '分栏', preview: '预览' },
+    publish: {
+      button: '发布',
+      hint: '发布为需求卡到会话管理（新会话或已有会话）',
+      title: '发布需求草稿',
+      desc: '草稿将以需求卡形式写入会话管理：选择新建会话，或发布到已有会话（若其存在未完结需求卡将覆盖修订，需确认）。',
+      newConv: '创建新会话',
+      existingConv: '发布到已有会话：',
+      noConv: '（无可用会话）',
+      confirm: '发布',
+      publishing: '发布中…',
+      overwriteConfirm: '确认覆盖该会话的未完结需求卡（修订）？',
+    },
     ai: {
       generate: '需求生成',
       review: '需求审核',

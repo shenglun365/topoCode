@@ -1613,6 +1613,18 @@ export default {
     unsavedConfirm: 'Current draft has unsaved changes; switching will discard them. Continue?',
     deleteConfirm: 'Delete draft "{title}"? This cannot be undone.',
     view: { edit: 'Edit', split: 'Split', preview: 'Preview' },
+    publish: {
+      button: 'Publish',
+      hint: 'Publish as a requirement card into session management (new or existing conversation)',
+      title: 'Publish requirement draft',
+      desc: 'The draft will be written to session management as a requirement card: create a new conversation, or publish to an existing one (an unfinished requirement card there will be amended — confirmation required).',
+      newConv: 'Create new conversation',
+      existingConv: 'Publish to existing:',
+      noConv: '(no conversations)',
+      confirm: 'Publish',
+      publishing: 'Publishing…',
+      overwriteConfirm: 'Overwrite the unfinished requirement card of that conversation (amend)?',
+    },
     ai: {
       generate: 'Generate',
       review: 'Review',

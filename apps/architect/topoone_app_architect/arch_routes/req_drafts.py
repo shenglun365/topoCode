@@ -207,6 +207,85 @@ from ..sem import job_runner as _job_runner
 _job_runner.register("draft_ai", _job_draft_ai)
 
 
+@router.post("/req-drafts/{draft_id}/publish")
+async def api_req_drafts_publish(draft_id: str, request: Request = None):
+    """发布草稿为需求卡（批F，2.4/2.5）：目标=新会话或已有会话。
+
+    - 无 targetConvId → 创建新会话（requirement/architect 角色）；
+    - 有 → 会话绑定的需求**未交付完结**（活跃）→ 发布即 amend 覆盖，须
+      overwrite 确认（409 回执冲突详情，用户确认后重发）；已完结/无绑定 →
+      propose 新建（apply_spec_payload 内建归属三分，cv-248 同源判据）；
+    - 落库走 apply_spec_payload（幂等指纹/三级降级复用）+ 会话写 assistant
+      规约消息（会话管理页可见来源）；
+    - 草稿置 archived（只读）；修改走续写副本。
+    """
+    from ..agent.planning.req_spec import _plan_delivered, apply_spec_payload
+    from .. import ctx as _ctx
+    from .. import store
+    body = await request.json() if request else {}
+    draft = store.ReqDraftsStore.get(draft_id)
+    if not draft:
+        return err(404, "草稿不存在")
+    if (draft.get("status") or "editing") == "archived":
+        return err(409, "草稿已发布归档；如需修改请续写副本")
+    content = (draft.get("contentMd") or "").strip()
+    if not content:
+        return err(400, "草稿正文为空，无法发布")
+    pid = project_id_for(body.get("root"), body.get("project")) or draft.get("projectId") or ""
+    target_conv_id = (body.get("targetConvId") or "").strip()
+
+    # ① 目标会话解析/创建
+    if target_conv_id:
+        conv = store.ConversationsStore.get(target_conv_id)
+        if not conv:
+            return err(404, "目标会话不存在")
+        bound_rid = str(conv.get("reqId") or "")
+        if bound_rid and store.RequirementsStore.get(bound_rid) and not _plan_delivered(bound_rid):
+            if not body.get("overwrite"):
+                req_row = store.RequirementsStore.get(bound_rid) or {}
+                return err(409, "目标会话存在未完结需求卡，发布将覆盖修订（amend）")
+    else:
+        conv = store.ConversationsStore.create({
+            "kind": "requirement", "projectId": pid,
+            "title": (draft.get("title") or "").strip() or "需求草稿发布",
+            "status": "active", "roles": ["architect"], "tags": {"modules": [], "groups": []},
+        })
+        conv = store.ConversationsStore.get(conv["id"]) or conv
+        target_conv_id = conv["id"]
+
+    # ② 落库（ctx 会话上下文：propose 绑定回写依赖，cv-248 同源）
+    token = _ctx.set_conv(target_conv_id)
+    try:
+        result = apply_spec_payload(
+            {"title": (draft.get("title") or "").strip(), "requirementMd": content},
+            req_id=str(conv.get("reqId") or ""),
+            project=str(conv.get("projectId") or pid), root="")
+    finally:
+        _ctx.reset_conv(token)
+    if result.get("error"):
+        return err(500, f"需求落库失败: {result['error']}")
+    rid = str(result.get("requirementId") or "")
+
+    # ③ 会话消息（assistant 规约来源可溯）
+    store.ConversationsStore.append_message({
+        "id": store.next_id("m"), "conversationId": target_conv_id,
+        # projectId 为库路由提示键(消息表无此列, _insert_into 过滤)——
+        # 缺失时消息落主库而会话在项目库, messages() 按会话库直查读不到
+        "projectId": str(conv.get("projectId") or pid),
+        "role": "assistant", "time": int(__import__("time").time() * 1000),
+        "content": f"📋 **需求草稿发布**（{draft.get('title') or '未命名'}）\n\n"
+                   f"需求卡：`{rid}`（"
+                   + ("修订覆盖" if conv.get("reqId") else "新建")
+                   + "）。正文：\n\n---\n\n" + content[:6000],
+    })
+
+    # ④ 草稿归档回填
+    updated = store.ReqDraftsStore.update(draft_id, {
+        "status": "archived", "publishedConvId": target_conv_id, "publishedReqId": rid})
+    return ok({"draft": updated, "convId": target_conv_id, "requirementId": rid,
+               "amended": bool(conv.get("reqId"))})
+
+
 @router.post("/req-drafts/{draft_id}/adopt")
 async def api_req_drafts_adopt(draft_id: str):
     """采纳 AI 产物：contentMd ← lastProposedMd 并清空（批E diff 确认流）。
