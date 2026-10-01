@@ -2013,7 +2013,7 @@ export default {
       tier: { low: 'Lite', mid: 'Standard', high: 'Advanced · Custom' },
       tierDesc: {
         low: 'Lean: 5 kinds · implementation only · no governance axis, acceptance = coverage only',
-        mid: 'Standard: 6 kinds · 3 levels · lightweight governance entries',
+        mid: 'Standard: 6 kinds · 2 levels · lightweight governance entries',
         high: 'Advanced custom: everything + custom framework and value domains',
       },
     },
