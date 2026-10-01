@@ -74,6 +74,29 @@ const overviewMermaid = computed(() => {
   return lines.join('\n')
 })
 
+/** PlantUML 组件图版依赖关系（与 overviewMermaid 同源数据，供 DiagramCard 语言切换）。 */
+const overviewPlantuml = computed(() => {
+  const d = compFrames.value
+  if (!d?.canonical?.nodes?.length) return ''
+  const nameOf = (k: string) => d.canonical.nodes.find((n) => n.key === k)?.label ?? k
+  const mid = (k: string) => 'n' + k.replace(/[^A-Za-z0-9_]/g, '_')
+  const last = d.frames.at(-1)
+  const alive = new Set(last?.nodes ?? [])
+  const lines = ['@startuml', 'skinparam shadowing false']
+  for (const n of d.canonical.nodes) {
+    const color = alive.has(n.key) ? '' : ' #8b8b9e'
+    lines.push(`component "${nameOf(n.key).replace(/"/g, "'")}" as ${mid(n.key)}${color}`)
+  }
+  const seen = new Set<string>()
+  for (const e of d.canonical.edges) {
+    if (seen.has(e.key ?? `${e.from}->${e.to}`)) continue
+    seen.add(e.key ?? `${e.from}->${e.to}`)
+    lines.push(`${mid(e.from)} --> ${mid(e.to)}`)
+  }
+  lines.push('@enduml')
+  return lines.join('\n')
+})
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -124,7 +147,7 @@ onMounted(load)
     </div>
 
     <!-- 组件汇总图(宏观档) -->
-    <section v-if="overviewMermaid" class="panel p-4">
+    <section v-if="overviewMermaid || overviewPlantuml" class="panel p-4">
       <div class="flex items-center gap-2 mb-3">
         <CubeIcon class="w-4 h-4 text-ctp-mauve" />
         <span class="text-sm font-medium text-ctp-text">{{ t('archChange.ovCompGraph') }}</span>
@@ -133,7 +156,7 @@ onMounted(load)
           {{ t('archChange.ovOpenGraph') }}
         </button>
       </div>
-      <DiagramCard :title="t('archChange.mapTitle.dependency')" :diagrams="{ mermaid: overviewMermaid }" />
+      <DiagramCard :title="t('archChange.mapTitle.dependency')" :diagrams="{ mermaid: overviewMermaid, plantuml: overviewPlantuml }" />
     </section>
 
     <!-- 版本历史 -->
