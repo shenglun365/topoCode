@@ -51,10 +51,27 @@ const graph = ref<SemanticGraphResult | null>(null)
 
 /** 图谱视角(需求 6.3)：工作区默认；可切 head:<sha>（该视角未提取时后端底座∪视角语义=基线骨架）。
  *  baseline:<kbVersion> / 其他分支 head 锚定需先跑 extract_impl(rev=锚点) 产数据。 */
-const graphRev = ref('workspace')
-function setGraphRev(r: string) {
-  graphRev.value = r
-  void load(true)
+/** 图谱视角动态对齐基线对比目标：worktree→workspace；commit→裸 sha(与对比提取的行 rev 同源)。 */
+const graphRev = computed(() => {
+  const t = D.diff?.cmpTarget.value
+  return !t || t === 'worktree' ? 'workspace' : String(t)
+})
+/** 视角资产更新：走基线对比提取通道(extract-impl rev=视角)，完成后重载图谱。 */
+const revSyncing = ref(false)
+async function updateRevAssets() {
+  if (revSyncing.value) return
+  revSyncing.value = true
+  try {
+    const r = await semanticAssetService.startExtractImpl({ rev: graphRev.value })
+    const jobId = r?.job?.id
+    if (jobId && (r.started || r.reason === 'already_running')) {
+      const done = await D.diff.waitForJob(jobId)
+      if (!done.ok) console.warn('[graph] rev extract failed:', done.error)
+    }
+    await load(true)
+  } finally {
+    revSyncing.value = false
+  }
 }
 /** 基线 diff：节点(任一锚点文件 ∈ diffFiles)集合 + 计数，供图例/详情徽标。 */
 const diffNodeIds = computed<Set<string>>(() => {
@@ -337,6 +354,7 @@ watch(() => props.compareData, () => {
     viewOptions,
     weakCount,
     graphRev,
-    setGraphRev,
+    revSyncing,
+    updateRevAssets,
   }
 }

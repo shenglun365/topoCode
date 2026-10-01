@@ -3,7 +3,7 @@
 /** MS6-W2-S2 自 SemanticGraphView 模板整块迁出(逐行未动)；状态经 SGV_WS_KEY 注入。 */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon, WrenchScrewdriverIcon, EllipsisHorizontalIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import type { GraphTabDef } from '../../SemanticGraphView.vue'
 import { useSgvWs } from '../key'
@@ -38,7 +38,9 @@ const {
   focusMode,
   graph,
   graphRev,
-  setGraphRev,
+  revSyncing,
+  updateRevAssets,
+  diagrams,
   hiddenViewHints,
   includeIndirect,
   indexOpen,
@@ -68,6 +70,73 @@ const {
   weakCount,
 } = useSgvWs()
 const emit = defineEmits<{ close: [id: string] }>()
+
+// ---- 顶栏收纳菜单（工具▾ / ⋯ / 变化图例）：Teleport 浮层，定位/外点关闭与边类型图例同模式 ----
+const toolsOpen = ref(false)
+const toolsPos = ref({ top: 0, left: 0 })
+const toolsBtnRef = ref<HTMLElement | null>(null)
+const TOOLS_W = 192
+function placeMenu(btn: HTMLElement | null, w: number, alignRight: boolean): { top: number; left: number } {
+  if (!btn) return { top: 0, left: 8 }
+  const r = btn.getBoundingClientRect()
+  let left = alignRight ? r.right - w : r.left
+  left = Math.max(8, Math.min(left, window.innerWidth - 8 - w))
+  return { top: r.bottom + 4, left }
+}
+function toggleTools() {
+  if (!toolsOpen.value) toolsPos.value = placeMenu(toolsBtnRef.value, TOOLS_W, false)
+  toolsOpen.value = !toolsOpen.value
+}
+const moreOpen = ref(false)
+const morePos = ref({ top: 0, left: 0 })
+const moreBtnRef = ref<HTMLElement | null>(null)
+const MORE_W = 168
+function toggleMore() {
+  if (!moreOpen.value) morePos.value = placeMenu(moreBtnRef.value, MORE_W, true)
+  moreOpen.value = !moreOpen.value
+}
+const diffLegendOpen = ref(false)
+const diffLegendPos = ref({ top: 0, left: 0 })
+const diffLegendBtnRef = ref<HTMLElement | null>(null)
+const DIFF_LEGEND_W = 216
+function toggleDiffLegend() {
+  if (!diffLegendOpen.value) diffLegendPos.value = placeMenu(diffLegendBtnRef.value, DIFF_LEGEND_W, true)
+  diffLegendOpen.value = !diffLegendOpen.value
+}
+function onMenuDocClick(e: MouseEvent) {
+  const t = e.target
+  if (!(t instanceof Node)) return
+  for (const [open, btn, sel] of [
+    [toolsOpen, toolsBtnRef, '[data-tools-menu]'],
+    [moreOpen, moreBtnRef, '[data-more-menu]'],
+    [diffLegendOpen, diffLegendBtnRef, '[data-diff-legend]'],
+  ] as const) {
+    if (!open.value) continue
+    if (btn.value?.contains(t)) continue
+    if (document.querySelector(sel)?.contains(t)) continue
+    open.value = false
+  }
+}
+onMounted(() => document.addEventListener('click', onMenuDocClick, true))
+onBeforeUnmount(() => document.removeEventListener('click', onMenuDocClick, true))
+
+const MENU_ITEM = 'w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-ctp-surface0 text-left'
+const diffTotal = computed(() => diffBucketCounts.value.changed + diffBucketCounts.value.new + diffBucketCounts.value.removed + weakCount.value)
+
+/** 图谱导出(R1)：DSL 源码文本下载(渲染图导出走画布内 SVG/PNG)。 */
+function exportGraph(): void {
+  try {
+    const data = diagrams.value[cardLang.value] || ''
+    const ext = cardLang.value === 'plantuml' ? 'puml' : cardLang.value
+    const blob = new Blob([data], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `asset-graph-${new Date().toISOString().slice(0, 10)}.${ext}`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch { /* 导出失败静默 */ }
+}
 </script>
 
 <template>
@@ -107,16 +176,50 @@ const emit = defineEmits<{ close: [id: string] }>()
         class="shrink-0 text-[11px] text-ctp-overlay1 cursor-help px-0.5"
         :title="hiddenViewHints.join('\n')"
       >ⓘ</span>
-      <!-- 邻域聚焦：只渲染选中资产周围 N 跳子图(缓解大图拥挤/过宽/过长) -->
+      <!-- 工具▾：邻域聚焦/拓展关联/关系矩阵/资产索引/文件范围索引/关系图例 收纳 -->
       <div class="w-px h-4 bg-ctp-surface1 shrink-0" />
-      <button
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
-        :class="focusMode ? 'btn-primary' : ''"
-        :title="t('assetMgmt.graph.focusHint')"
-        @click="focusMode = !focusMode"
-      >
-        <ViewfinderCircleIcon class="w-3.5 h-3.5" />
-      </button>
+      <div ref="toolsBtnRef" class="shrink-0">
+        <button
+          class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center gap-0.5"
+          :class="(focusMode || matrixOpen || indexOpen || edgeTypeOff.size) ? 'btn-primary' : ''"
+          :title="t('assetMgmt.graph.toolsMenu')"
+          @click="toggleTools"
+        >
+          <WrenchScrewdriverIcon class="w-3.5 h-3.5" /><ChevronDownIcon class="w-3 h-3" />
+        </button>
+      </div>
+      <Teleport to="body">
+        <div
+          v-if="toolsOpen"
+          data-tools-menu
+          class="fixed z-50 rounded-lg border border-ctp-surface1 bg-ctp-mantle shadow-lg p-1 space-y-0.5"
+          :style="{ top: toolsPos.top + 'px', left: toolsPos.left + 'px', width: TOOLS_W + 'px' }"
+        >
+          <button :class="MENU_ITEM" @click="focusMode = !focusMode">
+            <ViewfinderCircleIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.focusMenu') }}
+            <span v-if="focusMode" class="ml-auto text-ctp-blue">●</span>
+          </button>
+          <button :class="[MENU_ITEM, expandable ? '' : 'opacity-50 cursor-not-allowed']" :disabled="!expandable || expanding" @click="expandSelected(); toolsOpen = false">
+            <PlusCircleIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.expandMenu') }}
+          </button>
+          <button :class="MENU_ITEM" @click="toggleMatrix(); toolsOpen = false">
+            <TableCellsIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.matrix.title') }}
+            <span v-if="matrixOpen" class="ml-auto text-ctp-blue">●</span>
+          </button>
+          <button :class="MENU_ITEM" @click="toggleIndex(); toolsOpen = false">
+            <ListBulletIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.index.title') }}
+            <span v-if="indexOpen" class="ml-auto text-ctp-blue">●</span>
+          </button>
+          <button v-if="overLimit" :class="MENU_ITEM" @click="fileScopeOpen = !fileScopeOpen; toolsOpen = false">
+            <FolderOpenIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.fileIndex.pickTitle') }}
+            <span v-if="fileScopeOpen || fileScopeSel.length" class="ml-auto text-ctp-blue">●</span>
+          </button>
+          <button ref="legendBtnRef" :class="MENU_ITEM" @click="toggleEdgeLegend(); toolsOpen = false">
+            <AdjustmentsHorizontalIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.edgeLegend') }}
+            <span v-if="edgeTypeOff.size" class="ml-auto text-ctp-blue">●</span>
+          </button>
+        </div>
+      </Teleport>
       <select
         v-if="focusMode"
         v-model.number="focusHops"
@@ -136,59 +239,10 @@ const emit = defineEmits<{ close: [id: string] }>()
         <LockClosedIcon v-if="focusLock" class="w-3.5 h-3.5" />
         <LockOpenIcon v-else class="w-3.5 h-3.5" />
       </button>
-      <!-- 拓展关联：基于选中节点扩展 1 跳关联(增量合并，可累积)；无未拓展关联时置灰 -->
-      <button
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
-        :class="expandable ? '' : 'opacity-50 cursor-not-allowed'"
-        :disabled="!expandable || expanding"
-        :title="expandable ? t('assetMgmt.graph.expandHint') : t('assetMgmt.graph.expandDisabledHint')"
-        @click="expandSelected"
-      >
-        <PlusCircleIcon class="w-3.5 h-3.5" />
-      </button>
       <span
         v-if="expandFeedback"
         class="shrink-0 text-[10px] text-ctp-teal font-medium cursor-default"
       >{{ expandFeedback }}</span>
-      <!-- 关系矩阵浮窗：文件×文件密度 + 节点级非对称全矩阵，数据跟随当前图谱口径 -->
-      <button
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
-        :class="matrixOpen ? 'btn-primary' : ''"
-        :title="t('assetMgmt.matrix.title')"
-        @click="toggleMatrix"
-      >
-        <TableCellsIcon class="w-3.5 h-3.5" />
-      </button>
-      <button
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
-        :class="indexOpen ? 'btn-primary' : ''"
-        :title="t('assetMgmt.index.title')"
-        @click="toggleIndex"
-      >
-        <ListBulletIcon class="w-3.5 h-3.5" />
-      </button>
-      <!-- 文件范围索引(仅超限 tab)：圈定 ≤500 资产的文件集合后重查图谱 -->
-      <button
-        v-if="overLimit"
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
-        :class="fileScopeOpen || fileScopeSel.length ? 'btn-primary' : ''"
-        :title="fileScopeSel.length
-          ? t('assetMgmt.fileIndex.titleActive', { files: fileScopeSel.length, n: scopeAssets })
-          : t('assetMgmt.fileIndex.pickTitle')"
-        @click="fileScopeOpen = !fileScopeOpen"
-      >
-        <FolderOpenIcon class="w-3.5 h-3.5" />
-      </button>
-      <!-- 边类型图例 + 显隐过滤；间接边开关(浮层 Teleport 到 body，不撑开工具栏) -->
-      <button
-        ref="legendBtnRef"
-        class="btn btn-ghost !py-0.5 !text-[11px] shrink-0 flex items-center"
-        :class="edgeTypeOff.size ? 'btn-primary' : ''"
-        :title="t('assetMgmt.graph.edgeLegend')"
-        @click="toggleEdgeLegend"
-      >
-        <AdjustmentsHorizontalIcon class="w-3.5 h-3.5" />
-      </button>
       <Teleport to="body">
         <div
           v-if="edgeLegendOpen"
@@ -242,28 +296,58 @@ const emit = defineEmits<{ close: [id: string] }>()
         >
           <FunnelIcon class="w-3 h-3" />{{ t('assetMgmt.graph.diffOnly') }}
         </button>
-        <span class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendChanged')">{{ t('assetMgmt.diff.changedN', { n: diffBucketCounts.changed }) }}</span>
-        <span class="chip bg-ctp-green/15 text-ctp-green font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendNew')">{{ t('assetMgmt.diff.newN', { n: diffBucketCounts.new }) }}</span>
-        <span v-if="diffBucketCounts.removed" class="chip bg-ctp-red/15 text-ctp-red font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendRemoved')">{{ t('assetMgmt.diff.removedN', { n: diffBucketCounts.removed }) }}</span>
-        <span v-if="weakCount" class="chip bg-ctp-surface0 text-ctp-overlay1 font-mono text-[9px] shrink-0" :title="t('assetMgmt.graph.legendWeak')">{{ t('assetMgmt.diff.weakN', { n: weakCount }) }}</span>
+        <!-- 变化图例聚合：总数 chip → 浮层列四桶明细 -->
+        <button
+          ref="diffLegendBtnRef"
+          class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0 cursor-pointer hover:bg-ctp-yellow/25"
+          :title="t('assetMgmt.graph.diffLegendHint')"
+          @click="toggleDiffLegend"
+        >{{ t('assetMgmt.graph.diffTotal') }} {{ diffTotal }}</button>
+        <Teleport to="body">
+          <div
+            v-if="diffLegendOpen"
+            data-diff-legend
+            class="fixed z-50 rounded-lg border border-ctp-surface1 bg-ctp-mantle shadow-lg p-2 space-y-1"
+            :style="{ top: diffLegendPos.top + 'px', left: diffLegendPos.left + 'px', width: DIFF_LEGEND_W + 'px' }"
+          >
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-yellow/50" />
+              <span>{{ t('assetMgmt.graph.legendChanged') }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.changed }}</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-green/50" />
+              <span>{{ t('assetMgmt.graph.legendNew') }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.new }}</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-red/50" />
+              <span>{{ t('assetMgmt.graph.legendRemoved') }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.removed }}</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-surface1" />
+              <span>{{ t('assetMgmt.graph.legendWeak') }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ weakCount }}</span>
+            </div>
+          </div>
+        </Teleport>
       </template>
       <span
         v-if="graph && props.diffFiles && diffNodeCount"
         class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0"
         :title="t('assetMgmt.diff.hint')"
       >{{ diffNodeCount }} {{ t('assetMgmt.graph.nodes') }} · diff</span>
-      <!-- 图谱视角(数据视角)：默认工作区，可切锚定 head -->
-      <div v-if="graph" class="flex items-center gap-0.5 shrink-0">
-        <select
-          class="px-1.5 py-0.5 rounded text-[11px] bg-ctp-surface0 text-ctp-subtext0 border border-ctp-surface1 cursor-pointer"
-          title="图谱视角（需求 6.3：默认工作区，可切锚定 head）"
-          :value="graphRev"
-          @change="setGraphRev(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="workspace">工作区</option>
-          <option value="head:HEAD">HEAD</option>
-        </select>
-      </div>
+      <!-- 视角动态对齐基线对比目标(无手选)；非工作区视角提供数据更新入口(基线对比提取通道) -->
+      <button
+        v-if="graph && graphRev !== 'workspace'"
+        class="btn btn-xs btn-ghost shrink-0 flex items-center gap-1"
+        :disabled="revSyncing"
+        :title="t('assetMgmt.graph.revSyncHint')"
+        @click="updateRevAssets"
+      >
+        <ArrowPathIcon class="w-3 h-3" :class="revSyncing ? 'animate-spin' : ''" />{{ t('assetMgmt.graph.revSync') }}
+      </button>
       <div
         v-if="graph"
         class="flex items-center gap-0.5 shrink-0"
@@ -295,38 +379,37 @@ const emit = defineEmits<{ close: [id: string] }>()
           <ArrowsPointingOutIcon class="w-3.5 h-3.5" />
         </button>
       </div>
-      <button
-        class="btn btn-xs"
-        :class="enhanceRunning ? 'btn-primary' : 'btn-ghost'"
-        :disabled="enhanceRunning || loading"
-        :title="enhanceRunning
-          ? t('assetMgmt.graph.enhanceRunning', { d: enhanceProgress.done, t: enhanceProgress.total })
-          : t('assetMgmt.graph.enhanceDesc')"
-        @click="startEnhanceDesc"
-      >
-        <SparklesIcon
-          class="w-3 h-3"
-          :class="enhanceRunning ? 'animate-spin' : ''"
-        />{{ enhanceRunning ? `${enhanceProgress.done}/${enhanceProgress.total}` : '' }}
-      </button>
-      <button
-        class="btn btn-xs btn-ghost"
-        :disabled="loading"
-        :title="t('assetMgmt.graph.reload')"
-        @click="load()"
-      >
-        <ArrowPathIcon
-          class="w-3 h-3"
-          :class="loading ? 'animate-spin' : ''"
-        />
-      </button>
-      <button
-        class="btn btn-xs btn-ghost"
-        :title="t('assetMgmt.graph.closeTab')"
-        @click="emit('close', props.tab.id)"
-      >
-        <XMarkIcon class="w-3 h-3" />
-      </button>
+      <!-- ⋯ 溢出菜单：增强描述 / 导出 DSL / 刷新 / 关闭 -->
+      <div ref="moreBtnRef" class="shrink-0">
+        <button
+          class="btn btn-xs btn-ghost"
+          :title="t('assetMgmt.graph.moreMenu')"
+          @click="toggleMore"
+        >
+          <EllipsisHorizontalIcon class="w-4 h-4" />
+        </button>
+      </div>
+      <Teleport to="body">
+        <div
+          v-if="moreOpen"
+          data-more-menu
+          class="fixed z-50 rounded-lg border border-ctp-surface1 bg-ctp-mantle shadow-lg p-1 space-y-0.5"
+          :style="{ top: morePos.top + 'px', left: morePos.left + 'px', width: MORE_W + 'px' }"
+        >
+          <button :class="MENU_ITEM" :disabled="enhanceRunning || loading" @click="startEnhanceDesc(); moreOpen = false">
+            <SparklesIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.enhanceDesc') }}
+          </button>
+          <button :class="MENU_ITEM" @click="exportGraph(); moreOpen = false">
+            <ArrowDownTrayIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.exportDsl') }}
+          </button>
+          <button :class="MENU_ITEM" :disabled="loading" @click="load(); moreOpen = false">
+            <ArrowPathIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.reload') }}
+          </button>
+          <button :class="[MENU_ITEM, 'text-ctp-red']" @click="emit('close', props.tab.id); moreOpen = false">
+            <XMarkIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.closeTab') }}
+          </button>
+        </div>
+      </Teleport>
     </div>
 </template>
 <style scoped>

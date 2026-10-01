@@ -3,27 +3,11 @@
 /** MS6-W2-S2 自 SemanticGraphView 模板整块迁出(逐行未动)；状态经 SGV_WS_KEY 注入。 */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowPathIcon, ArrowDownTrayIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
-
-/** 图谱导出（R1）：DSL 文本下载。 */
-function exportGraph(): void {
-  try {
-    const data = diagrams.value[cardLang.value] || ''
-    const mime = 'text/plain'
-    const ext = cardLang.value === 'plantuml' ? 'puml' : cardLang.value
-    const blob = new Blob([data], { type: `${mime};charset=utf-8` })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `asset-graph-${new Date().toISOString().slice(0, 10)}.${ext}`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch { /* 导出失败静默 */ }
-}
 
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
 import { useI18n } from 'vue-i18n'
@@ -188,13 +172,6 @@ const {
           @click="closeCardFullscreen"
         >
           <XMarkIcon class="w-3.5 h-3.5" />
-        </button>
-        <button
-          class="btn btn-ghost btn-xs absolute top-2 right-10 z-10"
-          :title="t('assetMgmt.graph.export')"
-          @click="exportGraph"
-        >
-          <ArrowDownTrayIcon class="w-3.5 h-3.5" />
         </button>
       </div>
 
