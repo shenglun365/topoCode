@@ -979,11 +979,14 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
     existing = store.SemanticAssetsStore.all_status(project_id, limit=20000)
     by_key: Dict[str, dict] = {}
     by_name: Dict[str, dict] = {}
+    by_id_all: Dict[str, dict] = {}
     for a in existing:
         ck = a.get("canonicalKey") or ""
         if ck:
             by_key.setdefault(ck, a)
         by_name.setdefault(a.get("name") or "", a)
+        if a.get("id"):
+            by_id_all[a["id"]] = a
     # 文件 → 归属组件(跨 INCLUDE/CALL 两套口径)。组件仅是下游投影，不参与身份。
     file_to_comps: Dict[str, List[str]] = {}
     if any(a.get("astRefs") for a in assets):
@@ -1024,6 +1027,19 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
                                [(r.get("kind"), r.get("symbol")) for r in ast_refs[:2]])
                 continue
         membership = _asset_scope_membership(ast_refs, file_to_comps)
+        if (a.get("level") or "") == "logic" and not membership:
+            # 逻辑链无锚点(锚点空)：按成员实现资产推导组件归属——
+            # 链挂进成员所在组件组(语义树/关系图可从组件视角看到逻辑层)。
+            mset: set = set()
+            for mid in (detail.get("members") or []):
+                mrow = by_id_all.get(mid)
+                if not mrow:
+                    continue
+                if (mrow.get("scopeType") or "") == "comm" and mrow.get("scopeKey"):
+                    mset.add(mrow["scopeKey"])
+                for sc in ((mrow.get("meta") or {}).get("scopes") or []):
+                    mset.add(sc)
+            membership = sorted(mset)
         meta = {"componentId": scope_key if scope_type == "comm" else "",
                 "scopes": membership}
         if scope_type == "files":

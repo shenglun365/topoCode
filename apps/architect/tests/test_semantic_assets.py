@@ -451,6 +451,28 @@ def test_batch_clear_no_selection_clears_all(tmp_path, monkeypatch):
         assert store.SemanticAssetsStore.get(aid["id"]) is None  # 物理删除
 
 
+def test_logic_asset_inherits_member_component_scopes(tmp_path, monkeypatch):
+    """逻辑链落库：无锚点 → meta.scopes 继承成员实现资产的组件归属(挂进组件组)。"""
+    _ctx(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import semantic_assets as SM
+    pid = S.project_id_for("/tmp/x", None)
+    # 先落实现资产(comm 归属 L0-0001)
+    impl = [{"kind": "asset", "level": "implementation", "name": "订单服务",
+             "astRefs": [{"file": "order.py", "symbol": "Order", "kind": "class",
+                          "startLine": 1, "endLine": 10}]}]
+    ctx = {"table": {}, "source": "live", "srcHash": "h", "root": "/tmp/x"}
+    saved_impl = SM._save_assets(pid, "comm", "L0-0001", impl, ctx)
+    assert saved_impl[0]["id"]
+    # 逻辑链：members 指向实现资产 id，锚点空 → membership 从成员推导
+    logic = [{"kind": "process_chain", "level": "logic", "name": "下单链",
+              "detail": {"members": [saved_impl[0]["id"]],
+                         "iospec": {"inputs": [], "outputs": []}},
+              "astRefs": []}]
+    saved_logic = SM._save_assets(pid, "files", "", logic, ctx)
+    scopes = (saved_logic[0].get("meta") or {}).get("scopes") or []
+    assert "L0-0001" in scopes
+
+
 def test_batch_clear_by_files_anchor(tmp_path, monkeypatch):
     """clear files 口径：实现级按锚点文件命中清除，未命中文件资产保留。"""
     _ctx(tmp_path, monkeypatch)
