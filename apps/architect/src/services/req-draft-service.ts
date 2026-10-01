@@ -60,4 +60,10 @@ export const reqDraftService = {
     const { root, project } = currentProjectParams()
     return apiPost<ReqDraft>(`/req-drafts/${encodeURIComponent(id)}/copy`, { root, project })
   },
+
+  /** 提交 AI 处理作业（单轮对话+多轮工具；产物写 lastProposedMd，完成后拉取草稿比对）。 */
+  async runAi(id: string, payload: { preset: 'generate' | 'review' | 'relate' | 'custom'; instruction?: string }): Promise<{ started: boolean; reason?: string; job?: { id: string; state: string } }> {
+    const { root, project } = currentProjectParams()
+    return apiPost(`/req-drafts/${encodeURIComponent(id)}/ai`, { root, project, ...payload })
+  },
 }

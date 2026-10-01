@@ -9,12 +9,14 @@ import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon, PlusIcon, TrashIcon, ArrowPathIcon,
   PencilSquareIcon, EyeIcon, Squares2X2Icon, ArchiveBoxIcon,
+  SparklesIcon, ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
 import MarkdownView from '@/components/MarkdownView.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { parseMessageBlocks } from '@/services/parse-message-blocks'
 import { renderDiagram } from '@/services/topo-render'
+import { semanticAssetService } from '@/services/semantic-asset-service'
 import { reqDraftService, type ReqDraft } from '@/services/req-draft-service'
 
 const { t } = useI18n()
@@ -92,6 +94,55 @@ async function copyDraft() {
 }
 
 const archived = computed(() => current.value?.status === 'archived')
+
+// ---- AI 处理（批D）：单轮对话+多轮工具；产物落 lastProposedMd（diff 比对批E 接入） ----
+const aiBusy = ref(false)
+const aiStatus = ref('')
+const aiInstruction = ref('')
+let aiJobTimer: ReturnType<typeof setInterval> | null = null
+
+async function runAi(preset: 'generate' | 'review' | 'relate' | 'custom') {
+  if (!current.value || aiBusy.value || archived.value) return
+  if (preset === 'custom' && !aiInstruction.value.trim()) return
+  if (dirty.value) await saveDraft()   // AI 上下文=已保存的 contentMd
+  aiBusy.value = true
+  aiStatus.value = t('draft.ai.submitting')
+  try {
+    const r = await reqDraftService.runAi(current.value.id, {
+      preset, instruction: preset === 'custom' ? aiInstruction.value.trim() : undefined,
+    })
+    const jobId = r?.job?.id
+    if (!jobId || (!r?.started && r?.reason !== 'already_running')) {
+      aiStatus.value = t('draft.ai.submitFailed')
+      return
+    }
+    await new Promise<void>((resolve) => {
+      aiJobTimer = setInterval(async () => {
+        try {
+          const j = await semanticAssetService.getJob(jobId)
+          if (!j || j.state === 'done') { resolve() }
+          else if (j.state === 'failed' || j.state === 'cancelled' || j.state === 'lost') {
+            aiStatus.value = t('draft.ai.failed')
+            resolve()
+          } else {
+            aiStatus.value = t('draft.ai.running', { current: j.result?.summary || j.state })
+          }
+        } catch { /* 轮询失败静默 */ }
+      }, 2000)
+    })
+    if (aiJobTimer) { clearInterval(aiJobTimer); aiJobTimer = null }
+    // 完成：拉取草稿（lastProposedMd 已更新）
+    current.value = await reqDraftService.get(current.value.id) ?? current.value
+    aiStatus.value = current.value.lastProposedMd ? t('draft.ai.done') : t('draft.ai.failed')
+  } catch (e) {
+    aiStatus.value = e instanceof Error && e.message ? e.message : t('draft.ai.submitFailed')
+  } finally {
+    if (aiJobTimer) { clearInterval(aiJobTimer); aiJobTimer = null }
+    aiBusy.value = false
+  }
+}
+
+const proposedOpen = ref(false)
 
 // ---- 编辑/预览 ----
 type ViewMode = 'edit' | 'split' | 'preview'
@@ -193,6 +244,25 @@ onMounted(() => { void loadList() })
       </div>
     </div>
 
+    <!-- AI 工具条：固定指令按钮 + 自定义指令（标记块指令在正文中 ```agent 围栏） -->
+    <div class="flex shrink-0 items-center gap-1 border-b border-ctp-surface0 px-2 py-1">
+      <SparklesIcon class="h-3.5 w-3.5 text-ctp-mauve shrink-0" />
+      <button class="btn btn-xs btn-ghost" :disabled="aiBusy || archived" @click="runAi('generate')">{{ t('draft.ai.generate') }}</button>
+      <button class="btn btn-xs btn-ghost" :disabled="aiBusy || archived" @click="runAi('review')">{{ t('draft.ai.review') }}</button>
+      <button class="btn btn-xs btn-ghost" :disabled="aiBusy || archived" @click="runAi('relate')">{{ t('draft.ai.relate') }}</button>
+      <input
+        v-model="aiInstruction"
+        class="input !py-0.5 !px-1.5 !text-[11px] min-w-0 flex-1"
+        :placeholder="t('draft.ai.instructionPlaceholder')"
+        :disabled="aiBusy || archived"
+        @keydown.enter="runAi('custom')"
+      >
+      <button class="btn btn-xs btn-blue shrink-0" :disabled="aiBusy || archived || (aiInstruction && !aiInstruction.trim())" @click="runAi('custom')">{{ t('draft.ai.run') }}</button>
+    </div>
+    <div v-if="aiBusy || aiStatus" class="shrink-0 px-2 py-0.5 text-[10px]" :class="aiBusy ? 'text-ctp-sky' : 'text-ctp-overlay1'">
+      {{ aiBusy ? t('draft.ai.running', { current: aiStatus }) : aiStatus }}
+    </div>
+
     <div class="flex min-h-0 flex-1">
       <!-- 左：草稿列表（替换原对话列表） -->
       <div class="flex w-44 shrink-0 flex-col border-r border-ctp-surface0">
@@ -259,6 +329,23 @@ onMounted(() => { void loadList() })
           <DocumentTextIcon class="h-8 w-8" />
           <span class="text-xs">{{ t('draft.noneSelected') }}</span>
         </div>
+      </div>
+    </div>
+
+    <!-- 上一轮 AI 产物（未采纳参考：给人工修正文本/指令做参考；不进下轮上下文） -->
+    <div v-if="current?.lastProposedMd" class="shrink-0 border-t border-ctp-surface0">
+      <button
+        class="flex w-full items-center gap-1 px-2 py-1 text-[10px] text-ctp-overlay1 hover:text-ctp-text"
+        @click="proposedOpen = !proposedOpen"
+      >
+        <ChevronRightIcon class="h-3 w-3" :class="proposedOpen ? 'rotate-90' : ''" />
+        {{ t('draft.proposed.title') }}
+        <span class="text-ctp-overlay0">{{ fmtTime(current.lastProposedAt ?? 0) }}</span>
+        <span class="flex-1" />
+        <span class="text-ctp-overlay0">{{ t('draft.proposed.hint') }}</span>
+      </button>
+      <div v-if="proposedOpen" class="max-h-56 overflow-y-auto border-t border-ctp-surface0 px-3 py-2">
+        <MarkdownView :content="current.lastProposedMd" />
       </div>
     </div>
 
