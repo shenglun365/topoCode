@@ -592,9 +592,6 @@ onBeforeUnmount(() => {
       </template>
       <template v-else>
         <span class="text-[11px] text-ctp-overlay0">{{ t('draft.emptyTabs') }}</span>
-        <button class="btn btn-xs btn-ghost ml-1" @click="createDraft">
-          <PlusIcon class="h-3 w-3" />{{ t('draft.newDraft') }}
-        </button>
       </template>
     </div>
 
