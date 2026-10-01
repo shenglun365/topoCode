@@ -56,18 +56,20 @@ const overviewMermaid = computed(() => {
   const d = compFrames.value
   if (!d?.canonical?.nodes?.length) return ''
   const nameOf = (k: string) => d.canonical.nodes.find((n) => n.key === k)?.label ?? k
+  // Mermaid 节点 ID 不允许引号/特殊字符——sanitize，显示文本才用引号。
+  const mid = (k: string) => k.replace(/[^A-Za-z0-9_-]/g, '_')
   const lines = ['flowchart LR']
   const last = d.frames.at(-1)
   const alive = new Set(last?.nodes ?? [])
   for (const n of d.canonical.nodes) {
-    lines.push(`  ${JSON.stringify(n.key)}[${JSON.stringify(nameOf(n.key))}]`)
-    if (!alive.has(n.key)) lines.push(`  class ${JSON.stringify(n.key)} gray`)
+    lines.push(`  ${mid(n.key)}[${JSON.stringify(nameOf(n.key))}]`)
+    if (!alive.has(n.key)) lines.push(`  class ${mid(n.key)} gray`)
   }
   const seen = new Set<string>()
   for (const e of d.canonical.edges) {
     if (seen.has(e.key ?? `${e.from}->${e.to}`)) continue
     seen.add(e.key ?? `${e.from}->${e.to}`)
-    lines.push(`  ${JSON.stringify(e.from)} --> ${JSON.stringify(e.to)}`)
+    lines.push(`  ${mid(e.from)} --> ${mid(e.to)}`)
   }
   return lines.join('\n')
 })
