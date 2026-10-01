@@ -13,7 +13,7 @@ import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon, PlusIcon, TrashIcon, EyeIcon, XMarkIcon,
   PencilSquareIcon, ArchiveBoxIcon, SparklesIcon, ChevronRightIcon, CheckIcon,
-  PaperAirplaneIcon, PlayCircleIcon, LinkIcon, CheckBadgeIcon, WrenchScrewdriverIcon,
+  PaperAirplaneIcon, PlayCircleIcon, LinkIcon, CheckBadgeIcon, WrenchScrewdriverIcon, Bars3Icon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
 import MarkdownView from '@/components/MarkdownView.vue'
