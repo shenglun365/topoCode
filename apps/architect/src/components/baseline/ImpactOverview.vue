@@ -6,7 +6,6 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import {
   DocumentTextIcon, CubeIcon, ArrowPathIcon, BoltIcon,
 } from '@heroicons/vue/24/outline'
@@ -16,7 +15,6 @@ import { componentsToMermaid } from '@/utils/diagram-gen'
 import type { EvolutionFrames } from '@/types'
 
 const { t } = useI18n()
-const router = useRouter()
 
 const loading = ref(false)
 const error = ref('')
@@ -116,10 +114,6 @@ async function load() {
   }
 }
 
-function openGraphTimeline() {
-  router.push({ path: '/workbench/asset-mgmt', query: { tab: 'graph', view: 'timeline' } })
-}
-
 onMounted(load)
 </script>
 
@@ -152,9 +146,6 @@ onMounted(load)
         <CubeIcon class="w-4 h-4 text-ctp-mauve" />
         <span class="text-sm font-medium text-ctp-text">{{ t('archChange.ovCompGraph') }}</span>
         <span class="flex-1" />
-        <button class="btn btn-ghost !py-1 !px-2 !text-[11px]" @click="openGraphTimeline">
-          {{ t('archChange.ovOpenGraph') }}
-        </button>
       </div>
       <DiagramCard :title="t('archChange.mapTitle.dependency')" :diagrams="{ mermaid: overviewMermaid, plantuml: overviewPlantuml }" />
     </section>

@@ -18,10 +18,8 @@ import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView from '@/components/assets/SemanticGraphView.vue'
-import EvolutionStoryPanel from '@/components/assets/EvolutionStoryPanel.vue'
 
 /** 图谱 tab 内置「演化时间轴」页(固定不可关, 与资源图谱 tab 并列)。 */
-const TIMELINE_TAB = '__timeline__'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { useSplitPane } from '@/composables/useSplitPane'
 import { copyText } from '@/utils/clipboard'
@@ -123,7 +121,7 @@ onUnmounted(() => {
             :key="tb.id"
             class="btn btn-xs"
             :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
-            @click="tab = tb.id; if (tab === 'graph' && !activeGraphTab) activeGraphTab = TIMELINE_TAB; onSearch()"
+            @click="tab = tb.id; onSearch()"
           >
             {{ tb.label }}
           </button>
@@ -403,15 +401,6 @@ onUnmounted(() => {
         >
           <div class="shrink-0 flex items-stretch border-b border-ctp-surface1 px-1 pt-1 overflow-x-auto">
             <button
-              class="group relative flex items-center gap-1.5 max-w-[200px] px-3 py-1.5 text-[11px] whitespace-nowrap rounded-t-lg border border-b-0 transition-colors shrink-0"
-              :class="activeGraphTab === TIMELINE_TAB
-                ? 'bg-ctp-mantle text-ctp-text border-ctp-surface1 font-semibold'
-                : 'bg-ctp-surface0/50 text-ctp-subtext0 border-transparent hover:bg-ctp-surface0 hover:text-ctp-subtext1'"
-              @click="activeGraphTab = TIMELINE_TAB"
-            >
-              {{ t('assetMgmt.graph.timelineTab') }}
-            </button>
-            <button
               v-for="gt in graphTabs"
               :key="gt.id"
               class="group relative flex items-center gap-1.5 max-w-[200px] px-3 py-1.5 text-[11px] whitespace-nowrap rounded-t-lg border border-b-0 transition-colors shrink-0"
@@ -433,30 +422,24 @@ onUnmounted(() => {
             </button>
           </div>
           <div class="flex-1 min-h-0">
-            <EvolutionStoryPanel
-              v-if="activeGraphTab === TIMELINE_TAB"
-              class="h-full overflow-auto"
+            <div
+              v-if="!graphTabs.length"
+              class="h-full flex items-center justify-center text-xs text-ctp-overlay0"
+            >
+              {{ t('assetMgmt.graph.noTab') }}
+            </div>
+            <SemanticGraphView
+              v-for="gt in graphTabs"
+              v-show="activeGraphTab === gt.id"
+              v-else
+              :key="gt.id"
+              :tab="gt"
+              :diff-files="changedFilesForGraph"
+              :compare-data="compareData"
+              :file-index="graphFileIndexes[gt.id] ?? []"
+              :comp-names="graphCompNames"
+              @close="closeGraphTab"
             />
-            <template v-else>
-              <div
-                v-if="!graphTabs.length"
-                class="h-full flex items-center justify-center text-xs text-ctp-overlay0"
-              >
-                {{ t('assetMgmt.graph.noTab') }}
-              </div>
-              <SemanticGraphView
-                v-for="gt in graphTabs"
-                v-show="activeGraphTab === gt.id"
-                v-else
-                :key="gt.id"
-                :tab="gt"
-                :diff-files="changedFilesForGraph"
-                :compare-data="compareData"
-                :file-index="graphFileIndexes[gt.id] ?? []"
-                :comp-names="graphCompNames"
-                @close="closeGraphTab"
-              />
-            </template>
           </div>
         </div>
         <div
