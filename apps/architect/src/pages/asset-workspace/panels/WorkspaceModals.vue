@@ -6,7 +6,6 @@ import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, ChartBarSquareIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'
-import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import { useAssetWorkspaceCtx } from '..'
 
 const { t } = useI18n()
@@ -16,17 +15,13 @@ const {
   compareData,
   confirmPurge,
   confirmSyncExtract,
-  conv,
   diagramModalItems,
   diagramModalLoading,
   diagramModalOpen,
   diagramModalTitle,
   fileCard,
-  historyOpen,
-  importHistory,
   items,
   locateAsset,
-  onImportNewConversation,
   purgeBusy,
   purgeOpen,
   purgeResult,
@@ -36,15 +31,6 @@ const {
 </script>
 
 <template>
-    <RequirementHistoryModal
-      :open="historyOpen"
-      :active-conv-id="conv.activeId"
-      kind="asset"
-      @import-new="onImportNewConversation"
-      @close="historyOpen = false"
-      @import="importHistory"
-    />
-
     <!-- 清理语义资产确认：展示对需求池/未完成任务的影响范围 -->
     <div
       v-if="purgeOpen"

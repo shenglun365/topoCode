@@ -12,7 +12,6 @@ import type { WsDeps } from './useAssetCore'
 export function useUnownedExtract(D: WsDeps) {
   const { t } = useI18n()
   const core = D.core
-  const turns = D.chat.turns as Ref<{ role: string; content: string; assets?: any[]; conventions?: any[] }[]>
 
   // ---- 未归属组件文件：清单 + 单文件/循环批量提取 + 跨组件关联 ----
   const unownedFiles = ref<UnownedFileEntry[]>([])
@@ -57,33 +56,19 @@ export function useUnownedExtract(D: WsDeps) {
     // 范围确认弹窗（交互提取闭环统一交互）：确认后生成任务开始分析
     const picked = await D.diff.pickScope(t('assetMgmt.unowned.fileScopeTitle', { file: path }), [path])
     if (!picked?.length) return
-    turns.value.push({ role: 'user', content: t('assetMgmt.unowned.chatOne', { file: path }) })
-    const idx = turns.value.push({
-      role: 'assistant',
-      content: t('assetMgmt.compExtractJobSubmitted', { n: picked.length }),
-    }) - 1
     unownedExtractingOne.value = path
     try {
       const r = await semanticAssetService.startExtractScope(
         { scopeType: 'files', files: picked },
         { kinds: core.kinds.map((k: { value: string }) => k.value), level: 'implementation' })
-      const jobId = r?.job?.id
-      if (!r?.started || !jobId) {
-        turns.value[idx].content = r?.reason === 'already_running'
-          ? t('assetMgmt.compExtractAlreadyRunning')
-          : t('assetMgmt.unowned.chatOneFailed')
+      if (!r?.started || !r.job?.id) {
+        console.warn('[unowned] extract submit failed:', r?.reason)
         return
       }
-      const done = await D.diff.waitForJob(jobId)
-      if (!done.ok) {
-        turns.value[idx].content = `${t('assetMgmt.unowned.chatOneFailed')}\n${done.error || ''}`
-        return
-      }
-      turns.value[idx].content = done.summary || t('assetMgmt.unowned.chatOneDone', { n: 0 })
       D.chat.refreshAfterExtract()
       await loadUnownedFiles()
     } catch (err: any) {
-      turns.value[idx].content = err?.message || t('assetMgmt.batchFailed')
+      console.warn('[unowned] extract failed:', err?.message)
     } finally {
       unownedExtractingOne.value = ''
     }
@@ -95,8 +80,6 @@ export function useUnownedExtract(D: WsDeps) {
   let unownedJobTimer: ReturnType<typeof setInterval> | null = null
   let unownedJobDoneSeen = -1
   /** 批量作业的对话区 turn 下标(完成后回填摘要)。 */
-  const unownedJobChatIdx = ref(-1)
-
   const unownedExtracting = computed(() => !!unownedJob.value?.running)
 
   /** 进度 chip 标题：落库数 + 清单说明(无独立符号不参与提取)。作业缺盘点字段时回退本地清单计数。 */
@@ -124,19 +107,6 @@ export function useUnownedExtract(D: WsDeps) {
         }
       } else if (wasRunning) {
         stopUnownedJobPolling()
-        if (unownedJobChatIdx.value >= 0) {
-          const errs = st.errors ?? []
-          let msg = st.stopped
-            ? t('assetMgmt.unowned.chatJobStopped', { done: st.done, saved: st.saved })
-            : t('assetMgmt.unowned.chatJobDone', { done: st.done, saved: st.saved })
-          if (errs.length) {
-            msg += '\n' + t('assetMgmt.unowned.chatJobErrors')
-            for (const e of errs.slice(0, 3)) msg += `\n· ${e.error}`
-          }
-          if (!st.saved) msg += '\n' + t('assetMgmt.unowned.chatOneEmpty')
-          turns.value[unownedJobChatIdx.value].content = msg
-          unownedJobChatIdx.value = -1
-        }
         await Promise.all([loadUnownedFiles(), core.loadSemantic(), core.refreshStatus(), core.loadOverview(), D.framework.loadCoverage()])
       }
     } catch { /* 轮询失败静默，下轮重试 */ }
@@ -150,31 +120,19 @@ export function useUnownedExtract(D: WsDeps) {
   }
 
   async function extractAllUnowned() {
-    turns.value.push({ role: 'user', content: t('assetMgmt.unowned.chatJobUser') })
-    const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
     const r = await semanticAssetService.unownedExtract('start', { batch: 10 })
-    if (r.started) {
-      unownedJob.value = { running: true, total: r.total ?? 0, done: 0, saved: 0, batches: 0, errors: [] }
-      unownedJobChatIdx.value = idx
-      // 等式盘点：未归属 = 待提取 + 已有资产 + 无独立符号——解释"49 个为何只提 38 个"
-      turns.value[idx].content = t('assetMgmt.unowned.chatJobStart', {
-        n: r.total ?? 0, unowned: r.unowned ?? 0,
-        withAssets: r.withAssets ?? 0, noSymbols: r.noSymbols ?? 0,
-      })
-      startUnownedJobPolling()
-    } else if (r.reason === 'already_running') {
-      turns.value[idx].content = t('assetMgmt.unowned.chatJobAlready')
-      unownedJobChatIdx.value = idx       // 接管：完成后把摘要回填到本 turn
+    if (r.started || r.reason === 'already_running') {
+      if (!unownedJob.value?.running) {
+        unownedJob.value = { running: true, total: r.total ?? 0, done: 0, saved: 0, batches: 0, errors: [] }
+      }
+      // 等式盘点：未归属 = 待提取 + 已有资产 + 无独立符号——进度 chip hint 呈现
       startUnownedJobPolling()
     } else if (r.reason === 'nothing_to_extract') {
-      turns.value[idx].content = t('assetMgmt.unowned.chatJobNoneDetail', {
-        unowned: r.unowned ?? 0, withAssets: r.withAssets ?? 0, noSymbols: r.noSymbols ?? 0,
-      })
+      console.info('[unowned] nothing to extract',
+        { unowned: r.unowned, withAssets: r.withAssets, noSymbols: r.noSymbols })
     } else {
       // 请求失败(服务未启动/后端版本较旧路由缺失/项目根未解析)——不能伪装成"没有待提取"
-      turns.value[idx].content = r.reason === 'invalid_root'
-        ? t('assetMgmt.unowned.chatJobInvalidRoot')
-        : t('assetMgmt.unowned.chatJobFailed')
+      console.warn('[unowned] job failed:', r.reason)
       void pollUnownedJobOnce()
     }
   }
@@ -209,7 +167,7 @@ export function useUnownedExtract(D: WsDeps) {
     unownedFiles, unownedMeta, unownedLoading, unownedError, unownedLinks,
     loadUnownedFiles, loadUnownedLinks,
     unownedExtractingOne, extractUnownedFile,
-    unownedJob, unownedJobChatIdx, unownedExtracting, unownedJobHint,
+    unownedJob, unownedExtracting, unownedJobHint,
     stopUnownedJobPolling, pollUnownedJobOnce, startUnownedJobPolling,
     extractAllUnowned, stopUnownedExtract,
     unownedLinkOf, unownedLinkTitle, unownedLinkByAssetId,

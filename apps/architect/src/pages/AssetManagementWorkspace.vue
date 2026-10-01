@@ -10,7 +10,7 @@ import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, ArrowPathIcon,
   CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon,
-  ArrowsRightLeftIcon, ClipboardDocumentListIcon,
+  ArrowsRightLeftIcon, ClipboardDocumentListIcon, DocumentTextIcon,
   ChevronDownIcon, ChevronRightIcon,
   SparklesIcon, TrashIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
@@ -23,7 +23,6 @@ import EvolutionStoryPanel from '@/components/assets/EvolutionStoryPanel.vue'
 /** 图谱 tab 内置「演化时间轴」页(固定不可关, 与资源图谱 tab 并列)。 */
 const TIMELINE_TAB = '__timeline__'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
-import ConversationDock from '@/components/chat/ConversationDock.vue'
 import { useSplitPane } from '@/composables/useSplitPane'
 import { copyText } from '@/utils/clipboard'
 import type { SemanticAsset } from '@/types'
@@ -40,7 +39,6 @@ const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = 
 
 const ws = useAssetWorkspace()
 provide(ASSET_WS_KEY, ws)
-const conv = ws.conv
 const {
   tab, kind, level, q, items, loading, statusCounts, expanded, overviewStats, purging,
   kinds, levels, statusText,
@@ -55,10 +53,6 @@ const {
   refreshStatus, refreshOne, usable, detailLoading, descLoading,
   renderCap, renderedTreeRows, semScrollEl, loadMoreSentinel,
   genDesc, toggle, hideFileless, onSearch, compMetaText, compRefText,
-  historyOpen, turns, extractBusy, extractAbort,
-  ensureAssetConversation, importHistory, onImportNewConversation,
-  registerChatHook, askAgent, seedConventionIds,
-  onConventionConfirm, onConventionIgnore, referenceComp, referenceAsset,
   compareData,
   scopeModal, confirmScope, cancelScope,
   extractingPending, extractPendingAndRecompare,
@@ -80,27 +74,8 @@ const {
   diagramModalOpen, diagramModalLoading, diagramModalItems, diagramModalTitle, openAssetDiagram,
 } = ws
 
-/** dock 内「刷新资产」卡事件(全局会话栏代发)。 */
-function _onDockRefreshAsset(e: Event) {
-  const id = (e as CustomEvent).detail as string
-  refreshOne(items.value.find((x) => x.id === id) as SemanticAsset).catch(() => {})
-}
-function _onDockOpenAsset(e: Event) {
-  const id = (e as CustomEvent).detail as string
-  if (id) openGraphTab('asset', id, id)
-}
-
 // ---- setup 生命周期接线(状态/动作已全部在 composable，宿主只挂生命周期) ----
-const _unregChatHook = registerChatHook()
-
-onMounted(() => {
-  window.addEventListener('arch:refresh-asset', _onDockRefreshAsset)
-  window.addEventListener('arch:open-asset', _onDockOpenAsset)
-})
 onUnmounted(() => {
-  _unregChatHook()
-  window.removeEventListener('arch:refresh-asset', _onDockRefreshAsset)
-  window.removeEventListener('arch:open-asset', _onDockOpenAsset)
   ws.disposeObserver()
   ws.stopUnownedJobPolling()
   ws.stopSyncJobPolling()
@@ -119,10 +94,6 @@ onMounted(async () => {
     void loadOverview()
     void loadUnownedFiles()
   })
-  // 引导消息只在对话为空时种一次(turns 是全局 store, 页面反复挂载不重复种)
-  if (turns.value.length === 0) {
-    turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
-  }
   // 批量提取是后端作业：页面重开(此前关闭)也要接管进度轮询
   void ws.pollUnownedJobOnce().then(() => {
     if (unownedJob.value?.running) ws.startUnownedJobPolling()
@@ -158,12 +129,6 @@ onUnmounted(() => {
         </div>
         <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">{{ statusText }}</span>
          <div class="flex-1" />
-         <button
-           class="btn btn-sm btn-ghost"
-           @click="historyOpen = true"
-         >
-           <ClipboardDocumentListIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.historyButton') }}
-         </button>
        </div>
     </div>
 
@@ -541,9 +506,12 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- 右：全局会话栏·inline 停靠(P1 决策2: 唯一对话栏——本页停靠形态) -->
+      <!-- 右：需求草稿停靠位(批A 会话移除；批C 落 DraftDock 编辑器) -->
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-        <ConversationDock inline scope="asset" default-kind="asset" :skill-scenarios="['extract', 'plan', 'capability']" />
+        <div class="panel flex-1 flex flex-col items-center justify-center gap-2 text-ctp-overlay0">
+          <DocumentTextIcon class="w-8 h-8" />
+          <span class="text-xs">{{ t('assetMgmt.draftPlaceholder') }}</span>
+        </div>
       </div>
     </div>
 

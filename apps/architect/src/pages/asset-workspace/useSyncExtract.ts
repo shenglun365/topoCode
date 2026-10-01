@@ -22,7 +22,6 @@ export function useSyncExtract(D: WsDeps) {
   let syncJobTimer: ReturnType<typeof setInterval> | null = null
   let syncJobDoneSeen = -1
   /** 作业对应对话区 turn 下标(完成后回填摘要)。 */
-  const syncJobChatIdx = ref(-1)
 
   const syncExtracting = computed(() => !!syncJob.value?.running)
 
@@ -33,16 +32,16 @@ export function useSyncExtract(D: WsDeps) {
       syncPlan.value = await semanticAssetService.extractPlan()
       const p = syncPlan.value
       if (!p.toExtract && !p.deleted && !p.invalidated) {
-        turns.value.push({ role: 'assistant', content: t('assetMgmt.sync.noChange') })
+        console.info('[sync] no changes')
       } else if (!p.toExtract) {
         // 只有失效(删除文件)没有待提取：校验结果直接告知
-        turns.value.push({ role: 'assistant', content: t('assetMgmt.sync.invalidatedOnly', { n: p.invalidated, d: p.deleted }) })
+        console.info('[sync] invalidated only')
         await Promise.all([core.loadSemantic(), core.refreshStatus()])
       } else {
         syncPlanOpen.value = true
       }
     } catch (e: any) {
-      turns.value.push({ role: 'assistant', content: e?.message || t('assetMgmt.sync.planFailed') })
+      console.warn('[sync] plan failed:', e?.message)
     } finally {
       syncPlanLoading.value = false
     }
@@ -54,27 +53,14 @@ export function useSyncExtract(D: WsDeps) {
 
   async function confirmSyncExtract() {
     syncPlanOpen.value = false
-    const p = syncPlan.value
-    turns.value.push({ role: 'user', content: t('assetMgmt.sync.chatUser') })
-    const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
     const r = await semanticAssetService.syncExtract('start', { batch: 10 })
-    if (r.started) {
-      syncJob.value = { running: true, total: r.total ?? 0, done: 0, saved: 0, batches: 0, errors: [] }
-      syncJobChatIdx.value = idx
-      turns.value[idx].content = t('assetMgmt.sync.chatStart', {
-        n: r.total ?? 0, batches: p?.batchesEstimate ?? Math.ceil((r.total ?? 0) / 10),
-        added: p?.added ?? 0, modified: p?.modified ?? 0,
-        never: p?.neverExtracted ?? 0, stale: p?.staleOnly ?? 0,
-      })
+    if (r.started || r.reason === 'already_running') {
+      if (!syncJob.value?.running) {
+        syncJob.value = { running: true, total: r.total ?? 0, done: 0, saved: 0, batches: 0, errors: [] }
+      }
       startSyncJobPolling()
-    } else if (r.reason === 'already_running') {
-      turns.value[idx].content = t('assetMgmt.sync.chatBusy')
-      syncJobChatIdx.value = idx
-      startSyncJobPolling()
-    } else if (r.reason === 'unowned_running') {
-      turns.value[idx].content = t('assetMgmt.sync.chatUnownedBusy')
     } else {
-      turns.value[idx].content = r.message || t('assetMgmt.sync.chatFailed')
+      console.warn('[sync] start failed:', r.reason, r.message)
     }
   }
 
@@ -94,18 +80,6 @@ export function useSyncExtract(D: WsDeps) {
         }
       } else if (wasRunning) {
         stopSyncJobPolling()
-        if (syncJobChatIdx.value >= 0) {
-          const errs = st.errors ?? []
-          let msg = st.stopped
-            ? t('assetMgmt.sync.chatStopped', { done: st.done, saved: st.saved })
-            : t('assetMgmt.sync.chatDone', { done: st.done, saved: st.saved })
-          if (errs.length) {
-            msg += '\n' + t('assetMgmt.unowned.chatJobErrors')
-            for (const e of errs.slice(0, 3)) msg += `\n· ${e.error}`
-          }
-          turns.value[syncJobChatIdx.value].content = msg
-          syncJobChatIdx.value = -1
-        }
         await Promise.all([core.loadSemantic(), core.refreshStatus(), core.loadOverview(), D.framework.loadCoverage(), D.unowned.loadUnownedFiles()])
       }
     } catch { /* 轮询失败静默，下轮重试 */ }
@@ -124,7 +98,7 @@ export function useSyncExtract(D: WsDeps) {
   }
 
   return {
-    syncPlan, syncPlanOpen, syncPlanLoading, syncJob, syncJobChatIdx, syncExtracting,
+    syncPlan, syncPlanOpen, syncPlanLoading, syncJob, syncExtracting,
     planSyncExtract, cancelSyncExtract, confirmSyncExtract,
     stopSyncJobPolling, pollSyncJobOnce, startSyncJobPolling, stopSyncExtract,
   }

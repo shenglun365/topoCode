@@ -3,7 +3,7 @@
 /** MS6-W1 自 AssetManagementWorkspace 模板整块迁出(逐行未动)；状态经 ASSET_WS_KEY 注入。 */
 
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, ArrowsRightLeftIcon, ChartBarSquareIcon, ChatBubbleLeftRightIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, ScaleIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StopIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, ArrowsRightLeftIcon, ChartBarSquareIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StopIcon } from '@heroicons/vue/24/outline'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import { useAssetWorkspaceCtx } from '..'
 
@@ -45,8 +45,6 @@ const {
   openFileCard,
   openGraphTab,
   pendingFileSet,
-  referenceAsset,
-  referenceComp,
   refreshOne,
   renderedTreeRows,
   semanticTreeRows,
@@ -135,14 +133,7 @@ const {
                       class="w-3 h-3"
                     />
                   </button>
-                  <button
-                    class="text-ctp-overlay0 hover:text-ctp-blue p-0.5 shrink-0"
-                    :title="t('assetMgmt.compRef')"
-                    @click="referenceComp(g.name, g.key)"
-                  >
-                    <ChatBubbleLeftRightIcon class="w-3 h-3" />
-                  </button>
-                </template>
+                                  </template>
                 <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ subtreeCount.get(g.key) ?? 0 }}</span>
                 <!-- 基线对比 · 组件(子树)变化上卷：需更新/新增/移除 彩色计数 -->
                 <template v-if="diffRollup.get(g.key)">
@@ -401,14 +392,7 @@ const {
                   >
                     <ArrowPathIcon class="w-3 h-3" />
                   </button>
-                  <button
-                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                    :title="t('assetMgmt.reference')"
-                    @click="referenceAsset(a)"
-                  >
-                    <ScaleIcon class="w-3 h-3" />
-                  </button>
-                  <button
+                                    <button
                     class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
                     :title="t('assetMgmt.graph.viewAssetGraph')"
                     @click="openGraphTab('asset', a.id, a.name)"
