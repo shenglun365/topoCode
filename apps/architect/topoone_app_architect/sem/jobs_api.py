@@ -131,19 +131,6 @@ async def api_extract_logic(request: Request = None):
     return ok(r)
 
 
-@router.get("/kb/semantic/logic/{asset_id}/members")
-async def api_logic_members(asset_id: str):
-    """逻辑链组成成员动态解析（需求 3-C：运行时取成员当前状态）。"""
-    from ..store import SemanticAssetsStore
-    from .logic_extract import resolve_members
-    a = SemanticAssetsStore.get(asset_id)
-    if not a:
-        return err(404, "资产不存在")
-    if (a.get("level") or "") != "logic":
-        return err(400, "非逻辑级资产")
-    return ok({"members": await asyncio.to_thread(resolve_members, a)})
-
-
 @router.get("/kb/semantic/component-view/{component_id}")
 async def api_component_view(component_id: str, root: Optional[str] = None,
                              project: Optional[str] = None,

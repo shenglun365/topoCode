@@ -344,7 +344,7 @@ ARCH_PROJECT_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS arch_semantic_jobs (
         id TEXT PRIMARY KEY,
         project_id TEXT DEFAULT '',
-        kind TEXT DEFAULT '',               -- extract_delta | extract_unowned | enhance_desc | extract_impl | enhance_semantic | extract_logic | gen_component_view
+        kind TEXT DEFAULT '',               -- extract_delta | extract_unowned | enhance_desc | extract_impl | enhance_semantic | extract_logic | analyze_logic | gen_component_view
         scope TEXT DEFAULT '{}',            -- JSON: {type: project|component|file|asset, keys: []}
         state TEXT DEFAULT 'queued',        -- queued | running | done | failed | cancelled | lost
         progress TEXT DEFAULT '{}',         -- JSON: {total, done, current, batch}
@@ -395,6 +395,20 @@ ARCH_PROJECT_TABLES_SQL = """
         updated_at INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_arch_reqdrafts ON arch_req_drafts(project_id, status, updated_at);
+
+    CREATE TABLE IF NOT EXISTS arch_logic_views (
+        id TEXT PRIMARY KEY,
+        project_id TEXT DEFAULT '',
+        name TEXT DEFAULT '',                 -- 视图名(业务逻辑链名)
+        core_ids TEXT DEFAULT '[]',           -- 核心(种子)实现资产 id JSON——分析起点非范围
+        member_ids TEXT DEFAULT '[]',         -- 成员全集(核心+agent 拓展) JSON
+        summary TEXT DEFAULT '',              -- LLM 文字概括
+        source TEXT DEFAULT 'manual',         -- extract(提取归纳) | manual(手动新建)
+        fingerprint TEXT DEFAULT '',          -- 成员集指纹(name+sorted members，upsert 判重)
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_logicviews ON arch_logic_views(project_id, updated_at);
 
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,

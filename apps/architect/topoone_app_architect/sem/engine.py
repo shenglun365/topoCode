@@ -2294,7 +2294,8 @@ def semantic_graph(root: Optional[str], project: Optional[str],
                    focus: str = "", hops: int = 1,
                    include_indirect: bool = False,
                    file: str = "", files: str = "",
-                   change_base: str = "", rev: str = "") -> Dict[str, Any]:
+                   change_base: str = "", rev: str = "",
+                   assets: str = "") -> Dict[str, Any]:
     """语义层图谱：节点=语义资产，边=资产间 relations，锚点=AST 引用。
 
     边 = 存库基础 relations(按 id/name/nameAlias/符号解析) ∪ 程序化派生边
@@ -2307,6 +2308,8 @@ def semantic_graph(root: Optional[str], project: Optional[str],
     file: 文件范围——仅返回锚定该文件的资产子图(文件级图谱入口)。
     files: 多文件范围(逗号分隔)——大项目图谱 >500 资产时由文件索引浮窗
     手动圈定范围(资产索引同款交互)，与 file 取并集。
+    assets: 资产 id 集合(逗号分隔)——逻辑视图图谱入口：节点=指定成员实现
+    资产(边=其间 relations+派生调用/依赖)，与 file/files 取并集过滤。
     change_base: 变更着色基准 commit(缺省关闭)。给出时经 compare 口径
     给每个节点标 changeStatus(changed/new/removed, 含 strong 符号级证据)
     并返回 changeSummary —— 资产变更图谱 = 图谱 × 变更着色, 不另建图谱。
@@ -2344,6 +2347,9 @@ def semantic_graph(root: Optional[str], project: Optional[str],
     file_set = {_norm_path(f) for f in (files or "").split(",") if f.strip()}
     if file:
         file_set.add(_norm_path(file))
+    id_set = {a.strip() for a in (assets or "").split(",") if a.strip()}
+    if id_set:
+        rows = [r for r in rows if r.get("id") in id_set]
     if file_set:
         rows = [a for a in rows
                 if any(_norm_path(r.get("file") or "") in file_set
@@ -3597,29 +3603,34 @@ def _component_asset_ids(pid: str, comp_files: Dict[str, set],
 def _file_scoped_asset_ids(pid: str, file_set: set) -> List[str]:
     """文件口径范围 → 资产 id 集合(提取重生成前置清除用)。
 
-    - 实现级：任一锚点文件 ∈ file_set；
-    - 逻辑级：detail.members 与被清实现资产 id 相交(成员被清 → 链连带失效)，
-      或自身锚点文件命中兜底(逻辑链锚点通常为空)。
+    实现级：任一锚点文件 ∈ file_set。(逻辑层已转为逻辑视图存储——
+    连带删除在 batch_manage 的 _cascade_delete_logic_views 中处理。)
     """
-    impl_ids: set = set()
-    logic: List[dict] = []
+    out: set = set()
     for a in store.SemanticAssetsStore.all_status(pid, limit=4000):
         aid = a.get("id")
         if not aid or a.get("status") == "deleted":
             continue
-        if (a.get("level") or "implementation") == "logic":
-            logic.append(a)
-            continue
         f = _norm_path((a.get("astRefs") or [{}])[0].get("file") or "")
         if f and f in file_set:
-            impl_ids.add(aid)
-    out = set(impl_ids)
-    for a in logic:
-        members = set((a.get("detail") or {}).get("members") or [])
-        lf = _norm_path((a.get("astRefs") or [{}])[0].get("file") or "")
-        if (members & impl_ids) or (lf and lf in file_set):
-            out.add(a.get("id"))
+            out.add(aid)
     return sorted(i for i in out if i)
+
+
+def _cascade_delete_logic_views(pid: str, cleared_ids: List[str]) -> int:
+    """清除重建联动：成员实现资产被清的逻辑视图连带删除(链成员失效即视图失效)。"""
+    import json as _json
+    from ..store import LogicViewsStore
+    cleared = set(cleared_ids)
+    victims = []
+    for v in LogicViewsStore.list(pid, limit=1000):
+        try:
+            members = set(_json.loads(v.get("memberIds") or "[]"))
+        except Exception:
+            members = set()
+        if members & cleared:
+            victims.append(v["id"])
+    return LogicViewsStore.delete_many(pid, victims)
 
 
 def batch_manage(root: Optional[str], project: Optional[str],
@@ -3685,6 +3696,16 @@ def batch_manage(root: Optional[str], project: Optional[str],
                 except Exception:
                     pass
                 cleared = targets
+                # 逻辑视图连带：成员被清(全量口径=清全部) → 视图删除
+                try:
+                    if file_set:
+                        _cascade_delete_logic_views(pid, targets)
+                    else:
+                        from ..store import LogicViewsStore
+                        for v in LogicViewsStore.list(pid, limit=1000):
+                            LogicViewsStore.delete(v["id"])
+                except Exception as e:
+                    logger.warning("[semantic] cascade delete logic views failed: %s", e)
             except Exception as e:
                 logger.warning("[semantic] batch clear %s failed: %s", targets[:5], e)
         return {"action": action, "count": len(targets), "cleared": cleared,
@@ -4933,7 +4954,7 @@ async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
                     kind: str = "", scope: str = "", level: str = "", limit: int = 2000,
                     focus: str = "", hops: int = 1, include_indirect: bool = False,
                     file: str = "", files: str = "", change_base: str = "",
-                    rev: str = ""):
+                    rev: str = "", assets: str = ""):
     """语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。
 
     scope: 逗号分隔的组件范围(scope_key)；kind: 资产种类过滤；level: 抽象粒度过滤。
@@ -4949,7 +4970,8 @@ async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
     return ok(semantic_graph(root, project, kind, scopes, level=lvl, limit=limit,
                              focus=focus, hops=hops,
                              include_indirect=include_indirect, file=file,
-                             files=files, change_base=change_base, rev=rev))
+                             files=files, change_base=change_base, rev=rev,
+                             assets=assets))
 
 @router.get("/kb/semantic/asset-compare")
 async def api_asset_compare(root: Optional[str] = None, project: Optional[str] = None,

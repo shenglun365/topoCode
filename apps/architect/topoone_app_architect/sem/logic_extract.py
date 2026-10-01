@@ -130,6 +130,21 @@ def _assets_brief(assets: List[dict]) -> str:
     return "\n".join(lines)
 
 
+"""资产间关系摘要(归纳输入增厚)：detail.relations 的 from→to 行。"""
+def _edges_brief(assets: List[dict]) -> str:
+    names = {a.get("id"): (a.get("name") or "") for a in assets}
+    lines: List[str] = []
+    for a in assets:
+        d = a.get("detail") or {}
+        for rel in (d.get("relations") or [])[:10]:
+            tgt = rel.get("target") or rel.get("name") or ""
+            if not tgt:
+                continue
+            tgt_name = names.get(tgt, tgt)
+            lines.append(f"- {a.get('name')} --{rel.get('type') or 'relates'}--> {tgt_name}")
+    return "\n".join(lines[:120])
+
+
 def induce_chains(root: str, assets: List[dict], rev: str,
                   model_id: Optional[str] = None) -> List[dict]:
     """LLM 归纳链条 → 结构化(成员实现级资产对齐 + IO 锚点构造+校验)。
@@ -142,7 +157,11 @@ def induce_chains(root: str, assets: List[dict], rev: str,
     for a in assets:
         for r in (a.get("astRefs") or []):
             by_symbol[(r.get("symbol") or r.get("name") or "")] = a
-    prompt = _PROMPT.replace("{assets}", _assets_brief(assets))
+    brief = _assets_brief(assets)
+    edges = _edges_brief(assets)
+    if edges:
+        brief = brief + "\n\n资产间调用/依赖关系:\n" + edges
+    prompt = _PROMPT.replace("{assets}", brief)
     res = llm_sync([{"role": "user", "content": prompt}],
                    mode="chat", model_id=model_id, max_tokens=4000)
     content = ((res or {}).get("content") or "").strip()
@@ -241,55 +260,122 @@ def _job_extract_logic(ctx) -> dict:
     if not impl:
         return {"error": "范围内无实现级资产", "summary": "失败：无实现级前置"}
 
-    # stage 1: LLM 链条归纳
+    # stage 1: LLM 链条归纳 → 逻辑视图(非资产行)
     ctx.progress(total=1, done=0, stage=1)
     chains = induce_chains(rid, impl, rev, model_id)
+    from ..store import LogicViewsStore
+    from ..store.logic_views import fingerprint_of
     saved_ids: List[str] = []
-    from .engine import _save_assets
-    from ..store import SemanticAssetsStore
-    existing = {a.get("canonicalKey"): a
-                for a in SemanticAssetsStore.search(pid, level="logic", limit=2000, rev=rev or "")
-                if a.get("canonicalKey")}
     for ch in chains:
-        detail = {"iospec": {"inputs": ch["inputs"], "outputs": ch["outputs"]},
-                  "members": ch["members"], "summary": ch["summary"]}
-        payload = [{"name": ch["name"], "kind": ch["kind"], "level": "logic",
-                    "desc": ch["summary"], "astRefs": [], "detail": detail}]
-        canonical = json.dumps(sorted(ch["members"]), ensure_ascii=False) + ch["name"]
-        import hashlib
-        ck = hashlib.sha1(f"{ch['kind']}|logic|{canonical}".encode()).hexdigest()[:24]
-        old = existing.get(ck)
-        sctx = {"root": rid, "project": sc.get("project"), "source": "logic_extract",
-                "rev": rev, "files": [], "srcHash": rev, "table": {}}
-        assets = _save_assets(pid, "files", sc.get("scopeKey") or "", payload, sctx)
-        if assets:
-            SemanticAssetsStore.update(assets[0]["id"], {"canonicalKey": ck})
-            saved_ids.append(assets[0]["id"])
-    return {"saved": len(saved_ids), "ids": saved_ids[:20],
-            "summary": f"逻辑链 {len(saved_ids)} 条(候选 {len(chains)})"}
-
-
-def resolve_members(logic_asset: dict) -> List[dict]:
-    """组成关系动态解析（3-C）：成员 id → 成员实现级资产当前状态。
-
-    成员已被删除/失效时如实携带其当前 status（前端可标灰），不做静默过滤。
-    """
-    from ..store import SemanticAssetsStore
-    members = ((logic_asset.get("detail") or {}).get("members") or [])
-    out: List[dict] = []
-    for mid in members:
-        a = SemanticAssetsStore.get(mid)
-        if a:
-            out.append({"id": a.get("id"), "name": a.get("name"), "kind": a.get("kind"),
-                        "status": a.get("status"), "rev": a.get("rev"),
-                        "astRefs": (a.get("astRefs") or [])[:1]})
+        members = [m for m in (ch.get("members") or []) if m]
+        if not members:
+            continue
+        fp = fingerprint_of(ch.get("name") or "", members)
+        old = LogicViewsStore.by_fingerprint(pid, fp)
+        if old:
+            LogicViewsStore.update(old["id"], {
+                "memberIds": json.dumps(members, ensure_ascii=False),
+                "summary": ch.get("summary") or "", "fingerprint": fp})
+            saved_ids.append(old["id"])
         else:
-            out.append({"id": mid, "status": "missing"})
-    return out
+            view = LogicViewsStore.create(
+                pid, ch.get("name") or "", members, members,
+                summary=ch.get("summary") or "", source="extract")
+            saved_ids.append(view["id"])
+    return {"saved": len(saved_ids), "ids": saved_ids[:20],
+            "summary": f"逻辑视图 {len(saved_ids)} 条(候选 {len(chains)})"}
 
 
 from . import job_runner as _job_runner  # noqa: E402
 _job_runner.register("extract_logic", _job_extract_logic)  # noqa: E305
+
+
+# ── 逻辑视图分析(手动新建：核心节点为种子，agent 沿调用依赖拓展 + LLM 概括) ──
+
+def expand_members(edges: List[tuple], core_ids: List[str], hops: int, cap: int = 500) -> List[str]:
+    """从核心资产沿边集无向 BFS 拓展(业务链条上下游都相关)；hops<=0 即仅核心。
+
+    edges: [(from_id, to_id), ...]——调用/依赖关系(无向可达)。
+    """
+    members = list(dict.fromkeys(core_ids))
+    if hops <= 0 or not edges:
+        return members[:cap]
+    adj: Dict[str, List[str]] = {}
+    for a, b in edges:
+        adj.setdefault(a, []).append(b)
+        adj.setdefault(b, []).append(a)
+    seen = set(members)
+    frontier = list(members)
+    for _ in range(hops):
+        nxt: List[str] = []
+        for cur in frontier:
+            for nb in adj.get(cur, []):
+                if nb not in seen:
+                    seen.add(nb)
+                    nxt.append(nb)
+        if not nxt:
+            break
+        members.extend(nxt)
+        frontier = nxt
+        if len(members) >= cap:
+            break
+    return members[:cap]
+
+
+def summarize_members(assets: List[dict], model_id: Optional[str] = None) -> str:
+    """成员全集 → LLM 文字概括(职责/流程/关键依赖，≤300 字)。"""
+    from ..agent.cognition.llm import llm_sync
+    brief = _assets_brief(assets)
+    edges = _edges_brief(assets)
+    if edges:
+        brief = brief + "\n\n成员间调用/依赖关系:\n" + edges
+    prompt = (
+        "你是软件架构分析师。下面是一组语义资产(实现级)及其相互关系，"
+        "它们组成一条跨文件/跨组件的业务逻辑链。请用不超过 300 字概括：\n"
+        "1) 这条链的业务职责(系统在做什么)；2) 处理流程(从哪开始、经哪些环节、到哪结束)；"
+        "\n3) 关键依赖与外部 IO。直接输出概括文字，不要列表编号。\n\n" + brief)
+    res = llm_sync([{"role": "user", "content": prompt}],
+                   mode="chat", model_id=model_id, max_tokens=800)
+    return (((res or {}).get("content") or "").strip())[:600]
+
+
+def _job_analyze_logic(ctx) -> dict:
+    """analyze_logic 作业：核心节点拓展(调用依赖边集) → 成员更新 → LLM 概括。"""
+    from .paths import project_id_for, resolve_root
+    from ..store import LogicViewsStore, SemanticAssetsStore
+    sc = ctx.scope or {}
+    rid = (resolve_root(sc.get("root") or "", sc.get("project")) or "").strip()
+    if not rid:
+        return {"error": "项目 root 解析失败"}
+    pid = project_id_for(rid, sc.get("project"))
+    view = LogicViewsStore.get(sc.get("viewId") or "")
+    if not view:
+        return {"error": "逻辑视图不存在", "summary": "失败：视图不存在"}
+    expand = sc.get("expand") or "all"
+    core_ids = json.loads(view.get("coreIds") or "[]")
+    hops = {"core": 0, "1": 1, "2": 2}.get(expand, 99)   # all=可达闭包(hops 大值+cap)
+    # 拓展边集：全图谱 relations(存库+派生) —— semantic_graph 一次取全
+    ctx.progress(total=2, done=0, stage=0)
+    from .engine import semantic_graph
+    g = semantic_graph(rid, sc.get("project"), limit=4000)
+    id_set = {n.get("id") for n in (g.get("nodes") or [])}
+    edges = [(e.get("from"), e.get("to"))
+             for e in (g.get("edges") or [])
+             if e.get("from") in id_set and e.get("to") in id_set]
+    members = expand_members(edges, core_ids, hops)
+    ctx.progress(total=2, done=1, stage=0)
+    rows = [a for a in SemanticAssetsStore.search(pid, text="", limit=4000)
+            if a.get("id") in set(members)]
+    summary = summarize_members(rows, sc.get("modelId") or None)
+    LogicViewsStore.update(view["id"], {
+        "memberIds": json.dumps(members, ensure_ascii=False),
+        "summary": summary})
+    ctx.progress(total=2, done=2, stage=1)
+    return {"saved": 1, "summary": f"成员 {len(members)}(核心 {len(core_ids)})；概括已生成",
+            "viewId": view["id"]}
+
+
+_job_runner.register("analyze_logic", _job_analyze_logic)  # noqa: E305
 
 
 def start_extract_logic(root: str, project: Optional[str], *,

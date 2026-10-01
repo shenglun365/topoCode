@@ -489,29 +489,6 @@ def test_batch_clear_by_files_anchor(tmp_path, monkeypatch):
     assert store.SemanticAssetsStore.get("sa-fx-62") is not None
 
 
-def test_batch_clear_by_files_logic_members(tmp_path, monkeypatch):
-    """clear files 口径：逻辑链成员(实现资产)被清 → 链连带删除；无关链保留。"""
-    _ctx(tmp_path, monkeypatch)
-    pid = S.project_id_for("/tmp/x", None)
-    for aid, f, detail in [
-        ("sa-fx-71", "svc/a.py", {}),
-        ("sa-fx-72", "svc/b.py", {}),
-        ("sa-lg-73", "", {"members": ["sa-fx-71"]}),   # 链 A：成员命中 → 连带
-        ("sa-lg-74", "", {"members": ["sa-fx-72"]}),   # 链 B：成员未命中 → 保留
-    ]:
-        store.SemanticAssetsStore.create({
-            "id": aid, "projectId": pid,
-            "kind": "asset", "level": "logic" if aid.startswith("sa-lg") else "implementation",
-            "name": aid, "desc": "", "detail": detail,
-            "astRefs": ([{"file": f}] if f else []),
-            "scopeType": "comm", "scopeKey": "L0-0001", "srcHash": "h",
-            "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
-    res = S.batch_manage("/tmp/x", None, "clear", files=["svc/a.py"])
-    assert set(res["cleared"]) == {"sa-fx-71", "sa-lg-73"}
-    assert store.SemanticAssetsStore.get("sa-lg-73") is None
-    assert store.SemanticAssetsStore.get("sa-fx-72") is not None
-    assert store.SemanticAssetsStore.get("sa-lg-74") is not None
-
 
 def test_batch_clear_other_only_keeps_components(tmp_path, monkeypatch):
     """仅「其它」范围清除 → 非组件文件/无锚点资产删除，组件资产保留。"""

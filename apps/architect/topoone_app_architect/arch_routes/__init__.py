@@ -20,6 +20,7 @@ from . import contracts
 from . import acceptance
 from . import naming
 from . import req_drafts
+from . import logic_views
 from . import mainkb
 from ..agent.reflection import mining as capability_mining
 from ..agent.reflection import dataset as llm_dataset
@@ -58,6 +59,7 @@ router.include_router(contracts.router)
 router.include_router(acceptance.router)
 router.include_router(naming.router)
 router.include_router(req_drafts.router)
+router.include_router(logic_views.router)
 router.include_router(mainkb.router)
 router.include_router(capability_mining.router)
 router.include_router(diagram.router)

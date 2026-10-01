@@ -43,10 +43,10 @@ _TIER_X = {
     "high": tuple(KIND_LABELS),
 }
 _TIER_Y = {
+    # 逻辑层已转为「逻辑视图」(跨组件业务链条，非资产层级)——粒度轴收敛为实现单层
     "low": ("implementation",),
-    # 业务层已取消：标准/高级档粒度收敛为实现+逻辑两层(LEVEL_LABELS 仍含 business 供存量数据查询兼容)
-    "mid": ("implementation", "logic"),
-    "high": ("implementation", "logic"),
+    "mid": ("implementation",),
+    "high": ("implementation",),
 }
 _TIER_Z = {
     "low": (),

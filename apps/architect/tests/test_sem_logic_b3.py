@@ -47,27 +47,6 @@ def test_build_code_anchor_and_validate(tmp_path):
 
 # ── 逻辑链落库 + 成员动态解析（3-C） ─────────────────────────
 
-def test_logic_members_dynamic(tmp_path):
-    from topoone_app_architect.sem.logic_extract import resolve_members
-    m1 = SemanticAssetsStore.create({
-        "id": "sa-impl-1", "projectId": PID, "kind": "process",
-        "level": "implementation", "name": "create", "rev": "workspace",
-        "status": "active", "scopeType": "files", "scopeKey": "",
-        "astRefs": [{"file": "m.py", "symbol": "create", "startLine": 3, "endLine": 4}],
-        "createdAt": 1, "updatedAt": 1})
-    logic = SemanticAssetsStore.create({
-        "id": "sa-logic-1", "projectId": PID, "kind": "process_chain",
-        "level": "logic", "name": "订单创建链", "rev": "workspace",
-        "status": "active", "scopeType": "files", "scopeKey": "",
-        "detail": {"members": ["sa-impl-1", "sa-gone"],
-                   "iospec": {"inputs": [], "outputs": []}},
-        "createdAt": 1, "updatedAt": 1})
-    members = resolve_members(logic)
-    assert members[0]["id"] == "sa-impl-1" and members[0]["status"] == "active"
-    assert members[1] == {"id": "sa-gone", "status": "missing"}
-
-
-# ── 组件视图存取/辐射打脏（4.1 / 影响辐射） ──────────────────
 
 def test_component_view_lifecycle_and_stale(tmp_path):
     from topoone_app_architect.sem.component_view import (
