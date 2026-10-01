@@ -719,6 +719,12 @@ export const semanticAssetService = {
     })
   },
 
+  /** 逻辑级提取作业提交(LLM 链条归纳，基于实现级资产)：BE 级联——范围内实现骨架缺失自动先跑结构化提取。 */
+  async startExtractLogic(payload: { rev?: string; files?: string[]; scopeKey?: string; modelId?: string } = {}): Promise<{ started: boolean; reason?: string; job?: { id: string } }> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/kb/semantic/extract-logic', { root, project, ...payload })
+  },
+
   /** 结构化提取作业提交(无 LLM)：rev='baseline:<sha>'/'head:<sha>' 时按 rev 内容解析。 */
   async startExtractImpl(payload: { rev?: string; files?: string[]; keys?: string[]; base?: string }): Promise<{ started: boolean; reason?: string; job?: { id: string } }> {
     const { root, project } = currentProjectParams()
@@ -817,7 +823,7 @@ export const semanticAssetService = {
 
   /** 批量清除选定组件范围的语义资产(clear)。
    *  支持 dryRun=true 预览影响(需求池/任务)供前端确认。 */
-  async batchManage(action: 'clear', components: string[], opts?: { includeOther?: boolean; scope?: string[]; dryRun?: boolean }): Promise<SemanticBatchResult> {
+  async batchManage(action: 'clear', components: string[], opts?: { includeOther?: boolean; scope?: string[]; dryRun?: boolean; files?: string[] }): Promise<SemanticBatchResult> {
     return apiPost<SemanticBatchResult>('/kb/semantic/batch', {
       root: currentProjectParams().root,
       project: currentProjectParams().project,
@@ -826,6 +832,7 @@ export const semanticAssetService = {
       includeOther: opts?.includeOther,
       scope: opts?.scope,
       dryRun: opts?.dryRun,
+      files: opts?.files,
     })
   },
 

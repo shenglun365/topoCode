@@ -55,16 +55,12 @@ export function useUnownedExtract(D: WsDeps) {
     if (unownedExtracting.value) return
     // 范围确认弹窗（交互提取闭环统一交互）：确认后生成任务开始分析
     const picked = await D.diff.pickScope(t('assetMgmt.unowned.fileScopeTitle', { file: path }), [path])
-    if (!picked?.length) return
+    if (!picked) return
     unownedExtractingOne.value = path
     try {
-      const r = await semanticAssetService.startExtractScope(
-        { scopeType: 'files', files: picked },
-        { kinds: core.kinds.map((k: { value: string }) => k.value), level: 'implementation' })
-      if (!r?.started || !r.job?.id) {
-        console.warn('[unowned] extract submit failed:', r?.reason)
-        return
-      }
+      // 清除重建 + 粒度提取统一编排（清除→实现→逻辑；完成经失效总线刷新资产数据）
+      const ok = await D.diff.runExtractPipeline(picked, false)
+      if (!ok) console.warn('[unowned] extract pipeline failed')
       D.chat.refreshAfterExtract()
       await loadUnownedFiles()
     } catch (err: any) {

@@ -56,8 +56,8 @@ export function useAssetCore(D: WsDeps) {
     { value: 'decision', label: t('assetMgmt.kind.decision') },
   ]
 
+  // 业务层已取消——粒度筛选只留逻辑/实现(i18n level.business 键保留供存量资产行显示)
   const levels: { value: SemanticAssetLevel; label: string }[] = [
-    { value: 'business', label: t('assetMgmt.level.business') },
     { value: 'logic', label: t('assetMgmt.level.logic') },
     { value: 'implementation', label: t('assetMgmt.level.implementation') },
   ]

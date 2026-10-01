@@ -11,6 +11,14 @@ import { gitService, type GitLogEntry } from '@/services/git-service'
 import type { SemanticAsset } from '@/types'
 import type { WsDeps } from './useAssetCore'
 
+/** 提取范围弹窗确认回执：勾选文件 + 提取粒度 + 全量更新。 */
+export interface ScopePick {
+  files: string[]
+  impl: boolean
+  logic: boolean
+  full: boolean
+}
+
 export function useAssetDiff(D: WsDeps) {
   const { t } = useI18n()
   const core = D.core
@@ -82,18 +90,18 @@ export function useAssetDiff(D: WsDeps) {
   })
 
   // ---- 提取范围弹窗（交互提取闭环共用：本域入口 + 按组件/按文件经 ctx 复用） ----
-  const scopeModal = ref<{ open: boolean; title: string; files: string[] }>(
-    { open: false, title: '', files: [] })
-  let scopeResolver: ((files: string[] | null) => void) | null = null
-  /** 弹窗选择提取范围；resolve 选中的文件（取消 → null）。 */
-  function pickScope(title: string, files: string[]): Promise<string[] | null> {
+  const scopeModal = ref<{ open: boolean; title: string; files: string[]; showFull: boolean }>(
+    { open: false, title: '', files: [], showFull: false })
+  let scopeResolver: ((pick: ScopePick | null) => void) | null = null
+  /** 弹窗选择提取范围与粒度；resolve 确认回执（取消 → null）。 */
+  function pickScope(title: string, files: string[], opts?: { full?: boolean }): Promise<ScopePick | null> {
     if (scopeResolver) return Promise.resolve(null)   // 弹窗已开：忽略重复触发
-    scopeModal.value = { open: true, title, files }
+    scopeModal.value = { open: true, title, files, showFull: !!opts?.full }
     return new Promise((resolve) => { scopeResolver = resolve })
   }
-  function confirmScope(files: string[]): void {
+  function confirmScope(files: string[], opts?: { impl?: boolean; logic?: boolean; full?: boolean }): void {
     scopeModal.value.open = false
-    scopeResolver?.(files)
+    scopeResolver?.({ files, impl: opts?.impl ?? true, logic: opts?.logic ?? true, full: opts?.full ?? false })
     scopeResolver = null
   }
   function cancelScope(): void {
@@ -136,7 +144,57 @@ export function useAssetDiff(D: WsDeps) {
     return 1
   }
 
-  /** 已完成基线提取的 rev（同一源码状态节点只提取一次；对比刷新后 baseAssetsMissing 自然转 false）。 */
+  /** 提取编排（清除重建统一语义）：范围清除 → 实现提取(勾选) → 逻辑归纳(勾选) → 刷新/重对比。
+ *  full=全量更新：清除全库(scope 空)且 files 扩为全量文件全集；失败中止返回 false。 */
+async function runExtractPipeline(pick: ScopePick, recompare: boolean): Promise<boolean> {
+  let files = pick.files
+  if (pick.full) {
+    const universe = new Set(diffFileUniverse.value)
+    const cmp = compareData.value
+    if (cmp) for (const f of [...cmp.files.added, ...cmp.files.modified]) universe.add(f)
+    files = [...universe].filter(isCodeFile).sort()
+  }
+  compareHint.value = t('assetMgmt.scopeClearing')
+  try {
+    await semanticAssetService.batchManage('clear', [], pick.full
+      ? { includeOther: true }                       // 全量：清空全库(实现+逻辑)
+      : { files })                                   // 范围：锚点文件命中+逻辑 members 连带
+  } catch (e) {
+    compareError.value = e instanceof Error && e.message ? e.message : t('assetMgmt.batchFailed')
+    compareHint.value = ''
+    return false
+  }
+  if (pick.impl) {
+    compareHint.value = t('assetMgmt.implExtracting', { n: files.length })
+    if (await runScopeJob(files) < 0) {
+      compareHint.value = ''
+      return false
+    }
+  }
+  if (pick.logic) {
+    compareHint.value = t('assetMgmt.logicExtracting')
+    const r = await semanticAssetService.startExtractLogic({ files })
+    const jobId = r?.job?.id
+    if (!jobId || (!r?.started && r?.reason !== 'already_running')) {
+      compareError.value = t('assetMgmt.compExtractFailed')
+      compareHint.value = ''
+      return false
+    }
+    const done = await waitForJob(jobId)
+    if (!done.ok) {
+      compareError.value = done.error === 'timeout'
+        ? t('assetMgmt.diff.jobTimeout') : (done.error || t('assetMgmt.diff.cmpFailed'))
+      compareHint.value = ''
+      return false
+    }
+  }
+  compareHint.value = ''
+  await Promise.all([D.core.loadSemantic(), D.core.refreshStatus()])
+  if (recompare) await runCompare()
+  return true
+}
+
+/** 已完成基线提取的 rev（同一源码状态节点只提取一次；对比刷新后 baseAssetsMissing 自然转 false）。 */
   let baselineExtractedSha = ''
 
   /** 代码扩展过滤（与 BE compare._CODE_EXTS 同口径）：文档/配置提取不出符号。 */
@@ -167,13 +225,23 @@ export function useAssetDiff(D: WsDeps) {
         if (!files.length) return
       }
       extractingPending.value = true   // 弹窗期间即锁定（防双击重复弹窗）
-      files = await pickScope(
+      const pick = await pickScope(
         cmp?.baseAssetsMissing
           ? t('assetMgmt.diff.extractScopeTitleBaseline')
           : t('assetMgmt.diff.extractScopeTitle'),
         files,
-      ) ?? []
+        { full: true },   // 全量更新选项仅本入口提供
+      )
       extractingPending.value = false
+      if (!pick) return
+      files = pick.files
+      extractingPending.value = true
+      try {
+        await runExtractPipeline(pick, true)
+      } finally {
+        extractingPending.value = false
+      }
+      return
     }
     if (!files.length) return
     extractingPending.value = true
@@ -200,11 +268,9 @@ export function useAssetDiff(D: WsDeps) {
           compareHint.value = ''
         }
       }
-      // ② 目标侧补提（LLM 范围提取作业；任务中心可见进度）
-      const extracted = await runScopeJob(files)
-      if (extracted < 0) return
-      // ③ 重新对比
-      await Promise.all([core.loadSemantic(), runCompare()])
+      // ② 清除重建 + 目标侧补提 + 逻辑归纳（统一编排；任务中心可见进度）
+      const ok = await runExtractPipeline({ files, impl: true, logic: true, full: false }, true)
+      if (!ok) return
     } catch (e) {
       compareError.value = e instanceof Error && e.message ? e.message : t('assetMgmt.diff.cmpFailed')
     } finally {
@@ -339,7 +405,7 @@ export function useAssetDiff(D: WsDeps) {
     diffLoading, baselineDiffData, loadBaselineDiff, initCompare,
     cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
     loadCommitOptions, runCompare,
-    scopeModal, pickScope, confirmScope, cancelScope, waitForJob,
+    scopeModal, pickScope, confirmScope, cancelScope, waitForJob, runExtractPipeline,
     extractingPending, pendingExtractable, extractPendingAndRecompare,
     changedFileMap, assetChangeMark, cmpBucketById, changeMarkById, diffFileCounts,
     treeFileOf, pendingFileSet, addedFileSet, diffFileUniverse,

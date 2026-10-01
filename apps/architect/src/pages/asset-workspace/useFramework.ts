@@ -73,17 +73,12 @@ export function useFramework(D: WsDeps) {
     const owns = (comp?.owns ?? []).filter(Boolean)
     if (!owns.length) return
     const picked = await D.diff.pickScope(t('assetMgmt.compExtractScopeTitle', { name }), owns)
-    if (!picked?.length) return
+    if (!picked) return
     D.chat.extractBusy.value = true
     try {
-      const r = await semanticAssetService.startExtractScope(
-        { scopeType: 'comm', key, files: picked },
-        { kinds: core.kinds.map((k: { value: string }) => k.value), level: 'implementation' })
-      if (!r?.started || !r.job?.id) {
-        await dialog.alert(r?.reason === 'already_running'
-          ? t('assetMgmt.compExtractAlreadyRunning')
-          : t('assetMgmt.compExtractFailed'))
-      }
+      // 清除重建 + 粒度提取统一编排（清除→实现→逻辑；进度在任务中心，完成经总线刷新）
+      const ok = await D.diff.runExtractPipeline(picked, false)
+      if (!ok) await dialog.alert(t('assetMgmt.compExtractFailed'))
     } catch (e: any) {
       await dialog.alert(e?.message || t('assetMgmt.batchFailed'))
     } finally {

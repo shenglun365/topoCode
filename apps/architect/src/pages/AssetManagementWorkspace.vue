@@ -513,6 +513,7 @@ onUnmounted(() => {
     :open="scopeModal.open"
     :title="scopeModal.title"
     :files="scopeModal.files"
+    :show-full="scopeModal.showFull"
     @confirm="confirmScope"
     @close="cancelScope"
   />

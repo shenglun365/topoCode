@@ -387,7 +387,9 @@ const {
             v-for="(row, ri) in detailBlock.rows"
             :key="ri"
             class="pl-2 font-mono text-[10px] text-ctp-subtext0 truncate"
-            :title="row.title"
+            :class="row.assetId ? 'cursor-pointer hover:text-ctp-text' : ''"
+            :title="row.assetId ? t('assetMgmt.graph.memberJump') : row.title"
+            @click="row.assetId && (selId = row.assetId)"
           >{{ row.text }}</div>
         </div>
         <!-- 关系延伸 tab 内容：相关资产锚点代码预览(点击名称跳转选中该资产) -->

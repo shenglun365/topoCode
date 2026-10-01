@@ -3578,6 +3578,34 @@ def _component_asset_ids(pid: str, comp_files: Dict[str, set],
     return sorted(i for i in ids if i)
 
 
+def _file_scoped_asset_ids(pid: str, file_set: set) -> List[str]:
+    """文件口径范围 → 资产 id 集合(提取重生成前置清除用)。
+
+    - 实现级：任一锚点文件 ∈ file_set；
+    - 逻辑级：detail.members 与被清实现资产 id 相交(成员被清 → 链连带失效)，
+      或自身锚点文件命中兜底(逻辑链锚点通常为空)。
+    """
+    impl_ids: set = set()
+    logic: List[dict] = []
+    for a in store.SemanticAssetsStore.all_status(pid, limit=4000):
+        aid = a.get("id")
+        if not aid or a.get("status") == "deleted":
+            continue
+        if (a.get("level") or "implementation") == "logic":
+            logic.append(a)
+            continue
+        f = _norm_path((a.get("astRefs") or [{}])[0].get("file") or "")
+        if f and f in file_set:
+            impl_ids.add(aid)
+    out = set(impl_ids)
+    for a in logic:
+        members = set((a.get("detail") or {}).get("members") or [])
+        lf = _norm_path((a.get("astRefs") or [{}])[0].get("file") or "")
+        if (members & impl_ids) or (lf and lf in file_set):
+            out.add(a.get("id"))
+    return sorted(i for i in out if i)
+
+
 def batch_manage(root: Optional[str], project: Optional[str],
                  action: str, comp_ids: Optional[List[str]] = None,
                  include_other: bool = False,
@@ -3585,7 +3613,8 @@ def batch_manage(root: Optional[str], project: Optional[str],
                  model_id: Optional[str] = None,
                  level: str = "implementation",
                  scopes: Optional[List[str]] = None,
-                 dry_run: bool = False) -> Dict[str, Any]:
+                 dry_run: bool = False,
+                 files: Optional[List[str]] = None) -> Dict[str, Any]:
     """批量管理组件范围语义资产。
 
     仅支持 action="clear"：物理删除选定组件范围内的语义资产(不做软删保留)，
@@ -3594,6 +3623,9 @@ def batch_manage(root: Optional[str], project: Optional[str],
 
     兼容保留 kinds/model_id/level 参数(clear 不使用)。scopes: 与 search 一致的
     组件范围语义(None=全部 / ['__other__']=仅其它 / 组件 id 列表)。
+    files(仅 clear): 文件口径范围——实现级按锚点文件命中，逻辑级按
+    detail.members 与被清实现资产 id 相交连带(提取重生成前置清除用；
+    与 scopes 二选一，files 优先)。
     返回 {action, count, cleared?, impact?}。
     """
     root = resolve_root(root, project)
@@ -3609,7 +3641,9 @@ def batch_manage(root: Optional[str], project: Optional[str],
             scopes = None   # 空选 + 其它 = 全部
         elif include_other:
             scopes.append("__other__")
-    ids = _component_asset_ids(pid, comp_files, scopes)
+    file_set = {_norm_path(f) for f in (files or []) if f and f.strip()}
+    ids = _file_scoped_asset_ids(pid, file_set) if file_set \
+        else _component_asset_ids(pid, comp_files, scopes)
     cleared, updated = [], []
     if action == "clear":
         # 清除 = 物理删除(不做软删保留)：连同引用登记一并删除。
@@ -4410,9 +4444,11 @@ async def api_aggregate_high(request: Request):
 async def api_batch(request: Request):
     """批量管理选定组件范围的语义资产(extract/clear/update)。
 
-    body: {action, components?, includeOther?, kinds?, modelId?, level?, scope?, dryRun?}
+    body: {action, components?, includeOther?, kinds?, modelId?, level?, scope?, dryRun?, files?}
     scope: 与 search 一致的组件范围(空/缺省=全部，['__other__']=仅其它)。
-    clear 支持 dryRun=true 预览影响(需求池/任务)供前端确认。
+    clear 支持 dryRun=true 预览影响(需求池/任务)供前端确认；
+    files(文件清单)给出时 clear 按文件口径(锚点命中+逻辑 members 连带)。
+
     """
     body = await request.json()
     logger.info("[semantic] /kb/semantic/batch 请求: action=%s components=%d include_other=%s",
@@ -4425,7 +4461,8 @@ async def api_batch(request: Request):
                        model_id=body.get("modelId"),
                        level=body.get("level") or "",
                        scopes=body.get("scope"),
-                       dry_run=bool(body.get("dryRun")))
+                       dry_run=bool(body.get("dryRun")),
+                       files=body.get("files"))
     logger.info("[semantic] /kb/semantic/batch 响应: action=%s count=%s components=%s",
                 body.get("action"), res.get("count"), res.get("components"))
     return ok(res)
