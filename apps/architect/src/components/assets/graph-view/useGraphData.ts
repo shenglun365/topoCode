@@ -8,8 +8,6 @@ import { SemanticGraphResult, semanticAssetService } from '@/services/semantic-a
 
 export type DiffBucket = 'changed' | 'weak' | 'new' | 'removed'
 import type { WsDeps } from './graphTypes'
-import { assetsToGraphFrames } from './sceneAdapter'
-import type { ComponentLite } from './sceneAdapter'
 import { useI18n } from 'vue-i18n'
 
 
@@ -51,9 +49,6 @@ const kindFilter = ref<SemanticAssetKind | ''>('')
 const view = ref<SemanticGraphViewId | ''>('')
 const graph = ref<SemanticGraphResult | null>(null)
 
-/** 统一渲染内核模式(批4-2 双轨)：graph-scene/SceneCanvas 路径(默认开, D9 裁决整体迁入；
- *  旧 mermaid 渲染保留为回退开关)。 */
-const kernelMode = ref((localStorage.getItem('arch.graph.kernel') ?? '1') !== '0')
 /** 图谱视角(需求 6.3)：工作区默认；可切 head:<sha>（该视角未提取时后端底座∪视角语义=基线骨架）。
  *  baseline:<kbVersion> / 其他分支 head 锚定需先跑 extract_impl(rev=锚点) 产数据。 */
 const graphRev = ref('workspace')
@@ -61,31 +56,6 @@ function setGraphRev(r: string) {
   graphRev.value = r
   void load(true)
 }
-function setKernelMode(v: boolean) {
-  kernelMode.value = v
-  try { localStorage.setItem('arch.graph.kernel', v ? '1' : '0') } catch { /* ignore */ }
-}
-
-/** 组件轻量目录(容器命名；来自资产核心域缓存，图谱域不重复拉取)。 */
-const graphComponents = computed<ComponentLite[]>(() => {
-  const cat = D.core?.compCatalog?.value ?? []
-  return cat.map((c: { id: string; name?: string }) => ({ id: c.id, name: c.name || c.id }))
-})
-
-/** 资产图谱 → 统一图 JSON（SceneCanvas/TopoStory 数据源；节点变化重算）。 */
-const sceneGraph = computed(() => {
-  const g = graph.value
-  if (!g || !(g.nodes || []).length) return null
-  const changed = diffKindById.value.size
-    ? new Set([...diffKindById.value.keys()].filter((k) => diffKindById.value.get(k) !== 'removed'))
-    : undefined
-  return assetsToGraphFrames(g, {
-    rev: 'workspace',
-    changedIds: changed,
-    components: graphComponents.value,
-  })
-})
-
 /** 基线 diff：节点(任一锚点文件 ∈ diffFiles)集合 + 计数，供图例/详情徽标。 */
 const diffNodeIds = computed<Set<string>>(() => {
   const s = new Set<string>()
@@ -366,9 +336,6 @@ watch(() => props.compareData, () => {
     view,
     viewOptions,
     weakCount,
-    kernelMode,
-    setKernelMode,
-    sceneGraph,
     graphRev,
     setGraphRev,
   }

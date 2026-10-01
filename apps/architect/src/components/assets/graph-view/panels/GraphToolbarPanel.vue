@@ -39,8 +39,6 @@ const {
   graph,
   graphRev,
   setGraphRev,
-  kernelMode,
-  setKernelMode,
   hiddenViewHints,
   includeIndirect,
   indexOpen,
@@ -254,8 +252,8 @@ const emit = defineEmits<{ close: [id: string] }>()
         class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0"
         :title="t('assetMgmt.diff.hint')"
       >{{ diffNodeCount }} {{ t('assetMgmt.graph.nodes') }} · diff</span>
-      <!-- 统一内核(批4-2)：视角切换 + 内核回退开关 -->
-      <div v-if="kernelMode && graph" class="flex items-center gap-0.5 shrink-0">
+      <!-- 图谱视角(数据视角)：默认工作区，可切锚定 head -->
+      <div v-if="graph" class="flex items-center gap-0.5 shrink-0">
         <select
           class="px-1.5 py-0.5 rounded text-[11px] bg-ctp-surface0 text-ctp-subtext0 border border-ctp-surface1 cursor-pointer"
           title="图谱视角（需求 6.3：默认工作区，可切锚定 head）"
@@ -265,14 +263,6 @@ const emit = defineEmits<{ close: [id: string] }>()
           <option value="workspace">工作区</option>
           <option value="head:HEAD">HEAD</option>
         </select>
-        <button
-          class="px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer"
-          :class="kernelMode ? 'bg-ctp-mauve/15 text-ctp-mauve ring-1 ring-ctp-mauve/30' : 'text-ctp-subtext0 hover:bg-ctp-surface0'"
-          title="统一渲染内核(graph-scene/演化播放)；点击回退 mermaid 渲染"
-          @click="setKernelMode(!kernelMode)"
-        >
-          内核
-        </button>
       </div>
       <div
         v-if="graph"
