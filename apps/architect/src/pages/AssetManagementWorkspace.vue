@@ -514,6 +514,7 @@ onUnmounted(() => {
     :title="scopeModal.title"
     :files="scopeModal.files"
     :show-full="scopeModal.showFull"
+    :logic-available="frameworkInfo?.presets?.[frameworkInfo.config.activeTier]?.y?.includes('logic') !== false"
     @confirm="confirmScope"
     @close="cancelScope"
   />

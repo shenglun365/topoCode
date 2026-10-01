@@ -14,6 +14,8 @@ const props = defineProps<{
   busy?: boolean
   /** 显示「全量更新」选项(清除全库+全量重提，忽略文件选择)；仅对比闭环入口传入。 */
   showFull?: boolean
+  /** 逻辑层可选(分析框架档位 presets.y 含 logic；精简模式仅实现层)。缺省 true。 */
+  logicAvailable?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'confirm', files: string[], opts: { impl: boolean; logic: boolean; full: boolean }): void
@@ -51,10 +53,11 @@ const fullSel = ref(false)
 watch(logicSel, (v) => {
   if (v) implSel.value = true
 })
-const canConfirm = computed(() => (implSel.value || logicSel.value) && (fullSel.value || selected.value.size > 0))
+const logicOn = computed(() => props.logicAvailable !== false && logicSel.value)
+const canConfirm = computed(() => (implSel.value || logicOn.value) && (fullSel.value || selected.value.size > 0))
 
 function doConfirm() {
-  emit('confirm', [...selected.value], { impl: implSel.value, logic: logicSel.value, full: fullSel.value })
+  emit('confirm', [...selected.value], { impl: implSel.value, logic: logicOn.value, full: fullSel.value })
 }
 
 const selCount = computed(() => selected.value.size)
@@ -98,17 +101,20 @@ function fileBase(f: string): string {
         <p class="mt-1 text-[11px] leading-relaxed text-ctp-overlay1">
           {{ t('assetMgmt.scopeModal.hint', { n: files.length }) }}
         </p>
-        <!-- 提取粒度：逻辑层基于实现层归纳，勾逻辑时实现强制勾选 -->
+        <!-- 提取粒度(随分析框架档位)：精简仅实现层；标准+ 含逻辑层(基于实现层归纳，勾逻辑时实现锁定) -->
         <div class="mt-2 flex items-center gap-4 text-[11px]">
           <span class="text-ctp-overlay1">{{ t('assetMgmt.scopeModal.levels') }}</span>
           <label class="flex cursor-pointer items-center gap-1.5 text-ctp-subtext1">
-            <input v-model="implSel" type="checkbox" class="accent-ctp-blue" :disabled="logicSel">
+            <input v-model="implSel" type="checkbox" class="accent-ctp-blue" :disabled="logicOn">
             {{ t('assetMgmt.scopeModal.levelImpl') }}
           </label>
-          <label class="flex cursor-pointer items-center gap-1.5 text-ctp-subtext1" :title="t('assetMgmt.scopeModal.levelLogicTip')">
-            <input v-model="logicSel" type="checkbox" class="accent-ctp-blue">
-            {{ t('assetMgmt.scopeModal.levelLogic') }}
-          </label>
+          <template v-if="logicAvailable !== false">
+            <label class="flex cursor-pointer items-center gap-1.5 text-ctp-subtext1" :title="t('assetMgmt.scopeModal.levelLogicTip')">
+              <input v-model="logicSel" type="checkbox" class="accent-ctp-blue">
+              {{ t('assetMgmt.scopeModal.levelLogic') }}
+            </label>
+          </template>
+          <span v-else class="text-ctp-overlay0">{{ t('assetMgmt.scopeModal.lowTierHint') }}</span>
         </div>
         <!-- 清除重建警示(提取即替换语义，恒示) -->
         <div class="mt-2 rounded-md border border-ctp-peach/40 bg-ctp-peach/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-ctp-peach">

@@ -1668,6 +1668,7 @@ export default {
     levelImpl: '实现层',
     levelLogic: '逻辑层',
     levelLogicTip: '逻辑层基于实现层资产归纳——勾选逻辑层时实现层强制参与',
+    lowTierHint: '精简模式仅实现层',
     clearWarn: '确认后将先清除所选范围已有的实现/逻辑层资产，再按勾选粒度重新生成',
     fullUpdate: '全量更新',
     fullUpdateHint: '清除全库实现+逻辑层资产，按全部文件重新生成（无需选择文件）',
