@@ -1667,8 +1667,11 @@ export default {
       instructionPlaceholder: '自定义指令（回车提交）…',
     },
     proposed: {
-      title: '上一轮生成（未采纳）',
-      hint: '仅作参考，不进下轮 AI 上下文；可手动复制进编辑器',
+      title: 'AI 产物比对',
+      hint: '放弃=保留参考不覆盖；可改指令再处理（新产物覆盖）',
+      adopt: '采纳（覆盖正文）',
+      discard: '放弃',
+      dirtyNote: '正文有未保存修改——比对基准为已保存版本，采纳将覆盖未保存内容',
     },
   },
     title: '资产管理',

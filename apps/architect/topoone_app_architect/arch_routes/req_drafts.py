@@ -207,6 +207,26 @@ from ..sem import job_runner as _job_runner
 _job_runner.register("draft_ai", _job_draft_ai)
 
 
+@router.post("/req-drafts/{draft_id}/adopt")
+async def api_req_drafts_adopt(draft_id: str):
+    """采纳 AI 产物：contentMd ← lastProposedMd 并清空（批E diff 确认流）。
+
+    放弃=不调用本端点（lastProposedMd 保留作 UI 参考，被下一轮产物覆盖）。
+    """
+    from ..store import ReqDraftsStore
+    draft = ReqDraftsStore.get(draft_id)
+    if not draft:
+        return err(404, "草稿不存在")
+    if (draft.get("status") or "editing") == "archived":
+        return err(409, "草稿已归档（只读）")
+    proposed = (draft.get("lastProposedMd") or "").strip()
+    if not proposed:
+        return err(400, "无可采纳的 AI 产物")
+    updated = ReqDraftsStore.update(draft_id, {
+        "contentMd": proposed, "lastProposedMd": "", "lastProposedAt": 0})
+    return ok(updated)
+
+
 @router.post("/req-drafts/{draft_id}/ai")
 async def api_req_drafts_ai(draft_id: str, request: Request = None):
     """提交 AI 处理作业：{preset: generate|review|relate|custom, instruction?, root?, project?}。

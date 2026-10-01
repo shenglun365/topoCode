@@ -135,3 +135,22 @@ def test_draft_ai_job_and_endpoint(monkeypatch):
     ReqDraftsStore.update(d["id"], {"status": "archived"})
     out = _body(asyncio.run(api.api_req_drafts_ai(d["id"], _Req())))
     assert out.get("code") == 409
+
+
+def test_draft_adopt(monkeypatch):
+    """采纳：contentMd ← lastProposedMd 并清空；归档/空产物拒绝。"""
+    from topoone_app_architect.arch_routes import req_drafts as api
+    from topoone_app_architect.store import ReqDraftsStore
+
+    d = ReqDraftsStore.create(PID, "adopt", "# v1")
+    # 空产物拒绝
+    out = _body(asyncio.run(api.api_req_drafts_adopt(d["id"])))
+    assert out.get("code") == 400
+    ReqDraftsStore.update(d["id"], {"lastProposedMd": "# v2 AI", "lastProposedAt": 1})
+    out = _body(asyncio.run(api.api_req_drafts_adopt(d["id"])))
+    row = out["data"]
+    assert row["contentMd"] == "# v2 AI" and row["lastProposedMd"] == "" and row["lastProposedAt"] == 0
+    # 归档拒绝
+    ReqDraftsStore.update(d["id"], {"status": "archived", "lastProposedMd": "# v3"})
+    out = _body(asyncio.run(api.api_req_drafts_adopt(d["id"])))
+    assert out.get("code") == 409

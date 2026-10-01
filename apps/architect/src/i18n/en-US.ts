@@ -1626,8 +1626,11 @@ export default {
       instructionPlaceholder: 'Custom instruction (Enter to run)…',
     },
     proposed: {
-      title: 'Last proposal (not adopted)',
-      hint: 'Reference only; not sent into next AI context. Copy into editor manually if needed',
+      title: 'AI proposal diff',
+      hint: 'Discard = keep as reference, no overwrite; re-run with revised instruction to replace',
+      adopt: 'Adopt (overwrite)',
+      discard: 'Discard',
+      dirtyNote: 'Unsaved edits present — diff base is the saved version; adopting overwrites unsaved edits',
     },
   },
     title: 'Asset Management',

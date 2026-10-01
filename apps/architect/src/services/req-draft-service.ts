@@ -61,6 +61,11 @@ export const reqDraftService = {
     return apiPost<ReqDraft>(`/req-drafts/${encodeURIComponent(id)}/copy`, { root, project })
   },
 
+  /** 采纳 AI 产物：contentMd ← lastProposedMd 并清空。 */
+  async adopt(id: string): Promise<ReqDraft> {
+    return apiPost<ReqDraft>(`/req-drafts/${encodeURIComponent(id)}/adopt`, {})
+  },
+
   /** 提交 AI 处理作业（单轮对话+多轮工具；产物写 lastProposedMd，完成后拉取草稿比对）。 */
   async runAi(id: string, payload: { preset: 'generate' | 'review' | 'relate' | 'custom'; instruction?: string }): Promise<{ started: boolean; reason?: string; job?: { id: string; state: string } }> {
     const { root, project } = currentProjectParams()

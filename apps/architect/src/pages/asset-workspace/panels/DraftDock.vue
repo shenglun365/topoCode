@@ -9,7 +9,7 @@ import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon, PlusIcon, TrashIcon, ArrowPathIcon,
   PencilSquareIcon, EyeIcon, Squares2X2Icon, ArchiveBoxIcon,
-  SparklesIcon, ChevronRightIcon,
+  SparklesIcon, ChevronRightIcon, CheckIcon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
 import MarkdownView from '@/components/MarkdownView.vue'
@@ -18,6 +18,7 @@ import { parseMessageBlocks } from '@/services/parse-message-blocks'
 import { renderDiagram } from '@/services/topo-render'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import { reqDraftService, type ReqDraft } from '@/services/req-draft-service'
+import { diffLines, diffStat } from '@/utils/diff-lines'
 
 const { t } = useI18n()
 const dialog = useAppDialog()
@@ -143,6 +144,29 @@ async function runAi(preset: 'generate' | 'review' | 'relate' | 'custom') {
 }
 
 const proposedOpen = ref(false)
+const adopting = ref(false)
+/** diff 视图（当前已保存正文 vs AI 产物，git diff 模式行级比对）。 */
+const proposedDiff = computed(() =>
+  current.value?.lastProposedMd
+    ? diffLines(current.value.contentMd || '', current.value.lastProposedMd)
+    : [])
+const proposedStat = computed(() => diffStat(proposedDiff.value))
+
+/** 采纳：contentMd ← lastProposedMd（后端清空产物）；编辑缓冲同步。 */
+async function adoptProposal() {
+  if (!current.value || adopting.value) return
+  adopting.value = true
+  try {
+    current.value = await reqDraftService.adopt(current.value.id)
+    contentDraft.value = current.value.contentMd
+    titleDraft.value = current.value.title
+    dirty.value = false
+    const idx = drafts.value.findIndex((x) => x.id === current.value!.id)
+    if (idx >= 0) drafts.value[idx] = { ...drafts.value[idx], ...current.value }
+  } finally {
+    adopting.value = false
+  }
+}
 
 // ---- 编辑/预览 ----
 type ViewMode = 'edit' | 'split' | 'preview'
@@ -332,7 +356,7 @@ onMounted(() => { void loadList() })
       </div>
     </div>
 
-    <!-- 上一轮 AI 产物（未采纳参考：给人工修正文本/指令做参考；不进下轮上下文） -->
+    <!-- AI 产物比对（git diff 模式）：采纳覆盖 / 放弃保留参考（可改指令再处理，新产物覆盖） -->
     <div v-if="current?.lastProposedMd" class="shrink-0 border-t border-ctp-surface0">
       <button
         class="flex w-full items-center gap-1 px-2 py-1 text-[10px] text-ctp-overlay1 hover:text-ctp-text"
@@ -340,12 +364,36 @@ onMounted(() => { void loadList() })
       >
         <ChevronRightIcon class="h-3 w-3" :class="proposedOpen ? 'rotate-90' : ''" />
         {{ t('draft.proposed.title') }}
+        <span v-if="proposedStat.added || proposedStat.removed" class="font-mono">
+          <span class="text-ctp-green">+{{ proposedStat.added }}</span>
+          <span class="text-ctp-red">-{{ proposedStat.removed }}</span>
+        </span>
         <span class="text-ctp-overlay0">{{ fmtTime(current.lastProposedAt ?? 0) }}</span>
         <span class="flex-1" />
         <span class="text-ctp-overlay0">{{ t('draft.proposed.hint') }}</span>
       </button>
-      <div v-if="proposedOpen" class="max-h-56 overflow-y-auto border-t border-ctp-surface0 px-3 py-2">
-        <MarkdownView :content="current.lastProposedMd" />
+      <div v-if="proposedOpen" class="border-t border-ctp-surface0">
+        <div class="flex items-center gap-1.5 px-2 py-1">
+          <button class="btn btn-xs btn-blue" :disabled="adopting || archived" @click="adoptProposal">
+            <CheckIcon class="h-3 w-3" />{{ t('draft.proposed.adopt') }}
+          </button>
+          <button class="btn btn-xs btn-ghost" @click="proposedOpen = false">{{ t('draft.proposed.discard') }}</button>
+          <span class="flex-1" />
+          <span v-if="dirty" class="text-[9px] text-ctp-peach">{{ t('draft.proposed.dirtyNote') }}</span>
+        </div>
+        <div class="max-h-64 overflow-auto border-t border-ctp-surface0 bg-ctp-crust/60 font-mono text-[10px] leading-5">
+          <div
+            v-for="(l, i) in proposedDiff" :key="i"
+            class="flex gap-1 whitespace-pre px-1"
+            :class="l.type === 'add' ? 'bg-ctp-green/10 text-ctp-green'
+              : l.type === 'del' ? 'bg-ctp-red/10 text-ctp-red' : 'text-ctp-subtext0'"
+          >
+            <span class="w-8 shrink-0 select-none text-right text-ctp-overlay0">{{ l.oldNo ?? '' }}</span>
+            <span class="w-8 shrink-0 select-none text-right text-ctp-overlay0">{{ l.newNo ?? '' }}</span>
+            <span class="w-3 shrink-0 select-none">{{ l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' ' }}</span>
+            <span class="min-w-0 flex-1">{{ l.text }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
