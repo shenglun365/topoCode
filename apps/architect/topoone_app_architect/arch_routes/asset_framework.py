@@ -44,8 +44,9 @@ _TIER_X = {
 }
 _TIER_Y = {
     "low": ("implementation",),
-    "mid": tuple(LEVEL_LABELS),
-    "high": tuple(LEVEL_LABELS),
+    # 业务层已取消：标准/高级档粒度收敛为实现+逻辑两层(LEVEL_LABELS 仍含 business 供存量数据查询兼容)
+    "mid": ("implementation", "logic"),
+    "high": ("implementation", "logic"),
 }
 _TIER_Z = {
     "low": (),

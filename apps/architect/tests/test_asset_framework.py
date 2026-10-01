@@ -59,11 +59,12 @@ class TestPresets:
         assert tier["z"] == []
         assert tier["acceptanceDefault"]["mode"] == "auto"
 
-    def test_mid_full_six_kinds_three_levels(self, tmp_path, monkeypatch):
+    def test_mid_full_six_kinds_two_levels(self, tmp_path, monkeypatch):
+        """标准档：6 类本体；粒度两层(业务层已取消——实现+逻辑)；治理轴全量。"""
         cfg = F.build_preset("mid")
         tier = cfg["tiers"]["mid"]
         assert set(tier["x"]) == set(F.KIND_LABELS)
-        assert set(tier["y"]) == set(F.LEVEL_LABELS)
+        assert set(tier["y"]) == {"implementation", "logic"}
         assert set(tier["z"]) == set(F.Z_LABELS)
         assert tier["acceptanceDefault"]["l3"] == "human-on-demand"
 
