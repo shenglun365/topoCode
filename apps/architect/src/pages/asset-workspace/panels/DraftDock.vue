@@ -301,19 +301,30 @@ function persistToolbar(): void {
   } catch { /* 忽略 */ }
 }
 
+/** 主区容器（拖动边界 clamp）。 */
+const editorHost = ref<HTMLElement | null>(null)
 let dragStart: { px: number; py: number; x: number; y: number } | null = null
+/** 折叠态：icon 兼把手——移动超阈值视为拖动，抑制随后的 click（避免拖完误切折叠）。 */
+let collapsedDragging = false
+
 function onToolbarDown(e: PointerEvent): void {
   const target = e.target as HTMLElement
-  if (target.closest('button')) return   // 按钮不触发拖动
+  const fromHandle = !!target.closest('.tb-handle')
+  const fromCollapsed = tbCollapsed.value && !!target.closest('button')
+  if (!fromHandle && !fromCollapsed) return
   dragStart = { px: e.clientX, py: e.clientY, x: tbPos.value.x, y: tbPos.value.y }
+  collapsedDragging = false
   const move = (ev: PointerEvent): void => {
     if (!dragStart) return
-    const host = (e.currentTarget as HTMLElement).parentElement
+    const dx = ev.clientX - dragStart.px
+    const dy = ev.clientY - dragStart.py
+    if (fromCollapsed && Math.hypot(dx, dy) > 4) collapsedDragging = true
+    const host = editorHost.value
     const maxX = (host?.clientWidth ?? 800) - 60
     const maxY = (host?.clientHeight ?? 400) - 30
     tbPos.value = {
-      x: Math.max(4, Math.min(maxX, dragStart.x + ev.clientX - dragStart.px)),
-      y: Math.max(4, Math.min(maxY, dragStart.y + ev.clientY - dragStart.py)),
+      x: Math.max(4, Math.min(maxX, dragStart.x + dx)),
+      y: Math.max(4, Math.min(maxY, dragStart.y + dy)),
     }
   }
   const up = (): void => {
@@ -324,6 +335,15 @@ function onToolbarDown(e: PointerEvent): void {
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)
+}
+
+function onCollapsedClick(): void {
+  if (collapsedDragging) {   // 拖动结束的这次 click 不切换折叠
+    collapsedDragging = false
+    return
+  }
+  tbCollapsed.value = !tbCollapsed.value
+  persistToolbar()
 }
 
 // ══════════ AI 处理（指令=正文 topo-cmd 块；无专用输入框） ══════════
@@ -602,7 +622,7 @@ onBeforeUnmount(() => {
 
     <div class="flex min-h-0 flex-1">
       <!-- 左：主区（编辑/预览 + 悬浮工具栏） -->
-      <div class="relative flex min-h-0 min-w-0 flex-1">
+      <div ref="editorHost" class="relative flex min-h-0 min-w-0 flex-1">
         <!-- 悬浮工具栏（拖动/折叠）：AI + 预览 + 发布 -->
         <div
           v-if="tabs.length && !archived"
@@ -611,6 +631,11 @@ onBeforeUnmount(() => {
           @pointerdown="onToolbarDown"
         >
           <template v-if="!tbCollapsed">
+            <span
+              class="tb-handle mr-0.5 cursor-grab self-stretch flex items-center text-ctp-overlay0 hover:text-ctp-text active:cursor-grabbing"
+              :title="t('draft.toolbar.drag')"
+              @pointerdown.stop="onToolbarDown"
+            ><Bars3Icon class="h-3.5 w-3.5" /></span>
             <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.generate')" @click="runAi('generate')"><SparklesIcon class="h-3.5 w-3.5" /></button>
             <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.review')" @click="runAi('review')"><CheckBadgeIcon class="h-3.5 w-3.5" /></button>
             <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.relate')" @click="runAi('relate')"><LinkIcon class="h-3.5 w-3.5" /></button>
@@ -620,7 +645,7 @@ onBeforeUnmount(() => {
             <span class="mx-0.5 h-4 w-px bg-ctp-surface1" />
             <button class="tb-btn" :disabled="!(contentDraft || '').trim()" :title="t('draft.publish.hint')" @click="openPublish"><PaperAirplaneIcon class="h-3.5 w-3.5" /></button>
           </template>
-          <button class="tb-btn" :title="tbCollapsed ? t('draft.toolbar.expand') : t('draft.toolbar.collapse')" @click="tbCollapsed = !tbCollapsed; persistToolbar()">
+          <button class="tb-btn cursor-grab active:cursor-grabbing" :title="tbCollapsed ? t('draft.toolbar.expand') : t('draft.toolbar.collapse')" @click="onCollapsedClick">
             <WrenchScrewdriverIcon v-if="tbCollapsed" class="h-3.5 w-3.5 text-ctp-mauve" />
             <ChevronRightIcon v-else class="h-3.5 w-3.5 rotate-180" />
           </button>
@@ -848,4 +873,5 @@ onBeforeUnmount(() => {
 }
 .tb-btn:hover:not(:disabled) { background: rgb(var(--ctp-surface0)); color: rgb(var(--ctp-text)); }
 .tb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.tb-handle { touch-action: none; }
 </style>
