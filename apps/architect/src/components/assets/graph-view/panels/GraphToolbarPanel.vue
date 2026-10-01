@@ -17,6 +17,7 @@ const {
   diagramLangs,
   diffBucketCounts,
   diffKindById,
+  diffSignalsById,
   diffNodeCount,
   diffOnly,
   edgeLegendOpen,
@@ -122,6 +123,9 @@ onBeforeUnmount(() => document.removeEventListener('click', onMenuDocClick, true
 
 const MENU_ITEM = 'w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-ctp-surface0 text-left'
 const diffTotal = computed(() => diffBucketCounts.value.changed + diffBucketCounts.value.new + diffBucketCounts.value.removed + weakCount.value)
+const diffChangedLike = computed(() => diffBucketCounts.value.changed + diffBucketCounts.value.new + diffBucketCounts.value.removed)
+const sigAddedCount = computed(() => [...diffSignalsById.value.values()].filter((x) => x.hasAdded).length)
+const sigDeletedCount = computed(() => [...diffSignalsById.value.values()].filter((x) => x.hasDeleted).length)
 
 /** 图谱导出(R1)：DSL 源码文本下载(渲染图导出走画布内 SVG/PNG)。 */
 function exportGraph(): void {
@@ -313,22 +317,22 @@ function exportGraph(): void {
             <div class="flex items-center gap-1.5 text-[11px]">
               <span class="w-2.5 h-2.5 rounded-sm bg-ctp-yellow/50" />
               <span>{{ t('assetMgmt.graph.legendChanged') }}</span>
-              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.changed }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffChangedLike }}</span>
             </div>
             <div class="flex items-center gap-1.5 text-[11px]">
-              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-green/50" />
-              <span>{{ t('assetMgmt.graph.legendNew') }}</span>
-              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.new }}</span>
-            </div>
-            <div class="flex items-center gap-1.5 text-[11px]">
-              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-red/50" />
-              <span>{{ t('assetMgmt.graph.legendRemoved') }}</span>
-              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.removed }}</span>
-            </div>
-            <div class="flex items-center gap-1.5 text-[11px]">
-              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-surface1" />
+              <span class="w-2.5 h-2.5 rounded-sm bg-ctp-yellow/25" />
               <span>{{ t('assetMgmt.graph.legendWeak') }}</span>
-              <span class="ml-auto text-ctp-overlay0 font-mono">{{ weakCount }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.weak }}</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <span class="w-2 h-2 rounded-full bg-ctp-green ring-1 ring-ctp-crust" />
+              <span>{{ t('assetMgmt.graph.legendAddedSig') }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ sigAddedCount }}</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <span class="w-2 h-2 rounded-full bg-ctp-red ring-1 ring-ctp-crust" />
+              <span>{{ t('assetMgmt.graph.legendDeletedSig') }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ sigDeletedCount }}</span>
             </div>
           </div>
         </Teleport>

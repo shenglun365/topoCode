@@ -346,8 +346,17 @@ def compare_changes(root: Optional[str], project: Optional[str],
                 return "base"
             return "stale" if in_delta else ""
 
-        def _strong(hits: set, side: str) -> bool:
-            """符号级：锚点符号代码段(行区间)在其归属侧坐标系中与变更 hunk 相交。"""
+        def _signals(hits: set, side: str) -> tuple:
+            """符号级变化信号：锚点符号代码段(行区间)与两侧变更 hunk 求交。
+
+            返回 (strong, hasAdded, hasDeleted)：
+            - strong 口径不变(side 坐标系：base 侧比 base hunk / target 侧比
+              tgt hunk / stale 任一侧命中即强)；
+            - hasAdded=锚点段 ∩ tgt hunk(段内含新增行，坐标近似——提示性信号)；
+            - hasDeleted=锚点段 ∩ base hunk(段内含删除行)；
+            - 未跟踪新文件：整文件皆新增 → strong+hasAdded。
+            """
+            strong = has_added = has_deleted = False
             for r in (a.get("astRefs") or []):
                 f = _norm_path(r.get("file") or "")
                 if f not in hits:
@@ -359,18 +368,25 @@ def compare_changes(root: Optional[str], project: Optional[str],
                 h = hunks.get(f)
                 if not h:
                     if f in added:
-                        return True   # 未跟踪新文件：整文件皆新增
+                        strong = True   # 未跟踪新文件：整文件皆新增
+                        has_added = True
                     continue
+                tgt_hit = _span_hits(s_, e_, h.get("tgt") or [])
+                base_hit = _span_hits(s_, e_, h.get("base") or [])
+                if tgt_hit:
+                    has_added = True
+                if base_hit:
+                    has_deleted = True
                 if side == "base":
-                    if _span_hits(s_, e_, h.get("base") or []):
-                        return True
+                    if base_hit:
+                        strong = True
                 elif side == "target":
-                    if _span_hits(s_, e_, h.get("tgt") or []):
-                        return True
+                    if tgt_hit:
+                        strong = True
                 else:                 # stale/未知侧：保守策略，任一侧命中即强
-                    if _span_hits(s_, e_, h.get("tgt") or []) or _span_hits(s_, e_, h.get("base") or []):
-                        return True
-            return False
+                    if tgt_hit or base_hit:
+                        strong = True
+            return strong, has_added, has_deleted
 
         if hit_del:
             removed_total += 1
@@ -388,14 +404,15 @@ def compare_changes(root: Optional[str], project: Optional[str],
         if hit_mod:
             changed_total += 1
             side = _side(hit_mod)
-            strong = _strong(hit_mod, side)
+            strong, has_added, has_deleted = _signals(hit_mod, side)
             if strong:
                 changed_strong += 1
             else:
                 changed_weak += 1
             if len(changed) < _CAP_ASSETS:
                 changed.append({**_asset_brief(a, sorted(hit_mod), comp), "side": side,
-                                "strong": strong})
+                                "strong": strong,
+                                "hasAdded": has_added, "hasDeleted": has_deleted})
             continue
         stable_n += 1
 

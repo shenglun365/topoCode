@@ -444,49 +444,82 @@ function applySelectedNodeStyle() {
   selectedNodeEl?.classList.add('td-node-selected')
 }
 
-/** 对比变化节点着色：桶类 td-node-diff-{changed|weak|new|removed} + 形状内联样式兜底
- *  (setProperty important，免疫 mermaid 主题样式优先级)。
+/** 对比变化节点视觉(统一浅橘黄底+右上信号点)：
+ *  变更/新增/移除统一「需更新」浅橘黄；弱关联(符号段未变)更浅一档；
+ *  信号点=节点包含的具体代码变化——绿点(含新增行)/红点(含删除行)/双点(有增有删)。
+ *  形状内联样式兜底(setProperty important，免疫 mermaid 主题样式优先级)。
  *  寻址与选中态/tooltip 同款：mermaid id 主口径 + plantuml 文本兜底(标签→<text>→爬升到含形状组)。 */
 const DIFF_FILL: Record<DiffBucket, string> = {
-  changed: 'rgba(249, 226, 175, 0.30)',   // 黄：强关联(符号段变更)
-  weak: 'rgba(136, 137, 163, 0.16)',      // 灰：弱关联(同文件变更,段未变)
-  new: 'rgba(166, 227, 161, 0.26)',       // 绿：目标侧新增
-  removed: 'rgba(243, 139, 168, 0.26)',   // 红：目标侧移除
+  changed: 'rgba(249, 226, 175, 0.30)',   // 浅橘黄：变更(符号段有变化)
+  weak: 'rgba(249, 226, 175, 0.14)',      // 更浅一档：弱关联(段未变,可能受影响)
+  new: 'rgba(249, 226, 175, 0.30)',       // 统一浅橘黄：新增信号由绿点表达
+  removed: 'rgba(249, 226, 175, 0.30)',   // 统一浅橘黄：移除信号由红点表达
 }
 const DIFF_STROKE: Record<DiffBucket, string> = {
   changed: 'rgba(249, 226, 175, 0.8)',
-  weak: 'rgba(136, 137, 163, 0.5)',
-  new: 'rgba(166, 227, 161, 0.8)',
-  removed: 'rgba(243, 139, 168, 0.8)',
+  weak: 'rgba(249, 226, 175, 0.4)',
+  new: 'rgba(249, 226, 175, 0.8)',
+  removed: 'rgba(249, 226, 175, 0.8)',
 }
+const SIGNAL_GREEN = '#a6e3a1'
+const SIGNAL_RED = '#f38ba8'
 function applyDiffNodeStyles() {
   const host: HTMLElement | null = diagRef.value?.containerRef ?? null
   const svg = host?.querySelector('svg')
   if (!svg) return
   svg.querySelectorAll('[class*="td-node-diff"]').forEach((el) =>
     el.classList.remove('td-node-diff-changed', 'td-node-diff-weak', 'td-node-diff-new', 'td-node-diff-removed'))
+  svg.querySelectorAll('.td-node-signal').forEach((el) => el.remove())
   if (!D.data.diffKindById.value.size) return
   const rootPrefix = svg.id ? `${svg.id}-` : ''
-  // 桶样式落组：桶类 + 形状内联兜底(组内全部形状)。
-  const applyBucket = (el: Element, bucket: DiffBucket): void => {
+  // 桶样式+信号点落组：统一浅橘黄底(weak 更浅) + 右上信号点(绿=含新增/红=含删除)。
+  const applyNodeSignal = (el: Element, bucket: DiffBucket,
+                           sig?: { hasAdded: boolean; hasDeleted: boolean }): void => {
     el.classList.add(`td-node-diff-${bucket}`)
     // 内联样式兜底：mermaid 主题样式(SVG 内 <style> 带 id 选择器)特异性高于类规则，
     // 类规则虽有 !important 但部分引擎渲染路径会被内联呈现覆盖——双保险。
     for (const shape of el.querySelectorAll<SVGElement>('rect, polygon, ellipse, circle')) {
       shape.style.setProperty('fill', DIFF_FILL[bucket], 'important')
       shape.style.setProperty('stroke', DIFF_STROKE[bucket], 'important')
-      if (bucket === 'removed') shape.style.setProperty('stroke-dasharray', '6 3', 'important')
-      else shape.style.removeProperty('stroke-dasharray')
+      shape.style.removeProperty('stroke-dasharray')
     }
+    if (!sig || (!sig.hasAdded && !sig.hasDeleted)) return
+    // 右上信号点：组 bbox 右上角注入(双信号绿左红右横排；mantle 描边保证任意底色可读)
+    try {
+      const bb = (el as SVGGElement).getBBox()
+      const NS = 'http://www.w3.org/2000/svg'
+      const mkDot = (cx: number, cy: number, fill: string): SVGCircleElement => {
+        const c = document.createElementNS(NS, 'circle')
+        c.setAttribute('cx', String(cx))
+        c.setAttribute('cy', String(cy))
+        c.setAttribute('r', '4')
+        c.setAttribute('fill', fill)
+        c.setAttribute('stroke', '#1e1e2e')
+        c.setAttribute('stroke-width', '1')
+        c.setAttribute('class', 'td-node-signal')
+        c.setAttribute('pointer-events', 'none')
+        return c
+      }
+      const y = bb.y + 5
+      if (sig.hasAdded && sig.hasDeleted) {
+        el.appendChild(mkDot(bb.x + bb.width - 11, y, SIGNAL_GREEN))
+        el.appendChild(mkDot(bb.x + bb.width - 3, y, SIGNAL_RED))
+      } else if (sig.hasAdded) {
+        el.appendChild(mkDot(bb.x + bb.width - 3, y, SIGNAL_GREEN))
+      } else {
+        el.appendChild(mkDot(bb.x + bb.width - 3, y, SIGNAL_RED))
+      }
+    } catch { /* bbox 不可得时静默跳过信号点 */ }
   }
   // ① mermaid id 主口径(plantuml SVG 无此类 id，恒不命中)
   const styled = new Set<string>()
+  const signalOf = (aid: string) => D.data.diffSignalsById?.value?.get(aid)
   for (const [nid, aid] of clickIds.value) {
     const bucket = D.data.diffKindById.value.get(aid)
     if (!bucket) continue
     for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
       if (resolveNodeIdFromEl(el, rootPrefix) !== nid) continue
-      applyBucket(el, bucket)
+      applyNodeSignal(el, bucket, signalOf(aid))
       styled.add(aid)
       break
     }
@@ -499,29 +532,30 @@ function applyDiffNodeStyles() {
     if (bucket) pending.set(aid, bucket)
   }
   if (!pending.size) return
-  const labelBucket = new Map<string, DiffBucket>()
+  const labelBucket = new Map<string, { bucket: DiffBucket; aid: string }>()
   for (const [label, aid] of clickIds.value) {
     const bucket = pending.get(aid)
     if (!label || !bucket || labelBucket.has(label)) continue
-    labelBucket.set(label, bucket)
+    labelBucket.set(label, { bucket, aid })
   }
   for (const n of D.data.scopedNodes.value) {   // 名称截断口径(与 tooltip ② 同款)
     const bucket = pending.get(n.id)
     if (!bucket) continue
     for (const v of [n.name, ...[18, 26, 30, 40].map((m) => semanticNodeLabelText(n.name, m))]) {
-      if (!labelBucket.has(v)) labelBucket.set(v, bucket)
+      if (!labelBucket.has(v)) labelBucket.set(v, { bucket, aid: n.id })
     }
   }
   const seenGroups = new Set<Element>()
   for (const t of svg.querySelectorAll('text')) {
     const txt = (t.textContent || '').trim()
     if (!txt) continue
-    let bucket = labelBucket.get(txt)
-    if (!bucket) {   // plantuml flow 标签内嵌「· 资产ID」
+    let hit = labelBucket.get(txt)
+    if (!hit) {   // plantuml flow 标签内嵌「· 资产ID」
       for (const [aid, b] of pending) {
-        if (txt.includes(aid)) { bucket = b; break }
+        if (txt.includes(aid)) { hit = { bucket: b, aid }; break }
       }
     }
+    const bucket = hit?.bucket
     if (!bucket) continue
     // 爬升到含形状的最近组(plantuml 文本与形状可能不同层)，样式落在节点整体上
     let el: Element | null = t
@@ -532,7 +566,7 @@ function applyDiffNodeStyles() {
     const group = (el && el !== svg ? el : (t.closest('g') ?? t.parentElement)) as Element | null
     if (group && !seenGroups.has(group)) {
       seenGroups.add(group)
-      applyBucket(group, bucket)
+      applyNodeSignal(group, bucket, hit ? signalOf(hit.aid) : undefined)
     }
   }
 }

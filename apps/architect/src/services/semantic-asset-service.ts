@@ -334,6 +334,9 @@ export interface AssetCompareAsset {
   side?: 'base' | 'target' | 'stale'
   /** 符号级判定：true=锚点符号代码段有变更(强) / false=仅同文件其他位置变更(弱，可能受影响) */
   strong?: boolean
+  /** 信号点(段内行级，近似口径)：true=锚点段含新增行(绿点) / 删除行(红点) */
+  hasAdded?: boolean
+  hasDeleted?: boolean
 }
 
 export interface AssetCompareCrossLink {

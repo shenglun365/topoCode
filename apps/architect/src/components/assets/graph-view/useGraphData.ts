@@ -102,6 +102,19 @@ const diffKindById = computed<Map<string, DiffBucket>>(() => {
   for (const a of c.assets.removed) m.set(a.id, 'removed')
   return m
 })
+/** 节点信号(按节点包含的具体代码变化)：绿点=含新增/红点=含删除；
+ *  new/removed 整节点增删直接推导；changed 用 BE 行级信号；weak 无信号(仅更浅底色)。 */
+const diffSignalsById = computed<Map<string, { hasAdded: boolean; hasDeleted: boolean }>>(() => {
+  const m = new Map<string, { hasAdded: boolean; hasDeleted: boolean }>()
+  const c = props.compareData
+  if (!c) return m
+  for (const a of c.assets.changed) {
+    m.set(a.id, { hasAdded: !!a.hasAdded, hasDeleted: !!a.hasDeleted })
+  }
+  for (const a of c.assets.new) m.set(a.id, { hasAdded: true, hasDeleted: false })
+  for (const a of c.assets.removed) m.set(a.id, { hasAdded: false, hasDeleted: true })
+  return m
+})
 const diffBucketCounts = computed(() => {
   const counts: Record<DiffBucket, number> = { changed: 0, weak: 0, new: 0, removed: 0 }
   for (const k of diffKindById.value.values()) counts[k] += 1
@@ -324,6 +337,7 @@ watch(() => props.compareData, () => {
     availableLevels,
     diffBucketCounts,
     diffKindById,
+    diffSignalsById,
     diffNodeCount,
     diffNodeIds,
     diffOnly,
