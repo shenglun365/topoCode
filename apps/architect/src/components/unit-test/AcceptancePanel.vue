@@ -307,7 +307,7 @@ onMounted(async () => {
           :key="p.id"
           :value="p.id"
         >
-          {{ p.id }} · {{ p.itemIds.length }} {{ t('localAcceptance.items') }} · {{ t(`acceptance.pkgStatus.${p.status}`) }}
+          {{ p.id }} · {{ p.itemIds.length }} {{ t('localAcceptance.items') }} · {{ t(`localAcceptance.pkgStatus.${p.status}`) }}
         </option>
       </select>
       <button
@@ -493,7 +493,7 @@ onMounted(async () => {
                 @click="openAuth(itemsById[itemId])"
               >
                 <ClipboardDocumentListIcon class="w-3.5 h-3.5" />
-                {{ t('localAcceptance.authorization') }}
+                {{ t('common.authorization') }}
               </button>
             </div>
             <!-- L3 参考意见（人工主判；按需激活模型辅助） -->
@@ -652,9 +652,9 @@ onMounted(async () => {
       <div class="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-lg border border-ctp-surface1 bg-ctp-mantle overflow-hidden shadow-2xl">
         <div class="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-ctp-surface1">
           <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-sapphire" />
-          <span class="text-sm font-medium text-ctp-text1">{{ t('localAcceptance.authorizationTitle') }}</span>
+          <span class="text-sm font-medium text-ctp-text1">{{ t('common.authorizationTitle') }}</span>
           <span v-if="auth" class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext1">
-            {{ t('localAcceptance.authMode') }}: {{ auth.mode }}
+            {{ t('common.authMode') }}: {{ auth.mode }}
           </span>
           <button class="ml-auto text-ctp-overlay1 hover:text-ctp-text1" @click="closeAuth">
             <XMarkIcon class="w-4 h-4" />
@@ -669,8 +669,8 @@ onMounted(async () => {
               :class="auth.autoPassable ? 'border-ctp-teal/30 bg-ctp-teal/5 text-ctp-teal' : 'border-ctp-yellow/30 bg-ctp-yellow/5 text-ctp-yellow'"
             >
               {{ auth.autoPassable
-                ? t('localAcceptance.authAutoPassable')
-                : t('localAcceptance.authNotAutoPassable') }}
+                ? t('common.authAutoPassable')
+                : t('common.authNotAutoPassable') }}
             </div>
             <ul class="space-y-1.5">
               <li
@@ -691,7 +691,7 @@ onMounted(async () => {
                       ? 'bg-ctp-teal/10 text-ctp-teal'
                       : 'bg-ctp-yellow/10 text-ctp-yellow'"
                   >
-                    {{ c.authorizable ? t('localAcceptance.authAuto') : t('localAcceptance.authHuman') }}
+                    {{ c.authorizable ? t('common.authAuto') : t('common.authHuman') }}
                   </span>
                 </div>
                 <p v-if="c.note" class="mt-1 text-[10px] text-ctp-subtext0 pl-3.5">{{ c.note }}</p>
