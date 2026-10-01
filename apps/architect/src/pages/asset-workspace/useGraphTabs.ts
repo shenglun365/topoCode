@@ -17,13 +17,14 @@ export function useGraphTabs(D: WsDeps) {
   const activeGraphTab = ref('')
 
   /** 打开(或激活已存在的同名资源)图谱 tab；kind 相同时复用，避免重复。 */
-  function openGraphTab(kind: GraphTabDef['kind'], id: string, title: string) {
+  function openGraphTab(kind: GraphTabDef['kind'], id: string, title: string, members?: string[]) {
     const key = `${kind}:${id}`
     const existing = graphTabs.value.find((x) => x.id === key)
     if (existing) {
+      if (kind === 'logic' && members) existing.members = members   // 重新分析后刷新成员快照
       activeGraphTab.value = existing.id
     } else {
-      const def: GraphTabDef = { id: key, kind, title, compId: kind === 'comp' ? id : undefined, assetId: kind === 'asset' ? id : undefined, fileId: kind === 'file' ? id : undefined }
+      const def: GraphTabDef = { id: key, kind, title, compId: kind === 'comp' ? id : undefined, assetId: kind === 'asset' ? id : undefined, fileId: kind === 'file' ? id : undefined, viewId: kind === 'logic' ? id : undefined, members }
       graphTabs.value.push(def)
       activeGraphTab.value = def.id
     }

@@ -257,6 +257,9 @@ async function load(reset = false) {
     const file = props.tab.kind === 'file' ? props.tab.fileId : undefined
     // 多文件范围：超限 tab 经文件索引圈定后的选取
     const files = overLimit.value && fileScopeSel.value.length ? fileScopeSel.value : undefined
+    // 逻辑视图：节点=成员实现资产集合(边=其间 relations+派生调用/依赖)
+    const assets = props.tab.kind === 'logic' && props.tab.members?.length
+      ? props.tab.members.join(',') : undefined
     // 邻域聚焦：聚焦模式开启且有选中 → 以选中资产为中心 D.detail.focusHops 跳子图；
     // 范围锁定时以锁定锚点为中心(切换选中不跟随)；否则单资产 tab 聚焦该资产(1 跳)、组件 tab 全量。
     let focus: string | undefined
@@ -271,7 +274,7 @@ async function load(reset = false) {
     } else if (props.tab.kind === 'asset') {
       focus = props.tab.assetId
     }
-    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value, file, files, rev: graphRev.value })
+    graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value, file, files, assets, rev: graphRev.value })
     if (reset) {
       // 打开/切换 tab：类型重置为全部；粒度默认=组件级取该组件最高可用层级，其余取全部。
       kindFilter.value = ''

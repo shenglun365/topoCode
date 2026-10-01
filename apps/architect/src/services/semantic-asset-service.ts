@@ -1,5 +1,5 @@
 import type { AssetDiagramResult, SemanticAsset, SemanticAssetDetail, SemanticAssetKind, SemanticAssetLevel } from '@/types'
-import { apiGet, apiPost, apiPut } from './api-client'
+import { apiDelete, apiGet, apiPost, apiPut } from './api-client'
 import { currentProjectParams } from './project-service'
 
 /**
@@ -719,7 +719,35 @@ export const semanticAssetService = {
     })
   },
 
-  /** 逻辑级提取作业提交(LLM 链条归纳，基于实现级资产)：BE 级联——范围内实现骨架缺失自动先跑结构化提取。 */
+  /** 逻辑视图列表(逻辑分析分组数据源)。 */
+  async listLogicViews(): Promise<LogicView[]> {
+    const q = qsWith('')
+    const r = await apiGet<{ views: LogicView[] }>(`/kb/semantic/logic-views${q ? `?${q}` : ''}`)
+    return r?.views ?? []
+  },
+
+  /** 新建逻辑视图(手动)：核心实现资产为种子，分析后拓展为成员全集。 */
+  async createLogicView(payload: { name: string; coreIds: string[] }): Promise<LogicView | undefined> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/kb/semantic/logic-views', { root, project, ...payload })
+  },
+
+  /** 逻辑视图改名/成员编辑。 */
+  async updateLogicView(id: string, payload: { name?: string; coreIds?: string[]; memberIds?: string[] }): Promise<LogicView | undefined> {
+    return apiPut(`/kb/semantic/logic-views/${encodeURIComponent(id)}`, payload)
+  },
+
+  async deleteLogicView(id: string): Promise<void> {
+    await apiDelete(`/kb/semantic/logic-views/${encodeURIComponent(id)}`)
+  },
+
+  /** 分析作业：核心沿调用依赖拓展(expand=core/1/2/all) → 成员更新 → LLM 概括。 */
+  async analyzeLogicView(id: string, expand: 'core' | '1' | '2' | 'all' = 'all'): Promise<{ started: boolean; reason?: string; job?: { id: string } }> {
+    const { root, project } = currentProjectParams()
+    return apiPost(`/kb/semantic/logic-views/${encodeURIComponent(id)}/analyze`, { root, project, expand })
+  },
+
+  /** 逻辑级提取作业提交(LLM 链条归纳，基于实现级资产→落库为逻辑视图)：BE 级联——范围内实现骨架缺失自动先跑结构化提取。 */
   async startExtractLogic(payload: { rev?: string; files?: string[]; scopeKey?: string; modelId?: string } = {}): Promise<{ started: boolean; reason?: string; job?: { id: string } }> {
     const { root, project } = currentProjectParams()
     return apiPost('/kb/semantic/extract-logic', { root, project, ...payload })
@@ -852,7 +880,7 @@ export const semanticAssetService = {
   },
 
   /** 语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。 */
-  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number; includeIndirect?: boolean; file?: string; files?: string[]; rev?: string }): Promise<SemanticGraphResult> {
+  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number; includeIndirect?: boolean; file?: string; files?: string[]; assets?: string; rev?: string }): Promise<SemanticGraphResult> {
     const parts: string[] = []
     if (kind) parts.push(`kind=${encodeURIComponent(kind)}`)
     if (level) parts.push(`level=${encodeURIComponent(level)}`)
@@ -863,6 +891,7 @@ export const semanticAssetService = {
     if (opts?.file) parts.push(`file=${encodeURIComponent(opts.file)}`)
     if (opts?.files?.length) parts.push(`files=${encodeURIComponent(opts.files.join(','))}`)
     if (opts?.rev && opts.rev !== 'workspace') parts.push(`rev=${encodeURIComponent(opts.rev)}`)
+    if (opts?.assets) parts.push(`assets=${encodeURIComponent(opts.assets)}`)
     // limit 10000：2000 上限在大项目(3.7k+ 资产)会把较早的活跃资产截掉——
     // 文件级/聚焦图谱查不到明明存在的资产(实测回归)。
     parts.push('limit=10000')
@@ -947,6 +976,19 @@ export interface FrameworkView {
   z: string[]
   acceptanceDefault?: FrameworkTierDef['acceptanceDefault']
   directivesDepth?: string
+}
+
+/** 逻辑视图：跨组件业务逻辑链条(核心种子+拓展成员+LLM 概括)。 */
+export interface LogicView {
+  id: string
+  name: string
+  coreIds: string
+  memberIds: string
+  summary: string
+  source: 'extract' | 'manual'
+  fingerprint?: string
+  createdAt?: number
+  updatedAt?: number
 }
 
 export interface FrameworkResult { config: FrameworkConfig; view: FrameworkView; presets: Record<string, FrameworkTierDef> }

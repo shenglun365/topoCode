@@ -252,29 +252,12 @@ async function copySegLoc(seg: CodeSegment, si: number) {
 }
 
 // ---- C1 按类别结构化 detail(有数据时)：entity/contract→字段 · process/decision→步骤 · state→状态
-//      · 逻辑链→IO 端点+实现成员(extract_logic 落库 detail.iospec/members) ----
+//      (逻辑层已转为逻辑视图——视图呈现在语义树「逻辑分析」分组，非资产行 detail) ----
 const detailBlock = computed<{ title: string; rows: { text: string; title: string; assetId?: string }[] } | null>(() => {
   const d = D.detail.selDetail.value?.detail
   if (!d) return null
   const kind = D.detail.sel.value?.kind
-  if (d.iospec || d.members?.length) {
-    const rows: { text: string; title: string; assetId?: string }[] = []
-    const epRows = (list: { name?: string; note?: string; code?: { file?: string; lines?: number[] }[] }[] | undefined, mark: string) => {
-      for (const e of list ?? []) {
-        const a = e.code?.[0]
-        const loc = a?.file ? ` (${shortPath(a.file)}:L${a.lines?.[0] ?? '?'})` : ''
-        const text = `${mark} ${e.name ?? ''}${loc}`
-        rows.push({ text, title: e.note ? `${text} — ${e.note}` : text })
-      }
-    }
-    epRows(d.iospec?.inputs, '→')
-    epRows(d.iospec?.outputs, '←')
-    for (const mid of d.members ?? []) {
-      const n = D.data.graph.value?.nodes?.find((x) => x.id === mid)
-      rows.push({ text: `◇ ${n?.name ?? mid.slice(0, 8)}`, title: n?.name ?? mid, assetId: mid })
-    }
-    if (rows.length) return { title: t('assetMgmt.graph.logicChain'), rows }
-  }
+
   if ((kind === 'entity' || kind === 'contract') && d.fields?.length) {
     return {
       title: t('assetMgmt.graph.fields'),

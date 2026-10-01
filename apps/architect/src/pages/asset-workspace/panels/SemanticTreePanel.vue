@@ -2,10 +2,12 @@
 
 /** MS6-W1 自 AssetManagementWorkspace 模板整块迁出(逐行未动)；状态经 ASSET_WS_KEY 注入。 */
 
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, ArrowsRightLeftIcon, ChartBarSquareIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StopIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, ArrowsRightLeftIcon, BeakerIcon, ChartBarSquareIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, PlusIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StopIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import { useAssetWorkspaceCtx } from '..'
+import type { SemanticAsset } from '@/types'
 
 const { t } = useI18n()
 const {
@@ -62,10 +64,99 @@ const {
   unownedLinks,
   unownedMeta,
   usable,
+  logicViews, logicViewBusy, logicViewOpen, logicGroupOpen, logicViewCreateOpen,
+  createLogicView, renameLogicView, deleteLogicView, reanalyzeLogicView,
+  locateAsset, dialog,
 } = useAssetWorkspaceCtx()
+
+// ---- 逻辑视图辅助：成员解析(名称/计数/核心标记) ----
+const itemById = computed(() => new Map((items.value as SemanticAsset[]).map((a) => [a.id, a])))
+function membersOf(v: { memberIds: string }): string[] {
+  try { return JSON.parse(v.memberIds || '[]') } catch { return [] }
+}
+function coreOf(v: { coreIds: string }): string[] {
+  try { return JSON.parse(v.coreIds || '[]') } catch { return [] }
+}
+function memberName(mid: string): string {
+  return itemById.value.get(mid)?.name ?? mid.slice(0, 10)
+}
+function isCore(v: { coreIds: string }, mid: string): boolean {
+  return coreOf(v).includes(mid)
+}
 </script>
 
 <template>
+            <!-- 逻辑分析分组(跨组件业务逻辑链条——视图类型，非资产行；语义资产 tab 单列) -->
+            <template v-if="logicViews.length">
+              <div class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5 tree-row">
+                <button
+                  class="text-ctp-overlay0 hover:text-ctp-text p-0.5"
+                  @click="logicGroupOpen = !logicGroupOpen"
+                >
+                  <ChevronRightIcon class="w-3 h-3 transition-transform" :class="logicGroupOpen ? 'rotate-90' : ''" />
+                </button>
+                <BeakerIcon class="w-3.5 h-3.5 text-ctp-mauve shrink-0" />
+                <span class="text-[11px] font-semibold text-ctp-text">{{ t('assetMgmt.logicViews.group') }}</span>
+                <span class="chip !text-[8px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ logicViews.length }}</span>
+                <span class="flex-1" />
+                <button
+                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                  :title="t('assetMgmt.logicViews.createHint')"
+                  @click="logicViewCreateOpen = true"
+                >
+                  <PlusIcon class="w-3 h-3" />
+                </button>
+              </div>
+              <template v-if="logicGroupOpen">
+                <div v-for="v in logicViews" :key="v.id" class="ml-3">
+                  <div class="flex items-center gap-1.5 px-1 py-0.5 tree-row">
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-text p-0.5"
+                      @click="logicViewOpen[v.id] = !logicViewOpen[v.id]"
+                    >
+                      <ChevronRightIcon class="w-3 h-3 transition-transform" :class="logicViewOpen[v.id] ? 'rotate-90' : ''" />
+                    </button>
+                    <span class="text-[11px] text-ctp-subtext1 truncate flex-1" :title="v.summary || v.name">{{ v.name }}</span>
+                    <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0" :title="t('assetMgmt.logicViews.membersN', { n: membersOf(v).length })">{{ membersOf(v).length }}</span>
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-blue p-0.5 shrink-0"
+                      :title="t('assetMgmt.logicViews.viewGraph')"
+                      @click="openGraphTab('logic', v.id, v.name, membersOf(v))"
+                    >
+                      <Squares2X2Icon class="w-3 h-3" />
+                    </button>
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0"
+                      :disabled="logicViewBusy === v.id"
+                      :title="t('assetMgmt.logicViews.reanalyze')"
+                      @click="reanalyzeLogicView(v.id)"
+                    >
+                      <ArrowPathIcon class="w-3 h-3" :class="logicViewBusy === v.id ? 'animate-spin' : ''" />
+                    </button>
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-red p-0.5 shrink-0"
+                      :title="t('common.delete')"
+                      @click="dialog.confirm(t('assetMgmt.logicViews.deleteConfirm', { name: v.name }), { danger: true }).then((ok: boolean) => { if (ok) void deleteLogicView(v.id) })"
+                    >
+                      <TrashIcon class="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div v-if="logicViewOpen[v.id]" class="ml-6 py-1 space-y-1">
+                    <p class="text-[10px] leading-relaxed text-ctp-subtext0 whitespace-pre-wrap">{{ v.summary || t('assetMgmt.logicViews.noSummary') }}</p>
+                    <div
+                      v-for="mid in membersOf(v)"
+                      :key="mid"
+                      class="flex items-center gap-1.5 text-[10px] cursor-pointer text-ctp-overlay1 hover:text-ctp-text"
+                      :title="t('assetMgmt.logicViews.memberLocate')"
+                      @click="locateAsset(mid)"
+                    >
+                      <span class="font-mono truncate">{{ memberName(mid) }}</span>
+                      <span v-if="isCore(v, mid)" class="chip !text-[7px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ t('assetMgmt.logicViews.core') }}</span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </template>
             <template
               v-for="row in renderedTreeRows"
               :key="row.key"

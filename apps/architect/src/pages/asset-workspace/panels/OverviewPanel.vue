@@ -29,7 +29,7 @@ const {
   items,
   kind,
   kinds,
-  levels,
+  logicViews,
   overviewStats,
   purging,
   runCompare,
@@ -81,12 +81,8 @@ const {
                 </div>
                 <div class="flex flex-wrap items-center gap-1 pt-1">
                   <span class="text-[10px] text-ctp-subtext1 shrink-0">{{ t('assetMgmt.overview.levelLabel') }}</span>
-                  <span
-                    v-for="l in levels"
-                    :key="l.value"
-                    class="chip"
-                    :class="levelChipClass(l.value)"
-                  >{{ l.label }}</span>
+                  <span class="chip" :class="levelChipClass('implementation')">{{ t('assetMgmt.level.implementation') }} · {{ overviewStats?.byLevel?.implementation ?? 0 }}</span>
+                  <span class="chip bg-ctp-mauve/15 text-ctp-mauve" :title="t('assetMgmt.logicViews.group')">{{ t('assetMgmt.logicViews.group') }} · {{ logicViews.length }}</span>
                 </div>
                 <p class="text-[10px] text-ctp-subtext0 leading-relaxed pt-1">
                   {{ t('assetMgmt.overview.tagHint') }}
@@ -147,12 +143,8 @@ const {
                     {{ t('assetMgmt.overview.byLevel') }}
                   </div>
                   <div class="flex flex-wrap gap-1.5">
-                    <span
-                      v-for="l in levels"
-                      :key="l.value"
-                      class="chip"
-                      :class="levelChipClass(l.value)"
-                    >{{ l.label }} · {{ overviewStats?.byLevel?.[l.value] ?? 0 }}</span>
+                    <span class="chip" :class="levelChipClass('implementation')">{{ t('assetMgmt.level.implementation') }} · {{ overviewStats?.byLevel?.implementation ?? 0 }}</span>
+                    <span class="chip bg-ctp-mauve/15 text-ctp-mauve">{{ t('assetMgmt.logicViews.group') }} · {{ logicViews.length }}</span>
                   </div>
                 </div>
 

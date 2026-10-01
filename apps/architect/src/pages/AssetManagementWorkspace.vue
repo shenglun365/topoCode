@@ -29,6 +29,7 @@ import OverviewPanel from './asset-workspace/panels/OverviewPanel.vue'
 import SemanticTreePanel from './asset-workspace/panels/SemanticTreePanel.vue'
 import WorkspaceModals from './asset-workspace/panels/WorkspaceModals.vue'
 import ExtractScopeModal from './asset-workspace/panels/ExtractScopeModal.vue'
+import LogicViewCreateModal from './asset-workspace/panels/LogicViewCreateModal.vue'
 import DraftDock from './asset-workspace/panels/DraftDock.vue'
 import { OTHER_KEY } from './asset-workspace/useAssetCore'
 
@@ -40,7 +41,7 @@ const ws = useAssetWorkspace()
 provide(ASSET_WS_KEY, ws)
 const {
   tab, kind, level, q, items, loading, statusCounts, expanded, overviewStats, purging,
-  kinds, levels, statusText,
+  kinds, levels, statusText, logicViewCreateOpen, loadLogicViews,
   compCatalog, loadCompCatalog, treeComps, compById, fileToComps,
   componentsOf, descendantsOf, hasChildren,
   scopeSel, compOpen, filterOpen, toggleComp, toggleOther, clearScope, toggleOpen,
@@ -83,7 +84,7 @@ onUnmounted(() => {
 let offInvalidate: (() => void) | null = null
 onMounted(async () => {
   // 首屏关键链(资产树/概览/状态)；未归属清单非首屏必需 → idle 延迟(批4-3 懒加载)
-  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage()])
+  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage(), loadLogicViews()])
   const idle = (fn: () => void) => (window.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 800)))(fn)
   idle(() => { void loadUnownedFiles(); void loadUnownedLinks(); initCompare() })
   // 失效总线(批4-3)：任务中心作业完成 → 核心数据刷新（防抖合并在总线内）
@@ -92,6 +93,7 @@ onMounted(async () => {
     void refreshStatus()
     void loadOverview()
     void loadUnownedFiles()
+    void loadLogicViews()   // extract_logic 作业完成 → 逻辑视图(归纳落库)刷新
   })
   // 批量提取是后端作业：页面重开(此前关闭)也要接管进度轮询
   void ws.pollUnownedJobOnce().then(() => {
@@ -166,23 +168,6 @@ onUnmounted(() => {
               :value="k.value"
             >
               {{ k.label }}
-            </option>
-          </select>
-          <select
-            v-if="tab === 'semantic'"
-            v-model="level"
-            class="input !py-0.5 !px-2 !text-[11px] w-auto"
-            @change="onSearch"
-          >
-            <option value="">
-              {{ t('assetMgmt.allLevels') }}
-            </option>
-            <option
-              v-for="l in levels"
-              :key="l.value"
-              :value="l.value"
-            >
-              {{ l.label }}
             </option>
           </select>
           <button
@@ -508,13 +493,17 @@ onUnmounted(() => {
     @close="fileCard = null"
     @goto="locateAsset"
   />
+  <!-- 新建逻辑视图（模式2：核心资产种子 + agent 拓展 + LLM 概括） -->
+  <LogicViewCreateModal
+    :open="logicViewCreateOpen"
+    @close="logicViewCreateOpen = false"
+  />
   <!-- 提取范围确认弹窗（基线对比/按组件/按文件 提取闭环共用） -->
   <ExtractScopeModal
     :open="scopeModal.open"
     :title="scopeModal.title"
     :files="scopeModal.files"
     :show-full="scopeModal.showFull"
-    :logic-available="frameworkInfo?.presets?.[frameworkInfo.config.activeTier]?.y?.includes('logic') !== false"
     @confirm="confirmScope"
     @close="cancelScope"
   />

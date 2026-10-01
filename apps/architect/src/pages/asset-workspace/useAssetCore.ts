@@ -11,7 +11,7 @@ import { BoltIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIc
 import { copyText } from '@/utils/clipboard'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { semanticAssetService } from '@/services/semantic-asset-service'
-import type { SemanticStatsResult } from '@/services/semantic-asset-service'
+import type { LogicView, SemanticStatsResult } from '@/services/semantic-asset-service'
 import { kbAssetService } from '@/services/kb-assets'
 import type { AssetDetail, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
@@ -56,11 +56,9 @@ export function useAssetCore(D: WsDeps) {
     { value: 'decision', label: t('assetMgmt.kind.decision') },
   ]
 
-  // 业务层已取消——粒度筛选只留逻辑/实现(i18n level.business 键保留供存量资产行显示)
-  const levels: { value: SemanticAssetLevel; label: string }[] = [
-    { value: 'logic', label: t('assetMgmt.level.logic') },
-    { value: 'implementation', label: t('assetMgmt.level.implementation') },
-  ]
+  // 粒度轴收敛实现单层(逻辑已转为逻辑视图，非资产层级)——levels 筛选下线；
+  // i18n level.* 键保留供存量资产行标签显示。
+  const levels: { value: SemanticAssetLevel; label: string }[] = []
 
   const statusText = computed(() => {
     const c = statusCounts.value
@@ -493,6 +491,52 @@ export function useAssetCore(D: WsDeps) {
     }
   }
 
+  // ---- 逻辑视图（逻辑分析分组：跨组件业务逻辑链条，视图类型而非资产行） ----
+  const logicViews = shallowRef<LogicView[]>([])
+  const logicViewBusy = ref('')
+  /** 逻辑分析分组开合 + 新建弹窗开关。 */
+  const logicGroupOpen = ref(true)
+  const logicViewCreateOpen = ref(false)
+  const logicViewOpen = reactive<Record<string, boolean>>({})
+
+  async function loadLogicViews() {
+    try {
+      logicViews.value = await semanticAssetService.listLogicViews()
+    } catch {
+      logicViews.value = []
+    }
+  }
+
+  /** 新建并分析：核心资产+拓展档 → 后台作业(任务中心可见)，完成后经总线刷新。 */
+  async function createLogicView(payload: { name: string; coreIds: string[]; expand: 'core' | '1' | '2' | 'all' }) {
+    const v = await semanticAssetService.createLogicView({ name: payload.name, coreIds: payload.coreIds })
+    if (v?.id) {
+      await semanticAssetService.analyzeLogicView(v.id, payload.expand)
+      await loadLogicViews()
+    }
+    return v
+  }
+
+  async function renameLogicView(id: string, name: string) {
+    await semanticAssetService.updateLogicView(id, { name })
+    await loadLogicViews()
+  }
+
+  async function deleteLogicView(id: string) {
+    await semanticAssetService.deleteLogicView(id)
+    await loadLogicViews()
+  }
+
+  async function reanalyzeLogicView(id: string, expand: 'core' | '1' | '2' | 'all' = 'all') {
+    if (logicViewBusy.value) return
+    logicViewBusy.value = id
+    try {
+      await semanticAssetService.analyzeLogicView(id, expand)
+    } finally {
+      logicViewBusy.value = ''
+    }
+  }
+
   /** 概览统计：语义资产总量/类别/粒度/状态。 */
   async function loadOverview() {
     try {
@@ -655,6 +699,8 @@ export function useAssetCore(D: WsDeps) {
   }
 
   return {
+    logicViews, logicViewBusy, logicViewOpen, logicGroupOpen, logicViewCreateOpen, loadLogicViews,
+    createLogicView, renameLogicView, deleteLogicView, reanalyzeLogicView,
     tab, kind, level, q, items, loading, statusCounts, expanded, overviewStats, purging,
     kinds, levels, statusText,
     compCatalog, loadCompCatalog, treeComps, compById, fileToComps,
