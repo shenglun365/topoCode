@@ -445,7 +445,8 @@ function applySelectedNodeStyle() {
 }
 
 /** 对比变化节点着色：桶类 td-node-diff-{changed|weak|new|removed} + 形状内联样式兜底
- *  (setProperty important，免疫 mermaid 主题样式优先级)。寻址与选中态同款(mermaid id 主口径)。 */
+ *  (setProperty important，免疫 mermaid 主题样式优先级)。
+ *  寻址与选中态/tooltip 同款：mermaid id 主口径 + plantuml 文本兜底(标签→<text>→爬升到含形状组)。 */
 const DIFF_FILL: Record<DiffBucket, string> = {
   changed: 'rgba(249, 226, 175, 0.30)',   // 黄：强关联(符号段变更)
   weak: 'rgba(136, 137, 163, 0.16)',      // 灰：弱关联(同文件变更,段未变)
@@ -466,21 +467,72 @@ function applyDiffNodeStyles() {
     el.classList.remove('td-node-diff-changed', 'td-node-diff-weak', 'td-node-diff-new', 'td-node-diff-removed'))
   if (!D.data.diffKindById.value.size) return
   const rootPrefix = svg.id ? `${svg.id}-` : ''
+  // 桶样式落组：桶类 + 形状内联兜底(组内全部形状)。
+  const applyBucket = (el: Element, bucket: DiffBucket): void => {
+    el.classList.add(`td-node-diff-${bucket}`)
+    // 内联样式兜底：mermaid 主题样式(SVG 内 <style> 带 id 选择器)特异性高于类规则，
+    // 类规则虽有 !important 但部分引擎渲染路径会被内联呈现覆盖——双保险。
+    for (const shape of el.querySelectorAll<SVGElement>('rect, polygon, ellipse, circle')) {
+      shape.style.setProperty('fill', DIFF_FILL[bucket], 'important')
+      shape.style.setProperty('stroke', DIFF_STROKE[bucket], 'important')
+      if (bucket === 'removed') shape.style.setProperty('stroke-dasharray', '6 3', 'important')
+      else shape.style.removeProperty('stroke-dasharray')
+    }
+  }
+  // ① mermaid id 主口径(plantuml SVG 无此类 id，恒不命中)
+  const styled = new Set<string>()
   for (const [nid, aid] of clickIds.value) {
     const bucket = D.data.diffKindById.value.get(aid)
     if (!bucket) continue
     for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
       if (resolveNodeIdFromEl(el, rootPrefix) !== nid) continue
-      el.classList.add(`td-node-diff-${bucket}`)
-      // 内联样式兜底：mermaid 主题样式(SVG 内 <style> 带 id 选择器)特异性高于类规则，
-      // 类规则虽有 !important 但部分引擎渲染路径会被内联呈现覆盖——双保险。
-      for (const shape of el.querySelectorAll<SVGElement>('rect, polygon, ellipse, circle')) {
-        shape.style.setProperty('fill', DIFF_FILL[bucket], 'important')
-        shape.style.setProperty('stroke', DIFF_STROKE[bucket], 'important')
-        if (bucket === 'removed') shape.style.setProperty('stroke-dasharray', '6 3', 'important')
-        else shape.style.removeProperty('stroke-dasharray')
-      }
+      applyBucket(el, bucket)
+      styled.add(aid)
       break
+    }
+  }
+  // ② plantuml 文本兜底：渲染文本口径(name·id/名称截断/净化id)都登记在 clickIds 的 label 键
+  const pending = new Map<string, DiffBucket>()
+  for (const [, aid] of clickIds.value) {
+    if (styled.has(aid) || pending.has(aid)) continue
+    const bucket = D.data.diffKindById.value.get(aid)
+    if (bucket) pending.set(aid, bucket)
+  }
+  if (!pending.size) return
+  const labelBucket = new Map<string, DiffBucket>()
+  for (const [label, aid] of clickIds.value) {
+    const bucket = pending.get(aid)
+    if (!label || !bucket || labelBucket.has(label)) continue
+    labelBucket.set(label, bucket)
+  }
+  for (const n of D.data.scopedNodes.value) {   // 名称截断口径(与 tooltip ② 同款)
+    const bucket = pending.get(n.id)
+    if (!bucket) continue
+    for (const v of [n.name, ...[18, 26, 30, 40].map((m) => semanticNodeLabelText(n.name, m))]) {
+      if (!labelBucket.has(v)) labelBucket.set(v, bucket)
+    }
+  }
+  const seenGroups = new Set<Element>()
+  for (const t of svg.querySelectorAll('text')) {
+    const txt = (t.textContent || '').trim()
+    if (!txt) continue
+    let bucket = labelBucket.get(txt)
+    if (!bucket) {   // plantuml flow 标签内嵌「· 资产ID」
+      for (const [aid, b] of pending) {
+        if (txt.includes(aid)) { bucket = b; break }
+      }
+    }
+    if (!bucket) continue
+    // 爬升到含形状的最近组(plantuml 文本与形状可能不同层)，样式落在节点整体上
+    let el: Element | null = t
+    while (el && el !== svg) {
+      if (el.querySelector('rect, polygon, ellipse, circle')) break
+      el = el.parentElement
+    }
+    const group = (el && el !== svg ? el : (t.closest('g') ?? t.parentElement)) as Element | null
+    if (group && !seenGroups.has(group)) {
+      seenGroups.add(group)
+      applyBucket(group, bucket)
     }
   }
 }
