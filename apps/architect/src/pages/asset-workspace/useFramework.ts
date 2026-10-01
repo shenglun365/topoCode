@@ -43,6 +43,11 @@ export function useFramework(D: WsDeps) {
     }
   }
 
+  /** 档位暂不可选（高级自定义模式开发中，暂关闭切换入口）。 */
+  function tierUnavailable(tier: 'low' | 'mid' | 'high'): boolean {
+    return tier === 'high'
+  }
+
   /** 标准变更确认流：preview(dry-run) → 设计者确认 → switch（整体作废+命名不迁移）。 */
   async function switchTier(tier: 'low' | 'mid' | 'high') {
     if (fwSwitching.value) return
@@ -105,7 +110,7 @@ export function useFramework(D: WsDeps) {
 
   return {
     frameworkInfo, coverageInfo, fwLoading, fwSwitching, fwPreview,
-    loadFramework, loadCoverage, switchTier, askExtractComponent,
+    loadFramework, loadCoverage, switchTier, tierUnavailable, askExtractComponent,
     compCoverage, copiedKey, copyCompRef,
   }
 }

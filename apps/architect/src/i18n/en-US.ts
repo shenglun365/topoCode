@@ -462,6 +462,7 @@ export default {
       hint: 'New = fresh coding context; switch = jobs & feeds land on the selected sub; ↗ opens its message stream.',
       new: 'New sub-session (fresh context)',
       active: 'Active',
+      tierUnavailable: 'Advanced custom mode is under development — unavailable for now',
       view: 'Open stream',
       empty: 'No sub-sessions yet — auto-created on /执行, or create below.',
       feedHint: 'Feed to coding (filtered into sub-session & job)',

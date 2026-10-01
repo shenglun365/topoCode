@@ -458,6 +458,7 @@ export default {
       hint: '新建=清空 coding 自持上下文；切换=后续作业与投喂落所选子会话；↗ 查看=打开该子会话消息流。',
       new: '新建子会话(清空上下文)',
       active: '活跃',
+      tierUnavailable: '高级自定义模式开发中，暂不可选',
       view: '查看消息流',
       empty: '暂无子会话——/执行 时自动创建，或点下方新建。',
       feedHint: '转达给 coding(过滤后进入子会话与作业)',

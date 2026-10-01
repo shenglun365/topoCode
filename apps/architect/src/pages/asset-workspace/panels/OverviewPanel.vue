@@ -35,7 +35,7 @@ const {
   runCompare,
   runPurge,
   statusCounts,
-  switchTier,
+  switchTier, tierUnavailable,
   totalChanged,
 } = useAssetWorkspaceCtx()
 </script>
@@ -198,10 +198,13 @@ const {
                     v-for="tier in (['low', 'mid', 'high'] as const)"
                     :key="tier"
                     class="border rounded-md p-2 text-left transition-colors"
-                    :class="frameworkInfo?.config?.activeTier === tier
-                      ? 'border-ctp-blue/60 bg-ctp-blue/10'
-                      : 'border-ctp-surface0 hover:border-ctp-blue/40'"
-                    :disabled="fwLoading || fwSwitching"
+                    :class="tierUnavailable(tier)
+                      ? 'border-ctp-surface0 opacity-45 cursor-not-allowed'
+                      : (frameworkInfo?.config?.activeTier === tier
+                        ? 'border-ctp-blue/60 bg-ctp-blue/10'
+                        : 'border-ctp-surface0 hover:border-ctp-blue/40')"
+                    :disabled="fwLoading || fwSwitching || tierUnavailable(tier)"
+                    :title="tierUnavailable(tier) ? t('assetMgmt.framework.tierUnavailable') : ''"
                     @click="switchTier(tier)"
                   >
                     <div class="flex items-center gap-1.5">
