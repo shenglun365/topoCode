@@ -111,7 +111,9 @@ export function usePurgeBatch(D: WsDeps) {
         scope,
       })
       batchLast.value = t('assetMgmt.batchDone', { action: t(`assetMgmt.batchAction.${action}`), n: res.count })
-      await Promise.all([core.loadSemantic(), core.refreshStatus()])
+      // 清除为物理删除：后端连带清空逻辑视图 → 列表与逻辑资产分组需同步刷新
+      // (只刷 loadSemantic 时逻辑视图残留旧数据，需刷新页面才消失——实测 2026-10-02)
+      await Promise.all([core.loadSemantic(), core.loadLogicViews(), core.refreshStatus()])
       batchOpen.value = false   // 删除完成：刷新列表(上) + 自动关闭批量管理浮窗
     } catch {
       batchLast.value = t('assetMgmt.batchFailed')
