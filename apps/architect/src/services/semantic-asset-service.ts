@@ -724,8 +724,7 @@ export const semanticAssetService = {
 
   /** 逻辑视图列表(逻辑分析分组数据源)。 */
   async listLogicViews(): Promise<LogicView[]> {
-    const q = qsWith('')
-    const r = await apiGet<{ views: LogicView[] }>(`/kb/semantic/logic-views${q ? `?${q}` : ''}`)
+    const r = await apiGet<{ views: LogicView[] }>(`/kb/semantic/logic-views${qsWith('')}`)
     return r?.views ?? []
   },
 
