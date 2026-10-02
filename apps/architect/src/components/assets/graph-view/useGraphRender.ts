@@ -484,6 +484,7 @@ function applyDiffNodeStyles() {
       shape.style.removeProperty('stroke-dasharray')
     }
     if (!sig || (!sig.hasAdded && !sig.hasDeleted)) return
+    el.querySelectorAll('.td-node-signal').forEach((d) => d.remove())   // 幂等
     // 左上信号点：组 bbox 左上区域内缩注入纯色圆点(左/顶留隙；双信号绿左红右横排)
     try {
       const bb = (el as SVGGElement).getBBox()
@@ -493,7 +494,7 @@ function applyDiffNodeStyles() {
         c.setAttribute('cx', String(cx))
         c.setAttribute('cy', String(cy))
         c.setAttribute('r', '4')
-        c.setAttribute('fill', fill)
+        c.style.setProperty('fill', fill, 'important')   // 免疫主题 CSS 覆盖(SVG 属性特异性最低)
         c.setAttribute('class', 'td-node-signal')
         c.setAttribute('pointer-events', 'none')
         return c
@@ -513,6 +514,7 @@ function applyDiffNodeStyles() {
   const styled = new Set<string>()
   const signalOf = (aid: string) => D.data.diffSignalsById?.value?.get(aid)
   for (const [nid, aid] of clickIds.value) {
+    if (styled.has(aid)) continue          // clickIds 多键(名称变体)可映同一资产，防重复
     const bucket = D.data.diffKindById.value.get(aid)
     if (!bucket) continue
     for (const el of svg.querySelectorAll('[id], [data-entity-uid]')) {
