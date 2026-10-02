@@ -152,9 +152,14 @@ def _run_job(job_id: str) -> None:
             if row.get("state") == "cancelled":   # handler 内已终态(取消)——不覆盖
                 return
             ok_flag = not result.get("error")
+            prog = (SemanticJobsStore.get(job_id) or {}).get("progress") or {}
+            if prog.get("total") is not None and prog.get("done") != prog.get("total"):
+                # 终态进度置满：单件作业(如 extract_logic total=1)完成前 done=0，
+                # 完成后若不置满 → 任务中心恒显 0/1 误导为失败(实测 2026-10-02)
+                prog = {**prog, "done": prog.get("total")}
             SemanticJobsStore.finish(
                 job_id, state="done" if ok_flag else "failed", result=result,
-                progress=(SemanticJobsStore.get(job_id) or {}).get("progress") or {})
+                progress=prog)
             logger.info("[job-runner] 作业完成: id=%s kind=%s state=%s",
                         job_id, job.get("kind"), "done" if ok_flag else "failed")
         except Exception as e:  # noqa: BLE001 — 作业线程必须吞异常保状态一致

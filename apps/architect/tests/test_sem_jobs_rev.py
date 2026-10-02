@@ -191,3 +191,27 @@ def test_build_file_skeleton_mapping():
     assert "loop" in proc[0]["detail"]["steps"][0]["semantic"]
     # 锚点 kind 归一化(func)——过 _asset_anchor_kind_ok 白名单
     assert proc[0]["astRefs"][0]["kind"] == "func"
+
+
+def test_run_job_progress_filled_at_terminal(tmp_path, monkeypatch):
+    """终态进度置满：单件作业(total=1, done=0)完成后 done=total——
+    任务中心不再恒显 0/1 误导为失败(实测 2026-10-02)。"""
+    import time as _t
+    from topoone_app_architect.sem import job_runner as JR
+    _ctx_setup(tmp_path, monkeypatch)
+
+    def _handler(ctx):
+        ctx.progress(total=1, done=0, stage=1)   # 模拟 extract_logic 最后一次进度
+        return {"summary": "ok", "saved": 8}
+    monkeypatch.setitem(JR._handlers, "probe_fill", _handler)
+    job = JR.start_job(PID, "probe_fill", {}, llm=False)
+    assert job.get("started"), job
+    jid = job["job"]["id"]
+    for _ in range(100):
+        row = SemanticJobsStore.get(jid)
+        if row and row.get("state") in ("done", "failed"):
+            break
+        _t.sleep(0.05)
+    assert row["state"] == "done"
+    assert row["progress"]["done"] == row["progress"]["total"] == 1
+    assert row["result"]["saved"] == 8
