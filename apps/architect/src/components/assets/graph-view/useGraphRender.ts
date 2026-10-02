@@ -484,7 +484,7 @@ function applyDiffNodeStyles() {
       shape.style.removeProperty('stroke-dasharray')
     }
     if (!sig || (!sig.hasAdded && !sig.hasDeleted)) return
-    // 左上信号点：组 bbox 左上内侧注入纯色圆点(双信号绿左红右横排，无描边)
+    // 左上信号点：组 bbox 左上区域内缩注入纯色圆点(左/顶留隙；双信号绿左红右横排)
     try {
       const bb = (el as SVGGElement).getBBox()
       const NS = 'http://www.w3.org/2000/svg'
@@ -498,14 +498,14 @@ function applyDiffNodeStyles() {
         c.setAttribute('pointer-events', 'none')
         return c
       }
-      const y = bb.y + 5
+      const y = bb.y + 10          // 左上区域内缩：左/顶各留 6 单位间隙(r=4)
       if (sig.hasAdded && sig.hasDeleted) {
-        el.appendChild(mkDot(bb.x + 3, y, SIGNAL_GREEN))
-        el.appendChild(mkDot(bb.x + 11, y, SIGNAL_RED))
+        el.appendChild(mkDot(bb.x + 10, y, SIGNAL_GREEN))
+        el.appendChild(mkDot(bb.x + 18, y, SIGNAL_RED))
       } else if (sig.hasAdded) {
-        el.appendChild(mkDot(bb.x + 3, y, SIGNAL_GREEN))
+        el.appendChild(mkDot(bb.x + 10, y, SIGNAL_GREEN))
       } else {
-        el.appendChild(mkDot(bb.x + 3, y, SIGNAL_RED))
+        el.appendChild(mkDot(bb.x + 10, y, SIGNAL_RED))
       }
     } catch { /* bbox 不可得时静默跳过信号点 */ }
   }
