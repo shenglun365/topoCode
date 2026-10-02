@@ -270,9 +270,11 @@ const explainParas = computed<{ heading?: string; lines: { text: string; ref?: b
   return out
 })
 
-/** 成员引用/清单点击 → 选中画布节点(资产卡/代码联动)。 */
+/** 成员引用/清单点击 → 选中画布节点(资产卡/代码联动) + 资产卡置顶(否则被本卡遮住)。 */
 function selectNode(id: string) {
-  if (id) ws.selId.value = id
+  if (!id) return
+  ws.selId.value = id
+  bringCardToFront('asset')
 }
 
 /** AI 详细语义讲解：force=重新生成。缓存(含上次会话落库的)指纹一致由后端秒回。 */

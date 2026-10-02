@@ -137,7 +137,8 @@ def _assets_brief(assets: List[dict]) -> str:
             body += f"\n  控制流: {'; '.join(steps)}"
         if fields:
             body += f"\n  字段: {', '.join(fields)}"
-        lines.append(f"- [{a.get('kind')}] {a.get('name')}: {(a.get('desc') or '')[:120]}\n{body}")
+        # 名称后内联资产 ID——explain 讲解引用「资产名 (sa-xxx)」的数据源(缺 ID 时 LLM 只能臆造)
+        lines.append(f"- [{a.get('kind')}] {a.get('name')} ({a.get('id') or ''}): {(a.get('desc') or '')[:120]}\n{body}")
     return "\n".join(lines)
 
 
