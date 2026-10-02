@@ -16,6 +16,8 @@ import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semant
 import { useSgvWs } from '../key'
 
 const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string>; compNames?: Record<string, string> }>()
+/** 逻辑视图资产卡浮窗开合(本地态：仅 kind='logic' 画布有入口)。 */
+const logicCardOpen = ref(false)
 const { t } = useI18n()
 const {
   FILE_BUDGET,

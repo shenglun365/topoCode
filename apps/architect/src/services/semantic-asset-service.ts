@@ -728,6 +728,13 @@ export const semanticAssetService = {
     return r?.views ?? []
   },
 
+  /** AI 详细语义讲解：指纹一致缓存秒回 / 成员变化自动失效重生成 / force 强制。 */
+  async explainLogicView(id: string, force = false, modelId?: string): Promise<{ viewId: string; detail: string; cached: boolean } | undefined> {
+    const { root, project } = currentProjectParams()
+    return apiPost(`/kb/semantic/logic-views/${encodeURIComponent(id)}/explain`,
+                   { root, project, force, modelId })
+  },
+
   /** 新建逻辑视图(手动)：核心实现资产为种子，分析后拓展为成员全集。 */
   async createLogicView(payload: { name: string; coreIds: string[] }): Promise<LogicView | undefined> {
     const { root, project } = currentProjectParams()
@@ -989,6 +996,9 @@ export interface LogicView {
   summary: string
   source: 'extract' | 'manual'
   fingerprint?: string
+  /** AI 详细语义讲解(Markdown 缓存；成员资产变化指纹失效自动重生成) */
+  detail?: string
+  detailFp?: string
   createdAt?: number
   updatedAt?: number
 }

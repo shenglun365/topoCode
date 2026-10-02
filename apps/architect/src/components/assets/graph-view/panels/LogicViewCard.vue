@@ -1,0 +1,182 @@
+<template>
+  <!-- 逻辑视图资产卡(浮窗)：视图名/概括/成员清单(点击选中画布节点)/AI 详细语义讲解。
+       讲解后端按成员 srcHash 指纹缓存——成员资产变化自动失效；「重新生成」force。 -->
+  <div class="absolute z-20 right-2 bottom-14 w-[26rem] max-h-[62%] flex flex-col rounded-lg border border-ctp-surface1 bg-ctp-mantle shadow-2xl">
+    <header class="flex items-center gap-2 px-3 py-2 border-b border-ctp-surface1 shrink-0">
+      <DocumentTextIcon class="w-4 h-4 text-ctp-mauve shrink-0" />
+      <span class="text-xs font-semibold text-ctp-text truncate">{{ view?.name || viewId }}</span>
+      <span v-if="view?.source === 'manual'" class="text-[10px] px-1.5 py-0.5 rounded bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ t('assetMgmt.logicViews.manualTag') }}</span>
+      <span v-if="explained && cached" class="text-[10px] text-ctp-overlay0 shrink-0">{{ t('assetMgmt.logicViews.explainCached') }}</span>
+      <button class="ml-auto text-ctp-overlay0 hover:text-ctp-text shrink-0" :title="t('common.close')" @click="emit('close')">
+        <XMarkIcon class="w-4 h-4" />
+      </button>
+    </header>
+
+    <div class="overflow-y-auto px-3 py-2 space-y-3 text-xs">
+      <!-- 概括 -->
+      <p v-if="view?.summary" class="text-ctp-subtext1 leading-relaxed">{{ view.summary }}</p>
+
+      <!-- 成员清单(点击选中画布节点) -->
+      <section>
+        <h4 class="text-[11px] font-semibold text-ctp-overlay1 mb-1">{{ t('assetMgmt.logicViews.membersTitle') }} · {{ members.length }}</h4>
+        <div class="flex flex-wrap gap-1">
+          <button
+            v-for="m in members" :key="m.id"
+            class="px-1.5 py-0.5 rounded border text-[11px] transition-colors"
+            :class="m.isCore
+              ? 'border-ctp-mauve/50 text-ctp-mauve bg-ctp-mauve/10 hover:bg-ctp-mauve/20'
+              : 'border-ctp-surface1 text-ctp-subtext1 hover:text-ctp-text hover:border-ctp-overlay0'"
+            :title="m.isCore ? t('assetMgmt.logicViews.coreTag') : m.id"
+            @click="selectNode(m.id)"
+          >{{ m.name }}</button>
+        </div>
+      </section>
+
+      <!-- AI 详细语义讲解 -->
+      <section>
+        <div class="flex items-center gap-2 mb-1">
+          <h4 class="text-[11px] font-semibold text-ctp-overlay1">{{ t('assetMgmt.logicViews.explainTitle') }}</h4>
+          <button
+            v-if="!explainLoading"
+            class="flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border transition-colors"
+            :class="explained
+              ? 'border-ctp-surface1 text-ctp-overlay1 hover:text-ctp-text'
+              : 'border-ctp-blue/50 text-ctp-blue bg-ctp-blue/10 hover:bg-ctp-blue/20'"
+            @click="explain(explained)"
+          >
+            <SparklesIcon class="w-3 h-3" />
+            {{ explained ? t('assetMgmt.logicViews.regenerate') : t('assetMgmt.logicViews.aiExplain') }}
+          </button>
+          <span v-else class="flex items-center gap-1 text-[11px] text-ctp-overlay0">
+            <ArrowPathIcon class="w-3 h-3 animate-spin" />{{ t('assetMgmt.logicViews.explainLoading') }}
+          </span>
+        </div>
+        <p v-if="explainError" class="text-ctp-red text-[11px]">{{ explainError }}</p>
+        <div v-if="explained" class="rounded border border-ctp-surface1 bg-ctp-base/60 px-2.5 py-2 space-y-1.5 leading-relaxed text-ctp-subtext1">
+          <template v-for="(para, pi) in explainParas" :key="pi">
+            <p v-if="para.heading" class="font-semibold text-ctp-text">{{ para.heading }}</p>
+            <p v-for="(line, li) in para.lines" :key="li" class="break-words">
+              <template v-for="(seg, si) in line" :key="si">
+                <button
+                  v-if="seg.ref" class="text-ctp-blue hover:underline"
+                  :title="seg.refId"
+                  @click="selectNode(seg.refId!)"
+                >{{ seg.text }}</button>
+                <span v-else>{{ seg.text }}</span>
+              </template>
+            </p>
+          </template>
+        </div>
+        <p v-else-if="!explainLoading" class="text-ctp-overlay0 text-[11px]">{{ t('assetMgmt.logicViews.explainHint') }}</p>
+      </section>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ArrowPathIcon, DocumentTextIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { semanticAssetService } from '@/services/semantic-asset-service'
+import { useSgvWs } from '../key'
+
+const props = defineProps<{ viewId: string }>()
+const emit = defineEmits<{ close: [] }>()
+const { t } = useI18n()
+const ws = useSgvWs()
+
+const view = ref<Awaited<ReturnType<typeof semanticAssetService.listLogicViews>>[number] | null>(null)
+const explainLoading = ref(false)
+const explained = ref(false)
+const cached = ref(false)
+const explainError = ref('')
+const detailText = ref('')
+
+/** 成员清单：名称取图谱节点(kind='logic' 图谱=成员资产)；核心成员标记。 */
+const members = computed<{ id: string; name: string; isCore: boolean }[]>(() => {
+  if (!view.value) return []
+  let mids: string[] = []
+  let cores: string[] = []
+  try {
+    mids = JSON.parse(view.value.memberIds || '[]')
+    cores = JSON.parse(view.value.coreIds || '[]')
+  } catch { return [] }
+  const nameById = new Map<string, string>(
+    (ws.graph?.value?.nodes ?? []).map((n: { id: string; name?: string }) => [n.id, n.name ?? n.id]))
+  return mids.map((id) => ({
+    id,
+    name: nameById.get(id) ?? id.slice(0, 12),
+    isCore: cores.includes(id),
+  }))
+})
+
+/** 讲解文本分段：段落(标题行/正文行) + 「资产名 (sa-xxx)」引用解析为可点击片段。 */
+const REF_RE = /([^\s，。；、（）()]{1,40})\s*[（(]\s*(sa-[A-Za-z0-9_-]+)\s*[）)]/g
+const explainParas = computed<{ heading?: string; lines: { text: string; ref?: boolean; refId?: string }[][] }[]>(() => {
+  const raw = detailText.value
+  if (!raw) return []
+  const out: { heading?: string; lines: { text: string; ref?: boolean; refId?: string }[][] }[] = []
+  let cur: { heading?: string; lines: { text: string; ref?: boolean; refId?: string }[][] } = { lines: [] }
+  for (const ln of raw.split(/\n+/)) {
+    const line = ln.trim()
+    if (!line) continue
+    if (/^#{1,4}\s+/.test(line)) {
+      if (cur.heading || cur.lines.length) out.push(cur)
+      cur = { heading: line.replace(/^#{1,4}\s+/, ''), lines: [] }
+      continue
+    }
+    const segs: { text: string; ref?: boolean; refId?: string }[] = []
+    let last = 0
+    for (const m of line.matchAll(REF_RE)) {
+      const idx = m.index ?? 0
+      if (idx > last) segs.push({ text: line.slice(last, idx) })
+      segs.push({ text: `${m[1]} (${m[2]})`, ref: true, refId: m[2] })
+      last = idx + m[0].length
+    }
+    if (last < line.length) segs.push({ text: line.slice(last) })
+    cur.lines.push(segs.length ? segs : [{ text: line }])
+  }
+  if (cur.heading || cur.lines.length) out.push(cur)
+  return out
+})
+
+/** 成员引用/清单点击 → 选中画布节点(资产卡/代码联动)。 */
+function selectNode(id: string) {
+  if (id) ws.selId.value = id
+}
+
+/** AI 详细语义讲解：force=重新生成。缓存(含上次会话落库的)指纹一致由后端秒回。 */
+async function explain(force = false) {
+  if (explainLoading.value) return
+  explainLoading.value = true
+  explainError.value = ''
+  try {
+    const r = await semanticAssetService.explainLogicView(props.viewId, force)
+    if (r?.detail) {
+      detailText.value = r.detail
+      explained.value = true
+      cached.value = !!r.cached
+      if (view.value) view.value.detail = r.detail
+    } else {
+      explainError.value = t('assetMgmt.logicViews.explainFailed')
+    }
+  } catch (e: unknown) {
+    explainError.value = (e as { message?: string })?.message || t('assetMgmt.logicViews.explainFailed')
+  } finally {
+    explainLoading.value = false
+  }
+}
+
+onMounted(async () => {
+  try {
+    const views = await semanticAssetService.listLogicViews()
+    view.value = views.find((v) => v.id === props.viewId) ?? null
+    // 后端已有缓存(且指纹未失效的判定由 explain 兜底) → 直接展示旧讲解
+    if (view.value?.detail) {
+      detailText.value = view.value.detail
+      explained.value = true
+      cached.value = true
+    }
+  } catch { /* 列表失败保留空卡 */ }
+})
+</script>
