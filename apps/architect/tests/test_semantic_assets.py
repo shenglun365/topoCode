@@ -2805,3 +2805,26 @@ def test_batch_clear_rebuild_keeps_change_semantics(tmp_path, monkeypatch):
     drift = [dict(asts[0], astRefs=[{"file": "svc/a.py", "symbol": "other", "startLine": 1, "endLine": 2}])]
     got = ENG._save_assets(pid, "comm", "L0-0001", drift, ctx2)
     assert got[0]["change"] == "added" and got[0]["id"] != aid
+
+
+def test_source_snippet_diff_base_new_file(tmp_path, monkeypatch):
+    """diff_base 模式：基准后新增的文件(base 无此文件)不再 404——空 base 对比，
+    全文件皆 add 行(资产卡代码区新增文件可正常展示)。"""
+    import subprocess
+    import asyncio
+    _ctx(tmp_path, monkeypatch)
+    repo = tmp_path / "svc"
+    repo.mkdir()
+    def _g(*a):
+        return subprocess.run(["git", "-C", str(repo), *a], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    _g("init", "-q"); _g("config", "user.email", "t@t"); _g("config", "user.name", "t")
+    (repo / "old.txt").write_text("x\n")
+    _g("add", "-A"); _g("commit", "-qm", "base")
+    base = _g("rev-parse", "HEAD")
+    (repo / "new.ts").write_text("l1\nl2\nl3\n")   # 基准后新增文件
+    r = asyncio.run(S.api_source_snippet(str(repo), None, file="new.ts", line=2,
+                                         diff_base=base))
+    assert r["code"] == 0, r
+    kinds = {ln["kind"] for ln in r["data"]["lines"]}
+    assert kinds == {"add"}, kinds

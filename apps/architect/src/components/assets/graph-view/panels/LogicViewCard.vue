@@ -273,6 +273,10 @@ const explainParas = computed<{ heading?: string; lines: { text: string; ref?: b
 /** 成员引用/清单点击 → 选中画布节点(资产卡/代码联动) + 资产卡置顶(否则被本卡遮住)。 */
 function selectNode(id: string) {
   if (!id) return
+  const nodes = (ws.graph?.value?.nodes ?? []) as { id: string }[]
+  console.log('[td-debug] selectNode', `id=${id}`,
+    `inGraph=${nodes.some((n) => n.id === id)}`, `graphNodes=${nodes.length}`,
+    `cardMin=${ws.cardMin?.value}`, `selBefore=${ws.selId.value}`)
   ws.selId.value = id
   bringCardToFront('asset')
 }

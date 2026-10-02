@@ -299,12 +299,23 @@ async function load(reset = false) {
       focus = props.tab.assetId
     }
     graph.value = await semanticAssetService.graph(undefined, scope, undefined, { focus, hops, includeIndirect: includeIndirect.value, file, files, assets, rev: graphRev.value })
+    // [td-debug] 图加载完成：tab/成员命中情况(B 假设——目标资产是否在图)
+    try {
+      const ids = new Set((graph.value?.nodes ?? []).map((n) => n.id))
+      const members = props.tab.kind === 'logic' ? (props.tab.members ?? []) : []
+      const missing = members.filter((m) => !ids.has(m))
+      console.log('[td-debug] graph loaded',
+        `tab=${props.tab.kind}`, `view=${props.tab.viewId ?? ''}`,
+        `nodes=${ids.size}`, `members=${members.length}`,
+        missing.length ? `缺失成员=${missing.join(',')}` : '成员全命中')
+    } catch { /* 日志不影响主流程 */ }
     if (reset) {
       // 打开/切换 tab：类型重置为全部；粒度默认=组件级取该组件最高可用层级，其余取全部。
       kindFilter.value = ''
       view.value = ''
       level.value = props.tab.kind === 'comp' ? (availableLevels.value[0] ?? '') : ''
     } else if (D.detail.selId.value && !(graph.value?.nodes ?? []).some((n) => n.id === D.detail.selId.value)) {
+      console.log('[td-debug] 软刷新清选中: selId 不在新图 nodes → 清空', D.detail.selId.value)
       D.detail.selId.value = ''
       D.detail.selDetail.value = null
     }

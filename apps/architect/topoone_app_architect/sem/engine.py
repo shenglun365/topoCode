@@ -4345,8 +4345,9 @@ async def api_source_snippet(root: Optional[str] = None, project: Optional[str] 
     if diff_base:
         try:
             base_lines = _git_blob_lines(rpath, diff_base, file)
-        except RuntimeError as e:
-            return err(404, str(e))
+        except RuntimeError:
+            # 文件在 diff_base 不存在(基准后新增) → 空 base 对比：全文件皆新增行
+            base_lines = []
         rows = _diff_window(_diff_rows(base_lines, lines), anchor, before, after, limit)
         highlight = [r["line"] for r in rows if anchor and r.get("targetLine") == anchor]
         return ok({"file": file, "symbol": symbol, "anchorLine": anchor or 1,
