@@ -735,6 +735,18 @@ export const semanticAssetService = {
                    { root, project, force, modelId })
   },
 
+  /** 图谱范围提纲(零 LLM)：核心(选中优先+中心度 top) × 1/2/3 跳邻域三档。 */
+  async graphOutline(assetIds: string[], preferCores?: string[]): Promise<{ cores: { coreId: string; coreName: string; degree: number; hops: Record<'1' | '2' | '3', string[]> }[] } | undefined> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/kb/semantic/logic-views/graph-outline', { root, project, assetIds, preferCores })
+  },
+
+  /** 图谱范围逻辑解析(同步等待作业完成)：每组 → source='graph' 逻辑视图。 */
+  async induceScope(groups: { coreId: string; hops: number; memberIds: string[] }[], modelId?: string): Promise<{ viewIds: string[]; count: number } | undefined> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/kb/semantic/logic-views/induce-scope', { root, project, groups, modelId })
+  },
+
   /** 新建逻辑视图(手动)：核心实现资产为种子，分析后拓展为成员全集。 */
   async createLogicView(payload: { name: string; coreIds: string[] }): Promise<LogicView | undefined> {
     const { root, project } = currentProjectParams()

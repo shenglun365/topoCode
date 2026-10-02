@@ -8,6 +8,7 @@ import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
 import LogicViewCard from './LogicViewCard.vue'
+import LogicScopeModal from './LogicScopeModal.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
 
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
@@ -16,10 +17,22 @@ import type { GraphTabDef } from '../graphTypes'
 import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semantic-kind-style'
 import { useSgvWs } from '../key'
 import { bringCardToFront, isCardTop } from '../cardZ'
+import { invalidateAssets } from '@/pages/asset-workspace/invalidate-bus'
 
 const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string>; compNames?: Record<string, string> }>()
-/** 逻辑视图资产卡浮窗开合(本地态：仅 kind='logic' 画布有入口)。 */
+/** 逻辑视图资产卡浮窗开合 + 当前视图 id(logic tab=tab.viewId；范围解析后=新视图)。 */
 const logicCardOpen = ref(false)
+const logicCardViewId = ref('')
+watch(() => props.tab, (tb) => { logicCardViewId.value = tb.viewId ?? '' }, { immediate: true })
+const scopeOpen = ref(false)
+function onScopeDone(viewIds: string[]) {
+  scopeOpen.value = false
+  invalidateAssets('job:induce_scope:done')   // 语义树「逻辑资产」分组刷新
+  if (viewIds.length) {
+    logicCardViewId.value = viewIds[0]!
+    logicCardOpen.value = true
+  }
+}
 const { t } = useI18n()
 const {
   FILE_BUDGET,
@@ -566,7 +579,7 @@ const {
       >
         <InformationCircleIcon class="w-5 h-5" />
       </button>
-      <!-- 逻辑视图资产卡入口：常驻(仅 kind='logic' 画布)，停靠资产卡 icon 正上方 -->
+      <!-- 逻辑入口·logic tab：打开既有逻辑资产卡(常驻，资产卡 icon 正上方) -->
       <button
         v-if="tab.kind === 'logic' && tab.viewId"
         class="absolute z-10 right-2 bottom-14 w-9 h-9 rounded-full border shadow-lg flex items-center justify-center transition-transform hover:scale-110"
@@ -578,9 +591,28 @@ const {
       >
         <ShareIcon class="w-5 h-5" />
       </button>
+      <!-- 逻辑入口·实现级图谱：发起范围逻辑解析(显示范围资产→提纲/直接确认→解析) -->
+      <button
+        v-else-if="tab.kind !== 'logic' && scopedNodes.length"
+        class="absolute z-10 right-2 bottom-14 w-9 h-9 rounded-full border shadow-lg flex items-center justify-center transition-transform hover:scale-110"
+        :class="[scopeOpen
+          ? 'border-ctp-mauve/60 bg-ctp-mauve/25 text-ctp-mauve'
+          : 'border-ctp-mauve/40 bg-ctp-mauve/15 text-ctp-mauve']"
+        :title="t('assetMgmt.logicViews.scopeEntry')"
+        @click="scopeOpen = true"
+      >
+        <SparklesIcon class="w-5 h-5" />
+      </button>
+      <LogicScopeModal
+        v-if="scopeOpen"
+        :nodes="scopedNodes"
+        :sel-id="selId"
+        @close="scopeOpen = false"
+        @done="onScopeDone"
+      />
       <LogicViewCard
-        v-if="tab.kind === 'logic' && tab.viewId && logicCardOpen"
-        :view-id="tab.viewId"
+        v-if="logicCardOpen && logicCardViewId"
+        :view-id="logicCardViewId"
         @close="logicCardOpen = false"
       />
       <!-- 关系矩阵浮窗：数据实时跟随当前图谱口径(聚焦/拓展/过滤)；点节点头回写选中全联动 -->
