@@ -15,6 +15,7 @@ import { useI18n } from 'vue-i18n'
 import type { GraphTabDef } from '../graphTypes'
 import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semantic-kind-style'
 import { useSgvWs } from '../key'
+import { bringCardToFront, isCardTop } from '../cardZ'
 
 const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string>; compNames?: Record<string, string> }>()
 /** 逻辑视图资产卡浮窗开合(本地态：仅 kind='logic' 画布有入口)。 */
@@ -182,12 +183,14 @@ const {
       <div
         v-if="sel && !cardMin"
         ref="cardEl"
-        class="card-root fixed z-40 flex flex-col max-w-[calc(100vw-1rem)] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl overflow-hidden"
+        class="card-root fixed flex flex-col max-w-[calc(100vw-1rem)] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl overflow-hidden"
         :class="[
+          isCardTop('asset') ? 'z-50' : 'z-40',   // 与逻辑资产卡点选互顶
           !cardPos ? 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2' : '',
           cardDragging ? 'cursor-grabbing' : '',
           cardResizing ? 'select-none' : '',
         ]"
+        @mousedown.capture="bringCardToFront('asset')"
         :style="{
           width: cardSize.w + 'px',
           // 卡片非代码文字随全局 UI 字号等比(--card-scale = 全局字号/16，与 --ui-scale 同步缩放)，

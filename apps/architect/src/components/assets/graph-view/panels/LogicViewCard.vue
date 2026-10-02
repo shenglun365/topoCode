@@ -3,12 +3,14 @@
        内容：视图名/概括/成员清单(点击选中画布节点)/AI 详细语义讲解(缓存+指纹失效联动)。 -->
   <div
     ref="cardEl"
-    class="card-root fixed z-40 flex flex-col max-w-[calc(100vw-1rem)] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl overflow-hidden"
+    class="card-root fixed flex flex-col max-w-[calc(100vw-1rem)] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl overflow-hidden"
     :class="[
+      isCardTop('logic') ? 'z-50' : 'z-40',   // 与代码资产卡点选互顶
       !cardPos ? 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2' : '',
       dragging ? 'cursor-grabbing' : '',
       resizing ? 'select-none' : '',
     ]"
+    @mousedown.capture="bringCardToFront('logic')"
     :style="{
       width: cardSize.w + 'px',
       ...(cardSize.h ? { height: cardSize.h + 'px' } : {}),
@@ -102,6 +104,7 @@ import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, ShareIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import { useSgvWs } from '../key'
+import { bringCardToFront, isCardTop } from '../cardZ'
 
 const props = defineProps<{ viewId: string }>()
 const emit = defineEmits<{ close: [] }>()
