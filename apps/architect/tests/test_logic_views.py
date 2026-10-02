@@ -170,3 +170,56 @@ def test_induce_chains_truncation_recovery(monkeypatch):
     chains, diag = LX.induce_chains("/tmp/x", impl, "workspace")
     assert chains == []
     assert "未返回 JSON" in diag
+
+
+class _ExplainReq:
+    def __init__(self, body=None):
+        self._b = body or {}
+
+    async def json(self):
+        return self._b
+
+
+def test_logic_view_explain_cache_and_invalidation(ctx, monkeypatch):
+    """AI 讲解三态：指纹一致缓存秒回 / 成员 srcHash 变化自动失效 / force 强制重生成。"""
+    import asyncio
+    from topoone_app_architect.sem import logic_induce as LI
+    pid = S.project_id_for("/tmp/x", None)
+    _mk_impl(pid, "impl-e1", "订单入口")
+    _mk_impl(pid, "impl-e2", "状态同步")
+    # 成员 srcHash 预置 h1
+    for aid in ("impl-e1", "impl-e2"):
+        store.SemanticAssetsStore.update(aid, {"srcHash": "h1"})
+    v = store.LogicViewsStore.create(pid, "下单链", ["impl-e1"], ["impl-e1", "impl-e2"],
+                                     summary="从下单到支付", source="extract")
+
+    calls = {"n": 0}
+
+    def fake_explain(view, assets, model_id=None):
+        calls["n"] += 1
+        return f"讲解v{calls['n']}(引用 订单入口 (impl-e1))"
+
+    monkeypatch.setattr(LI, "explain_view", fake_explain)
+
+    async def _call(body=None):
+        return await LV.api_logic_views_explain(v["id"], _ExplainReq(body))
+
+    # ① 首次：无缓存 → 生成并落库
+    r1 = asyncio.run(_call())
+    assert r1["data"]["cached"] is False and "讲解v1" in r1["data"]["detail"]
+    assert calls["n"] == 1
+    # ② 再次：成员未变 → 指纹一致 → 缓存秒回(不调 LLM)
+    r2 = asyncio.run(_call())
+    assert r2["data"]["cached"] is True and calls["n"] == 1
+    # ③ 成员 srcHash 变化(重提取) → 指纹失效 → 自动重生成
+    store.SemanticAssetsStore.update("impl-e2", {"srcHash": "h2"})
+    r3 = asyncio.run(_call())
+    assert r3["data"]["cached"] is False and "讲解v2" in r3["data"]["detail"]
+    assert calls["n"] == 2
+    # ④ force：缓存命中仍强制重生成
+    r4 = asyncio.run(_call({"force": True}))
+    assert r4["data"]["cached"] is False and "讲解v3" in r4["data"]["detail"]
+    assert calls["n"] == 3
+    # 讲解落库可查
+    got = store.LogicViewsStore.get(v["id"])
+    assert "讲解v3" in (got.get("detail") or "")

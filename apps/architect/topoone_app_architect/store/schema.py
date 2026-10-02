@@ -924,6 +924,10 @@ def _project_migrations(db) -> None:
         ("routes", "TEXT"),
         ("constants", "TEXT"),
     ])
+    _add_cols(db, "arch_logic_views", [
+        ("detail", "TEXT DEFAULT ''"),      # AI 详细语义讲解(Markdown, 手动触发缓存)
+        ("detail_fp", "TEXT DEFAULT ''"),   # 讲解指纹(成员资产 srcHash 聚合)——成员变化即失效
+    ])
 
 
 def init_architect_db(db) -> None:

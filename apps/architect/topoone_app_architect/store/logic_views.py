@@ -27,6 +27,11 @@ def fingerprint_of(name: str, member_ids: List[str]) -> str:
     return hashlib.sha1(f"{name}|{','.join(sorted(member_ids))}".encode()).hexdigest()[:24]
 
 
+def detail_fingerprint_of(members_src: List[str]) -> str:
+    """讲解缓存指纹：成员资产 srcHash(缺失去 '∅')排序聚合——成员集变化/内容变化即失效。"""
+    return hashlib.sha1("|".join(sorted(members_src)).encode()).hexdigest()[:24]
+
+
 class LogicViewsStore:
     """arch_logic_views CRUD。"""
 
@@ -55,7 +60,8 @@ class LogicViewsStore:
     @classmethod
     def update(cls, view_id: str, data: dict) -> Optional[dict]:
         payload = {k: v for k, v in data.items() if k in (
-            "name", "coreIds", "memberIds", "summary", "fingerprint")}
+            "name", "coreIds", "memberIds", "summary", "fingerprint",
+            "detail", "detailFp")}
         if not payload:
             return cls.get(view_id)
         payload["updatedAt"] = _now()

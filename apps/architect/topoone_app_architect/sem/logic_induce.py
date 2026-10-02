@@ -104,6 +104,26 @@ _PROMPT = """你是资深软件架构分析师。下面是一批实现级语义�
 {assets}"""
 
 
+def _pick_assets(assets: List[dict], cap: int = 400) -> List[dict]:
+    """归纳入题资产选择：关系密度优先 + 文件多样性(替代 search 的 updated_at 随机序截断)。
+
+    排序键 = (关系度数 desc, 文件路径 asc, 起始行 asc)：
+    - 度数 = detail.relations 出边+入边计数(O(n)，与 _edges_brief 同源)——
+      调用链枢纽(被多方调用的核心函数)必入题，孤立叶子让位；
+    - 同文件相邻 + 行号序 → LLM 组装同文件/跨文件链条更容易，结果稳定可复现。
+    """
+    deg: Dict[str, int] = {}
+    for a in assets:
+        aid = a.get("id") or ""
+        if aid:
+            deg[aid] = deg.get(aid, 0) + len((a.get("detail") or {}).get("relations") or [])
+    def _key(a: dict) -> tuple:
+        r0 = (a.get("astRefs") or [{}])[0] or {}
+        return (-deg.get(a.get("id") or "", 0),
+                str(r0.get("file") or ""), int(r0.get("startLine") or 0))
+    return sorted(assets, key=_key)[:cap]
+
+
 def _assets_brief(assets: List[dict]) -> str:
     lines: List[str] = []
     for a in assets[:200]:      # 探测深度：LLM 可见资产广度(原 60，files 口径数百条时链条跨文件组合受限)
@@ -202,8 +222,9 @@ def induce_chains(root: str, assets: List[dict], rev: str,
             sym = (r.get("symbol") or "").strip()
             if sym:
                 by_symbol.setdefault(sym, a)   # 符号名索引(prompt 主口径)
-    brief = _assets_brief(assets)
-    edges = _edges_brief(assets)
+    picked = _pick_assets(assets)          # 探测深度：度数优先选 400(替代原随机序截断)
+    brief = _assets_brief(picked)
+    edges = _edges_brief(picked)
     if edges:
         brief = brief + "\n\n资产间调用/依赖关系:\n" + edges
     prompt = _PROMPT.replace("{assets}", brief)
@@ -280,3 +301,37 @@ def _endpoints(raw_eps: Any, direction: str, by_symbol: Dict[str, dict],
                     "direction": direction,
                     "code": [anchor], "note": (ep.get("note") or "")[:200]})
     return out
+
+
+# ── 逻辑视图详细语义讲解(手动触发, 缓存+指纹失效联动) ───────────────
+
+_EXPLAIN_PROMPT = """你是资深软件架构分析师。下面是一条业务逻辑链(逻辑视图)的成员实现资产清单。
+请生成这条逻辑链的**详细语义讲解**，要求：
+
+1. 讲清楚这条链的业务职责、触发入口、数据如何流转、关键分支与外部 IO；
+2. 讲解必须**逐环节引用成员实现资产**，引用格式一律为「资产名 (资产ID)」——
+   例如：订单校验 (sa-d-i-p-16746) 负责入口过滤…；禁止只写名称不写 ID；
+3. 按处理顺序组织段落(Markdown)，成员间调用/依赖关系要显式说明；
+4. 只依据给出的资产事实，不臆造；结尾用 2-3 句总结这条链在系统中的位置。
+
+逻辑视图：{view} ({kind})
+已有概括：{summary}
+成员实现资产清单：
+{assets}
+"""
+
+
+def explain_view(view: dict, assets: List[dict], model_id: Optional[str] = None) -> str:
+    """逻辑视图详细语义讲解：结合成员实现资产(名称+ID 引用)的 LLM 讲解文本。"""
+    from ..agent.cognition.llm import llm_sync
+    from ..agent.cognition.roles import resolve_role_model
+    brief = _assets_brief(assets)
+    prompt = (_EXPLAIN_PROMPT
+              .replace("{view}", (view.get("name") or "")[:80])
+              .replace("{kind}", view.get("source") or "extract")
+              .replace("{summary}", (view.get("summary") or "暂无")[:500])
+              .replace("{assets}", brief))
+    res = llm_sync([{"role": "user", "content": prompt}],
+                   mode="chat",
+                   model_id=resolve_role_model("induce", model_id or ""))
+    return (((res or {}).get("content") or "").strip())[:6000]
