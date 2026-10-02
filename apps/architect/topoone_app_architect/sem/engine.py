@@ -1096,7 +1096,8 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
             if old is batch_seen.get(canonical_key):
                 _merge_high_details(payload, old)
             # LLM 改动语义命名但锚点不变 → 复用 id，仅记录 renamed 溯源。
-            old_name = old.get("name") or ""
+            # 清除重建快照命中(_cleared)不记：重归纳的命名漂移非用户改名(「改名自」困惑源)。
+            old_name = ("" if old.get("_cleared") else (old.get("name") or ""))
             if old_name and old_name != (a.get("name") or ""):
                 payload["renamedFrom"] = old_name
                 aliases = list(old.get("nameAlias") or []) if isinstance(old.get("nameAlias"), list) else []

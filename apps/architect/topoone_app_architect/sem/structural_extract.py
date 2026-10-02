@@ -111,8 +111,13 @@ def extract_structural(root: str, project: Optional[str], files: List[str],
         if not skeletons:
             continue
         try:
+            # srcHash=文件内容 md5(rev 视角)：change 语义(same/modified)的真实依据——
+            # 原填 rev 字符串恒等，清除重建后全部误判 same(「已覆盖」泛滥的根因)
+            from .incremental import _file_md5
+            _sh = _file_md5(rid, rel) if (not rev or rev == "workspace") \
+                else _rev_anchor_hash(rid, rel, rev)
             ctx = {"root": rid, "project": project, "source": "structural",
-                   "rev": rev, "files": [rel], "srcHash": rev, "table": {}}
+                   "rev": rev, "files": [rel], "srcHash": _sh or rev, "table": {}}
             if historical:
                 # rev 视角锚定：哈希取 rev 内容（磁盘已非该版本），否则 side 归属全错
                 ah = _rev_anchor_hash(rid, rel, rev)
@@ -203,9 +208,12 @@ def _job_extract_impl(ctx) -> dict:
         if skeletons:
             try:
                 from .engine import _save_assets
+                from .incremental import _file_md5
+                _sh2 = _file_md5(rid, rel) if (not rev or rev == "workspace") \
+                    else _rev_anchor_hash(rid, rel, rev)
                 sctx = {"root": rid, "project": sc.get("project"),
                         "source": "structural", "rev": rev,
-                        "files": [rel], "srcHash": rev, "table": {}}
+                        "files": [rel], "srcHash": _sh2 or rev, "table": {}}
                 if rev != "workspace" and not rev.startswith("baseline:"):
                     ah = _rev_anchor_hash(rid, rel, rev)
                     if ah:

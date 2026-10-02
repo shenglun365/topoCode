@@ -106,7 +106,7 @@ _PROMPT = """你是资深软件架构分析师。下面是一批实现级语义�
 
 def _assets_brief(assets: List[dict]) -> str:
     lines: List[str] = []
-    for a in assets[:60]:
+    for a in assets[:200]:      # 探测深度：LLM 可见资产广度(原 60，files 口径数百条时链条跨文件组合受限)
         d = a.get("detail") or {}
         refs = a.get("astRefs") or []
         f0 = (refs[0] or {}) if refs else {}
@@ -229,6 +229,7 @@ def induce_chains(root: str, assets: List[dict], rev: str,
             logger.warning("[logic] %s", diag)
     chains: List[dict] = []
     dropped = 0
+    degraded = 0
     for ch in raw[:12]:
         kind = ch.get("kind") if ch.get("kind") in LOGIC_KINDS else "process_chain"
         members: List[str] = []
@@ -238,9 +239,11 @@ def induce_chains(root: str, assets: List[dict], rev: str,
                 members.append(a["id"])
         inputs = _endpoints(ch.get("inputs"), "in", by_symbol, root, rev)
         outputs = _endpoints(ch.get("outputs"), "out", by_symbol, root, rev)
-        if not inputs and not outputs:
+        if not inputs and not outputs and len(members) < 2:
             dropped += 1
-            continue   # 无可锚定 IO 的链条不落库(纯文字链条=3-D 禁止形态)
+            continue   # 单成员且无可锚定 IO = 纯文字链条(3-D 禁止形态)
+        if not inputs and not outputs:
+            degraded += 1   # 多成员链条降级保留：成员=真实代码资产(锚定充分)，仅缺 IO 端点
         chains.append({
             "name": (ch.get("name") or kind)[:80], "kind": kind,
             "summary": (ch.get("summary") or "")[:400],
@@ -248,6 +251,8 @@ def induce_chains(root: str, assets: List[dict], rev: str,
         })
     if dropped:
         diag = (diag + "；" if diag else "") + f"{dropped} 条无 IO 锚点被过滤"
+    if degraded:
+        diag = (diag + "；" if diag else "") + f"{degraded} 条缺 IO 端点降级保留(成员锚定充分)"
     return chains, diag
 
 
@@ -255,7 +260,7 @@ def _endpoints(raw_eps: Any, direction: str, by_symbol: Dict[str, dict],
                root: str, rev: str) -> List[dict]:
     out: List[dict] = []
     for ep in (raw_eps or [])[:8]:
-        sym = ep.get("symbol") or ""
+        sym = (ep.get("symbol") or ep.get("name") or "").strip()   # name 兜底: LLM 可能把资产名放 name 字段
         a = by_symbol.get(sym)
         anchor: Optional[dict] = None
         if a is not None:
