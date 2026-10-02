@@ -107,34 +107,15 @@ async def api_logic_views_analyze(view_id: str, request: Request = None):
 
 @router.post("/kb/semantic/logic-views/{view_id}/explain")
 async def api_logic_views_explain(view_id: str, request: Request = None):
-    """AI 详细语义讲解(手动触发, 缓存+指纹失效联动)。
+    """AI 详细语义讲解(B3 统一入任务中心：提交 explain_logic 作业并等待完成)。
 
-    Body: {force?, modelId?, root?, project?}。缓存命中(指纹一致)秒回；
-    成员资产变化(重提取 srcHash 变/删除) → 指纹变 → 自动失效重生成；force 强制。
+    Body: {force?, modelId?, root?, project?}。缓存命中(指纹一致)作业内秒回；
+    成员资产变化 → 指纹失效自动重生成；force 强制。排队/运行任务中心可见。
     """
-    import json as _json
-    from ..store import LogicViewsStore, SemanticAssetsStore
-    from ..store.logic_views import detail_fingerprint_of
     body = await request.json() if request else {}
-    view = LogicViewsStore.get(view_id)
-    if not view:
-        return err(404, "视图不存在")
-    members: list = _json.loads(view.get("memberIds") or "[]")
-    rows = [SemanticAssetsStore.get(m) for m in members]
-    fp = detail_fingerprint_of([(r or {}).get("srcHash") or "∅" for r in rows])
-    cached = (view.get("detail") or "") and (view.get("detailFp") or "") == fp
-    if cached and not body.get("force"):
-        return ok({"viewId": view_id, "detail": view.get("detail"),
-                   "cached": True, "stale": False, "fingerprint": fp})
-    assets = [r for r in rows if r]
-    if not assets:
-        return err(400, "视图无可解析成员资产")
-    from ..sem.logic_induce import explain_view
-    def _run() -> str:
-        return explain_view(view, assets, body.get("modelId") or None)
-    detail = await asyncio.to_thread(_run)
-    if not detail:
-        return err(502, "讲解生成失败(LLM 未返回内容)")
-    LogicViewsStore.update(view_id, {"detail": detail, "detailFp": fp})
-    return ok({"viewId": view_id, "detail": detail,
-               "cached": False, "stale": False, "fingerprint": fp})
+    from ..sem.engine import wait_llm_job
+    return await wait_llm_job("explain_logic", {
+        "viewId": view_id, "force": bool(body.get("force")),
+        "modelId": body.get("modelId") or "",
+        "root": body.get("root"), "project": body.get("project")},
+        body.get("root"), body.get("project"))

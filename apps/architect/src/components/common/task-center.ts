@@ -29,6 +29,12 @@ export const KIND_LABEL: Record<string, string> = {
   enhance_desc: '描述增强',
   enhance_semantic: '语义增强',
   extract_logic: '逻辑视图归纳',
+  node_brief: '节点简介',
+  edge_notes: '关系描述',
+  line_notes: '逐行解读',
+  pseudo: '伪码解释',
+  asset_desc: '功能摘要',
+  explain_logic: '逻辑讲解',
   analyze_logic: '逻辑视图分析',
   gen_component_view: '组件聚合',
 }

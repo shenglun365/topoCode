@@ -2402,7 +2402,8 @@ def test_line_notes_endpoint_cached(tmp_path, monkeypatch):
                                      root=str(root), project=None, model_id=None))
     assert out["code"] == 0
     assert out["data"]["cached"] is True
-    assert out["data"]["notes"] == {6: "返回汇总金额"}
+    # job 化(B3)后 result 经 JSON 落库往返：键为字符串(FE 消费侧本就 Number(k) 归一)
+    assert {int(k): v for k, v in out["data"]["notes"].items()} == {6: "返回汇总金额"}
 
 
 def test_generate_line_notes_tool_round_whitelist(tmp_path, monkeypatch):

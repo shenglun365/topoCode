@@ -15,3 +15,5 @@ from . import logic_extract as _logic_extract  # noqa: E402,F401  (注册 extrac
 from . import component_view as _component_view  # noqa: E402,F401  (注册 gen_component_view)
 from . import scope_extract as _scope_extract  # noqa: E402,F401  (注册 extract_scope)
 from . import jobs_api as _jobs_api  # noqa: E402,F401  (jobs 列表/取消路由)
+from . import llm_jobs as _llm_jobs  # noqa: E402,F401  (轻解析作业注册 B3)
+_llm_jobs.register_all()

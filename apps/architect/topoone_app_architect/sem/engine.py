@@ -3042,8 +3042,9 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
 async def api_edge_notes(asset_id: str, root: Optional[str] = None, project: Optional[str] = None,
                          model_id: Optional[str] = None, force: bool = False):
     """资产出边的关系描述(证据式；落库 edge_notes 缓存，force 重生成)。"""
-    return ok(await asyncio.to_thread(
-        generate_edge_notes, asset_id, root, project, model_id, force))
+    return await wait_llm_job("edge_notes", {
+        "assetId": asset_id, "root": root, "project": project,
+        "modelId": model_id or "", "force": force}, root, project)
 
 
 # ── 存量资产描述批量增强(批 1-4 收编：job 行 + 统一调度器，原进程内 _ENHANCE 单例退役) ──
@@ -5120,33 +5121,64 @@ async def api_detail(asset_id: str, root: Optional[str] = None, project: Optiona
     return ok(a)
 
 
+async def wait_llm_job(kind: str, scope: dict, root: Optional[str] = None,
+                        project: Optional[str] = None, timeout_s: int = 300):
+    """轻解析统一入任务中心(B3)：提交 llm 作业 → 等待完成 → 透传 result。
+
+    HTTP 响应与原直调同构(FE 零改动)；排队/运行在任务中心浮窗可见；
+    同实体(assetId/viewId)活跃作业幂等复用。等待为线程轮询，不占 LLM 闸。"""
+    pid = project_id_for(root, project)
+    if not pid:
+        return err(400, "项目 root 解析失败")
+    r = job_runner.start_job(pid, kind, scope=scope, llm=True)
+    jid = ((r.get("job") or {}).get("id")) or ""
+    if not jid:
+        return err(500, f"作业提交失败: {r.get('reason')}")
+
+    def _wait() -> Optional[dict]:
+        t0 = time.time()
+        while time.time() - t0 < timeout_s:
+            j = store.SemanticJobsStore.get(jid)
+            if j and j.get("state") not in ("queued", "running"):
+                return j
+            time.sleep(0.4)
+        return None
+
+    j = await asyncio.to_thread(_wait)
+    if not j:
+        return err(504, "解析排队超时(任务中心可查)")
+    if j.get("state") != "done":
+        res = j.get("result") or {}
+        return err(500, str(res.get("summary") or res.get("error") or j.get("state")))
+    return ok(j.get("result") or {})
+
+
 @router.get("/kb/semantic/{asset_id}/pseudo")
 async def api_pseudo(asset_id: str, root: Optional[str] = None,
                      project: Optional[str] = None, model_id: Optional[str] = None,
                      force: bool = False):
     """查询时生成/返回资产关联代码的伪码级说明(有效生命周期内缓存)。"""
-    # LLM 同步调用 offload 到线程(P0：async 内禁阻塞事件循环)
-    return ok(await asyncio.to_thread(generate_pseudo, asset_id, root, project, model_id, force))
+    return await wait_llm_job("pseudo", {
+        "assetId": asset_id, "root": root, "project": project,
+        "modelId": model_id or "", "force": force}, root, project)
 
 
 @router.get("/kb/semantic/{asset_id}/desc")
 async def api_asset_desc(asset_id: str, root: Optional[str] = None,
                          project: Optional[str] = None, model_id: Optional[str] = None):
     """按需生成资产功能摘要(列表展开详情触发)；fresh 缓存直返，stale 重生成。"""
-    # LLM 同步调用 offload 到线程(同 api_pseudo)
-    return ok(await asyncio.to_thread(generate_desc, asset_id, root, project, model_id))
+    return await wait_llm_job("asset_desc", {
+        "assetId": asset_id, "root": root, "project": project,
+        "modelId": model_id or ""}, root, project)
 
 
 @router.get("/kb/semantic/{asset_id}/node-brief")
 async def api_node_brief(asset_id: str, root: Optional[str] = None, project: Optional[str] = None,
                          model_id: Optional[str] = None, force: bool = False):
     """资产节点简介(≤80 字代码级描述；fresh 命中缓存 / stale·force 重生成；失败降级原 desc)。"""
-    def _run():
-        a = store.SemanticAssetsStore.get(asset_id)
-        if not a:
-            return {"brief": "", "cached": False, "degraded": True, "error": "资产不存在"}
-        return generate_node_brief(a, root, project, model_id, force)
-    return ok(await asyncio.to_thread(_run))
+    return await wait_llm_job("node_brief", {
+        "assetId": asset_id, "root": root, "project": project,
+        "modelId": model_id or "", "force": force}, root, project)
 
 
 @router.get("/kb/semantic/{asset_id}/line-notes")
@@ -5155,8 +5187,10 @@ async def api_line_notes(asset_id: str, file: str, start: int, end: int,
                          model_id: Optional[str] = None, force: bool = False):
     """资产卡源码窗口关键行逐行用途说明(手动触发，落库缓存随资产生命周期)。
     force=True 跳过缓存读取，重新生成并覆盖原窗口缓存。"""
-    return ok(await asyncio.to_thread(
-        generate_line_notes, asset_id, file, start, end, root, project, model_id, force))
+    return await wait_llm_job("line_notes", {
+        "assetId": asset_id, "file": file, "start": start, "end": end,
+        "root": root, "project": project, "modelId": model_id or "", "force": force},
+        root, project)
 
 
 # ── 静态查询路由置底（A1-T2）：新增静态路径务必注册在 {asset_id} 之前 ──

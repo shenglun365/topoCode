@@ -11,6 +11,7 @@ _jobs dict 状态：作业行持久化于 arch_semantic_jobs（项目库），ha
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -34,6 +35,19 @@ _lock = threading.Lock()
 def register(kind: str, fn: Callable[["JobCtx"], dict]) -> None:
     """注册作业执行体（kind → handler）。"""
     _handlers[kind] = fn
+
+
+def _scope_digest(scope: Optional[dict]) -> str:
+    """幂等键的 scope 摘要：优先取实体键(assetId/viewId/file)——轻解析类作业
+    (node_brief 等)同 kind 不同资产须可并行；无实体键回退全 scope 稳定序列化。"""
+    sc = scope or {}
+    key = sc.get("assetId") or sc.get("viewId") or sc.get("file") or ""
+    if key:
+        return str(key)[:64]
+    try:
+        return json.dumps(sc, sort_keys=True, ensure_ascii=False)[:64]
+    except Exception:  # noqa: BLE001
+        return str(sc)[:64]
 
 
 class JobCtx:
@@ -95,9 +109,10 @@ def start_job(pid: str, kind: str, scope: Optional[dict] = None, *,
     if kind not in _handlers:
         return {"started": False, "reason": "unknown_kind"}
     recover(pid)
-    active = SemanticJobsStore.active(pid, kind)
-    if active:
-        return {"started": False, "reason": "already_running", "job": active[0]}
+    dg = _scope_digest(scope)
+    for j in SemanticJobsStore.active(pid, kind):
+        if _scope_digest(j.get("scope") or {}) == dg:
+            return {"started": False, "reason": "already_running", "job": j}
     job = SemanticJobsStore.create(pid, kind, scope, llm=llm,
                                    stages=stages, created_by=created_by)
     threading.Thread(target=_run_job, args=(job["id"],),
