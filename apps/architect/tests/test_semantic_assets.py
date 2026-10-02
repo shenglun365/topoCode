@@ -2771,3 +2771,37 @@ def test_unowned_no_symbol_source_maps_424(tmp_path, monkeypatch):
     assert body2["code"] == 424
     body3 = _run_coro(_sem_engine.api_unowned_files(root=None, project=None, limit=10))
     assert body3["code"] == 400, "无 root 属参数错误，不升级为 424"
+
+
+def test_batch_clear_rebuild_keeps_change_semantics(tmp_path, monkeypatch):
+    """清除重建快照：clear 后重提取，canonicalKey 命中 → 复活旧 id + change 语义
+    (same/modified)恢复，而非恒标 added(新增/修改状态尽失的回归守护)。"""
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for("/tmp/x", None)
+    asts = [{"kind": "asset", "level": "implementation", "name": "下单校验",
+             "desc": "d", "detail": {},
+             "astRefs": [{"file": "svc/a.py", "symbol": "validate", "startLine": 3, "endLine": 9}]}]
+    from topoone_app_architect.sem import engine as ENG
+    ctx = {"root": "/tmp/x", "project": None, "srcHash": "h1"}
+    first = ENG._save_assets(pid, "comm", "L0-0001", asts, ctx)
+    aid, ck = first[0]["id"], first[0].get("canonicalKey")
+    assert aid and ck
+    # 清除(files 口径) → 快照 + 物理删除
+    res = S.batch_manage("/tmp/x", None, "clear", files=["svc/a.py"])
+    assert aid in res["cleared"]
+    assert store.SemanticAssetsStore.get(aid) is None
+    assert ck in (ENG._REBUILD_SNAPSHOT.get(pid) or {})
+    # 重提取(内容相同 srcHash=h1) → 复活旧 id + change=same
+    again = ENG._save_assets(pid, "comm", "L0-0001", asts, ctx)
+    assert again[0]["id"] == aid
+    assert again[0]["change"] == "same"
+    # 再清除重提(srcHash 变化) → change=modified
+    S.batch_manage("/tmp/x", None, "clear", files=["svc/a.py"])
+    ctx2 = dict(ctx, srcHash="h2")
+    third = ENG._save_assets(pid, "comm", "L0-0001", asts, ctx2)
+    assert third[0]["id"] == aid
+    assert third[0]["change"] == "modified"
+    # 锚点漂移的新资产(不同 canonicalKey)仍为 added
+    drift = [dict(asts[0], astRefs=[{"file": "svc/a.py", "symbol": "other", "startLine": 1, "endLine": 2}])]
+    got = ENG._save_assets(pid, "comm", "L0-0001", drift, ctx2)
+    assert got[0]["change"] == "added" and got[0]["id"] != aid

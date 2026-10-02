@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 # ═══ queries（原第 queries 段，纯移动）═══
 _RECONCILE_AT: Dict[str, float] = {}
+# 清除重建快照(pid → canonicalKey → 被清行)：物理删除前暂存，重提取落库时
+# 按 canonicalKey 对齐复活旧 id + 恢复 change 语义(same/modified)——否则
+# 清除重建后全部资产行恒标 added，「新增/修改」状态语义尽失。进程内暂存，
+# BE 重启即退化(可接受)；新一轮清除覆盖旧快照。
+_REBUILD_SNAPSHOT: Dict[str, Dict[str, dict]] = {}
 _RECONCILE_INTERVAL = 30.0  # 秒
 
 
@@ -987,6 +992,11 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
         by_name.setdefault(a.get("name") or "", a)
         if a.get("id"):
             by_id_all[a["id"]] = a
+    for _ck, _row in (_REBUILD_SNAPSHOT.get(project_id) or {}).items():
+        # 清除重建快照：行已物理删(不在 existing/by_id_all)，落库命中时复活旧 id。
+        # _cleared 标记区分 batch_seen/本批新建行(其 id 不在 by_id_all 但在库中)。
+        if _ck and _ck not in by_key and (_row.get("id") or "") not in by_id_all:
+            by_key[_ck] = dict(_row, _cleared=True)
     # 文件 → 归属组件(跨 INCLUDE/CALL 两套口径)。组件仅是下游投影，不参与身份。
     file_to_comps: Dict[str, List[str]] = {}
     if any(a.get("astRefs") for a in assets):
@@ -1103,7 +1113,11 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
                 merged = sorted(set(old_scopes) | set(membership))
                 old_meta["scopes"] = merged
                 payload["meta"] = old_meta
-            store.SemanticAssetsStore.update(old["id"], payload)
+            if old.get("_cleared"):
+                # 清除重建快照命中的行已被物理删除 → 按旧 id 重建(change 语义已恢复)
+                store.SemanticAssetsStore.create(payload)
+            else:
+                store.SemanticAssetsStore.update(old["id"], payload)
         else:
             lvl = a.get("level") or "logic"
             payload["id"] = store.next_id(_id_prefix(lvl, a["kind"]))
@@ -3689,6 +3703,14 @@ def batch_manage(root: Optional[str], project: Optional[str],
                     "updated": [], "dryRun": True, "impact": impact}
         if targets:
             try:
+                snap: Dict[str, dict] = {}
+                for _aid in targets:
+                    _row = store.SemanticAssetsStore.get(_aid)
+                    _ck = (_row or {}).get("canonicalKey") or ""
+                    if _ck:
+                        snap[_ck] = _row          # 快照先于物理删除(供重提取对齐复活)
+                if snap:
+                    _REBUILD_SNAPSHOT[pid] = snap
                 for i in range(0, len(targets), 500):
                     store.SemanticAssetsStore.purge(pid, targets[i:i + 500])
                 try:

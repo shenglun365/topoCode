@@ -91,7 +91,7 @@ _PROMPT = """你是资深软件架构分析师。下面是一批实现级语义�
 1. 只依据给出的实现级事实归纳，不臆造；
 2. 每条链条标注类型: process_chain(主处理链) | validation_chain(校验链) | aggregation_chain(聚合链) | orchestration_chain(编排链)；
 3. 每条链条给出 inputs/outputs —— 每个端点必须有 code 引用(引用实现级资产的符号名与文件，禁止纯文字描述)；
-4. members 列出该链条由哪些实现级资产(符号名)组成。
+4. members 列出该链条由哪些实现级资产组成，用清单中的「资产名」或「符号」原文引用；跨文件/跨组件的完整链条通常 ≥2 个成员。
 
 输出 JSON(不要多余文本)：
 {"chains":[{"name":"链条名","kind":"process_chain","summary":"一句话",
@@ -195,8 +195,13 @@ def induce_chains(root: str, assets: List[dict], rev: str,
     from ..agent.cognition.llm import llm_sync
     by_symbol: Dict[str, dict] = {}
     for a in assets:
+        nm = (a.get("name") or "").strip()
+        if nm:
+            by_symbol.setdefault(nm, a)   # LLM 常以清单行首的资产名引用成员
         for r in (a.get("astRefs") or []):
-            by_symbol[(r.get("symbol") or r.get("name") or "")] = a
+            sym = (r.get("symbol") or "").strip()
+            if sym:
+                by_symbol.setdefault(sym, a)   # 符号名索引(prompt 主口径)
     brief = _assets_brief(assets)
     edges = _edges_brief(assets)
     if edges:
