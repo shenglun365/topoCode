@@ -145,9 +145,58 @@ def _edges_brief(assets: List[dict]) -> str:
     return "\n".join(lines[:120])
 
 
+def _recover_chains(content: str) -> List[dict]:
+    """截断恢复：自 `"chains"` 数组逐个抽取**花括号平衡的完整对象**独立解析。
+
+    输出触碰 maxTokens 上限被截断时整体 json.loads 必败；逐条恢复可救回
+    截断点之前的完整链条(尾部残条自然丢弃——宁缺勿错)。
+    """
+    i = content.find('"chains"')
+    if i < 0:
+        return []
+    j = content.find("[", i)
+    if j < 0:
+        return []
+    out: List[dict] = []
+    depth, start = 0, -1
+    in_str = esc = False
+    for k in range(j + 1, len(content)):
+        c = content[k]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == chr(92):
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            if depth == 0:
+                start = k
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0 and start >= 0:
+                try:
+                    out.append(json.loads(content[start:k + 1]))
+                except Exception:
+                    return out   # 首个坏对象即止(其后更不可信)
+                start = -1
+        elif c == "]" and depth == 0:
+            break
+    return out
+
+
 def induce_chains(root: str, assets: List[dict], rev: str,
-                  model_id: Optional[str] = None) -> List[dict]:
+                  model_id: Optional[str] = None) -> tuple:
     """LLM 归纳链条 → 结构化(成员实现级资产对齐 + IO 锚点构造+校验)。
+
+    返回 (chains, diag)：diag 为空=完全正常；非空=降级/过滤诊断(透传作业
+    result，消除「候选 0」不可排查问题)。
+    max_tokens 不写死——回退 arch_collab_config 偏好 → 主后端模型配置
+    (禁止代码写死 maxtoken 的既有裁决；写死 4000 曾致输出截断候选恒 0)。
 
     锚点解析失败的端点：尝试按 symbol 在成员资产 astRefs 中对齐重建；仍失败则
     丢弃该端点(宁缺勿错——3-D「不能以文字代替代码」)。
@@ -163,19 +212,28 @@ def induce_chains(root: str, assets: List[dict], rev: str,
         brief = brief + "\n\n资产间调用/依赖关系:\n" + edges
     prompt = _PROMPT.replace("{assets}", brief)
     res = llm_sync([{"role": "user", "content": prompt}],
-                   mode="chat", model_id=model_id, max_tokens=4000)
+                   mode="chat", model_id=model_id)
     content = ((res or {}).get("content") or "").strip()
+    raw: List[dict] = []
+    diag = ""
     m = re.search(r"\{.*\}", content, re.S)
-    if not m:
-        logger.warning("[logic] LLM 未返回 JSON")
-        return []
-    try:
-        data = json.loads(m.group(0))
-    except Exception:
-        logger.warning("[logic] LLM JSON 解析失败")
-        return []
+    if m:
+        try:
+            raw = list(json.loads(m.group(0)).get("chains") or [])
+        except Exception:
+            raw = []
+    if not raw:
+        if not m:
+            diag = f"LLM 未返回 JSON(content {len(content)} 字符)"
+            logger.warning("[logic] %s", diag)
+        else:
+            raw = _recover_chains(content)
+            diag = (f"JSON 截断，恢复 {len(raw)} 条完整链条(尾部残条丢弃)"
+                    if raw else "JSON 解析失败且截断恢复未救回任何链条")
+            logger.warning("[logic] %s", diag)
     chains: List[dict] = []
-    for ch in (data.get("chains") or [])[:12]:
+    dropped = 0
+    for ch in raw[:12]:
         kind = ch.get("kind") if ch.get("kind") in LOGIC_KINDS else "process_chain"
         members: List[str] = []
         for sym in (ch.get("members") or []):
@@ -185,13 +243,16 @@ def induce_chains(root: str, assets: List[dict], rev: str,
         inputs = _endpoints(ch.get("inputs"), "in", by_symbol, root, rev)
         outputs = _endpoints(ch.get("outputs"), "out", by_symbol, root, rev)
         if not inputs and not outputs:
+            dropped += 1
             continue   # 无可锚定 IO 的链条不落库(纯文字链条=3-D 禁止形态)
         chains.append({
             "name": (ch.get("name") or kind)[:80], "kind": kind,
             "summary": (ch.get("summary") or "")[:400],
             "inputs": inputs, "outputs": outputs, "members": members,
         })
-    return chains
+    if dropped:
+        diag = (diag + "；" if diag else "") + f"{dropped} 条无 IO 锚点被过滤"
+    return chains, diag
 
 
 def _endpoints(raw_eps: Any, direction: str, by_symbol: Dict[str, dict],
@@ -262,7 +323,7 @@ def _job_extract_logic(ctx) -> dict:
 
     # stage 1: LLM 链条归纳 → 逻辑视图(非资产行)
     ctx.progress(total=1, done=0, stage=1)
-    chains = induce_chains(rid, impl, rev, model_id)
+    chains, diag = induce_chains(rid, impl, rev, model_id)
     from ..store import LogicViewsStore
     from ..store.logic_views import fingerprint_of
     saved_ids: List[str] = []
@@ -282,8 +343,11 @@ def _job_extract_logic(ctx) -> dict:
                 pid, ch.get("name") or "", members, members,
                 summary=ch.get("summary") or "", source="extract")
             saved_ids.append(view["id"])
-    return {"saved": len(saved_ids), "ids": saved_ids[:20],
-            "summary": f"逻辑视图 {len(saved_ids)} 条(候选 {len(chains)})"}
+    summary = f"逻辑视图 {len(saved_ids)} 条(候选 {len(chains)})"
+    if diag:
+        summary += f"；{diag}"
+    return {"saved": len(saved_ids), "ids": saved_ids[:20], "diag": diag,
+            "summary": summary}
 
 
 from . import job_runner as _job_runner  # noqa: E402
@@ -335,7 +399,7 @@ def summarize_members(assets: List[dict], model_id: Optional[str] = None) -> str
         "1) 这条链的业务职责(系统在做什么)；2) 处理流程(从哪开始、经哪些环节、到哪结束)；"
         "\n3) 关键依赖与外部 IO。直接输出概括文字，不要列表编号。\n\n" + brief)
     res = llm_sync([{"role": "user", "content": prompt}],
-                   mode="chat", model_id=model_id, max_tokens=800)
+                   mode="chat", model_id=model_id)
     return (((res or {}).get("content") or "").strip())[:600]
 
 

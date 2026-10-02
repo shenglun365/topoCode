@@ -72,10 +72,10 @@ def test_extract_logic_saves_views_not_assets(ctx, monkeypatch):
     for i in range(3):
         _mk_impl(pid, f"impl-{i}", f"资产{i}")
     monkeypatch.setattr(LX, "induce_chains",
-                        lambda root, assets, rev, model_id=None: [
+                        lambda root, assets, rev, model_id=None: ([
                             {"name": "下单链", "kind": "process_chain",
                              "summary": "从下单到支付", "members": ["impl-0", "impl-1"],
-                             "inputs": [], "outputs": []}])
+                             "inputs": [], "outputs": []}], ""))
     job_ctx = _job_ctx({"root": "/tmp/x", "files": [], "rev": "workspace",
                         "skipImpl": True})
     r = LX._job_extract_logic(job_ctx)
@@ -131,3 +131,41 @@ def _job_ctx(scope):
         def cancelled(self):
             return False
     return _Ctx(scope)
+
+
+def test_induce_chains_truncation_recovery(monkeypatch):
+    """输出触碰 maxTokens 截断：整体 parse 必败 → 逐条恢复救回完整链条 + diag 透传。"""
+    impl = [{"id": f"impl-{i}", "kind": "asset", "name": f"资产{i}", "desc": "",
+             "detail": {}, "astRefs": [{"file": "a.py", "symbol": f"sym{i}"}]}
+            for i in range(4)]
+
+    def good(ep_sym):
+        return {"name": ep_sym, "symbol": ep_sym, "file": "a.py"}
+
+    # 2 条完整 + 第 3 条截断(无闭合)——历史事故形态
+    truncated = ('前言 {"chains": ['
+                 + json.dumps({"name": "链A", "kind": "process_chain", "summary": "s",
+                               "members": ["sym0", "sym1"],
+                               "inputs": [good("sym0")], "outputs": [good("sym1")]},
+                              ensure_ascii=False)
+                 + ", "
+                 + json.dumps({"name": "链B", "kind": "validation_chain", "summary": "s",
+                               "members": ["sym2"],
+                               "inputs": [good("sym2")], "outputs": []},
+                              ensure_ascii=False)
+                 + ', {"name": "链C", "summary": "残')
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                        lambda msgs, **kw: {"content": truncated})
+    monkeypatch.setattr(LX, "build_code_anchor",
+                        lambda root, ref, rev, lang="": {"file": ref.get("file")})
+    chains, diag = LX.induce_chains("/tmp/x", impl, "workspace")
+    assert [c["name"] for c in chains] == ["链A", "链B"]
+    assert chains[0]["members"] == ["impl-0", "impl-1"]
+    assert "截断" in diag and "恢复 2 条" in diag
+
+    # 完全无 JSON → diag 指明且不抛
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                        lambda msgs, **kw: {"content": "模型闲聊没有结构化输出"})
+    chains, diag = LX.induce_chains("/tmp/x", impl, "workspace")
+    assert chains == []
+    assert "未返回 JSON" in diag

@@ -172,7 +172,7 @@ def _job_gen_component_view(ctx) -> dict:
         prompt = _PROMPT.replace("{comp}", comp.get("name") or cid).replace(
             "{assets}", "\n".join(brief_lines))
         res = llm_sync([{"role": "user", "content": prompt}],
-                       mode="chat", model_id=sc.get("modelId") or None, max_tokens=4000)
+                       mode="chat", model_id=sc.get("modelId") or None)
         content = ((res or {}).get("content") or "").strip()
         m = re.search(r"\{.*\}", content, re.S)
         if not m:
