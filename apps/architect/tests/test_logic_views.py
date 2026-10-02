@@ -267,3 +267,28 @@ def test_induce_scope_creates_views(ctx, monkeypatch):
     assert v["summary"] == "概括文本"
     assert json.loads(v["memberIds"]) == ["impl-g0", "impl-g1", "impl-g2"]
     assert v["detailFp"]
+
+
+def test_induce_chains_endpoint_fallback_by_members(monkeypatch, tmp_path):
+    """LLM 端点全幻觉(symbol/file 全错) → 成员锚点兜底：首成员入/尾成员出，
+    链条保留且带真实代码锚(不再整链丢弃——输出质量波动根治)。"""
+    (tmp_path / "svc.py").write_text("def alpha():\n    pass\n\ndef beta():\n    pass\n")
+    impl = [{"id": "impl-f1", "kind": "asset", "name": "下单", "desc": "", "detail": {},
+             "astRefs": [{"file": "svc.py", "symbol": "alpha", "startLine": 1, "endLine": 1}]},
+            {"id": "impl-f2", "kind": "asset", "name": "支付", "desc": "", "detail": {},
+             "astRefs": [{"file": "svc.py", "symbol": "beta", "startLine": 4, "endLine": 5}]}]
+    # LLM 返回: 成员对(名称双索引)但端点 symbol/file 全错 → _endpoints 全空
+    bad = ('{"chains": [{"name": "交易链", "kind": "process_chain", "summary": "s",'
+           ' "members": ["下单", "支付"],'
+           ' "inputs": [{"symbol": "不存在", "file": "幻觉路径.ts", "line": 9}],'
+           ' "outputs": [{"symbol": "也没有", "file": "another.ts"}]}]}')
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                        lambda msgs, **kw: {"content": bad})
+    chains, diag = LX.induce_chains(str(tmp_path), impl, "workspace")
+    assert len(chains) == 1, (chains, diag)
+    c = chains[0]
+    assert c["members"] == ["impl-f1", "impl-f2"]
+    assert c["inputs"] and c["inputs"][0]["code"], "首成员入锚兜底"
+    assert c["outputs"] and c["outputs"][0]["code"], "尾成员出锚兜底"
+    assert c["inputs"][0]["code"][0]["file"] == "svc.py"
+    assert "被过滤" not in diag

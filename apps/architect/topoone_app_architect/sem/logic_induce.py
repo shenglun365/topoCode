@@ -261,11 +261,29 @@ def induce_chains(root: str, assets: List[dict], rev: str,
                 members.append(a["id"])
         inputs = _endpoints(ch.get("inputs"), "in", by_symbol, root, rev)
         outputs = _endpoints(ch.get("outputs"), "out", by_symbol, root, rev)
+        # 端点解析失败兜底：LLM 偶发把 inputs/outputs 的 symbol/file 全写错(输出质量
+        # 波动,同输入时好时坏)→ 整链锚点尽失被丢弃。用成员资产的真实代码锚补齐
+        # 缺失侧(首成员=入,尾成员=出)——链条保持代码锚定(3-D)，不再赌 LLM 端点质量。
+        if members:
+            by_id = {a.get("id"): a for a in assets}
+            def _member_anchor(mid: str, direction: str) -> list:
+                a = by_id.get(mid)
+                for r in (a.get("astRefs") or []):
+                    an = build_code_anchor(root, r, rev)
+                    if an:
+                        return [{"id": f"io-fb-{direction}", "name": (a.get("name") or mid)[:60],
+                                 "direction": direction, "code": [an],
+                                 "note": "成员锚点兜底(LLM 端点未解析)"}]
+                return []
+            if not inputs:
+                inputs = _member_anchor(members[0], "in")
+            if not outputs:
+                outputs = _member_anchor(members[-1], "out")
         if not inputs and not outputs and len(members) < 2:
             dropped += 1
-            continue   # 单成员且无可锚定 IO = 纯文字链条(3-D 禁止形态)
+            continue   # 无成员且无可锚定 IO = 纯文字链条(3-D 禁止形态)
         if not inputs and not outputs:
-            degraded += 1   # 多成员链条降级保留：成员=真实代码资产(锚定充分)，仅缺 IO 端点
+            degraded += 1   # 极端兜底后仍无锚(成员行号/文件均不可读)降级保留
         chains.append({
             "name": (ch.get("name") or kind)[:80], "kind": kind,
             "summary": (ch.get("summary") or "")[:400],
