@@ -12,9 +12,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("arch.cognition.llm")
+
+# llm_sync 全局串行闸门(用户裁决并发=1)：所有调用方(HTTP 端点内嵌解析/作业线程/
+# 会话)统一过闸 FIFO 排队——治「资产卡连点 → 多路解析并发拥堵打满 LLM 后端」。
+# 与 job_runner._SEM_LLM 嵌套方向单一(job→sync，无反向)，无死锁。
+_SYNC_GATE = threading.Semaphore(1)
 
 _MODEL_KEY = "llm.modelId"
 _MAX_TOKENS_KEY = "llm.maxTokens"
@@ -222,7 +228,8 @@ def llm_sync(messages: List[Dict[str, str]],
             body["tools"] = tools
         if output_schema:
             body["outputSchema"] = output_schema
-        res = gateway.call("llm.sync", timeout=_LLM_CALL_TIMEOUT, **body)
+        with _SYNC_GATE:
+            res = gateway.call("llm.sync", timeout=_LLM_CALL_TIMEOUT, **body)
         try:
             from ..reflection import dataset as _lds
             _ok = isinstance(res, dict)

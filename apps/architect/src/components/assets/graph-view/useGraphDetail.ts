@@ -215,8 +215,15 @@ function jumpToRelation(r: { targetId: string }) {
   selId.value = r.targetId
 }
 
+// per-asset 取消器：切换资产时中止未决的 LLM 解析请求(nodeBrief/edgeNotes)
+// ——连点下不再白烧配额/加剧闸门排队(B2)。
+let detailAbort: AbortController | null = null
+
 // 选中详情到达 → 节点简介(缺失则懒生成) + 关系描述(有关系才生成)
 watch(selDetail, async (d) => {
+  detailAbort?.abort()
+  detailAbort = new AbortController()
+  const sig = detailAbort.signal
   nodeBriefText.value = ''
   edgeNotesMap.value = {}
   D.code.relTabSegs.value = {}   // 切换资产 → 关系 tab 预览缓存失效
@@ -233,7 +240,8 @@ watch(selDetail, async (d) => {
   } else {
     nodeBriefLoading.value = true
     try {
-      const r = await semanticAssetService.nodeBrief(d.id)
+      const r = await semanticAssetService.nodeBrief(d.id, false, sig).catch(() => null)
+      if (!r) return   // 已切换资产(abort) → 丢弃
       nodeBriefText.value = r.degraded ? '' : (r.brief || '')
     } catch { /* 降级显示原 desc */ } finally {
       nodeBriefLoading.value = false
@@ -242,7 +250,8 @@ watch(selDetail, async (d) => {
   if ((d.detail?.relations ?? []).length) {
     edgeNotesLoading.value = true
     try {
-      const r = await semanticAssetService.edgeNotes(d.id)
+      const r = await semanticAssetService.edgeNotes(d.id, false, sig).catch(() => null)
+      if (!r) return   // 已切换资产(abort) → 丢弃
       edgeNotesMap.value = r.notes || {}
     } catch { /* 关系描述降级显示 semantic/type */ } finally {
       edgeNotesLoading.value = false

@@ -688,12 +688,12 @@ export const semanticAssetService = {
   },
 
   /** 资产节点简介(≤80 字代码级描述；fresh 命中缓存 / stale·force 重生成；失败降级原 desc)。 */
-  async nodeBrief(assetId: string, force = false): Promise<{ brief: string; cached: boolean; degraded: boolean }> {
-    return apiGet(`/kb/semantic/${assetId}/node-brief${qsWith(force ? 'force=true' : '')}`)
+  async nodeBrief(assetId: string, force = false, signal?: AbortSignal): Promise<{ brief: string; cached: boolean; degraded: boolean }> {
+    return apiGet(`/kb/semantic/${assetId}/node-brief${qsWith(force ? 'force=true' : '')}`, signal)
   },
 
   /** 资产出边关系描述(证据式；edge_notes 缓存，force 重生成)。 */
-  async edgeNotes(assetId: string, force = false): Promise<{ notes: Record<string, string>; cached: boolean; degraded: boolean }> {
+  async edgeNotes(assetId: string, force = false, signal?: AbortSignal): Promise<{ notes: Record<string, string>; cached: boolean; degraded: boolean }> {
     return apiGet(`/kb/semantic/${assetId}/edge-notes${qsWith(force ? 'force=true' : '')}`)
   },
 

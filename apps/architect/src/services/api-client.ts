@@ -34,8 +34,8 @@ export function getToken(): string {
   return readToken()
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, { headers: authHeaders() })
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, { headers: authHeaders(), signal })
   const body = await resp.json()
   if (body.code !== 0) throw new Error(body.message || `API error: ${path}`)
   return body.data as T
