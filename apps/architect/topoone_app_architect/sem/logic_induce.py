@@ -238,9 +238,23 @@ def induce_chains(root: str, assets: List[dict], rev: str,
     且丢弃多(可用<3 且丢弃≥3)时自动重采样一次，取可用数较多的一轮——
     不再让一次坏采样直接产出「0-1 条」的退化结果。
     """
-    from ..agent.cognition.llm import llm_sync
+    from ..agent.cognition.llm import llm_sync, resolve_context_budget
     by_symbol, by_norm = _member_index(assets)
     picked = _pick_assets(assets)          # 探测深度：度数优先选 400(替代原随机序截断)
+
+    # 上下文预算自适应：31k chars 清单塞 8k 窗模型 = 爆窗→LM Studio 非确定截断
+    # → 清单残缺成员名全 miss + 输出截断(实测 2026-10-02 六次同输入好坏随机)。
+    # 按探测窗口裁剪 picked(度数优先序保核心枢纽)，清单恒在窗内——小窗模型
+    # 归纳范围变浅但稳定可出链；大窗模型(262k)自动全量。
+    budget = resolve_context_budget(None, model_id or "") or 0
+    if budget > 0:
+        max_brief = max(2000, int(budget * 0.85) - 600)   # 600=题头+关系边预留(chars≈tok)
+        for _ in range(12):
+            brief = _assets_brief(picked)
+            edges = _edges_brief(picked)
+            if len(brief) + len(edges) <= max_brief or len(picked) <= 40:
+                break
+            picked = picked[:max(40, int(len(picked) * 0.7))]   # 逐次收缩 30%
     brief = _assets_brief(picked)
     edges = _edges_brief(picked)
     if edges:

@@ -332,3 +332,29 @@ def test_induce_resample_on_bad_output(monkeypatch, tmp_path):
     assert calls["n"] == 2, "坏采样(丢弃≥3)应触发重采样"
     assert [c["name"] for c in chains] == ["真链"]
     assert diag == ""   # 终态取优轮(好采样)诊断——坏轮的未匹配诊断不带入
+
+
+def test_induce_context_budget_trims_brief(monkeypatch, tmp_path):
+    """上下文预算自适应：小窗(8k)模型 → 清单按预算裁剪(度数优先保核心)，
+    prompt 恒在窗内——爆窗非确定截断(成员名全 miss)根治。大窗/不可探测不裁。"""
+    (tmp_path / "svc.py").write_text("def s0():\n    pass\n")
+    impl = [{"id": f"impl-b{i}", "kind": "asset", "name": f"预算裁剪测试资产编号{i}",
+             "desc": "", "detail": {},
+             "astRefs": [{"file": "svc.py", "symbol": f"sym{i}", "startLine": 1, "endLine": 1}]}
+            for i in range(300)]   # 300 资产 ≈ 清单远超小预算
+    prompts = []
+    def fake_llm(msgs, **kw):
+        prompts.append(msgs[0]["content"])
+        return {"content": '{"chains": []}'}
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync", fake_llm)
+    # 小预算(8k 窗探测值)：清单必须被裁到 ~2.8k chars 内
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.resolve_context_budget",
+                        lambda explicit, model_id: 4096)
+    LX.induce_chains(str(tmp_path), impl, "workspace")
+    assert len(prompts[-1]) < 4500, f"小预算下 prompt 未裁剪: {len(prompts[-1])}"
+    # 不可探测(None)：不裁剪(全量 300 资产入题)
+    prompts.clear()
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.resolve_context_budget",
+                        lambda explicit, model_id: None)
+    LX.induce_chains(str(tmp_path), impl, "workspace")
+    assert len(prompts[-1]) > 9000, "不可探测时不应按预算裁剪清单(全量入题)"
