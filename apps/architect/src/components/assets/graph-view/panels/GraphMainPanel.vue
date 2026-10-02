@@ -7,6 +7,7 @@ import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, Information
 import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
+import LogicViewCard from './LogicViewCard.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
 
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
@@ -561,6 +562,21 @@ const {
       >
         <InformationCircleIcon class="w-5 h-5" />
       </button>
+      <!-- 逻辑视图资产卡入口：常驻(仅 kind='logic' 画布)，停靠资产卡 icon 正上方 -->
+      <button
+        v-if="tab.kind === 'logic' && tab.viewId"
+        class="absolute z-10 right-2 bottom-14 w-9 h-9 rounded-full border shadow-lg flex items-center justify-center transition-transform hover:scale-110"
+        :class="[logicCardOpen ? 'border-ctp-mauve/60 bg-ctp-mauve/20 text-ctp-mauve' : 'border-ctp-surface1 bg-ctp-mantle text-ctp-subtext1']"
+        :title="t('assetMgmt.logicViews.cardTitle')"
+        @click="logicCardOpen = !logicCardOpen"
+      >
+        <DocumentTextIcon class="w-5 h-5" />
+      </button>
+      <LogicViewCard
+        v-if="tab.kind === 'logic' && tab.viewId && logicCardOpen"
+        :view-id="tab.viewId"
+        @close="logicCardOpen = false"
+      />
       <!-- 关系矩阵浮窗：数据实时跟随当前图谱口径(聚焦/拓展/过滤)；点节点头回写选中全联动 -->
       <GraphMatrixWindow
         v-if="matrixOpen"
