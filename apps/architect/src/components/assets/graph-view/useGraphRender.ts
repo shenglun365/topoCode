@@ -472,7 +472,7 @@ function applyDiffNodeStyles() {
   svg.querySelectorAll('.td-node-signal').forEach((el) => el.remove())
   if (!D.data.diffKindById.value.size) return
   const rootPrefix = svg.id ? `${svg.id}-` : ''
-  // 桶样式+信号点落组：统一浅橘黄底(weak 更浅) + 右上信号点(绿=含新增/红=含删除)。
+  // 桶样式+信号点落组：统一浅橘黄底(weak 更浅) + 左上内侧纯色信号点(绿=含新增/红=含删除)。
   const applyNodeSignal = (el: Element, bucket: DiffBucket,
                            sig?: { hasAdded: boolean; hasDeleted: boolean }): void => {
     el.classList.add(`td-node-diff-${bucket}`)
@@ -484,7 +484,7 @@ function applyDiffNodeStyles() {
       shape.style.removeProperty('stroke-dasharray')
     }
     if (!sig || (!sig.hasAdded && !sig.hasDeleted)) return
-    // 右上信号点：组 bbox 右上角注入(双信号绿左红右横排；mantle 描边保证任意底色可读)
+    // 左上信号点：组 bbox 左上内侧注入纯色圆点(双信号绿左红右横排，无描边)
     try {
       const bb = (el as SVGGElement).getBBox()
       const NS = 'http://www.w3.org/2000/svg'
@@ -494,20 +494,18 @@ function applyDiffNodeStyles() {
         c.setAttribute('cy', String(cy))
         c.setAttribute('r', '4')
         c.setAttribute('fill', fill)
-        c.setAttribute('stroke', '#1e1e2e')
-        c.setAttribute('stroke-width', '1')
         c.setAttribute('class', 'td-node-signal')
         c.setAttribute('pointer-events', 'none')
         return c
       }
       const y = bb.y + 5
       if (sig.hasAdded && sig.hasDeleted) {
-        el.appendChild(mkDot(bb.x + bb.width - 11, y, SIGNAL_GREEN))
-        el.appendChild(mkDot(bb.x + bb.width - 3, y, SIGNAL_RED))
+        el.appendChild(mkDot(bb.x + 3, y, SIGNAL_GREEN))
+        el.appendChild(mkDot(bb.x + 11, y, SIGNAL_RED))
       } else if (sig.hasAdded) {
-        el.appendChild(mkDot(bb.x + bb.width - 3, y, SIGNAL_GREEN))
+        el.appendChild(mkDot(bb.x + 3, y, SIGNAL_GREEN))
       } else {
-        el.appendChild(mkDot(bb.x + bb.width - 3, y, SIGNAL_RED))
+        el.appendChild(mkDot(bb.x + 3, y, SIGNAL_RED))
       }
     } catch { /* bbox 不可得时静默跳过信号点 */ }
   }

@@ -322,12 +322,12 @@ function exportGraph(): void {
               <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffTotals.weak }}</span>
             </div>
             <div class="flex items-center gap-1.5 text-[11px]">
-              <span class="w-2 h-2 rounded-full bg-ctp-green ring-1 ring-ctp-crust" />
+              <span class="w-2 h-2 rounded-full bg-ctp-green" />
               <span>{{ t('assetMgmt.graph.legendAddedSig') }}</span>
               <span class="ml-auto text-ctp-overlay0 font-mono">{{ sigAddedCount }}</span>
             </div>
             <div class="flex items-center gap-1.5 text-[11px]">
-              <span class="w-2 h-2 rounded-full bg-ctp-red ring-1 ring-ctp-crust" />
+              <span class="w-2 h-2 rounded-full bg-ctp-red" />
               <span>{{ t('assetMgmt.graph.legendDeletedSig') }}</span>
               <span class="ml-auto text-ctp-overlay0 font-mono">{{ sigDeletedCount }}</span>
             </div>
