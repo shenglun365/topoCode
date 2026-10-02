@@ -187,7 +187,7 @@ const {
               <div class="p-3 space-y-2">
                 <div class="grid grid-cols-3 gap-2">
                   <button
-                    v-for="tier in (['low', 'mid', 'high'] as const)"
+                    v-for="tier in (['mid', 'high'] as const)"
                     :key="tier"
                     class="border rounded-md p-2 text-left transition-colors"
                     :class="tierUnavailable(tier)

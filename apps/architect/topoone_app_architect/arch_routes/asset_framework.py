@@ -36,29 +36,26 @@ Z_LABELS = {
     "config": "配置", "security": "安全",
 }
 
-# 各档位值域（M0 §1.1 总表；low 无 state——状态用枚举/过程分支描述）
+# 各档位值域（M0 §1.1 总表；low 精简档已下线——标准模式本身足够轻量，
+# 2026-10-02 裁决移除，存量 low 配置读取时归一为 mid）
 _TIER_X = {
-    "low": ("entity", "contract", "rule", "process", "decision"),
     "mid": tuple(KIND_LABELS),
     "high": tuple(KIND_LABELS),
 }
 _TIER_Y = {
     # 逻辑层已转为「逻辑视图」(跨组件业务链条，非资产层级)——粒度轴收敛为实现单层
-    "low": ("implementation",),
     "mid": ("implementation",),
     "high": ("implementation",),
 }
 _TIER_Z = {
-    "low": (),
     "mid": tuple(Z_LABELS),
     "high": tuple(Z_LABELS),
 }
 _ACCEPTANCE_DEFAULT = {
-    "low": {"mode": "auto", "layers": ["L1"], "l3": "off"},
     "mid": {"mode": "assisted", "layers": ["L1", "L2"], "l3": "human-on-demand"},
     "high": {"mode": "assisted", "layers": ["L1", "L2"], "l3": "human-on-demand"},
 }
-_DIRECTIVES_DEPTH = {"low": "brief", "mid": "full", "high": "full-scaffold"}
+_DIRECTIVES_DEPTH = {"mid": "full", "high": "full-scaffold"}
 
 SCENARIOS = ("extract", "accept", "naming", "general")
 
@@ -95,8 +92,8 @@ def _validate_config(config: Dict[str, Any]) -> Optional[str]:
     if not isinstance(config, dict):
         return "config 必须是对象"
     tier = config.get("activeTier")
-    if tier not in ("low", "mid", "high", "custom"):
-        return "activeTier 必须是 low|mid|high|custom"
+    if tier not in ("mid", "high", "custom"):
+        return "activeTier 必须是 mid|high|custom(low 精简档已下线)"
     tiers = config.get("tiers")
     if not isinstance(tiers, dict) or tier not in tiers:
         return "tiers 缺少当前档位定义"
@@ -121,6 +118,10 @@ def _active_config(project_id: str) -> Dict[str, Any]:
         try:
             cfg = json.loads(row.get("config") or "{}")
             if isinstance(cfg, dict) and cfg.get("activeTier"):
+                if cfg["activeTier"] == "low":
+                    # 存量精简档(low 值域 ⊂ mid)：归一标准档，避免下线后取值崩溃
+                    logger.info("[framework] 存量 low 档归一 mid project=%s", project_id)
+                    return build_preset("mid")
                 cfg["frameworkVersion"] = int(row.get("version") or 1)
                 return cfg
         except Exception:
@@ -221,7 +222,7 @@ def _apply_change(project_id: str, config: Dict[str, Any], change_kind: str,
     except Exception as e:
         logger.warning("[framework] 规约待复核标记失败: %s", e)
     # 契约条目联动（V8）：非 accepted 条目标 staleByFramework 需重确认；
-    # 切到 z 空值域(如 low)时未 accepted 条目 z_axis 自动清空并提示
+    # 切到 z 空值域自定义档时未 accepted 条目 z_axis 自动清空并提示
     try:
         from ..store import _target_db as _tdb
         db = _tdb("arch_contract_items", project_id=project_id)
@@ -343,7 +344,7 @@ async def api_framework_preview(request: Request):
 
 @router.post("/framework/switch")
 async def api_framework_switch(request: Request):
-    """执行标准变更：{projectId?, tier: low|mid|high, executedBy?, note?}。"""
+    """执行标准变更：{projectId?, tier: mid|high(low 已下线), executedBy?, note?}。"""
     body = await request.json()
     pid = _pid(body)
     tier = (body or {}).get("tier") or ""

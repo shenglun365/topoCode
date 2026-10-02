@@ -1999,9 +1999,8 @@ export default {
       hint: 'Switching the analysis framework voids all extracted assets (names are not migrated); re-extract on demand. Code changes (framework unchanged) are unaffected — they go through stale/refresh.',
       confirmMsg: 'Switching the analysis framework.\n\nThis will void {n} extracted assets ({dist}); names are not migrated and must be re-extracted on demand.\n\nContinue?',
       switchFailed: 'Framework switch failed',
-      tier: { low: 'Lite', mid: 'Standard', high: 'Advanced · Custom' },
+      tier: { mid: 'Standard', high: 'Advanced · Custom' },
       tierDesc: {
-        low: 'Lean: 5 kinds · implementation only · no governance axis, acceptance = coverage only',
         mid: 'Standard: 6 kinds · implementation + logic views · lightweight governance entries',
         high: 'Advanced custom: everything + custom framework and value domains',
       },

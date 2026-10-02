@@ -50,14 +50,23 @@ def _get_raw(aid: str):
 # ── 预设形状（M0 §1.1） ─────────────────────────────────────────
 
 class TestPresets:
-    def test_low_has_five_kinds_no_state(self, tmp_path, monkeypatch):
-        cfg = F.build_preset("low")
-        tier = cfg["tiers"]["low"]
-        assert "state" not in tier["x"]
-        assert len(tier["x"]) == 5
-        assert tier["y"] == ["implementation"]
-        assert tier["z"] == []
-        assert tier["acceptanceDefault"]["mode"] == "auto"
+    def test_low_tier_retired(self, tmp_path, monkeypatch):
+        """low 精简档已下线(2026-10-02)：预设不可构建；存量 low 配置读取归一 mid。"""
+        import pytest
+        with pytest.raises(ValueError):
+            F.build_preset("low")
+
+    def test_legacy_low_config_normalized_to_mid(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        FrameworkConfigStore.activate(PID, F.build_preset("mid"), "tier_switch", affected={})
+        # 手工写入 low 档存量行(下线前形态)
+        import json as _json
+        legacy = F.build_preset("mid")
+        legacy["activeTier"] = "low"
+        FrameworkConfigStore.activate(PID, legacy, "tier_switch", affected={})
+        cfg = F._active_config(PID)
+        assert cfg["activeTier"] == "mid"          # 归一标准档(low ⊂ mid 值域兼容)
+        assert "state" in F.allowed_kinds(PID)
 
     def test_mid_full_six_kinds_one_level(self, tmp_path, monkeypatch):
         """标准档：6 类本体；粒度轴收敛实现单层(逻辑已转为逻辑视图，非资产层级)；治理轴全量。"""
@@ -82,7 +91,7 @@ class TestFrameworkConfigStore:
         r1 = FrameworkConfigStore.activate(PID, F.build_preset("mid"),
                                            "tier_switch", affected={"voidedAssets": 0})
         assert r1["version"] == 1 and r1["active"] == 1
-        r2 = FrameworkConfigStore.activate(PID, F.build_preset("low"),
+        r2 = FrameworkConfigStore.activate(PID, F.build_preset("high"),
                                            "tier_switch", affected={})
         assert r2["version"] == 2 and r2["active"] == 1
         raw = FrameworkConfigStore.get_active_raw(PID)
@@ -103,7 +112,7 @@ class TestStandardChange:
         _mk_asset("sa-1", "process")
         _mk_asset("sa-2", "entity", status="stale")
         _mk_asset("sa-3", "rule")
-        row = F.switch_tier(PID, "low", executed_by="designer")
+        row = F.switch_tier(PID, "mid", executed_by="designer")
         assert row["voidedAssets"] == 3
         for aid in ("sa-1", "sa-2", "sa-3"):
             raw = _get_raw(aid)
@@ -116,15 +125,15 @@ class TestStandardChange:
     def test_voided_assets_excluded_from_active_queries(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
         _mk_asset("sa-20", "process")
-        F.switch_tier(PID, "low")
+        F.switch_tier(PID, "mid")
         assert SemanticAssetsStore.all(PID) == []
 
     def test_allowed_kinds_follow_active_tier(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
         assert "state" in F.allowed_kinds(PID)          # 默认 mid
-        F.switch_tier(PID, "low")
-        assert "state" not in F.allowed_kinds(PID)      # low 无 state
-        assert "contract" in F.allowed_kinds(PID)
+        F.switch_tier(PID, "high")
+        assert set(F.allowed_kinds(PID)) == set(F.KIND_LABELS)   # high 全量档
+        assert F._active_config(PID)["activeTier"] == "high"
 
     def test_preview_change_counts(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
@@ -156,7 +165,7 @@ class TestNamingConventions:
         _setup(tmp_path, monkeypatch)
         NamingConventionStore.create(PID, "实体命名用业务名词",
                                      scenarios=["naming"])
-        F.switch_tier(PID, "low")
+        F.switch_tier(PID, "mid")
         rows = NamingConventionStore.list(PID, status="pending_review")
         assert len(rows) == 1
 

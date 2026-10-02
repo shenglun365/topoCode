@@ -107,19 +107,28 @@ class TestItemLifecycle:
         except ValueError as e:
             assert "V7" in str(e)
 
-    def test_v5_low_tier_z_and_state(self, tmp_path, monkeypatch):
+    def test_v5_empty_z_tier_and_state(self, tmp_path, monkeypatch):
+        """V5/V1(原 low 档场景，low 下线后以 z 空+无 state 的自建档替代)。"""
         _ctx_setup(tmp_path, monkeypatch)
         pid = _pid(tmp_path)
-        F.switch_tier(pid, "low")
+        cfg = F.build_preset("mid")
+        cfg["activeTier"] = "custom"
+        cfg["tiers"]["custom"] = {
+            "x": [k for k in cfg["tiers"]["mid"]["x"] if k != "state"],
+            "y": ["implementation"], "z": [],
+            "acceptanceDefault": cfg["tiers"]["mid"]["acceptanceDefault"],
+            "directivesDepth": "full",
+        }
+        F.load_custom(pid, cfg)
         try:
             CT.create_item(pid, _item(zAxis=[{"category": "security", "text": "x"}]))
-            assert False, "V5 应拒绝 low 档 zAxis"
+            assert False, "V5 应拒绝 z 空档 zAxis"
         except ValueError as e:
             assert "V5" in str(e)
         try:
             CT.create_item(pid, _item(kind="state",
                                       behavior={"states": ["A"], "transitions": []}))
-            assert False, "low 档无 state kind（V1）"
+            assert False, "自建档无 state kind（V1）"
         except ValueError as e:
             assert "V1" in str(e)
 
@@ -180,12 +189,16 @@ class TestItemLifecycle:
         re = CT.confirm_item(row["id"])
         assert re["status"] == "confirmed" and re["staleByFramework"] == 0
 
-    def test_low_switch_clears_z_axis(self, tmp_path, monkeypatch):
+    def test_empty_z_switch_clears_z_axis(self, tmp_path, monkeypatch):
+        """切 z 空值域档(原 low 场景，下线后以自建档替代)未确认条目 z_axis 自动清空。"""
         _ctx_setup(tmp_path, monkeypatch)
         pid = _pid(tmp_path)
         row = CT.create_item(pid, _item(
             zAxis=[{"category": "resilience", "text": "超时 3s"}]))
-        F.switch_tier(pid, "low")
+        cfg = F.build_preset("mid")
+        cfg["activeTier"] = "custom"
+        cfg["tiers"]["custom"] = dict(cfg["tiers"]["mid"], z=[])
+        F.load_custom(pid, cfg)
         assert (ContractItemStore.get(row["id"]) or {}).get("zAxis") == []
 
 

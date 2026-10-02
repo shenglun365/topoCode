@@ -99,7 +99,7 @@ function fileBase(f: string): string {
         <p class="mt-1 text-[11px] leading-relaxed text-ctp-overlay1">
           {{ t('assetMgmt.scopeModal.hint', { n: files.length }) }}
         </p>
-        <!-- 提取粒度(随分析框架档位)：精简仅实现层；标准+ 含逻辑层(基于实现层归纳，勾逻辑时实现锁定) -->
+        <!-- 提取粒度：实现层必选基础；逻辑层为基于实现层的归纳(勾逻辑时实现锁定) -->
         <div class="mt-2 flex items-center gap-4 text-[11px]">
           <span class="text-ctp-overlay1">{{ t('assetMgmt.scopeModal.levels') }}</span>
           <label class="flex cursor-pointer items-center gap-1.5 text-ctp-subtext1">

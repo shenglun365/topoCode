@@ -951,7 +951,7 @@ export const semanticAssetService = {
   },
 
   /** 执行标准变更（切换预设档位；存量资产整体作废、命名不迁移）。 */
-  async switchFramework(tier: 'low' | 'mid' | 'high', note?: string): Promise<FrameworkVersionRow> {
+  async switchFramework(tier: 'mid' | 'high', note?: string): Promise<FrameworkVersionRow> {
     return apiPost<FrameworkVersionRow>('/framework/switch', { tier, note, ...currentProjectParams() })
   },
 
@@ -985,7 +985,7 @@ export interface FrameworkTierDef {
 
 export interface FrameworkConfig {
   version?: number
-  activeTier: 'low' | 'mid' | 'high' | 'custom'
+  activeTier: 'mid' | 'high' | 'custom'
   axes?: { id: string; label: string; values: FrameworkAxisValue[] }[]
   tiers?: Record<string, FrameworkTierDef>
   frameworkVersion?: number

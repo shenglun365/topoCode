@@ -33,6 +33,18 @@ from topoone_app_architect.store import (
     SemanticAssetsStore)
 
 
+def _custom_tier_no_state_no_z(pid):
+    """自建档(x 无 state、z 空)——替代已下线的 low 档构造同场景。"""
+    cfg = F.build_preset("mid")
+    cfg["activeTier"] = "custom"
+    cfg["tiers"]["custom"] = {
+        "x": [k for k in cfg["tiers"]["mid"]["x"] if k != "state"],
+        "y": ["implementation"], "z": [],
+        "acceptanceDefault": cfg["tiers"]["mid"]["acceptanceDefault"],
+        "directivesDepth": "full",
+    }
+    return F.load_custom(pid, cfg)
+
 def _ctx_setup(tmp_path, monkeypatch):
     data = str(tmp_path / "arch")
     monkeypatch.setenv("ARCH_DATA_DIR", data)
@@ -85,7 +97,7 @@ class TestSaveAgentAssets:
     def test_kind_out_of_framework_domain_rejected(self, tmp_path, monkeypatch):
         _ctx_setup(tmp_path, monkeypatch)
         _fake_collect(monkeypatch, str(tmp_path))
-        F.switch_tier(S.project_id_for(str(tmp_path), None), "low")  # low 无 state
+        _custom_tier_no_state_no_z(S.project_id_for(str(tmp_path), None))  # 自建档无 state
         res = S.save_agent_assets(str(tmp_path), None, [_asset("订单状态", kind="state")])
         assert res["count"] == 0
         assert res["rejected"] and "值域" in res["rejected"][0]["reason"]
