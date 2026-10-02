@@ -257,10 +257,8 @@ watch(selDetail, async (d) => {
 watch(selId, async (id) => {
   selDetail.value = null
   if (!id) return
-  console.log('[td-debug] selId →', id, '，detail 请求发起')
   try {
     const d = (await semanticAssetService.detail(id)) ?? null
-    console.log('[td-debug] detail', id, '→', d ? `ok name=${d.name}` : '(空响应)')
     if (D.code.fullCode.value && d) {
       const files = new Set((d.astRefs ?? []).map((r) => r.file))
       if (!files.has(D.code.fullCode.value.file)) {
@@ -278,20 +276,9 @@ watch(selId, async (id) => {
       }
     }
     selDetail.value = d
-  } catch (err) {
-    console.log('[td-debug] detail', id, '→ err:', err)
+  } catch {
     selDetail.value = null
   }
-})
-
-// [td-debug] 资产卡渲染条件聚合监控(A/B 假设终局判定：三布尔谁卡住)
-watch([sel, selDetail, () => (D.render as { cardMin?: { value: boolean } } | undefined)?.cardMin?.value ?? false], () => {
-  if (!selId.value) return
-  const cardMin = (D.render as { cardMin?: { value: boolean } } | undefined)?.cardMin?.value ?? false
-  const show = !!(sel.value && !cardMin)
-  console.log('[td-debug] 卡条件',
-    `sel=${!!sel.value}(节点在图)`, `selDetail=${!!selDetail.value}(详情已到)`,
-    `cardMin=${cardMin}`, `→ 卡${show ? '渲染' : '不渲染'}`)
 })
 
 // ---- 节点点击 → 选中资产 + 锚点代码闪烁突出 ----

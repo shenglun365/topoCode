@@ -344,7 +344,6 @@ function onNodeClick(e: NodeClickEvent) {
     // 点中文本未映射(如 UML 构造型 «process»、ER 字段行) → 半径 80px 内就近搜索可映射文本
     assetId = nearestMappedAsset(e) ?? ''
   }
-  console.log('[td-debug] node click', `nodeId=${e.nodeId}`, `label=${(e.label || '').slice(0, 24)}`, `resolved=${assetId || '(空-未映射)'}`)
   if (!assetId) return
   flashOnNext = true
   D.code.flashSeg = 0
