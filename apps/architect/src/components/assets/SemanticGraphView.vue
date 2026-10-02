@@ -26,21 +26,7 @@ import { useGraphData } from './graph-view/useGraphData'
 import { useGraphDetail } from './graph-view/useGraphDetail'
 import { useGraphCode } from './graph-view/useGraphCode'
 import { useGraphRender } from './graph-view/useGraphRender'
-import type { WsDeps } from './graph-view/graphTypes'
-
-/** 图谱资源 tab 定义(由外部资产列表/组件列表打开)。 */
-export interface GraphTabDef {
-  id: string
-  kind: 'all' | 'comp' | 'asset' | 'file' | 'logic'
-  title: string
-  compId?: string
-  assetId?: string
-  /** kind='file'：锚定该文件的资产子图。 */
-  fileId?: string
-  /** kind='logic'：逻辑视图 id + 成员快照(打开时更新；视图=成员实现资产子图+调用依赖边)。 */
-  viewId?: string
-  members?: string[]
-}
+import type { GraphTabDef, WsDeps } from './graph-view/graphTypes'
 
 const props = defineProps<{
   tab: GraphTabDef
@@ -119,7 +105,6 @@ const {
   diagRef,
   diagramLangs,
   diagrams,
-  diffBucketCounts,
   diffKindById,
   diffNodeCount,
   diffNodeIds,

@@ -136,7 +136,7 @@ function nodeVisibleInViewport(svg: SVGSVGElement, el: SVGGElement): boolean {
  *  节点已在可视区域内时不平移(避免频繁跳动)；仅视口外节点才居中。 */
 function centerSelectedNode() {
   void nextTick(() => {
-    const svg = diagRef.value?.getSvg()
+    const svg = diagRef.value?.getSvg() as SVGSVGElement | null | undefined
     const cmap = clickIds.value
     if (!svg || !D.detail.selId.value || !cmap.size) return
     const rev = new Map<string, string>()

@@ -11,7 +11,7 @@ import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
 
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
 import { useI18n } from 'vue-i18n'
-import type { GraphTabDef } from '../../SemanticGraphView.vue'
+import type { GraphTabDef } from '../graphTypes'
 import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semantic-kind-style'
 import { useSgvWs } from '../key'
 

@@ -5,7 +5,7 @@
 import { computed, ref } from 'vue'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import type { GraphFileEntry, SemanticAsset, AssetDiagramItem } from '@/types'
-import type { GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
+import type { GraphTabDef } from '@/components/assets/graph-view/graphTypes'
 import type { WsDeps } from './useAssetCore'
 
 export function useGraphTabs(D: WsDeps) {

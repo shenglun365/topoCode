@@ -5,7 +5,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon, WrenchScrewdriverIcon, EllipsisHorizontalIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
-import type { GraphTabDef } from '../../SemanticGraphView.vue'
+import type { GraphTabDef } from '../graphTypes'
 import { useSgvWs } from '../key'
 
 const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string> }>()
@@ -15,9 +15,9 @@ const {
   cardSrcOpen,
   clearSel,
   diagramLangs,
-  diffBucketCounts,
   diffKindById,
   diffSignalsById,
+  diffTotals,
   diffNodeCount,
   diffOnly,
   edgeLegendOpen,
@@ -68,7 +68,6 @@ const {
   toggleMatrix,
   viewOptions,
   viewSel,
-  weakCount,
 } = useSgvWs()
 const emit = defineEmits<{ close: [id: string] }>()
 
@@ -122,8 +121,6 @@ onMounted(() => document.addEventListener('click', onMenuDocClick, true))
 onBeforeUnmount(() => document.removeEventListener('click', onMenuDocClick, true))
 
 const MENU_ITEM = 'w-full flex items-center gap-2 px-2 py-1 rounded text-[11px] hover:bg-ctp-surface0 text-left'
-const diffTotal = computed(() => diffBucketCounts.value.changed + diffBucketCounts.value.new + diffBucketCounts.value.removed + weakCount.value)
-const diffChangedLike = computed(() => diffBucketCounts.value.changed + diffBucketCounts.value.new + diffBucketCounts.value.removed)
 const sigAddedCount = computed(() => [...diffSignalsById.value.values()].filter((x) => x.hasAdded).length)
 const sigDeletedCount = computed(() => [...diffSignalsById.value.values()].filter((x) => x.hasDeleted).length)
 
@@ -306,7 +303,7 @@ function exportGraph(): void {
           class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px] shrink-0 cursor-pointer hover:bg-ctp-yellow/25"
           :title="t('assetMgmt.graph.diffLegendHint')"
           @click="toggleDiffLegend"
-        >{{ t('assetMgmt.graph.diffTotal') }} {{ diffTotal }}</button>
+        >{{ t('assetMgmt.graph.diffTotal') }} {{ diffTotals.chip }}</button>
         <Teleport to="body">
           <div
             v-if="diffLegendOpen"
@@ -317,12 +314,12 @@ function exportGraph(): void {
             <div class="flex items-center gap-1.5 text-[11px]">
               <span class="w-2.5 h-2.5 rounded-sm bg-ctp-yellow/50" />
               <span>{{ t('assetMgmt.graph.legendChanged') }}</span>
-              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffChangedLike }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffTotals.changedLike }}</span>
             </div>
             <div class="flex items-center gap-1.5 text-[11px]">
               <span class="w-2.5 h-2.5 rounded-sm bg-ctp-yellow/25" />
               <span>{{ t('assetMgmt.graph.legendWeak') }}</span>
-              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffBucketCounts.weak }}</span>
+              <span class="ml-auto text-ctp-overlay0 font-mono">{{ diffTotals.weak }}</span>
             </div>
             <div class="flex items-center gap-1.5 text-[11px]">
               <span class="w-2 h-2 rounded-full bg-ctp-green ring-1 ring-ctp-crust" />

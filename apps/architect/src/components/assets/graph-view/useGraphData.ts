@@ -124,6 +124,16 @@ const diffBucketCounts = computed(() => {
 const diffOnly = ref(false)
 /** 弱关联计数(仅同文件变更；不标色，仅提示)。 */
 const weakCount = computed(() => props.compareData?.assets.changedWeak ?? 0)
+/** 变化计数(BE 不封顶口径，列表截断 _CAP_ASSETS=200 时与列表长度不一致以此为准)：
+ *  chip=全部变化节点(强变更+弱关联+新增+移除) / changedLike=统一浅橘黄底节点 / weak=弱关联。 */
+const diffTotals = computed(() => {
+  const a = props.compareData?.assets
+  return {
+    chip: a ? a.changedTotal + a.newTotal + a.removedTotal : 0,
+    changedLike: a ? (a.changedTotal - a.changedWeak) + a.newTotal + a.removedTotal : 0,
+    weak: a?.changedWeak ?? 0,
+  }
+})
 const loading = ref(false)
 /** 类型(资产类别)过滤后的节点集。 */
 const kindNodes = computed(() => (graph.value?.nodes ?? []).filter((n) =>
@@ -371,6 +381,7 @@ watch(() => props.compareData, () => {
     view,
     viewOptions,
     weakCount,
+    diffTotals,
     graphRev,
     revSyncing,
     updateRevAssets,
