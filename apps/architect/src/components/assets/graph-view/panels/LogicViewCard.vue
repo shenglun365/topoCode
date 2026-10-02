@@ -1,9 +1,26 @@
 <template>
-  <!-- 逻辑视图资产卡(浮窗)：视图名/概括/成员清单(点击选中画布节点)/AI 详细语义讲解。
-       讲解后端按成员 srcHash 指纹缓存——成员资产变化自动失效；「重新生成」force。 -->
-  <div class="absolute z-20 right-2 bottom-14 w-[26rem] max-h-[62%] flex flex-col rounded-lg border border-ctp-surface1 bg-ctp-mantle shadow-2xl">
-    <header class="flex items-center gap-2 px-3 py-2 border-b border-ctp-surface1 shrink-0">
-      <DocumentTextIcon class="w-4 h-4 text-ctp-mauve shrink-0" />
+  <!-- 逻辑视图资产卡(全局浮窗)：与代码资产卡同款拖拽/四边拉伸/尺寸持久化。
+       内容：视图名/概括/成员清单(点击选中画布节点)/AI 详细语义讲解(缓存+指纹失效联动)。 -->
+  <div
+    ref="cardEl"
+    class="card-root fixed z-40 flex flex-col max-w-[calc(100vw-1rem)] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl overflow-hidden"
+    :class="[
+      !cardPos ? 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2' : '',
+      dragging ? 'cursor-grabbing' : '',
+      resizing ? 'select-none' : '',
+    ]"
+    :style="{
+      width: cardSize.w + 'px',
+      ...(cardSize.h ? { height: cardSize.h + 'px' } : {}),
+      ...(cardPos ? { left: cardPos.x + 'px', top: cardPos.y + 'px' } : {}),
+    }"
+  >
+    <header
+      class="flex items-center gap-2 px-3 py-2 border-b border-ctp-surface1 shrink-0 cursor-grab"
+      @mousedown="beginCardDrag"
+      @dblclick.stop
+    >
+      <ShareIcon class="w-4 h-4 text-ctp-mauve shrink-0" />
       <span class="text-xs font-semibold text-ctp-text truncate">{{ view?.name || viewId }}</span>
       <span v-if="view?.source === 'manual'" class="text-[10px] px-1.5 py-0.5 rounded bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ t('assetMgmt.logicViews.manualTag') }}</span>
       <span v-if="explained && cached" class="text-[10px] text-ctp-overlay0 shrink-0">{{ t('assetMgmt.logicViews.explainCached') }}</span>
@@ -70,13 +87,19 @@
         <p v-else-if="!explainLoading" class="text-ctp-overlay0 text-[11px]">{{ t('assetMgmt.logicViews.explainHint') }}</p>
       </section>
     </div>
+
+    <!-- 四边独立拉伸把手(与代码资产卡同款) -->
+    <div class="card-edge card-edge-n" @mousedown="startResize($event, 'n')" @dblclick.stop />
+    <div class="card-edge card-edge-s" @mousedown="startResize($event, 's')" @dblclick.stop />
+    <div class="card-edge card-edge-w" @mousedown="startResize($event, 'w')" @dblclick.stop />
+    <div class="card-edge card-edge-e" @mousedown="startResize($event, 'e')" @dblclick.stop />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, DocumentTextIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, ShareIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import { useSgvWs } from '../key'
 
@@ -91,6 +114,110 @@ const explained = ref(false)
 const cached = ref(false)
 const explainError = ref('')
 const detailText = ref('')
+
+// ---- 浮窗拖拽 + 四边独立拉伸(与代码资产卡同款机制，独立状态/持久化键) ----
+type ResizeEdge = 'n' | 's' | 'w' | 'e'
+const SIZE_KEY = 'arch.graphLogicCard.size'
+const cardEl = ref<HTMLElement | null>(null)
+const cardPos = ref<{ x: number; y: number } | null>(null)
+const dragging = ref(false)
+const resizing = ref(false)
+let dragStartX = 0
+let dragStartY = 0
+let dragStartPos = { x: 0, y: 0 }
+let resizeEdge: ResizeEdge = 's'
+let resizeStart = { x: 0, y: 0, w: 560, h: 520, px: 0, py: 0 }
+
+function loadSize(): { w: number; h: number | null } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SIZE_KEY) || '')
+    if (raw && Number(raw.w) >= 360 && Number(raw.h) >= 240) return { w: Number(raw.w), h: Number(raw.h) }
+  } catch { /* 默认尺寸 */ }
+  return { w: 560, h: 520 }
+}
+function saveSize() {
+  try { localStorage.setItem(SIZE_KEY, JSON.stringify(cardSize.value)) } catch { /* ignore */ }
+}
+const cardSize = ref<{ w: number; h: number | null }>(loadSize())
+
+function beginCardDrag(e: MouseEvent) {
+  if (e.button !== 0) return
+  const el = cardEl.value
+  if (!el) return
+  if ((e.target as HTMLElement).closest('button, a, input, select')) return
+  dragging.value = true
+  if (!cardPos.value) {
+    const r = el.getBoundingClientRect()
+    dragStartPos = { x: r.left, y: r.top }
+    cardPos.value = { ...dragStartPos }
+  } else {
+    dragStartPos = { x: el.offsetLeft, y: el.offsetTop }
+  }
+  dragStartX = e.clientX
+  dragStartY = e.clientY
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp, { once: true })
+  e.preventDefault()
+}
+function startResize(e: MouseEvent, edge: ResizeEdge) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  const el = cardEl.value
+  if (!el) return
+  let px = el.offsetLeft
+  let py = el.offsetTop
+  if (!cardPos.value) {
+    const r = el.getBoundingClientRect()
+    px = r.left
+    py = r.top
+    cardPos.value = { x: px, y: py }
+  }
+  resizeEdge = edge
+  resizing.value = true
+  resizeStart = { x: e.clientX, y: e.clientY, w: cardSize.value.w,
+                  h: cardSize.value.h ?? el.offsetHeight, px, py }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp, { once: true })
+}
+function onMove(e: MouseEvent) {
+  if (resizing.value) {
+    const maxW = Math.min(1100, window.innerWidth - 16)
+    const maxH = Math.floor(window.innerHeight * 0.94)
+    const dx = e.clientX - resizeStart.x
+    const dy = e.clientY - resizeStart.y
+    let w = resizeStart.w
+    let h = resizeStart.h
+    let px = resizeStart.px
+    let py = resizeStart.py
+    if (resizeEdge === 'e') {
+      w = Math.min(maxW, Math.max(360, w + dx))
+    } else if (resizeEdge === 'w') {
+      w = Math.min(maxW, Math.max(360, w - dx))
+      px += resizeStart.w - w
+    }
+    if (resizeEdge === 's') {
+      h = Math.min(maxH, Math.max(240, h + dy))
+    } else if (resizeEdge === 'n') {
+      h = Math.min(maxH, Math.max(240, h - dy))
+      py += resizeStart.h - h
+    }
+    cardSize.value = { w, h }
+    cardPos.value = { x: px, y: py }
+    return
+  }
+  if (!dragging.value) return
+  cardPos.value = {
+    x: Math.min(window.innerWidth - 80, Math.max(-(cardSize.value.w - 80), dragStartPos.x + (e.clientX - dragStartX))),
+    y: Math.min(window.innerHeight - 48, Math.max(0, dragStartPos.y + (e.clientY - dragStartY))),
+  }
+}
+function onUp() {
+  dragging.value = false
+  if (resizing.value) saveSize()
+  resizing.value = false
+  window.removeEventListener('mousemove', onMove)
+}
 
 /** 成员清单：名称取图谱节点(kind='logic' 图谱=成员资产)；核心成员标记。 */
 const members = computed<{ id: string; name: string; isCore: boolean }[]>(() => {
@@ -171,7 +298,7 @@ onMounted(async () => {
   try {
     const views = await semanticAssetService.listLogicViews()
     view.value = views.find((v) => v.id === props.viewId) ?? null
-    // 后端已有缓存(且指纹未失效的判定由 explain 兜底) → 直接展示旧讲解
+    // 后端已有缓存(指纹失效判定由 explain 兜底) → 直接展示旧讲解
     if (view.value?.detail) {
       detailText.value = view.value.detail
       explained.value = true
@@ -180,3 +307,33 @@ onMounted(async () => {
   } catch { /* 列表失败保留空卡 */ }
 })
 </script>
+
+<style scoped>
+/* 四边独立拉伸把手(与代码资产卡同款)：透明热区，hover 显提示条 */
+.card-edge {
+  position: absolute;
+  z-index: 10;
+  transition: background-color 0.15s;
+}
+.card-edge:hover {
+  background-color: rgba(136, 137, 163, 0.35);
+}
+.card-edge-n,
+.card-edge-s {
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+.card-edge-n { top: 0; }
+.card-edge-s { bottom: 0; }
+.card-edge-e,
+.card-edge-w {
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.card-edge-w { left: 0; }
+.card-edge-e { right: 0; }
+</style>

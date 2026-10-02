@@ -3,7 +3,7 @@
 /** MS6-W2-S2 自 SemanticGraphView 模板整块迁出(逐行未动)；状态经 SGV_WS_KEY 注入。 */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ShareIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
@@ -566,11 +566,13 @@ const {
       <button
         v-if="tab.kind === 'logic' && tab.viewId"
         class="absolute z-10 right-2 bottom-14 w-9 h-9 rounded-full border shadow-lg flex items-center justify-center transition-transform hover:scale-110"
-        :class="[logicCardOpen ? 'border-ctp-mauve/60 bg-ctp-mauve/20 text-ctp-mauve' : 'border-ctp-surface1 bg-ctp-mantle text-ctp-subtext1']"
+        :class="[logicCardOpen
+          ? 'border-ctp-mauve/60 bg-ctp-mauve/25 text-ctp-mauve'
+          : 'border-ctp-mauve/40 bg-ctp-mauve/15 text-ctp-mauve']"
         :title="t('assetMgmt.logicViews.cardTitle')"
         @click="logicCardOpen = !logicCardOpen"
       >
-        <DocumentTextIcon class="w-5 h-5" />
+        <ShareIcon class="w-5 h-5" />
       </button>
       <LogicViewCard
         v-if="tab.kind === 'logic' && tab.viewId && logicCardOpen"
