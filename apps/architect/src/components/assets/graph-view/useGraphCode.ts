@@ -25,6 +25,22 @@ export function useGraphCode(D: WsDeps) {
 const MAX_SEGMENTS = 4
 const segments = ref<CodeSegment[]>([])
 const segEls: (HTMLElement | null)[] = []
+
+// 档2 行级定位：合成节点(决策分支)携带行号 → 代码段 DOM 就绪后滚动到行并闪高亮。
+watch([() => D.detail.focusLine.value, segments], ([line]) => {
+  if (!line) return
+  void nextTick(() => {
+    for (const seg of segEls) {
+      const row = seg?.querySelector(`[data-line="${line}"]`)
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        row.classList.add('line-focus-flash')
+        setTimeout(() => row.classList.remove('line-focus-flash'), 2200)
+        return
+      }
+    }
+  })
+})
 let segSeq = 0
 
 // ---- B2 多段代码手风琴(>1 段折叠，默认仅首段展开) ----

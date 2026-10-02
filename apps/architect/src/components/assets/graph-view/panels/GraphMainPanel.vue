@@ -458,6 +458,7 @@ const {
     class="flex flex-wrap items-baseline gap-1.5"
     :class="l.kind === 'add' ? ['bg-ctp-green/15', 'rounded-sm'] : l.kind === 'del' ? ['bg-ctp-red/15', 'rounded-sm'] : ''"
   ><span class="select-none text-ctp-overlay0 shrink-0 w-12 text-right">{{ l.kind === 'del' ? `-${l.baseLine ?? l.line}` : `${l.kind === 'add' ? '+' : ''}${l.targetLine ?? l.line}` }}</span> <span
+              :data-line="l.line"
               :data-anchor-line="segHighlighted(seg, l.line) ? '1' : null"
               :class="segHighlighted(seg, l.line)
                 ? [kindTextClass, kindBgClass, 'font-semibold rounded-sm px-0.5', flashing ? 'anchor-flash' : '']
@@ -628,15 +629,16 @@ const {
 }
 /* 图节点选中态：桃色强对比(浓光晕 + 加粗描边 + 半透明填充覆盖 + 文字加重)，
    绑定节点 DOM 切换；与未选节点的主题底色拉开层次，缩放后仍可一眼定位 */
+/* 选中态改蓝色系淡色(原 peach 与变化节点浅橘黄同暖色系，文字难辨) */
 :deep(.td-node-selected) {
-  filter: drop-shadow(0 0 6px rgba(250, 179, 135, 1)) drop-shadow(0 0 14px rgba(250, 179, 135, 0.6));
+  filter: drop-shadow(0 0 6px rgba(137, 180, 250, 1)) drop-shadow(0 0 14px rgba(137, 180, 250, 0.6));
 }
 :deep(.td-node-selected) path,
 :deep(.td-node-selected) rect,
 :deep(.td-node-selected) polygon,
 :deep(.td-node-selected) circle,
 :deep(.td-node-selected) ellipse {
-  stroke: #fab387 !important;
+  stroke: #89b4fa !important;
   stroke-width: 3px !important;
 }
 /* 主体形状(rect/polygon/ellipse/circle)叠加半透明桃色填充，与底色形成面级对比；
@@ -645,10 +647,10 @@ const {
 :deep(.td-node-selected) polygon,
 :deep(.td-node-selected) ellipse,
 :deep(.td-node-selected) circle {
-  fill: rgba(250, 179, 135, 0.16) !important;
+  fill: rgba(137, 180, 250, 0.16) !important;
 }
 :deep(.td-node-selected) text {
-  fill: #fab387 !important;
+  fill: #89b4fa !important;
   font-weight: 700;
 }
 /* 对比变化节点视觉(与 useGraphRender DIFF_FILL/STROKE 同值，双保险兜底)：
@@ -686,6 +688,15 @@ const {
   fill: rgba(249, 226, 175, 0.30) !important;
   stroke: rgba(249, 226, 175, 0.8) !important;
   stroke-width: 1.5px !important;
+}
+/* 档2 行级定位闪烁：合成节点(决策分支)点击 → 代码行滚动至视中并闪蓝 */
+@keyframes line-focus-flash-kf {
+  0% { background: rgba(137, 180, 250, 0.45); }
+  100% { background: transparent; }
+}
+:deep(.line-focus-flash) {
+  animation: line-focus-flash-kf 2.2s ease-out;
+  border-radius: 2px;
 }
 /* 资产卡四边独立拉伸把手(上下左右)：透明热区，hover 显提示条 */
 .card-edge {

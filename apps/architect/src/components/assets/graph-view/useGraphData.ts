@@ -2,7 +2,7 @@
  * 语义图谱 · data 域（MS6-W2 机械迁出：域内逐行原文，跨域引用 D. 前缀重写）。
  */
 import { computed, ref, watch } from 'vue'
-import { recommendedSemanticView, supportedViewsFor, viewUnavailableReasons, SemanticGraphViewId } from '@/utils/diagram-gen'
+import { recommendedSemanticView, supportedViewsFor, viewUnavailableReasons, SemanticGraphViewId, ViewClickEntry } from '@/utils/diagram-gen'
 import type { SemanticAssetLevel, SemanticAssetKind } from '@/types'
 import { SemanticGraphResult, semanticAssetService } from '@/services/semantic-asset-service'
 

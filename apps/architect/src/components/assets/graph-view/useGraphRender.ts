@@ -318,7 +318,15 @@ function cardEndDrag() {
 }
 function cardResetPos() { cardPos.value = null }
 
-const clickIds = computed(() => semanticViewClickIds(D.data.effectiveView.value, D.data.scopedNodes.value))
+const clickIds = computed(() => {
+  const m = semanticViewClickIds(D.data.effectiveView.value, D.data.scopedNodes.value)
+  // 合成节点(步骤/分支/子状态)映射合并：id 键(mermaid 寻址) + 文本键(plantuml 兜底)。
+  // 先到先得——资产主键优先(clickMap 不覆盖)，合成节点让点击/选中全节点可寻址。
+  for (const [k, ent] of (D.detail.viewClickMap?.value ?? new Map())) {
+    if (!m.has(k)) m.set(k, ent.assetId)
+  }
+  return m
+})
 let flashOnNext = false
 const flashing = ref(false)
 let flashTimer: ReturnType<typeof setTimeout> | null = null
@@ -339,6 +347,14 @@ function onNodeClick(e: NodeClickEvent) {
   if (!assetId) {
     const tail = (e.label || '').split('·').pop()?.trim() ?? ''
     if (/^sa-/.test(tail)) assetId = tail
+  }
+  // 合成节点行级定位(档2)：决策分支携带 branches[].line → 代码段就绪后滚到该行
+  const clickEnt = D.detail.viewClickMap?.value?.get(e.nodeId) ?? D.detail.viewClickMap?.value?.get(e.label ?? '')
+  if (clickEnt) {
+    assetId = clickEnt.assetId
+    D.detail.focusLine.value = clickEnt.line || 0
+  } else {
+    D.detail.focusLine.value = 0
   }
   if (!assetId && e.nodeId.startsWith('txt:')) {
     // 点中文本未映射(如 UML 构造型 «process»、ER 字段行) → 半径 80px 内就近搜索可映射文本
@@ -593,6 +609,9 @@ function applyPlantumlNodeAddressing() {
   const byText = new Map<string, string>()
   for (const [k, aid] of clickIds.value) {
     if (!/^n\d+$/.test(k)) byText.set(k, aid)
+  }
+  for (const [k, ent] of (D.detail.viewClickMap?.value ?? new Map())) {
+    if (!byText.has(k)) byText.set(k, ent.assetId)   // 合成节点文本(步骤/分支)注入寻址
   }
   for (const n of D.data.scopedNodes.value) {
     for (const v of [n.name, ...[18, 26, 30, 40].map((m) => semanticNodeLabelText(n.name, m))]) {

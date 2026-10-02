@@ -2,7 +2,7 @@
  * 语义图谱 · detail 域（MS6-W2 机械迁出：域内逐行原文，跨域引用 D. 前缀重写）。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import { semanticGraphViewDiagrams, SemanticGraphViewId } from '@/utils/diagram-gen'
+import { semanticGraphViewDiagrams, ViewClickEntry, SemanticGraphViewId } from '@/utils/diagram-gen'
 import type { SemanticAsset } from '@/types'
 import { SemanticGraphResult, semanticAssetService } from '@/services/semantic-asset-service'
 
@@ -13,6 +13,8 @@ export function useGraphDetail(D: WsDeps) {
 
 const selId = ref('')
 const selDetail = ref<SemanticAsset | null>(null)
+/** 行级定位请求(档2)：合成节点(决策分支)携带的代码行——detail/代码段就绪后滚动高亮。 */
+const focusLine = ref(0)
 /** 邻域聚焦：开启后图谱只渲染选中资产周围 focusHops 跳子图(缓解大图拥挤/过宽/过长)。 */
 const focusMode = ref(false)
 const focusHops = ref(2)
@@ -50,8 +52,12 @@ const sel = computed(() => (D.data.graph.value?.nodes ?? []).find((n) => n.id ==
 
 const diagrams = computed<Partial<Record<'mermaid' | 'plantuml', string>>>(() => {
   if (!D.data.graph.value) return {}
-  return semanticGraphViewDiagrams(D.data.effectiveView.value, D.data.scopedNodes.value, D.data.scopedEdges.value)
+  const r = semanticGraphViewDiagrams(D.data.effectiveView.value, D.data.scopedNodes.value, D.data.scopedEdges.value)
+  viewClickMap.value = r.clickMap
+  return r
 })
+/** 视图合成节点(步骤/分支/子状态)→宿主资产映射(含行级定位 line)；随图数据/视图重建。 */
+const viewClickMap = ref<Map<string, ViewClickEntry>>(new Map())
 
 watch([focusMode, focusHops], () => {
   void D.data.load()
@@ -323,5 +329,7 @@ watch(selId, (id, old) => {
     startEnhanceDesc,
     toggleFocusLock,
     viewSel,
+    viewClickMap,
+    focusLine,
   }
 }

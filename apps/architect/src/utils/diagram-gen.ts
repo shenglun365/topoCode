@@ -834,7 +834,7 @@ function _stateMachines(nodes: _Node[]) {
     && Array.isArray(n.detail?.states) && n.detail!.states!.length)
 }
 
-export function semanticStateDiagramToMermaid(nodes: _Node[], edges: _Edge[]): string {
+export function semanticStateDiagramToMermaid(nodes: _Node[], edges: _Edge[], collect?: ViewClickCollector): string {
   const rules = nodes.filter((n) => n.kind === 'decision')
   const machines = _stateMachines(nodes)
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
@@ -845,6 +845,11 @@ export function semanticStateDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
     st.forEach((s, i) => {
       const sid = `${safe.get(m.id)}_s${i}`
       lines.push(`  state "${_semLabel(s.name, 24)}" as ${sid}`)
+      if (collect) {   // 子状态=合成节点：回链宿主状态机资产(mermaid id 键+文本键双引擎)
+        collect(sid, { assetId: m.id })
+        collect(s.name, { assetId: m.id })
+        collect(_semLabel(s.name, 24), { assetId: m.id })
+      }
       if (s.initial) lines.push(`  [*] --> ${sid}`)
     })
     for (const tr of (m.detail?.transitions ?? []).slice(0, 20)) {
@@ -864,6 +869,7 @@ export function semanticStateDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
   for (const n of rules) {
     const branches = (n.detail?.branches ?? []).slice(0, 6)
     branches.forEach((b, i) => {
+      const bl = Number((b as { line?: number }).line) || undefined
       const s = `${safe.get(n.id)}_b${i}`
       lines.push(`  state "${_semLabel(b.condition || `分支${i + 1}`, 24)}" as ${s}`)
       lines.push(`  ${safe.get(n.id)} --> ${s}`)
@@ -871,6 +877,12 @@ export function semanticStateDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
       lines.push(`  state "${_semLabel(String(b.then ?? 'then'), 20)}" as ${safe.get(n.id)}_t${i}`)
       lines.push(`  ${s} --> ${safe.get(n.id)}_e${i} : 不成立`)
       lines.push(`  state "${_semLabel(String(b.else ?? 'else'), 20)}" as ${safe.get(n.id)}_e${i}`)
+      if (collect) {   // 分支/then/else 合成状态：回链宿主决策资产 + 分支行号(档2 行级定位)
+        for (const key of [s, `${safe.get(n.id)}_t${i}`, `${safe.get(n.id)}_e${i}`]) collect(key, { assetId: n.id, line: bl })
+        for (const txt of [_semLabel(b.condition || `分支${i + 1}`, 24), _semLabel(String(b.then ?? 'then'), 20), _semLabel(String(b.else ?? 'else'), 20)]) {
+          collect(txt, { assetId: n.id, line: bl })
+        }
+      }
     })
   }
   const seen = new Set<string>()
@@ -966,7 +978,7 @@ function _branchElseLabel(b: { else?: unknown }): string {
   return (String(b.else ?? '').trim()) || '跳过/继续'
 }
 
-export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[]): string {
+export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[], collect?: ViewClickCollector): string {
   const P = currentDiagramPalette()
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
   const lines = ['flowchart TD']
@@ -1016,9 +1028,17 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
   const kindStyle = (k: string) => ({ process: 'process', decision: 'decision', contract: 'contract', asset: 'asset', state: 'state' })[k] || undefined
   let seq = 0
   const nid = () => `n${seq++}`
-  const addNode = (label: string, style?: string): string => {
+  /** 合成节点登记：id 键(mermaid 寻址) + 渲染文本/截断变体键(plantuml 文本兜底)。 */
+  const regNode = (id: string, label: string, host?: string, line?: number) => {
+    if (!host || !collect) return
+    collect(id, { assetId: host, line })
+    const shown = _semLabel(label, 30)
+    for (const k of new Set([shown, _semLabel(label, 40), _semLabel(label, 18), label])) collect(k, { assetId: host, line })
+  }
+  const addNode = (label: string, style?: string, host?: string, line?: number): string => {
     const id = nid()
     lines.push(`  ${id}["${_semLabel(label, 30)}"]${style ? `:::${style}` : ''}`)
+    regNode(id, label, host, line)
     return id
   }
   const link = (a?: string, b?: string) => { if (a && b && a !== b && !overBudget()) { edgeCount++; lines.push(`  ${a} --> ${b}`) } }
@@ -1031,16 +1051,17 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
     let first: string | undefined
     let last: string | undefined
     if (n.detail?.trigger) {
-      first = addNode(`⚡ ${String(n.detail.trigger)}`, 'process')
+      first = addNode(`⚡ ${String(n.detail.trigger)}`, 'process', n.id)
       last = first
     }
     const branches = (n.detail?.branches ?? []).filter((b) => (b.condition || '').trim())
     if (n.kind === 'decision' && branches.length) {
-      const join = addNode(`${_semLabel(n.name, 20)} 合并`, style)
+      const join = addNode(`${_semLabel(n.name, 20)} 合并`, style, n.id)
       for (const b of branches.slice(0, 6)) {
-        const cond = addNode(String(b.condition).trim(), 'decision')
-        const t = addNode(String(b.then ?? 'then'), style)
-        const e = addNode(_branchElseLabel(b), style)
+        const bl = Number((b as { line?: number }).line) || undefined
+        const cond = addNode(String(b.condition).trim(), 'decision', n.id, bl)
+        const t = addNode(String(b.then ?? 'then'), style, n.id, bl)
+        const e = addNode(_branchElseLabel(b), style, n.id, bl)
         if (!first) first = cond
         if (last) link(last, cond)
         last = cond
@@ -1057,22 +1078,22 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
         const txt = (s.semantic || '').trim() || _semLabel(n.name, 20)
         const cond = (s.condition || '').trim()
         if (cond) {
-          const c = addNode(cond, 'decision')
-          const act = addNode(txt, style)
+          const c = addNode(cond, 'decision', n.id)
+          const act = addNode(txt, style, n.id)
           if (!first) first = c
           if (last) link(last, c)
           last = c
           labeledLink(c, act, '成立')
           last = act
         } else {
-          const act = addNode(txt, style)
+          const act = addNode(txt, style, n.id)
           if (!first) first = act
           if (last) link(last, act)
           last = act
         }
       }
     } else {
-      const node = addNode(`${_semNodeLabel(n, 24)}`, style)
+      const node = addNode(`${_semNodeLabel(n, 24)}`, style, n.id)
       if (!first) first = node
       if (last) link(last, node)
       last = node
@@ -1341,9 +1362,14 @@ export function semanticMindmapToPlantUml(nodes: _Node[]): string {
 
 // ---- 视图分发表 ----
 
+/** 视图节点点击映射条目：合成节点(步骤/分支/子状态)回链宿主资产，line=行级定位。 */
+export interface ViewClickEntry { assetId: string; line?: number }
+/** 生成器节点登记回调：key=图内 id(mermaid) 或渲染文本(双引擎兜底)。 */
+export type ViewClickCollector = (key: string, entry: ViewClickEntry) => void
+
 export const SEMANTIC_VIEW_GENERATORS: Record<SemanticGraphViewId, {
-  mermaid: (nodes: _Node[], edges: _Edge[]) => string
-  plantuml: (nodes: _Node[], edges: _Edge[]) => string
+  mermaid: (nodes: _Node[], edges: _Edge[], collect?: ViewClickCollector) => string
+  plantuml: (nodes: _Node[], edges: _Edge[], collect?: ViewClickCollector) => string
 }> = {
   flow: { mermaid: semanticGraphToMermaid, plantuml: semanticGraphToPlantUml },
   class: { mermaid: semanticClassDiagramToMermaid, plantuml: semanticClassDiagramToPlantUml },
@@ -1359,9 +1385,13 @@ export function semanticGraphViewDiagrams(
   view: SemanticGraphViewId,
   nodes: _Node[],
   edges: _Edge[],
-): { mermaid: string; plantuml: string } {
+): { mermaid: string; plantuml: string; clickMap: Map<string, ViewClickEntry> } {
   const g = SEMANTIC_VIEW_GENERATORS[view] ?? SEMANTIC_VIEW_GENERATORS.flow
-  return { mermaid: g.mermaid(nodes, edges), plantuml: g.plantuml(nodes, edges) }
+  const clickMap = new Map<string, ViewClickEntry>()
+  const collect: ViewClickCollector = (key, entry) => {
+    if (key && !clickMap.has(key)) clickMap.set(key, entry)
+  }
+  return { mermaid: g.mermaid(nodes, edges, collect), plantuml: g.plantuml(nodes, edges, collect), clickMap }
 }
 
 /** 图内点击节点 id(node-click 插件剥壳后) → 资产 id 映射；未渲染的合成节点不在表内。
