@@ -292,3 +292,43 @@ def test_induce_chains_endpoint_fallback_by_members(monkeypatch, tmp_path):
     assert c["outputs"] and c["outputs"][0]["code"], "尾成员出锚兜底"
     assert c["inputs"][0]["code"][0]["file"] == "svc.py"
     assert "被过滤" not in diag
+
+
+def test_induce_member_fuzzy_match(monkeypatch, tmp_path):
+    """成员名模糊匹配：LLM 给名称加括号注释/改写空格 → norm 键仍命中(不再整链丢成员)。"""
+    (tmp_path / "svc.py").write_text("def alpha():\n    pass\n")
+    impl = [{"id": "impl-fz", "kind": "asset", "name": "场景快照构建", "desc": "", "detail": {},
+             "astRefs": [{"file": "svc.py", "symbol": "buildSnapshot", "startLine": 1, "endLine": 1}]},
+            {"id": "impl-fz2", "kind": "asset", "name": "拓扑计算", "desc": "", "detail": {},
+             "astRefs": [{"file": "svc.py", "symbol": "calcTopo", "startLine": 1, "endLine": 1}]}]
+    out = ('{"chains": [{"name": "快照链", "kind": "process_chain", "summary": "s",'
+           ' "members": ["场景快照构建（核心）", "拓扑 计算"],'
+           ' "inputs": [], "outputs": []}]}')
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                        lambda msgs, **kw: {"content": out})
+    chains, diag = LX.induce_chains(str(tmp_path), impl, "workspace")
+    assert len(chains) == 1, (chains, diag)
+    assert chains[0]["members"] == ["impl-fz", "impl-fz2"]   # 括号注释/空格改写均命中
+    assert "被过滤" not in diag
+
+
+def test_induce_resample_on_bad_output(monkeypatch, tmp_path):
+    """波动重采样：首轮坏采样(成员全未匹配+丢弃≥3) → 二轮好采样，取可用数多者。"""
+    (tmp_path / "svc.py").write_text("def a1():\n    pass\n\ndef a2():\n    pass\n")
+    impl = [{"id": f"impl-r{i}", "kind": "asset", "name": f"资产{i}", "desc": "", "detail": {},
+             "astRefs": [{"file": "svc.py", "symbol": f"sym{i}", "startLine": 1, "endLine": 1}]}
+            for i in range(4)]
+    bad = ('{"chains": [' + ','.join(
+        '{"name": "幻链%d", "kind": "process_chain", "summary": "s", "members": ["不存在的资产%d"], "inputs": [], "outputs": []}' % (i, i)
+        for i in range(4)) + ']}')
+    good = ('{"chains": [{"name": "真链", "kind": "process_chain", "summary": "s",'
+            ' "members": ["资产0", "资产1"], "inputs": [], "outputs": []}]}')
+    calls = {"n": 0}
+    def fake(msgs, **kw):
+        calls["n"] += 1
+        return {"content": bad if calls["n"] == 1 else good}
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync", fake)
+    chains, diag = LX.induce_chains(str(tmp_path), impl, "workspace")
+    assert calls["n"] == 2, "坏采样(丢弃≥3)应触发重采样"
+    assert [c["name"] for c in chains] == ["真链"]
+    assert diag == ""   # 终态取优轮(好采样)诊断——坏轮的未匹配诊断不带入

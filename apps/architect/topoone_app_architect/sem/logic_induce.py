@@ -91,7 +91,7 @@ _PROMPT = """你是资深软件架构分析师。下面是一批实现级语义�
 1. 只依据给出的实现级事实归纳，不臆造；
 2. 每条链条标注类型: process_chain(主处理链) | validation_chain(校验链) | aggregation_chain(聚合链) | orchestration_chain(编排链)；
 3. 每条链条给出 inputs/outputs —— 每个端点必须有 code 引用(引用实现级资产的符号名与文件，禁止纯文字描述)；
-4. members 列出该链条由哪些实现级资产组成，用清单中的「资产名」或「符号」原文引用；跨文件/跨组件的完整链条通常 ≥2 个成员。
+4. members 列出该链条由哪些实现级资产组成，用清单中的「资产名」或「符号」逐字原文引用(不得改写/缩写/加注释/翻译)；跨文件/跨组件的完整链条通常 ≥2 个成员。
 
 输出 JSON(不要多余文本)：
 {"chains":[{"name":"链条名","kind":"process_chain","summary":"一句话",
@@ -201,6 +201,30 @@ def _recover_chains(content: str) -> List[dict]:
     return out
 
 
+def _norm_key(s: str) -> str:
+    """模糊匹配键：剥括号注释(全/半角) + 去空白 + 小写。
+    LLM 常给名称加「(注释)」「（中文注）」或微调空格——归一后仍可命中。"""
+    t = re.sub(r"[（(【\[《<].*?[)）\]》>]", "", s or "")
+    return re.sub(r"\s+", "", t).lower()
+
+
+def _member_index(assets: List[dict]) -> tuple:
+    """成员解析双索引：by_symbol(资产名/符号精确) + by_norm(归一键)。"""
+    by_symbol: Dict[str, dict] = {}
+    by_norm: Dict[str, dict] = {}
+    for a in assets:
+        nm = (a.get("name") or "").strip()
+        if nm:
+            by_symbol.setdefault(nm, a)   # LLM 常以清单行首的资产名引用成员
+            by_norm.setdefault(_norm_key(nm), a)
+        for r in (a.get("astRefs") or []):
+            sym = (r.get("symbol") or "").strip()
+            if sym:
+                by_symbol.setdefault(sym, a)   # 符号名索引(prompt 主口径)
+                by_norm.setdefault(_norm_key(sym), a)
+    return by_symbol, by_norm
+
+
 def induce_chains(root: str, assets: List[dict], rev: str,
                   model_id: Optional[str] = None) -> tuple:
     """LLM 归纳链条 → 结构化(成员实现级资产对齐 + IO 锚点构造+校验)。
@@ -210,28 +234,54 @@ def induce_chains(root: str, assets: List[dict], rev: str,
     max_tokens 不写死——回退 arch_collab_config 偏好 → 主后端模型配置
     (禁止代码写死 maxtoken 的既有裁决；写死 4000 曾致输出截断候选恒 0)。
 
-    锚点解析失败的端点：尝试按 symbol 在成员资产 astRefs 中对齐重建；仍失败则
-    丢弃该端点(宁缺勿错——3-D「不能以文字代替代码」)。
+    输出质量波动治理(events.jsonl 实证同输入时好时坏)：单次采样可用链条少
+    且丢弃多(可用<3 且丢弃≥3)时自动重采样一次，取可用数较多的一轮——
+    不再让一次坏采样直接产出「0-1 条」的退化结果。
     """
     from ..agent.cognition.llm import llm_sync
-    by_symbol: Dict[str, dict] = {}
-    for a in assets:
-        nm = (a.get("name") or "").strip()
-        if nm:
-            by_symbol.setdefault(nm, a)   # LLM 常以清单行首的资产名引用成员
-        for r in (a.get("astRefs") or []):
-            sym = (r.get("symbol") or "").strip()
-            if sym:
-                by_symbol.setdefault(sym, a)   # 符号名索引(prompt 主口径)
+    by_symbol, by_norm = _member_index(assets)
     picked = _pick_assets(assets)          # 探测深度：度数优先选 400(替代原随机序截断)
     brief = _assets_brief(picked)
     edges = _edges_brief(picked)
     if edges:
         brief = brief + "\n\n资产间调用/依赖关系:\n" + edges
     prompt = _PROMPT.replace("{assets}", brief)
-    res = llm_sync([{"role": "user", "content": prompt}],
-                   mode="chat", model_id=model_id)
-    content = ((res or {}).get("content") or "").strip()
+
+    def _resolve(sym: str) -> Optional[dict]:
+        """成员/端点符号解析：精确(资产名/符号) → norm(剥括号注释+空白归一)
+        → 唯一前缀匹配。LLM 常给名称加注释/微改写，模糊二级显著提高命中率。"""
+        a = by_symbol.get(sym)
+        if a is not None:
+            return a
+        k = _norm_key(sym)
+        if not k:
+            return None
+        a = by_norm.get(k)
+        if a is not None:
+            return a
+        hits = [x for key, x in by_norm.items()
+                if len(k) >= 4 and (key.startswith(k) or k.startswith(key))]
+        return hits[0] if len(hits) == 1 else None
+
+    best: tuple = ([], "")
+    for attempt in (1, 2):
+        res = llm_sync([{"role": "user", "content": prompt}],
+                       mode="chat", model_id=model_id)
+        content = ((res or {}).get("content") or "").strip()
+        chains, diag, dropped = _filter_chains(
+            content, by_symbol, _resolve, assets, root, rev)
+        if attempt == 1 or len(chains) > len(best[0]):
+            best = (chains, diag)
+        if dropped < 3 or len(chains) >= 3:
+            break   # 质量可接受(或无丢弃)——不浪费第二次采样
+        logger.info("[logic] 归纳采样质量低(可用 %d/丢弃 %d)→ 重采样",
+                    len(chains), dropped)
+    return best[0], best[1]
+
+
+def _filter_chains(content: str, by_symbol: Dict[str, dict], resolve,
+                   assets: List[dict], root: str, rev: str) -> tuple:
+    """单次采样输出 → 解析(JSON/截断恢复) → 成员对齐+锚点过滤(返回 chains,diag,dropped)。"""
     raw: List[dict] = []
     diag = ""
     m = re.search(r"\{.*\}", content, re.S)
@@ -252,11 +302,12 @@ def induce_chains(root: str, assets: List[dict], rev: str,
     chains: List[dict] = []
     dropped = 0
     degraded = 0
+    miss_member = 0
     for ch in raw[:12]:
         kind = ch.get("kind") if ch.get("kind") in LOGIC_KINDS else "process_chain"
         members: List[str] = []
         for sym in (ch.get("members") or []):
-            a = by_symbol.get(sym)
+            a = resolve(sym)
             if a is not None and a.get("id"):
                 members.append(a["id"])
         inputs = _endpoints(ch.get("inputs"), "in", by_symbol, root, rev)
@@ -281,6 +332,8 @@ def induce_chains(root: str, assets: List[dict], rev: str,
                 outputs = _member_anchor(members[-1], "out")
         if not inputs and not outputs and len(members) < 2:
             dropped += 1
+            if not members and (ch.get("members") or []):
+                miss_member += 1   # LLM 成员名全部未匹配(未按清单原文引用)
             continue   # 无成员且无可锚定 IO = 纯文字链条(3-D 禁止形态)
         if not inputs and not outputs:
             degraded += 1   # 极端兜底后仍无锚(成员行号/文件均不可读)降级保留
@@ -291,9 +344,12 @@ def induce_chains(root: str, assets: List[dict], rev: str,
         })
     if dropped:
         diag = (diag + "；" if diag else "") + f"{dropped} 条无 IO 锚点被过滤"
+        if miss_member:
+            diag += f"(其中 {miss_member} 条成员名全部未匹配——LLM 未按清单原文引用)"
     if degraded:
         diag = (diag + "；" if diag else "") + f"{degraded} 条缺 IO 端点降级保留(成员锚定充分)"
-    return chains, diag
+    return chains, diag, dropped
+
 
 
 def _endpoints(raw_eps: Any, direction: str, by_symbol: Dict[str, dict],
