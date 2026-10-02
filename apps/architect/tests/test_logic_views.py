@@ -16,6 +16,7 @@ import topoone_app_architect.store as store
 from topoone_app_architect.arch_routes import semantic_assets as S
 from topoone_app_architect.arch_routes import logic_views as LV
 from topoone_app_architect.sem import logic_extract as LX
+from topoone_app_architect.sem import logic_induce as LI
 from topoone_app_architect.sem.logic_extract import expand_members
 
 
@@ -156,7 +157,7 @@ def test_induce_chains_truncation_recovery(monkeypatch):
                  + ', {"name": "链C", "summary": "残')
     monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
                         lambda msgs, **kw: {"content": truncated})
-    monkeypatch.setattr(LX, "build_code_anchor",
+    monkeypatch.setattr(LI, "build_code_anchor",   # induce_chains 内部绑定位在归纳域模块
                         lambda root, ref, rev, lang="": {"file": ref.get("file")})
     chains, diag = LX.induce_chains("/tmp/x", impl, "workspace")
     assert [c["name"] for c in chains] == ["链A", "链B"]
