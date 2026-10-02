@@ -994,7 +994,7 @@ export interface LogicView {
   coreIds: string
   memberIds: string
   summary: string
-  source: 'extract' | 'manual'
+  source: 'extract' | 'manual' | 'graph'
   fingerprint?: string
   /** AI 详细语义讲解(Markdown 缓存；成员资产变化指纹失效自动重生成) */
   detail?: string

@@ -223,3 +223,47 @@ def test_logic_view_explain_cache_and_invalidation(ctx, monkeypatch):
     # 讲解落库可查
     got = store.LogicViewsStore.get(v["id"])
     assert "讲解v3" in (got.get("detail") or "")
+
+
+def test_graph_outline_cores_and_hops(ctx):
+    """范围提纲：选中核心优先置顶 + 中心度排序 + 1/2/3 跳三档邻域(∩显示范围)。"""
+    pid = S.project_id_for("/tmp/x", None)
+    # a(中心,hub) ← b,c 调用；b → d(2跳)
+    def mk(aid, name, rels):
+        store.SemanticAssetsStore.create({
+            "id": aid, "projectId": pid, "kind": "asset", "level": "implementation",
+            "name": name, "desc": "", "detail": {"relations": rels},
+            "astRefs": [], "scopeType": "comm", "scopeKey": "L0-0001", "srcHash": "h",
+            "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
+    mk("a", "核心A", [])
+    mk("b", "上游B", [{"target": "a", "type": "calls"}])
+    mk("c", "上游C", [{"target": "a", "type": "calls"}])
+    mk("d", "深源D", [{"target": "b", "type": "calls"}])
+    assets = [store.SemanticAssetsStore.get(i) for i in ("a", "b", "c", "d")]
+    out = LX.graph_outline(assets, prefer_core_ids=["d"])   # 选中 d 置顶
+    assert out[0]["coreId"] == "d"
+    assert out[0]["hops"]["1"] == ["d", "b"]
+    assert "a" in out[0]["hops"]["2"]
+    top = next(r for r in out if r["coreId"] == "a")
+    assert top["degree"] == 2   # a 被 b/c 调用(入度2)
+    assert set(top["hops"]["1"]) >= {"a", "b", "c"}
+
+
+def test_induce_scope_creates_views(ctx, monkeypatch):
+    """范围解析作业：每组→source=graph 视图 + 概括 + 讲解指纹落库。"""
+    pid = S.project_id_for("/tmp/x", None)
+    for i in range(3):
+        _mk_impl(pid, f"impl-g{i}", f"资产{i}")
+    from topoone_app_architect.sem import llm_jobs as LJ
+    monkeypatch.setattr("topoone_app_architect.sem.logic_extract.summarize_members",
+                        lambda assets, model_id=None: "概括文本")
+    job_ctx = _job_ctx({"root": "/tmp/x", "project": None,
+                        "groups": [{"coreId": "impl-g0", "hops": 2,
+                                    "memberIds": ["impl-g0", "impl-g1", "impl-g2"]}]})
+    r = LJ._job_induce_scope(job_ctx)
+    assert r["count"] == 1
+    v = store.LogicViewsStore.get(r["viewIds"][0])
+    assert v["source"] == "graph"
+    assert v["summary"] == "概括文本"
+    assert json.loads(v["memberIds"]) == ["impl-g0", "impl-g1", "impl-g2"]
+    assert v["detailFp"]

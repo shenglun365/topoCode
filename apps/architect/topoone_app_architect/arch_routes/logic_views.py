@@ -119,3 +119,44 @@ async def api_logic_views_explain(view_id: str, request: Request = None):
         "modelId": body.get("modelId") or "",
         "root": body.get("root"), "project": body.get("project")},
         body.get("root"), body.get("project"))
+
+
+@router.post("/kb/semantic/logic-views/graph-outline")
+async def api_logic_graph_outline(request: Request = None):
+    """图谱范围提纲(零 LLM 秒回)：核心(选中优先+中心度 top≤8) × 1/2/3 跳邻域。
+
+    Body: {assetIds(显示范围), preferCores?(选中节点置顶), root?, project?}。
+    """
+    import asyncio as _aio
+    body = await request.json() if request else {}
+    from ..store import SemanticAssetsStore
+    from ..sem.logic_extract import graph_outline
+    ids = list(dict.fromkeys([i for i in (body.get("assetIds") or []) if i]))
+    if not ids:
+        return ok({"cores": []})
+
+    def _run():
+        rows = [SemanticAssetsStore.get(i) for i in ids]
+        assets = [r for r in rows if r and r.get("status") == "active"]
+        return graph_outline(assets, body.get("preferCores") or [])
+    return ok({"cores": await _aio.to_thread(_run)})
+
+
+@router.post("/kb/semantic/logic-views/induce-scope")
+async def api_logic_induce_scope(request: Request = None):
+    """图谱范围逻辑解析(B3 统一排队)：提交 induce_scope 作业并等待完成。
+
+    Body: {groups: [{coreId, hops, memberIds}], root?, project?, modelId?}。
+    """
+    body = await request.json() if request else {}
+    from ..sem.engine import wait_llm_job
+    groups = body.get("groups") or []
+    if not groups:
+        return err(400, "缺少解析分组")
+    for g in groups:
+        if not (g.get("memberIds") or []):
+            return err(400, "分组缺少成员")
+    return await wait_llm_job("induce_scope", {
+        "groups": groups, "root": body.get("root"), "project": body.get("project"),
+        "modelId": body.get("modelId") or ""},
+        body.get("root"), body.get("project"), timeout_s=600)

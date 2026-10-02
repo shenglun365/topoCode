@@ -15,7 +15,7 @@ let timer: ReturnType<typeof setTimeout> | null = null
 const SEMANTIC_KINDS = new Set([
   'extract_delta', 'extract_unowned', 'extract_impl', 'extract_logic',
   'extract_scope', 'enhance_desc', 'enhance_semantic', 'gen_component_view',
-  'analyze_logic',
+  'analyze_logic', 'induce_scope',
 ])
 
 export function invalidateAssets(reason: string): void {

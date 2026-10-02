@@ -140,6 +140,44 @@ def expand_members(edges: List[tuple], core_ids: List[str], hops: int, cap: int 
     return members[:cap]
 
 
+def graph_outline(assets: List[dict], prefer_core_ids: Optional[List[str]] = None,
+                  max_cores: int = 8) -> List[dict]:
+    """图谱范围提纲(零 LLM)：核心(选中优先+中心度 top) × 1/2/3 跳邻域。
+
+    边集=资产 detail.relations(与归纳输入增厚同源)；邻域=expand_members BFS
+    ∩ 传入资产集(显示范围)——跳数档由 FE 呈现切换，三档成员一次算齐。
+    """
+    ids = {a.get("id") for a in assets if a.get("id")}
+    edges: List[tuple] = []
+    deg: Dict[str, int] = {}
+    for a in assets:
+        aid = a.get("id") or ""
+        for r in (a.get("detail") or {}).get("relations") or []:
+            t = str(r.get("target") or "")
+            if t in ids and t != aid:
+                edges.append((aid, t))
+                deg[aid] = deg.get(aid, 0) + 1
+                deg[t] = deg.get(t, 0) + 1
+    by_id = {a.get("id"): a for a in assets}
+    cores: List[str] = []
+    for c in (prefer_core_ids or []):
+        if c in ids and c not in cores:
+            cores.append(c)   # 选中节点优先置顶
+    for c, _d in sorted(deg.items(), key=lambda kv: -kv[1]):
+        if c not in cores:
+            cores.append(c)
+        if len(cores) >= max_cores:
+            break
+    out: List[dict] = []
+    for c in cores:
+        row = {"coreId": c, "coreName": (by_id.get(c) or {}).get("name") or c,
+               "degree": deg.get(c, 0), "hops": {}}
+        for h in (1, 2, 3):
+            row["hops"][str(h)] = expand_members(edges, [c], h, cap=500)
+        out.append(row)
+    return out
+
+
 def summarize_members(assets: List[dict], model_id: Optional[str] = None) -> str:
     """成员全集 → LLM 文字概括(职责/流程/关键依赖，≤300 字)。"""
     from ..agent.cognition.llm import llm_sync

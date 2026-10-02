@@ -4,7 +4,7 @@
 - core_ids：核心(种子)实现资产——分析起点，非分析范围；
 - member_ids：成员全集 = 核心 + agent 沿调用依赖边拓展；
 - summary：LLM 文字概括（analyze 作业生成/刷新）；
-- source：extract(提取时 LLM 归纳) | manual(手动新建)；
+- source：extract(提取时 LLM 归纳) | manual(手动新建) | graph(图谱范围解析)；
 - fingerprint：name+sorted(members) 指纹——提取重跑时 upsert 判重。
 """
 from __future__ import annotations

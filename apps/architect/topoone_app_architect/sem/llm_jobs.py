@@ -90,6 +90,45 @@ def _job_explain_logic(ctx) -> dict:
             "cached": False, "stale": False, "fingerprint": fp}
 
 
+def _job_induce_scope(ctx) -> dict:
+    """图谱范围逻辑解析(B3+跳数可控)：每组(核心+跳数邻域)→逻辑视图(source=graph)
+    + LLM 概括 + 讲解指纹(成员变化自动失效)。"""
+    import time as _time
+    from ..store import LogicViewsStore, SemanticAssetsStore
+    from ..store.logic_views import detail_fingerprint_of
+    from .logic_extract import summarize_members
+    from .paths import project_id_for, resolve_root
+    sc = _sc(ctx)
+    groups = sc.get("groups") or []
+    rid = (resolve_root(sc.get("root") or "", sc.get("project")) or "").strip()
+    if not rid:
+        return {"error": "项目 root 解析失败", "summary": "失败：root 解析失败"}
+    pid = project_id_for(rid, sc.get("project"))
+    view_ids: list = []
+    model_id = sc.get("modelId") or None
+    for g in groups:
+        core_id = g.get("coreId") or ""
+        members = [m for m in (g.get("memberIds") or []) if m]
+        if not members:
+            continue
+        rows = [SemanticAssetsStore.get(m) for m in members]
+        assets = [r for r in rows if r]
+        if not assets:
+            continue
+        core_name = (SemanticAssetsStore.get(core_id) or {}).get("name") or core_id
+        name = f"{core_name}·{g.get('hops') or 1}跳逻辑"[:80]
+        summary = summarize_members(assets, model_id)
+        view = LogicViewsStore.create(
+            pid, name, [core_id] if core_id else members[:1], members,
+            summary=summary, source="graph")
+        fp = detail_fingerprint_of([(r or {}).get("srcHash") or "∅" for r in rows])
+        LogicViewsStore.update(view["id"], {"detailFp": fp})
+        view_ids.append(view["id"])
+        _time.sleep(0)
+    return {"viewIds": view_ids[:20], "count": len(view_ids),
+            "summary": f"图谱范围解析 {len(view_ids)} 条逻辑视图"}
+
+
 def register_all() -> None:
     from . import job_runner
     job_runner.register("node_brief", _job_node_brief)
@@ -98,3 +137,4 @@ def register_all() -> None:
     job_runner.register("pseudo", _job_pseudo)
     job_runner.register("asset_desc", _job_asset_desc)
     job_runner.register("explain_logic", _job_explain_logic)
+    job_runner.register("induce_scope", _job_induce_scope)

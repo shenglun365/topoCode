@@ -35,6 +35,7 @@ export const KIND_LABEL: Record<string, string> = {
   pseudo: '伪码解释',
   asset_desc: '功能摘要',
   explain_logic: '逻辑讲解',
+  induce_scope: '范围逻辑解析',
   analyze_logic: '逻辑视图分析',
   gen_component_view: '组件聚合',
 }
