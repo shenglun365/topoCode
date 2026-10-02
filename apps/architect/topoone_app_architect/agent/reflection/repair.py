@@ -74,7 +74,7 @@ def json_dumps(obj: Any) -> str:
 # ── summarize_task 摘要/中继/提取统一原语 ─────────────────────────────
 
 def summarize_task(*, task_id: str, system: str, material: str,
-                   max_tokens: int, model_id: str = "",
+                   max_tokens: Optional[int] = None, model_id: str = "",
                    mode: str = "chat",
                    output_schema: Optional[Dict[str, Any]] = None,
                    parse: Optional[Callable[[Dict[str, Any]], Any]] = None,

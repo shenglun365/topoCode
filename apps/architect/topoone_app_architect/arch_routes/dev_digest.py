@@ -115,7 +115,7 @@ async def generate_digest(request: Request):
                "迭代条目按重要性排列并保留分支/提交信息；指出风险与待办。"
                "忠实素材，不虚构。",
         material=f"时间窗: 近 {since_days} 天\n\n素材:\n{material[:20000]}",
-        mode="structured", output_schema=_DIGEST_SCHEMA, max_tokens=2048,
+        mode="structured", output_schema=_DIGEST_SCHEMA,
         parse=lambda r: r.get("output") if isinstance(r.get("output"), dict) else None)
     if out["ok"] and isinstance(out["output"], dict):
         o = out["output"]

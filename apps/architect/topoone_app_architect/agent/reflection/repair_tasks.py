@@ -71,7 +71,6 @@ def _build_tool_call_repair(*, name: str, arguments: Dict[str, Any],
         user=(f"原调用: {json.dumps({'tool': name, 'arguments': arguments}, ensure_ascii=False)}\n"
               f"错误: {error}\n合法工具清单:\n{valid}"),
         parse=_parse_tool_call_json,
-        max_tokens=500,
         model_id=model_id or "",
         dataset_kind="tool_call_repair",
         meta={"original": {"tool": name, "arguments": arguments},

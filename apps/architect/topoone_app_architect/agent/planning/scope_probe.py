@@ -107,7 +107,7 @@ def probe_scope(root: str, project: Optional[str], req_text: str,
         Purpose.PROBE,
         [{"role": "system", "content": sys_prompt},
          {"role": "user", "content": "\n\n".join(user_parts)}],
-        tier=tier, schema=schema, max_tokens=1024,
+        tier=tier, schema=schema,
         model_id=resolve_light_task_model("probe", load_light_tasks_cfg())
         or None,
         validate=lambda p: (isinstance((p or {}).get("files"), list)

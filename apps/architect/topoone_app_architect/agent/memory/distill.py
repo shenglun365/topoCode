@@ -105,7 +105,7 @@ def build_error_patterns(material: List[Dict[str, Any]],
         task_id="error_distill",
         system=_SYSTEM,
         material=f"错误记录:\n\n" + "\n\n".join(lines)[:12000],
-        mode="structured", output_schema=DISTILL_SCHEMA, max_tokens=1500,
+        mode="structured", output_schema=DISTILL_SCHEMA,
         model_id=resolve_light_task_model("distill", cfg if cfg is not None
                                           else load_light_tasks_cfg()),
         parse=lambda r: r.get("output") if isinstance(r.get("output"), dict) else None)

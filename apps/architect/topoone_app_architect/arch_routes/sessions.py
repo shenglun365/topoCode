@@ -751,7 +751,7 @@ async def msg_digest(conv_id: str, request: Request):
     from ..agent.reflection.repair import summarize_task
     out = await asyncio.to_thread(
         summarize_task, task_id="msg_digest", system=sys_prompt,
-        material=material, max_tokens=800,
+        material=material,
         parse=lambda r: str(r.get("content") or "").strip() or None,
         fallback=lambda: material[:2000])
     digest = str(out.get("output") or "")
@@ -1227,7 +1227,7 @@ async def session_guide(conv_id: str):
     from ..agent.reflection.repair import summarize_task
     out = summarize_task(
         task_id="session_guide", system=_GUIDE_SYSTEM,
-        material=json.dumps(state, ensure_ascii=False), max_tokens=500)
+        material=json.dumps(state, ensure_ascii=False))
     content = out["output"]
     if not content:
         return _fallback()

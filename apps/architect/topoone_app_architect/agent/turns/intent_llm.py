@@ -105,7 +105,7 @@ def _classify(q: str, context: str = "") -> Optional[dict]:
     res = catalog_call("light:intent",
                        [{"role": "system", "content": _CLASSIFY_SYSTEM},
                         {"role": "user", "content": user}],
-                       schema=schema, max_tokens=100, validate=_valid,
+                       schema=schema, validate=_valid,
                        fallback=lambda: None)
     out = res.get("output") if isinstance(res.get("output"), dict) else {}
     try:

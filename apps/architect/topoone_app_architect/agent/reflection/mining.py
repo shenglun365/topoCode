@@ -130,7 +130,7 @@ def run_mine(conversation_id: str, root: Optional[str] = None,
     usr = {"role": "user", "content": f"会话 {conversation_id} 记录:\n\n{material}"}
     mid = model_id or resolve_role_model("mine") or None
     res = llm_sync(messages=[{"role": "system", "content": sys_prompt}, usr],
-                   mode="structured", output_schema=_MINE_SCHEMA, max_tokens=2048,
+                   mode="structured", output_schema=_MINE_SCHEMA,
                    model_id=mid)
     proposals = []
     if res and isinstance(res.get("output"), dict):
@@ -143,7 +143,7 @@ def run_mine(conversation_id: str, root: Optional[str] = None,
         chat = llm_sync(
             messages=[{"role": "system", "content": sys_prompt},
                       {"role": "user", "content": usr["content"] + hint}],
-            mode="chat", max_tokens=2048, model_id=mid)
+            mode="chat", model_id=mid)
         if chat is None and res is None:
             return {"error": "LLM 不可达——提炼失败(可稍后重试)"}
         proposals = [p for p in _parse_proposal_array((chat or {}).get("content", ""))

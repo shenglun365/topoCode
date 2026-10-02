@@ -243,7 +243,7 @@ def _batch_name_enrich(root: str, project: Optional[str], file_: str, kind: str,
                 "不要 Markdown 代码块。")
         try:
             resp = asyncio.run(llm.chat(
-                [{"role": "user", "content": user}], max_tokens=600))
+                [{"role": "user", "content": user}]))
         except Exception as e:
             logger.warning("[asset_extract] %s 名称解析失败(走符号名): %s", file_, e)
             return out

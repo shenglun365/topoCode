@@ -189,7 +189,7 @@ def _overflow_digest_msg(conv: dict, history: list, pol: dict) -> str:
                     task_id="overflow_digest",
                     system=("你是会话摘要器。将历史对话压缩为要点纪要"
                             "(已做决策/关键事实/未尽事项)，不超过 400 字，中文。"),
-                    material=material, max_tokens=600,
+                    material=material,
                     dataset_kind="overflow_digest")
             except Exception:  # noqa: BLE001 — 含 ModelNotConfigured: 禁降级出垃圾
                 _swallow("ctx.overflow_digest")

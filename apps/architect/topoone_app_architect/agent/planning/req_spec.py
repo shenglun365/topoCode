@@ -337,7 +337,7 @@ def repair_spec_payload_format(text: str, req_id: str = "") -> Optional[Dict[str
 
     out = run_repair_loop(RepairTask(
         task_id="spec_format", system=sys_prompt, user=text[:6000],
-        parse=_parse, max_tokens=1200, dataset_kind="repair_spec_format"))
+        parse=_parse, dataset_kind="repair_spec_format"))
     return out.get("parsed") if isinstance(out.get("parsed"), dict) else None
 
 

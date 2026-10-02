@@ -169,7 +169,7 @@ def summarize_conversation(conv_id: str, force: bool = False) -> Optional[dict]:
             task_id="conv_summary",
             system="你是会话归档助手。根据对话记录生成简短标题与摘要，只输出结构化结果。",
             material=f"对话记录:\n{transcript[:6000]}",
-            mode="structured", output_schema=_TITLE_SCHEMA, max_tokens=512,
+            mode="structured", output_schema=_TITLE_SCHEMA,
             model_id=resolve_light_task_model("summary", load_light_tasks_cfg()),
             parse=lambda r: r.get("output") if isinstance(r.get("output"), dict) else None)
         if out["ok"] and isinstance(out["output"], dict):

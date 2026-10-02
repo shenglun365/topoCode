@@ -85,7 +85,6 @@ async def outline_abbreviate(request: Request):
                     system="你是会话大纲助手。把用户输入缩略为不超过16字的语义短标题，"
                            "保留关键名词与意图，只输出短标题本身。",
                     material=text[:160],
-                    max_tokens=64,
                     model_id=resolve_light_task_model("summary", load_light_tasks_cfg()),
                 )
                 s = ""
@@ -216,7 +215,7 @@ async def doc_from_conversation(conv_id: str, request: Request):
         system="你是需求归档助手。把对话中的需求与方案讨论整理为一份备案文档"
                "(Markdown: ## 需求 / ## 方案 / ## 待办 三段), 忠实于对话内容, 不新增结论。",
         material=f"对话记录:\n{transcript[:24000]}",
-        mode="structured", output_schema=_DOC_SCHEMA, max_tokens=2048,
+        mode="structured", output_schema=_DOC_SCHEMA,
         parse=lambda r: r.get("output") if isinstance(r.get("output"), dict) else None)
     if out["ok"]:
         title = str((out["output"] or {}).get("title") or "").strip()[:80]

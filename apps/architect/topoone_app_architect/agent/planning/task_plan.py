@@ -325,7 +325,7 @@ def split_tasks_llm(req_text: str, policy: Optional[Any] = None) -> Optional[lis
                      "只输出结构化结果。"},
          {"role": "user", "content": f"需求文本:\n{req_text[:6000]}"}],
         tier=str(getattr(policy, "tier", "") or "T1"),
-        schema=schema, max_tokens=2048,
+        schema=schema,
         validate=lambda p: (isinstance((p or {}).get("tasks"), list)
                             and bool(p["tasks"]), "tasks 非列表或为空"),
         fallback=lambda: None)

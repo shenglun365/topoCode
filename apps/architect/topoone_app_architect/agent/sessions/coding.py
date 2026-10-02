@@ -42,7 +42,7 @@ async def _summarize_for_coding(text: str) -> tuple:
     )
     out = await asyncio.to_thread(
         summarize_task, task_id="coding_relay", system=sys_prompt,
-        material=text[:8000], max_tokens=400,
+        material=text[:8000],
         parse=lambda r: str(r.get("content") or "").strip() or None)
     content = out["output"]
     return (content, True) if content else (text, False)
