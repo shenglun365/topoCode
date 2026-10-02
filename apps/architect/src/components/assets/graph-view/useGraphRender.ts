@@ -461,8 +461,9 @@ const DIFF_STROKE: Record<DiffBucket, string> = {
   new: 'rgba(249, 226, 175, 0.8)',
   removed: 'rgba(249, 226, 175, 0.8)',
 }
-const SIGNAL_GREEN = '#a6e3a1'
-const SIGNAL_RED = '#f38ba8'
+// 信号点走全局 ctp 变量：随 data-theme 联动(浅色主题=饱和绿/红)，与 UI 色调恒一致
+const SIGNAL_GREEN = 'rgb(var(--ctp-green))'
+const SIGNAL_RED = 'rgb(var(--ctp-red))'
 function applyDiffNodeStyles() {
   const host: HTMLElement | null = diagRef.value?.containerRef ?? null
   const svg = host?.querySelector('svg')
