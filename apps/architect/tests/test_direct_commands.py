@@ -300,8 +300,9 @@ def test_error_contract_shapes(tmp_path, monkeypatch):
     assert resp404.status_code == 404 and resp404.json()["code"] == 404
 
 
-def test_llm_catalog_url_strips_v1_and_probes_context(monkeypatch):
-    """环节四: llm.models 目录 url 存根(剥 /v1, 探测友好); contextWindow 探测落库。"""
+def test_llm_catalog_url_strips_v1_no_context_field(monkeypatch):
+    """环节四: llm.models 目录 url 存根(剥 /v1, 探测友好); contextWindow 字段已
+    取消(2026-10-02 裁决: 上下文一律运行时探测, 不落库快照防失真)。"""
     import asyncio
     data = tempfile.mkdtemp(prefix="topo-cat-")
     monkeypatch.setenv("ARCH_DATA_DIR", data)
@@ -322,4 +323,7 @@ def test_llm_catalog_url_strips_v1_and_probes_context(monkeypatch):
     asyncio.run(mc.import_llm_models_route())
     saved = mc.get_llm_models()
     assert saved and saved[0]["url"] == "http://h:8082"          # /v1 剥离(存根)
-    assert saved[0]["contextWindow"] == 262144                    # 探测落库
+    assert "contextWindow" not in saved[0]                        # 字段取消: 不落库
+    # 存量条目携带 contextWindow 时读取路径惰性清理
+    mc.save_llm_models([{**saved[0], "contextWindow": 8192}])
+    assert "contextWindow" not in mc.get_llm_models()[0]

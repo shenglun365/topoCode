@@ -162,7 +162,12 @@ def get_llm_models() -> list:
         return []
     try:
         data = json.loads(raw)
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            return []
+        for m in data:   # 惰性清理: 上下文字段已取消(运行时探测)——存量键弹出
+            if isinstance(m, dict):
+                m.pop("contextWindow", None)
+        return data
     except (json.JSONDecodeError, TypeError):
         return []
 
@@ -218,7 +223,6 @@ def _normalize_kb_model(row: dict) -> dict:
         "type": row.get("type") or "local",
         "isDefault": bool(row.get("isDefault") or row.get("is_default")),
         "hasApiKey": bool(row.get("hasApiKey")),
-        "contextWindow": int(row.get("contextWindow") or row.get("context_window") or 0),
         "updatedAt": _ts(),
     }
 
@@ -264,19 +268,9 @@ async def import_llm_models_route():
         added += 1
 
     catalog = list(manual.values()) + out_imported
-    # 上下文容量探测落库(环节四): 缺 contextWindow 的条目逐个尽力探测(2s/个,
-    # 结果缓存), 失败留空不阻塞导入(cv-168 配套: architect 读取模型 API 真实容量)
-    import asyncio as _aio
-    from ..agent.cognition.llm import probe_context_window
-    for m in catalog:
-        if not m.get("contextWindow") and m.get("url"):
-            try:
-                n = await _aio.to_thread(probe_context_window,
-                                         str(m["url"]), str(m.get("model") or ""))
-                if n:
-                    m["contextWindow"] = int(n)
-            except Exception:  # noqa: BLE001
-                pass
+    # 上下文窗口不再落库(2026-10-02 裁决: KB/architect 双侧 ctx 字段取消，
+    # 一律运行时探测 probe_context_window → resolve_context_budget——
+    # 落库快照会过时失真(8192 vs 实测 262144)，max_tokens 仍由两侧自行设置)
     save_llm_models(catalog)
     store.CollabConfigStore.set("llm.modelImportedAt", str(_ts()))
     # 当前选中模型若已不在重建后的列表中 → 清空偏好(回退主后端默认模型)
