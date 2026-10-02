@@ -2,8 +2,9 @@ import type { DiagramPlugin, PluginContext } from './types';
 
 const DRAG_THRESHOLD_PX = 4;
 
-/** mermaid v11 ids look like `flowchart-A-0`, `stateDiagram-new-0`, `er-USER-0`. */
-const MERMAID_ID_RE = /^([a-zA-Z][a-zA-Z0-9]*)-([A-Za-z][\w-]*?)-\d+$/;
+/** mermaid v11 ids look like `flowchart-A-0`, `stateDiagram-new-0`, `er-USER-0`,
+ * `entity-USER-0`, `classId-名称-0`(中文类名). Node-id segment allows CJK/digits. */
+const MERMAID_ID_RE = /^([a-zA-Z][a-zA-Z0-9]*)-([\w\u3400-\u9fff\u3000-\u303f][\w\u3400-\u9fff-]*?)-\d+$/;
 
 function firstText(el: Element): string {
   const title = el.querySelector('title');

@@ -101,7 +101,7 @@ function closeCardFullscreen() {
  *  架构感知图谱直接呈现最终完成图；帧间过渡由演化时间轴的补间承担)。 */
 const diagRef = ref<InstanceType<typeof TopoDiagram> | null>(null)
 function onDiagramReady() {
-  void nextTick(() => { applySelectedNodeStyle(); applyNodeTooltips(); applyDiffNodeStyles() })
+  void nextTick(() => { applyPlantumlNodeAddressing(); applySelectedNodeStyle(); applyNodeTooltips(); applyDiffNodeStyles() })
 }
 /** 节点是否已在可视区域内：节点屏幕 bbox 外扩 margin 逆映射到根用户空间后
  *  完全落在 svg 元素可视范围内(对 zoom-pan 的 transform/viewBox 实现均成立)。
@@ -572,6 +572,52 @@ function applyDiffNodeStyles() {
     if (group && !seenGroups.has(group)) {
       seenGroups.add(group)
       applyNodeSignal(group, bucket, hit ? signalOf(hit.aid) : undefined)
+    }
+  }
+}
+/** plantuml 节点寻址注入：CLI 渲染的 SVG 无任何 id/class/data-*(实测)——kernel
+ *  resolvePlantuml 主路径恒空，点击全靠"最近文本"兜底(点框边缘易误中邻节点)。
+ *  渲染后按 clickIds 文本口径(safeSemId/显示名/「名称 · ID」截断变体)匹配 <text>，
+ *  爬升含形状组注入 data-entity-uid → 节点框任意位置可点(kernel 主路径直命中)。
+ *  幂等：注入前清除既有标记。mermaid 引擎(有 id 寻址)不处理。 */
+function applyPlantumlNodeAddressing() {
+  if (cardLang.value !== 'plantuml') return
+  const host: HTMLElement | null = diagRef.value?.containerRef ?? null
+  const svg = host?.querySelector('svg')
+  if (!svg) return
+  svg.querySelectorAll('g[data-entity-uid]').forEach((g) => {
+    g.removeAttribute('data-entity-uid')
+    g.removeAttribute('data-qualified-name')
+  })
+  // 文本 → 资产 id：clickIds 各视图口径 + 名称截断变体(与着色文本兜底同源) + 「· sa-x」尾段
+  const byText = new Map<string, string>()
+  for (const [k, aid] of clickIds.value) {
+    if (!/^n\d+$/.test(k)) byText.set(k, aid)
+  }
+  for (const n of D.data.scopedNodes.value) {
+    for (const v of [n.name, ...[18, 26, 30, 40].map((m) => semanticNodeLabelText(n.name, m))]) {
+      if (!byText.has(v)) byText.set(v, n.id)
+    }
+  }
+  if (!byText.size) return
+  for (const t of svg.querySelectorAll('text')) {
+    const txt = (t.textContent || '').trim()
+    if (!txt) continue
+    let aid = byText.get(txt)
+    if (!aid) {   // 「名称 · 资产ID」尾段兜底(component 口径截断后 ID 仍完整)
+      const tail = txt.split('·').pop()?.trim() ?? ''
+      if (/^sa-[A-Za-z0-9_-]+$/.test(tail)) aid = tail
+    }
+    if (!aid) continue
+    let el: Element | null = t
+    while (el && el !== svg) {
+      if (el.querySelector('rect, polygon, ellipse, circle')) break
+      el = el.parentElement
+    }
+    const g = (el && el !== svg ? el : (t.closest('g') ?? t.parentElement)) as Element | null
+    if (g && !g.hasAttribute('data-entity-uid')) {
+      g.setAttribute('data-entity-uid', aid)
+      g.setAttribute('data-qualified-name', txt)
     }
   }
 }
