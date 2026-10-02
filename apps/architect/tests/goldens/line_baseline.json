@@ -149,7 +149,7 @@
  "sem/engine.py": 5203,
  "sem/incremental.py": 85,
  "sem/job_runner.py": 221,
- "sem/llm_jobs.py": 140,
+ "sem/llm_jobs.py": 215,
  "sem/logic_extract.py": 251,
  "sem/logic_induce.py": 412,
  "sem/map_tools.py": 306,

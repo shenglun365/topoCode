@@ -5170,6 +5170,12 @@ async def wait_llm_job(kind: str, scope: dict, root: Optional[str] = None,
     pid = project_id_for(root, project)
     if not pid:
         return err(400, "项目 root 解析失败")
+    # 缓存预检(纯内存快查)：命中直接返回——不建作业行、不进任务中心
+    # (资产卡多轮重复点击已生成结果时不再重复请求/不再堆积已完成记录)
+    from .llm_jobs import precheck_cached
+    pre = await asyncio.to_thread(precheck_cached, kind, scope)
+    if pre is not None:
+        return ok(pre)
     r = job_runner.start_job(pid, kind, scope=scope, llm=True)
     jid = ((r.get("job") or {}).get("id")) or ""
     if not jid:

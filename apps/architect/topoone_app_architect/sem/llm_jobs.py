@@ -129,6 +129,81 @@ def _job_induce_scope(ctx) -> dict:
             "summary": f"图谱范围解析 {len(view_ids)} 条逻辑视图"}
 
 
+# ── 缓存预检(wait_llm_job 提交作业前快查：命中直接返回，不建作业行) ──
+# 资产卡高频点击(切换选中/多轮重复)时，已生成结果不再重复提交作业——
+# 任务中心不再堆积「已完成」记录、作业线程不再空转(实测 2026-10-03)。
+
+def _pre_node_brief(sc: dict) -> Optional[dict]:
+    from ..store import SemanticAssetsStore
+    a = SemanticAssetsStore.get(sc.get("assetId") or "")
+    if not a:
+        return None
+    fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    existing = (a.get("nodeBrief") or "").strip()
+    if fresh and existing and not sc.get("force"):
+        return {"brief": existing, "cached": True, "degraded": False}
+    return None
+
+
+def _pre_edge_notes(sc: dict) -> Optional[dict]:
+    """复刻 generate_edge_notes 缓存判定(纯内存：fresh + 全 key 覆盖)。"""
+    from ..store import SemanticAssetsStore
+    from .engine import _relation_target_index, _resolve_relation_target, project_id_for
+    a = SemanticAssetsStore.get(sc.get("assetId") or "")
+    if not a:
+        return None
+    pid = project_id_for(sc.get("root"), sc.get("project"))
+    if not pid:
+        return None
+    fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    if not fresh or sc.get("force"):
+        return None
+    try:
+        old = json.loads((a.get("edgeNotes") or "") or "{}")
+    except Exception:
+        return None
+    idx = _relation_target_index([x for x in SemanticAssetsStore.all_status(pid, limit=4000)
+                                  if x.get("status") != "deleted"])
+    keys = []
+    for rel in (a.get("detail") or {}).get("relations") or []:
+        tgt, resolved = _resolve_relation_target((rel.get("target") or "").strip(), idx)
+        if tgt and resolved:
+            keys.append(f"{a['id']}|{tgt}")
+    if not keys:
+        return None
+    if all(k in old and isinstance(old.get(k), dict) and (old[k] or {}).get("desc") for k in keys):
+        return {"notes": {k.split("|", 1)[1]: (old[k] or {}).get("desc") or "" for k in keys},
+                "cached": True, "degraded": False}
+    return None
+
+
+def _pre_explain_logic(sc: dict) -> Optional[dict]:
+    from ..store import LogicViewsStore, SemanticAssetsStore
+    from ..store.logic_views import detail_fingerprint_of
+    view = LogicViewsStore.get(sc.get("viewId") or "")
+    if not view or sc.get("force"):
+        return None
+    rows = [SemanticAssetsStore.get(m) for m in json.loads(view.get("memberIds") or "[]")]
+    fp = detail_fingerprint_of([(r or {}).get("srcHash") or "∅" for r in rows])
+    if (view.get("detail") or "") and (view.get("detailFp") or "") == fp:
+        return {"viewId": view.get("id"), "detail": view.get("detail"),
+                "cached": True, "stale": False, "fingerprint": fp}
+    return None
+
+
+_PRECHECKS = {
+    "node_brief": _pre_node_brief,
+    "edge_notes": _pre_edge_notes,
+    "explain_logic": _pre_explain_logic,
+}
+
+
+def precheck_cached(kind: str, scope: dict) -> Optional[dict]:
+    """有缓存语义的轻解析作业预检：返回 dict=缓存命中(免作业)；None=需生成。"""
+    fn = _PRECHECKS.get(kind)
+    return fn(scope or {}) if fn else None
+
+
 def register_all() -> None:
     from . import job_runner
     job_runner.register("node_brief", _job_node_brief)

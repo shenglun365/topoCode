@@ -1,10 +1,11 @@
 /**
  * 语义图谱 · detail 域（MS6-W2 机械迁出：域内逐行原文，跨域引用 D. 前缀重写）。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { semanticGraphViewDiagrams, ViewClickEntry, SemanticGraphViewId } from '@/utils/diagram-gen'
 import type { SemanticAsset } from '@/types'
 import { SemanticGraphResult, semanticAssetService } from '@/services/semantic-asset-service'
+import { onAssetsInvalidated } from '@/pages/asset-workspace/invalidate-bus'
 
 import type { WsDeps } from './graphTypes'
 
@@ -92,6 +93,11 @@ const selAnchors = computed<{ file: string; startLine: number; symbol: string }[
 })
 
 // ---- 节点简介 + 关系描述(证据式，grounded；提取时/懒生成，stale 自动失效) ----
+// 会话级结果缓存：切换节点/多轮重复点击已生成资产时直接命中，不再发请求
+// (BE 亦有缓存预检兜底——见 llm_jobs.precheck_cached)；资产数据失效时清空。
+const aiDetailCache = new Map<string, { brief?: string; notes?: Record<string, string> }>()
+const offInvalidate = onAssetsInvalidated(() => aiDetailCache.clear())
+onBeforeUnmount(() => offInvalidate())
 const nodeBriefText = ref('')
 const nodeBriefLoading = ref(false)
 const edgeNotesMap = ref<Record<string, string>>({})
@@ -107,6 +113,7 @@ async function regenerateNodeBrief() {
   try {
     const r = await semanticAssetService.nodeBrief(d.id, true)
     nodeBriefText.value = r.degraded ? (d.desc || '') : (r.brief || d.desc || '')
+    aiDetailCache.set(d.id, { ...aiDetailCache.get(d.id), brief: nodeBriefText.value })
   } catch { /* 保留现状 */ } finally {
     nodeBriefLoading.value = false
   }
@@ -235,26 +242,35 @@ watch(selDetail, async (d) => {
     const rest = D.code.visitedTabs.value.filter((x) => x.file !== pf)
     D.code.visitedTabs.value = [...rest, { file: pf, label: pf.split('/').pop() || pf, assetId: d.id, assetName: d.name }].slice(-6)
   }
+  const aiCached = aiDetailCache.get(d.id)
   if (d.nodeBrief) {
     nodeBriefText.value = d.nodeBrief
+  } else if (aiCached?.brief !== undefined) {
+    nodeBriefText.value = aiCached.brief
   } else {
     nodeBriefLoading.value = true
     try {
       const r = await semanticAssetService.nodeBrief(d.id, false, sig).catch(() => null)
       if (!r) return   // 已切换资产(abort) → 丢弃
       nodeBriefText.value = r.degraded ? '' : (r.brief || '')
+      aiDetailCache.set(d.id, { ...aiDetailCache.get(d.id), brief: nodeBriefText.value })
     } catch { /* 降级显示原 desc */ } finally {
       nodeBriefLoading.value = false
     }
   }
   if ((d.detail?.relations ?? []).length) {
-    edgeNotesLoading.value = true
-    try {
-      const r = await semanticAssetService.edgeNotes(d.id, false, sig).catch(() => null)
-      if (!r) return   // 已切换资产(abort) → 丢弃
-      edgeNotesMap.value = r.notes || {}
-    } catch { /* 关系描述降级显示 semantic/type */ } finally {
-      edgeNotesLoading.value = false
+    if (aiCached?.notes !== undefined) {
+      edgeNotesMap.value = aiCached.notes
+    } else {
+      edgeNotesLoading.value = true
+      try {
+        const r = await semanticAssetService.edgeNotes(d.id, false, sig).catch(() => null)
+        if (!r) return   // 已切换资产(abort) → 丢弃
+        edgeNotesMap.value = r.notes || {}
+        aiDetailCache.set(d.id, { ...aiDetailCache.get(d.id), notes: edgeNotesMap.value })
+      } catch { /* 关系描述降级显示 semantic/type */ } finally {
+        edgeNotesLoading.value = false
+      }
     }
   }
   // 入边(被谁引用)

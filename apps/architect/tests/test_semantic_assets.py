@@ -2862,3 +2862,27 @@ def test_edge_notes_diag_and_resample(tmp_path, monkeypatch):
                         {"ok": True, "content": '{"edges":[{"target":"幻觉名","brief":"x"}]}'})
     r2 = E.generate_edge_notes("sa-en-from", str(root), None, force=True)
     assert r2.get("error") and "target 与清单不符" in r2["error"], r2
+
+
+def test_wait_llm_job_precheck_cached_no_job_row(tmp_path, monkeypatch):
+    """缓存预检：已生成结果重复请求不再建作业行(任务中心不堆积)。
+    node_brief 落库后二次 wait_llm_job → 直接 cached 返回, jobs 无新行。"""
+    import asyncio
+    import topoone_app_architect.sem.engine as E
+    from topoone_app_architect.store import SemanticJobsStore
+    _ctx(tmp_path, monkeypatch)
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "a.ts").write_text("export function calc() { return 1 }\n")
+    pid = S.project_id_for(str(root), None)
+    _mk_proc_asset(pid, "sa-pc-1", "calc", rels=[], file="a.ts")
+    store.SemanticAssetsStore.update("sa-pc-1", {"nodeBrief": "calc 计算并返回结果"})
+
+    before = len(SemanticJobsStore.list(pid) or [])
+    r = asyncio.run(E.wait_llm_job("node_brief",
+                                   {"assetId": "sa-pc-1", "root": str(root), "project": None,
+                                    "modelId": "", "force": False}, str(root), None))
+    after = len(SemanticJobsStore.list(pid) or [])
+    d = r.get("data") or {}
+    assert d.get("cached") is True and d.get("brief"), r
+    assert before == after, "缓存命中不应新建作业行"
