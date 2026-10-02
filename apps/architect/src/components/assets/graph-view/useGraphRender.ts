@@ -474,7 +474,9 @@ function applyDiffNodeStyles() {
   const rootPrefix = svg.id ? `${svg.id}-` : ''
   // 桶样式+信号点落组：统一浅橘黄底(weak 更浅) + 左上内侧纯色信号点(绿=含新增/红=含删除)。
   const applyNodeSignal = (el: Element, bucket: DiffBucket,
-                           sig?: { hasAdded: boolean; hasDeleted: boolean }): void => {
+                           sigIn?: { hasAdded: boolean; hasDeleted: boolean }): void => {
+    // weak(符号段未变,可能受影响)不画信号点——不确定的关联画增删点会误导为确有变化
+    const sig = bucket === 'weak' ? undefined : sigIn
     el.classList.add(`td-node-diff-${bucket}`)
     // 内联样式兜底：mermaid 主题样式(SVG 内 <style> 带 id 选择器)特异性高于类规则，
     // 类规则虽有 !important 但部分引擎渲染路径会被内联呈现覆盖——双保险。
@@ -495,6 +497,8 @@ function applyDiffNodeStyles() {
         c.setAttribute('cy', String(cy))
         c.setAttribute('r', '4')
         c.style.setProperty('fill', fill, 'important')   // 免疫主题 CSS 覆盖(SVG 属性特异性最低)
+        c.style.setProperty('stroke', 'none', 'important')   // 描边全免疫(桶类/主题 CSS 均不命中)
+        c.style.setProperty('stroke-width', '0', 'important')
         c.setAttribute('class', 'td-node-signal')
         c.setAttribute('pointer-events', 'none')
         return c

@@ -628,14 +628,14 @@ const {
   fill: #fab387 !important;
   font-weight: 700;
 }
-/* 对比变化节点着色(asset-compare 资产级口径)：以浅色底填充为主(比描边醒目)，
-   透明度压低保证节点文字可读；辅以同色细描边勾勒轮廓。
-   强关联=黄底 · 弱关联=灰浅底(段未变) · 目标侧新增=绿底 · 目标侧移除=红底+虚线。
-   (运行时另注入同值内联样式兜底，双保险) */
+/* 对比变化节点视觉(与 useGraphRender DIFF_FILL/STROKE 同值，双保险兜底)：
+   变更/新增/移除统一「需更新」浅橘黄底；弱关联(符号段未变)更浅一档；
+   增删语义由左上信号点表达(纯色圆点，非节点形状描边)。
+   circle:not(.td-node-signal)——信号点为运行时注入的专属元素，排除防描边误伤。 */
 :deep(.td-node-diff-changed) rect,
 :deep(.td-node-diff-changed) polygon,
 :deep(.td-node-diff-changed) ellipse,
-:deep(.td-node-diff-changed) circle {
+:deep(.td-node-diff-changed) circle:not(.td-node-signal) {
   fill: rgba(249, 226, 175, 0.30) !important;
   stroke: rgba(249, 226, 175, 0.8) !important;
   stroke-width: 1.5px !important;
@@ -643,27 +643,26 @@ const {
 :deep(.td-node-diff-weak) rect,
 :deep(.td-node-diff-weak) polygon,
 :deep(.td-node-diff-weak) ellipse,
-:deep(.td-node-diff-weak) circle {
-  fill: rgba(136, 137, 163, 0.16) !important;
-  stroke: rgba(136, 137, 163, 0.5) !important;
+:deep(.td-node-diff-weak) circle:not(.td-node-signal) {
+  fill: rgba(249, 226, 175, 0.14) !important;
+  stroke: rgba(249, 226, 175, 0.4) !important;
   stroke-width: 1.5px !important;
 }
 :deep(.td-node-diff-new) rect,
 :deep(.td-node-diff-new) polygon,
 :deep(.td-node-diff-new) ellipse,
-:deep(.td-node-diff-new) circle {
-  fill: rgba(166, 227, 161, 0.24) !important;
-  stroke: rgba(166, 227, 161, 0.75) !important;
+:deep(.td-node-diff-new) circle:not(.td-node-signal) {
+  fill: rgba(249, 226, 175, 0.30) !important;
+  stroke: rgba(249, 226, 175, 0.8) !important;
   stroke-width: 1.5px !important;
 }
 :deep(.td-node-diff-removed) rect,
 :deep(.td-node-diff-removed) polygon,
 :deep(.td-node-diff-removed) ellipse,
-:deep(.td-node-diff-removed) circle {
-  fill: rgba(243, 139, 168, 0.24) !important;
-  stroke: rgba(243, 139, 168, 0.8) !important;
+:deep(.td-node-diff-removed) circle:not(.td-node-signal) {
+  fill: rgba(249, 226, 175, 0.30) !important;
+  stroke: rgba(249, 226, 175, 0.8) !important;
   stroke-width: 1.5px !important;
-  stroke-dasharray: 6 3 !important;
 }
 /* 资产卡四边独立拉伸把手(上下左右)：透明热区，hover 显提示条 */
 .card-edge {
