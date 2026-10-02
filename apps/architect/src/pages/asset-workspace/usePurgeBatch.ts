@@ -112,6 +112,7 @@ export function usePurgeBatch(D: WsDeps) {
       })
       batchLast.value = t('assetMgmt.batchDone', { action: t(`assetMgmt.batchAction.${action}`), n: res.count })
       await Promise.all([core.loadSemantic(), core.refreshStatus()])
+      batchOpen.value = false   // 删除完成：刷新列表(上) + 自动关闭批量管理浮窗
     } catch {
       batchLast.value = t('assetMgmt.batchFailed')
     } finally {

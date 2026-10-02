@@ -495,7 +495,7 @@ export function useAssetCore(D: WsDeps) {
   const logicViews = shallowRef<LogicView[]>([])
   const logicViewBusy = ref('')
   /** 逻辑分析分组开合 + 新建弹窗开关。 */
-  const logicGroupOpen = ref(true)
+  const logicGroupOpen = ref(false)   // 默认收拢(一级分组条目恒显，无视图也显示)
   const logicViewCreateOpen = ref(false)
   const logicViewOpen = reactive<Record<string, boolean>>({})
 

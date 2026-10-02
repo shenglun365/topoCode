@@ -2008,7 +2008,7 @@ export default {
       tierUnavailable: 'Advanced custom mode is under development — unavailable for now',
     },
     logicViews: {
-    group: 'Logic Analysis',
+    group: 'Logic Assets',
     manualTag: 'manual',
     cardTitle: 'Logic view card',
     membersTitle: 'Member assets',

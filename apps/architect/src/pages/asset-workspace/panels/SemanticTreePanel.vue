@@ -86,8 +86,7 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
 </script>
 
 <template>
-            <!-- 逻辑分析分组(跨组件业务逻辑链条——视图类型，非资产行；语义资产 tab 单列) -->
-            <template v-if="logicViews.length">
+            <!-- 逻辑资产分组(跨组件业务逻辑链条——视图类型，非资产行；组头恒显，无视图也显示) -->
               <div class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5 tree-row">
                 <button
                   class="text-ctp-overlay0 hover:text-ctp-text p-0.5"
@@ -156,7 +155,7 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
                   </div>
                 </div>
               </template>
-            </template>
+
             <template
               v-for="row in renderedTreeRows"
               :key="row.key"

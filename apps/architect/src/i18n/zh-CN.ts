@@ -2011,7 +2011,7 @@ export default {
       tierUnavailable: '高级自定义模式开发中，暂不可选',
     },
     logicViews: {
-    group: '逻辑分析',
+    group: '逻辑资产',
     manualTag: '手动',
     cardTitle: '逻辑视图资产卡',
     membersTitle: '成员实现资产',
