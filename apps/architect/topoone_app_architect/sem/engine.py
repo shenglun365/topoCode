@@ -2983,29 +2983,37 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
     sys_prompt = (
         "你是资深架构师。基于 from 资产的真实源码片段，逐条描述它与各 target 资产的关系："
         "必须在源码中指明关系发生的位置(引用真实符号/语句)，说明『在做什么的过程中与对方发生该关系』。"
-        "每条不超过 40 字，中文，贴着代码，不得臆造源码中不存在的关系。"
+        "每条不超过 40 字，中文，贴着代码，brief 原样使用清单中的 target 资产名，不得臆造源码中不存在的关系。"
         '只输出 JSON：{"edges":[{"target":"<原始target名>","brief":"<描述>"}]}。'
     )
     user = (f"from 资产: [{a.get('kind')}] {a.get('name')}\n"
             + (terms_txt + "\n" if terms_txt else "") + (conv_txt + "\n" if conv_txt else "")
             + "\n真实源码片段:\n" + snippet
             + "\n\ntarget 资产清单:\n" + "\n".join(tgt_blocks) + "\n\n请输出 JSON。")
+    from ..agent.tools.req_agent import get_max_tokens_preference
+    from ..agent.turns.catalog import catalog_call
     notes: Dict[str, str] = {}
-    try:
-        from ..agent.tools.req_agent import get_max_tokens_preference
-        from ..agent.turns.catalog import catalog_call
-        res = catalog_call("role:pseudo",
-                           [{"role": "system", "content": sys_prompt},
-                            {"role": "user", "content": user}],
-                           max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=model_id)
-        raw = (res.get("content") or "").strip() if res.get("ok") else ""
-        if raw.startswith("```"):
-            raw = raw.strip("`")
-            if raw.lower().startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
-        parsed = json.loads(raw)
-        by_target = {rel.get("target") or t: t for t, rel in rels}
+    diag = ""
+    by_target = {rel.get("target") or t: t for t, rel in rels}
+
+    def _parse_notes(raw: str) -> tuple:
+        """单次输出解析：JSON 加固提取 + target 匹配 + 接地校验；返回 (notes, 失败诊断)。"""
+        if not raw:
+            return {}, "LLM 返回空内容"
+        parsed = None
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            m = re.search(r"\{.*\}", raw, re.S)   # 围栏/前后缀加固(对齐归纳口径)
+            if not m:
+                return {}, f"输出无 JSON(前 60 字符: {raw[:60]!r})"
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                return {}, f"JSON 解析失败(前 60 字符: {raw[:60]!r})"
+        out: Dict[str, str] = {}
+        unmatched: List[str] = []
+        ungrounded = 0
         for it in (parsed.get("edges") or []) if isinstance(parsed, dict) else []:
             try:
                 tn = str(it.get("target") or "").strip()
@@ -3014,17 +3022,49 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
                 continue
             t = by_target.get(tn)
             if not t or not brief:
+                if tn and not t:
+                    unmatched.append(tn[:30])
                 continue
             ta = by_id.get(t) or {}
             tok_names = [ta.get("name") or ""] + [r.get("symbol") or "" for r in (ta.get("astRefs") or [])]
             if not any(len(k) >= 3 and k in brief for k in tok_names):
-                continue   # 接地校验：描述必须引用 target 真实符号
-            notes[f"{asset_id}|{t}"] = brief
-    except Exception as e:
-        logger.warning("[semantic] edge notes LLM 失败: %s", e)
-        notes = {}
+                ungrounded += 1   # 接地校验：描述必须引用 target 真实符号
+                continue
+            out[f"{asset_id}|{t}"] = brief
+        if not out:
+            if unmatched:
+                fail = f"输出 target 与清单不符(样例: {unmatched[:2]})"
+            elif ungrounded:
+                fail = f"{ungrounded} 条描述未引用 target 真实符号被丢弃"
+            else:
+                fail = "输出 edges 为空"
+            return {}, fail
+        return out, ""
+
+    for attempt in (1, 2):
+        try:
+            res = catalog_call("role:pseudo",
+                               [{"role": "system", "content": sys_prompt},
+                                {"role": "user", "content": user}],
+                               max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=model_id)
+        except Exception as e:  # noqa: BLE001 — 网关异常如实进诊断
+            logger.warning("[semantic] edge notes 调用失败: %s", e)
+            diag = f"调用异常: {e}"
+            break
+        raw = (res.get("content") or "").strip() if res.get("ok") else ""
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        notes, diag = _parse_notes(raw)
+        if notes:
+            break
+        if attempt == 1:
+            logger.info("[semantic] edge notes 输出无效(%s) → 重采样", diag)
     if not notes:
-        return {"notes": {}, "cached": False, "degraded": True, "error": "LLM 未返回有效关系描述"}
+        return {"notes": {}, "cached": False, "degraded": True,
+                "error": f"LLM 未返回有效关系描述({diag})"}
     try:
         merged = dict(old)
         now = _ts()

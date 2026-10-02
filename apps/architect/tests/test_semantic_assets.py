@@ -2829,3 +2829,36 @@ def test_source_snippet_diff_base_new_file(tmp_path, monkeypatch):
     assert r["code"] == 0, r
     kinds = {ln["kind"] for ln in r["data"]["lines"]}
     assert kinds == {"add"}, kinds
+
+
+def test_edge_notes_diag_and_resample(tmp_path, monkeypatch):
+    """edge_notes 失败诊断细分 + 无效输出重采样一次：
+    首轮 target 不匹配 → 诊断样例 + 重采样；二轮接地通过 → 落库返回。"""
+    import topoone_app_architect.sem.engine as E
+    _ctx(tmp_path, monkeypatch)
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "a.ts").write_text("export function accTranslate() { return 1 }\n")
+    pid = S.project_id_for(str(root), None)
+    _mk_proc_asset(pid, "sa-en-tgt", "解析位移属性", rels=[], file="a.ts")
+    _mk_proc_asset(pid, "sa-en-from", "平移累加",
+                   rels=[{"target": "解析位移属性", "type": "calls"}], file="a.ts")
+
+    calls = {"n": 0}
+    def fake_call(role, msgs, max_tokens=0, model_id=None, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"ok": True, "content": '{"edges":[{"target":"解析位移","brief":"调用解析位移属性"}]}'}
+        return {"ok": True, "content": '{"edges":[{"target":"解析位移属性","brief":"调用解析位移属性获取输入"}]}'}
+    monkeypatch.setattr("topoone_app_architect.agent.turns.catalog.catalog_call", fake_call)
+    r = E.generate_edge_notes("sa-en-from", str(root), None)
+    assert calls["n"] == 2, "无效输出(target 不匹配)应触发重采样"
+    assert not r.get("error"), r
+    assert list(r["notes"].values()) == ["调用解析位移属性获取输入"]
+
+    # 两轮都无效 → 错误带细分诊断(target 不匹配样例)
+    monkeypatch.setattr("topoone_app_architect.agent.turns.catalog.catalog_call",
+                        lambda role, msgs, max_tokens=0, model_id=None, **kw:
+                        {"ok": True, "content": '{"edges":[{"target":"幻觉名","brief":"x"}]}'})
+    r2 = E.generate_edge_notes("sa-en-from", str(root), None, force=True)
+    assert r2.get("error") and "target 与清单不符" in r2["error"], r2
