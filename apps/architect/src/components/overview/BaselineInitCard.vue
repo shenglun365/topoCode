@@ -85,12 +85,12 @@ async function syncCodegraph() {
   }
 }
 
-/** KB 基线更新: 仅发起请求(knowledge.pullRequest), 基线管理页确认执行后过期消除。 */
+/** 基线更新(数据主权批E): 本地编排 采集→分组→命名, 单作业进度。 */
 async function updateBaseline() {
   kbMsg.value = ''
   try {
-    const r = await semanticAssetService.symbolSync()
-    kbMsg.value = r?.message || ''
+    const r = await semanticAssetService.baselineRefresh()
+    kbMsg.value = r?.message || (r?.started ? '已提交' : (r?.reason || ''))
   } catch (e: any) {
     kbMsg.value = e?.message || String(e)
   }

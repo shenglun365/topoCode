@@ -4749,6 +4749,43 @@ async def api_component_name(body: dict = None):
     return ok({**r, "message": "组件命名已提交(LLM 通道, 任务中心可见进度)"})
 
 
+@router.post("/kb/semantic/baseline-refresh")
+async def api_baseline_refresh(body: dict = None):
+    """一键基线刷新(数据主权批E)：采集→分组→命名 三步串行编排(单作业可见全进度)。
+
+    取代旧 symbol-sync 发起-确认流——KB 去基线化后基线更新为 architect 本地动作。
+    scope: {force?: bool(命名全量重做), modelId?: str}
+    """
+    from .. import ctx
+    from .job_runner import start_job
+    body = body or {}
+    proj = body.get('project') or ctx.get_project()
+    if not proj:
+        return err(400, "项目 id 缺失")
+    scope: dict = {}
+    if body.get('force'):
+        scope['force'] = True
+    if isinstance(body.get('modelId'), str) and body['modelId'].strip():
+        scope['modelId'] = body['modelId'].strip()
+    r = start_job(proj, 'baseline_refresh', scope)
+    if not r.get("started"):
+        return ok({**r, "message": f"未启动: {r.get('reason')}"})
+    return ok({**r, "message": "基线刷新已提交(采集→分组→命名, 任务中心可见)"})
+
+
+@router.get("/kb/semantic/baseline-refresh/status")
+async def api_baseline_refresh_status(project: Optional[str] = None):
+    """基线刷新作业状态(最近 5 次)+ 当前锚。"""
+    from .. import ctx
+    from ..store.jobs import SemanticJobsStore
+    proj = project or ctx.get_project()
+    if not proj:
+        return err(400, "项目 id 缺失")
+    jobs = [j for j in SemanticJobsStore.list(proj, limit=50)
+            if j.get("kind") == "baseline_refresh"]
+    return ok({"jobs": jobs[:5], "latest": jobs[0] if jobs else None})
+
+
 @router.get("/kb/semantic/component-name/status")
 async def api_component_name_status(project: Optional[str] = None):
     """命名状态：覆盖率 + 各组件命名（概览卡/组件卡状态源, 替代 KB naming-status）。"""

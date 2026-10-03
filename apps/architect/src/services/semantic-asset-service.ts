@@ -266,6 +266,15 @@ export interface NamingStatus {
   } | null
 }
 
+/** 基线刷新作业行(批E)。 */
+export interface BaselineRefreshJob {
+  id: string
+  kind: string
+  state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'lost' | string
+  progress?: { total?: number; done?: number; current?: string }
+  result?: { rev?: string; head?: string; steps?: Record<string, { nodes?: number; edges?: number; components?: number; named?: number; error?: string }> }
+}
+
 /** 自管组件命名状态(批C): arch_component_naming 覆盖口径。 */
 export interface ComponentNamingStatus {
   rev: string
@@ -488,10 +497,16 @@ export const semanticAssetService = {
     return await apiPost('/kb/semantic/codegraph-sync', { root, project })
   },
 
-  /** 发起基线变更请求（职责划分：architect 仅发起，KB 知识库管理确认执行）。 */
-  async symbolSync(): Promise<{ requested: boolean; requestId?: string; corePid: string; head: string; message?: string } | undefined> {
+  /** 一键基线刷新(数据主权批E): 本地编排 采集→分组→命名, 单作业进度。 */
+  async baselineRefresh(force = false): Promise<{ started: boolean; reason?: string; job?: { id: string }; message?: string } | undefined> {
     const { root, project } = currentProjectParams()
-    return await apiPost('/kb/semantic/symbol-sync', { root, project })
+    return await apiPost('/kb/semantic/baseline-refresh', { root, project, ...(force ? { force: true } : {}) })
+  },
+
+  /** 基线刷新作业状态(最近 5 次 + 最新)。 */
+  async baselineRefreshStatus(): Promise<{ jobs: BaselineRefreshJob[]; latest?: BaselineRefreshJob } | undefined> {
+    const c = ctx()
+    return await apiGet(`/kb/semantic/baseline-refresh/status${c ? `?${c}` : ''}`)
   },
 
   /** 基线(lastHead) → 工作区 变更文件集（三视图 diff 数据源）。 */

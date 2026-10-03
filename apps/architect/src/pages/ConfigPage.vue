@@ -589,7 +589,7 @@ async function loadCgStatus() {
 async function runCgSync() {
   cgSyncing.value = true
   try {
-    await semanticAssetService.symbolSync()
+    await semanticAssetService.baselineRefresh()
     void loadCgStatus()
   } catch { /* 失败提示由 api 层处理 */ } finally {
     cgSyncing.value = false

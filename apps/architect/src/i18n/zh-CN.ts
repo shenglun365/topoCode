@@ -1069,13 +1069,13 @@ export default {
     notForced: '提示而已，不强制提交',
     commitDo: '提交变更',
     cleanOk: '工作区干净，无未提交变更',
-    kbSync: '知识库基线同步',
-    kbSyncHint: '仅发送基线变更请求(branch / tag / commit)；知识库基于 git 同步代码并更新基线，不直接交互变更数据。',
+    kbSync: '更新自有基线',
+    kbSyncHint: '本地一键编排：parseFileAst 采集 → 社区分组 → 快速命名；KB 仅提供算力，基线数据全部存于 architect。',
     branch: '分支',
     tag: '标签',
     commit: 'commit',
-    sendSync: '发送基线变更请求',
-    sync: { idle: '待同步', syncing: '同步中', done: '已同步' },
+    sendSync: '更新基线(采集→分组→命名)',
+    sync: { idle: '待更新', syncing: '刷新中', done: '已更新', error: '失败' },
   },
   config: {
     cg: {

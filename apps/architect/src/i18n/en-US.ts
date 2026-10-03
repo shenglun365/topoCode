@@ -1066,13 +1066,13 @@ export default {
     notForced: 'Just a hint — not forced',
     commitDo: 'Commit Changes',
     cleanOk: 'Working tree clean — no uncommitted changes',
-    kbSync: 'Knowledge Base Baseline Sync',
-    kbSyncHint: 'Only send the baseline change request (branch / tag / commit); the KB syncs code via git and updates the baseline — no direct change-data exchange.',
+    kbSync: 'Refresh own baseline',
+    kbSyncHint: 'Local one-click pipeline: parseFileAst collect → community grouping → fast naming; KB provides compute only, baseline data lives in architect.',
     branch: 'Branch',
     tag: 'Tag',
     commit: 'commit',
-    sendSync: 'Send Baseline Change Request',
-    sync: { idle: 'Idle', syncing: 'Syncing', done: 'Synced' },
+    sendSync: 'Refresh baseline (collect → group → name)',
+    sync: { idle: 'Pending', syncing: 'Refreshing', done: 'Updated', error: 'Failed' },
   },
   config: {
     lightTasks: {

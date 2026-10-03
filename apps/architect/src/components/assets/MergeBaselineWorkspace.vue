@@ -155,6 +155,7 @@ function fmtTs(ts: number): string {
             'bg-ctp-surface0 text-ctp-subtext0': syncStatus === 'idle',
             'bg-ctp-yellow/15 text-ctp-yellow': syncStatus === 'syncing',
             'bg-ctp-green/15 text-ctp-green': syncStatus === 'done',
+            'bg-ctp-red/15 text-ctp-red': syncStatus === 'error',
           }"
         >{{ t(`mergeBaseline.sync.${syncStatus}`) }}</span>
       </div>
@@ -176,16 +177,28 @@ function fmtTs(ts: number): string {
           >
             ✓ {{ merge.sync.message }} · {{ fmtDate(merge.sync.requestedAt) }}
           </div>
+          <div
+            v-if="merge.failed"
+            class="text-[11px] text-ctp-red"
+          >
+            ✗ {{ merge.sync.message }}
+          </div>
+          <div
+            v-else-if="merge.syncing && merge.sync.message"
+            class="text-[11px] text-ctp-subtext0"
+          >
+            {{ merge.sync.message }}
+          </div>
         </template>
 
         <button
           class="btn btn-sm"
           :class="merge.done ? 'btn-ghost' : 'btn-mauve'"
-          :disabled="merge.syncing || merge.done"
+          :disabled="merge.syncing"
           @click="merge.sendBaselineSync()"
         >
           <PaperAirplaneIcon class="w-4 h-4" />
-          {{ merge.syncing ? `${t('common.loading')}…` : merge.done ? `${t('common.done')} ✓` : t('mergeBaseline.sendSync') }}
+          {{ merge.syncing ? `${t('common.loading')}…` : merge.done ? `${t('mergeBaseline.sendSync')} ↻` : t('mergeBaseline.sendSync') }}
         </button>
       </div>
     </div>
