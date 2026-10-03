@@ -60,14 +60,19 @@ class TestDerive:
 
 class TestPolicy:
     def test_default_unprobed(self):
-        assert AP.asset_parse_policy("") == {"mode": "free", "ref_form": "name",
-                                             "brief_cap": None, "retries": 1}
+        """统一裁决(2026-10-03): 未探测也恒 structural(大清单=信息干扰)。"""
+        assert AP.asset_parse_policy("") == {"mode": "structural", "ref_form": "name",
+                                             "brief_cap": None, "chain_len": [3, 15],
+                                             "retries": 1}
 
-    def test_numbered_policy(self, monkeypatch, tmp_path):
+    def test_numbered_policy_manual_only(self, monkeypatch, tmp_path):
+        """探测档案 numbered 不驱动策略(恒 structural); 手动 numbered 才生效。"""
         from topoone_app_architect.agent.cognition import model_profile as MP
         _setup_store(tmp_path, monkeypatch)
         AP._save_asset_profile("m1", {"mode": "numbered", "listCap": 200,
-                                      "chainLen": [3, 15], "retries": 1})
+                                      "chainLen": [3, 15], "retries": 1, "source": "probed"})
+        assert AP.asset_parse_policy("m1")["mode"] == "structural"   # probed 仅参考
+        AP.set_asset_profile_manual("m1", {"mode": "numbered", "listCap": 200})
         pol = AP.asset_parse_policy("m1")
         assert pol["ref_form"] == "num" and pol["brief_cap"] == 200 * AP.ROW_CHARS
 
@@ -81,11 +86,11 @@ class TestPolicy:
     def test_manual_overrides_probe(self, tmp_path, monkeypatch):
         _setup_store(tmp_path, monkeypatch)
         AP._save_asset_profile("m3", {"mode": "numbered", "listCap": 200})
-        r = AP.set_asset_profile_manual("m3", {"mode": "structural"})
+        r = AP.set_asset_profile_manual("m3", {"mode": "agentic"})
         assert r["asset"]["source"] == "manual"
+        assert AP.asset_parse_policy("m3")["mode"] == "agentic"
+        AP.set_asset_profile_manual("m3", None)   # 清除回缺省(=统一 structural)
         assert AP.asset_parse_policy("m3")["mode"] == "structural"
-        AP.set_asset_profile_manual("m3", None)   # 清除回缺省
-        assert AP.asset_parse_policy("m3")["mode"] == "free"
 
 
 class TestProbeFlow:
@@ -126,3 +131,21 @@ def _setup_store(tmp_path, monkeypatch):
     monkeypatch.setenv("ARCH_DATA_DIR", data)
     C._db = None; C._kb = None; C._data_dir = None; C._project_dbs.clear()
     C.setup(data_dir=data)
+
+
+class TestPolicyUnified:
+    def test_probed_numbered_still_structural(self, tmp_path, monkeypatch):
+        """统一裁决(2026-10-03): 探测档案(numbered)不驱动策略——恒 structural,
+        探测数据仅参考展示。"""
+        _setup_store(tmp_path, monkeypatch)
+        AP._save_asset_profile("m-u1", {"mode": "numbered", "listCap": 200,
+                                        "source": "probed"})
+        pol = AP.asset_parse_policy("m-u1")
+        assert pol["mode"] == "structural"
+
+    def test_manual_free_respected(self, tmp_path, monkeypatch):
+        """手动覆盖(实验选项)显式 free → 尊重。"""
+        _setup_store(tmp_path, monkeypatch)
+        AP.set_asset_profile_manual("m-u2", {"mode": "free", "listCap": 100})
+        pol = AP.asset_parse_policy("m-u2")
+        assert pol["mode"] == "free" and pol["ref_form"] == "name"

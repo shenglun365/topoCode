@@ -73,7 +73,7 @@ class TestNameChain:
         monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
                             lambda msgs, **kw: {"content": '{"name":"位移渲染链","summary":"从解析到渲染"}'})
         r = LS.name_chain([{"id": "x", "name": "解析位移"}])
-        assert r == {"name": "位移渲染链", "summary": "从解析到渲染"}
+        assert r == {"name": "位移渲染链", "summary": "从解析到渲染", "score": None}
 
     def test_retry_then_degrade(self, monkeypatch):
         """坏输出重采样 1 次; 两次都失败 → None(调用方降级命名不丢链)。"""
@@ -123,3 +123,38 @@ class TestStructuralInduce:
         chains, diag = LI.induce_chains(str(tmp_path), _assets({1: [2], 2: [3], 3: []}),
                                         "workspace", None, mode="structural")
         assert called.get("ok") and chains == [{"name": "x"}]
+
+
+class TestSemanticReview:
+    def test_good_chain_kept_with_score(self, monkeypatch):
+        monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                            lambda msgs, **kw: {"content": '{"name":"位移渲染链","summary":"s","score":0.9}'})
+        r = LS.name_chain([{"id": "x", "name": "a", "desc": "d"}])
+        assert r and r["name"] == "位移渲染链" and r["score"] == 0.9 and not r.get("drop")
+
+    def test_pseudo_chain_dropped(self, monkeypatch):
+        """调用图巧合伪链(低分) → drop 丢弃。"""
+        monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                            lambda msgs, **kw: {"content": '{"name":"杂链","summary":"s","score":0.2}'})
+        r = LS.name_chain([{"id": "x", "name": "a", "desc": "d"}])
+        assert r == {"drop": True, "score": 0.2}
+
+    def test_missing_score_tolerant(self, monkeypatch):
+        """score 缺失/非法 → 保留(误伤率未知, 宽容先行)。"""
+        monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                            lambda msgs, **kw: {"content": '{"name":"无分链","summary":"s"}'})
+        r = LS.name_chain([{"id": "x", "name": "a", "desc": "d"}])
+        assert r and r["name"] == "无分链" and r["score"] is None and not r.get("drop")
+
+    def test_structural_induce_drops_low_score(self, monkeypatch, tmp_path):
+        """端到端: 低分伪链被丢弃且 diag 计数; 高分链保留。"""
+        assets = _assets({1: [2], 2: [3], 3: []}) + _assets({7: [8], 8: [9], 9: []}, prefix="z")
+        out = {"n": 0}
+        def fake(msgs, **kw):
+            out["n"] += 1
+            return {"content": '{"name":"伪链","summary":"s","score":0.1}'} if out["n"] == 1 \
+                else {"content": '{"name":"真链","summary":"s","score":0.95}'}
+        monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync", fake)
+        chains, diag = LS.structural_induce(str(tmp_path), assets, "workspace")
+        assert [c["name"] for c in chains] == ["真链"]
+        assert "1 条未通过语义评审" in diag

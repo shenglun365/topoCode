@@ -250,23 +250,27 @@ def set_asset_profile_manual(model_id: str, asset: Optional[dict]) -> dict:
 
 
 def asset_parse_policy(model_id: str) -> dict:
-    """归纳消费口径: asset 档案 → induce 参数(mode/ref_form/brief_cap)。
-
-    未探测/缺省 → 现行为(free+名称引用不分批); manual/probed 参数直用。
+    """归纳消费口径(2026-10-03 统一裁决): 策略恒结构化构链——大清单(自由/
+    编号归纳)对模型是信息干扰(批0: 35b name@200=0, num 抄对≠语义合理),
+    确保数据上下文质量。探测档案(name/num 命中率)仅作参考展示, 不驱动
+    策略; 仅手动覆盖(manual source)显式选 free/numbered/agentic 时尊重。
     """
     from . import model_profile as MP
     prof = (MP.get_profile(model_id).get("asset") or {}) if model_id else {}
     mode = prof.get("mode") or ""
+    manual = prof.get("source") == "manual"
+    if not manual:
+        return {"mode": "structural", "ref_form": "name", "brief_cap": None,
+                "chain_len": prof.get("chainLen") or [3, 15], "retries": 1}
+    # 手动覆盖(实验选项): 参数直用
     list_cap = prof.get("listCap") or 0
     brief_cap = int(list_cap * ROW_CHARS) if list_cap else None
     if mode == "numbered":
         return {"mode": "free", "ref_form": "num",
                 "brief_cap": brief_cap, "retries": prof.get("retries") or 1}
-    if mode == "structural":
-        return {"mode": "structural", "ref_form": "name", "brief_cap": None,
+    if mode in ("structural", "agentic"):
+        return {"mode": mode, "ref_form": "name", "brief_cap": None,
                 "chain_len": prof.get("chainLen") or [3, 15],
                 "retries": prof.get("retries") or 1}
-    if mode == "free":
-        return {"mode": "free", "ref_form": "name",
-                "brief_cap": brief_cap, "retries": prof.get("retries") or 1}
-    return {"mode": "free", "ref_form": "name", "brief_cap": None, "retries": 1}
+    return {"mode": "free", "ref_form": "name",
+            "brief_cap": brief_cap, "retries": prof.get("retries") or 1}

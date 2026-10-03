@@ -19,11 +19,15 @@ from typing import Dict, List, Optional, Set, Tuple
 logger = logging.getLogger("arch.logic_structural")
 
 _NAME_PROMPT = (
-    "你是资深软件架构分析师。下列成员序列协作完成一个数据加工过程，"
-    "请给这条链起一个业务名并概括一句话(贴着成员做什么说, 不臆造)。"
-    '只输出 JSON：{"name":"链名(≤14字)","summary":"一句话概括(≤50字)"}。\n'
-    "成员序列:\n{seq}"
+    "你是资深软件架构分析师。下列成员序列(含各自职责描述)协作完成一个数据加工过程，"
+    "请: 1) 判断这条链在语义上是否构成一段合理/完整的数据加工路径(score 0-1, "
+    "1=成员连贯构成完整加工流, 0.5=结构连通但语义牵强, 0=明显是调用图巧合"
+    "(如工具函数被多方调用拼成的伪链)); 2) 合理的链起一个业务名并概括一句话"
+    "(贴着成员做什么说, 不臆造)。"
+    '只输出 JSON：{"name":"链名(≤14字)","summary":"一句话概括(≤50字)","score":0.8}。\n'
+    "成员序列:\n{seq}\n成员职责:\n{duties}"
 )
+REVIEW_DROP = 0.5   # 语义评审丢弃线(2026-10-03 先宽松: score<0.5 丢; 缺失/解析失败保留不误伤)
 
 
 def _norm_key(s: str) -> str:
@@ -116,14 +120,17 @@ def structural_chains(assets: List[dict], *, min_len: int = 3, max_len: int = 15
 
 
 def name_chain(members: List[dict], model_id: Optional[str] = None) -> Optional[dict]:
-    """单链命名+概括(每链一次轻调用; ≤15 成员短 prompt, LLM 舒适区)。
+    """单链命名+概括+语义评审(每链一次轻调用; ≤15 成员短 prompt, LLM 舒适区)。
 
-    失败重采样 1 次; 仍失败返回 None(调用方降级命名, 不丢链)。
+    score<REVIEW_DROP 判伪链返回 {"drop": True}(调用方丢弃); score 缺失/
+    解析失败默认保留(误伤率未知, 宽容先行)。调用失败重采样 1 次; 仍失败
+    返回 None(调用方降级命名, 不丢链)。
     """
     from ..agent.cognition.llm import llm_sync
     seq = " → ".join(f"{m.get('name') or m.get('id')}({(m.get('astRefs') or [{}])[0].get('symbol') or ''})"
                      for m in members)
-    prompt = _NAME_PROMPT.replace("{seq}", seq)
+    duties = "\n".join(f"- {m.get('name') or m.get('id')}: {(m.get('desc') or '')[:80]}" for m in members)
+    prompt = _NAME_PROMPT.replace("{seq}", seq).replace("{duties}", duties)
     for attempt in (1, 2):
         try:
             res = llm_sync([{"role": "user", "content": prompt}],
@@ -141,10 +148,17 @@ def name_chain(members: List[dict], model_id: Optional[str] = None) -> Optional[
                 d = json.loads(m.group(0))
             except Exception:
                 continue
-        name = str((d or {}).get("name") or "").strip()[:14]
-        summary = str((d or {}).get("summary") or "").strip()[:50]
+        d = d or {}
+        name = str(d.get("name") or "").strip()[:14]
+        summary = str(d.get("summary") or "").strip()[:50]
+        try:
+            score = float(d.get("score"))
+        except (TypeError, ValueError):
+            score = None
+        if score is not None and score < REVIEW_DROP and name:
+            return {"drop": True, "score": score}
         if name:
-            return {"name": name, "summary": summary}
+            return {"name": name, "summary": summary, "score": score}
     return None
 
 
@@ -162,11 +176,15 @@ def structural_induce(root: str, assets: List[dict], rev: str,
     raw_chains = structural_chains(assets, min_len=min_len, max_len=max_len, top_n=top_n)
     chains: List[dict] = []
     unnamed = 0
+    dropped = 0
     for members_ids in raw_chains:
         members = [by_id[m] for m in members_ids if by_id.get(m)]
         if len(members) < min_len:
             continue
         nm = name_chain(members, model_id)
+        if nm and nm.get("drop"):
+            dropped += 1   # 语义评审判伪链(调用图巧合): 丢弃
+            continue
         if not nm:
             unnamed += 1
             nm = {"name": f"{members[0].get('name') or '链'}→{members[-1].get('name') or ''}",
@@ -189,5 +207,6 @@ def structural_induce(root: str, assets: List[dict], rev: str,
             "members": [m.get("id") for m in members],
         })
     diag = (f"结构化构链 {len(chains)} 条(图算法确定性成员"
-            + (f"；{unnamed} 条命名降级" if unnamed else "") + ")")
+            + (f"；{unnamed} 条命名降级" if unnamed else "")
+            + (f"；{dropped} 条未通过语义评审(伪链)丢弃" if dropped else "") + ")")
     return chains, diag
