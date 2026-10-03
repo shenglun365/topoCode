@@ -274,50 +274,26 @@ async def list_kb_versions(project_id: str = ""):
     return ok(versions or [])
 
 
-@router.post("/kb/update-request")
-async def kb_update_request(request: Request):
-    """主动向 KB 发起基线更新请求(仅写待更新标记，不执行)。"""
-    body = await request.json()
-    res = call_kb("knowledge.pullRequest",
-                  projectId=body.get("kbProjectId") or body.get("projectId"),
-                  head=body.get("commit"), note=body.get("note"))
-    if res:
-        return ok(res)
-    # KB 能力不足(方法不可达/参数错误)→ 明确报错，不再占位假装成功
-    return JSONResponse(status_code=502, content={
-        "code": 502, "message": "KB 能力不足：knowledge.pullRequest 未打通或参数错误，无法登记基线更新请求。",
-        "data": None,
-    })
-
-
 @router.get("/kb/update-requests")
 async def kb_update_requests(project_id: str = ""):
-    res = call_kb("knowledge.pendingUpdates", projectId=project_id or None)
-    return ok(res or [])
+    """去基线化退役：KB 基线变更请求语义已消亡，恒空列表(旧轮询调用平滑)。"""
+    return ok([])
 
 
 @router.post("/kb/update-requests/{req_id}/confirm")
 async def kb_update_confirm(req_id: str, request: Request):
-    body = await request.json()
-    res = call_kb("knowledge.updateConfirm",
-                  requestId=req_id, method=body.get("method", "pull"))
-    if not res:
-        return JSONResponse(status_code=502, content={
-            "code": 502, "message": "KB 能力不足：knowledge.updateConfirm 未打通，无法确认基线更新。",
-            "data": None,
-        })
-    return ok(res)
+    return JSONResponse(status_code=410, content={
+        "code": 410, "message": "KB 已去基线化：基线更新确认流退役(architect 自管基线)。",
+        "data": None,
+    })
 
 
 @router.post("/kb/update-requests/{req_id}/cancel")
 async def kb_update_cancel(req_id: str):
-    res = call_kb("knowledge.updateCancel", requestId=req_id)
-    if not res:
-        return JSONResponse(status_code=502, content={
-            "code": 502, "message": "KB 能力不足：knowledge.updateCancel 未打通，无法取消基线更新。",
-            "data": None,
-        })
-    return ok(res)
+    return JSONResponse(status_code=410, content={
+        "code": 410, "message": "KB 已去基线化：基线更新取消流退役(architect 自管基线)。",
+        "data": None,
+    })
 
 
 # ── KB 基线组件语义 · MCP 出向通道（MS7-W6，裁决① 收口）────────────────

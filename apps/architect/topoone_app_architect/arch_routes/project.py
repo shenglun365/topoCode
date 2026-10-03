@@ -377,22 +377,17 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
         "branch": st.get("branch", ""),
         "ahead": st.get("ahead", 0),
     }
-    # 基线提交：存量数据 baselineCommit 可能为空 → 按 baselineId 从 KB 版本补齐并惰性回写
+    # 基线提交(去基线化): baselineCommit 空 → 自管图谱基线锚兜底(collect_graph
+    # 采集自记); KB version.list 依赖退役(KB 版本表冻结, 无新基线语义)。
     baseline_head = proj.get("baselineCommit") or ""
     kb_project_id = proj.get("kbProjectId") or ""
     version = ""
-    if kb_project_id:
+    if not baseline_head:
         try:
-            from ..kb_gateway import call_kb
-            versions = call_kb("version.list", projectId=kb_project_id) or []
+            from ..sem.graph_collect import read_graph_baseline
+            baseline_head = (read_graph_baseline(proj["id"]) or {}).get("head") or ""
         except Exception:
-            versions = []
-        matched = None
-        if versions:
-            matched = next((v for v in versions if v.get("id") == proj.get("baselineId")), None) or versions[0]
-            version = matched.get("label") or matched.get("id") or ""
-            if not baseline_head:
-                baseline_head = matched.get("head") or ""
+            baseline_head = ""
     if baseline_head and not proj.get("baselineCommit"):
         try:
             store.ProjectsStore.update(proj["id"], {"baselineCommit": baseline_head, "updatedAt": _ts()})
@@ -823,25 +818,6 @@ async def get_baseline_dirty(root: Optional[str] = None, project: Optional[str] 
     else:
         dirty = bool(st.get("dirty")) or bool(st.get("ahead", 0))
     return ok({"dirty": bool(dirty)})
-
-
-@router.post("/project/baseline/sync")
-async def sync_baseline(request: Request):
-    body = await request.json() or {}
-    root = body.get("root") or request.query_params.get("root")
-    project = body.get("project") or request.query_params.get("project")
-    proj = resolve_project(root, project)
-    if not proj or not proj.get("baselineId"):
-        return err(400, "未关联知识库，无法同步基线。请在项目概览「查找关联」中关联知识库后重试。")
-    from . import arch_git
-    work_dir = proj.get("rootPath") or ""
-    head = arch_git.head_commit(work_dir) if work_dir else ""
-    commit = (body.get("commit") or head).strip()
-    # 如实返回真实 commit + 项目当前 baselineId（不伪造新基线号）。
-    return ok({
-        "success": True, "commit": commit,
-        "baselineId": proj.get("baselineId") or "",
-    })
 
 
 @router.patch("/project/config")

@@ -3,6 +3,7 @@
 契约见 docs/architect/api-knowledge-greenfield.md。服务端返回确定性的模拟结果。
 (原「与前端 blueprint-agent / extract-service 对齐」措辞已随 MS2 前端死码删除而失效)
 """
+import subprocess
 from typing import Optional
 from fastapi import APIRouter, Request
 from ..common import _ts, _id, ok, err
@@ -166,54 +167,45 @@ async def kb_extract(request: Request):
 
 @router.post("/kb/baseline")
 async def kb_baseline(request: Request):
-    """建立知识基线。已关联 KB 项目时经 `version.list`+`version.materialize` 取真实版本
-    与文件清单写入快照；KB 能力不足/不可达 → 明确报错(不占位)。"""
-    from ..kb_gateway import call_kb
+    """建立知识基线(去基线化自管版): git HEAD 锚点 + git ls-files 文件清单。
+
+    KB 去基线化后不再经 version.list/materialize 取 KB 版本——architect
+    自管基线锚(arch.graphBaseline KV)+工作区文件清单即基线快照事实源。
+    """
+    from .. import ctx
+    from ..sem.graph_collect import record_graph_baseline
+    from ..sem.paths import resolve_root
+    from .. import arch_git as _gitmod
     body = await request.json()
-    proj_id = body.get("kbProjectId") or body.get("projectId")
+    proj_id = body.get("kbProjectId") or body.get("projectId") or ctx.get_project()
     commit = body.get("commit") or "HEAD"
-
     if not proj_id:
-        return err(400, "缺少 kbProjectId/projectId，无法建立 KB 基线")
-    versions = call_kb("version.list", projectId=proj_id) or []
-    if not versions:
-        return err(502, "KB 能力不足：version.list 未返回任何版本，无法建立基线。")
-    current = versions[0]
-    for v in versions:
-        if v.get("id") == proj_id and (v.get("current_version_id") or v.get("current")):
-            current = v
-            break
-    if current is None:
-        current = versions[0]
-    raw = call_kb("version.materialize", projectId=proj_id, versionId=current.get("id"))
-    if raw is None:
-        return err(502, "KB 能力不足：version.materialize 不可达，无法读取基线文件清单。")
-    # version.materialize 可能返回裸 list 或 {files:[...]} dict，统一为路径列表
-    if isinstance(raw, list):
-        file_list = [f if isinstance(f, str) else (f.get("path") or f.get("file_path") or f.get("file_name") or str(f))
-                     for f in raw]
-    elif isinstance(raw, dict):
-        items = raw.get("files") or raw.get("items") or []
-        file_list = [f if isinstance(f, str) else (f.get("path") or f.get("file_path") or f.get("file_name") or str(f))
-                     for f in items]
-    else:
+        return err(400, "缺少项目 id，无法建立基线")
+    proj = store.ProjectsStore.get(proj_id) if proj_id else None
+    work_dir = (proj or {}).get("rootPath") or body.get("rootPath") or ""
+    root = resolve_root(work_dir or None, proj_id)
+    if not root:
+        return err(400, "项目工作目录解析失败，无法建立基线")
+    head = _gitmod.head_commit(root) if commit in ("", "HEAD") else commit
+    if not head:
+        return err(400, "无法获取仓库 HEAD，非 git 目录请先初始化")
+    try:
+        out = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True,
+                             timeout=60)
+        file_list = [l.strip() for l in out.stdout.decode("utf-8", errors="replace").splitlines()
+                     if l.strip()] if out.returncode == 0 else []
+    except Exception:
         file_list = []
-    file_list = [f for f in file_list if f]
-    store.SnapshotsStore.create({
-        "id": store.next_id("snap"), "name": f"KB 基线 {commit}",
-        "version": "v1", "taskId": "manual", "gitBranch": "main",
-        "gitCommit": commit, "model": {"fileCount": len(file_list), "files": file_list},
-        "createdAt": _ts(),
-    })
-    return ok({
-        "baselineId": store.next_id("base"),
-        "commit": current.get("currId") or current.get("current_version_id") or current.get("id") or commit,
-        "mode": "existing", "tag": "v0.0.1",
-        "kbProjectId": proj_id, "files": file_list,
-    })
+    record_graph_baseline(proj_id, head)
+    try:
+        store.ProjectsStore.update(proj_id, {"baselineCommit": head, "updatedAt": _ts()})
+    except Exception:
+        pass
+    return ok({"baselineId": head[:12], "baselineCommit": head, "commit": head,
+               "files": file_list, "source": "self-managed"})
 
 
-# ── Launch / Guide ───────────────────────────────────────────
+
 
 def launch_info(root=None, project=None) -> dict:
     """启动信息(宿主机工作目录/KB 目录/模式)：已绑定项目 → 该项目真实 rootPath/kbRoot/mode；

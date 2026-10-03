@@ -4869,44 +4869,6 @@ async def api_workspace_symbols(body: dict = None):
     return ok(res)
 
 
-@router.post("/kb/semantic/symbol-sync")
-async def api_symbol_sync(body: dict = None):
-    """发起基线变更请求（职责划分：architect 仅发起，执行在 KB 知识库管理）。
-
-    调 KB knowledge.pullRequest 写入待更新标记(pending)，由 KB 知识库管理界面
-    确认后执行 updateConfirm + version.sync + cleanup。⚠️ 此处不 record_sync——
-    发起≠完成(图谱未重建)，对齐记录由执行链收尾(baseline_commit 惰性回写)。
-
-    ⚠️ 双模式（勿"统一"，决策见 api_cold_start docstring）：仓库已有 core 项目
-    → 走本端点（发起-确认-执行，防误同步）；仅冷启动(无项目、KB 管理无入口
-    可承接确认流)才由 api_cold_start 直接编排执行。
-    """
-    from .. import ctx
-    from ..kb_gateway import call_kb
-    from .symbols import _resolve_core_pid, _git
-    body = body or {}
-    proj = body.get('project') or ctx.get_project()
-    root = resolve_root(body.get('root') or None, proj)
-    if not root:
-        return err(400, "项目 root 解析失败")
-    pid = _resolve_core_pid(root)
-    if not pid:
-        return err(400, "KB 注册表无此仓库对应项目，请先在 KB 知识库管理中建项/建基线")
-    head = (_git(root, ['rev-parse', 'HEAD'], timeout=15) or '').strip()
-    if not head:
-        return err(400, "无法获取仓库 HEAD commit")
-    try:
-        res = call_kb('knowledge.pullRequest', project_id=pid, head=head,
-                      note='architect-manual-baseline-request')
-    except Exception as e:
-        return err(500, f"基线变更请求失败: {e}")
-    if res is None:
-        return err(503, "KB 服务不可达，请稍后重试")
-    return ok({"requested": True, "requestId": (res or {}).get('requestId'),
-                "corePid": pid, "head": head,
-                "message": "已在 KB 知识库管理创建待确认的基线变更请求"})
-
-
 @router.get("/kb/semantic/baseline-diff")
 async def api_baseline_diff(root: Optional[str] = None, project: Optional[str] = None):
     """基线(lastHead) → 工作区 变更文件集（三视图 diff 数据源）。

@@ -4,7 +4,6 @@
   - _resolve_core_pid：.topocode/proj-id 签名优先 / core 主库 root_path 反查 / 均无 → None
   - _open_core_conn：core project.db TEMP 同构视图（nodes/edges/contains）
   - symbol_source_state：HEAD 变化 → stale + 变更文件范围识别（不实时解析）
-  - POST /kb/semantic/symbol-sync：无 core 项目 → 400；有项目 → call_kb(version.sync)
     + 跟踪 KV 记录
 """
 from __future__ import annotations
@@ -206,20 +205,6 @@ def test_symbol_source_state_stale_detection(tmp_path, monkeypatch):
     assert st2["stale"] is False
 
 
-def test_symbol_sync_endpoint_no_core_project(tmp_path, monkeypatch):
-    root = tmp_path / "repo-unknown"
-    root.mkdir()
-    data = _mk_core_env(tmp_path, str(tmp_path / "elsewhere"), "proj-other", with_db=False)
-    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
-    _sym.invalidate_native_cache()
-    c = _client()
-    r = c.post("/api/architect/kb/semantic/symbol-sync",
-               json={"root": str(root), "project": None})
-    assert r.status_code == 400
-    body = r.json()
-    assert body["code"] != 0
-
-
 def _mk_git_repo_diff(tmp_path, root_name: str):
     """建含 基线commit + 已提交漂移(改/删) + 工作区未提交(新/改) 的仓库。"""
     root = tmp_path / root_name
@@ -344,34 +329,6 @@ def test_cold_start_endpoint_already_registered(tmp_path, monkeypatch):
     r = c.post("/api/architect/kb/semantic/cold-start", json={"root": root})
     assert r.status_code == 400
     assert r.json()["code"] != 0
-
-
-def test_symbol_sync_endpoint_initiates_pull_request(tmp_path, monkeypatch):
-    """职责划分：architect 仅发起基线变更请求(knowledge.pullRequest)，执行在 KB 管理。"""
-    root, _ = _mk_git_repo(tmp_path, "repo-sync")
-    data = _mk_core_env(tmp_path, str(root), "proj-sync", with_db=True)
-    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
-    _sym.invalidate_native_cache()
-    from topoone_app_architect import kb_gateway as _kg
-    calls = []
-    monkeypatch.setattr(_kg, "call_kb",
-                        lambda method, **p: calls.append((method, p))
-                        or {"requestId": "pur-1", "status": "pending"})
-    c = _client()
-    r = c.post("/api/architect/kb/semantic/symbol-sync",
-               json={"root": str(root), "project": None})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["data"]["requested"] is True
-    assert body["data"]["corePid"] == "proj-sync"
-    assert body["data"]["requestId"] == "pur-1"
-    assert len(calls) == 1
-    method, params = calls[0]
-    assert method == "knowledge.pullRequest"
-    assert params["project_id"] == "proj-sync"
-    assert len(params["head"]) == 40
-    # 发起≠完成：不得伪对齐(图谱未重建却推进 lastHead) —— 对齐由执行链收尾
-    assert not (_sym._read_state_kv("proj-sync") or {}).get("lastHead")
 
 
 def test_codegraph_sync_endpoint_and_cli_index_semantics(tmp_path, monkeypatch):
