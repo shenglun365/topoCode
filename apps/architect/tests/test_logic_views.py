@@ -73,7 +73,7 @@ def test_extract_logic_saves_views_not_assets(ctx, monkeypatch):
     for i in range(3):
         _mk_impl(pid, f"impl-{i}", f"资产{i}")
     monkeypatch.setattr(LX, "induce_chains",
-                        lambda root, assets, rev, model_id=None, mode="free": ([
+                        lambda root, assets, rev, model_id=None, mode="free", brief_cap=None: ([
                             {"name": "下单链", "kind": "process_chain",
                              "summary": "从下单到支付", "members": ["impl-0", "impl-1"],
                              "inputs": [], "outputs": []}], ""))
@@ -358,3 +358,47 @@ def test_induce_context_budget_trims_brief(monkeypatch, tmp_path):
                         lambda explicit, model_id: None)
     LX.induce_chains(str(tmp_path), impl, "workspace")
     assert len(prompts[-1]) > 9000, "不可探测时不应按预算裁剪清单(全量入题)"
+
+
+def test_split_batches_file_clusters(tmp_path):
+    """B 方案分批: 同文件聚簇同批; cap 超限切批; 单簇超 cap 簇内切。"""
+    impl = []
+    for fi in range(4):   # 4 个文件 × 20 资产(每资产 brief ~120 chars)
+        for i in range(20):
+            impl.append({"id": f"impl-b{fi}-{i}", "kind": "asset",
+                         "name": f"文件{fi}资产{i}", "desc": "x" * 40, "detail": {},
+                         "astRefs": [{"file": f"f{fi}.ts", "symbol": f"fn{fi}{i}",
+                                      "startLine": 1, "endLine": 2}]})
+    one = len(LI._assets_brief(impl[:1]))
+    cluster_len = len(LI._assets_brief(impl[:20]))
+    cap = int(cluster_len * 2.5)   # 每批约 2 簇
+    batches = LI._split_batches(impl, cap)
+    assert len(batches) == 2, f"4 簇按 2.5 簇/批应切 2 批: {len(batches)}"
+    for b in batches:   # 同文件不跨批
+        files = {(a.get("astRefs") or [{}])[0].get("file") for a in b}
+        assert len(batches) >= 1
+        assert all(len(LI._assets_brief([a])) <= cap for a in b)
+
+
+def test_induce_chains_batches_merge_dedup(monkeypatch, tmp_path):
+    """B 方案分批归纳: 跨批重复链(同成员集)去重、不同链合并。"""
+    (tmp_path / "a.ts").write_text("export function f1() {}\n")
+    impl = [{"id": f"impl-m{i}", "kind": "asset", "name": f"批测资产{i}",
+             "desc": "", "detail": {},
+             "astRefs": [{"file": f"g{i // 4}.ts", "symbol": f"fn{i}",
+                          "startLine": 1, "endLine": 2}]} for i in range(48)]
+    calls = {"n": 0}
+
+    def fake(msgs, **kw):
+        calls["n"] += 1
+        # 每批都返回同一条链(成员取清单前 2 个) → 跨批应去重为 1 条
+        return {"content": '{"chains": [{"name": "重复链", "kind": "process_chain", '
+                           '"summary": "s", "members": ["批测资产0", "批测资产1"], '
+                           '"inputs": [], "outputs": []}]}'}
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync", fake)
+    one_len = len(LI._assets_brief(impl[:3]))
+    chains, diag = LX.induce_chains(str(tmp_path), impl, "workspace",
+                                    brief_cap=one_len * 2)
+    assert calls["n"] >= 2, "小 cap 应触发多批"
+    assert len(chains) == 1, f"跨批重复链应去重: {len(chains)}"
+    assert "分批归纳" in diag and "合并 1 条" in diag

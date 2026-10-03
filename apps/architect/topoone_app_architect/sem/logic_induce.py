@@ -226,7 +226,8 @@ def _member_index(assets: List[dict]) -> tuple:
 
 
 def induce_chains(root: str, assets: List[dict], rev: str,
-                  model_id: Optional[str] = None, mode: str = "free") -> tuple:
+                  model_id: Optional[str] = None, mode: str = "free",
+                  brief_cap: Optional[int] = None) -> tuple:
     """LLM 归纳链条 → 结构化(成员实现级资产对齐 + IO 锚点构造+校验)。
 
     返回 (chains, diag)：diag 为空=完全正常；非空=降级/过滤诊断(透传作业
@@ -246,9 +247,73 @@ def induce_chains(root: str, assets: List[dict], rev: str,
         from .logic_structural import structural_induce
         return structural_induce(root, assets, rev, model_id,
                                  anchor_fn=build_code_anchor)
+    # B 方案分批(B 方案, 2026-10-03): briefCap 参数(chars)——清单超限时按文件簇
+    # 分批归纳、跨批去重合并, 广度不丢(替代单次裁剪丢尾); cap 来自 asset profile
+    # 探测参数/手动覆盖, None=不分批(单次全量, 现行为)。
+    cap = brief_cap or 0
+    picked = _pick_assets(assets)
+    full_len = len(_assets_brief(picked)) + len(_edges_brief(picked))
+    if cap > 0 and full_len > cap and len(picked) > 40:
+        batches = _split_batches(picked, cap)
+        merged: List[dict] = []
+        seen: set = set()
+        diags: List[str] = []
+        for b in batches:
+            chains, diag = _induce_free(root, assets, b, rev, model_id)
+            for c in chains:
+                key = frozenset(c.get("members") or [])
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                merged.append(c)
+            if diag:
+                diags.append(diag)
+        head = f"分批归纳 {len(batches)} 批(单批 ≤{cap} 字符)合并 {len(merged)} 条"
+        return merged, "；".join([head] + diags) if diags else head
+    return _induce_free(root, assets, picked, rev, model_id)
+
+
+def _split_batches(assets: List[dict], cap: int) -> List[List[dict]]:
+    """文件簇装箱: 同文件聚簇(簇内链天然完整), 簇按累计 chars 装箱(每箱 ≤ cap;
+    单簇超 cap 再按资产逐个切)。保持 _pick_assets 度数优先序的簇间顺序。"""
+    clusters: Dict[str, List[dict]] = {}
+    order: List[str] = []
+    for a in assets:
+        f = ((a.get("astRefs") or [{}])[0].get("file")) or "_"
+        if f not in clusters:
+            clusters[f] = []
+            order.append(f)
+        clusters[f].append(a)
+    batches: List[List[dict]] = []
+    cur: List[dict] = []
+    cur_chars = 0
+    for f in order:
+        cluster = clusters[f]
+        c_len = len(_assets_brief(cluster))
+        if cur and cur_chars + c_len > cap:
+            batches.append(cur)
+            cur, cur_chars = [], 0
+        if c_len > cap and not cur:
+            for a in cluster:   # 单簇超 cap: 簇内逐资产切(保文件内聚优先)
+                a_len = len(_assets_brief([a]))
+                if cur and cur_chars + a_len > cap:
+                    batches.append(cur)
+                    cur, cur_chars = [], 0
+                cur.append(a)
+                cur_chars += a_len
+        else:
+            cur.extend(cluster)
+            cur_chars += c_len
+    if cur:
+        batches.append(cur)
+    return batches
+
+
+def _induce_free(root: str, assets: List[dict], picked: List[dict],
+                 rev: str, model_id: Optional[str]) -> tuple:
+    """单批自由归纳(原 induce_chains 主体): 索引/预算裁剪/采样重试。"""
     from ..agent.cognition.llm import llm_sync, resolve_context_budget
     by_symbol, by_norm = _member_index(assets)
-    picked = _pick_assets(assets)          # 探测深度：度数优先选 400(替代原随机序截断)
 
     # 上下文预算自适应：31k chars 清单塞 8k 窗模型 = 爆窗→LM Studio 非确定截断
     # → 清单残缺成员名全 miss + 输出截断(实测 2026-10-02 六次同输入好坏随机)。
