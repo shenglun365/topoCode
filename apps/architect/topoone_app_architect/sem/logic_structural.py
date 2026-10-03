@@ -210,3 +210,143 @@ def structural_induce(root: str, assets: List[dict], rev: str,
             + (f"；{unnamed} 条命名降级" if unnamed else "")
             + (f"；{dropped} 条未通过语义评审(伪链)丢弃" if dropped else "") + ")")
     return chains, diag
+
+
+# ── agentic 按需读取(批7, 2026-10-03 用户方向: 必要数据+模型按需调 tool 补全) ──
+# 轻量编号摘要入题, LLM 用 JSON action 协议按需查询资产详情(不依赖原生
+# function calling, 本地模型友好), 信息足够后输出终答链。保底轮次防无限
+# 循环(用户裁决: 资产解析场景 60 轮上限)。
+
+_AGENTIC_SYS = (
+    "你是资深软件架构分析师。下面是项目的实现级资产编号摘要(每行一个, 含职责)。"
+    "请归纳「数据处理链条」(从输入到输出的完整数据加工路径)。\n"
+    "信息不足时可以查询工具, 每次输出一个 JSON: "
+    '{"action": {"tool": "asset.semantic.detail", "args": {"asset_id": "sa-xxx"}}} '
+    '(查单个资产完整详情: steps/fields/relations) 或 '
+    '{"action": {"tool": "asset.semantic.search", "args": {"text": "关键词"}}} '
+    '(按关键词检索资产)。\n'
+    "信息足够后输出终答(不再查询): "
+    '{"chains": [{"name": "链名", "kind": "process_chain", "summary": "一句话", '
+    '"members": [编号数组]}]} (4-10 条链, 每链 3-8 个成员编号)。\n'
+    "资产编号摘要:\n{digest}"
+)
+
+_AGENTIC_TOOLS = ("asset.semantic.detail", "asset.semantic.search")
+
+
+def _run_agentic_tool(name: str, args: dict, root: str, project: Optional[str]) -> dict:
+    """白名单工具执行(直接调 tools/impl 注册实现; 出错返回错误对象不中断)。"""
+    try:
+        if name == "asset.semantic.detail":
+            from ..agent.tools.impl.semantic import tool_semantic_detail as fn
+            r = fn(str(args.get("asset_id") or ""), root, project)
+            return {"ok": r is not None, "asset": r or "资产不存在"}
+        if name == "asset.semantic.search":
+            from ..agent.tools.impl.semantic import tool_semantic_search as fn
+            rows = fn(root, project, text=str(args.get("text") or ""),
+                      limit=min(int(args.get("limit") or 8), 12))
+            return {"ok": True, "assets": [
+                {"id": r.get("id"), "name": r.get("name"), "desc": (r.get("desc") or "")[:100]}
+                for r in (rows or [])]}
+        return {"ok": False, "error": f"工具不在白名单: {name}"}
+    except Exception as e:  # noqa: BLE001 — 工具失败如实回给模型自行调整
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def agentic_induce(root: str, assets: List[dict], rev: str,
+                   model_id: Optional[str] = None, *,
+                   max_rounds: int = 60, anchor_fn=None) -> tuple:
+    """agentic 按需读取归纳: 轻摘要 → LLM 按需 tool 查询(≤60 轮) → 终答链。
+
+    终答 members 为编号数组(直取摘要序, 与编号引用同口径); 链组装复用
+    归纳过滤(锚点兜底)。超轮次返回已得结果并 diag 标注。
+    """
+    from ..agent.cognition.llm import llm_sync
+    digest_lines = []
+    order: List[str] = []
+    for i, a in enumerate(assets[:200], 1):
+        order.append(a.get("id") or "")
+        digest_lines.append(f"[{i}] {a.get('name')} ({a.get('id')}): {(a.get('desc') or '')[:60]}")
+    sys_p = _AGENTIC_SYS.replace("{digest}", "\n".join(digest_lines))
+    msgs: List[dict] = [{"role": "system", "content": sys_p},
+                        {"role": "user", "content": "请开始分析(可先查询再终答)。"}]
+    by_id = {a.get("id"): a for a in assets}
+    tool_calls = 0
+    final_raw = ""
+    for rnd in range(1, max_rounds + 1):
+        res = llm_sync(msgs, mode="chat", model_id=model_id)
+        raw = ((res or {}).get("content") or "").strip()
+        final_raw = raw
+        d = None
+        try:
+            d = json.loads(raw)
+        except Exception:
+            m = re.search(r"\{.*\}", raw, re.S)
+            if m:
+                try:
+                    d = json.loads(m.group(0))
+                except Exception:
+                    d = None
+        if isinstance(d, dict) and (d.get("chains") is not None):
+            break   # 终答
+        act = (d or {}).get("action") if isinstance(d, dict) else None
+        if isinstance(act, dict) and act.get("tool"):
+            tool_calls += 1
+            r = _run_agentic_tool(str(act.get("tool")), dict(act.get("args") or {}),
+                                  root, None)
+            msgs = msgs + [{"role": "assistant", "content": raw[:2000]},
+                           {"role": "user", "content": "工具结果: " + json.dumps(r, ensure_ascii=False)[:4000]}]
+            continue
+        # 非法输出: 纠偏提示(计一轮)
+        msgs = msgs + [{"role": "user", "content":
+                        '输出格式不符——查询用 {"action":{...}}, 终答用 {"chains":[...]}。'}]
+    else:
+        pass
+    # 解析终答(编号成员 → 资产 id), 锚点兜底组装
+    chains: List[dict] = []
+    d = None
+    try:
+        d = json.loads(final_raw)
+    except Exception:
+        m = re.search(r"\{.*\}", final_raw, re.S)
+        if m:
+            try:
+                d = json.loads(m.group(0))
+            except Exception:
+                d = None
+    seen: set = set()
+    for ch in ((d or {}).get("chains") or [])[:12] if isinstance(d, dict) else []:
+        member_ids: List[str] = []
+        for n in (ch.get("members") or []):
+            try:
+                k = int(n)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= k <= len(order) and order[k - 1]:
+                member_ids.append(order[k - 1])
+        if len(member_ids) < 2:
+            continue
+        key = frozenset(member_ids)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        def _anchor(a: dict, direction: str) -> list:
+            if anchor_fn is None:
+                return []
+            for r in (a.get("astRefs") or []):
+                an = anchor_fn(root, r, rev)
+                if an:
+                    return [{"id": f"io-ag-{direction}", "name": (a.get("name") or "")[:60],
+                             "direction": direction, "code": [an],
+                             "note": "agentic 成员锚点"}]
+            return []
+        chains.append({
+            "name": (ch.get("name") or "链")[:80], "kind": "process_chain",
+            "summary": (ch.get("summary") or "")[:400],
+            "inputs": _anchor(by_id.get(member_ids[0]) or {}, "in"),
+            "outputs": _anchor(by_id.get(member_ids[-1]) or {}, "out"),
+            "members": member_ids,
+        })
+    diag = (f"agentic 按需读取 {len(chains)} 条(工具查询 {tool_calls} 次/轮次上限 {max_rounds})")
+    return chains, diag

@@ -271,6 +271,10 @@ def induce_chains(root: str, assets: List[dict], rev: str,
         return structural_induce(root, assets, rev, model_id,
                                  min_len=int(cl[0]), max_len=int(cl[-1]),
                                  anchor_fn=build_code_anchor)
+    if mode == "agentic":
+        from .logic_structural import agentic_induce
+        return agentic_induce(root, assets, rev, model_id,
+                              anchor_fn=build_code_anchor)
     # B 方案分批(B 方案, 2026-10-03): briefCap 参数(chars)——清单超限时按文件簇
     # 分批归纳、跨批去重合并, 广度不丢(替代单次裁剪丢尾); cap 来自 asset profile
     # 探测参数/手动覆盖, None=不分批(单次全量, 现行为)。

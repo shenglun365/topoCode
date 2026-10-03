@@ -158,3 +158,63 @@ class TestSemanticReview:
         chains, diag = LS.structural_induce(str(tmp_path), assets, "workspace")
         assert [c["name"] for c in chains] == ["真链"]
         assert "1 条未通过语义评审" in diag
+
+
+class TestAgenticInduce:
+    def _digest_assets(self, n=6):
+        return [{"id": f"impl-ag{i}", "kind": "asset", "name": f"按需资产{i}",
+                 "desc": f"职责{i}", "detail": {},
+                 "astRefs": [{"file": "a.ts", "symbol": f"afn{i}", "startLine": 1, "endLine": 2}]}
+                for i in range(n)]
+
+    def test_query_then_final(self, monkeypatch, tmp_path):
+        """按需读取循环: 首轮查 detail → 二轮终答编号链(直取摘要序)。"""
+        assets = self._digest_assets()
+        seq = iter([
+            {"content": '{"action": {"tool": "asset.semantic.detail", "args": {"asset_id": "impl-ag1"}}}'},
+            {"content": '{"chains": [{"name": "按需链", "kind": "process_chain", "summary": "s", '
+                        '"members": [0, 2, 4]}]}'},   # 编号 0 越界忽略 → 成员 2,4(<2 丢弃?) 用 1,2,3
+        ])
+        tool_calls = {"n": 0}
+        monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                            lambda msgs, **kw: next(seq))
+
+        def fake_detail(aid, root=None, project=None):
+            tool_calls["n"] += 1
+            return {"id": aid, "name": "x", "detail": {"steps": []}}
+        monkeypatch.setattr("topoone_app_architect.agent.tools.impl.semantic.tool_semantic_detail", fake_detail)
+        anchor_fn = lambda root, ref, rev: {"file": ref.get("file"), "startLine": 1}
+        chains, diag = LS.agentic_induce(str(tmp_path), assets, "workspace", anchor_fn=anchor_fn)
+        assert tool_calls["n"] == 1, "action 应触发一次工具执行"
+        # members [0,2,4]: 0 越界(1-based) → 剩 2,4 = impl-ag1, impl-ag3 → ≥2 保留
+        assert len(chains) == 1 and chains[0]["members"] == ["impl-ag1", "impl-ag3"]
+        assert chains[0]["inputs"][0]["code"][0]["file"] == "a.ts"
+        assert "工具查询 1 次" in diag
+
+    def test_round_cap_60(self, monkeypatch, tmp_path):
+        """60 轮保底: 模型永远只查询不终答 → 轮次上限截断, 不无限循环。"""
+        assets = self._digest_assets()
+        calls = {"n": 0}
+        def loop_query(msgs, **kw):
+            calls["n"] += 1
+            return {"content": '{"action": {"tool": "asset.semantic.search", "args": {"text": "x"}}}'}
+        monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync", loop_query)
+        def fake_search(root, project, text="", **kw):
+            return []
+        monkeypatch.setattr("topoone_app_architect.agent.tools.impl.semantic.tool_semantic_search", fake_search)
+        chains, diag = LS.agentic_induce(str(tmp_path), assets, "workspace", max_rounds=5)   # 小上限验证机制
+        assert calls["n"] == 5, "应停在轮次上限"
+        assert chains == []
+        assert "轮次上限 5" in diag
+
+    def test_invalid_output_nudge(self, monkeypatch, tmp_path):
+        """非法输出 → 纠偏提示继续(不崩溃), 次轮终答。"""
+        assets = self._digest_assets()
+        seq = iter([
+            {"content": "模型闲聊不输出 JSON"},
+            {"content": '{"chains": [{"name": "链", "summary": "s", "members": [1, 2]}]}'},
+        ])
+        monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync",
+                            lambda msgs, **kw: next(seq))
+        chains, diag = LS.agentic_induce(str(tmp_path), assets, "workspace")
+        assert len(chains) == 1 and len(chains[0]["members"]) == 2

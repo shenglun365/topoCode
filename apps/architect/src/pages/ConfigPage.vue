@@ -561,7 +561,7 @@ async function setAssetPolicy(m: ArchLlmModel, mode: string) {
 }
 
 function assetPolicyText(asset: any): string {
-  const mode = { numbered: '编号引用', free: '自由归纳', structural: '结构化构链' }[asset.mode as string] || asset.mode
+  const mode = { numbered: '编号引用(实验)', free: '自由归纳(实验)', structural: '结构化构链', agentic: '按需读取(实验·60轮)' }[asset.mode as string] || asset.mode
   const cap = asset.listCap ? ` · 清单≤${asset.listCap}` : ''
   const src = asset.source === 'manual' ? ' · 手动' : asset.source === 'probed' ? ' · 已探测' : ''
   const ev = asset.evidence
@@ -947,9 +947,10 @@ onMounted(() => { void loadCgStatus() })
                         @change="setAssetPolicy(m, ($event.target as HTMLSelectElement).value)"
                       >
                         <option value="">按探测档案</option>
-                        <option value="numbered">编号引用</option>
-                        <option value="free">自由归纳</option>
-                        <option value="structural">结构化构链</option>
+                        <option value="numbered">编号引用(实验)</option>
+                        <option value="free">自由归纳(实验)</option>
+                        <option value="structural">结构化构链(默认)</option>
+                        <option value="agentic">按需读取(实验·60轮)</option>
                       </select>
                       <button
                         class="btn !py-0 !px-2 !text-[10px]"
