@@ -226,7 +226,7 @@ def _member_index(assets: List[dict]) -> tuple:
 
 
 def induce_chains(root: str, assets: List[dict], rev: str,
-                  model_id: Optional[str] = None) -> tuple:
+                  model_id: Optional[str] = None, mode: str = "free") -> tuple:
     """LLM 归纳链条 → 结构化(成员实现级资产对齐 + IO 锚点构造+校验)。
 
     返回 (chains, diag)：diag 为空=完全正常；非空=降级/过滤诊断(透传作业
@@ -237,7 +237,15 @@ def induce_chains(root: str, assets: List[dict], rev: str,
     输出质量波动治理(events.jsonl 实证同输入时好时坏)：单次采样可用链条少
     且丢弃多(可用<3 且丢弃≥3)时自动重采样一次，取可用数较多的一轮——
     不再让一次坏采样直接产出「0-1 条」的退化结果。
+
+    mode(参数化策略, 2026-10-03): free=LLM 自由归纳(默认, 现路径);
+    structural=结构化构链(图算法找链+LLM 仅命名——成员 100% 命中,
+    回引不稳模型的兜底路径, 详见 logic_structural)。
     """
+    if mode == "structural":
+        from .logic_structural import structural_induce
+        return structural_induce(root, assets, rev, model_id,
+                                 anchor_fn=build_code_anchor)
     from ..agent.cognition.llm import llm_sync, resolve_context_budget
     by_symbol, by_norm = _member_index(assets)
     picked = _pick_assets(assets)          # 探测深度：度数优先选 400(替代原随机序截断)
