@@ -25,7 +25,6 @@ import ProjectContextMenu from './ProjectContextMenu.vue'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ClearCacheDialog from './ClearCacheDialog.vue'
-import VersionUpdateDialog from './VersionUpdateDialog.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-002')
@@ -115,7 +114,6 @@ const {
   showEditDialog,
   showMenu,
   showPathConfirm,
-  showVersionUpdateDialog,
   startEditInfo,
   startVersionUpdate,
   toggleFavorite,

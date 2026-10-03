@@ -64,13 +64,10 @@ def test_readiness_no_project(mdb):
 
 def test_readiness_states(mdb):
     db = mdb.main_db
-    # done 任务存在但未挂载 → unmounted
+    # 去基线化: done 即 ready(挂载不再是就绪前置)
     st = br.derive_readiness(mdb, project_id="proj-t")
-    assert st["state"] == "unmounted" and st["taskId"] == "done-1"
-    # 挂载后 → ready
-    vs.mount_task(mdb, "proj-t", "done-1", origin="auto")
-    st = br.derive_readiness(mdb, project_id="proj-t")
-    assert st["state"] == "ready" and st["mountedTaskIds"] == ["done-1"]
+    assert st["state"] == "ready" and st["taskId"] == "done-1"
+    assert st["mountedTaskIds"] == ["done-1"]
     # 运行中任务 → analyzing(优先于挂载态)
     db.execute("INSERT INTO analysis_tasks (id, project_id, type, name, status) "
                "VALUES ('run-2', 'proj-t', 'fast', 'x', 'running')")
@@ -86,18 +83,18 @@ def test_readiness_no_analysis(mdb):
     assert st["state"] == "no_analysis"
 
 
-def test_ensure_ready_auto_mounts_with_origin_auto(mdb):
+def test_ensure_ready_done_is_stable(mdb):
+    # 去基线化: done 即 ready, ensure 幂等且不再自动挂载
     st = br.ensure_ready(server=None, multi_db=mdb, project_id="proj-t")
     assert st["state"] == "ready"
-    row = mdb.main_db.fetchone(
-        "SELECT mount_origin FROM view_mounts WHERE project_id='proj-t'")
-    assert row["mount_origin"] == "auto"
-    # 幂等: ready 态重复调用不再建任务/换挂载
+    cnt = mdb.main_db.fetchone(
+        "SELECT COUNT(*) c FROM view_mounts WHERE project_id='proj-t'")["c"]
+    assert cnt == 0
     st2 = br.ensure_ready(server=None, multi_db=mdb, project_id="proj-t")
     assert st2["state"] == "ready"
-    cnt = mdb.main_db.fetchone(
+    tcnt = mdb.main_db.fetchone(
         "SELECT COUNT(*) c FROM analysis_tasks WHERE project_id='proj-t'")["c"]
-    assert cnt == 1
+    assert tcnt == 1
 
 
 def test_ensure_ready_creates_fast_task(mdb, monkeypatch):
@@ -138,31 +135,6 @@ def test_view_status_exposes_mount_origin(mdb):
 
 # ── A2: auto 挂载换代 ───────────────────────────────────────
 
-def test_swap_auto_mounts_replaces_only_auto(mdb):
-    db = mdb.main_db
-    db.execute("INSERT INTO analysis_tasks (id, project_id, type, name, status) "
-               "VALUES ('done-2', 'proj-t', 'fast', 'rebuild', 'done')")
-    db.commit()
-    vs.mount_task(mdb, "proj-t", "done-1", origin="auto")
-    res = br.swap_auto_mounts(mdb, "proj-t", "done-2")
-    assert res["swapped"] is True
-    mounts = vs._mounts(db, "proj-t")
-    assert [m["task_id"] for m in mounts] == ["done-2"]
-    assert mounts[0]["mount_origin"] == "auto"
-
-
-def test_swap_auto_mounts_never_touches_manual(mdb):
-    db = mdb.main_db
-    db.execute("INSERT INTO analysis_tasks (id, project_id, type, name, status) "
-               "VALUES ('done-2', 'proj-t', 'fast', 'rebuild', 'done')")
-    db.commit()
-    vs.mount_task(mdb, "proj-t", "done-1", origin="manual")
-    res = br.swap_auto_mounts(mdb, "proj-t", "done-2")
-    assert res["swapped"] is False and res["reason"] == "no_auto_mounts"
-    assert [m["task_id"] for m in vs._mounts(db, "proj-t")] == ["done-1"]
-
-
-# ── A3: UPSERT 语义 ─────────────────────────────────────────
 
 def test_bulk_upsert_preserves_name_manual(mdb):
     pdb = mdb.get_project_db("proj-t")

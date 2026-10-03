@@ -79,15 +79,6 @@ async function handleResyncFromDialog() {
   await projectStore.syncProject(props.project.id)
 }
 
-async function startVersionUpdate() {
-  D.menu.hideMenu()
-  D.state.showVersionUpdateDialog.value = true
-}
-
-async function onVersionUpdated() {
-  await projectStore.loadProjects()
-}
-
   return {
     confirmDelete,
     handleCheckChanges,
@@ -97,7 +88,5 @@ async function onVersionUpdated() {
     handleResetProject,
     handleResyncFromDialog,
     onClearCacheDone,
-    onVersionUpdated,
-    startVersionUpdate,
   }
 }

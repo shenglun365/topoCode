@@ -95,12 +95,12 @@ def _community_change(file_change: dict, files) -> str:
 
 
 def _resolve_view_task_ids(multi_db, project_id: str) -> list:
-    """基线视图挂载任务解析（未挂载 = 空列表，外部读取应为空）。"""
+    """任务解析（去基线化: 最新 done 任务; 挂载口径退役, 未挂载不再拦截）。"""
     try:
-        from topoone.engine.view_service import resolve_view_task_ids
-        return resolve_view_task_ids(multi_db, project_id)
+        from topoone.engine.task_api.community_query import _latest_done_task_ids
+        return _latest_done_task_ids(multi_db, project_id)
     except Exception as e:
-        logger.warning("[architecture] view resolve failed: %s", e)
+        logger.warning("[architecture] latest done resolve failed: %s", e)
         return []
 
 
@@ -143,7 +143,8 @@ def build_architecture_model(multi_db, project_id: str, *,
     except Exception:
         pass
 
-    # ── 版本差异 change（项目级，一次） ─────────────────────
+    # ── 版本差异 change（项目级，一次; 去基线化后 version 表冻结无新版本 →
+    #    恒零 diff, change 徽标由 architect 自管 diff 补齐——批E） ─────────
     versions = []
     try:
         import topoone.engine.version_sync_service as vss
@@ -330,7 +331,8 @@ def build_component_catalog(multi_db, project_id: str, *,
     except Exception:
         pass
 
-    # ── 版本差异 change（项目级，一次） ─────────────────────
+    # ── 版本差异 change（项目级，一次; 去基线化后 version 表冻结无新版本 →
+    #    恒零 diff, change 徽标由 architect 自管 diff 补齐——批E） ─────────
     file_change = {}
     try:
         import topoone.engine.version_sync_service as vss

@@ -104,9 +104,12 @@ def test_unmount_and_stale(mdb):
 
 
 def test_empty_view_resolves_nothing(mdb):
+    # 挂载体系退役后 view 解析仍返回空(内部消费方可用), 但 catalog 改走
+    # 最新 done 任务口径——未被「未挂载」拦截。
     assert vs.resolve_view_task_ids(mdb, "proj-t") == []
     out = build_component_catalog(mdb, "proj-t")
-    assert out["components"] == [] and out["taskIds"] == []
+    # 最新 done = task-aaaaaaaa(fixture 顺序第一个 done): 无 graph_doc 社区 → 组件空
+    assert out["components"] == []
 
 
 def test_catalog_merges_mounted_tasks(mdb):
@@ -124,11 +127,13 @@ def test_catalog_merges_mounted_tasks(mdb):
     vs.mount_task(mdb, "proj-t", "task-aaaaaaaa")
     vs.mount_task(mdb, "proj-t", "task-bbbbbbbb", force=True)
 
+    # 去基线化: catalog 走最新 done 单任务口径(多分区合并已随挂载退役塌缩——
+    # 仅最新 done 的 UNIFIED 社区进目录; 并列 updated_at 时取序不定, 断言塌缩为 1)
     out = build_component_catalog(mdb, "proj-t")
     ids = {c["id"] for c in out["components"]}
-    assert ids == {"comm-task-aaa-uni-L0-0000", "comm-task-bbb-uni-L0-0000"}
-    assert sorted(out["taskIds"]) == ["task-aaaaaaaa", "task-bbbbbbbb"]
-    assert out["view"]["mountedTaskIds"] == ["task-aaaaaaaa", "task-bbbbbbbb"]
+    assert len(ids) == 1
+    assert ids <= {"comm-task-aaa-uni-L0-0000", "comm-task-bbb-uni-L0-0000"}
+    assert out["taskIds"] in (["task-aaaaaaaa"], ["task-bbbbbbbb"])
     # 显式 task_id 仍可覆盖（内部消费方）
     only = build_component_catalog(mdb, "proj-t", task_id="task-aaaaaaaa")
     assert [c["id"] for c in only["components"]] == ["comm-task-aaa-uni-L0-0000"]

@@ -100,12 +100,9 @@ def workspace_snapshot(multi_db, project_id: str, files: Optional[List[str]] = N
     if not root:
         raise ValueError("project root_path empty")
 
+    # 去基线化: base 缺省改空(纯算力——文件集由调用方显式给定或全变更集;
+    # KB 不再持有基线 commit 语义, architect 用自管基线算 diff 后喂 files/base)。
     resolved_base = (base or "").strip()
-    if not resolved_base:
-        row = main_db.fetchone(
-            "SELECT baseline_commit FROM project_versions WHERE project_id = ? "
-            "ORDER BY created_at DESC, rowid DESC LIMIT 1", (project_id,))
-        resolved_base = ((row or {}).get("baseline_commit") or "").strip()
 
     explicit = [str(f) for f in (files or []) if f]
     if explicit:

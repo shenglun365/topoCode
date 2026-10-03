@@ -36,6 +36,19 @@ from .positions import save_positions, load_positions, list_position_keys, clear
 logger = logging.getLogger(__name__)
 
 
+
+def _latest_done_task_ids(multi_db, project_id: str) -> list:
+    """去基线化口径: 项目最新 done 任务的 id 列表(单任务口径; 多分区拆分
+    (>5000 文件)场景已随挂载退役而塌缩为最新任务——已裁决接受)。"""
+    row = multi_db.main_db.fetchone(
+        """SELECT id FROM analysis_tasks
+           WHERE project_id = ? AND status = 'done'
+           ORDER BY updated_at DESC LIMIT 1""",
+        (project_id,),
+    )
+    return [row["id"]] if row else []
+
+
 def register(server, multi_db, S):
     @server.register("analysis.scanFileStats")
     def scan_file_stats(project_id=None, projectId=None,
@@ -1411,14 +1424,14 @@ def register(server, multi_db, S):
             project_ids = [r["project_id"] for r in rows]
 
         results = []
-        from topoone.engine.view_service import resolve_view_task_ids
+        from topoone.engine.task_api.community_query import _latest_done_task_ids
         for pid in project_ids:
             try:
-                # 重建对象 = 基线视图挂载任务（与对外 catalog/model 展示口径严格一致）
-                tids = resolve_view_task_ids(multi_db, pid)
+                # 去基线化: 重建对象 = 各分区最新 done 任务并集(挂载口径退役)
+                tids = _latest_done_task_ids(multi_db, pid)
                 if not tids:
                     results.append({"project_id": pid,
-                                    "skipped": "baseline view has no mounted tasks"})
+                                    "skipped": "no done analysis tasks"})
                     continue
                 pdb = multi_db.get_project_db(pid)
                 store = AnalysisStore(pdb)

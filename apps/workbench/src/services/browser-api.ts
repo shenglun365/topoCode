@@ -172,7 +172,8 @@ export function createBrowserAPI(): any {
     deleteDoc: (id: string) => callRpc('knowledge.deleteDoc', { id }),
     getGraph: (params?: any) => callRpc('knowledge.getGraph', params || {}),
     getDimensions: () => callRpc('knowledge.getDimensions', {}),
-    pullRequest: (params: any) => callRpc('knowledge.pullRequest', params || {}),
+    // 去基线化退役: pullRequest 空壳(KB 已无待确认基线请求语义)
+    pullRequest: async () => ({ retired: true, success: false }),
     pendingUpdates: (params: any) => callRpc('knowledge.pendingUpdates', params || {}),
     updateConfirm: (params: any) => callRpc('knowledge.updateConfirm', params || {}),
     updateCancel: (params: any) => callRpc('knowledge.updateCancel', params || {}),

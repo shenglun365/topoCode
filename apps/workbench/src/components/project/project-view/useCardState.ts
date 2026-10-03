@@ -35,7 +35,6 @@ const editRemoteUrl = ref('')
 const editLocalRepoPath = ref('')
 const editBranch = ref('')
 const editHead = ref('')
-const showVersionUpdateDialog = ref(false)
 const allGroups = ref<GroupNode[]>([])
 const selectedGroupIds = ref<string[]>([])
 
@@ -93,6 +92,5 @@ const isResourceProject = computed(() => props.project.id?.startsWith?.('TOPORES
     showDeleteConfirm,
     showEditDialog,
     showPathConfirm,
-    showVersionUpdateDialog,
   }
 }

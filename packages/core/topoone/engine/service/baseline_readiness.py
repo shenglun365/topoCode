@@ -9,9 +9,10 @@
   任何 manual 挂载(用户显式操作)永不自动替换 — 遵守 view_service
   "切换一律显式挂载"哲学。
 
-状态机(推导而非存储):
-    no_project → importing → no_analysis → analyzing → unmounted → ready
-    (importing/analyzing 由既有表/作业状态识别, 重复调用原样返回)
+状态机(推导而非存储; 2026-10 KB 去基线化裁决——挂载/基线对齐语义退役,
+KB = 自由分析研究引擎):
+    no_project → importing → no_analysis → analyzing → ready
+    ready = 存在 done 任务(不再要求 view_mounts 挂载; unmounted 态消亡)
 
 fast 任务类型语义(analysis_tasks.type):
 - full : 6 步静态管线 + AI 项目摘要(report_service)
@@ -28,9 +29,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# 就绪状态顺序(仅用于文档/断言, 推导不依赖顺序)
-STATES = ("no_project", "importing", "no_analysis", "analyzing",
-          "unmounted", "ready")
+# 就绪状态顺序(仅用于文档/断言, 推导不依赖顺序; unmounted 已随挂载编排退役)
+STATES = ("no_project", "importing", "no_analysis", "analyzing", "ready")
 
 _ACTIVE_TASK_STATUS = ("pending", "queued", "running")
 
@@ -120,16 +120,10 @@ def derive_readiness(multi_db, project_id: str = "", root: str = "") -> dict:
 
     out = {"projectId": pid, "taskId": done["id"], "taskName": done.get("name") or "",
            "taskType": done.get("type") or "", "root": proj["root_path"]}
-    try:
-        from topoone.engine.view_service import _mounts
-        mounts = _mounts(main_db, pid)
-    except Exception:
-        mounts = []
-    if not mounts:
-        out["state"] = "unmounted"
-        return out
+    # 去基线化: done 即 ready(挂载不再是就绪前置); mountedTaskIds 字段保留
+    # 向后兼容(消费方 BaselineInitCard/语义资产只读 taskId/mountedTaskIds)。
     out["state"] = "ready"
-    out["mountedTaskIds"] = [m["task_id"] for m in mounts]
+    out["mountedTaskIds"] = [done["id"]]
     return out
 
 
@@ -180,42 +174,8 @@ def ensure_ready(server, multi_db, project_id: str = "", root: str = "",
         logger.info("[baseline.ensureReady] task=%s (%s) enqueued", task["id"], task_type)
         return derive_readiness(multi_db, pid)
 
-    if state["state"] == "unmounted":
-        pid = state["projectId"]
-        tid = state["taskId"]
-        from topoone.engine.view_service import mount_task
-        mount_task(multi_db, pid, tid, origin="auto")
-        logger.info("[baseline.ensureReady] auto-mounted task=%s (origin=auto)", tid)
-        return derive_readiness(multi_db, pid)
+    return state  # pragma: no cover — 状态机已穷举(挂载步随去基线化退役)
 
-    return state  # pragma: no cover — 状态机已穷举
-
-
-def swap_auto_mounts(multi_db, project_id: str, new_task_id: str) -> dict:
-    """将 auto 来源挂载切换到新任务(manual 挂载永不触碰)。
-
-    全量重建完成后的挂载换代: 仅当存在 auto 挂载时执行替换;
-    纯 manual 挂载布局下不动作(保持用户显式选择)。
-    """
-    from topoone.engine.view_service import mount_task, unmount_task, _mounts
-    main_db = multi_db.main_db
-    auto_mounts = [m for m in _mounts(main_db, project_id)
-                   if (m.get("mount_origin") or "manual") == "auto"]
-    for m in auto_mounts:
-        try:
-            unmount_task(multi_db, project_id, m["task_id"])
-        except Exception as e:
-            logger.warning("[swap_auto_mounts] unmount %s failed: %s", m["task_id"], e)
-    if not auto_mounts:
-        return {"swapped": False, "reason": "no_auto_mounts"}
-    try:
-        mount_task(multi_db, project_id, new_task_id, origin="auto")
-    except Exception as e:
-        logger.warning("[swap_auto_mounts] mount %s failed: %s", new_task_id, e)
-        return {"swapped": False, "reason": str(e)}
-    logger.info("[swap_auto_mounts] project=%s -> task=%s (%d replaced)",
-                project_id, new_task_id, len(auto_mounts))
-    return {"swapped": True, "replaced": len(auto_mounts)}
 
 
 def register_baseline_readiness_methods(server, multi_db) -> None:

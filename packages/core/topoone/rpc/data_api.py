@@ -70,11 +70,11 @@ EXTERNAL_METHODS = {
     # 项目/视图（基线视图对外契约：view.* 任务挂载管理与状态）
     "project.list",
     "view.status", "view.summary", "view.mount", "view.unmount", "view.history",
-    # 架构只读（经基线视图解析任务）
+    # 架构只读（去基线化后按最新 done 任务解析）
     "architecture.catalog", "architecture.model",
-    # 版本/基线
-    "version.list", "version.get", "version.preview", "version.sync",
-    "version.diff", "version.materialize", "version.cleanup",
+    # 版本只读(写/编排类 preview/sync/cleanup 已随去基线化退役出白名单;
+    # list/get/diff/materialize 仍被 architect 演化帧/历史解析消费, 批E 复核)
+    "version.list", "version.get", "version.diff", "version.materialize",
 }
 
 

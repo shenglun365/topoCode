@@ -1143,22 +1143,15 @@ async def _run_naming_recorded(multi_db, project_id: str, task_id: str) -> dict:
 
 
 async def _launch_fast_naming(server, multi_db, task_id: str, project_id: str):
-    """fast 任务完成后的收尾链: 命名继承 → 快速命名 → auto 挂载换代。
+    """fast 任务完成后的收尾链: 命名继承 → 快速命名(挂载换代随去基线化退役)。
 
-    每步独立容错: 命名失败不阻塞挂载换代(图谱已就绪), 反之亦然;
-    任务状态早已 done, 本链任何失败仅记日志(不回滚)。
+    命名失败仅记日志不回滚(任务状态早已 done, 图谱已就绪)。
     """
     try:
         res = await _run_naming_recorded(multi_db, project_id, task_id)
         logger.info("[fast-naming] done task=%s res=%s", task_id, res)
     except Exception as e:
         logger.warning("[fast-naming] task=%s failed: %s", task_id, e, exc_info=True)
-    try:
-        from topoone.engine.service.baseline_readiness import swap_auto_mounts
-        res = swap_auto_mounts(multi_db, project_id, task_id)
-        logger.info("[fast-naming] mount swap task=%s: %s", task_id, res)
-    except Exception as e:
-        logger.warning("[fast-naming] mount swap task=%s failed: %s", task_id, e)
 
 
 async def _execute_task(server, multi_db, task_id: str, run_id: str,

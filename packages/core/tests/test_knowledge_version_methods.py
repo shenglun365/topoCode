@@ -37,23 +37,20 @@ def svc(tmp_path, monkeypatch):
     return call
 
 
-def test_pull_request_delegation(svc):
-    out = svc("knowledge.pullRequest", project_id="p1", repo_url="https://x/y.git",
-              branch="main", head="abc123", note="n")
-    assert out == {"requestId": "req-1"}
-    assert svc.calls["pull"] == ("p1", "https://x/y.git", "main", "abc123")
+def test_knowledge_methods_retired(svc):
+    """去基线化(2026-10 裁决): knowledge.* 四方法空壳——旧调用得明确错误非 404。"""
+    r = svc("knowledge.pullRequest", projectId="proj-t")
+    assert r.get("retired") is True and "去基线化" in (r.get("error") or "")
+    r = svc("knowledge.pendingUpdates", projectId="proj-t")
+    assert r.get("retired") is True
+    r = svc("knowledge.updateConfirm", requestId="req-1")
+    assert r.get("retired") is True
+    r = svc("knowledge.updateCancel", requestId="req-1")
+    assert r.get("retired") is True
 
 
-def test_pending_updates_delegation(svc):
-    assert svc("knowledge.pendingUpdates", project_id="p2") == [{"id": "req-1"}]
-    assert svc.calls["pending"] == "p2"
-
-
-def test_update_confirm_method_passthrough(svc):
-    assert svc("knowledge.updateConfirm", request_id="req-9", method="pull") == {"ok": True}
-    assert svc.calls["confirm"] == ("req-9", "pull")
-
-
-def test_update_cancel_wraps_result(svc):
-    assert svc("knowledge.updateCancel", request_id="req-8") == {"cancelled": True}
-    assert svc.calls["cancel"] == "req-8"
+def test_version_write_methods_retired(svc):
+    """version.preview/sync/cleanup 同批退役空壳。"""
+    for name in ("version.preview", "version.sync", "version.cleanup"):
+        r = svc(name, projectId="proj-t")
+        assert r.get("retired") is True and r.get("success") is False, name

@@ -195,12 +195,9 @@ function createRealIPC() {
       get: async (projectId: string, versionId: string) => {
         return await api.call('version.get', { projectId, versionId })
       },
-      preview: async (projectId: string, opts?: { branch?: string; head?: string }) => {
-        return await api.call('version.preview', { projectId, ...(opts || {}) })
-      },
-      sync: async (projectId: string, opts?: { branch?: string; head?: string; label?: string; stages?: Record<string, boolean>; force?: boolean; requestId?: string }) => {
-        return await api.call('version.sync', { projectId, ...(opts || {}) })
-      },
+      // 去基线化退役: preview/sync 空壳(KB 无版本同步编排; 旧调用得明确错误)
+      preview: async () => ({ retired: true, success: false }),
+      sync: async () => ({ retired: true, success: false }),
       diff: async (projectId: string, fromId: string, toId: string) => {
         return await api.call('version.diff', { projectId, fromId, toId })
       },

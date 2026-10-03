@@ -25,7 +25,10 @@ def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("version.preview")
     def version_preview(project_id: str = None, branch: str = "", head: str = "",
                         projectId: str = None):
-        return vss.preview(multi_db, project_id or projectId, branch=branch, head=head)
+        # KB 去基线化(2026-10 裁决): 版本同步/预览/清理编排退役——architect 自管基线。
+        # 保留注册空壳(旧调用方得明确错误而非 404), 表壳冻结一版周期后清。
+        return {"retired": True, "success": False,
+                "error": "KB 已去基线化: version.preview 退役(architect 自管基线)"}
 
     @server.register("version.sync")
     def version_sync(project_id: str = None, branch: str = "", head: str = "",
@@ -33,10 +36,10 @@ def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
                      request_id: str = None, task_id: str = None,
                      projectId: str = None, requestId: str = None,
                      taskId: str = None):
-        return vss.sync(multi_db, project_id or projectId,
-                        branch=branch, head=head, label=label, stages=stages,
-                        force=force, request_id=request_id or requestId,
-                        task_id=task_id or taskId, server=server)
+        # KB 去基线化(2026-10 裁决): 版本同步/预览/清理编排退役——architect 自管基线。
+        # 保留注册空壳(旧调用方得明确错误而非 404), 表壳冻结一版周期后清。
+        return {"retired": True, "success": False,
+                "error": "KB 已去基线化: version.sync 退役(architect 自管基线)"}
 
     @server.register("version.diff")
     def version_diff(project_id: str = None, from_id: str = None, to_id: str = None,
@@ -52,30 +55,42 @@ def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("version.cleanup")
     def version_cleanup(project_id: str = None, keep_versions: int = 0,
                         projectId: str = None, keepVersions: int = None):
-        kv = keepVersions if keepVersions is not None else keep_versions
-        return vss.cleanup(multi_db, project_id or projectId, keep_versions=kv)
+        # KB 去基线化(2026-10 裁决): 版本同步/预览/清理编排退役——architect 自管基线。
+        # 保留注册空壳(旧调用方得明确错误而非 404), 表壳冻结一版周期后清。
+        return {"retired": True, "success": False,
+                "error": "KB 已去基线化: version.cleanup 退役(architect 自管基线)"}
 
     @server.register("knowledge.pullRequest")
     def knowledge_pull_request(project_id: str = None, repo_url: str = "",
                                local_repo_path: str = "", branch: str = "",
                                head: str = "", note: str = "",
                                projectId: str = None):
-        return vss.pull_request(multi_db, project_id or projectId,
-                                repo_url=repo_url, local_repo_path=local_repo_path,
-                                branch=branch, head=head, note=note)
+        # KB 去基线化(2026-10 裁决): 版本同步/预览/清理编排退役——architect 自管基线。
+        # 保留注册空壳(旧调用方得明确错误而非 404), 表壳冻结一版周期后清。
+        return {"retired": True, "success": False,
+                "error": "KB 已去基线化: knowledge.pullRequest 退役(architect 自管基线)"}
 
     @server.register("knowledge.pendingUpdates")
     def knowledge_pending_updates(project_id: str = None, projectId: str = None):
-        return vss.pending_updates(multi_db, project_id or projectId)
+        # KB 去基线化(2026-10 裁决): 版本同步/预览/清理编排退役——architect 自管基线。
+        # 保留注册空壳(旧调用方得明确错误而非 404), 表壳冻结一版周期后清。
+        return {"retired": True, "success": False,
+                "error": "KB 已去基线化: knowledge.pendingUpdates 退役(architect 自管基线)"}
 
     @server.register("knowledge.updateConfirm")
     def knowledge_update_confirm(request_id: str = None, method: str = "pull",
                                  requestId: str = None):
-        return vss.confirm_update(multi_db, request_id or requestId, method=method)
+        # KB 去基线化(2026-10 裁决): 版本同步/预览/清理编排退役——architect 自管基线。
+        # 保留注册空壳(旧调用方得明确错误而非 404), 表壳冻结一版周期后清。
+        return {"retired": True, "success": False,
+                "error": "KB 已去基线化: knowledge.updateConfirm 退役(architect 自管基线)"}
 
     @server.register("knowledge.updateCancel")
     def knowledge_update_cancel(request_id: str = None, requestId: str = None):
-        return {"cancelled": vss.cancel_update(multi_db, request_id or requestId)}
+        # KB 去基线化(2026-10 裁决): 版本同步/预览/清理编排退役——architect 自管基线。
+        # 保留注册空壳(旧调用方得明确错误而非 404), 表壳冻结一版周期后清。
+        return {"retired": True, "success": False,
+                "error": "KB 已去基线化: knowledge.updateCancel 退役(architect 自管基线)"}
 
     @server.register("architecture.model")
     def architecture_model(project_id: str = None, task_id: str = "",

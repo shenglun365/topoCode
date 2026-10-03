@@ -21,7 +21,6 @@ import { StarIcon, ArrowUpOnSquareIcon } from '@heroicons/vue/24/solid'
 import { languageBadge } from '@/utils/languageBadge'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ClearCacheDialog from '../../ClearCacheDialog.vue'
-import VersionUpdateDialog from '../../VersionUpdateDialog.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@/composables/useComponentId'
@@ -310,15 +309,6 @@ function formatTime(timeStr: string | null): string {
           <MagnifyingGlassIcon class="w-4 h-4" />
           <span>{{ t('project.checkChanges') }}</span>
         </div>
-        <!-- KB 基线更新 -->
-        <div
-          v-if="!isResourceProject"
-          class="context-menu-item"
-          @click="startVersionUpdate"
-        >
-          <ArrowPathIcon class="w-4 h-4" />
-          <span>{{ t('version.title') }}</span>
-        </div>
         <!-- 资源项目操作 -->
         <template v-if="isResourceProject">
           <div class="context-menu-divider" />
@@ -487,13 +477,6 @@ function formatTime(timeStr: string | null): string {
       @confirm="confirmPathChange"
     />
 
-    <!-- KB 基线更新弹窗 -->
-    <VersionUpdateDialog
-      v-if="showVersionUpdateDialog"
-      :project-id="project.id"
-      @close="showVersionUpdateDialog = false"
-      @updated="onVersionUpdated"
-    />
   </div>
 
   <Teleport to="body">
