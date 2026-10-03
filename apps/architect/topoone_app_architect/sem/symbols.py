@@ -199,8 +199,16 @@ def _attach_codegraph_merge(conn: sqlite3.Connection, root: str) -> bool:
                      "JOIN cg_nodes_norm c ON c.id = m.cg_id "
                      "JOIN nodes_native n ON n.id = m.native_id "
                      "WHERE n.start_line != c.start_line))")
+        # 合并节点/边物化 TEMP 表 + 索引(2026-10-03 性能修复): 原惰性视图每次
+        # 查询全量物化(cg 侧 NOT EXISTS/LEFT JOIN 相关子查询无索引, 嵌套循环
+        # ≈3.4s/次——unowned 端点 6-9.6s 实测; supervisor 全家桶拉起 core 后
+        # native 源在场必走合并, dev-watch 单服务时碰巧降级纯 codegraph 掩盖)
+        # → open 时一次性物化(连接缓存摊销; invalidate 后首个请求多 ~3.5s,
+        # 之后全快)+ file_path/kind/source/target 索引; 与 edges_dedup 物化
+        # 先例对称。nodes/edges 视图指物化表, 下游调用方零改动。
         conn.execute("DROP VIEW IF EXISTS nodes")
-        conn.execute("CREATE TEMP VIEW nodes AS "
+        conn.execute("DROP TABLE IF EXISTS nodes_merged")
+        conn.execute("CREATE TEMP TABLE nodes_merged AS "
                      "SELECT id, kind, name, qualified_name, file_path, start_line, end_line, "
                      "start_column, end_column, signature, docstring, return_type FROM nodes_native "
                      "UNION ALL "
@@ -208,8 +216,12 @@ def _attach_codegraph_merge(conn: sqlite3.Connection, root: str) -> bool:
                      "start_column, end_column, signature, docstring, return_type "
                      "FROM cg_nodes_norm c WHERE NOT EXISTS "
                      "(SELECT 1 FROM cg_id_map m WHERE m.cg_id = c.id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS temp.idx_nm_file ON nodes_merged(file_path)")
+        conn.execute("CREATE INDEX IF NOT EXISTS temp.idx_nm_kind ON nodes_merged(kind)")
+        conn.execute("CREATE TEMP VIEW nodes AS SELECT * FROM nodes_merged")
         conn.execute("DROP VIEW IF EXISTS edges")
-        conn.execute("CREATE TEMP VIEW edges AS "
+        conn.execute("DROP TABLE IF EXISTS edges_merged")
+        conn.execute("CREATE TEMP TABLE edges_merged AS "
                      "SELECT source, target, kind, line, col, metadata FROM edges_native "
                      "UNION ALL "
                      "SELECT COALESCE(m1.native_id, 'cg:' || e.source) AS source, "
@@ -223,6 +235,9 @@ def _attach_codegraph_merge(conn: sqlite3.Connection, root: str) -> bool:
                      "WHERE d.kind = e.kind "
                      "AND d.source = COALESCE(m1.native_id, 'cg:' || e.source) "
                      "AND d.target = COALESCE(m2.native_id, 'cg:' || e.target))")
+        conn.execute("CREATE INDEX IF NOT EXISTS temp.idx_em_source ON edges_merged(source)")
+        conn.execute("CREATE INDEX IF NOT EXISTS temp.idx_em_target ON edges_merged(target)")
+        conn.execute("CREATE TEMP VIEW edges AS SELECT * FROM edges_merged")
         return True
     except Exception as e:
         logger.warning("[semantic] codegraph 合并挂载失败, 回退纯 native: %s", e)
