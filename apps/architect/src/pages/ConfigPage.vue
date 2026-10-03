@@ -517,6 +517,61 @@ onUnmounted(() => {
   stopGatePoll()
   cancelEvalClose()
 })
+// ── 语义资产解析能力(独立探测独立参数, 与综合档分离) ──────────────
+const assetProbing = ref<Record<string, string>>({})
+const assetActive = ref<Record<string, boolean>>({})
+async function assetProbe(m: ArchLlmModel) {
+  if (assetActive.value[m.id]) return
+  assetActive.value = { ...assetActive.value, [m.id]: true }
+  assetProbing.value[m.id] = '探测中…(10 次调用测稳定性)'
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    const d = await Promise.race([
+      apiPost<any>(`/llm/models/${m.id}/asset-capability-probe`, { force: true }),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('探测超时(15 分钟)')), 900000)),
+    ])
+    if (d?.skipped) {
+      assetProbing.value[m.id] = '⏳ 已有探测档案(未强制)'
+    } else if (d?.profile) {
+      capProfiles.value = {
+        ...capProfiles.value,
+        [m.id]: { ...(capProfiles.value[m.id] || { modelId: m.id }), asset: { ...d.profile, evidence: d.evidence } },
+      }
+      delete assetProbing.value[m.id]
+    } else {
+      assetProbing.value[m.id] = '✗ 探测未返回档案'
+    }
+  } catch (e: any) {
+    assetProbing.value[m.id] = `✗ ${e?.message || e}`
+  } finally {
+    const next = { ...assetActive.value }
+    delete next[m.id]
+    assetActive.value = next
+  }
+}
+
+async function setAssetPolicy(m: ArchLlmModel, mode: string) {
+  try {
+    const { apiPut } = await import('@/services/api-client')
+    await apiPut(`/llm/model-profiles/${m.id}`, mode ? { asset: { mode } } : { asset: null })
+    await loadProfiles()   // 档案重载(手动覆盖 source=manual / 清除回缺省)
+  } catch (e: any) {
+    assetProbing.value[m.id] = `✗ ${e?.message || e}`
+  }
+}
+
+function assetPolicyText(asset: any): string {
+  const mode = { numbered: '编号引用', free: '自由归纳', structural: '结构化构链' }[asset.mode as string] || asset.mode
+  const cap = asset.listCap ? ` · 清单≤${asset.listCap}` : ''
+  const src = asset.source === 'manual' ? ' · 手动' : asset.source === 'probed' ? ' · 已探测' : ''
+  const ev = asset.evidence
+  const evTxt = ev ? ` · name@100:${_evMin(ev['name@100'])} num@200:${_evMin(ev['num@200'])}` : ''
+  return `${mode}${cap}${src}${evTxt}`
+}
+function _evMin(v?: number[]): string {
+  return v?.length ? Math.round(Math.min(...v) * 100) + '%' : '—'
+}
+
 async function setManualTier(m: ArchLlmModel, tier: number) {
   try {
     const { apiPut } = await import('@/services/api-client')
@@ -878,6 +933,33 @@ onMounted(() => { void loadCgStatus() })
                   </div>
                   <div class="text-ctp-overlay0">
                     默认映射: ≥0.90→T0 / ≥0.52→T1 / 其余→T2（非硬性绑定, 手动调整优先）
+                  </div>
+                </div>
+                <!-- 语义资产解析(独立探测独立参数, 2026-10-03: 与综合档分离) -->
+                <div class="border-t border-ctp-surface0 pt-1 space-y-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-mono text-ctp-subtext1">资产解析策略（编号/自由/构链 · 独立探测）</span>
+                    <div class="flex items-center gap-1">
+                      <select
+                        class="bg-ctp-surface0 text-[10px] rounded px-1 py-0.5 text-ctp-subtext0"
+                        :value="capProfiles[m.id].asset?.mode ?? ''"
+                        title="归纳策略参数(手动覆盖优先于探测; 空值=按探测档案)"
+                        @change="setAssetPolicy(m, ($event.target as HTMLSelectElement).value)"
+                      >
+                        <option value="">按探测档案</option>
+                        <option value="numbered">编号引用</option>
+                        <option value="free">自由归纳</option>
+                        <option value="structural">结构化构链</option>
+                      </select>
+                      <button
+                        class="btn !py-0 !px-2 !text-[10px]"
+                        :disabled="!!assetProbing[m.id] || capBusy"
+                        @click="assetProbe(m)"
+                      >{{ assetProbing[m.id] || '探测' }}</button>
+                    </div>
+                  </div>
+                  <div v-if="capProfiles[m.id].asset" class="font-mono text-ctp-subtext0">
+                    {{ assetPolicyText(capProfiles[m.id].asset) }}
                   </div>
                 </div>
                 <div class="font-mono text-ctp-subtext0">
