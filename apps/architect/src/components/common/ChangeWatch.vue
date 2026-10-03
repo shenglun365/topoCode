@@ -80,7 +80,7 @@ onUnmounted(() => {
 <style scoped>
 .cw-bar {
   position: fixed;
-  top: 12px;
+  top: 18vh;              /* 页面中心中上位置(用户裁决 2026-10-03, 原 top:12px 顶部贴边) */
   left: 50%;
   transform: translateX(-50%);
   z-index: 2100;
