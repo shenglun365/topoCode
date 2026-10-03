@@ -332,8 +332,9 @@ def _write_state_kv(core_pid: str, head: str) -> None:
 def resolve_base_commit(root: Optional[str], project: Optional[str] = None) -> str:
     """变更对比基准 commit（统一锚点）。
 
-    项目 baselineCommit(KB 基线版本 head) 优先；无基线时回退符号源同步 KV 的
-    lastHead(历史行为兼容)。两者皆无 → ''(未对齐基线)。
+    优先级：项目 baselineCommit 字段 > 自管图谱基线 KV(arch.graphBaseline.<pid>，
+    collect_graph 采集完成自记——数据主权批A，KB 缺席照常) > 符号源同步 KV
+    的 lastHead(旧 core_pid 键，历史行为兼容)。三者皆无 → ''(未对齐基线)。
     """
     if root:
         try:
@@ -342,6 +343,14 @@ def resolve_base_commit(root: Optional[str], project: Optional[str] = None) -> s
             bc = (proj.get("baselineCommit") or "").strip()
             if bc:
                 return bc
+        except Exception:
+            pass
+    if project:
+        try:
+            from .graph_collect import read_graph_baseline
+            head = (read_graph_baseline(project) or {}).get("head") or ""
+            if head:
+                return head
         except Exception:
             pass
     pid = _resolve_core_pid(root)
@@ -369,8 +378,8 @@ def symbol_source_state(root: Optional[str], project: Optional[str] = None) -> d
     stale_files: list = []
     stale = False
     last_head = ''
-    if pid:
-        last_head = resolve_base_commit(root, project)
+    # 基准锚不再要求 KB 在场(数据主权批A)：自管 KV 层使 KB 缺席照常判定 stale
+    last_head = resolve_base_commit(root, project)
     if root and head:
         out = _git(root, ['status', '--porcelain'])
         if out is not None:

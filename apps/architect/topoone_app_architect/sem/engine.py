@@ -4635,6 +4635,59 @@ async def api_codegraph_sync(body: dict = None):
                "message": "" if synced else "codegraph 同步未完成(CLI 缺失或通道被关闭)"})
 
 
+@router.post("/kb/semantic/collect-graph")
+async def api_collect_graph(body: dict = None):
+    """自有图谱基线采集(数据主权批A)：工作区现状 → parseFileAst 算力 →
+    arch_graph_node/edge 按 rev 快照落库 + 自记基线锚。KB 缺席照常(缓存命中时)。
+
+    scope: {files?: [](缺省 git ls-files 代码文件), rev?: [](缺省 baseline:<HEAD>)}
+    """
+    from .. import ctx
+    from . import graph_collect
+    from .job_runner import start_job
+    body = body or {}
+    proj = body.get('project') or ctx.get_project()
+    root = (resolve_root(body.get('root') or None, proj) or '').strip()
+    if not root or not os.path.isdir(root):
+        return err(400, "项目 root 解析失败")
+    if not proj:
+        return err(400, "项目 id 缺失(采集快照按项目隔离落库)")
+    scope: dict = {}
+    if isinstance(body.get('files'), list) and body['files']:
+        scope['files'] = [str(f).replace('\\', '/') for f in body['files']][:3000]
+    if isinstance(body.get('rev'), str) and body['rev'].strip():
+        scope['rev'] = body['rev'].strip()
+    r = start_job(proj, 'collect_graph', scope)
+    if not r.get("started"):
+        return ok({**r, "message": f"未启动: {r.get('reason')}"})
+    return ok({**r, "message": "图谱基线采集已提交(任务中心可见进度)"})
+
+
+@router.get("/kb/semantic/collect-graph/status")
+async def api_collect_graph_status(project: Optional[str] = None):
+    """采集作业状态 + 当前基线锚(rev/节点/边计数)。"""
+    from .. import ctx
+    from ..store.jobs import SemanticJobsStore
+    from ..store.graph import GraphStore
+    from . import graph_collect
+    proj = project or ctx.get_project()
+    if not proj:
+        return err(400, "项目 id 缺失")
+    jobs = [j for j in SemanticJobsStore.list(proj, limit=50)
+            if j.get("kind") == "collect_graph"]
+    latest = jobs[0] if jobs else None
+    anchor = graph_collect.read_graph_baseline(proj)
+    rev = (anchor or {}).get("head")
+    counts = GraphStore.counts(proj, f"baseline:{rev}") if rev else {"nodes": 0, "edges": 0}
+    return ok({
+        "jobs": jobs[:5],
+        "latest": latest,
+        "anchor": anchor,
+        "rev": f"baseline:{rev}" if rev else "",
+        "counts": counts,
+    })
+
+
 @router.post("/kb/semantic/codegraph")
 async def api_codegraph_set(body: dict = None):
     from .codegraph import set_kv_mode

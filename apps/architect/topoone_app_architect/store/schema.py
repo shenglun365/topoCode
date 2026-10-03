@@ -462,6 +462,86 @@ ARCH_PROJECT_TABLES_SQL = """
         PRIMARY KEY (project_id, file_path)
     );
 
+    -- ── architect 自有图谱基线(数据主权批A) ──────────────────────────────
+    -- KB 转纯算力服务(parseFileAst/communityFromGraph)，分析结果按项目+rev
+    -- 落 architect 库；rev 沿用锚点前缀 baseline:<commit> | head:<sha> |
+    -- workspace(与 arch_semantic_assets.rev 同族，底座判定 LIKE 'baseline:%'
+    -- 天然兼容，存量 baseline:<kbVersion> 行不受影响)。
+    CREATE TABLE IF NOT EXISTS arch_graph_node (
+        project_id TEXT NOT NULL,
+        rev TEXT NOT NULL DEFAULT '',
+        id TEXT NOT NULL,                   -- cache:file::name::line(_norm_cache_symbol 规则, 与 codegraph 同构模型)
+        kind TEXT DEFAULT '',
+        name TEXT DEFAULT '',
+        qualified_name TEXT DEFAULT '',
+        file_path TEXT DEFAULT '',
+        language TEXT DEFAULT '',
+        start_line INTEGER DEFAULT 0,
+        end_line INTEGER DEFAULT 0,
+        start_column INTEGER DEFAULT 0,
+        end_column INTEGER DEFAULT 0,
+        signature TEXT DEFAULT '',
+        docstring TEXT DEFAULT '',
+        return_type TEXT DEFAULT '',
+        is_exported INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, rev, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ag_node_file ON arch_graph_node(project_id, rev, file_path);
+    CREATE INDEX IF NOT EXISTS idx_ag_node_name ON arch_graph_node(project_id, rev, name);
+
+    CREATE TABLE IF NOT EXISTS arch_graph_edge (
+        project_id TEXT NOT NULL,
+        rev TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL,               -- 节点 id 或符号名(跨文件未解析时, 消费方 name_of 兼容)
+        target TEXT NOT NULL,
+        kind TEXT NOT NULL,                 -- calls | contains | imports | references | extends | instantiates | implements
+        line INTEGER DEFAULT 0,
+        col INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, rev, source, target, kind)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ag_edge_source ON arch_graph_edge(project_id, rev, source);
+    CREATE INDEX IF NOT EXISTS idx_ag_edge_target ON arch_graph_edge(project_id, rev, target);
+
+    -- 组件(批B 社区分组结果承载；批A 建表)。最小消费形状 {id,name,owns,parentId}
+    -- 直配 sem/catalog 接缝(catalog 切 arch_only 后五消费方零改动)。
+    CREATE TABLE IF NOT EXISTS arch_components (
+        project_id TEXT NOT NULL,
+        rev TEXT NOT NULL DEFAULT '',
+        id TEXT NOT NULL,
+        name TEXT DEFAULT '',
+        summary TEXT DEFAULT '',
+        owns TEXT DEFAULT '[]',             -- JSON: 相对路径[]
+        source TEXT DEFAULT 'community',    -- community | manual
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, rev, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ag_comp ON arch_components(project_id, rev);
+
+    CREATE TABLE IF NOT EXISTS arch_component_hierarchy (
+        project_id TEXT NOT NULL,
+        rev TEXT NOT NULL DEFAULT '',
+        child_id TEXT NOT NULL,
+        parent_id TEXT DEFAULT '',          -- '' = 顶层
+        level INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, rev, child_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_component_naming (
+        project_id TEXT NOT NULL,
+        rev TEXT NOT NULL DEFAULT '',
+        component_id TEXT NOT NULL,
+        name TEXT DEFAULT '',
+        summary TEXT DEFAULT '',
+        model_id TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',       -- active | stale(owns/rev 变化后)
+        fingerprint TEXT DEFAULT '',        -- 生成时 owns 集指纹(变更判定)
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, rev, component_id)
+    );
+
     CREATE TABLE IF NOT EXISTS arch_semantic_refs (
         asset_id TEXT NOT NULL,
         ref_type TEXT NOT NULL,             -- req | plan | task | test
