@@ -1479,7 +1479,6 @@ export default {
       kbImporting: 'Importing',
       kbNoAnalysis: 'Imported · not analyzed',
       kbAnalyzing: 'Analyzing',
-      kbUnmounted: 'Analyzed · unmounted',
       kbReady: 'Ready',
       kbStart: 'Cold start / resume',
       kbRerun: 'Re-check readiness',

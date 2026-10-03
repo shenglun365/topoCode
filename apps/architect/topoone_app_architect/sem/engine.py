@@ -5045,56 +5045,6 @@ async def api_ensure_baseline(body: dict = None):
     return ok(res)
 
 
-@router.get("/kb/semantic/naming-status")
-async def api_naming_status(root: Optional[str] = None, project: Optional[str] = None,
-                            task_id: Optional[str] = None):
-    """组件快速命名状态(result_data.naming): 概览卡片 B2 失败透出/重试状态源。"""
-    from .. import ctx as _c
-    from ..kb_gateway import call_kb
-    from .paths import resolve_root
-    tid = (task_id or '').strip()
-    if not tid:
-        root_r = (resolve_root(root, _c.get_project()) or '').strip()
-        if not root_r:
-            return err(400, "项目 root 解析失败")
-        read = call_kb('baseline.readiness', root=root_r) or {}
-        tid = (read or {}).get('taskId') or ''
-    if not tid:
-        return ok({"taskId": "", "naming": None})
-    task = call_kb('analysis.getTask', taskId=tid)
-    if task is None:
-        return ok({"taskId": tid, "naming": None})
-    rd = task.get('result_data') or {}
-    if isinstance(rd, str):
-        import json as _json
-        try:
-            rd = _json.loads(rd)
-        except Exception:
-            rd = {}
-    return ok({"taskId": tid, "taskStatus": task.get('status') or '',
-               "naming": (rd or {}).get('naming')})
-
-
-@router.post("/kb/semantic/naming-rerun")
-async def api_naming_rerun(body: dict = None):
-    """组件快速命名手动重试(B3) → KB analysis.rerunNaming(后台执行)。"""
-    from .. import ctx as _c
-    from ..kb_gateway import call_kb
-    from .paths import resolve_root
-    body = body or {}
-    tid = (body.get('taskId') or '').strip()
-    if not tid:
-        root_r = (resolve_root(body.get('root'), _c.get_project()) or '').strip()
-        if not root_r:
-            return err(400, "项目 root 解析失败")
-        read = call_kb('baseline.readiness', root=root_r) or {}
-        tid = (read or {}).get('taskId') or ''
-    if not tid:
-        return err(400, "无已完成的基线任务可重试命名")
-    res = call_kb('analysis.rerunNaming', taskId=tid)
-    if res is None:
-        return err(503, "KB 服务不可达或 rerunNaming 失败")
-    return ok(res)
 
 
 @router.get("/kb/semantic/mappings")

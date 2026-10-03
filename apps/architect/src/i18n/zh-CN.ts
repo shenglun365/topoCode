@@ -1483,7 +1483,6 @@ export default {
       kbImporting: '建项进行中',
       kbNoAnalysis: '已建项目·未分析',
       kbAnalyzing: '分析进行中',
-      kbUnmounted: '分析完成·未挂载',
       kbReady: '就绪',
       kbStart: '冷启动 / 继续就绪',
       kbRerun: '重新就绪检查',

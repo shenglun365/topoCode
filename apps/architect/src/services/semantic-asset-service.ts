@@ -241,7 +241,7 @@ export interface CodegraphStatus {
 
 /** KB 基线就绪状态(baseline.readiness 无状态推导)。 */
 export interface BaselineReadiness {
-  state: 'no_project' | 'importing' | 'no_analysis' | 'analyzing' | 'unmounted' | 'ready'
+  state: 'no_project' | 'importing' | 'no_analysis' | 'analyzing' | 'ready'
   projectId?: string
   taskId?: string
   taskName?: string
@@ -252,20 +252,6 @@ export interface BaselineReadiness {
 }
 
 /** 组件快速命名状态(analysis_tasks.result_data.naming)。 */
-export interface NamingStatus {
-  taskId: string
-  taskStatus?: string
-  naming?: {
-    status: 'running' | 'done' | 'error' | string
-    named?: number
-    reason?: string
-    inherited?: number
-    error?: string
-    startedAt?: string
-    finishedAt?: string
-  } | null
-}
-
 /** 基线刷新作业行(批E)。 */
 export interface BaselineRefreshJob {
   id: string
@@ -607,18 +593,6 @@ export const semanticAssetService = {
   async componentNameStart(force = false): Promise<{ started: boolean; reason?: string; jobId?: string } | undefined> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/component-name', { root, project, ...(force ? { force: true } : {}) })
-  },
-
-  /** 组件快速命名状态(result_data.naming; 缺 taskId 时按就绪态解析当前任务)。 */
-  async namingStatus(taskId?: string): Promise<NamingStatus | undefined> {
-    const c = ctx()
-    return await apiGet<NamingStatus | undefined>(`/kb/semantic/naming-status${c ? `?${c}` : ''}${taskId ? `&task_id=${encodeURIComponent(taskId)}` : ''}`)
-  },
-
-  /** 组件快速命名手动重试(B3): KB 后台执行, 轮询 namingStatus 跟踪。 */
-  async namingRerun(taskId?: string): Promise<{ started: boolean; reason?: string; taskId?: string } | undefined> {
-    const { root, project } = currentProjectParams()
-    return await apiPost('/kb/semantic/naming-rerun', { root, project, taskId })
   },
 
   /** 驱动就绪状态机直至 ready(ensureReady 单步语义, 调用方须轮询推进:

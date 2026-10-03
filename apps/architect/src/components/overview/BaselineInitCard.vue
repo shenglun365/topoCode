@@ -31,7 +31,6 @@ const kbStateText = computed(() => {
   if (st === 'analyzing') return t('overviewHome.baselineInit.kbAnalyzing')
   if (st === 'importing') return t('overviewHome.baselineInit.kbImporting')
   if (st === 'no_analysis') return t('overviewHome.baselineInit.kbNoAnalysis')
-  if (st === 'unmounted') return t('overviewHome.baselineInit.kbUnmounted')
   return t('overviewHome.baselineInit.kbNoProject')
 })
 
