@@ -151,7 +151,7 @@
  "sem/job_runner.py": 221,
  "sem/llm_jobs.py": 215,
  "sem/logic_extract.py": 251,
- "sem/logic_induce.py": 499,
+ "sem/logic_induce.py": 542,
  "sem/map_tools.py": 306,
  "sem/paths.py": 55,
  "sem/scope.py": 157,

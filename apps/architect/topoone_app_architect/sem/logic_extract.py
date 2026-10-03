@@ -79,7 +79,8 @@ def _job_extract_logic(ctx) -> dict:
     # mode: free(LLM 自由归纳默认) | structural(图算法构链, 回引不稳模型兜底)
     ctx.progress(total=1, done=0, stage=1)
     chains, diag = induce_chains(rid, impl, rev, model_id, mode=sc.get("mode") or "free",
-                                 brief_cap=int(sc.get("briefCap") or 0) or None)
+                                 brief_cap=int(sc.get("briefCap") or 0) or None,
+                                 ref_form=sc.get("refForm") or "name")
     from ..store import LogicViewsStore
     from ..store.logic_views import fingerprint_of
     saved_ids: List[str] = []

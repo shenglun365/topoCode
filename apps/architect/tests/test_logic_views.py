@@ -73,7 +73,7 @@ def test_extract_logic_saves_views_not_assets(ctx, monkeypatch):
     for i in range(3):
         _mk_impl(pid, f"impl-{i}", f"资产{i}")
     monkeypatch.setattr(LX, "induce_chains",
-                        lambda root, assets, rev, model_id=None, mode="free", brief_cap=None: ([
+                        lambda root, assets, rev, model_id=None, mode="free", brief_cap=None, ref_form="name": ([
                             {"name": "下单链", "kind": "process_chain",
                              "summary": "从下单到支付", "members": ["impl-0", "impl-1"],
                              "inputs": [], "outputs": []}], ""))
@@ -402,3 +402,27 @@ def test_induce_chains_batches_merge_dedup(monkeypatch, tmp_path):
     assert calls["n"] >= 2, "小 cap 应触发多批"
     assert len(chains) == 1, f"跨批重复链应去重: {len(chains)}"
     assert "分批归纳" in diag and "合并 1 条" in diag
+
+
+def test_induce_numbered_ref_form(monkeypatch, tmp_path):
+    """D 方案编号引用: members 数字数组直取 picked[n-1](数字抄录远稳于长中文名,
+    批0 实测主力 num 全档 1.00 vs name@200=0)。越界编号忽略; 字符串名仍兼容。"""
+    (tmp_path / "a.ts").write_text("export function f1() {}\n")
+    impl = [{"id": f"impl-n{i}", "kind": "asset", "name": f"编号资产{i}",
+             "desc": "", "detail": {},
+             "astRefs": [{"file": "a.ts", "symbol": f"fn{i}", "startLine": 1, "endLine": 2}]}
+            for i in range(8)]
+    prompts = []
+
+    def fake(msgs, **kw):
+        prompts.append(msgs[0]["content"])
+        return {"content": '{"chains": [{"name": "编号链", "kind": "process_chain", '
+                           '"summary": "s", "members": [1, 3, "编号资产5", 99], '
+                           '"inputs": [], "outputs": []}]}'}
+    monkeypatch.setattr("topoone_app_architect.agent.cognition.llm.llm_sync", fake)
+    chains, diag = LX.induce_chains(str(tmp_path), impl, "workspace", ref_form="num")
+    assert "[1] " in prompts[0] and "编号数字数组" in prompts[0], "编号清单+编号指令"
+    assert len(chains) == 1
+    # 数字直取(1→impl-n0, 3→impl-n2); 字符串名兼容(三级解析); 越界 99 忽略
+    assert chains[0]["members"] == ["impl-n0", "impl-n2", "impl-n5"]
+    assert "被过滤" not in diag

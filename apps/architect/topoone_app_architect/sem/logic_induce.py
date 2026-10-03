@@ -103,6 +103,25 @@ _PROMPT = """你是资深软件架构分析师。下面是一批实现级语义�
 实现级资产：
 {assets}"""
 
+_PROMPT_NUM = """你是资深软件架构分析师。下面是一批实现级语义资产(编号清单，函数/类型骨架)。
+请归纳出其中的「数据处理链条」——一条链条 = 从输入到输出的一段完整数据加工路径。
+
+要求：
+1. 只依据给出的实现级事实归纳，不臆造；
+2. 每条链条标注类型: process_chain(主处理链) | validation_chain(校验链) | aggregation_chain(聚合链) | orchestration_chain(编排链)；
+3. 每条链条给出 inputs/outputs —— 每个端点必须有 code 引用(引用实现级资产的符号名与文件，禁止纯文字描述)；
+4. members 列出该链条由哪些实现级资产组成，输出清单行首的编号数字数组(如 [12, 30, 55])；跨文件/跨组件的完整链条通常 ≥2 个成员。
+
+输出 JSON(不要多余文本)：
+{"chains":[{"name":"链条名","kind":"process_chain","summary":"一句话",
+  "inputs":[{"name":"输入名","symbol":"实现级符号名","file":"文件相对路径","note":"文字辅助"}],
+  "outputs":[{"name":"输出名","symbol":"...","file":"...","note":"..."}],
+  "members":[12, 30]}]}
+无链条时输出 {"chains":[]}。
+
+实现级资产(编号)：
+{assets}"""
+
 
 def _pick_assets(assets: List[dict], cap: int = 400) -> List[dict]:
     """归纳入题资产选择：关系密度优先 + 文件多样性(替代 search 的 updated_at 随机序截断)。
@@ -124,9 +143,9 @@ def _pick_assets(assets: List[dict], cap: int = 400) -> List[dict]:
     return sorted(assets, key=_key)[:cap]
 
 
-def _assets_brief(assets: List[dict]) -> str:
+def _assets_brief(assets: List[dict], numbered: bool = False) -> str:
     lines: List[str] = []
-    for a in assets[:200]:      # 探测深度：LLM 可见资产广度(原 60，files 口径数百条时链条跨文件组合受限)
+    for i, a in enumerate(assets[:200], 1):   # 探测深度：LLM 可见资产广度(原 60，files 口径数百条时链条跨文件组合受限)
         d = a.get("detail") or {}
         refs = a.get("astRefs") or []
         f0 = (refs[0] or {}) if refs else {}
@@ -138,7 +157,8 @@ def _assets_brief(assets: List[dict]) -> str:
         if fields:
             body += f"\n  字段: {', '.join(fields)}"
         # 名称后内联资产 ID——explain 讲解引用「资产名 (sa-xxx)」的数据源(缺 ID 时 LLM 只能臆造)
-        lines.append(f"- [{a.get('kind')}] {a.get('name')} ({a.get('id') or ''}): {(a.get('desc') or '')[:120]}\n{body}")
+        head = f"[{i}] " if numbered else "- "   # 编号行首(D 方案): members 可回引编号, 数字抄录远稳于长中文名
+        lines.append(f"{head}[{a.get('kind')}] {a.get('name')} ({a.get('id') or ''}): {(a.get('desc') or '')[:120]}\n{body}")
     return "\n".join(lines)
 
 
@@ -227,7 +247,8 @@ def _member_index(assets: List[dict]) -> tuple:
 
 def induce_chains(root: str, assets: List[dict], rev: str,
                   model_id: Optional[str] = None, mode: str = "free",
-                  brief_cap: Optional[int] = None) -> tuple:
+                  brief_cap: Optional[int] = None,
+                  ref_form: str = "name") -> tuple:
     """LLM 归纳链条 → 结构化(成员实现级资产对齐 + IO 锚点构造+校验)。
 
     返回 (chains, diag)：diag 为空=完全正常；非空=降级/过滤诊断(透传作业
@@ -259,7 +280,7 @@ def induce_chains(root: str, assets: List[dict], rev: str,
         seen: set = set()
         diags: List[str] = []
         for b in batches:
-            chains, diag = _induce_free(root, assets, b, rev, model_id)
+            chains, diag = _induce_free(root, assets, b, rev, model_id, ref_form)
             for c in chains:
                 key = frozenset(c.get("members") or [])
                 if not key or key in seen:
@@ -270,7 +291,7 @@ def induce_chains(root: str, assets: List[dict], rev: str,
                 diags.append(diag)
         head = f"分批归纳 {len(batches)} 批(单批 ≤{cap} 字符)合并 {len(merged)} 条"
         return merged, "；".join([head] + diags) if diags else head
-    return _induce_free(root, assets, picked, rev, model_id)
+    return _induce_free(root, assets, picked, rev, model_id, ref_form)
 
 
 def _split_batches(assets: List[dict], cap: int) -> List[List[dict]]:
@@ -310,10 +331,18 @@ def _split_batches(assets: List[dict], cap: int) -> List[List[dict]]:
 
 
 def _induce_free(root: str, assets: List[dict], picked: List[dict],
-                 rev: str, model_id: Optional[str]) -> tuple:
-    """单批自由归纳(原 induce_chains 主体): 索引/预算裁剪/采样重试。"""
+                 rev: str, model_id: Optional[str],
+                 ref_form: str = "name") -> tuple:
+    """单批自由归纳(原 induce_chains 主体): 索引/预算裁剪/采样重试。
+
+    ref_form(D 方案, 批0 实测 num 命中率碾压 name): 'num'=编号引用(清单行首
+    编号+members 数字数组, 直取 picked[n-1]——长中文名抄录幻觉免疫);
+    'name'=名称引用(三级解析兜底不变)。
+    """
     from ..agent.cognition.llm import llm_sync, resolve_context_budget
     by_symbol, by_norm = _member_index(assets)
+    numbered = ref_form == "num"
+    picked_ids = [a.get("id") for a in picked[:200]]
 
     # 上下文预算自适应：31k chars 清单塞 8k 窗模型 = 爆窗→LM Studio 非确定截断
     # → 清单残缺成员名全 miss + 输出截断(实测 2026-10-02 六次同输入好坏随机)。
@@ -323,20 +352,34 @@ def _induce_free(root: str, assets: List[dict], picked: List[dict],
     if budget > 0:
         max_brief = max(2000, int(budget * 0.85) - 600)   # 600=题头+关系边预留(chars≈tok)
         for _ in range(12):
-            brief = _assets_brief(picked)
+            brief = _assets_brief(picked, numbered)
             edges = _edges_brief(picked)
             if len(brief) + len(edges) <= max_brief or len(picked) <= 40:
                 break
             picked = picked[:max(40, int(len(picked) * 0.7))]   # 逐次收缩 30%
-    brief = _assets_brief(picked)
+    picked_ids = [a.get("id") for a in picked[:200]]   # 收缩后重对齐编号索引
+    brief = _assets_brief(picked, numbered)
     edges = _edges_brief(picked)
     if edges:
         brief = brief + "\n\n资产间调用/依赖关系:\n" + edges
-    prompt = _PROMPT.replace("{assets}", brief)
+    prompt = (_PROMPT_NUM if numbered else _PROMPT).replace("{assets}", brief)
 
-    def _resolve(sym: str) -> Optional[dict]:
-        """成员/端点符号解析：精确(资产名/符号) → norm(剥括号注释+空白归一)
-        → 唯一前缀匹配。LLM 常给名称加注释/微改写，模糊二级显著提高命中率。"""
+    def _resolve(sym) -> Optional[dict]:
+        """成员/端点解析：编号(D) → 精确(资产名/符号) → norm(剥括号注释+空白
+        归一) → 唯一前缀匹配。编号直取 picked[n-1]——数字抄录远稳于长中文名。"""
+        if isinstance(sym, (int, float)) or (isinstance(sym, str) and sym.strip().isdigit()):
+            try:
+                n = int(sym)
+            except (TypeError, ValueError):
+                return None
+            if 1 <= n <= len(picked_ids):
+                aid = picked_ids[n - 1]
+                for x in assets:
+                    if x.get("id") == aid:
+                        return x
+            return None
+        if not isinstance(sym, str):
+            return None
         a = by_symbol.get(sym)
         if a is not None:
             return a
@@ -394,7 +437,7 @@ def _filter_chains(content: str, by_symbol: Dict[str, dict], resolve,
         kind = ch.get("kind") if ch.get("kind") in LOGIC_KINDS else "process_chain"
         members: List[str] = []
         for sym in (ch.get("members") or []):
-            a = resolve(sym)
+            a = resolve(sym)   # 编号形态下 sym 为 int(直取), 名称形态走三级解析
             if a is not None and a.get("id"):
                 members.append(a["id"])
         inputs = _endpoints(ch.get("inputs"), "in", by_symbol, root, rev)
