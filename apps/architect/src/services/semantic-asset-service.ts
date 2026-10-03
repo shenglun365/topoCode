@@ -266,6 +266,16 @@ export interface NamingStatus {
   } | null
 }
 
+/** 自管组件命名状态(批C): arch_component_naming 覆盖口径。 */
+export interface ComponentNamingStatus {
+  rev: string
+  total: number
+  named: number
+  coverage: number
+  jobs?: { id: string; state: string; progress?: { named?: number } }[]
+  naming: Record<string, { componentId: string; name: string; summary: string; status: string }>
+}
+
 /** 工作区符号快照节点(稳定 ID 契约, 可与基线图谱对齐)。 */
 export interface WorkspaceSymbolNode {
   id: string
@@ -570,6 +580,18 @@ export const semanticAssetService = {
   async ensureBaselineReady(taskType: 'fast' | 'full' = 'fast', initGit = true): Promise<BaselineReadiness | undefined> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/ensure-baseline', { root, project, taskType, initGit })
+  },
+
+  /** 自管组件命名状态(数据主权批C): coverage + 各组件命名。 */
+  async componentNamingStatus(): Promise<ComponentNamingStatus | undefined> {
+    const c = ctx()
+    return await apiGet<ComponentNamingStatus | undefined>(`/kb/semantic/component-name/status${c ? `?${c}` : ''}`)
+  },
+
+  /** 组件快速命名启动(本地作业, KB llm 通道): force=全量重命名。 */
+  async componentNameStart(force = false): Promise<{ started: boolean; reason?: string; jobId?: string } | undefined> {
+    const { root, project } = currentProjectParams()
+    return await apiPost('/kb/semantic/component-name', { root, project, ...(force ? { force: true } : {}) })
   },
 
   /** 组件快速命名状态(result_data.naming; 缺 taskId 时按就绪态解析当前任务)。 */

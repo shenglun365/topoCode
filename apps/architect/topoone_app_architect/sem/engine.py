@@ -4726,6 +4726,55 @@ async def api_community_group_status(project: Optional[str] = None):
     })
 
 
+@router.post("/kb/semantic/component-name")
+async def api_component_name(body: dict = None):
+    """组件快速命名(数据主权批C)：own 文件+代表符号 → KB llm 通道批量命名 →
+    arch_component_naming 落库+组件名回写。scope: {componentIds?, force?, modelId?}。"""
+    from .. import ctx
+    from .job_runner import start_job
+    body = body or {}
+    proj = body.get('project') or ctx.get_project()
+    if not proj:
+        return err(400, "项目 id 缺失")
+    scope: dict = {}
+    if isinstance(body.get('componentIds'), list) and body['componentIds']:
+        scope['componentIds'] = [str(x) for x in body['componentIds']][:500]
+    if body.get('force'):
+        scope['force'] = True
+    if isinstance(body.get('modelId'), str) and body['modelId'].strip():
+        scope['modelId'] = body['modelId'].strip()
+    r = start_job(proj, 'component_name', scope, llm=True)
+    if not r.get("started"):
+        return ok({**r, "message": f"未启动: {r.get('reason')}"})
+    return ok({**r, "message": "组件命名已提交(LLM 通道, 任务中心可见进度)"})
+
+
+@router.get("/kb/semantic/component-name/status")
+async def api_component_name_status(project: Optional[str] = None):
+    """命名状态：覆盖率 + 各组件命名（概览卡/组件卡状态源, 替代 KB naming-status）。"""
+    from .. import ctx
+    from ..store.graph import ComponentStore
+    from ..store.jobs import SemanticJobsStore
+    proj = project or ctx.get_project()
+    if not proj:
+        return err(400, "项目 id 缺失")
+    rev = ComponentStore.latest_rev(proj)
+    comps = ComponentStore.list_rev(proj, rev) if rev else []
+    namings = ComponentStore.namings(proj, rev) if rev else {}
+    active = [c for c in comps if namings.get(c["id"], {}).get("status") == "active"
+              and namings[c["id"]].get("name")]
+    jobs = [j for j in SemanticJobsStore.list(proj, limit=50)
+            if j.get("kind") == "component_name"]
+    return ok({
+        "rev": rev,
+        "total": len(comps),
+        "named": len(active),
+        "coverage": round(len(active) / len(comps), 3) if comps else 0.0,
+        "jobs": jobs[:5],
+        "naming": {c["id"]: namings[c["id"]] for c in comps if c["id"] in namings},
+    })
+
+
 @router.post("/kb/semantic/codegraph")
 async def api_codegraph_set(body: dict = None):
     from .codegraph import set_kv_mode
