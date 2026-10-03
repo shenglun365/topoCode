@@ -4688,6 +4688,44 @@ async def api_collect_graph_status(project: Optional[str] = None):
     })
 
 
+@router.post("/kb/semantic/community-group")
+async def api_community_group(body: dict = None):
+    """社区分组(数据主权批B)：图谱快照 → KB communityFromGraph 算力 →
+    自管组件目录落库(arch_components)。catalog 源 arch_only 默认即读它。"""
+    from .. import ctx
+    from .job_runner import start_job
+    body = body or {}
+    proj = body.get('project') or ctx.get_project()
+    if not proj:
+        return err(400, "项目 id 缺失")
+    r = start_job(proj, 'community_group', {})
+    if not r.get("started"):
+        return ok({**r, "message": f"未启动: {r.get('reason')}"})
+    return ok({**r, "message": "社区分组已提交(KB 算力→自有组件目录)"})
+
+
+@router.get("/kb/semantic/community-group/status")
+async def api_community_group_status(project: Optional[str] = None):
+    """分组作业状态 + 自管组件目录统计(最新 rev)。"""
+    from .. import ctx
+    from ..store.graph import ComponentStore
+    from ..store.jobs import SemanticJobsStore
+    proj = project or ctx.get_project()
+    if not proj:
+        return err(400, "项目 id 缺失")
+    jobs = [j for j in SemanticJobsStore.list(proj, limit=50)
+            if j.get("kind") == "community_group"]
+    rev = ComponentStore.latest_rev(proj)
+    comps = ComponentStore.list_rev(proj, rev) if rev else []
+    return ok({
+        "jobs": jobs[:5],
+        "rev": rev,
+        "componentCount": len(comps),
+        "components": [{"id": c["id"], "name": c["name"], "owns": c["owns"],
+                        "parentId": c.get("parentId") or ""} for c in comps[:200]],
+    })
+
+
 @router.post("/kb/semantic/codegraph")
 async def api_codegraph_set(body: dict = None):
     from .codegraph import set_kv_mode

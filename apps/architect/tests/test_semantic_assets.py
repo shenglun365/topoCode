@@ -62,6 +62,10 @@ def _ctx(tmp_path, monkeypatch):
     return db
 
 
+def _kb_source_mode(monkeypatch):
+    """批B 起 catalog 源默认 arch_only(自管组件)——KB 链路用例显式切 kb 模式。"""
+    monkeypatch.setattr(_catalog_mod, "_catalog_source", lambda: "kb")
+
 def _run_coro(coro):
     import asyncio
     import json as _json
@@ -184,6 +188,7 @@ def test_file_scope_extraction_multi_component_scopes(tmp_path, monkeypatch):
 def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
     """组件文件映射短 TTL 缓存：提取任务逐文件落库不再每文件打一次 KB。"""
     _ctx(tmp_path, monkeypatch)
+    _kb_source_mode(monkeypatch)
     _catalog_mod._cache.clear()
     calls = {"n": 0}
 
@@ -210,6 +215,7 @@ def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
 def test_component_file_map_model_fallback(tmp_path, monkeypatch):
     """组件目录为空(降级/无基线) → 回退架构模型装配组件文件映射(与 _comm_files 口径一致)。"""
     _ctx(tmp_path, monkeypatch)
+    _kb_source_mode(monkeypatch)
     _catalog_mod._cache.clear()
     monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": []})
@@ -567,6 +573,7 @@ def test_batch_no_separate_update_action(tmp_path, monkeypatch):
 def test_comm_files_falls_back_to_catalog(tmp_path, monkeypatch):
     """模型(INCLUDE·L1)查不到的组件 id(如 CALL/L0) → 回退组件目录解析文件。"""
     _ctx(tmp_path, monkeypatch)
+    _kb_source_mode(monkeypatch)
     import topoone_app_architect.common as common
     monkeypatch.setattr(common, "build_architecture_model", lambda *a, **k: {
         "components": [{"id": "L1-0001", "owns": ["svc/model.py"]}]})
@@ -605,6 +612,7 @@ def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
 def test_comm_files_ex_matching(tmp_path, monkeypatch):
     """comm 解析匹配链：精确 id → 精确名称 → 忽略大小写 → 唯一子串；多义/全未命中返回候选。"""
     _ctx(tmp_path, monkeypatch)
+    _kb_source_mode(monkeypatch)
     monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": [
                             {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
@@ -634,6 +642,7 @@ def test_comm_files_ex_matching(tmp_path, monkeypatch):
 def test_extract_comm_miss_carries_candidates(tmp_path, monkeypatch):
     """comm 未命中 → extract_scope 返回 error+候选清单（agent 可如实报告并请用户重选）。"""
     _ctx(tmp_path, monkeypatch)
+    _kb_source_mode(monkeypatch)
     monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
                         lambda root, project: {"components": [
                             {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
