@@ -565,7 +565,7 @@ function assetPolicyText(asset: any): string {
   const cap = asset.listCap ? ` · 清单≤${asset.listCap}` : ''
   const src = asset.source === 'manual' ? ' · 手动' : asset.source === 'probed' ? ' · 已探测' : ''
   const ev = asset.evidence
-  const evTxt = ev ? ` · name@100:${_evMin(ev['name@100'])} num@200:${_evMin(ev['num@200'])}` : ''
+  const evTxt = ev ? ` · 参考: name@100:${_evMin(ev['name@100'])} num@200:${_evMin(ev['num@200'])}` : ''
   return `${mode}${cap}${src}${evTxt}`
 }
 function _evMin(v?: number[]): string {
@@ -955,12 +955,16 @@ onMounted(() => { void loadCgStatus() })
                       <button
                         class="btn !py-0 !px-2 !text-[10px]"
                         :disabled="!!assetProbing[m.id] || capBusy"
+                        title="探测 name/num 回引命中率(10 次调用)——结果仅参考对比, 不影响策略选择"
                         @click="assetProbe(m)"
-                      >{{ assetProbing[m.id] || '探测' }}</button>
+                      >{{ assetProbing[m.id] || '探测(参考)' }}</button>
                     </div>
                   </div>
                   <div v-if="capProfiles[m.id].asset" class="font-mono text-ctp-subtext0">
                     {{ assetPolicyText(capProfiles[m.id].asset) }}
+                  </div>
+                  <div class="text-ctp-overlay0">
+                    探测数据仅参考不驱动策略——归纳恒结构化构链(默认), 其余为手动实验选项
                   </div>
                 </div>
                 <div class="font-mono text-ctp-subtext0">
