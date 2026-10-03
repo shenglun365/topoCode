@@ -254,10 +254,14 @@ async def verify_baseline(request: Request):
     if _kb_degraded(body.get("root"), body.get("project")):
         return err(400, KB_NOTE)
     proj, kb_id, call_kb = _resolve(body.get("root"), body.get("project"))
-    if not kb_id:
-        return err(400, KB_NOTE)
-    versions = call_kb("version.list", projectId=kb_id) or []
-    baseline = versions[0] if versions else {}
+    # 去基线化: 基准 = 项目 baselineCommit > 自管图谱基线锚(KB 版本表冻结)
+    from ..sem.graph_collect import read_graph_baseline
+    from ..sem.symbols import resolve_base_commit
+    base_head = resolve_base_commit(body.get("root"), body.get("project")) or ""
+    baseline = {"id": (proj.get("baselineId") or ""), "head": base_head} if base_head else {}
+    if not base_head:
+        anchor = read_graph_baseline(proj.get("id") or "") or {}
+        base_head = anchor.get("head") or ""
     changes = _file_changes(proj, call_kb)
     dirty = bool(changes.get("hasChanges"))
     return ok({
@@ -266,28 +270,6 @@ async def verify_baseline(request: Request):
                         f"{len(changes.get('deleted') or [])} 删除，工作区偏离基线"),
         "verifyOk": not dirty,
         "baselineId": baseline.get("id") or proj.get("baselineId") or "",
-    })
-
-
-@router.post("/arch/baseline/commit")
-async def commit_baseline(request: Request):
-    body = await request.json() or {}
-    if _kb_degraded(body.get("root"), body.get("project")):
-        return err(400, KB_NOTE)
-    proj, kb_id, call_kb = _resolve(body.get("root"), body.get("project"))
-    if not kb_id:
-        return err(400, KB_NOTE)
-    # 真实提交：登记基线更新请求(写待更新标记) + 记录
-    res = call_kb("knowledge.pullRequest",
-                  projectId=kb_id, head=body.get("commit") or "", note="architect baseline commit")
-    store.StagingScansStore.create({
-        "id": store.next_id("inc"), "scope": "基线提交",
-        "grade": "A", "files": [], "edgesChanged": 0, "reExplained": [],
-        "boundaryChanged": [], "createdAt": _ts(),
-    })
-    return ok({
-        "commitResult": f"已登记基线更新请求 {res.get('requestId') if res else '(KB 未返回)'}",
-        "committedId": (res or {}).get("requestId") or "pending",
     })
 
 

@@ -1,6 +1,6 @@
 """Greenfield routes — Blueprint / Scaffold / Extract / Launch / Guide.
 
-契约见 docs/architect/api-knowledge-greenfield.md。服务端返回确定性的模拟结果。
+契约见 docs/architect/data-sovereignty-20261004.md(数据主权批E 基线自管版)。
 (原「与前端 blueprint-agent / extract-service 对齐」措辞已随 MS2 前端死码删除而失效)
 """
 import subprocess

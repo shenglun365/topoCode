@@ -4,7 +4,7 @@ KB-REQ-16(图谱复合查询)已实现(基于真实模型组件 + 跨社区调�
 KB-REQ-17 组件模型已由 KB `/zmq/architecture.model`
 (backend-core/architecture_model_service.py，分析图社区→组件/代码映射/依赖/版本差异)接管，
 `build_architecture_model` 经 KbGateway 拉取真实模型。已实现的 KB 方法
-(`version.*`、`knowledge.pullRequest/pendingUpdates/updateConfirm/updateCancel`)
+(去基线化后仅余 version.* 只读; knowledge.* 编排已退役空壳)
 经 `kb_gateway.call_kb` 直接接线，不可达时回退占位。
 """
 from typing import Optional

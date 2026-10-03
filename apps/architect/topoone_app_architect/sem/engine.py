@@ -4933,7 +4933,7 @@ def api_cold_start(body: dict = None):
       管理界面没有可承接确认流的入口，走 pullRequest 会死锁（无项目可挂请求）。
       自举一次性操作，且 import 天然是"建基线"语义，无覆盖风险。
     - 仓库已有项目 → 必须走 api_symbol_sync 的「发起 knowledge.pullRequest →
-      KB 管理确认 → version.sync 执行」确认流（决策④），防止未确认就重分析。
+      本地一键基线刷新(baseline_refresh)编排（数据主权批E），KB 去基线化后无确认流。
     同步 def：内含轮询 sleep(≤180s)，FastAPI 丢线程池执行，勿改回 async def
     （call_kb 为阻塞 urllib，async 下会卡事件循环）。
     """

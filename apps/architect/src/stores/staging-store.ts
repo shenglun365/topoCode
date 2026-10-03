@@ -100,17 +100,5 @@ export const useArchStagingStore = defineStore('arch-staging', {
         throw err
       }
     },
-    async commitRebaseline() {
-      if (!(await backendUp())) throw new Error('后端不可达，无法提交新基线')
-      try {
-        const res = await apiPost<{ commitResult: string; committedId: string }>('/arch/baseline/commit', ctxBody())
-        this.rebaseline.status = 'committed'
-        this.rebaseline.handshake.commitResult = res.commitResult
-        this.rebaseline.handshake.committedId = res.committedId
-        this.rebaseline.baselineId = 'baseline_id = N+1 (新基线 v1.0.0)'
-      } catch (err) {
-        throw err
-      }
-    },
   },
 })
