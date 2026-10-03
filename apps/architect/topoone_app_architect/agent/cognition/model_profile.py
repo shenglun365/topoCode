@@ -175,10 +175,12 @@ def get_profile(model_id: str) -> Dict[str, Any]:
     source=_HEURISTIC_TAG 仅作「未探测」标记(供懒探测触发)。"""
     model_id = model_id or ""
     prof = _load_all().get(model_id)
-    if isinstance(prof, dict) and isinstance(prof.get("tier"), int):
+    # 有效档案 = 含 tier(综合档) 或 asset(资产解析独立档, 2026-10-03 共表独立字段)
+    if isinstance(prof, dict) and (isinstance(prof.get("tier"), int) or prof.get("asset")):
         prof = dict(prof)
-        # 存量归一: 旧 T0-T4 五档刻度的 3/4 → 2(现行刻度 T0-T2)
-        prof["tier"] = max(0, min(2, int(prof["tier"])))
+        if isinstance(prof.get("tier"), int):
+            # 存量归一: 旧 T0-T4 五档刻度的 3/4 → 2(现行刻度 T0-T2)
+            prof["tier"] = max(0, min(2, int(prof["tier"])))
         return prof
     return {"modelId": model_id, "modelName": _model_name_of(model_id),
             "tier": 1, "source": _HEURISTIC_TAG,

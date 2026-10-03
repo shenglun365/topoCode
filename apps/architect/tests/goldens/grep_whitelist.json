@@ -1,25 +1,26 @@
 {
-  "llm_sync_callers": [
-    "agent/cognition/model_profile.py",
-    "agent/reflection/mining.py",
-    "agent/reflection/repair.py",
-    "agent/turns/call.py",
-    "agent/tools/req_agent.py",
-    "arch_routes/semantic_assets.py"
-  ],
-  "tier_literal_files": [
-    "agent/cognition/model_profile.py",
-    "agent/cognition/probe_suite.py",
-    "agent/cognition/prompt.py",
-    "agent/cognition/roles.py",
-    "agent/execution/probes.py",
-    "agent/governance/gears.py",
-    "agent/perception/commands.py",
-    "agent/planning/scope_probe.py",
-    "agent/planning/task_plan.py",
-    "arch_routes/agent_executors.py",
-    "agent/tools/req_agent.py",
-    "arch_routes/requirements.py",
-    "arch_routes/sessions.py"
-  ]
+ "llm_sync_callers": [
+  "agent/cognition/model_profile.py",
+  "agent/reflection/mining.py",
+  "agent/reflection/repair.py",
+  "agent/turns/call.py",
+  "agent/tools/req_agent.py",
+  "arch_routes/semantic_assets.py",
+  "agent/cognition/asset_probe.py"
+ ],
+ "tier_literal_files": [
+  "agent/cognition/model_profile.py",
+  "agent/cognition/probe_suite.py",
+  "agent/cognition/prompt.py",
+  "agent/cognition/roles.py",
+  "agent/execution/probes.py",
+  "agent/governance/gears.py",
+  "agent/perception/commands.py",
+  "agent/planning/scope_probe.py",
+  "agent/planning/task_plan.py",
+  "arch_routes/agent_executors.py",
+  "agent/tools/req_agent.py",
+  "arch_routes/requirements.py",
+  "arch_routes/sessions.py"
+ ]
 }

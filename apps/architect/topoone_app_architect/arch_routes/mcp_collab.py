@@ -487,14 +487,31 @@ async def clear_model_profile(model_id: str):
 
 @router.put("/llm/model-profiles/{model_id}")
 async def set_model_profile_route(model_id: str, request: Request):
-    """手工设置模型 tier(manual 优先级最高, 后续探测不覆盖)。Body: {tier}。"""
+    """手工设置模型 tier(manual 优先级最高, 后续探测不覆盖)。Body: {tier} 或 {asset: {...}|null}。"""
     body = await request.json() or {}
+    if "asset" in body:
+        # 语义资产解析参数手动覆盖(独立字段, 与综合档 tier 互不干扰; null=清除)
+        from ..agent.cognition import asset_probe
+        return ok(asset_probe.set_asset_profile_manual(model_id, body.get("asset")))
     try:
         tier = int(body.get("tier"))
     except (TypeError, ValueError):
-        return err(400, "缺少整数 tier (0-2)")
+        return err(400, "缺少整数 tier (0-2) 或 asset 对象")
     from ..agent.cognition import model_profile
     return ok(model_profile.set_manual_tier(model_id, tier))
+
+
+@router.post("/llm/models/{model_id}/asset-capability-probe")
+async def asset_capability_probe(model_id: str, force: bool = False):
+    """语义资产解析能力探测(独立套件, 10 次调用测稳定性) → 参数化档案
+    (mode/listCap/chainLen/retries, 与综合档共表独立 asset 字段)。"""
+    import asyncio
+    from ..agent.cognition import asset_probe
+    try:
+        r = await asyncio.to_thread(asset_probe.probe_asset_capability, model_id, force=force)
+    except Exception as e:  # noqa: BLE001
+        return err(500, f"探测失败: {e}")
+    return ok(r)
 
 
 @router.get("/collab/interactions")

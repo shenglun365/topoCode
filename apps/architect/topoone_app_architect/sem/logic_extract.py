@@ -76,11 +76,16 @@ def _job_extract_logic(ctx) -> dict:
         return {"error": "范围内无实现级资产", "summary": "失败：无实现级前置"}
 
     # stage 1: LLM 链条归纳 → 逻辑视图(非资产行)
-    # mode: free(LLM 自由归纳默认) | structural(图算法构链, 回引不稳模型兜底)
+    # 参数优先级: scope 显式 > 资产解析能力档案(独立探测参数化, 批4) > 默认 free
+    from ..agent.cognition.asset_probe import asset_parse_policy
+    pol = asset_parse_policy(model_id or "")
     ctx.progress(total=1, done=0, stage=1)
-    chains, diag = induce_chains(rid, impl, rev, model_id, mode=sc.get("mode") or "free",
-                                 brief_cap=int(sc.get("briefCap") or 0) or None,
-                                 ref_form=sc.get("refForm") or "name")
+    chains, diag = induce_chains(
+        rid, impl, rev, model_id,
+        mode=sc.get("mode") or pol["mode"],
+        brief_cap=int(sc.get("briefCap") or 0) or pol.get("brief_cap"),
+        ref_form=sc.get("refForm") or pol["ref_form"],
+        chain_len=pol.get("chain_len"))
     from ..store import LogicViewsStore
     from ..store.logic_views import fingerprint_of
     saved_ids: List[str] = []

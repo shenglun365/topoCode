@@ -248,7 +248,8 @@ def _member_index(assets: List[dict]) -> tuple:
 def induce_chains(root: str, assets: List[dict], rev: str,
                   model_id: Optional[str] = None, mode: str = "free",
                   brief_cap: Optional[int] = None,
-                  ref_form: str = "name") -> tuple:
+                  ref_form: str = "name",
+                  chain_len: Optional[list] = None) -> tuple:
     """LLM 归纳链条 → 结构化(成员实现级资产对齐 + IO 锚点构造+校验)。
 
     返回 (chains, diag)：diag 为空=完全正常；非空=降级/过滤诊断(透传作业
@@ -266,7 +267,9 @@ def induce_chains(root: str, assets: List[dict], rev: str,
     """
     if mode == "structural":
         from .logic_structural import structural_induce
+        cl = chain_len or [3, 15]
         return structural_induce(root, assets, rev, model_id,
+                                 min_len=int(cl[0]), max_len=int(cl[-1]),
                                  anchor_fn=build_code_anchor)
     # B 方案分批(B 方案, 2026-10-03): briefCap 参数(chars)——清单超限时按文件簇
     # 分批归纳、跨批去重合并, 广度不丢(替代单次裁剪丢尾); cap 来自 asset profile

@@ -73,7 +73,7 @@ def test_extract_logic_saves_views_not_assets(ctx, monkeypatch):
     for i in range(3):
         _mk_impl(pid, f"impl-{i}", f"资产{i}")
     monkeypatch.setattr(LX, "induce_chains",
-                        lambda root, assets, rev, model_id=None, mode="free", brief_cap=None, ref_form="name": ([
+                        lambda root, assets, rev, model_id=None, mode="free", brief_cap=None, ref_form="name", chain_len=None: ([
                             {"name": "下单链", "kind": "process_chain",
                              "summary": "从下单到支付", "members": ["impl-0", "impl-1"],
                              "inputs": [], "outputs": []}], ""))
