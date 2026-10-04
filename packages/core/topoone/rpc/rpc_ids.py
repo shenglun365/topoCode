@@ -206,6 +206,7 @@ RPC_IDS: dict[str, str] = {
     "analysis.analyzeComponents":  "API-154",
     "analysis.parseFileAst":       "API-155",
     "analysis.communityFromGraph":  "API-156",
+    "analysis.buildGraph":         "API-157",
 }
 
 

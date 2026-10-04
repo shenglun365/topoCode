@@ -93,10 +93,10 @@ def _parse_one(root: str, rel: str) -> Optional[dict]:
 
 def collect_snapshot(root: str, project: str, files: List[str], rev: str, *,
                      progress=None) -> Tuple[List[dict], List[dict], dict]:
-    """采集核心：文件集 → (nodes, edges, stats)。逐文件缓存命中/KB 解析。
+    """采集核心：文件集 → (nodes, edges, stats)。
 
-    stats: {parsed, cached, failed, source}
-    """
+    主路径: KB analysis.buildGraph(与 KB 分析管线同构全图, 划分一致);
+    降级路径: 逐文件 parseFileAst + refs 重建 + D1 imports 解析。"""
     from .context import _norm_cache_symbol, _peek_docstring_at_line, _rebuild_edges_from_refs
     from .import_resolver import AliasRegistry, build_alias_registry
 
@@ -104,6 +104,15 @@ def collect_snapshot(root: str, project: str, files: List[str], rev: str, *,
     edges: List[dict] = []
     stats = {"parsed": 0, "cached": 0, "failed": 0, "source": ""}
     file_set = set(files or [])
+
+    # ── 主路径: KB buildGraph(全层级同构图) ──
+    from .buildgraph_client import collect_via_buildgraph
+    bg = collect_via_buildgraph(root, files or [])
+    if bg is not None:
+        if progress is not None:
+            progress(len(files or []), "buildGraph 完成")
+        return bg
+
     registry = build_alias_registry(root, file_set)
     for i, rel in enumerate(files or []):
         if progress is not None and i % 20 == 0:
