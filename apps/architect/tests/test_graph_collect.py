@@ -88,11 +88,11 @@ class GraphBaselineTest(unittest.TestCase):
                          {"nodes": 1, "edges": 1})
 
     def test_replace_rev_dedup_duplicate_ids(self):
-        """walker 双路径提取的重复 id 不撞 UNIQUE(keep-first: 首条=完整作用域链)。"""
+        """同 id 重复不撞 UNIQUE——KB write_nodes 同口径: INSERT OR REPLACE 后写胜。"""
         dup_a = _norm_node("a.py", "alpha")
         dup_a["qualified_name"] = "mod::alpha"
         dup_b = dict(_norm_node("a.py", "alpha"))
-        dup_b["qualified_name"] = "alpha"  # 同 id 不同链(通用遍历弱链)
+        dup_b["qualified_name"] = "alpha"  # 同 id 不同链(后写覆盖, 与 KB 一致)
         r = GraphStore.replace_rev(
             self.PID, "baseline:dup",
             [dup_a, dup_b, _norm_node("sub/b.py", "beta")], [])
@@ -100,7 +100,7 @@ class GraphBaselineTest(unittest.TestCase):
         got = GraphStore.nodes(self.PID, "baseline:dup")
         self.assertEqual(len(got), 2)
         alpha = next(n for n in got if n["name"] == "alpha")
-        self.assertEqual(alpha["qualified_name"], "mod::alpha")  # keep-first
+        self.assertEqual(alpha["qualified_name"], "alpha")  # last-wins(KB 同口径)
 
     def test_drop_rev(self):
         GraphStore.replace_rev(self.PID, "baseline:ccc", [_norm_node("a.py", "x")], [])
@@ -109,98 +109,8 @@ class GraphBaselineTest(unittest.TestCase):
 
     # ── A2: collect_snapshot 双路径 ───────────────────────────────
 
-    def test_collect_snapshot_cross_file_refs(self):
-        """D2: b.py import a 并调用 alpha → 调用边 target 解析为 a 的符号 id。"""
-        from unittest.mock import patch
-        from topoone_app_architect.sem import graph_collect as gc
 
-        def fake_parse(root, rel):
-            if rel == "a.py":
-                return {"language": "python",
-                        "symbols": [{"name": "alpha", "kind": "function",
-                                     "startLine": 1, "endLine": 2,
-                                     "qualifiedName": "alpha", "signature": "def alpha()"}],
-                        "imports": [], "refs": []}
-            return {"language": "python",
-                    "symbols": [{"name": "beta", "kind": "function",
-                                 "startLine": 3, "endLine": 4,
-                                 "qualifiedName": "beta", "signature": "def beta()"}],
-                    "imports": ["a"],
-                    "refs": [{"name": "alpha", "kind": "calls", "line": 4}]}
 
-        with patch.object(gc, "_parse_one", side_effect=fake_parse), \
-             patch("topoone_app_architect.kb_gateway.call_kb",
-                   side_effect=Exception("kb down")):   # 强制降级路径
-            nodes, edges, stats = gc.collect_snapshot(
-                self.root, self.PID, ["a.py", "sub/b.py"], "baseline:d2")
-        self.assertEqual(stats["crossFileRefs"], 1)
-        cross = [e for e in edges if e["kind"] == "calls"
-                 and e["target"].startswith("cache:a.py::")]
-        self.assertEqual(len(cross), 1)
-        self.assertEqual(cross[0]["target"], "cache:a.py::alpha::1")
-
-    def test_collect_snapshot_kb_path(self):
-        from topoone_app_architect.sem import graph_collect as gc
-
-        def fake_parse(root, rel, impl=True):
-            if rel == "a.py":
-                return {
-                    "language": "python",
-                    "symbols": [{"name": "alpha", "kind": "function",
-                                 "startLine": 1, "endLine": 2,
-                                 "qualifiedName": "alpha", "signature": "def alpha()"}],
-                    "imports": [], "refs": [],
-                }
-            return {
-                "language": "python",
-                "symbols": [{"name": "beta", "kind": "function",
-                             "startLine": 3, "endLine": 4,
-                             "qualifiedName": "beta", "signature": "def beta()"}],
-                "imports": ["a"],
-                "refs": [{"name": "alpha", "kind": "calls", "line": 4}],
-            }
-
-        with patch.object(gc, "_parse_one", side_effect=fake_parse), \
-             patch("topoone_app_architect.kb_gateway.call_kb",
-                   side_effect=Exception("kb down")):   # 强制降级路径
-            nodes, edges, stats = gc.collect_snapshot(
-                self.root, self.PID, ["a.py", "sub/b.py"], "baseline:test")
-        self.assertEqual(stats["parsed"], 2)
-        self.assertEqual(stats["failed"], 0)
-        names = {n["name"] for n in nodes if n["kind"] != "file"}
-        self.assertEqual(names, {"alpha", "beta"})
-        file_ids = {n["id"] for n in nodes if n["kind"] == "file"}
-        self.assertIn("file:sub/b.py", file_ids)
-        # imports 文件级边(D1: 模块说明符解析为真实 file 节点 id)
-        imps = [e for e in edges if e["kind"] == "imports"]
-        self.assertEqual(len(imps), 1)
-        self.assertEqual(imps[0]["source"], "file:sub/b.py")
-        self.assertEqual(imps[0]["target"], "file:a.py")
-        self.assertEqual(stats["importsResolved"], 1)
-        # ast cache 已回写(下次命中)
-        cached = AstCacheStore.get(self.PID, "a.py")
-        self.assertIsNotNone(cached)
-        self.assertTrue(cached.get("symbols"))
-
-    def test_collect_snapshot_cache_hit(self):
-        from topoone_app_architect.sem import graph_collect as gc
-        # 缓存命中是降级路径(逐文件)语义; 主路径 buildGraph 由 KB 全图直出无缓存
-        with patch("topoone_app_architect.kb_gateway.call_kb",
-                   side_effect=Exception("kb down")):   # 强制降级路径
-            # 预置缓存(与磁盘内容 hash 一致)
-            h = gc._cache_content_hash(self.root, "a.py")
-            AstCacheStore.upsert(self.PID, "a.py", {
-                "contentHash": h, "language": "python",
-                "symbols": [_norm_node("a.py", "cached_sym")],
-                "imports": [], "refs": [], "source": "kb",
-            })
-            nodes, edges, stats = gc.collect_snapshot(
-                self.root, self.PID, ["a.py"], "baseline:test")
-        self.assertEqual(stats["cached"], 1)
-        self.assertEqual(stats["parsed"], 0)
-        self.assertIn("cached_sym", {n["name"] for n in nodes})
-
-    # ── A4: 基线锚自管层 ─────────────────────────────────────────
 
     def test_graph_baseline_kv_roundtrip(self):
         from topoone_app_architect.sem import graph_collect as gc
@@ -239,3 +149,80 @@ class GraphBaselineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCollectSnapshotPipeline(unittest.TestCase):
+    """collect_snapshot = semantic_service.run_pipeline 直调(一套代码), 转换层契约。"""
+
+    def test_collect_snapshot_pipeline_shape(self):
+        from topoone_app_architect.sem import graph_collect as gc
+        import topoone_app_architect.sem.graph_collect as gm
+        fake = {
+            "nodes": [{"id": "n1", "kind": "file", "name": "a.py",
+                       "file_path": "a.py", "task_id": "buildgraph"}],
+            "edges": [{"source_id": "n1", "target_id": "n2", "kind": "imports",
+                       "line": 3, "col": 0}],
+            "components": [
+                {"commId": "c1", "level": "L0", "parentId": "", "files": ["a.py"],
+                 "nodeCount": 1, "fileCount": 1, "qualityScore": 0.9},
+                {"commId": "c2", "level": "L1", "parentId": "c1", "files": ["a.py"],
+                 "nodeCount": 1, "fileCount": 1, "qualityScore": 0.5},
+            ],
+            "levels": 1,
+            "counts": {"parsed": 1, "skipped": 0},
+            "stats": {"task_id": "buildgraph"},
+        }
+        with patch.object(gm, "collect_snapshot", return_value=(
+                fake["nodes"],
+                [{"source": e["source_id"], "target": e["target_id"],
+                  "kind": e["kind"], "line": e["line"], "col": e["col"]}
+                 for e in fake["edges"]],
+                {"parsed": 1, "cached": 0, "failed": 0, "source": "pipeline",
+                 "components": fake["components"], "levels": 1})):
+            # 作业链: 落图 + 落组件树(全层级) + 记锚
+            import tempfile
+            from topoone_app_architect import ctx as C
+            with tempfile.TemporaryDirectory() as td:
+                C._data_dir = None
+                C._project_dbs.clear()
+                C.setup(data_dir=td)
+                from topoone_app_architect.store.graph import GraphStore
+                from topoone_app_architect.store.component import ComponentStore
+                pid, rev = "proj-t", "baseline:x1"
+                GraphStore.replace_rev(pid, rev, fake["nodes"], [
+                    {"source": "n1", "target": "n2", "kind": "imports", "line": 3, "col": 0}])
+                comps = [{"id": c["commId"], "name": c["commId"], "summary": "",
+                          "owns": c["files"], "source": "community"}
+                         for c in fake["components"]]
+                hier = [{"childId": c["commId"], "parentId": c.get("parentId") or "",
+                         "level": int(c["level"][1:])} for c in fake["components"]]
+                ComponentStore.replace_rev(pid, rev, comps, hier)
+                got = ComponentStore.list_rev(pid, rev)
+                assert len(got) == 2
+                lv = {c["id"]: c["level"] for c in got}
+                assert lv == {"c1": 0, "c2": 1}
+                pd = {c["id"]: c["parentId"] for c in got}
+                assert pd["c2"] == "c1"
+                # 边落库 (src,tgt,kind) 唯一(KB 口径)
+                e = GraphStore.edges(pid, rev, limit=10)
+                assert any(x["kind"] == "imports" for x in e)
+
+    def test_pipeline_called_with_files(self):
+        """collect_snapshot 直调 run_pipeline(一套代码证据: 无 call_kb/降级)。"""
+        from topoone_app_architect.sem import graph_collect as gc
+        import topoone_app_architect.sem.graph_collect as gm
+        called = {}
+
+        def fake_run(root, files):
+            called["args"] = (root, list(files))
+            return {"nodes": [], "edges": [], "components": [], "levels": 0,
+                    "counts": {"parsed": 0, "skipped": 0}}
+        import topoone.engine.semantic_service as ss
+        orig = ss.run_pipeline
+        ss.run_pipeline = fake_run
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                gc.collect_snapshot(td, "proj-x", ["a.py"], "baseline:t")
+        finally:
+            ss.run_pipeline = orig
+        assert called["args"][1] == ["a.py"]

@@ -1,6 +1,6 @@
 """一键基线刷新编排（数据主权批E2）。
 
-kind=baseline_refresh：collect_graph(采集) → community_group(分组) →
+kind=baseline_refresh：collect_graph(采集+分组, 公共服务管线) →
 component_name(命名, LLM 失败容错) 三步串行——FE「更新基线」单端点入口，
 任务中心单作业可见全进度。子步骤复用各自 handler(独立容错, 步骤失败即停)。
 """
@@ -38,37 +38,30 @@ class _SubCtx:
 
 
 def _job_baseline_refresh(ctx: JobCtx) -> dict:
-    from . import component_group, component_naming, graph_collect
+    from . import component_naming, graph_collect
 
     pid = ctx.pid
     scope = dict(ctx.scope or {})
     out: dict = {"steps": {}}
 
-    ctx.progress(total=3, done=0, current="[采集] parseFileAst 批量采集")
+    ctx.progress(total=2, done=0, current="[采集] 语义管线(解析→符号→关系→社区→分组)")
     r1 = graph_collect._job_collect_graph(_SubCtx(ctx, pid, scope, "采集"))
     out["steps"]["collect"] = r1
     if r1.get("error"):
         out["error"] = f"采集失败: {r1['error']}"
         return out
 
-    ctx.progress(total=3, done=1, current="[分组] KB 社区算力")
-    r2 = component_group._job_community_group(_SubCtx(ctx, pid, {}, "分组"))
-    out["steps"]["group"] = r2
-    if r2.get("error"):
-        # 分组失败不阻塞已有资产消费(图谱快照已更新), 如实返回
-        out["warning"] = f"分组失败: {r2['error']}"
-
-    ctx.progress(total=3, done=2, current="[命名] KB llm 通道")
+    ctx.progress(total=2, done=1, current="[命名] KB llm 通道")
     try:
         r3 = component_naming._job_component_name(_SubCtx(ctx, pid, {}, "命名"))
         out["steps"]["naming"] = r3
         if r3.get("error"):
-            out["warning"] = (out.get("warning") or "") + f" 命名失败: {r3['error']}"
+            out["warning"] = f"命名失败: {r3['error']}"
     except Exception as e:  # noqa: BLE001
         out["steps"]["naming"] = {"error": str(e)}
-        out["warning"] = (out.get("warning") or "") + f" 命名异常: {e}"
+        out["warning"] = f"命名异常: {e}"
 
-    ctx.progress(total=3, done=3, current="完成")
+    ctx.progress(total=2, done=2, current="完成")
     out["rev"] = (r1 or {}).get("rev") or ""
     out["head"] = (r1 or {}).get("head") or ""
     logger.info("[baseline-refresh] 完成: %s", {k: (v or {}).get("error") or "ok"

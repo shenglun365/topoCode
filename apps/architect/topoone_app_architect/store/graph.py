@@ -40,18 +40,14 @@ class GraphStore:
         """整 rev 重灌（事务）：先清该 rev 旧快照再批量写入。返回 {nodes, edges}。"""
         db = _target_db(cls.NODE_TABLE, project_id)
         now = _now()
-        # 节点按 id 去重(keep-first): KB walker 对 TS/JS 变量声明存在双路径提取
-        # (显式路径+通用遍历), 同 id 重复条目会撞 UNIQUE(project_id,rev,id)。
-        # keep-first 实证安全: 361 重复组中 128 组 qualified_name 链不同, 全部
-        # 第一条=显式路径产出的完整作用域链(顺序稳定)。
-        seen_nodes: set = set()
-        n_rows = []
+        # 节点同 id 覆盖(KB write_nodes INSERT OR REPLACE 同口径): 后写胜
+        row_by_id: dict = {}
         for n in nodes or []:
             if not (n or {}).get("id"):
                 continue
-            if n["id"] in seen_nodes:
-                continue
-            seen_nodes.add(n["id"])
+            row_by_id[n["id"]] = n
+        n_rows = []
+        for n in row_by_id.values():
             n_rows.append((
                 project_id, rev, n["id"], n.get("kind") or "",
                 n.get("name") or "", n.get("qualified_name") or "",
@@ -66,18 +62,13 @@ class GraphStore:
         seen_edges = set()
         for e in edges or []:
             key = (e.get("source"), e.get("target"), e.get("kind"))
-            if not all(key):
+            if not all(key) or key in seen_edges:
                 continue
-            line = int(e.get("line") or 0)
-            # 去重键含 line: 同对节点多行调用是独立边(社区连接强度信号,
-            # 与 KB graph_edge 同口径)——只滤 (src,tgt,kind,line) 全同的真重复
-            dkey = key + (line,)
-            if dkey in seen_edges:
-                continue
-            seen_edges.add(dkey)
+            # KB make_edge_id(src,tgt,kind) 口径: 同对节点合并为 1 条
+            seen_edges.add(key)
             e_rows.append((
-                project_id, rev, key[0], key[1], key[2], line,
-                int(e.get("col") or 0),
+                project_id, rev, key[0], key[1], key[2],
+                int(e.get("line") or 0), int(e.get("col") or 0),
             ))
         db.execute("DELETE FROM arch_graph_node WHERE project_id=? AND rev=?",
                    (project_id, rev))
@@ -107,88 +98,6 @@ class GraphStore:
         db.execute("DELETE FROM arch_graph_edge WHERE project_id=? AND rev=?",
                    (project_id, rev))
         db.commit()
-
-    @classmethod
-    def merge_partition(cls, project_id: str, rev: str, nodes: List[dict],
-                        edges: List[dict], files: List[str]) -> dict:
-        """分区增量落库(D3)：删该分区文件旧节点及其关联边，再合并插入。
-
-        分区文件集不相交(拆分保证)，多分区串行落库同一 rev 互不覆盖；
-        重跑同分区幂等(先删后插)。返回 {nodes, edges}。"""
-        db = _target_db(cls.NODE_TABLE, project_id)
-        file_list = [f for f in (files or []) if f]
-        # 1) 删旧: 分区文件节点(file_path 命中 + file 虚拟节点), 收集被删 id
-        deleted_ids: set = set()
-        for i in range(0, len(file_list), 400):
-            chunk = file_list[i:i + 400]
-            ph = ",".join("?" * len(chunk))
-            rows = db.fetchall(
-                f"SELECT id FROM arch_graph_node WHERE project_id=? AND rev=?"
-                f" AND (file_path IN ({ph}) OR id IN ({ph}))",
-                (project_id, rev, *chunk, *(f"file:{c}" for c in chunk)))
-            deleted_ids |= {r["id"] for r in (rows or [])}
-            db.execute(f"DELETE FROM arch_graph_node WHERE project_id=? AND rev=?"
-                       f" AND (file_path IN ({ph}) OR id IN ({ph}))",
-                       (project_id, rev, *chunk, *(f"file:{c}" for c in chunk)))
-        # 2) 端点在被删节点集的边一并删(分批 IN)
-        dl = list(deleted_ids)
-        for i in range(0, len(dl), 400):
-            chunk = dl[i:i + 400]
-            ph = ",".join("?" * len(chunk))
-            db.execute(f"DELETE FROM arch_graph_edge WHERE project_id=? AND rev=?"
-                       f" AND (source IN ({ph}) OR target IN ({ph}))",
-                       (project_id, rev, *chunk, *chunk))
-        # 3) 插入本批(节点去重 keep-first, 边端点须存在于 现存∪新批)
-        kept_ids = {r["id"] for r in db.fetchall(
-            "SELECT id FROM arch_graph_node WHERE project_id=? AND rev=?",
-            (project_id, rev))}
-        now = _now()
-        seen_nodes: set = set()
-        n_rows = []
-        for n in nodes or []:
-            if not (n or {}).get("id") or n["id"] in seen_nodes:
-                continue
-            seen_nodes.add(n["id"])
-            n_rows.append((
-                project_id, rev, n["id"], n.get("kind") or "",
-                n.get("name") or "", n.get("qualified_name") or "",
-                n.get("file_path") or "", n.get("language") or "",
-                int(n.get("start_line") or 0), int(n.get("end_line") or 0),
-                int(n.get("start_column") or 0), int(n.get("end_column") or 0),
-                n.get("signature") or "", n.get("docstring") or "",
-                n.get("return_type") or "",
-                1 if n.get("is_exported") else 0, now,
-            ))
-        valid = kept_ids | seen_nodes
-        seen_edges = set()
-        e_rows = []
-        for e in edges or []:
-            key = (e.get("source"), e.get("target"), e.get("kind"))
-            if not all(key) or key in seen_edges:
-                continue
-            if key[0] not in valid or key[1] not in valid:
-                continue
-            seen_edges.add(key)
-            e_rows.append((
-                project_id, rev, key[0], key[1], key[2],
-                int(e.get("line") or 0), int(e.get("col") or 0),
-            ))
-        if n_rows:
-            db.executemany(
-                "INSERT INTO arch_graph_node (project_id, rev, id, kind, name, "
-                "qualified_name, file_path, language, start_line, end_line, "
-                "start_column, end_column, signature, docstring, return_type, "
-                "is_exported, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                n_rows)
-        if e_rows:
-            db.executemany(
-                "INSERT INTO arch_graph_edge (project_id, rev, source, target, "
-                "kind, line, col) VALUES (?,?,?,?,?,?,?)",
-                e_rows)
-        db.commit()
-        return {"nodes": len(n_rows), "edges": len(e_rows)}
-
-    # ── 查询 ──────────────────────────────────────────────────────
 
     @classmethod
     def counts(cls, project_id: str, rev: str) -> dict:

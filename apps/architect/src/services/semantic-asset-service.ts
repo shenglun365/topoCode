@@ -240,15 +240,6 @@ export interface CodegraphStatus {
 }
 
 /** 分区提案行(D3, GET plan/POST confirm)。 */
-export interface GraphPartition {
-  idx: number
-  files: string[]
-  langs: string[]
-  estSymbols: number
-  reason: string
-  state?: string
-}
-
 /** 自管基线状态(GET /kb/semantic/collect-graph/status)。 */
 export interface CollectGraphStatus {
   jobs?: Array<Record<string, unknown>>
@@ -266,7 +257,7 @@ export interface BaselineRefreshJob {
   kind: string
   state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'lost' | string
   progress?: { total?: number; done?: number; current?: string }
-  result?: { rev?: string; head?: string; steps?: Record<string, { nodes?: number; edges?: number; components?: number; named?: number; error?: string }> }
+  result?: { rev?: string; head?: string; steps?: Record<string, { nodes?: number; edges?: number; components?: number; named?: number; error?: string; group?: { components?: number; hierarchy?: number; levels?: number } }> }
 }
 
 /** 自管组件命名状态(批C): arch_component_naming 覆盖口径。 */
@@ -495,18 +486,6 @@ export const semanticAssetService = {
   async collectGraphStatus(): Promise<CollectGraphStatus | undefined> {
     const c = ctx()
     return await apiGet<CollectGraphStatus>(`/kb/semantic/collect-graph/status${c ? `?${c}` : ''}`)
-  },
-
-  /** 自动分区提案(D3): 轻量 import 扫描→连通分量→装箱。≤5000 文件单分区无需确认。 */
-  async collectGraphPlan(): Promise<{ head: string; fileCount: number; needsConfirmation: boolean; partitions: GraphPartition[]; stats?: Record<string, unknown> } | undefined> {
-    const { root, project } = currentProjectParams()
-    return await apiPost('/kb/semantic/collect-graph/plan', { root, project })
-  },
-
-  /** 确认分区并执行(D3): selected 为勾选分区 idx(缺省全选=全部执行)。 */
-  async collectGraphConfirm(selected?: number[], head?: string): Promise<{ started: boolean; confirmed?: number; message?: string } | undefined> {
-    const { root, project } = currentProjectParams()
-    return await apiPost('/kb/semantic/collect-graph/confirm', { root, project, selected, head })
   },
 
   /** 一键基线刷新(数据主权批E): 本地编排 采集→分组→命名, 单作业进度。 */

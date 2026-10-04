@@ -498,9 +498,9 @@ ARCH_PROJECT_TABLES_SQL = """
         kind TEXT NOT NULL,                 -- calls | contains | imports | references | extends | instantiates | implements
         line INTEGER DEFAULT 0,
         col INTEGER DEFAULT 0,
-        -- PK 含 line: 同对节点的多行调用是独立边(连接强度信号), 与 KB
-        -- graph_edge(id 含 line)同口径——去重会把 Louvain 边权抹平 → 社区碎裂。
-        PRIMARY KEY (project_id, rev, source, target, kind, line)
+        -- PK 不含 line: KB make_edge_id(src,tgt,kind) 同对节点合并为 1 条
+        -- (用户裁决: 与 KB 完全一致, 不自加策略)。
+        PRIMARY KEY (project_id, rev, source, target, kind)
     );
     CREATE INDEX IF NOT EXISTS idx_ag_edge_source ON arch_graph_edge(project_id, rev, source);
     CREATE INDEX IF NOT EXISTS idx_ag_edge_target ON arch_graph_edge(project_id, rev, target);
@@ -804,16 +804,16 @@ def architect_db_migrations(db) -> None:
 # ── 项目库迁移(旧项目库升级兜底，幂等) ─────────────────────────
 
 def _migrate_edge_line_pk(db) -> None:
-    """arch_graph_edge PK 加 line(同对节点多行调用=独立边, KB 同口径)。
+    """arch_graph_edge PK 撤 line(回 KB make_edge_id 口径: 同对节点 1 条边)。
 
-    SQLite 不能改 PK → 检测旧 PK(不含 line)则重建表迁数据。幂等。"""
+    SQLite 不能改 PK → 检测 PK 含 line 则重建表迁数据(OR IGNORE 合并)。幂等。"""
     cols = {r[1]: r for r in db.execute("PRAGMA table_info(arch_graph_edge)").fetchall()}
     if not cols:
         return
     pk_cols = [r[1] for r in sorted(
         (r for r in cols.values() if r[5]), key=lambda r: r[5])]
-    if pk_cols[-1:] == ["line"]:
-        return  # 已是新 PK
+    if "line" not in pk_cols:
+        return  # 已是目标 PK
     db.executescript("""
 CREATE TABLE arch_graph_edge_new (
     project_id TEXT NOT NULL,
@@ -823,7 +823,7 @@ CREATE TABLE arch_graph_edge_new (
     kind TEXT NOT NULL,
     line INTEGER DEFAULT 0,
     col INTEGER DEFAULT 0,
-    PRIMARY KEY (project_id, rev, source, target, kind, line)
+    PRIMARY KEY (project_id, rev, source, target, kind)
 );
 INSERT OR IGNORE INTO arch_graph_edge_new
     SELECT project_id, rev, source, target, kind, line, col FROM arch_graph_edge;

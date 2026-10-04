@@ -4657,84 +4657,10 @@ async def api_collect_graph(body: dict = None):
         scope['files'] = [str(f).replace('\\', '/') for f in body['files']][:3000]
     if isinstance(body.get('rev'), str) and body['rev'].strip():
         scope['rev'] = body['rev'].strip()
-    # D3 闸门: 文件数超单任务上限 → 引导分区流程(先 plan 后 confirm)
-    from .partition import MAX_FILES_PER_TASK
-    if not scope.get('files'):
-        n = len(graph_collect.list_code_files(root))
-        if n > MAX_FILES_PER_TASK:
-            return ok({
-                "started": False, "needsPartition": True,
-                "message": f"文件数 {n} 超单任务上限 {MAX_FILES_PER_TASK}——请先生成并确认分区"
-                           f"(POST /kb/semantic/collect-graph/plan)",
-                "fileCount": n,
-            })
     r = start_job(proj, 'collect_graph', scope)
     if not r.get("started"):
         return ok({**r, "message": f"未启动: {r.get('reason')}"})
     return ok({**r, "message": "图谱基线采集已提交(任务中心可见进度)"})
-
-
-@router.post("/kb/semantic/collect-graph/plan")
-async def api_collect_graph_plan(body: dict = None):
-    """自动分区提案(D3)：轻量 import 扫描 → 连通分量 → 目录装箱/同语言合并。
-
-    人工在 FE(基线管理页)勾选后 POST confirm 执行。≤5000 文件返回单分区(无需确认)。"""
-    from .. import ctx
-    from ..store.partition import PartitionStore
-    from .partition import build_partitions
-    body = body or {}
-    proj = body.get('project') or ctx.get_project()
-    root = (resolve_root(body.get('root') or None, proj) or '').strip()
-    if not root or not os.path.isdir(root):
-        return err(400, "项目 root 解析失败")
-    from . import graph_collect
-    files = graph_collect.list_code_files(root)
-    parts, stats = build_partitions(root, files)
-    head = graph_collect._git_head(root) or ""
-    PartitionStore.replace_plan(proj, head, parts)
-    return ok({
-        "head": head, "fileCount": len(files),
-        "needsConfirmation": len(parts) > 1,
-        "partitions": parts, "stats": stats,
-    })
-
-
-@router.post("/kb/semantic/collect-graph/confirm")
-async def api_collect_graph_confirm(body: dict = None):
-    """确认分区并执行(D3)：selected 为勾选的分区 idx 子集(部分执行)。
-
-    逐分区提交 collect_graph 作业(分区模式 merge_partition + 串行自链)。"""
-    from .. import ctx
-    from ..store.partition import PartitionStore
-    from .job_runner import start_job
-    body = body or {}
-    proj = body.get('project') or ctx.get_project()
-    if not proj:
-        return err(400, "项目 id 缺失")
-    selected = body.get('selected')
-    head = (body.get('head') or "").strip()
-    rows = PartitionStore.list_rev(proj, head) if head else []
-    if not rows:
-        return err(400, "无分区提案(先 POST plan)")
-    if not isinstance(selected, list):
-        selected = [p["idx"] for p in rows]   # 缺省全选
-    sel = {int(i) for i in selected}
-    confirmed = 0
-    for p in rows:
-        if p["idx"] in sel:
-            PartitionStore.set_state(proj, head, p["idx"], "confirmed")
-            confirmed += 1
-        else:
-            PartitionStore.set_state(proj, head, p["idx"], "skipped")
-    first = next((p["idx"] for p in rows if p["idx"] in sel), None)
-    if first is None:
-        return ok({"started": False, "message": "未勾选任何分区"})
-    r = start_job(proj, 'collect_graph', scope={
-        "rev": f"baseline:{head}" if head else "workspace",
-        "partition": {"head": head, "idx": first},
-    })
-    return ok({**r, "confirmed": confirmed, "message":
-               f"已确认 {confirmed} 个分区, 分批采集中(任务中心可见进度)"})
 
 
 @router.get("/kb/semantic/collect-graph/status")
@@ -4759,44 +4685,6 @@ async def api_collect_graph_status(project: Optional[str] = None):
         "anchor": anchor,
         "rev": f"baseline:{rev}" if rev else "",
         "counts": counts,
-    })
-
-
-@router.post("/kb/semantic/community-group")
-async def api_community_group(body: dict = None):
-    """社区分组(数据主权批B)：图谱快照 → KB communityFromGraph 算力 →
-    自管组件目录落库(arch_components)。catalog 源 arch_only 默认即读它。"""
-    from .. import ctx
-    from .job_runner import start_job
-    body = body or {}
-    proj = body.get('project') or ctx.get_project()
-    if not proj:
-        return err(400, "项目 id 缺失")
-    r = start_job(proj, 'community_group', {})
-    if not r.get("started"):
-        return ok({**r, "message": f"未启动: {r.get('reason')}"})
-    return ok({**r, "message": "社区分组已提交(KB 算力→自有组件目录)"})
-
-
-@router.get("/kb/semantic/community-group/status")
-async def api_community_group_status(project: Optional[str] = None):
-    """分组作业状态 + 自管组件目录统计(最新 rev)。"""
-    from .. import ctx
-    from ..store.graph import ComponentStore
-    from ..store.jobs import SemanticJobsStore
-    proj = project or ctx.get_project()
-    if not proj:
-        return err(400, "项目 id 缺失")
-    jobs = [j for j in SemanticJobsStore.list(proj, limit=50)
-            if j.get("kind") == "community_group"]
-    rev = ComponentStore.latest_rev(proj)
-    comps = ComponentStore.list_rev(proj, rev) if rev else []
-    return ok({
-        "jobs": jobs[:5],
-        "rev": rev,
-        "componentCount": len(comps),
-        "components": [{"id": c["id"], "name": c["name"], "owns": c["owns"],
-                        "parentId": c.get("parentId") or ""} for c in comps[:200]],
     })
 
 

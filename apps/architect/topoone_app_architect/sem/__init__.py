@@ -17,7 +17,6 @@ from . import scope_extract as _scope_extract  # noqa: E402,F401  (注册 extrac
 from . import jobs_api as _jobs_api  # noqa: E402,F401  (jobs 列表/取消路由)
 from . import llm_jobs as _llm_jobs  # noqa: E402,F401  (轻解析作业注册 B3)
 from . import graph_collect as _graph_collect  # noqa: E402,F401  (数据主权批A: 注册 collect_graph)
-from . import component_group as _component_group  # noqa: E402,F401  (数据主权批B: 注册 community_group)
 from . import component_naming as _component_naming  # noqa: E402,F401  (数据主权批C: 注册 component_name)
 from . import baseline_refresh as _baseline_refresh  # noqa: E402,F401  (数据主权批E: 注册 baseline_refresh 编排)
 _llm_jobs.register_all()

@@ -142,9 +142,10 @@ export const useArchMergeBaselineStore = defineStore('arch-merge-baseline', {
         if (job.state === 'done') {
           this.sync.status = 'done'
           const steps = job.result?.steps || {}
+          const group = steps.collect?.group
           const parts = [
             steps.collect ? `采集 ${steps.collect.nodes ?? 0} 符号` : '',
-            steps.group ? `分组 ${steps.group.components ?? 0} 组件` : '',
+            group ? `分组 ${group.components ?? 0} 组件` : '',
             steps.naming && !steps.naming.error ? `命名 ${steps.naming.named ?? 0}` : '',
           ].filter(Boolean)
           this.sync.message = parts.length
