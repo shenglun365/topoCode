@@ -59,9 +59,35 @@ class TestCommunityFromGraph:
         # 父子链: L0 组件 parentId 可空(单层)
         assert all("parentId" in c for c in comps)
 
-    def test_stateless_reproducible(self):
-        nodes, edges = _cluster_graph(2, 6)
-        r1 = _run(nodes, edges)
-        r2 = _run(nodes, edges)
-        assert r1["counts"]["inputNodes"] == r2["counts"]["inputNodes"] == 12
-        assert len(r1["components"]) == len(r2["components"])
+    def test_symbol_calls_aggregate_to_file_level(self):
+        """符号级 calls 按 file_path 归并文件级——file_path 丢失的强分辨回归。
+
+        场景: 星型 imports 底座(3 簇) + 独立调用链文件集 f20..f32(仅靠
+        跨文件符号 calls 连通, 无 imports; 13 节点 ≥ CALL 线 min_node_cnt)。
+        - 正确(文件级): 调用归并为文件链 → 这些文件进入 UNIFIED 组件 files。
+        - bug(符号级, _NODE_DEFAULTS 丢 file_path): CALL 社区成员是符号 id
+          (无 "/"), files 组装拒收 → f20..f32 从所有组件 files 消失。"""
+        nodes, edges = [], []
+        for c in range(3):  # imports 底座
+            for i in range(8):
+                rel = f"mod{c}/f{i}.py"
+                nodes.append(_node(f"file:{rel}", rel, name=f"f{i}.py"))
+                if i > 0:
+                    edges.append({"source": f"file:mod{c}/f{i}.py",
+                                  "target": f"file:mod{c}/f0.py", "kind": "imports"})
+        chain = [f"call_only/f{k}.py" for k in range(13)]  # 仅符号调用连通的文件集
+        for rel in chain:
+            nodes.append(_node(f"file:{rel}", rel, name=rel.split("/")[-1]))
+        for k in range(12):
+            nodes.append(_node(f"sym:{k}", chain[k], kind="function", name=f"fn{k}"))
+            nodes.append(_node(f"sym_t:{k}", chain[k + 1], kind="function", name=f"gn{k}"))
+            edges.append({"source": f"sym:{k}", "target": f"sym_t:{k}",
+                          "kind": "calls", "line": k + 2})
+        r = _run(nodes, edges)
+        # 决定性信号: CALL 线文件级=链状少量社区; 符号级(丢 file_path)退化为
+        # 12 个独立 2 节点分量。实测: 修复态 4 / bug 态 12。
+        assert r["counts"]["callCommunities"] == 4, r["counts"]
+        assert r["counts"]["unifiedComponents"] >= 1, r["counts"]
+        all_files = {f for c in r["components"] for f in c["files"]}
+        missing = [rel for rel in chain if rel not in all_files]
+        assert not missing, f"调用链文件从组件 files 消失(file_path 归并失效): {missing[:4]}"

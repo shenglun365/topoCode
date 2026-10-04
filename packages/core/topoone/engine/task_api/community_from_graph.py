@@ -27,7 +27,7 @@ _TASK = "communityFromGraph"      # 内存库任务轴占位 id
 _MAX_NODES = 50000
 _MAX_EDGES = 200000
 
-_NODE_DEFAULTS = dict(qualified_name="", file_id="", language="",
+_NODE_DEFAULTS = dict(qualified_name="", file_path="", file_id="", language="",
                       start_line=0, start_col=0, end_line=0, end_col=0,
                       signature="", visibility="", is_exported=0, is_async=0,
                       is_static=0, docstring="", decorators="",
@@ -55,7 +55,14 @@ def _run(nodes: list, edges: list) -> dict:
     from topoone.engine.store.analysis_store import AnalysisStore
     from topoone.plugins.community import community_analysis, unified_merge
 
-    in_nodes = [n for n in nodes if isinstance(n, dict) and n.get("id")][:_MAX_NODES]
+    in_nodes = []
+    for n in nodes:
+        if not (isinstance(n, dict) and n.get("id")):
+            continue
+        if not n.get("file_path") and n.get("filePath"):
+            n = {**n, "file_path": n["filePath"]}  # camelCase 归一
+        in_nodes.append(n)
+    in_nodes = in_nodes[:_MAX_NODES]
     in_edges = [e for e in edges if isinstance(e, dict) and e.get("source")
                 and e.get("target")][:_MAX_EDGES]
     node_ids = {n["id"] for n in in_nodes}
