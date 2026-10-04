@@ -110,8 +110,13 @@ def _run(nodes: list, edges: list) -> dict:
             for r in e_rows])
 
     # 两线 Louvain + UNIFIED 对齐合并（与 KB 自身分析同一算法单源）
-    inc = community_analysis.analyze_communities(_TASK, store, "INCLUDE")
-    call = community_analysis.analyze_communities(_TASK, store, "CALL")
+    # min_node_cnt 同 KB 管线(analyst_runner 传 config 值 INCLUDE=6/CALL=12)——
+    # 此前用默认 10 → 社区粒度与 KB 不一致(实测 26 vs KB UNIFIED L0=9)。
+    from topoone.config import COMMUNITY_MIN_NODE_INCLUDE, COMMUNITY_MIN_NODE_CALL
+    inc = community_analysis.analyze_communities(
+        _TASK, store, "INCLUDE", min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE)
+    call = community_analysis.analyze_communities(
+        _TASK, store, "CALL", min_node_cnt=COMMUNITY_MIN_NODE_CALL)
     uni = unified_merge.analyze_unified(_TASK, store)
 
     # 读 UNIFIED 树：graph_doc(成员) + community_hierarchy(层级/质量)
