@@ -181,7 +181,7 @@ def build_graph_from_files(proj_path: str, files: List[str],
     return {"nodes": nodes, "edges": edges, "stats": stats}
 
 
-def register(server):
+def register(server, multi_db=None):
     """注册 analysis.buildGraph（API-157）。"""
 
     @server.register("analysis.buildGraph")
