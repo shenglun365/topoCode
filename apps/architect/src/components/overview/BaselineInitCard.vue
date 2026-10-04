@@ -104,11 +104,15 @@ async function refreshBaseline() {
     }
     await loadBase(); await loadCg()
     const st = await semanticAssetService.baselineRefreshStatus().catch(() => undefined)
-    baseMsg.value = st?.latest?.state === 'failed'
-      ? (st.latest?.result?.steps && Object.values(st.latest.result.steps).find((x) => x?.error)?.error
-        || st.latest?.result && (st.latest.result as any).summary
-        || t('overviewHome.baselineInit.baseFailed'))
-      : t('overviewHome.baselineInit.baseSet')
+    const latest = st?.latest
+    if (latest?.state === 'failed') {
+      const steps = (latest.result?.steps ?? {}) as Record<string, { error?: string }>
+      const stepErr = Object.values(steps).find((x) => x?.error)?.error
+      const summary = (latest.result as { summary?: string } | undefined)?.summary
+      baseMsg.value = stepErr || summary || t('overviewHome.baselineInit.baseFailed')
+    } else {
+      baseMsg.value = t('overviewHome.baselineInit.baseSet')
+    }
   } catch (e: any) {
     baseMsg.value = e?.message || String(e)
   } finally {
