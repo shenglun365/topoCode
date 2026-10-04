@@ -15,6 +15,7 @@ import { semanticAssetService, type CollectGraphStatus } from '@/services/semant
 import type { GitInfoLite } from '@/types'
 
 const { t } = useI18n()
+const emit = defineEmits(['refreshed'])
 
 const git = ref<GitInfoLite | null>(null)
 const cg = ref<Awaited<ReturnType<typeof semanticAssetService.codegraphStatus>> | null>(null)
@@ -103,6 +104,7 @@ async function refreshBaseline() {
       if (job?.progress?.current) baseMsg.value = job.progress.current
     }
     await loadBase(); await loadCg()
+    emit('refreshed')   // 通知父页面重载(概览 diff/组件树/命名状态随新基线更新)
     const st = await semanticAssetService.baselineRefreshStatus().catch(() => undefined)
     const latest = st?.latest
     if (latest?.state === 'failed') {

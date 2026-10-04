@@ -85,6 +85,12 @@ async function load() {
   }
 }
 
+/** 基线刷新完成 → 重载概览(diff/组件树)+命名状态(新基线口径) */
+async function onBaselineRefreshed() {
+  await load()
+  await loadNaming()
+}
+
 onMounted(load)
 
 const diffSummary = computed(() => [
@@ -296,7 +302,7 @@ onUnmounted(stopNamingPoll)
       </section>
 
       <!-- ①.5 基线设定(git / codegraph / 自管基线状态识别 + 操作按钮组) -->
-      <BaselineInitCard />
+      <BaselineInitCard @refreshed="onBaselineRefreshed" />
 
 
       <!-- ③ 组件变更情况（组件树父子层级 · 逐层开合 · 含未归属分组 · 可展开到变更文件） -->
