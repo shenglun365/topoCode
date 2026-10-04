@@ -542,6 +542,20 @@ ARCH_PROJECT_TABLES_SQL = """
         PRIMARY KEY (project_id, rev, component_id)
     );
 
+    CREATE TABLE IF NOT EXISTS arch_graph_partitions (
+        project_id TEXT NOT NULL,
+        head TEXT NOT NULL DEFAULT '',      -- 提案时的 git HEAD
+        idx INTEGER NOT NULL,               -- 分区序号
+        files TEXT DEFAULT '[]',            -- 文件相对路径 JSON 数组
+        langs TEXT DEFAULT '[]',            -- 语言构成 JSON 数组
+        est_symbols INTEGER DEFAULT 0,      -- 预估符号数
+        reason TEXT DEFAULT '',             -- 拆分原因(连通分量/目录装箱/语言合并)
+        state TEXT DEFAULT 'proposed',      -- proposed|confirmed|running|done|error|skipped
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, head, idx)
+    );
+
     CREATE TABLE IF NOT EXISTS arch_semantic_refs (
         asset_id TEXT NOT NULL,
         ref_type TEXT NOT NULL,             -- req | plan | task | test

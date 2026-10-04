@@ -245,7 +245,8 @@ def _git_head(root: str) -> str:
 
 
 def _job_collect_graph(ctx: JobCtx) -> dict:
-    """作业体：kind=collect_graph。scope: {files?: [], rev?: str}。"""
+    """作业体：kind=collect_graph。scope: {files?: [], rev?: str,
+    partition?: {head, idx}}(分区模式, D3——单分区落库 + 完成后自链下一分区)。"""
     from .. import ctx as app_ctx
     from ..arch_routes.project import resolve_project
     from .paths import resolve_root
@@ -258,8 +259,19 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
     if not root:
         return {"error": "root 解析失败"}
 
-    files = scope.get("files") or list_code_files(root)
+    part = scope.get("partition") or None
+    from ..store.partition import PartitionStore
+    if part:
+        prow = PartitionStore.get(pid, part.get("head") or "", int(part.get("idx") or 0))
+        if not prow:
+            return {"error": "分区不存在(重新提案)"}
+        PartitionStore.set_state(pid, part["head"], prow["idx"], "running")
+        files = prow.get("files") or []
+    else:
+        files = scope.get("files") or list_code_files(root)
     if not files:
+        if part:
+            PartitionStore.set_state(pid, part["head"], prow["idx"], "done")
         return {"nodes": 0, "edges": 0, "files": 0, "note": "无代码文件"}
     rev = scope.get("rev") or ""
     if not rev:
@@ -270,25 +282,56 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
         ctx.progress(total=len(files), done=done, current=current[-80:])
 
     nodes, edges, stats = collect_snapshot(root, pid, files, rev, progress=_prog)
-    written = GraphStore.replace_rev(pid, rev, nodes, edges)
+    if part:
+        written = GraphStore.merge_partition(pid, rev, nodes, edges, files)
+    else:
+        written = GraphStore.replace_rev(pid, rev, nodes, edges)
     head = _git_head(root)
+    baseline_recorded = False
     if head:
-        record_graph_baseline(pid, head)
-        try:
-            from .symbols import _resolve_core_pid, record_sync
-            core_pid = _resolve_core_pid(root)
-            if core_pid:
-                record_sync(core_pid, head)
-        except Exception as e:  # noqa: BLE001
-            logger.info("[graph-collect] 兼容 record_sync 跳过: %s", e)
+        if part:
+            # 分区模式: 全部 done 才记基线锚; 并自链下一个待跑分区
+            PartitionStore.set_state(pid, part["head"], prow["idx"], "done")
+            states = PartitionStore.counts_by_state(pid, part["head"])
+            next_idx = _next_partition(pid, part["head"])
+            if next_idx is not None:
+                from . import job_runner
+                job_runner.start_job(pid, "collect_graph", scope={
+                    "rev": rev, "partition": {"head": part["head"], "idx": next_idx},
+                })
+            elif not states.get("confirmed") and not states.get("running"):
+                record_graph_baseline(pid, head)
+                baseline_recorded = True
+        else:
+            record_graph_baseline(pid, head)
+            baseline_recorded = True
+            try:
+                from .symbols import _resolve_core_pid, record_sync
+                core_pid = _resolve_core_pid(root)
+                if core_pid:
+                    record_sync(core_pid, head)
+            except Exception as e:  # noqa: BLE001
+                logger.info("[graph-collect] 兼容 record_sync 跳过: %s", e)
     result = {
         "rev": rev, "head": head,
         "files": len(files), "nodes": written["nodes"], "edges": written["edges"],
         "parsed": stats["parsed"], "cached": stats["cached"], "failed": stats["failed"],
-        "source": stats["source"],
+        "source": stats["source"], "baselineRecorded": baseline_recorded,
     }
+    if part:
+        result["partition"] = prow["idx"]
+        result["importsResolved"] = stats.get("importsResolved", 0)
     logger.info("[graph-collect] 完成: %s", json.dumps(result, ensure_ascii=False))
     return result
+
+
+def _next_partition(pid: str, head: str):
+    """自链: 下一个 confirmed 分区 idx; 无返回 None。"""
+    from ..store.partition import PartitionStore
+    for p in PartitionStore.list_rev(pid, head):
+        if p.get("state") == "confirmed":
+            return p["idx"]
+    return None
 
 
 # 组件三表的写入入口也在此暴露（批B 社区接线直接调；A1 落位）

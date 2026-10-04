@@ -102,6 +102,86 @@ class GraphStore:
                    (project_id, rev))
         db.commit()
 
+    @classmethod
+    def merge_partition(cls, project_id: str, rev: str, nodes: List[dict],
+                        edges: List[dict], files: List[str]) -> dict:
+        """分区增量落库(D3)：删该分区文件旧节点及其关联边，再合并插入。
+
+        分区文件集不相交(拆分保证)，多分区串行落库同一 rev 互不覆盖；
+        重跑同分区幂等(先删后插)。返回 {nodes, edges}。"""
+        db = _target_db(cls.NODE_TABLE, project_id)
+        file_list = [f for f in (files or []) if f]
+        # 1) 删旧: 分区文件节点(file_path 命中 + file 虚拟节点), 收集被删 id
+        deleted_ids: set = set()
+        for i in range(0, len(file_list), 400):
+            chunk = file_list[i:i + 400]
+            ph = ",".join("?" * len(chunk))
+            rows = db.fetchall(
+                f"SELECT id FROM arch_graph_node WHERE project_id=? AND rev=?"
+                f" AND (file_path IN ({ph}) OR id IN ({ph}))",
+                (project_id, rev, *chunk, *(f"file:{c}" for c in chunk)))
+            deleted_ids |= {r["id"] for r in (rows or [])}
+            db.execute(f"DELETE FROM arch_graph_node WHERE project_id=? AND rev=?"
+                       f" AND (file_path IN ({ph}) OR id IN ({ph}))",
+                       (project_id, rev, *chunk, *(f"file:{c}" for c in chunk)))
+        # 2) 端点在被删节点集的边一并删(分批 IN)
+        dl = list(deleted_ids)
+        for i in range(0, len(dl), 400):
+            chunk = dl[i:i + 400]
+            ph = ",".join("?" * len(chunk))
+            db.execute(f"DELETE FROM arch_graph_edge WHERE project_id=? AND rev=?"
+                       f" AND (source IN ({ph}) OR target IN ({ph}))",
+                       (project_id, rev, *chunk, *chunk))
+        # 3) 插入本批(节点去重 keep-first, 边端点须存在于 现存∪新批)
+        kept_ids = {r["id"] for r in db.fetchall(
+            "SELECT id FROM arch_graph_node WHERE project_id=? AND rev=?",
+            (project_id, rev))}
+        now = _now()
+        seen_nodes: set = set()
+        n_rows = []
+        for n in nodes or []:
+            if not (n or {}).get("id") or n["id"] in seen_nodes:
+                continue
+            seen_nodes.add(n["id"])
+            n_rows.append((
+                project_id, rev, n["id"], n.get("kind") or "",
+                n.get("name") or "", n.get("qualified_name") or "",
+                n.get("file_path") or "", n.get("language") or "",
+                int(n.get("start_line") or 0), int(n.get("end_line") or 0),
+                int(n.get("start_column") or 0), int(n.get("end_column") or 0),
+                n.get("signature") or "", n.get("docstring") or "",
+                n.get("return_type") or "",
+                1 if n.get("is_exported") else 0, now,
+            ))
+        valid = kept_ids | seen_nodes
+        seen_edges = set()
+        e_rows = []
+        for e in edges or []:
+            key = (e.get("source"), e.get("target"), e.get("kind"))
+            if not all(key) or key in seen_edges:
+                continue
+            if key[0] not in valid or key[1] not in valid:
+                continue
+            seen_edges.add(key)
+            e_rows.append((
+                project_id, rev, key[0], key[1], key[2],
+                int(e.get("line") or 0), int(e.get("col") or 0),
+            ))
+        if n_rows:
+            db.executemany(
+                "INSERT INTO arch_graph_node (project_id, rev, id, kind, name, "
+                "qualified_name, file_path, language, start_line, end_line, "
+                "start_column, end_column, signature, docstring, return_type, "
+                "is_exported, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                n_rows)
+        if e_rows:
+            db.executemany(
+                "INSERT INTO arch_graph_edge (project_id, rev, source, target, "
+                "kind, line, col) VALUES (?,?,?,?,?,?,?)",
+                e_rows)
+        db.commit()
+        return {"nodes": len(n_rows), "edges": len(e_rows)}
+
     # ── 查询 ──────────────────────────────────────────────────────
 
     @classmethod
@@ -178,155 +258,5 @@ class GraphStore:
         }
 
 
-class ComponentStore:
-    """arch_components / arch_component_hierarchy（批B 社区结果承载，A1 先建）。"""
-
-    TABLE = "arch_components"
-
-    @classmethod
-    def replace_rev(cls, project_id: str, rev: str,
-                    components: List[dict], hierarchy: List[dict]) -> dict:
-        db = _target_db(cls.TABLE, project_id)
-        now = _now()
-        c_rows = []
-        for c in components or []:
-            if not (c or {}).get("id"):
-                continue
-            c_rows.append((
-                project_id, rev, c["id"], c.get("name") or "",
-                c.get("summary") or "",
-                json.dumps(c.get("owns") or [], ensure_ascii=False),
-                c.get("source") or "community", now, now,
-            ))
-        h_rows = []
-        for h in hierarchy or []:
-            cid = (h or {}).get("childId") or (h or {}).get("child_id") or ""
-            if not cid:
-                continue
-            h_rows.append((project_id, rev, cid,
-                           h.get("parentId") or h.get("parent_id") or "",
-                           int(h.get("level") or 0)))
-        db.execute("DELETE FROM arch_components WHERE project_id=? AND rev=?",
-                   (project_id, rev))
-        db.execute("DELETE FROM arch_component_hierarchy WHERE project_id=? AND rev=?",
-                   (project_id, rev))
-        if c_rows:
-            db.executemany(
-                "INSERT INTO arch_components (project_id, rev, id, name, summary, "
-                "owns, source, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                c_rows)
-        if h_rows:
-            db.executemany(
-                "INSERT INTO arch_component_hierarchy (project_id, rev, child_id, "
-                "parent_id, level) VALUES (?,?,?,?,?)",
-                h_rows)
-        db.commit()
-        return {"components": len(c_rows), "hierarchy": len(h_rows)}
-
-    @classmethod
-    def list_rev(cls, project_id: str, rev: str) -> List[dict]:
-        """目录形状（catalog 最小消费形状 {id,name,owns,parentId} 直配接缝）。"""
-        rows, _ = _fetchall_routed(
-            cls.TABLE,
-            "SELECT c.*, h.parent_id AS parent_id FROM arch_components c "
-            "LEFT JOIN arch_component_hierarchy h ON h.project_id = c.project_id "
-            "AND h.rev = c.rev AND h.child_id = c.id "
-            "WHERE c.project_id=? AND c.rev=? ORDER BY c.id",
-            (project_id, rev), project_id or None)
-        out = []
-        for r in rows:
-            try:
-                owns = json.loads(r.get("owns") or "[]")
-            except Exception:  # noqa: BLE001
-                owns = []
-            out.append({
-                "id": r["id"], "name": r.get("name") or "",
-                "summary": r.get("summary") or "", "owns": owns,
-                "parentId": r.get("parent_id") or "",
-                "source": r.get("source") or "community",
-            })
-        return out
-
-    @classmethod
-    def latest_rev(cls, project_id: str) -> str:
-        """最近一次写入组件结果的 rev（无则 ''）。"""
-        rows, _ = _fetchall_routed(
-            cls.TABLE,
-            "SELECT rev, MAX(updated_at) AS ts FROM arch_components "
-            "WHERE project_id=? GROUP BY rev ORDER BY ts DESC LIMIT 1",
-            (project_id,), project_id or None)
-        return (rows[0] or {}).get("rev") or "" if rows else ""
-
-    # ── 快速命名(批C) ─────────────────────────────────────────────
-
-    @classmethod
-    def upsert_naming(cls, project_id: str, rev: str,
-                      items: List[dict], model_id: str,
-                      fingerprints: Optional[Dict[str, str]] = None) -> int:
-        """批量写命名结果(arch_component_naming) + 回写组件名/概要。
-
-        items: [{componentId, name, summary}]；fingerprints: cid→owns 指纹。
-        """
-        db = _target_db(cls.TABLE, project_id)
-        now = _now()
-        rows = []
-        for it in items or []:
-            cid = (it or {}).get("componentId") or ""
-            if not cid or not (it.get("name") or "").strip():
-                continue
-            rows.append((
-                project_id, rev, cid, (it.get("name") or "").strip(),
-                (it.get("summary") or "").strip(), model_id or "",
-                "active", (fingerprints or {}).get(cid, ""), now, now,
-            ))
-        if not rows:
-            return 0
-        db.executemany(
-            "INSERT INTO arch_component_naming (project_id, rev, component_id, "
-            "name, summary, model_id, status, fingerprint, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(project_id, rev, component_id) DO UPDATE SET "
-            "name=excluded.name, summary=excluded.summary, model_id=excluded.model_id, "
-            "status='active', "
-            "fingerprint=COALESCE(NULLIF(excluded.fingerprint,''), arch_component_naming.fingerprint), "
-            "updated_at=excluded.updated_at", rows)
-        for r in rows:
-            db.execute(
-                "UPDATE arch_components SET name=?, summary=?, updated_at=? "
-                "WHERE project_id=? AND rev=? AND id=?",
-                (r[3], r[4], now, project_id, rev, r[2]))
-        db.commit()
-        return len(rows)
-
-    @classmethod
-    def namings(cls, project_id: str, rev: str) -> Dict[str, dict]:
-        """rev 内全部命名 → {componentId: {name, summary, fingerprint, status}}。"""
-        rows, _ = _fetchall_routed(
-            "arch_component_naming",
-            "SELECT * FROM arch_component_naming WHERE project_id=? AND rev=?",
-            (project_id, rev), project_id or None)
-        return {r["component_id"]: {
-            "componentId": r["component_id"], "name": r.get("name") or "",
-            "summary": r.get("summary") or "",
-            "fingerprint": r.get("fingerprint") or "",
-            "status": r.get("status") or "active", "modelId": r.get("model_id") or "",
-        } for r in rows}
-
-    @classmethod
-    def mark_stale(cls, project_id: str, rev: str,
-                   component_ids: Optional[List[str]] = None) -> int:
-        """命名置 stale(owns/rev 变化后)；component_ids 缺省=全部。"""
-        db = _target_db(cls.TABLE, project_id)
-        if component_ids:
-            ph = ",".join("?" * len(component_ids))
-            cur = db.execute(
-                f"UPDATE arch_component_naming SET status='stale', updated_at=? "
-                f"WHERE project_id=? AND rev=? AND component_id IN ({ph})",
-                (_now(), project_id, rev, *component_ids))
-        else:
-            cur = db.execute(
-                "UPDATE arch_component_naming SET status='stale', updated_at=? "
-                "WHERE project_id=? AND rev=?",
-                (_now(), project_id, rev))
-        db.commit()
-        return cur.rowcount if cur else 0
+# ComponentStore 自本文件拆分(store/component.py, 行数门禁); 此处重导出兼容
+from .component import ComponentStore  # noqa: F401

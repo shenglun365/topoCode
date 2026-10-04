@@ -194,6 +194,7 @@ PROJECT_TABLES = frozenset({
     # architect 自有图谱基线(数据主权批A)：符号/关系按 project+rev 持久化
     "arch_graph_node", "arch_graph_edge",
     "arch_components", "arch_component_hierarchy", "arch_component_naming",
+    "arch_graph_partitions",
 })
 
 # WS8 认知层→主库提升: 主库全局桶哨兵 project_id(设计稿 global-promotion-design.md)
