@@ -4996,6 +4996,86 @@ async def api_baseline_diff(root: Optional[str] = None, project: Optional[str] =
     return ok(baseline_diff(_root or None, project or ctx.get_project()))
 
 
+@router.get("/kb/semantic/baselines")
+async def api_baselines(project: Optional[str] = None):
+    """自管基线快照清单(数据主权批E): architect 明确管理的各 head 图谱快照。
+
+    每行 = 一个 rev(baseline:<head>) 的节点/边/文件计数 + 是否当前锚。"""
+    from .. import ctx
+    from ..store.graph import GraphStore, ComponentStore
+    from ..sem.graph_collect import read_graph_baseline
+    pid = project or ctx.get_project()
+    if not pid:
+        return err(400, "项目 id 缺失")
+    anchor = read_graph_baseline(pid) or {}
+    cur_head = anchor.get("head") or ""
+    out = []
+    for r in GraphStore.rev_list(pid):
+        rev = r["rev"]
+        head = rev[len("baseline:"):] if rev.startswith("baseline:") else ""
+        comp_rev = ComponentStore.latest_rev(pid)
+        comps = len(ComponentStore.list_rev(pid, comp_rev)) if comp_rev == rev else 0
+        out.append({
+            "rev": rev, "head": head,
+            "nodes": int(r.get("nodes") or 0), "edges": int(r.get("edges") or 0),
+            "files": int(r.get("files") or 0), "components": comps,
+            "isCurrent": bool(cur_head) and head == cur_head,
+            "updatedAt": int(r.get("updatedAt") or 0),
+        })
+    return ok({"anchor": anchor, "baselines": out})
+
+
+@router.post("/kb/semantic/baseline-diff")
+async def api_baseline_diff(body: dict = None):
+    """任意两 head 快照的组件/文件级 diff(数据主权批E: DIFF 各 head 数据的自管面)。
+
+    Body: { headA?, headB? }——缺省 A=当前锚 head, B=快照中次新 head。
+    组件按 id 对比(added/removed/ownsChanged), 文件集合对比(added/removed)。"""
+    from .. import ctx
+    from ..store.graph import GraphStore, ComponentStore
+    body = body or {}
+    pid = body.get("project") or ctx.get_project()
+    if not pid:
+        return err(400, "项目 id 缺失")
+    revs = [r["rev"] for r in GraphStore.rev_list(pid)]
+    heads = [r[len("baseline:"):] for r in revs if r.startswith("baseline:")]
+
+    def _rev_of(head: str) -> str:
+        return f"baseline:{head}"
+
+    ha = body.get("headA") or (heads[0] if heads else "")
+    hb = body.get("headB") or (heads[1] if len(heads) > 1 else "")
+    if not ha or not hb:
+        return err(400, "可用快照不足(至少两个 head 才能对比)")
+    rev_a, rev_b = _rev_of(ha), _rev_of(hb)
+    if rev_a not in revs or rev_b not in revs:
+        return err(400, "head 对应快照不存在")
+
+    def _comp_map(rev: str) -> dict:
+        return {c["id"]: c for c in ComponentStore.list_rev(pid, rev)}
+
+    ma, mb = _comp_map(rev_a), _comp_map(rev_b)
+    added = [{"id": i, "name": mb[i].get("name") or i, "owns": mb[i].get("owns") or []}
+             for i in sorted(mb.keys() - ma.keys())]
+    removed = [{"id": i, "name": ma[i].get("name") or i, "owns": ma[i].get("owns") or []}
+               for i in sorted(ma.keys() - mb.keys())]
+    owns_changed = []
+    for i in sorted(ma.keys() & mb.keys()):
+        oa, ob = set(ma[i].get("owns") or []), set(mb[i].get("owns") or [])
+        if oa != ob:
+            owns_changed.append({"id": i, "name": mb[i].get("name") or i,
+                                 "addedFiles": sorted(ob - oa), "removedFiles": sorted(oa - ob)})
+    fa, fb = set(GraphStore.files(pid, rev_a)), set(GraphStore.files(pid, rev_b))
+    return ok({
+        "headA": ha, "headB": hb,
+        "components": {"added": added, "removed": removed, "ownsChanged": owns_changed,
+                       "counts": {"a": len(ma), "b": len(mb),
+                                  "added": len(added), "removed": len(removed),
+                                  "ownsChanged": len(owns_changed)}},
+        "files": {"added": sorted(fb - fa), "removed": sorted(fa - fb)},
+    })
+
+
 @router.get("/kb/semantic/mappings")
 async def api_mappings(root: Optional[str] = None, project: Optional[str] = None,
                        asset_ids: str = ""):

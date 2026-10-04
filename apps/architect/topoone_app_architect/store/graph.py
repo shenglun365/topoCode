@@ -195,6 +195,24 @@ class GraphStore:
         return {"nodes": int(r.get("n") or 0), "edges": int(r.get("e") or 0)}
 
     @classmethod
+    def rev_list(cls, project_id: str) -> List[dict]:
+        """全部快照 rev 清单(D3/数据主权: 各 head 的基线数据管理面)。
+
+        返回 [{rev, nodes, edges, files, updatedAt}] 按 updatedAt 新→旧。"""
+        db = _target_db(cls.NODE_TABLE, project_id)
+        rows = db.fetchall(
+            "SELECT n.rev AS rev, COUNT(*) AS nodes, MAX(n.updated_at) AS updated_at,"
+            " (SELECT COUNT(*) FROM arch_graph_edge e WHERE e.project_id=n.project_id"
+            "   AND e.rev=n.rev) AS edges,"
+            " (SELECT COUNT(DISTINCT n2.file_path) FROM arch_graph_node n2"
+            "   WHERE n2.project_id=n.project_id AND n2.rev=n.rev AND n2.file_path!='') AS files"
+            " FROM arch_graph_node n WHERE n.project_id=? GROUP BY n.rev"
+            " ORDER BY updated_at DESC", (project_id,))
+        return [{"rev": r["rev"], "nodes": int(r["nodes"] or 0),
+                 "edges": int(r["edges"] or 0), "files": int(r["files"] or 0),
+                 "updatedAt": int(r["updated_at"] or 0)} for r in (rows or [])]
+
+    @classmethod
     def files(cls, project_id: str, rev: str) -> List[str]:
         """快照覆盖的文件清单（相对路径，正斜杠）。"""
         rows, _ = _fetchall_routed(
