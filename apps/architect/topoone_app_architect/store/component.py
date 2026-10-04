@@ -66,7 +66,7 @@ class ComponentStore:
         """目录形状（catalog 最小消费形状 {id,name,owns,parentId} 直配接缝）。"""
         rows, _ = _fetchall_routed(
             cls.TABLE,
-            "SELECT c.*, h.parent_id AS parent_id FROM arch_components c "
+            "SELECT c.*, h.parent_id AS parent_id, h.level AS level FROM arch_components c "
             "LEFT JOIN arch_component_hierarchy h ON h.project_id = c.project_id "
             "AND h.rev = c.rev AND h.child_id = c.id "
             "WHERE c.project_id=? AND c.rev=? ORDER BY c.id",
@@ -81,6 +81,7 @@ class ComponentStore:
                 "id": r["id"], "name": r.get("name") or "",
                 "summary": r.get("summary") or "", "owns": owns,
                 "parentId": r.get("parent_id") or "",
+                "level": int(r.get("level") or 0),
                 "source": r.get("source") or "community",
             })
         return out
@@ -156,6 +157,32 @@ class ComponentStore:
                 (r[3], r[4], now, project_id, rev, r[2]))
         db.commit()
         return len(rows)
+
+    @classmethod
+    def backfill_names(cls, project_id: str, rev: str) -> int:
+        """把已有 active 命名回写组件表(幂等兜底)。
+
+        场景: community-group 的 replace_rev 会把组件 name 重置回 id; 若命名
+        缓存命中跳过 llm(不 upsert), 组件名停留在 id——分组后/命名前任何
+        消费方都会读到裸 id。入口统一回补一次。返回回写行数。"""
+        db = _target_db(cls.TABLE, project_id)
+        cur = db.execute(
+            "UPDATE arch_components SET "
+            "name=(SELECT n.name FROM arch_component_naming n "
+            "      WHERE n.project_id=arch_components.project_id "
+            "      AND n.rev=arch_components.rev AND n.component_id=arch_components.id "
+            "      AND n.status='active'), "
+            "summary=(SELECT n.summary FROM arch_component_naming n "
+            "      WHERE n.project_id=arch_components.project_id "
+            "      AND n.rev=arch_components.rev AND n.component_id=arch_components.id "
+            "      AND n.status='active'), "
+            "updated_at=updated_at "
+            "WHERE project_id=? AND rev=? AND id IN "
+            "(SELECT component_id FROM arch_component_naming "
+            " WHERE project_id=? AND rev=? AND status='active' AND name!='')",
+            (project_id, rev, project_id, rev))
+        db.commit()
+        return cur.rowcount or 0
 
     @classmethod
     def namings(cls, project_id: str, rev: str) -> Dict[str, dict]:

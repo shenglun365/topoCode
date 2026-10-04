@@ -168,3 +168,34 @@ class ComponentNamingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_backfill_names_restores_reset_components(tmp_path, monkeypatch):
+    """replace_rev 重置组件名后, backfill_names 从命名表恢复(缓存跳过兜底)。"""
+    from topoone_app_architect import ctx as C
+    C._data_dir = None
+    C._project_dbs.clear()
+    C.setup(data_dir=str(tmp_path))
+    from topoone_app_architect.store.component import ComponentStore
+    pid, rev = "proj-bf", "baseline:t1"
+    comps = [
+        {"id": "c1", "name": "c1", "summary": "", "owns": ["a.py"], "source": "community"},
+        {"id": "c2", "name": "c2", "summary": "", "owns": ["b.py"], "source": "community"},
+    ]
+    hier = [{"childId": "c1", "parentId": "", "level": 0},
+            {"childId": "c2", "parentId": "c1", "level": 1}]
+    ComponentStore.replace_rev(pid, rev, comps, hier)
+    # 命名 c1(回写 c1.name) → replace_rev 重置(模拟重新分组) → 名字丢
+    ComponentStore.upsert_naming(pid, rev, [
+        {"componentId": "c1", "name": "核心引擎", "summary": "s"}], "m1")
+    comps2 = [{"id": "c1", "name": "c1", "summary": "", "owns": ["a.py"], "source": "community"},
+              {"id": "c2", "name": "c2", "summary": "", "owns": ["b.py"], "source": "community"}]
+    ComponentStore.replace_rev(pid, rev, comps2, hier)
+    got = {c["id"]: c["name"] for c in ComponentStore.list_rev(pid, rev)}
+    assert got["c1"] == "c1"  # 已被重置
+    n = ComponentStore.backfill_names(pid, rev)
+    assert n >= 1
+    got2 = {c["id"]: c["name"] for c in ComponentStore.list_rev(pid, rev)}
+    assert got2["c1"] == "核心引擎"  # 恢复
+    # 幂等: 再跑一次不炸
+    assert ComponentStore.backfill_names(pid, rev) >= 0

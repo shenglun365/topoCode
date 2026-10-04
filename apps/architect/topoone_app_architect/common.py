@@ -94,7 +94,7 @@ def _self_components(root=None, project=None) -> list:
     return [{
         "id": c["id"], "name": c.get("name") or c["id"],
         "owns": c.get("owns") or [], "parentId": c.get("parentId") or "",
-        "level": "L0", "edgeType": "UNIFIED",
+        "level": f"L{c.get('level') or 0}", "edgeType": "UNIFIED",
         "dependsOn": sorted(deps.get(c["id"], set())),
         "desc": c.get("summary") or "",
     } for c in comps]

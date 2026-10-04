@@ -133,6 +133,9 @@ def _job_component_name(ctx: JobCtx) -> dict:
         return {"error": "自管组件目录为空(先运行 community-group 分组)"}
     want = set(scope.get("componentIds") or [])
     force = bool(scope.get("force"))
+    # 分组 replace_rev 重置组件名 → 先把已有 active 命名回补(缓存命中跳过
+    # llm 的组件也因此名字不丢)
+    ComponentStore.backfill_names(pid, rev)
     namings = ComponentStore.namings(pid, rev)
     targets = [c for c in comps
                if (not want or c["id"] in want)

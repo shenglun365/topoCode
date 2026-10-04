@@ -54,11 +54,9 @@ def _job_community_group(ctx: JobCtx) -> dict:
         if not cid:
             continue
         lvl = str(c.get("level") or "L0")
-        # 组件 = L0 顶层域(KB level 语义: L0 粗粒度顶层, L1/L2 子层细节)。
-        # 实测 topo-animation: L0 33 个覆盖 80 文件(≈3.2 文件/域), 全层级
-        # 平铺 86 会把子层碎片当组件(用户确认夸张)。L1/L2 待新思路重建。
-        if lvl != "L0":
-            continue
+        # 全层级落库(L0~L5, 用户裁决: 与 KB 一致按层级生成)——L0 顶层域,
+        # L1+ 子层细节(owns=该层自有文件, parentId 挂父组件)。概览组件树/
+        # 资产工作区按 parentId 渲染父子层级。
         comps.append({
             "id": cid, "name": cid, "summary": "",
             "owns": c.get("files") or [], "source": "community",
