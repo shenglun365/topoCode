@@ -178,7 +178,7 @@ def _job_component_name(ctx: JobCtx) -> dict:
         else:
             failed += len(batch)
         ctx.progress(total=len(targets), done=min(i + _BATCH, len(targets)),
-                     named=named)
+                     current=f"已命名 {named}/{len(targets)}")
     return {"named": named, "failed": failed, "total": len(targets),
             "rev": rev, "errors": errors[:5]}
 

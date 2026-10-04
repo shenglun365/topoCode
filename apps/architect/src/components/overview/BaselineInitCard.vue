@@ -99,14 +99,16 @@ async function refreshBaseline() {
       await new Promise((res) => setTimeout(res, 2500))
       const st = await semanticAssetService.baselineRefreshStatus().catch(() => undefined)
       const job = st?.latest
-      if (job?.status === 'done' || job?.status === 'error' || job?.status === 'cancelled') break
-      if (job?.message) baseMsg.value = job.message
+      if (job?.state === 'done' || job?.state === 'failed' || job?.state === 'cancelled') break
+      if (job?.progress?.current) baseMsg.value = job.progress.current
     }
     await loadBase(); await loadCg()
     const st = await semanticAssetService.baselineRefreshStatus().catch(() => undefined)
-    baseMsg.value = st?.latest?.status === 'error'
-      ? (st.latest?.error || t('overviewHome.baselineInit.baseFailed'))
-      : ''
+    baseMsg.value = st?.latest?.state === 'failed'
+      ? (st.latest?.result?.steps && Object.values(st.latest.result.steps).find((x) => x?.error)?.error
+        || st.latest?.result && (st.latest.result as any).summary
+        || t('overviewHome.baselineInit.baseFailed'))
+      : t('overviewHome.baselineInit.baseSet')
   } catch (e: any) {
     baseMsg.value = e?.message || String(e)
   } finally {
