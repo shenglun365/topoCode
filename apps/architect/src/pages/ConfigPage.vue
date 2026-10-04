@@ -601,7 +601,7 @@ async function runCgColdStart() {
   cgColdStarting.value = true
   cgColdStartMsg.value = ''
   try {
-    // 驱动就绪状态机直至 ready(共享 driveBaselineReady; initGit=true 按钮点击
+    // 驱动 KB 分析就绪状态机直至 ready(KB 研究入口; initGit=true 按钮点击
     // 即授权: 非 git 工作目录自动初始化)。实时状态经 onProgress 显示。
     const r = await semanticAssetService.driveBaselineReady((s) => {
       const st = s?.state ?? ''

@@ -33,7 +33,7 @@ export const useArchSpecStore = defineStore('arch-spec', {
   actions: {
     async load() {
       if (this.loaded || this.loading || this.degraded) return
-      // cv-205: 无 KB 基线项目(工作目录直开)直接降级——不发起注定 400 的
+      // cv-205: KB 项目缺失(工作目录直开)直接降级——不发起注定 400 的
       // 请求(与后端 kb_degraded 同口径: baselineId 缺失即未关联)
       const ps = useArchProjectStore()
       if (ps.loaded && !ps.hasBaseline) {

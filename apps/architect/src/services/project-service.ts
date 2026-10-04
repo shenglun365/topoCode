@@ -117,7 +117,7 @@ export const projectService = {
     return apiGet<Snapshot[]>(`/project/snapshots${qs ? '?' + qs : ''}`)
   },
 
-  /** KB 基线版本列表(基线管理宏观概览「版本历史」)：新→旧。 */
+  /** KB 版本列表只读(KB 表壳冻结期兼容; 基线管理宏观概览「版本历史」)：新→旧。 */
   async versions(): Promise<Array<{ id: string; label: string; head: string; createdAt: string }>> {
     const qs = projectQuery().toString()
     return apiGet<Array<{ id: string; label: string; head: string; createdAt: string }>>(`/project/versions${qs ? '?' + qs : ''}`)

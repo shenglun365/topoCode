@@ -226,7 +226,7 @@ export interface CodegraphStatus {
   kv?: string | null
   source: 'env' | 'kv' | 'default'
   corePid?: string
-  /** codegraph CLI 索引统计(.codegraph/codegraph.db) —— 与 KB 基线图谱正交。 */
+  /** codegraph CLI 索引统计(.codegraph/codegraph.db) —— 与自管基线图谱正交。 */
   native?: { nodes?: number; edges?: number }
   /** auto 合并语义: native∪codegraph 合并统计(仅 auto+codegraph 可用时返回)。 */
   mergeStats?: { nativeNodes?: number; cgNodes?: number; cgMapped?: number; lineDrift?: number }
@@ -239,7 +239,17 @@ export interface CodegraphStatus {
   }
 }
 
-/** KB 基线就绪状态(baseline.readiness 无状态推导)。 */
+/** 自管基线状态(GET /kb/semantic/collect-graph/status)。 */
+export interface CollectGraphStatus {
+  jobs?: Array<Record<string, unknown>>
+  latest?: Record<string, unknown> | null
+  /** 基线锚 {head, at}(collect_graph 完成自记)。 */
+  anchor?: { head?: string; at?: number } | null
+  rev?: string
+  counts?: { nodes?: number; edges?: number }
+}
+
+/** KB 分析就绪状态(baseline.readiness, KB 自由研究引擎的项目上下文; 非自管基线)。 */
 export interface BaselineReadiness {
   state: 'no_project' | 'importing' | 'no_analysis' | 'analyzing' | 'ready'
   projectId?: string
@@ -483,6 +493,12 @@ export const semanticAssetService = {
     return await apiPost('/kb/semantic/codegraph-sync', { root, project })
   },
 
+  /** 自管基线状态(采集作业 + 基线锚 + 图谱计数) —— 概览「基线设定」行数据源。 */
+  async collectGraphStatus(): Promise<CollectGraphStatus | undefined> {
+    const c = ctx()
+    return await apiGet<CollectGraphStatus>(`/kb/semantic/collect-graph/status${c ? `?${c}` : ''}`)
+  },
+
   /** 一键基线刷新(数据主权批E): 本地编排 采集→分组→命名, 单作业进度。 */
   async baselineRefresh(force = false): Promise<{ started: boolean; reason?: string; job?: { id: string }; message?: string } | undefined> {
     const { root, project } = currentProjectParams()
@@ -570,13 +586,13 @@ export const semanticAssetService = {
     return await apiPost('/kb/semantic/cold-start', { root, project })
   },
 
-  /** KB 基线就绪状态(无状态推导): no_project→importing→no_analysis→analyzing→unmounted→ready。 */
+  /** KB 分析就绪状态(无状态推导): no_project→importing→no_analysis→analyzing→ready。 */
   async baselineReadiness(): Promise<BaselineReadiness | undefined> {
     const c = ctx()
     return await apiGet<BaselineReadiness>(`/kb/semantic/baseline-readiness${c ? `?${c}` : ''}`)
   },
 
-  /** 一键确保 KB 基线就绪(幂等编排: 建项→fast 全量分析→自动挂载)。
+  /** 一键确保 KB 分析就绪(幂等编排: 建项→分析→ready, KB 研究入口)。
    *  initGit: 工作目录非 git 仓库时授权 TopoCode 自动初始化(按钮点击即授权)。 */
   async ensureBaselineReady(taskType: 'fast' | 'full' = 'fast', initGit = true): Promise<BaselineReadiness | undefined> {
     const { root, project } = currentProjectParams()

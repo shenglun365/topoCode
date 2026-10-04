@@ -258,7 +258,7 @@ const {
               </div>
             </div>
 
-            <!-- 基线对比（常驻信息卡 · 三视图 diff）：基准固定=KB 基线，目标可选(默认工作区) -->
+            <!-- 基线对比（常驻信息卡 · 三视图 diff）：基准固定=自管基线，目标可选(默认工作区) -->
             <div class="panel overflow-hidden">
               <div class="panel-header">
                 <span class="flex items-center gap-2">

@@ -1,6 +1,6 @@
 /**
  * 资产工作区 · 基线对比域（MS6-W1 自 AssetManagementWorkspace.vue 搬移；常驻化改造）。
- * 基准固定 = KB 基线(baselineCommit)；对比目标可选(工作区默认/任意提交)。
+ * 基准固定 = 自管基线(baselineCommit/graphBaseline 锚)；对比目标可选(工作区默认/任意提交)。
  * 三视图 diff 叠加(概览卡/语义行徽标/图谱着色)常驻生效，无开关。
  */
 import { computed, ref } from 'vue'
@@ -47,7 +47,7 @@ export function useAssetDiff(D: WsDeps) {
     void runCompare()
   }
 
-  // ---- 资产/组件对比：基准固定=KB 基线(baselineCommit)，目标可选(缓存态) ----
+  // ---- 资产/组件对比：基准固定=自管基线(baselineCommit)，目标可选(缓存态) ----
   const cmpTarget = ref('worktree')  // 'worktree' = 工作区(含未提交/未跟踪)
   const commitOptions = ref<GitLogEntry[]>([])
   const baselineSha = ref('')

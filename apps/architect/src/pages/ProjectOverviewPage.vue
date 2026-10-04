@@ -335,7 +335,7 @@ onUnmounted(stopNamingPoll)
         <p v-else class="py-4 text-center text-xs text-ctp-overlay0">{{ t('digest.empty') }}</p>
       </section>
 
-      <!-- ①.5 KB 基线就绪(git / codegraph / KB 状态识别 + 初始化按钮组) -->
+      <!-- ①.5 基线设定(git / codegraph / 自管基线状态识别 + 操作按钮组) -->
       <BaselineInitCard />
 
       <!-- ② 知识库关联 -->
