@@ -12,37 +12,31 @@ from .. import store
 router = APIRouter()
 
 # 未关联知识库时的统一提示(与 knowledge.py 一致)。
-KB_NOTE = "未关联知识库：无法执行基线/变更分析。请在项目概览「查找关联」中关联知识库后重试。"
-
-
-def _kb_degraded(root=None, project_id=None) -> bool:
-    from .project import kb_degraded
-    return kb_degraded(root, project_id)
 
 
 def _resolve(root=None, project=None):
-    """解析项目 → KB id；未绑定/降级返回 None。"""
+    """解析项目(数据主权批E: 自管, 不经 KB)。"""
     from .project import resolve_project
-    from ..kb_gateway import call_kb
     proj = resolve_project(root, project)
-    if not proj:
-        return None, None, None
-    kb_id = proj.get("kbProjectId") or proj.get("kb_project_id") or ""
-    return proj, kb_id, call_kb
+    return (proj or None), None, None
 
 
-def _kb_model(proj: dict, call_kb) -> dict:
-    """真实架构模型(组件/owns/dependsOn)。"""
-    kb_id = proj.get("kbProjectId") or proj.get("kb_project_id") or ""
-    model = call_kb("architecture.model", projectId=kb_id) or {}
-    return model if isinstance(model, dict) else {}
+def _self_model(proj: dict) -> dict:
+    """自管架构模型(arch_components + 图谱依赖归并, common.build_*)。"""
+    from ..common import build_architecture_model
+    return build_architecture_model(proj.get("rootPath") or "", proj.get("id"))
 
 
-def _file_changes(proj: dict, call_kb) -> dict:
-    """工作区真实文件变更(与 source_files 哈希对比)。用 KB 项目 id。"""
-    kb_id = proj.get("kbProjectId") or proj.get("kb_project_id") or ""
-    res = call_kb("project.checkFileChanges", id=kb_id) or {}
-    return res if isinstance(res, dict) else {}
+def _file_changes(proj: dict) -> dict:
+    """工作区真实文件变更(自管): git status 对比基线 commit(arch_git)。"""
+    from . import arch_git
+    try:
+        d = arch_git.diff_worktree(proj, base=proj.get("baselineCommit") or "")
+        return {"hasChanges": bool(d.get("filesChanged")),
+                "added": d.get("added") or [], "modified": d.get("modified") or [],
+                "deleted": d.get("deleted") or []}
+    except Exception:  # noqa: BLE001
+        return {"hasChanges": False, "added": [], "modified": [], "deleted": []}
 
 
 def _map_files_to_components(files, comps):
@@ -61,24 +55,20 @@ def _map_files_to_components(files, comps):
     return out
 
 
-def _diff_changes(proj: dict, call_kb) -> dict:
-    """版本差异(added/modified/deleted)真实数据。"""
-    kb_id = proj.get("kbProjectId") or proj.get("kb_project_id") or ""
-    res = call_kb("version.diff", projectId=kb_id) or {}
-    return res if isinstance(res, dict) else {}
+def _diff_changes(proj: dict) -> dict:
+    """版本差异(自管): 同 _file_changes(git 对比基线 commit)。"""
+    return _file_changes(proj)
 
 
 @router.post("/arch/change")
 async def compute_arch_change(request: Request):
     body = await request.json()
-    if _kb_degraded(body.get("root"), body.get("project")):
-        return err(400, KB_NOTE)
-    proj, kb_id, call_kb = _resolve(body.get("root"), body.get("project"))
-    if not kb_id:
-        return err(400, KB_NOTE)
-    model = _kb_model(proj, call_kb)
+    proj, _, _ = _resolve(body.get("root"), body.get("project"))
+    if not proj:
+        return err(400, "未定位到项目")
+    model = _self_model(proj)
     comps = model.get("components") or []
-    changes = _file_changes(proj, call_kb)
+    changes = _file_changes(proj)
     added = changes.get("added") or []
     modified = changes.get("modified") or []
     deleted = changes.get("deleted") or []
@@ -136,16 +126,14 @@ async def compute_arch_change(request: Request):
 
 @router.get("/arch/staging")
 async def get_staging(root: Optional[str] = None, project: Optional[str] = None):
-    if _kb_degraded(root, project):
-        return err(400, KB_NOTE)
-    proj, kb_id, call_kb = _resolve(root, project)
-    if not kb_id:
-        return err(400, KB_NOTE)
-    changes = _file_changes(proj, call_kb)
+    proj, _, _ = _resolve(root, project)
+    if not proj:
+        return err(400, "未定位到项目")
+    changes = _file_changes(proj)
     added = changes.get("added") or []
     modified = changes.get("modified") or []
     deleted = changes.get("deleted") or []
-    model = _kb_model(proj, call_kb)
+    model = _self_model(proj)
     comps = model.get("components") or []
     affected = sorted({meta["name"] for meta in
                        (list(_map_files_to_components(added + modified, comps).values())
@@ -171,12 +159,10 @@ async def get_staging(root: Optional[str] = None, project: Optional[str] = None)
 @router.post("/arch/staging/scan")
 async def run_staging_scan(request: Request):
     body = await request.json() or {}
-    if _kb_degraded(body.get("root"), body.get("project")):
-        return err(400, KB_NOTE)
-    proj, kb_id, call_kb = _resolve(body.get("root"), body.get("project"))
-    if not kb_id:
-        return err(400, KB_NOTE)
-    changes = _file_changes(proj, call_kb)
+    proj, _, _ = _resolve(body.get("root"), body.get("project"))
+    if not proj:
+        return err(400, "未定位到项目")
+    changes = _file_changes(proj)
     added = changes.get("added") or []
     modified = changes.get("modified") or []
     deleted = changes.get("deleted") or []
@@ -208,25 +194,21 @@ async def run_staging_scan(request: Request):
 
 
 @router.get("/arch/staging/log")
-async def get_staging_log(root: Optional[str] = None, project: Optional[str] = None):
-    if _kb_degraded(root, project):
-        return err(400, KB_NOTE)
+async def get_staging_log():
     return ok(store.StagingScansStore.all())
 
 
 @router.get("/arch/staging/compliance")
 async def get_staging_compliance(root: Optional[str] = None, project: Optional[str] = None):
-    if _kb_degraded(root, project):
-        return err(400, KB_NOTE)
-    proj, kb_id, call_kb = _resolve(root, project)
-    if not kb_id:
-        return err(400, KB_NOTE)
-    changes = _file_changes(proj, call_kb)
+    proj, _, _ = _resolve(root, project)
+    if not proj:
+        return err(400, "未定位到项目")
+    changes = _file_changes(proj)
     added = changes.get("added") or []
     modified = changes.get("modified") or []
     deleted = changes.get("deleted") or []
     total = len(added) + len(modified) + len(deleted)
-    model = _kb_model(proj, call_kb)
+    model = _self_model(proj)
     comps = model.get("components") or []
     # 真实检查：文件是否全部归属于已知组件；删除文件是否越界
     known_files = {f for c in comps for f in (c.get("owns") or [])}
@@ -251,25 +233,17 @@ async def set_staging_gate(request: Request):
 @router.post("/arch/baseline/verify")
 async def verify_baseline(request: Request):
     body = await request.json() or {}
-    if _kb_degraded(body.get("root"), body.get("project")):
-        return err(400, KB_NOTE)
-    proj, kb_id, call_kb = _resolve(body.get("root"), body.get("project"))
-    # 去基线化: 基准 = 项目 baselineCommit > 自管图谱基线锚(KB 版本表冻结)
-    from ..sem.graph_collect import read_graph_baseline
-    from ..sem.symbols import resolve_base_commit
-    base_head = resolve_base_commit(body.get("root"), body.get("project")) or ""
-    baseline = {"id": (proj.get("baselineId") or ""), "head": base_head} if base_head else {}
-    if not base_head:
-        anchor = read_graph_baseline(proj.get("id") or "") or {}
-        base_head = anchor.get("head") or ""
-    changes = _file_changes(proj, call_kb)
+    proj, _, _ = _resolve(body.get("root"), body.get("project"))
+    if not proj:
+        return err(400, "未定位到项目")
+    changes = _file_changes(proj)
     dirty = bool(changes.get("hasChanges"))
     return ok({
         "verify": ("ok - 工作区与基线一致" if not dirty
                    else f"检测到 {len(changes.get('added') or [])} 新增 / {len(changes.get('modified') or [])} 修改 / "
                         f"{len(changes.get('deleted') or [])} 删除，工作区偏离基线"),
         "verifyOk": not dirty,
-        "baselineId": baseline.get("id") or proj.get("baselineId") or "",
+        "baselineId": proj.get("baselineId") or "",
     })
 
 
@@ -288,35 +262,34 @@ def _load_spec():
     }
 
 
-def _spec_from_kb(root=None, project=None):
-    """从 KB 真实数据推导规约：
-    - 显式规则: 项目内规约文档(CONVENTIONS/ARCHITECTURE/README 等) + KB knowledge_docs
-    - 派生规则: 基于 KB 真实组件模型推导(组件边界/依赖方向/分层约束)
+def _spec_from_self(root=None, project=None):
+    """规约推导(数据主权批E: 自管)：
+    - 显式规则: 项目规约文档(CONVENTIONS/ARCHITECTURE/README) + 自管命名规约表
+    - 派生规则: 基于自管组件模型推导(组件边界/依赖方向/分层约束)
     """
-    from .knowledge import _project_ctx
-    from ..kb_gateway import call_kb
-    _, degraded = _project_ctx(root, project)
-    if degraded:
-        return None
     proj = _resolve(root, project)[0]
     if not proj:
         return None
-    kb_id = proj.get("kbProjectId") or proj.get("kb_project_id") or ""
-    model = _kb_model(proj, call_kb)
+    model = _self_model(proj)
     comps = model.get("components") or []
 
-    # ── 显式规则: 项目规约文档 + KB 文档 ──
+    # ── 显式规则: 项目规约文档 + 自管命名规约 ──
     explicit: list = []
     try:
-        docs = call_kb("knowledge.listDocs") or []
-        for d in docs:
-            title = (d.get("title") or d.get("id") or "").lower()
-            if any(k in title for k in ("spec", "规约", "convention", "architecture", "rule")):
-                explicit.append({
-                    "id": f"kbdoc-{d.get('id')}", "text": f"KB 文档规约：{(d.get('title') or d.get('id'))}",
-                    "level": "major", "source": "explicit",
-                })
-    except Exception:
+        from ..store.base import _target_db
+        db = _target_db("arch_naming_conventions", proj.get("id") or "")
+        rows = db.fetchall(
+            "SELECT rule_text, source FROM arch_naming_conventions"
+            " WHERE project_id=? AND status='active' ORDER BY rowid",
+            (proj.get("id") or "",))
+        for r in (rows or []):
+            tag = {"induced": "派生规约", "manual": "人工规约"}.get(r["source"], r["source"])
+            explicit.append({
+                "id": f"conv-{abs(hash(r['rule_text'])) % 10 ** 8}",
+                "text": f"{tag}：{r['rule_text']}",
+                "level": "major", "source": "explicit",
+            })
+    except Exception:  # noqa: BLE001
         pass
 
     # ── 派生规则: 组件边界与依赖方向(真实模型) ──
@@ -352,26 +325,22 @@ def _spec_from_kb(root=None, project=None):
 
 @router.get("/spec")
 async def get_spec(root: Optional[str] = None, project: Optional[str] = None):
-    if _kb_degraded(root, project):
-        return err(400, KB_NOTE)
-    # 已确认的规约(用户落地)优先；否则由 KB 真实数据动态推导
+    # 已确认的规约(用户落地)优先；否则由自管数据动态推导
     confirmed = _load_spec()
     if confirmed:
         return ok(confirmed)
-    derived = _spec_from_kb(root, project)
+    derived = _spec_from_self(root, project)
     if derived is None:
-        return err(502, "KB 能力不足：无法从 KB 推导规约(未关联知识库或 KB 模型不可达)。")
+        return err(400, "未定位到项目，无法推导规约。")
     return ok(derived)
 
 
 @router.post("/spec/confirm")
 async def confirm_spec(request: Request):
     body = await request.json() or {}
-    if _kb_degraded(body.get("root"), body.get("project")):
-        return err(400, KB_NOTE)
-    spec = _load_spec() or _spec_from_kb(body.get("root"), body.get("project"))
+    spec = _load_spec() or _spec_from_self(body.get("root"), body.get("project"))
     if spec is None:
-        return err(502, "KB 能力不足：无法确认规约(未关联知识库或 KB 模型不可达)。")
+        return err(400, "未定位到项目，无法确认规约。")
     db = store._db()
     db.execute(
         "INSERT INTO arch_specs (version, overrides, explicit_rules, derived_rules, changelog, updated_at) "

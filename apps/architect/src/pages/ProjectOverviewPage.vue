@@ -11,7 +11,6 @@ import { projectService } from '@/services/project-service'
 import { sessionService, type DigestInfo } from '@/services/session-service'
 import { semanticAssetService, type ComponentNamingStatus } from '@/services/semantic-asset-service'
 import type { KbMatchResult, ProjectOverview, ProjectOverviewComponent } from '@/types'
-import KbLinkDialog from '@/components/project/KbLinkDialog.vue'
 import BaselineInitCard from '@/components/overview/BaselineInitCard.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useRouter } from 'vue-router'
@@ -88,50 +87,11 @@ async function load() {
 
 onMounted(load)
 
-const showLinkDialog = ref(false)
-const linkMatch = ref<KbMatchResult | null>(null)
-const matching = ref(false)
-const unlinking = ref(false)
-
-async function openLinkDialog() {
-  matching.value = true
-  try {
-    linkMatch.value = await projectService.matchKbProjects()
-  } catch {
-    linkMatch.value = null
-  } finally {
-    matching.value = false
-    showLinkDialog.value = true
-  }
-}
-
-function closeLinkDialog() {
-  showLinkDialog.value = false
-  load()
-}
-
-async function askUnlink() {
-  if (!(await dialog.confirm(t('overviewHome.unlinkConfirm'), { danger: true }))) return
-  unlinking.value = true
-  try {
-    await useArchProjectStore().unlinkKb()
-    await load()
-  } catch {
-    error.value = t('overviewHome.loadFailed')
-  } finally {
-    unlinking.value = false
-  }
-}
-
 const diffSummary = computed(() => [
   { label: t('overviewHome.added'), value: overview.value?.diff.added ?? 0, cls: 'text-ctp-green' },
   { label: t('overviewHome.modified'), value: overview.value?.diff.modified ?? 0, cls: 'text-ctp-blue' },
   { label: t('overviewHome.deleted'), value: overview.value?.diff.deleted ?? 0, cls: 'text-ctp-red' },
 ])
-
-/** 已绑定但 KB 端项目已被删除（后端打开页时随 /project/overview 检测） */
-const kbMissing = computed(() =>
-  !!overview.value?.kb.linked && overview.value?.kb.kbExists === false)
 
 function statusLabel(s: string): string {
   if (s === 'A') return t('overviewHome.stAdded')
@@ -338,125 +298,6 @@ onUnmounted(stopNamingPoll)
       <!-- ①.5 基线设定(git / codegraph / 自管基线状态识别 + 操作按钮组) -->
       <BaselineInitCard />
 
-      <!-- ② 知识库关联 -->
-      <section class="panel p-5">
-        <div class="flex items-center gap-2 mb-4">
-          <DocumentTextIcon class="w-4 h-4 text-ctp-peach" />
-          <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.kbLink') }}</span>
-        </div>
-        <div v-if="overview.kb.linked" class="text-sm text-ctp-text">
-          <div class="flex items-center gap-2">
-            <span
-              class="inline-flex items-center gap-1.5 text-xs"
-              :class="kbMissing ? 'text-ctp-red' : 'text-ctp-green'"
-            >
-              <ExclamationTriangleIcon v-if="kbMissing" class="w-4 h-4" />
-              <CheckCircleIcon v-else class="w-4 h-4" />
-              {{ kbMissing ? t('overviewHome.kbMissing') : t('overviewHome.kbLinked') }}
-            </span>
-            <button
-              class="btn btn-blue !px-2.5 !py-1 text-xs shrink-0"
-              :disabled="matching"
-              @click="openLinkDialog"
-            >
-              <MagnifyingGlassIcon class="w-3.5 h-3.5" />
-              {{ matching ? t('app.loading') : (kbMissing ? t('overviewHome.relink') : t('overviewHome.switchLink')) }}
-            </button>
-            <button
-              class="btn btn-ghost !px-2.5 !py-1 text-xs shrink-0"
-              :disabled="unlinking"
-              @click="askUnlink"
-            >
-              {{ unlinking ? t('app.loading') : t('overviewHome.unlink') }}
-            </button>
-          </div>
-          <!-- KB 端已删除警示条 -->
-          <div v-if="kbMissing" class="mt-2 rounded-lg border border-ctp-red/40 bg-ctp-red/10 px-3 py-2 text-xs space-y-1">
-            <p class="text-ctp-red font-medium">
-              {{ t('overviewHome.kbMissingHint', { id: overview.kb.kbProjectId || '' }) }}
-            </p>
-            <p class="text-ctp-subtext0">{{ t('overviewHome.kbMissingAction') }}</p>
-          </div>
-          <p v-else-if="overview.kb.kbReachable === false" class="mt-2 text-xs text-ctp-peach">
-            {{ t('overviewHome.kbUnreachable') }}
-          </p>
-          <!-- 基线视图状态（对外生效任务数 · 覆盖率 · 更新提示） -->
-          <div
-            v-else
-            class="mt-2 flex items-center gap-2 text-xs flex-wrap"
-            :class="(overview.kb.kbView?.mounted ?? 0) === 0 ? 'text-ctp-peach' : 'text-ctp-subtext1'"
-          >
-            <span class="text-ctp-overlay1 shrink-0">{{ t('overviewHome.kbView') }}</span>
-            <template v-if="(overview.kb.kbView?.mounted ?? 0) > 0">
-              <span class="font-mono">{{ t('overviewHome.kbViewMounted', { count: overview.kb.kbView?.mounted ?? 0 }) }}</span>
-              <span class="text-ctp-surface1">|</span>
-              <span class="text-ctp-overlay1">{{ t('overviewHome.kbViewCoverage') }}</span>
-              <span class="font-mono">{{ overview.kb.kbView?.coveragePct ?? '—' }}%</span>
-              <span class="text-ctp-surface1">|</span>
-              <span class="text-ctp-overlay1">v{{ overview.kb.kbView?.viewVersion ?? 0 }}</span>
-            </template>
-            <span v-else>{{ t('overviewHome.kbViewEmpty') }}</span>
-            <span
-              v-if="overview.kb.kbView?.stale"
-              class="chip bg-ctp-peach/15 text-ctp-peach shrink-0"
-              :title="t('overviewHome.kbViewStaleHint')"
-            >{{ t('overviewHome.kbViewStale') }}</span>
-          </div>
-          <div class="mt-2 space-y-1">
-            <div v-if="overview.kb.kbProjectId" class="text-xs text-ctp-subtext1">
-              <span class="text-ctp-overlay1">{{ t('overviewHome.kbProject') }}:</span>
-              <span class="font-mono">{{ overview.kb.kbProjectId }}</span>
-            </div>
-            <div v-if="overview.kb.kbSourceDir" class="text-xs text-ctp-subtext1">
-              <span class="text-ctp-overlay1">{{ t('overviewHome.kbSource') }}:</span>
-              <span class="font-mono break-all">{{ overview.kb.kbSourceDir }}</span>
-            </div>
-          </div>
-          <!-- 基线信息(并入知识库关联组，不单列)：基线 commit + 分支 + 仓库 -->
-          <div class="mt-3 pt-2.5 border-t border-ctp-surface0/70 flex items-center gap-2 text-xs flex-wrap">
-            <span class="text-ctp-overlay1 shrink-0">{{ t('overviewHome.baseline') }}</span>
-            <template v-if="overview.baseline.exists">
-              <span class="font-mono text-ctp-text">{{ overview.baseline.commit?.slice(0, 8) }}</span>
-              <span v-if="overview.baseline.id" class="font-mono text-ctp-overlay1">({{ overview.baseline.id }})</span>
-            </template>
-            <span v-else class="text-ctp-subtext0">{{ t('overviewHome.noBaseline') }}</span>
-            <span class="text-ctp-surface1 shrink-0">|</span>
-            <span class="text-ctp-overlay1 shrink-0">{{ t('overviewHome.branch') }}</span>
-            <span class="font-mono text-ctp-text">{{ overview.head.branch || overview.branch || 'main' }}</span>
-            <span class="text-ctp-surface1 shrink-0">|</span>
-            <span class="text-ctp-overlay1 shrink-0">{{ t('overviewHome.repo') }}</span>
-            <span
-              class="chip shrink-0"
-              :class="overview.repoKind === 'remote' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext1'"
-              :title="overview.repoKind === 'remote' ? t('overviewHome.repoRemoteHint') : t('overviewHome.repoLocalHint')"
-            >{{ overview.repoKind === 'remote' ? t('overviewHome.repoRemote') : t('overviewHome.repoLocal') }}</span>
-            <span
-              class="font-mono text-ctp-text truncate max-w-[40ch]"
-              :title="overview.repoKind === 'remote' ? overview.remoteUrl : overview.workDir"
-            >{{ overview.repoKind === 'remote' ? overview.remoteUrl : overview.workDir }}</span>
-          </div>
-        </div>
-        <div v-else class="text-sm text-ctp-subtext0 flex items-center gap-1.5 flex-wrap">
-          <span class="inline-flex items-center gap-1.5 text-ctp-red text-xs">
-            <XCircleIcon class="w-4 h-4" /> {{ t('overviewHome.kbNotLinked') }}
-          </span>
-          <button
-            class="btn btn-blue !px-2.5 !py-1 text-xs ml-2 shrink-0"
-            :disabled="matching"
-            @click="openLinkDialog"
-          >
-            <MagnifyingGlassIcon class="w-3.5 h-3.5" />
-            {{ matching ? t('app.loading') : t('overviewHome.findLink') }}
-          </button>
-          <span class="text-xs text-ctp-subtext0">{{ t('overviewHome.noBaseline') }}</span>
-        </div>
-      </section>
-
-      <KbLinkDialog
-        v-if="showLinkDialog"
-        :match-result="linkMatch"
-        @close="closeLinkDialog"
-      />
 
       <!-- ③ 组件变更情况（组件树父子层级 · 逐层开合 · 含未归属分组 · 可展开到变更文件） -->
       <section class="panel p-4">
@@ -480,7 +321,7 @@ onUnmounted(stopNamingPoll)
             @click="toggleAllComps"
           >{{ allExpanded ? t('overviewHome.collapseAll') : t('overviewHome.expandAll') }}</button>
         </div>
-        <div v-if="overview.kb.linked && compTree.length" class="space-y-1">
+        <div v-if="compTree.length" class="space-y-1">
           <template v-for="node in visibleComps" :key="node.c.id">
             <div
               class="flex items-center gap-1.5 border border-ctp-surface0 rounded-lg px-3 py-2"
@@ -529,8 +370,7 @@ onUnmounted(stopNamingPoll)
             </div>
           </template>
         </div>
-        <p v-if="!overview.kb.linked" class="text-xs text-ctp-subtext0">{{ t('overviewHome.noComponentNeedKb') }}</p>
-        <p v-else-if="!compTree.length" class="text-xs text-ctp-subtext0">{{ t('overviewHome.noComponentChange') }}</p>
+        <p v-if="!compTree.length" class="text-xs text-ctp-subtext0">{{ t('overviewHome.noComponentChange') }}</p>
       </section>
 
       <!-- ④ 代码变更情况（对比基线） -->
@@ -540,7 +380,7 @@ onUnmounted(stopNamingPoll)
           <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.codeChanges') }}</span>
         </div>
 
-        <template v-if="overview.kb.linked">
+        <template>
         <div class="flex gap-4 mb-3 text-sm">
           <span class="text-ctp-subtext1 flex items-center gap-1">
             <DocumentTextIcon class="w-4 h-4 text-ctp-overlay0" />{{ overview.diff.filesChanged }} {{ t('overviewHome.filesChanged') }}

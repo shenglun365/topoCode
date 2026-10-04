@@ -133,28 +133,6 @@ class CommunityGroupTest(unittest.TestCase):
         self.assertEqual(cat["source"], "empty")
         self.assertIn("collect-graph", cat["note"])
 
-    def test_catalog_source_switch_kb_mode_calls_kb(self):
-        from topoone_app_architect.store.base import _target_db
-        db = _target_db("arch_settings", self.PID)
-        db.execute(
-            "INSERT INTO arch_settings(key,value) VALUES('arch.catalogSource',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (json.dumps({"mode": "kb"}),))
-        db.commit()
-        catalog._cache.clear()
-        try:
-            with patch("topoone_app_architect.common.build_component_catalog",
-                       return_value={"components": [
-                           {"id": "kbid1", "name": "k", "owns": ["x.py"]}]}), \
-                 patch("topoone_app_architect.common.build_architecture_model",
-                       return_value={"components": []}):
-                cat = catalog.component_catalog(None, self.PID, force=True)
-            self.assertEqual(cat["source"], "catalog")
-            self.assertIn("kbid1", cat["byId"])
-        finally:
-            db.execute("DELETE FROM arch_settings WHERE key='arch.catalogSource'")
-            db.commit()
-            catalog._cache.clear()
 
 
 if __name__ == "__main__":

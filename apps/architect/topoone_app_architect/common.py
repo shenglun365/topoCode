@@ -55,72 +55,69 @@ class KbUnavailableError(Exception):
     """KB 调用失败/不可达/能力不足 —— 调用方应转 502 并给出明确提示。"""
 
 
-def build_architecture_model(root=None, project=None, include_code_mappings: bool = False) -> dict:
-    """返回项目真实架构模型。
+def _self_components(root=None, project=None) -> list:
+    """自管组件目录(数据主权): arch_components 最新 rev + 组件级依赖聚合。
 
-    正式方案(KB-REQ-17)：项目已关联 KB 且基线可访问时，经 KbGateway 调 KB
-    `/zmq/architecture.model` 取真实模型(组件来自分析图社区、依赖走 imports
-    边、change 归因到版本差异)。
-
-    语义：
-    - 项目未绑定 KB 基线(降级态) → 返回空模型(合法状态，接口带 note 提示关联)；
-    - KB 调用失败/不可达/方法缺失 → 抛 KbUnavailableError，路由转 502(不再静默当空)。
+    依赖 = 自管图谱 imports 边(file→file) 按组件 owns 归并(组件级 dependsOn)。
     """
+    from .sem.catalog import _fetch_arch_components
+    from .sem.symbols import resolve_base_commit
+    from .store.graph import GraphStore
+    proj = None
     try:
         from .arch_routes import project as _project_mod
-        from .kb_gateway import call_kb
-        if _project_mod.kb_degraded(root, project):
-            return empty_architecture_model()
         proj = _project_mod.resolve_project(root, project)
-        kb_id = (proj or {}).get("kbProjectId") or (proj or {}).get("kb_project_id")
-        if not kb_id:
-            return empty_architecture_model()
-        model = call_kb("architecture.model", projectId=kb_id)
-        if model is None:
-            raise KbUnavailableError("KB 不可达：architecture.model 调用失败，无法读取组件模型。")
-        if not isinstance(model, dict):
-            raise KbUnavailableError("KB 能力不足：architecture.model 返回了非模型结构。")
-        for k in _MODEL_KEYS:
-            model.setdefault(k, [])
-        if include_code_mappings:
-            model["codeMappings"] = _derive_code_mappings(model)
-        else:
-            model.pop("codeMappings", None)
-        return model
-    except KbUnavailableError:
-        raise
-    except Exception as e:
-        raise KbUnavailableError(f"KB 调用失败：{e}")
+    except Exception:  # noqa: BLE001
+        proj = None
+    pid = (proj or {}).get("id") or (project or "")
+    comps = _fetch_arch_components(pid)
+    if not comps:
+        return []
+    file2comp = {}
+    for c in comps:
+        for f in (c.get("owns") or []):
+            file2comp[f] = c["id"]
+    deps: dict = {}
+    head = resolve_base_commit(root, pid)
+    if head:
+        try:
+            for e in GraphStore.edges(pid, f"baseline:{head}", kind="imports", limit=100000):
+                s = (e.get("source") or "")
+                t = (e.get("target") or "")
+                s = s[5:] if s.startswith("file:") else ""
+                t = t[5:] if t.startswith("file:") else ""
+                cs, ct = file2comp.get(s), file2comp.get(t)
+                if cs and ct and cs != ct:
+                    deps.setdefault(cs, set()).add(ct)
+        except Exception:  # noqa: BLE001
+            pass
+    return [{
+        "id": c["id"], "name": c.get("name") or c["id"],
+        "owns": c.get("owns") or [], "parentId": c.get("parentId") or "",
+        "level": "L0", "edgeType": "UNIFIED",
+        "dependsOn": sorted(deps.get(c["id"], set())),
+        "desc": c.get("summary") or "",
+    } for c in comps]
+
+
+def build_architecture_model(root=None, project=None, include_code_mappings: bool = False) -> dict:
+    """返回项目架构模型(数据主权批E: 自管独立, 不经 KB)。
+
+    组件 = arch_components 最新 rev(社区分组); 依赖 = 自管图谱 imports 边
+    按组件归并; 其余分析域(erTables/executionFlows 等)一期为空, 待按新思路
+    重建(用户裁决: 切断 KB 联系, architect 独立完成)。
+    """
+    model = {k: [] for k in _MODEL_KEYS}
+    model["components"] = _self_components(root, project)
+    if include_code_mappings:
+        model["codeMappings"] = _derive_code_mappings(model)
+    return model
 
 
 def build_component_catalog(root=None, project=None) -> dict:
-    """组件目录(选择器专用)：经 KB `/zmq/architecture.catalog` 取跨分析类型/层级的组件。
-
-    返回 { components, edgeTypes, levels, taskId }。
-    - 项目未绑定 KB 基线(降级态) → 空目录(合法状态，接口提示关联)；
-    - KB 调用失败/不可达 → 抛 KbUnavailableError，路由转 502。
-    """
-    try:
-        from .arch_routes import project as _project_mod
-        from .kb_gateway import call_kb
-        if _project_mod.kb_degraded(root, project):
-            return {"components": [], "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None}
-        proj = _project_mod.resolve_project(root, project)
-        kb_id = (proj or {}).get("kbProjectId") or (proj or {}).get("kb_project_id")
-        if not kb_id:
-            return {"components": [], "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None}
-        catalog = call_kb("architecture.catalog", projectId=kb_id)
-        if catalog is None:
-            raise KbUnavailableError("KB 不可达：architecture.catalog 调用失败，无法读取组件目录。")
-        if not isinstance(catalog, dict):
-            raise KbUnavailableError("KB 能力不足：architecture.catalog 返回了非目录结构。")
-        catalog.setdefault("components", [])
-        catalog.setdefault("edgeTypes", ["UNIFIED"])
-        catalog.setdefault("levels", ["L0", "L1"])
-        catalog.setdefault("taskId", None)
-        return catalog
-    except KbUnavailableError:
-        raise
-    except Exception as e:
-        raise KbUnavailableError(f"KB 调用失败：{e}")
+    """组件目录(选择器专用, 数据主权批E: 自管独立, 不经 KB)。"""
+    return {
+        "components": _self_components(root, project),
+        "edgeTypes": ["UNIFIED"], "levels": ["L0", "L1"], "taskId": None,
+    }
 

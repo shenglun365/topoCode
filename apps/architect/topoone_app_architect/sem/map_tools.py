@@ -200,29 +200,15 @@ def tool_rules(project: Optional[str] = None) -> str:
     pid = _pid_of(proj)
     out = [_md_header("规约全集", proj), "编码前必读；冲突时以人工覆盖层 > 用户显式 > 派生约束。\n"]
 
-    out.append("## 编码规约（KB 文档）\n")
-    try:
-        from ..kb_gateway import call_kb
-        docs = call_kb("knowledge.listDocs") or []
-        found = False
-        for d in docs:
-            title = (d.get("title") or "").strip()
-            if any(k in title.lower() for k in ("规约", "convention", "coding", "rule", "style", "spec", "约定")):
-                found = True
-                out.append(f"### {title}\n")
-                out.append((d.get("content") or d.get("text") or "").strip()[:4000])
-        if not found:
-            out.append("(KB 无规约类文档)")
-    except Exception as e:  # noqa: BLE001
-        out.append(f"(KB 不可达: {e})")
-
+    out.append("## 编码规约（自管，architect 独立维护）\n")
     try:
         from .. import store
         convs = store.NamingConventionStore.list(pid, status="active") or []
         if convs:
-            out.append("\n## 命名规约（active）\n")
             for c in convs[:50]:
                 out.append(f"- [{c.get('scenario','')}] {c.get('ruleText') or c.get('rule') or c.get('text') or ''}")
+        else:
+            out.append("(自管规约为空——可在规约工作台人工登记或由提取派生)")
         glos = store.GlossaryStore.list(pid) or []
         if glos:
             out.append("\n## 词汇表\n")

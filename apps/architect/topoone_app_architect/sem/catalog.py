@@ -26,23 +26,6 @@ _CATALOG_TTL = 60.0
 _cache: Dict[Tuple[str, str], Tuple[float, dict]] = {}  # (root, project) -> (ts, cat)
 
 
-def _catalog_source() -> str:
-    """组件目录源开关（数据主权批B）：arch_only(默认, 自有社区组件) | kb | merge。
-
-    用户裁决：KB 与 architect 并行各存组件视角、互不影响——默认读自管
-    arch_components(community_group 作业产物)；kb/merge 为兼容/实验位。
-    """
-    try:
-        from .. import ctx
-        row = ctx.db().fetchone(
-            "SELECT value FROM arch_settings WHERE key = 'arch.catalogSource'")
-        if row and row.get("value"):
-            return (json.loads(row["value"]) or {}).get("mode") or "arch_only"
-    except Exception:  # noqa: BLE001
-        pass
-    return "arch_only"
-
-
 def _fetch_arch_components(project: Optional[str]) -> List[dict]:
     """自管组件目录（最新 rev）→ catalog 组件形状（{id,name,owns,parentId}）。"""
     if not project:
@@ -59,57 +42,15 @@ def _fetch_arch_components(project: Optional[str]) -> List[dict]:
 
 
 def _fetch_catalog(root: Optional[str], project: Optional[str]) -> Tuple[List[dict], str, str]:
-    """→ (components, source, note)。source: arch | catalog | model | merged | empty。
+    """→ (components, source, note)。source: arch | empty。
 
-    源开关 _catalog_source()：arch_only → 仅自管社区组件（KB 缺席照常）；
-    kb → 既有 KB 双源链；merge → arch 优先并集（按 id 去重，arch 优先）。
-    KB 双源合并语义（与原 scope._comm_components 一致）：catalog 与 model
-    取并集、按 id 去重（catalog 优先——model 拍平且 id 可能重复，仅补缺）。
+    数据主权批E: 仅自管社区组件(arch_only, KB 缺席照常)——kb/merge 双源
+    链已切断(用户裁决: 全部切断与 KB 的联系, architect 独立完成)。
     """
-    mode = _catalog_source()
-    arch_comps = _fetch_arch_components(project) if mode in ("arch_only", "merge") else []
-    if mode == "arch_only":
-        if arch_comps:
-            return arch_comps, "arch", ""
-        return [], "empty", "自有组件目录为空(先运行 collect-graph 采集 + community-group 分组)"
-    from ..common import build_architecture_model, build_component_catalog
-    comps: List[dict] = []
-    seen: set = set()
-    source = "empty"
-    try:
-        cat = build_component_catalog(root, project)
-        for c in (cat.get("components") or []):
-            cid = c.get("id")
-            if cid and cid not in seen:
-                seen.add(cid)
-                comps.append(c)
-        if comps:
-            source = "catalog"
-    except Exception as e:
-        logger.warning("[catalog] architecture.catalog 失败: %s", e)
-    try:
-        model = build_architecture_model(root, project)
-        extra = 0
-        for c in (model.get("components") or []):
-            cid = c.get("id")
-            if cid and cid not in seen:
-                seen.add(cid)
-                comps.append(c)
-                extra += 1
-        if extra:
-            source = "merged" if source == "catalog" else "model"
-    except Exception as e:
-        logger.warning("[catalog] architecture.model 兜底失败: %s", e)
-    if mode == "merge" and arch_comps:
-        merged = list(arch_comps)
-        seen = {c.get("id") for c in arch_comps}
-        for c in comps:
-            if c.get("id") and c["id"] not in seen:
-                merged.append(c)
-        comps = merged
-        source = f"{source}+arch" if source != "empty" else "arch"
-    note = "" if comps else "KB 无组件数据（未关联基线或调用失败）"
-    return comps, source, note
+    arch_comps = _fetch_arch_components(project)
+    if arch_comps:
+        return arch_comps, "arch", ""
+    return [], "empty", "自有组件目录为空(先运行 collect-graph 采集 + community-group 分组)"
 
 
 def _depths(by_id: Dict[str, dict]) -> Dict[str, int]:

@@ -135,6 +135,12 @@ async function refreshBaseline() {
       <span v-if="baselineBehind" class="text-ctp-peach shrink-0">
         {{ t('overviewHome.baselineInit.baselineBehind', { n: cg?.state?.staleCount ?? 0 }) }}
       </span>
+      <span
+        v-if="git?.isRepo"
+        class="chip shrink-0"
+        :class="git?.remoteUrl ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext1'"
+        :title="git?.remoteUrl || git?.root"
+      >{{ git?.remoteUrl ? t('overviewHome.baselineInit.repoRemote') : t('overviewHome.baselineInit.repoLocal') }}</span>
       <span v-if="baseMsg" class="text-ctp-overlay0 truncate max-w-[16rem]" :title="baseMsg">{{ baseMsg }}</span>
       <span class="flex-1" />
       <button

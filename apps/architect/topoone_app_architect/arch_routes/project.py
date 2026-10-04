@@ -321,7 +321,8 @@ async def git_info(request: Request):
         return ok({"isRepo": False, "root": root})
     st = arch_git.repo_status(root)
     return ok({"isRepo": True, "root": root, "branch": st.get("branch", ""),
-               "head": st.get("commit", ""), "dirty": st.get("dirty", False)})
+               "head": st.get("commit", ""), "dirty": st.get("dirty", False),
+               "remoteUrl": arch_git.remote_url(root)})
 
 
 @router.post("/project/init-git")
@@ -587,44 +588,10 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
     if not _looks_like_remote_url(remote):
         remote = ""
     st = arch_git.repo_status(work_dir)
-    # 基线提交兜底：存量数据为空时按 baselineId 从 KB 版本取 head，并惰性回写
     baseline_head = proj.get("baselineCommit") or ""
-    if not baseline_head and proj.get("kbProjectId") and proj.get("baselineId"):
-        baseline_head = _kb_baseline_head(proj["kbProjectId"], proj["baselineId"])
-        if baseline_head:
-            try:
-                store.ProjectsStore.update(proj["id"], {"baselineCommit": baseline_head, "updatedAt": _ts()})
-                proj = {**proj, "baselineCommit": baseline_head}
-            except Exception:
-                pass
     diff = arch_git.diff_worktree(proj, base=baseline_head) if work_dir else {
         "filesChanged": 0, "added": 0, "modified": 0, "deleted": 0,
         "deletedHighRisk": False, "files": [], "byComponent": []}
-    # KB 绑定健康检测：architect 端已绑定，但 KB 端项目可能已被删除
-    # (kbReachable=None 表示 KB 服务不可达，无法判定；kbExists=False 才是"KB 端已删除")
-    kb_health = {"kbReachable": None, "kbExists": None, "kbProjectName": ""}
-    kb_view = {"mounted": 0, "coveragePct": None, "viewVersion": 0, "stale": False}
-    if proj.get("kbProjectId"):
-        rows = _kb_call("project.list")
-        kb_health["kbReachable"] = rows is not None
-        matched = next((p for p in (rows or []) if p.get("id") == proj["kbProjectId"]), None)
-        if rows is not None:
-            kb_health["kbExists"] = matched is not None
-        kb_health["kbProjectName"] = (matched or {}).get("name") or ""
-        # 基线视图摘要：对外生效任务数/覆盖率/stale（architect 不感知任务，仅看视图代际）
-        if matched is not None:
-            try:
-                from ..kb_gateway import call_kb
-                summary = call_kb("view.summary", projectId=proj["kbProjectId"])
-            except Exception:
-                summary = None
-            if isinstance(summary, dict):
-                kb_view = {
-                    "mounted": len(summary.get("mountedTaskIds") or []),
-                    "coveragePct": summary.get("coveragePct"),
-                    "viewVersion": summary.get("viewVersion") or 0,
-                    "stale": bool(summary.get("stale")),
-                }
     return ok({
         "workDir": work_dir,
         # 仅真实远端 URL(git origin)；本地仓库为空串，仓库类型见 repoKind
@@ -635,15 +602,8 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
         "head": {"commit": st.get("commit") or "", "branch": st.get("branch") or "",
                  "ahead": st.get("ahead", 0), "behind": st.get("behind", 0),
                  "dirty": bool(st.get("dirty"))},
-        "kb": {
-            "linked": bool(proj.get("kbProjectId")),
-            "kbProjectId": proj.get("kbProjectId"),
-            "kbSourceDir": proj.get("kbSourceDir"),
-            "kbRoot": proj.get("kbRoot"),
-            "linkVerifiedAt": proj.get("linkVerifiedAt"),
-            **kb_health,
-            "kbView": kb_view,
-        },
+        # kb 字段为历史存档(关联功能已退役, 基线自管)
+        "kb": {"linked": bool(proj.get("kbProjectId")), "kbProjectId": proj.get("kbProjectId")},
         "baseline": {
             "id": proj.get("baselineId"),
             "commit": proj.get("baselineCommit") or "",
@@ -659,20 +619,22 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
 
 @router.get("/project/versions")
 async def get_project_versions(root: Optional[str] = None, project: Optional[str] = None):
-    """KB 基线版本列表(宏观概览「版本历史」数据源)：label/head/创建时间，新→旧。"""
-    from ..kb_gateway import call_kb
+    """基线版本列表(数据主权批E: 自管)——当前基线锚单条(历史链待新思路重建)。"""
+    from ..sem.graph_collect import read_graph_baseline
+    from ..sem.symbols import resolve_base_commit
     proj = resolve_project(root, project)
-    if not proj or not proj.get("kbProjectId"):
+    if not proj:
         return ok([])
-    try:
-        versions = call_kb("version.list", projectId=proj["kbProjectId"]) or []
-    except Exception:
-        versions = []
-    return ok([
-        {"id": v.get("id"), "label": v.get("label") or v.get("id"), "head": v.get("head") or "",
-         "createdAt": v.get("created_at") or v.get("createdAt") or ""}
-        for v in versions
-    ])
+    pid = proj.get("id") or ""
+    head = resolve_base_commit(root, project) or ""
+    anchor = read_graph_baseline(pid) or {}
+    if not head and not anchor:
+        return ok([])
+    return ok([{
+        "id": "baseline", "label": "当前基线",
+        "head": head or (anchor.get("head") or ""),
+        "createdAt": anchor.get("at") or "",
+    }])
 
 
 @router.get("/project/evolution-frames")
@@ -685,7 +647,6 @@ async def get_evolution_frames(root: Optional[str] = None, project: Optional[str
     base=baselineCommit, head=HEAD。anchor 图谱 = KB 挂载版本组件全集，
     逐帧按 ls-tree 文件存在性推演存活 + diff 交集标 change(added/modified/same)。
     """
-    from ..kb_gateway import call_kb
     from .evolution import build_graph_frames, resolve_ref
     proj = resolve_project(root, project)
     if not proj:
@@ -694,24 +655,9 @@ async def get_evolution_frames(root: Optional[str] = None, project: Optional[str
     if not work_dir:
         return err(400, "项目无工作目录")
     baseline_commit = proj.get("baselineCommit") or ""
-    # KB 版本链: version id → head 映射(ref 解析) + head → 版本名(帧标注)
-    version_heads: dict = {}
-    version_names: dict = {}
-    if proj.get("kbProjectId"):
-        try:
-            versions = call_kb("version.list", projectId=proj["kbProjectId"]) or []
-        except Exception:
-            versions = []
-        for v in versions:
-            vhead = (v.get("head") or "").strip()
-            if vhead:
-                version_heads[v.get("id") or ""] = vhead
-                version_names[vhead] = v.get("label") or v.get("id") or ""
-                version_names[vhead[:7]] = version_names[vhead]
-    if not baseline_commit and proj.get("kbProjectId") and proj.get("baselineId"):
-        baseline_commit = _kb_baseline_head(proj["kbProjectId"], proj["baselineId"]) or ""
-    base_ref = resolve_ref(work_dir, base or "baseline", baseline_commit, version_heads)
-    head_ref = resolve_ref(work_dir, head or "HEAD", baseline_commit, version_heads)
+    # 数据主权批E: KB 版本链切断——ref 解析走 baseline/branch/commit
+    base_ref = resolve_ref(work_dir, base or "baseline", baseline_commit, {})
+    head_ref = resolve_ref(work_dir, head or "HEAD", baseline_commit, {})
     if not base_ref or not head_ref:
         return err(400, f"ref 解析失败: base={base or 'baseline'} head={head or 'HEAD'}")
     if layer != "file":
@@ -730,12 +676,12 @@ async def get_evolution_frames(root: Optional[str] = None, project: Optional[str
         ]
     if layer == "file":
         # 文件层: 纯 git diff 推演, 不需要 KB 组件锚
-        return ok(build_graph_frames(work_dir, base_ref, head_ref, [], version_names, layer="file"))
+        return ok(build_graph_frames(work_dir, base_ref, head_ref, [], {}, layer="file"))
     if not anchor:
-        return err(400, "KB 组件图谱为空（未关联知识库或基线未挂载），无法推演演化帧")
+        return err(400, "组件图谱为空——请先在基线管理执行「更新自有基线」")
     # 批5(需求7)：refs=逗号分隔显式帧序列(分支/head)——替代 base..head 自动采样
     ref_points = [r.strip() for r in (refs or "").split(",") if r.strip()] or None
-    return ok(build_graph_frames(work_dir, base_ref, head_ref, anchor, version_names,
+    return ok(build_graph_frames(work_dir, base_ref, head_ref, anchor, {},
                                  ref_points=ref_points))
 
 
@@ -813,8 +759,7 @@ async def get_baseline_dirty(root: Optional[str] = None, project: Optional[str] 
     st = arch_git.repo_status(work_dir) if work_dir else {}
     # dirty 语义：相对 KB 基线提交存在任何差异（含已提交+未提交），或本地领先 upstream。
     # 不依赖 @{upstream}：无 remote 的本地仓库此前恒判"干净"。
-    baseline_head = proj.get("baselineCommit") or _kb_baseline_head(
-        proj.get("kbProjectId") or "", proj.get("baselineId") or "")
+    baseline_head = proj.get("baselineCommit") or ""
     if baseline_head and work_dir:
         diff = arch_git.diff_worktree(proj, base=baseline_head)
         dirty = bool(diff.get("filesChanged")) or bool(st.get("ahead", 0))

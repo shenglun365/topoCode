@@ -1298,4 +1298,6 @@ export interface GitInfoLite {
   branch?: string
   head?: string
   dirty?: boolean
+  /** git origin(数据主权批E 迁移自概览「知识库关联」卡的仓库信息行) */
+  remoteUrl?: string
 }

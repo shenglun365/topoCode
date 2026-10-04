@@ -259,18 +259,6 @@ export interface CollectGraphStatus {
   counts?: { nodes?: number; edges?: number }
 }
 
-/** KB 分析就绪状态(baseline.readiness, KB 自由研究引擎的项目上下文; 非自管基线)。 */
-export interface BaselineReadiness {
-  state: 'no_project' | 'importing' | 'no_analysis' | 'analyzing' | 'ready'
-  projectId?: string
-  taskId?: string
-  taskName?: string
-  taskType?: string
-  taskStatus?: string
-  root?: string
-  mountedTaskIds?: string[]
-}
-
 /** 组件快速命名状态(analysis_tasks.result_data.naming)。 */
 /** 基线刷新作业行(批E)。 */
 export interface BaselineRefreshJob {
@@ -602,25 +590,6 @@ export const semanticAssetService = {
     return await apiGet<SyncExtractJob>(`/kb/semantic/sync-extract-status${qsWith('')}`)
   },
 
-  /** 冷启动：未注册仓库 → core 建项(含初始基线) + 全量分析发起。 */
-  async coldStart(): Promise<{ started: boolean; projectId?: string; taskId?: string; requestId?: string; head?: string; message?: string } | undefined> {
-    const { root, project } = currentProjectParams()
-    return await apiPost('/kb/semantic/cold-start', { root, project })
-  },
-
-  /** KB 分析就绪状态(无状态推导): no_project→importing→no_analysis→analyzing→ready。 */
-  async baselineReadiness(): Promise<BaselineReadiness | undefined> {
-    const c = ctx()
-    return await apiGet<BaselineReadiness>(`/kb/semantic/baseline-readiness${c ? `?${c}` : ''}`)
-  },
-
-  /** 一键确保 KB 分析就绪(幂等编排: 建项→分析→ready, KB 研究入口)。
-   *  initGit: 工作目录非 git 仓库时授权 TopoCode 自动初始化(按钮点击即授权)。 */
-  async ensureBaselineReady(taskType: 'fast' | 'full' = 'fast', initGit = true): Promise<BaselineReadiness | undefined> {
-    const { root, project } = currentProjectParams()
-    return await apiPost('/kb/semantic/ensure-baseline', { root, project, taskType, initGit })
-  },
-
   /** 自管组件命名状态(数据主权批C): coverage + 各组件命名。 */
   async componentNamingStatus(): Promise<ComponentNamingStatus | undefined> {
     const c = ctx()
@@ -631,26 +600,6 @@ export const semanticAssetService = {
   async componentNameStart(force = false): Promise<{ started: boolean; reason?: string; jobId?: string } | undefined> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/component-name', { root, project, ...(force ? { force: true } : {}) })
-  },
-
-  /** 驱动就绪状态机直至 ready(ensureReady 单步语义, 调用方须轮询推进:
-   *  建项 importing → 建任务 analyzing → 完成后自动挂载 ready)。
-   *  onProgress 每轮回调实时状态; 上限 ≈10 分钟, 连续 no_project 判死循环。 */
-  async driveBaselineReady(onProgress?: (r: BaselineReadiness) => void): Promise<BaselineReadiness | undefined> {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-    const MAX_ROUNDS = 240
-    let last = ''
-    let r: BaselineReadiness | undefined
-    for (let i = 0; i < MAX_ROUNDS; i++) {
-      r = await this.ensureBaselineReady()
-      onProgress?.(r)
-      const st = r?.state ?? ''
-      if (st === 'ready') break
-      if (st === 'no_project' && last === 'no_project' && i > 2) break
-      last = st
-      await sleep(st === 'analyzing' || st === 'importing' ? 2500 : 300)
-    }
-    return r
   },
 
   /** 工作区(非基线)AST 实时快照 — KB 通道(稳定节点 ID, 可与基线图谱对齐跟踪)。 */

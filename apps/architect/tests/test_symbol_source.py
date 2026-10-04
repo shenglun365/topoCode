@@ -281,56 +281,6 @@ def test_baseline_diff_endpoint(tmp_path, monkeypatch):
     assert body["counts"]["added"] == 1
 
 
-def test_cold_start_endpoint_bootstraps_project(tmp_path, monkeypatch):
-    """冷启动：未注册 git 仓库 → project.import(建项+初始基线) + 全量分析发起 + 跟踪对齐。"""
-    root, base, head = _mk_git_repo_diff(tmp_path, "repo-cold")
-    data = _mk_core_env(tmp_path, str(tmp_path / "elsewhere"), "proj-other", with_db=False)
-    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
-    _sym.invalidate_native_cache()
-    from topoone_app_architect import kb_gateway as _kg
-    calls = []
-
-    def fake_call(method, **p):
-        calls.append((method, p))
-        if method == "project.import":
-            return {"requestId": "imp-1", "status": "running"}
-        if method == "project.importStatus":
-            return {"status": "done", "projectId": "proj-cold"}
-        if method == "analysis.createTask":
-            return {"id": "task-cold", "status": "pending"}
-        if method == "analysis.runTask":
-            return {"taskId": "task-cold", "status": "running"}
-        return {}
-    monkeypatch.setattr(_kg, "call_kb", fake_call)
-    c = _client()
-    r = c.post("/api/architect/kb/semantic/cold-start", json={"root": root})
-    assert r.status_code == 200
-    body = r.json()["data"]
-    assert body["started"] is True
-    assert body["projectId"] == "proj-cold"
-    assert body["taskId"] == "task-cold"
-    # 调用顺序：import → importStatus → createTask → runTask
-    assert [m for m, _ in calls] == ["project.import", "project.importStatus",
-                                     "analysis.createTask", "analysis.runTask"]
-    assert calls[0][1]["mode"] == "static" and calls[0][1]["path"] == root
-    assert calls[2][1]["type"] == "full"
-    # 跟踪 KV 对齐 HEAD（符号源 fresh）
-    kv = _sym._read_state_kv("proj-cold")
-    assert kv.get("lastHead") == head
-
-
-def test_cold_start_endpoint_already_registered(tmp_path, monkeypatch):
-    """已注册仓库 → 400（应走基线变更而非冷启动）。"""
-    root, _, _ = _mk_git_repo_diff(tmp_path, "repo-cold-reg")
-    data = _mk_core_env(tmp_path, root, "proj-reg", with_db=False)
-    monkeypatch.setenv("TOPOCODE_DB_DIR", data)
-    _sym.invalidate_native_cache()
-    c = _client()
-    r = c.post("/api/architect/kb/semantic/cold-start", json={"root": root})
-    assert r.status_code == 400
-    assert r.json()["code"] != 0
-
-
 def test_codegraph_sync_endpoint_and_cli_index_semantics(tmp_path, monkeypatch):
     """codegraph 行语义(用户裁决): status.native = codegraph CLI 索引
     (.codegraph/codegraph.db)计数, KB 基线图谱(graph_node)不得混入;

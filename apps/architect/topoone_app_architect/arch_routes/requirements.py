@@ -4,7 +4,6 @@ import re
 from typing import Optional
 from fastapi import APIRouter, Request
 from ..common import _ts, ok, err
-from .knowledge import KB_NOTE
 from .. import store
 from ..agent.tools import req_agent as _req_agent
 
@@ -24,16 +23,6 @@ def _recompute_flow_of_req(row: Optional[dict], trigger: str) -> None:
             _flow.recompute(conv_id, trigger=trigger)
     except Exception:  # noqa: BLE001
         pass
-
-
-def _kb_degraded(root=None, project_id=None) -> bool:
-    """是否降级: 无项目 或 项目无 KB 基线(工作目录直开/无 KB 内容支撑)。
-
-    项目选择持久化在 URL(?root=/?project=)，由前端随请求透传 root/project。
-    复用 project.kb_degraded 统一口径。
-    """
-    from .project import kb_degraded as _d
-    return _d(root, project_id)
 
 
 @router.get("/requirements")
@@ -337,12 +326,7 @@ async def analyze_clarify(request: Request):
     desc = req.get("desc", "")
     mode = req.get("mode")
     preferred = req.get("preferredAssetIds") or []
-    degraded = _kb_degraded(body.get("root"), body.get("project"))
     model_id = body.get("modelId") or body.get("req", {}).get("modelId") or None
-
-    # 既有项目：必须已绑定 KB，否则明确报错(KB 能力不足/未关联)
-    if mode != "greenfield" and degraded:
-        return err(400, KB_NOTE)
 
     from ..agent.tools.req_agent import req_harness_clarify
     from ..common import KbUnavailableError
@@ -388,12 +372,7 @@ async def analyze_collect(request: Request):
     boundary = _split_list(answers.get("boundary"))
     acceptance = _split_list(answers.get("acceptance"))
     mode = base.get("mode")
-    degraded = _kb_degraded(body.get("root"), body.get("project"))
     model_id = body.get("modelId") or base.get("modelId") or None
-
-    # 既有项目：必须已绑定 KB，否则明确报错(KB 能力不足/未关联)
-    if mode != "greenfield" and degraded:
-        return err(400, KB_NOTE)
 
     from ..agent.tools.req_agent import req_harness_collect
     from ..common import KbUnavailableError

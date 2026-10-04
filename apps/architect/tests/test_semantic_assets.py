@@ -62,9 +62,17 @@ def _ctx(tmp_path, monkeypatch):
     return db
 
 
+def _mock_self_comps(monkeypatch, comps):
+    """批E 全自管: mock catalog._fetch_arch_components(数据主权源)。
+
+    comps 为 list 时按 pid 忽略直接返回; 为 callable 时作为实现(可数调用次数)。"""
+    impl = comps if callable(comps) else (lambda pid: comps)
+    monkeypatch.setattr("topoone_app_architect.sem.catalog._fetch_arch_components", impl)
+
+
 def _kb_source_mode(monkeypatch):
-    """批B 起 catalog 源默认 arch_only(自管组件)——KB 链路用例显式切 kb 模式。"""
-    monkeypatch.setattr(_catalog_mod, "_catalog_source", lambda: "kb")
+    """批E 起 catalog 全自管(源开关退役)——历史用例保留 no-op 适配。"""
+    return
 
 def _run_coro(coro):
     import asyncio
@@ -188,19 +196,17 @@ def test_file_scope_extraction_multi_component_scopes(tmp_path, monkeypatch):
 def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
     """组件文件映射短 TTL 缓存：提取任务逐文件落库不再每文件打一次 KB。"""
     _ctx(tmp_path, monkeypatch)
-    _kb_source_mode(monkeypatch)
     _catalog_mod._cache.clear()
     calls = {"n": 0}
 
-    def _fake_catalog(root, project):
+    def _fake_comps(pid):
         calls["n"] += 1
-        return {"components": [
-            {"id": "c1", "owns": ["a/x.py"]},
-            {"id": "c2", "owns": ["a/x.py", "a/y.py"]},
-        ]}
+        return [
+            {"id": "c1", "name": "c1", "owns": ["a/x.py"]},
+            {"id": "c2", "name": "c2", "owns": ["a/x.py", "a/y.py"]},
+        ]
 
-    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
-                        _fake_catalog)
+    _mock_self_comps(monkeypatch, _fake_comps)
     m1 = S._component_file_map("/root-cachetest", "proj-cache")
     m2 = S._component_file_map("/root-cachetest", "proj-cache")
     try:
@@ -211,23 +217,6 @@ def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
     finally:
         _catalog_mod._cache.clear()
 
-
-def test_component_file_map_model_fallback(tmp_path, monkeypatch):
-    """组件目录为空(降级/无基线) → 回退架构模型装配组件文件映射(与 _comm_files 口径一致)。"""
-    _ctx(tmp_path, monkeypatch)
-    _kb_source_mode(monkeypatch)
-    _catalog_mod._cache.clear()
-    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
-                        lambda root, project: {"components": []})
-    monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
-                        lambda root, project: {"components": [
-                            {"id": "m1", "owns": ["b/z.py"]}
-                        ]})
-    try:
-        m = S._component_file_map("/root-fb", "proj-fb")
-        assert m == {"m1": {"b/z.py"}}
-    finally:
-        _catalog_mod._cache.clear()
 
 
 def test_save_assets_change_detection(tmp_path, monkeypatch):
@@ -570,21 +559,14 @@ def test_batch_no_separate_update_action(tmp_path, monkeypatch):
     assert store.SemanticAssetsStore.get("sa-d-31") is not None
 
 
-def test_comm_files_falls_back_to_catalog(tmp_path, monkeypatch):
-    """模型(INCLUDE·L1)查不到的组件 id(如 CALL/L0) → 回退组件目录解析文件。"""
+def test_comm_files_self_source(tmp_path, monkeypatch):
+    """批E 单源自管: comm 组件 id 命中 → owns 文件; 未命中 → 空。"""
     _ctx(tmp_path, monkeypatch)
-    _kb_source_mode(monkeypatch)
-    import topoone_app_architect.common as common
-    monkeypatch.setattr(common, "build_architecture_model", lambda *a, **k: {
-        "components": [{"id": "L1-0001", "owns": ["svc/model.py"]}]})
-    monkeypatch.setattr(common, "build_component_catalog", lambda *a, **k: {
-        "components": [{"id": "L0-0009", "owns": ["svc/call.py", "svc/util.py"]}]})
-    # 模型内组件 → 走模型
-    assert S._comm_files("/tmp/x", "L1-0001") == ["svc/model.py"]
-    # 目录独有组件(CALL/L0) → 走目录回退
+    _mock_self_comps(monkeypatch, [
+        {"id": "L0-0009", "name": "c", "owns": ["svc/call.py", "svc/util.py"]}])
     assert S._comm_files("/tmp/x", "L0-0009") == ["svc/call.py", "svc/util.py"]
-    # 都不存在 → 空
     assert S._comm_files("/tmp/x", "nope") == []
+
 
 
 def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
@@ -612,15 +594,10 @@ def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
 def test_comm_files_ex_matching(tmp_path, monkeypatch):
     """comm 解析匹配链：精确 id → 精确名称 → 忽略大小写 → 唯一子串；多义/全未命中返回候选。"""
     _ctx(tmp_path, monkeypatch)
-    _kb_source_mode(monkeypatch)
-    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
-                        lambda root, project: {"components": [
-                            {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
-                            {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]},
-                            {"id": "comm-3", "name": "图表转译引擎", "owns": ["c/z.ts"]},
-                        ]})
-    monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
-                        lambda *a, **k: {"components": []})
+    _mock_self_comps(monkeypatch, [
+        {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
+        {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]},
+        {"id": "comm-3", "name": "图表转译引擎", "owns": ["c/z.ts"]}])
     # 1) 精确 id
     files, err = S._comm_files_ex("/r", "comm-1")
     assert files == ["a/x.ts"] and err is None
@@ -642,14 +619,9 @@ def test_comm_files_ex_matching(tmp_path, monkeypatch):
 def test_extract_comm_miss_carries_candidates(tmp_path, monkeypatch):
     """comm 未命中 → extract_scope 返回 error+候选清单（agent 可如实报告并请用户重选）。"""
     _ctx(tmp_path, monkeypatch)
-    _kb_source_mode(monkeypatch)
-    monkeypatch.setattr("topoone_app_architect.common.build_component_catalog",
-                        lambda root, project: {"components": [
-                            {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
-                            {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]},
-                        ]})
-    monkeypatch.setattr("topoone_app_architect.common.build_architecture_model",
-                        lambda *a, **k: {"components": []})
+    _mock_self_comps(monkeypatch, [
+        {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
+        {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]}])
     res = S.extract_scope("/tmp/x", None, scope_type="comm", scope_key="topoOne-animation",
                           kinds=["asset"], use_llm=False)
     assert res["count"] == 0
