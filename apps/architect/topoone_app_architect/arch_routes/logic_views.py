@@ -138,7 +138,13 @@ async def api_logic_graph_outline(request: Request = None):
     def _run():
         rows = [SemanticAssetsStore.get(i) for i in ids]
         assets = [r for r in rows if r and r.get("status") == "active"]
-        return graph_outline(assets, body.get("preferCores") or [])
+        # 全量 active 资产建解析索引(target 名字/别名/符号 → id, 与图谱同口径);
+        # 成员仍 ∩ 显示范围(assetIds)
+        proj = body.get("project") or ""
+        all_assets = [r for r in SemanticAssetsStore.all_status(proj, limit=6000)
+                      if r and r.get("status") == "active"]
+        return graph_outline(assets, body.get("preferCores") or [],
+                             all_assets=all_assets)
     return ok({"cores": await _aio.to_thread(_run)})
 
 

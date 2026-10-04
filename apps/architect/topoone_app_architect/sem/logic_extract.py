@@ -149,23 +149,26 @@ def expand_members(edges: List[tuple], core_ids: List[str], hops: int, cap: int 
 
 
 def graph_outline(assets: List[dict], prefer_core_ids: Optional[List[str]] = None,
-                  max_cores: int = 8) -> List[dict]:
+                  max_cores: int = 8, all_assets: Optional[List[dict]] = None) -> List[dict]:
     """图谱范围提纲(零 LLM)：核心(选中优先+中心度 top) × 1/2/3 跳邻域。
 
-    边集=资产 detail.relations(与归纳输入增厚同源)；邻域=expand_members BFS
-    ∩ 传入资产集(显示范围)——跳数档由 FE 呈现切换，三档成员一次算齐。
-    """
+    边集=资产 detail.relations——target 经 relation 索引归一成 id(与
+    semantic_graph 同口径)；邻域=expand_members BFS ∩ 显示范围。
+    all_assets: 全量 active 资产(建索引用, 缺省=assets)。"""
+    from .relation_index import relation_target_index
+    idx = relation_target_index(all_assets if all_assets is not None else assets)
     ids = {a.get("id") for a in assets if a.get("id")}
     edges: List[tuple] = []
     deg: Dict[str, int] = {}
     for a in assets:
         aid = a.get("id") or ""
         for r in (a.get("detail") or {}).get("relations") or []:
-            t = str(r.get("target") or "")
-            if t in ids and t != aid:
-                edges.append((aid, t))
+            # target 名字/别名/符号 → id(与 semantic_graph 同口径); 解析失败保持原值→被 ids 过滤
+            tid = idx.get(str(r.get("target") or "").strip()) or str(r.get("target") or "")
+            if tid in ids and tid != aid:
+                edges.append((aid, tid))
                 deg[aid] = deg.get(aid, 0) + 1
-                deg[t] = deg.get(t, 0) + 1
+                deg[tid] = deg.get(tid, 0) + 1
     by_id = {a.get("id"): a for a in assets}
     cores: List[str] = []
     for c in (prefer_core_ids or []):

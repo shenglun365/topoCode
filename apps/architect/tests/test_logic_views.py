@@ -249,6 +249,31 @@ def test_graph_outline_cores_and_hops(ctx):
     assert set(top["hops"]["1"]) >= {"a", "b", "c"}
 
 
+def test_graph_outline_resolves_name_targets(ctx):
+    """回归: relations.target 存【资产名】(非 id)——提纲 hops 曾因按 id 过滤全空
+    (1/2/3 跳恒只有 core)。修复: relation 索引(id/name/alias/符号→id)归一,
+    与 semantic_graph 同口径。"""
+    pid = S.project_id_for("/tmp/x2", None)
+    def mk(aid, name, rels):
+        store.SemanticAssetsStore.create({
+            "id": aid, "projectId": pid, "kind": "asset", "level": "implementation",
+            "name": name, "desc": "", "detail": {"relations": rels},
+            "astRefs": [], "scopeType": "comm", "scopeKey": "L0-0001", "srcHash": "h",
+            "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
+    mk("a2", "渲染路由", [{"target": "启动渲染进程", "type": "calls"},
+                          {"target": "写入缓存", "type": "calls"}])
+    mk("b2", "启动渲染进程", [{"target": "定位JAR", "type": "calls"}])
+    mk("c2", "写入缓存", [])
+    mk("d2", "定位JAR", [])
+    assets = [store.SemanticAssetsStore.get(i) for i in ("a2", "b2", "c2", "d2")]
+    out = LX.graph_outline(assets, prefer_core_ids=["a2"])
+    top = out[0]
+    assert top["coreId"] == "a2"
+    assert top["degree"] == 2                      # 名字边已被解析(按名字也能连)
+    assert set(top["hops"]["1"]) >= {"b2", "c2"}   # 1 跳=直接调用方
+    assert "d2" in top["hops"]["2"]                # 2 跳=邻居的邻居
+
+
 def test_induce_scope_creates_views(ctx, monkeypatch):
     """范围解析作业：每组→source=graph 视图 + 概括 + 讲解指纹落库。"""
     pid = S.project_id_for("/tmp/x", None)

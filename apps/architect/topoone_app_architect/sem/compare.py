@@ -436,7 +436,7 @@ def compare_changes(root: Optional[str], project: Optional[str],
     # ── 跨域联系：「其他」桶资产 → 组件内资产 的 relations(证据式, 合理联动) ──
     cross_links: List[dict] = []
     try:
-        from .engine import _relation_target_index, _resolve_relation_target
+        from .relation_index import relation_target_index as _relation_target_index, resolve_relation_target as _resolve_relation_target
         idx = _relation_target_index(rows)
         name_by_id = {a.get("id"): (a.get("name") or "") for a in rows}
         for a in other_delta_assets:

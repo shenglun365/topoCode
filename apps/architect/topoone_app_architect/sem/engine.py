@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .. import store
 from ..common import _ts, err, ok  # noqa: F401
 from . import job_runner
+from .relation_index import relation_target_index as _relation_target_index, resolve_relation_target as _resolve_relation_target
 from . import router
 from .anchors import _attach_step_refs, _node_to_ref, logger, resolve_ast_refs
 from fastapi import Request
@@ -2225,39 +2226,6 @@ def _cached_derived_edges(root: Optional[str], project: Optional[str],
         for k in sorted(_DERIVED_EDGE_CACHE, key=lambda kk: _DERIVED_EDGE_CACHE[kk][0])[:32]:
             _DERIVED_EDGE_CACHE.pop(k, None)
     return edges
-
-
-def _relation_target_index(assets: List[dict]) -> Dict[str, str]:
-    """关系目标解析索引：id / name / nameAlias / 锚点符号 → 资产 id。
-
-    基于**全部**资产(非过滤子集)建索引，使按粒度/类别/范围筛选时，
-    指向其它层级/范围的边仍能解析为稳定 id(是否渲染由前端按节点集决定)。
-    """
-    idx: Dict[str, str] = {}
-    for a in assets:
-        aid = a.get("id") or ""
-        if not aid:
-            continue
-        idx.setdefault(aid, aid)
-        nm = (a.get("name") or "").strip()
-        if nm:
-            idx.setdefault(nm, aid)
-        for al in (a.get("nameAlias") or []) if isinstance(a.get("nameAlias"), list) else []:
-            if isinstance(al, str) and al.strip():
-                idx.setdefault(al.strip(), aid)
-        for r in (a.get("astRefs") or []):
-            s = (r.get("symbol") or "").strip()
-            if s:
-                idx.setdefault(s, aid)
-    return idx
-
-
-def _resolve_relation_target(t: str, idx: Dict[str, str]) -> Tuple[str, bool]:
-    t = (t or "").strip()
-    if not t:
-        return "", False
-    aid = idx.get(t)
-    return (aid, True) if aid else (t, False)
 
 
 def _graph_node_detail(a: dict) -> dict:

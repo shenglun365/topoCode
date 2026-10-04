@@ -148,7 +148,8 @@ def _pre_node_brief(sc: dict) -> Optional[dict]:
 def _pre_edge_notes(sc: dict) -> Optional[dict]:
     """复刻 generate_edge_notes 缓存判定(纯内存：fresh + 全 key 覆盖)。"""
     from ..store import SemanticAssetsStore
-    from .engine import _relation_target_index, _resolve_relation_target, project_id_for
+    from .engine import project_id_for
+    from .relation_index import relation_target_index as _relation_target_index, resolve_relation_target as _resolve_relation_target
     a = SemanticAssetsStore.get(sc.get("assetId") or "")
     if not a:
         return None
