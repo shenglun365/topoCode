@@ -194,6 +194,26 @@ async function runExtractPipeline(pick: ScopePick, recompare: boolean): Promise<
   return true
 }
 
+/** 全量更新(语义资产列表入口): 与概览「基线对比」的全量更新完全一致——
+ *  同一 ExtractScopeModal(全量选项/不可撤销警告) + 同一 runExtractPipeline
+ *  (清除全库 → 全量实现提取 → 逻辑归纳 → 刷新重对比)。 */
+async function runFullUpdate() {
+  if (extractingPending.value) return
+  const universe = new Set(diffFileUniverse.value)
+  const cmp = compareData.value
+  if (cmp) for (const f of [...cmp.files.added, ...cmp.files.modified]) universe.add(f)
+  const files = [...universe].filter(isCodeFile).sort()
+  if (!files.length) return
+  extractingPending.value = true
+  try {
+    const pick = await pickScope(t('assetMgmt.scopeModal.fullUpdate'), files, { full: true })
+    if (!pick) return
+    await runExtractPipeline(pick, true)
+  } finally {
+    extractingPending.value = false
+  }
+}
+
 /** 已完成基线提取的 rev（同一源码状态节点只提取一次；对比刷新后 baseAssetsMissing 自然转 false）。 */
   let baselineExtractedSha = ''
 
@@ -405,7 +425,7 @@ async function runExtractPipeline(pick: ScopePick, recompare: boolean): Promise<
     diffLoading, baselineDiffData, loadBaselineDiff, initCompare,
     cmpTarget, commitOptions, baselineSha, compareData, compareError, compareHint, compareLoading,
     loadCommitOptions, runCompare,
-    scopeModal, pickScope, confirmScope, cancelScope, waitForJob, runExtractPipeline,
+    scopeModal, pickScope, confirmScope, cancelScope, waitForJob, runExtractPipeline, runFullUpdate,
     extractingPending, pendingExtractable, extractPendingAndRecompare,
     changedFileMap, assetChangeMark, cmpBucketById, changeMarkById, diffFileCounts,
     treeFileOf, pendingFileSet, addedFileSet, diffFileUniverse,

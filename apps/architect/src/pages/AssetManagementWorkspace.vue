@@ -55,7 +55,7 @@ const {
   genDesc, toggle, hideFileless, onSearch, compMetaText, compRefText,
   compareData,
   scopeModal, confirmScope, cancelScope,
-  extractingPending, extractPendingAndRecompare,
+  extractingPending, extractPendingAndRecompare, runFullUpdate,
   changeMarkById, diffFileCounts, pendingFileSet, addedFileSet,
   diffMarkLabel, changedFilesForGraph, initCompare,
   frameworkInfo, coverageInfo, fwLoading, fwSwitching, fwPreview,
@@ -198,6 +198,16 @@ onUnmounted(() => {
               @click="batchOpen = !batchOpen; filterOpen = false"
             >
               <TrashIcon class="w-3 h-3" />
+            </button>
+            <!-- 全量更新: 与概览基线对比的全量更新同管线(清除全库→全量重提) -->
+            <button
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center gap-1 h-[calc(1.5rem+2px)] text-ctp-mauve hover:!border-ctp-mauve"
+              :disabled="extractingPending"
+              :title="t('assetMgmt.scopeModal.fullWarn')"
+              @click="runFullUpdate"
+            >
+              <ArrowPathIcon class="w-3 h-3" :class="extractingPending ? 'animate-spin' : ''" />
+              {{ t('assetMgmt.scopeModal.fullUpdate') }}
             </button>
 
             <!-- 点击浮层：批量清除(物理删除 选定组件范围) -->
