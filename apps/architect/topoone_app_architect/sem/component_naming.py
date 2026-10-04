@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from typing import Dict, List, Optional, Tuple
 
 from ..store.graph import ComponentStore, GraphStore
@@ -82,10 +83,20 @@ def _represent_symbols(nodes_by_file: Dict[str, List[dict]], owns: List[str]) ->
 
 
 def _parse_items(res: Optional[dict], n: int) -> List[dict]:
-    """LLM 返回 → items（编号越界/重名忽略；坏输出返回空）。"""
+    """LLM 返回 → items（编号越界/重名忽略；坏输出返回空）。
+
+    llm_sync(mode=structured) 返回信封 {content, output:{items}}——
+    items 取 output 信封；content 文本兜底 JSON 提取。"""
     if not isinstance(res, dict):
         return []
-    raw = res.get("items")
+    payload = res.get("output") if isinstance(res.get("output"), dict) else res
+    raw = payload.get("items")
+    if raw is None and isinstance(res.get("content"), str):
+        try:
+            m = re.search(r"\{[\s\S]*\}", res["content"])
+            raw = (json.loads(m.group(0)) or {}).get("items") if m else []
+        except Exception:  # noqa: BLE001
+            raw = []
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
