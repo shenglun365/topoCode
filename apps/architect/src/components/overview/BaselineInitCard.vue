@@ -93,10 +93,12 @@ async function autoSyncCg() {
   await semanticAssetService.codegraphSync().catch(() => null)
   await loadCg()
 }
-function loadAll() {
-  void loadGit(); void loadCg(); void loadBase()
+const initialLoaded = ref(false)
+async function loadAll() {
+  await Promise.allSettled([loadGit(), loadCg(), loadBase()])
+  initialLoaded.value = true
 }
-onMounted(() => { loadAll(); void autoSyncCg() })
+onMounted(() => { void loadAll(); void autoSyncCg() })
 
 async function initGit() {
   gitBusy.value = true
@@ -174,7 +176,8 @@ async function refreshBaseline() {
     <div class="flex items-center gap-3 py-2 border-t border-ctp-surface0 text-xs">
       <CodeBracketIcon class="w-4 h-4 text-ctp-blue shrink-0" />
       <span class="w-20 text-ctp-overlay1 shrink-0">git</span>
-      <span v-if="git?.isRepo" class="text-ctp-green font-mono">
+      <span v-if="git === null && !initialLoaded" class="text-ctp-overlay0 animate-pulse">{{ t('app.loading') }}</span>
+      <span v-else-if="git?.isRepo" class="text-ctp-green font-mono">
         {{ git.branch || 'main' }}<span v-if="git.dirty" class="text-ctp-peach"> · {{ t('overviewHome.dirty') }}</span>
       </span>
       <span v-else class="text-ctp-peach">{{ t('overviewHome.baselineInit.gitMissing') }}</span>
@@ -208,7 +211,8 @@ async function refreshBaseline() {
     <div class="flex items-center gap-3 py-2 border-t border-ctp-surface0 text-xs">
       <BoltIcon class="w-4 h-4 text-ctp-yellow shrink-0" />
       <span class="w-20 text-ctp-overlay1 shrink-0">codegraph</span>
-      <span v-if="!cg?.cli" class="text-ctp-peach">{{ t('overviewHome.baselineInit.cgNoCli') }}</span>
+      <span v-if="cg === null && !initialLoaded" class="text-ctp-overlay0 animate-pulse">{{ t('app.loading') }}</span>
+      <span v-else-if="!cg?.cli" class="text-ctp-peach">{{ t('overviewHome.baselineInit.cgNoCli') }}</span>
       <span v-else-if="(cg?.native?.nodes ?? 0) > 0" class="text-ctp-green">
         {{ t('overviewHome.baselineInit.cgLinked') }} {{ cg?.native?.nodes }} {{ t('overviewHome.baselineInit.cgNodes') }}
       </span>
@@ -275,6 +279,7 @@ async function refreshBaseline() {
           @click="clearAnchor"
         >{{ t('overviewHome.baselineInit.anchorClear') }}</button>
       </span>
+      <span v-else-if="base === null && !initialLoaded" class="text-ctp-overlay0 animate-pulse">{{ t('app.loading') }}</span>
       <span v-else class="text-ctp-peach">{{ t('overviewHome.baselineInit.baseUnset') }}</span>
       <span v-if="baseMsg" class="text-ctp-overlay0 truncate max-w-[16rem]" :title="baseMsg">{{ baseMsg }}</span>
       <span class="flex-1" />
