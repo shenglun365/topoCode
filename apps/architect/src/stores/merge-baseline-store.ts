@@ -80,7 +80,7 @@ export const useArchMergeBaselineStore = defineStore('arch-merge-baseline', {
       ]
       this.uncommitted = []
     },
-    async sendBaselineSync() {
+    async sendBaselineSync(anchorHead?: string) {
       if (this.syncing) return
       const project = useArchProjectStore()
       const st = project.status
@@ -104,7 +104,7 @@ export const useArchMergeBaselineStore = defineStore('arch-merge-baseline', {
       this.sync.status = 'syncing'
       this.sync.message = ''
       try {
-        const r = await semanticAssetService.baselineRefresh()
+        const r = await semanticAssetService.baselineRefresh(false, anchorHead)
         if (!r?.started) {
           this.sync.status = 'error'
           this.sync.message = `未启动: ${r?.reason || '未知原因'}`

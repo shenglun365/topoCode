@@ -9,9 +9,10 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleStackIcon, BoltIcon, CodeBracketIcon, ArrowPathIcon } from '@heroicons/vue/24/outline'
+import { ChevronDownIcon, CircleStackIcon, BoltIcon, CodeBracketIcon, ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { projectService } from '@/services/project-service'
 import { semanticAssetService, type CollectGraphStatus } from '@/services/semantic-asset-service'
+import type { GitCommitInfo } from '@/types'
 import type { GitInfoLite } from '@/types'
 
 const { t } = useI18n()
@@ -33,6 +34,43 @@ const baselineSet = computed(() => !!base.value?.anchor?.head)
 function fmtAnchorTime(at?: number) {
   if (!at) return ''
   try { return new Date(at).toLocaleString() } catch { return '' }
+}
+
+// ── 基线锚定选单(数据主权批E): 基线行点击 → 基线后提交探测列表 → 选定锚定 ──
+const anchorHead = ref('')
+const pickerOpen = ref(false)
+const pickerLoading = ref(false)
+const pickerList = ref<GitCommitInfo[]>([])
+
+/** 打开探测列表: 基线(since=当前锚 head)后提交, 最新 10 条, 滚动选单。 */
+async function openPicker() {
+  pickerOpen.value = !pickerOpen.value
+  if (!pickerOpen.value) return
+  pickerLoading.value = true
+  try {
+    const git = await projectService.gitInfo()
+    pickerList.value = (git?.log ?? []).filter((c) => c.hash !== base.value?.anchor?.head)
+  } catch {
+    pickerList.value = []
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+function pickAnchor(c: GitCommitInfo) {
+  anchorHead.value = c.hash
+  pickerOpen.value = false
+  baseMsg.value = t('overviewHome.baselineInit.anchorPicked', { msg: c.message.slice(0, 24) })
+}
+
+function clearAnchor() {
+  anchorHead.value = ''
+}
+
+function fmtCommitDate(ts: number): string {
+  if (!ts) return ''
+  const d = new Date(ts * 1000)
+  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 /** 基线落后(HEAD 领先已设定基线) —— 更新基线按钮的显示条件。 */
@@ -85,12 +123,13 @@ async function syncCodegraph() {
   }
 }
 
-/** 基线刷新(数据主权批E): 本地编排 采集→分组→命名, 轮询至终态。 */
+/** 基线刷新(数据主权批E): 本地编排 采集→分组→命名, 轮询至终态。
+ *  anchorHead 可选——把基线锚定到选定提交(缺省=工作区 HEAD)。 */
 async function refreshBaseline() {
   baseBusy.value = true
   baseMsg.value = t('overviewHome.baselineInit.baseRefreshing')
   try {
-    const r = await semanticAssetService.baselineRefresh()
+    const r = await semanticAssetService.baselineRefresh(false, anchorHead.value || undefined)
     if (!r?.started) {
       baseMsg.value = r?.reason || r?.message || ''
       return
@@ -194,9 +233,47 @@ async function refreshBaseline() {
           · {{ base?.counts?.nodes }} {{ t('overviewHome.baselineInit.baseNodes') }}
           · {{ base?.counts?.edges }} {{ t('overviewHome.baselineInit.baseEdges') }}
         </span>
-        <span v-if="base?.anchor?.at" class="font-mono text-ctp-overlay0" :title="fmtAnchorTime(base.anchor.at)">
-          · {{ base.anchor.head?.slice(0, 7) }}
+        <!-- 分支 + 锚定 head(可点击弹出探测选单) -->
+        <span class="text-ctp-overlay0"> ·</span>
+        <span class="font-mono text-ctp-subtext1">{{ git?.branch || 'main' }}</span>
+        <span class="relative">
+          <button
+            class="font-mono text-ctp-mauve hover:text-ctp-pink underline decoration-dotted underline-offset-2"
+            :title="t('overviewHome.baselineInit.anchorPickHint')"
+            @click="openPicker"
+          >{{ (anchorHead || base?.anchor?.head || '')?.slice(0, 7) }}<ChevronDownIcon class="w-3 h-3 inline ml-0.5" /></button>
+          <!-- 探测选单: 基线后提交(最新 10 条, 滚动) -->
+          <div
+            v-if="pickerOpen"
+            class="absolute right-0 top-6 z-30 w-[26rem] max-h-72 overflow-y-auto rounded-lg border border-ctp-surface1 bg-ctp-base shadow-xl"
+          >
+            <div class="px-3 py-2 text-[10px] text-ctp-overlay1 border-b border-ctp-surface0 sticky top-0 bg-ctp-base">
+              {{ t('overviewHome.baselineInit.anchorPickTitle') }}
+            </div>
+            <p v-if="pickerLoading" class="px-3 py-3 text-xs text-ctp-overlay0">{{ t('app.loading') }}</p>
+            <p v-else-if="!pickerList.length" class="px-3 py-3 text-xs text-ctp-overlay0">{{ t('overviewHome.baselineInit.anchorPickEmpty') }}</p>
+            <button
+              v-for="c in pickerList"
+              :key="c.hash"
+              class="w-full text-left px-3 py-2 hover:bg-ctp-surface0 border-b border-ctp-surface0/50"
+              @click="pickAnchor(c)"
+            >
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-[11px] text-ctp-mauve">{{ c.short }}</span>
+                <span v-if="c.isHead" class="chip bg-ctp-blue/15 text-ctp-blue !text-[9px]">HEAD</span>
+                <span class="text-[10px] text-ctp-overlay0">{{ fmtCommitDate(c.date) }}</span>
+                <span class="text-[10px] text-ctp-overlay0 ml-auto">{{ c.author }}</span>
+              </div>
+              <div class="text-xs text-ctp-text truncate">{{ c.message }}</div>
+            </button>
+          </div>
         </span>
+        <button
+          v-if="anchorHead"
+          class="text-[10px] text-ctp-peach hover:underline shrink-0"
+          :title="t('overviewHome.baselineInit.anchorClearHint')"
+          @click="clearAnchor"
+        >{{ t('overviewHome.baselineInit.anchorClear') }}</button>
       </span>
       <span v-else class="text-ctp-peach">{{ t('overviewHome.baselineInit.baseUnset') }}</span>
       <span v-if="baseMsg" class="text-ctp-overlay0 truncate max-w-[16rem]" :title="baseMsg">{{ baseMsg }}</span>
@@ -205,6 +282,7 @@ async function refreshBaseline() {
         class="btn !py-1 !px-3 !text-xs"
         :class="baselineSet ? 'btn-ghost' : 'btn-primary'"
         :disabled="baseBusy"
+        :title="anchorHead ? t('overviewHome.baselineInit.anchorActiveHint', { head: anchorHead.slice(0, 7) }) : ''"
         @click="refreshBaseline"
       ><ArrowPathIcon v-if="baseBusy" class="w-3.5 h-3.5 animate-spin" />{{ baseBusy ? t('overviewHome.baselineInit.working') : (baselineSet ? t('overviewHome.baselineInit.baseRefresh') : t('overviewHome.baselineInit.baseInit')) }}</button>
     </div>

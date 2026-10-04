@@ -510,9 +510,9 @@ export const semanticAssetService = {
   },
 
   /** 一键基线刷新(数据主权批E): 本地编排 采集→分组→命名, 单作业进度。 */
-  async baselineRefresh(force = false): Promise<{ started: boolean; reason?: string; job?: { id: string }; message?: string } | undefined> {
+  async baselineRefresh(force = false, anchorHead?: string): Promise<{ started: boolean; reason?: string; job?: { id: string }; message?: string } | undefined> {
     const { root, project } = currentProjectParams()
-    return await apiPost('/kb/semantic/baseline-refresh', { root, project, ...(force ? { force: true } : {}) })
+    return await apiPost('/kb/semantic/baseline-refresh', { root, project, ...(force ? { force: true } : {}), ...(anchorHead ? { anchorHead } : {}) })
   },
 
   /** 基线刷新作业状态(最近 5 次 + 最新)。 */

@@ -1300,4 +1300,16 @@ export interface GitInfoLite {
   dirty?: boolean
   /** git origin(数据主权批E 迁移自概览「知识库关联」卡的仓库信息行) */
   remoteUrl?: string
+  /** 基线设定探测选单: 基线(since)后提交, 最新 10 条(新→旧) */
+  log?: GitCommitInfo[]
+}
+
+/** git 提交条目(基线锚定选单/提交历史共用形状) */
+export interface GitCommitInfo {
+  hash: string
+  short: string
+  author: string
+  date: number
+  message: string
+  isHead?: boolean
 }

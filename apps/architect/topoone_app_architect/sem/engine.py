@@ -4828,7 +4828,8 @@ async def api_baseline_refresh(body: dict = None):
     """一键基线刷新(数据主权批E)：采集→分组→命名 三步串行编排(单作业可见全进度)。
 
     取代旧 symbol-sync 发起-确认流——KB 去基线化后基线更新为 architect 本地动作。
-    scope: {force?: bool(命名全量重做), modelId?: str}
+    scope: {force?: bool(命名全量重做), modelId?: str, anchorHead?: str(基线锚定 head——
+    选定提交作为基线记录, 缺省=工作区 HEAD)}
     """
     from .. import ctx
     from .job_runner import start_job
@@ -4839,6 +4840,8 @@ async def api_baseline_refresh(body: dict = None):
     scope: dict = {}
     if body.get('force'):
         scope['force'] = True
+    if isinstance(body.get('anchorHead'), str) and body['anchorHead'].strip():
+        scope['anchorHead'] = body['anchorHead'].strip()
     if isinstance(body.get('modelId'), str) and body['modelId'].strip():
         scope['modelId'] = body['modelId'].strip()
     r = start_job(proj, 'baseline_refresh', scope)

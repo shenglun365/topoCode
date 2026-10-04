@@ -319,8 +319,9 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
             PartitionStore.set_state(pid, part["head"], prow["idx"], "done")
         return {"nodes": 0, "edges": 0, "files": 0, "note": "无代码文件"}
     rev = scope.get("rev") or ""
+    anchor_head = (scope.get("anchorHead") or "").strip()
     if not rev:
-        head = _git_head(root)
+        head = anchor_head or _git_head(root)
         rev = f"baseline:{head}" if head else "workspace"
 
     def _prog(done: int, current: str) -> None:
@@ -331,7 +332,7 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
         written = GraphStore.merge_partition(pid, rev, nodes, edges, files)
     else:
         written = GraphStore.replace_rev(pid, rev, nodes, edges)
-    head = _git_head(root)
+    head = anchor_head or _git_head(root)
     baseline_recorded = False
     if head:
         if part:

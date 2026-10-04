@@ -320,9 +320,16 @@ async def git_info(request: Request):
     if not arch_git.is_git_repo(root):
         return ok({"isRepo": False, "root": root})
     st = arch_git.repo_status(root)
-    return ok({"isRepo": True, "root": root, "branch": st.get("branch", ""),
-               "head": st.get("commit", ""), "dirty": st.get("dirty", False),
-               "remoteUrl": arch_git.remote_url(root)})
+    resp = {"isRepo": True, "root": root, "branch": st.get("branch", ""),
+            "head": st.get("commit", ""), "dirty": st.get("dirty", False),
+            "remoteUrl": arch_git.remote_url(root)}
+    # 基线设定探测选单(可选 since=基线 head → 基线后提交, 最新 10 条)
+    since = request.query_params.get("since") or ""
+    try:
+        resp["log"] = arch_git.git_log(root, since=since, limit=10)
+    except Exception:  # noqa: BLE001
+        resp["log"] = []
+    return ok(resp)
 
 
 @router.post("/project/init-git")
