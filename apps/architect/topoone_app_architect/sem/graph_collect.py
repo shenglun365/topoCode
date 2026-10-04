@@ -181,6 +181,42 @@ def collect_snapshot(root: str, project: str, files: List[str], rev: str, *,
                                              jvm_package_dirs=jvm_roots)
     stats["importsResolved"] = imp_stats["resolved"]
     stats["importsExternal"] = imp_stats["external"]
+
+    # D2: 符号级跨文件边(import 感知)——refs 未命中本文件的裸符号名 target,
+    # 在「本文件 import 的目标文件」符号表中找同名; 唯一命中改写为符号 id,
+    # 多命中(歧义)丢弃保守。
+    sym_by_file: dict = {}
+    for n in nodes:
+        nm = n.get("name")
+        if nm and n.get("kind") != "file":
+            sym_by_file.setdefault(n.get("file_path") or "", {})[nm] = n["id"]
+    file_imports: dict = {}
+    for e in edges:
+        if e.get("kind") == "imports":
+            src, tgt = e.get("source") or "", e.get("target") or ""
+            if src.startswith("file:") and tgt.startswith("file:"):
+                file_imports.setdefault(src[5:], set()).add(tgt[5:])
+    cross_resolved = 0
+    for e in edges:
+        if e.get("kind") == "imports":
+            continue
+        tgt = e.get("target") or ""
+        if not tgt or tgt.startswith(("cache:", "file:")):
+            continue
+        src = e.get("source") or ""
+        src_file = src[6:].split("::", 1)[0] if src.startswith("cache:") else ""
+        hit = None
+        for tf in file_imports.get(src_file, ()):  # 直接 import 的目标文件
+            cand = sym_by_file.get(tf, {}).get(tgt)
+            if cand:
+                if hit and hit != cand:   # 歧义 → 丢弃
+                    hit = None
+                    break
+                hit = cand
+        if hit:
+            e["target"] = hit
+            cross_resolved += 1
+    stats["crossFileRefs"] = cross_resolved
     return nodes, edges, stats
 
 

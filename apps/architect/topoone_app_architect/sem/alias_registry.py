@@ -20,6 +20,7 @@ FAMILY_EXTS: Dict[str, List[str]] = {
     "go": [".go"],
     "rust": [".rs"],
     "cs": [".cs"],
+    "swift": [".swift"],
     "php": [".php"],
     "dart": [".dart"],
     "ruby": [".rb"],
@@ -68,6 +69,7 @@ class AliasRegistry:
     def __init__(self) -> None:
         self._prefix: List[tuple] = []   # (prefix, target_dir)
         self._glob: List[tuple] = []     # (regex, target_dir)
+        self.include_dirs: List[str] = []  # C 族 include 搜索路径(CMake 等)
 
     def add_prefix(self, prefix: str, target_dir: str) -> None:
         if prefix and target_dir:
@@ -87,6 +89,10 @@ class AliasRegistry:
         tpre, _, tsuf = target_dir.partition("*")
         self._glob.append((re.compile("^" + re.escape(pre) + "(.*)" + re.escape(suf) + "$"),
                            (tpre, tsuf)))
+
+    def add_include_dir(self, d: str) -> None:
+        if d and d not in self.include_dirs:
+            self.include_dirs.append(d)
 
     def resolve(self, mod: str) -> Optional[str]:
         """命中返回目录前缀替换后的项目相对路径(可能带子路径), 未命中 None。"""
@@ -251,6 +257,9 @@ def build_alias_registry(root: str, file_set: set) -> AliasRegistry:
                 # 模块坐标(最后段) → 目录; 包路径解析由 JVM 包根索引兜底
                 reg.add_prefix(mod.split(":")[-1], d)
 
+    # ── 二期: 代码型配置(受限正则提取, 不执行配置代码) ──
+    _load_code_configs(root, reg)
+
     # 依赖包目录名前缀(monorepo 常见 pkg/ packages/ libs/ 直引)
     for parent in ("packages", "pkg", "libs", "modules"):
         pd = os.path.join(root, parent)
@@ -286,3 +295,51 @@ def glob_csproj(root: str, limit: int = 32) -> List[str]:
     return out
 
 
+
+
+def _load_code_configs(root: str, reg) -> None:
+    """二期别名载体(代码型配置): vite/webpack alias、CMake include、SPM target。
+
+    只做受限正则提取(字符串字面量), 不执行配置代码。"""
+    import glob as _glob
+
+    # ── vite.config / webpack.config: resolve.alias 对象形态 ──
+    for pat in ("vite.config.*", "webpack.config.*", "webpack.*.config.*"):
+        for cfg in _glob.glob(os.path.join(root, pat))[:4]:
+            txt = _read_text(cfg)
+            m = re.search(r"alias\s*:\s*\{(.*?)\}", txt, re.S)
+            if not m:
+                continue
+            for km in re.finditer(
+                    r"['\"]([^'\"]+)['\"]\s*:\s*(?:path\.resolve\([^,]*,\s*)?['\"]([^'\"]+)['\"]",
+                    m.group(1)):
+                key, val = km.group(1), km.group(2)
+                val = val.lstrip("/").rstrip("/")   # '/src' → 'src'(项目相对)
+                if "*" in key:
+                    reg.add_glob(key, val)
+                else:
+                    reg.add_prefix(key, val)
+
+    # ── CMakeLists: include_directories(...) → C 族搜索路径 ──
+    for cm in _glob.glob(os.path.join(root, "**", "CMakeLists.txt"), recursive=True)[:16]:
+        txt = _read_text(cm)
+        base = os.path.relpath(os.path.dirname(cm), root).replace(os.sep, "/")
+        for m in re.finditer(r"include_directories\s*\(([^)]*)\)", txt):
+            for tok in m.group(1).replace("\n", " ").split():
+                tok = tok.strip('"')
+                if tok in ("BEFORE", "AFTER", "SYSTEM", "PRIVATE", "PUBLIC", "INTERFACE"):
+                    continue
+                if tok.startswith("${"):
+                    continue
+                d = tok.lstrip("./")
+                full = f"{base}/{d}" if base != "." else d
+                reg.add_include_dir(full)
+
+    # ── Package.swift: .target(name:path:) → swift 族前缀 ──
+    psw = os.path.join(root, "Package.swift")
+    if os.path.isfile(psw):
+        txt = _read_text(psw)
+        for m in re.finditer(
+                r"\.target\s*\(\s*name:\s*\"([^\"]+)\"(?:[^)]*?)path:\s*\"([^\"]+)\"",
+                txt, re.S):
+            reg.add_prefix(m.group(1), m.group(2))

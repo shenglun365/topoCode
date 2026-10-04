@@ -37,7 +37,7 @@ _LANG_NAME_FAMILY = {
     "c": "c", "c_header": "c", "cpp": "c", "cpp_header": "c",
     "python": "py", "go": "go", "rust": "rust", "c_sharp": "cs",
     "php": "php", "dart": "dart", "ruby": "ruby", "lua": "lua", "luau": "lua",
-    "objc": "c",
+    "objc": "c", "swift": "swift",
 }
 
 INDEX_NAMES = ("index", "__init__", "mod", "main")
@@ -127,13 +127,17 @@ def resolve_import(mod: str, from_file: str, file_set: set,
     if hit:
         return probe_file(hit, file_set, family)
     # C 族: 引号 include 无 ./ 前缀(已由 walker 归一为 'ngx_config.h')——
-    # 同目录 + 项目内全局文件名匹配兜底
+    # 同目录 → include_dirs(CMake) → 项目内全局文件名匹配兜底
     if family == "c":
         base_dir = os.path.dirname(from_file)
         cand = os.path.normpath(os.path.join(base_dir, mod)).replace(os.sep, "/")
         got = probe_file(cand, file_set, family)
         if got:
             return got
+        for d in registry.include_dirs:   # CMake include_directories
+            got = probe_file(f"{d}/{mod}", file_set, family)
+            if got:
+                return got
         matches = [f for f in file_set if f.endswith("/" + mod) or f == mod]
         if len(matches) == 1:
             return matches[0]

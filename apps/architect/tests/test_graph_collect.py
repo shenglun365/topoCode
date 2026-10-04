@@ -109,6 +109,34 @@ class GraphBaselineTest(unittest.TestCase):
 
     # ── A2: collect_snapshot 双路径 ───────────────────────────────
 
+    def test_collect_snapshot_cross_file_refs(self):
+        """D2: b.py import a 并调用 alpha → 调用边 target 解析为 a 的符号 id。"""
+        from unittest.mock import patch
+        from topoone_app_architect.sem import graph_collect as gc
+
+        def fake_parse(root, rel):
+            if rel == "a.py":
+                return {"language": "python",
+                        "symbols": [{"name": "alpha", "kind": "function",
+                                     "startLine": 1, "endLine": 2,
+                                     "qualifiedName": "alpha", "signature": "def alpha()"}],
+                        "imports": [], "refs": []}
+            return {"language": "python",
+                    "symbols": [{"name": "beta", "kind": "function",
+                                 "startLine": 3, "endLine": 4,
+                                 "qualifiedName": "beta", "signature": "def beta()"}],
+                    "imports": ["a"],
+                    "refs": [{"name": "alpha", "kind": "calls", "line": 4}]}
+
+        with patch.object(gc, "_parse_one", side_effect=fake_parse):
+            nodes, edges, stats = gc.collect_snapshot(
+                self.root, self.PID, ["a.py", "sub/b.py"], "baseline:d2")
+        self.assertEqual(stats["crossFileRefs"], 1)
+        cross = [e for e in edges if e["kind"] == "calls"
+                 and e["target"].startswith("cache:a.py::")]
+        self.assertEqual(len(cross), 1)
+        self.assertEqual(cross[0]["target"], "cache:a.py::alpha::1")
+
     def test_collect_snapshot_kb_path(self):
         from topoone_app_architect.sem import graph_collect as gc
 

@@ -208,6 +208,53 @@ class TestBuildAliasRegistry(unittest.TestCase):
             self.assertIsNotNone(reg2.resolve("Lib"))
 
 
+class TestCodeConfigs(unittest.TestCase):
+    """二期别名载体(代码型配置, 受限正则提取)。"""
+
+    def _mk(self, tmp, rel, content):
+        p = os.path.join(tmp, rel)
+        os.makedirs(os.path.dirname(p) or tmp, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def test_vite_alias(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            self._mk(tmp, "vite.config.ts", """import path from 'path'
+export default {
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+      '@comp': '/src/components',
+    },
+  },
+}
+""")
+            fs = _fs("src/utils/fmt.ts", "src/components/Card.vue", "vite.config.ts")
+            reg = build_alias_registry(tmp, fs)
+            self.assertEqual(resolve_import("@/utils/fmt", "a.ts", fs, reg), "src/utils/fmt.ts")
+            self.assertEqual(resolve_import("@comp/Card", "a.ts", fs, reg), "src/components/Card.vue")
+
+    def test_cmake_include_dirs(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            self._mk(tmp, "CMakeLists.txt", "include_directories(include os/inc)\n")
+            fs = _fs("include/ngx_hash.h", "os/inc/util.h", "CMakeLists.txt")
+            reg = build_alias_registry(tmp, fs)
+            self.assertEqual(resolve_import("ngx_hash.h", "src/a.c", fs, reg), "include/ngx_hash.h")
+            self.assertEqual(resolve_import("util.h", "src/a.c", fs, reg), "os/inc/util.h")
+
+    def test_spm_targets(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            self._mk(tmp, "Package.swift",
+                     '.target(name: "MyCore", path: "Sources/MyCore")')
+            fs = _fs("Sources/MyCore/Util.swift", "Package.swift")
+            reg = build_alias_registry(tmp, fs)
+            self.assertEqual(resolve_import("MyCore/Util", "Sources/Other/A.swift", fs, reg),
+                             "Sources/MyCore/Util.swift")
+
+
 class TestBatchRewrite(unittest.TestCase):
     def test_batch_rewrite_stats(self):
         fs = _fs("src/a.ts", "src/b.ts")
