@@ -108,6 +108,30 @@ def _node_text(node: SyntaxNode, source: bytes) -> str:
         return ""
 
 
+class _ByteStr(str):
+    """str 兼容层: int 切片按 tree-sitter 字节偏移语义(utf-8 bytes)解码。
+
+    语言钩子(extract_import/extract_param 等)签名为 str, 但内部全部用
+    node.start_byte/end_byte 切片——文件含多字节字符(中文注释等)时字节
+    偏移 > 字符偏移, 直接切 str 会错位(实测: 中文 docstring 的 python
+    文件 import 模块名错位 257 字节)。本类让 str 上的 int 切片自动按
+    bytes 语义解码, 其余 str 操作(.strip/.split/startswith)照常。"""
+
+    __slots__ = ("_data",)
+
+    @classmethod
+    def from_bytes(cls, b: bytes) -> "_ByteStr":
+        obj = cls(b.decode("utf-8", errors="replace"))
+        obj._data = b
+        return obj
+
+    def __getitem__(self, item):
+        if isinstance(item, slice) and isinstance(item.start, int) \
+                and isinstance(item.stop, int):
+            return self._data[item.start:item.stop].decode("utf-8", errors="replace")
+        return super().__getitem__(item)
+
+
 def _child_by_field(node: SyntaxNode, field: str) -> Optional[SyntaxNode]:
     try:
         return node.child_by_field_name(field)
@@ -172,6 +196,10 @@ class TreeSitterWalker:
         # 状态
         self.node_stack: list[str] = []           # 当前 scope 节点 ID 栈
         self._node_index: dict[str, Node] = {}    # id → Node 快速查找
+        # 值函数已由 _extract_function 自遍历(正确 scope)的 start_byte 集——
+        # 通用 visit/_walk 递归防重入, 否则同符号双份且 qualified_name 链错
+        # (实测 topo-animation: 56/84 文件 919 重复, 局部变量双链)
+        self._consumed_fn: set = set()
         # 同文件 (kind, qualified_name) 出现计数 — 重载符号 #N 消歧(源码序)
         self._qn_counts: dict[tuple, int] = {}
         # 标识符使用候选(遍历期收集，flush 期过滤落 refs):
@@ -187,14 +215,14 @@ class TreeSitterWalker:
         sys.setrecursionlimit(max(sys.getrecursionlimit(), 50000))
 
         # 解码源文本（供钩子函数使用）
-        self.source_str = self.source.decode("utf-8", errors="replace")
+        self.source_str = _ByteStr.from_bytes(self.source)
 
         # Vue SFC 预处理：提取 <script> 块用 TypeScript 解析
         if self.language == "vue":
             result = _extract_vue_script(self.source)
             if result:
                 self.source, self._vue_line_offset = result
-                self.source_str = self.source.decode("utf-8", errors="replace")
+                self.source_str = _ByteStr.from_bytes(self.source)
                 self.language = "typescript"
                 logger.info(f"Vue SFC extracted script block from {self.file_path} (offset={self._vue_line_offset})")
             else:
@@ -293,6 +321,10 @@ class TreeSitterWalker:
 
         # 1. 函数
         if node_type in ex.function_types:
+            if node.start_byte in self._consumed_fn:
+                # 已由 _extract_variable 委托提取并自遍历 body(正确 scope)——
+                # 通用递归再入会产出同符号双份
+                return True
             if self._inside_class_like() and node_type in ex.method_types:
                 self._extract_method(node)
             else:
@@ -711,6 +743,7 @@ class TreeSitterWalker:
                     name = _node_text(name_node, self.source)
                     value_node = _child_by_field(child, "value")
                     if value_node and value_node.type in ("arrow_function", "function_expression"):
+                        self._consumed_fn.add(value_node.start_byte)
                         self._extract_function(value_node)
                         continue
                     var_node = self._create_node(kind, name, child, is_exported=is_exported)
@@ -1458,6 +1491,8 @@ class TreeSitterWalker:
             for i in range(n.named_child_count):
                 c = n.named_child(i)
                 if c:
+                    if c.type in ex.function_types and c.start_byte in self._consumed_fn:
+                        continue  # 值函数已按正确 scope 遍历——跳过(防同符号双链)
                     _walk(c)
 
         _walk(body)
