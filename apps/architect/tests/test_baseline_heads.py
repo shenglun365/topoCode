@@ -114,5 +114,30 @@ class TestBaselineHeads(unittest.TestCase):
             C.reset_project(token)
 
 
+    def test_prune_old_revs_keep_two(self):
+        """刷新修剪: 组件三表+图快照只留最近 2 个 rev(当前+DIFF 基准)。"""
+        GraphStore.replace_rev(self.PID, "baseline:c1", [_node("a.py", "f1")], [])
+        GraphStore.replace_rev(self.PID, "baseline:c2", [_node("a.py", "f2")], [])
+        GraphStore.replace_rev(self.PID, "baseline:c3", [_node("a.py", "f3")], [])
+        ComponentStore.replace_rev(self.PID, "baseline:c1",
+                                   [{"id": "x1", "name": "", "owns": ["a.py"]}], [])
+        ComponentStore.replace_rev(self.PID, "baseline:c2",
+                                   [{"id": "x2", "name": "", "owns": ["a.py"]}], [])
+        ComponentStore.replace_rev(self.PID, "baseline:c3",
+                                   [{"id": "x3", "name": "", "owns": ["a.py"]}], [])
+        # 时间序: 逐条 update 保证 updated_at 递增(c1 最旧)
+        import time as _t
+        _t.sleep(0.02)
+        ComponentStore.replace_rev(self.PID, "baseline:c3",
+                                   [{"id": "x3", "name": "", "owns": ["a.py"]}], [])
+        n = ComponentStore.prune_old_revs(self.PID, keep=2)
+        ng = GraphStore.prune_old_revs(self.PID, keep=2)
+        self.assertGreaterEqual(n, 1)
+        alive = sum(1 for rev in ("baseline:c1", "baseline:c2", "baseline:c3")
+                    if ComponentStore.list_rev(self.PID, rev))
+        self.assertLessEqual(alive, 2)   # 只留 2 个 rev
+        self.assertGreaterEqual(ng, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

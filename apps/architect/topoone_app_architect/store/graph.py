@@ -195,6 +195,27 @@ class GraphStore:
         return {"nodes": int(r.get("n") or 0), "edges": int(r.get("e") or 0)}
 
     @classmethod
+    def prune_old_revs(cls, project_id: str, keep: int = 2) -> int:
+        """修剪旧图快照(数据主权批E): 按最近写入保留 keep 个 rev(当前+DIFF
+        基准), 更旧的节点/边清理。与 ComponentStore.prune_old_revs 配套
+        (collect_graph 采集尾部调用)。返回删除 rev 数。"""
+        db = _target_db(cls.NODE_TABLE, project_id)
+        rows = db.fetchall(
+            "SELECT rev FROM arch_graph_node WHERE project_id=?"
+            " GROUP BY rev ORDER BY MAX(updated_at) DESC LIMIT -1 OFFSET ?",
+            (project_id, keep))
+        n = 0
+        for r in (rows or []):
+            rev = r["rev"]
+            db.execute("DELETE FROM arch_graph_edge WHERE project_id=? AND rev=?",
+                       (project_id, rev))
+            cur = db.execute("DELETE FROM arch_graph_node WHERE project_id=? AND rev=?",
+                             (project_id, rev))
+            n += 1 if (cur.rowcount or 0) > 0 else 0
+        db.commit()
+        return n
+
+    @classmethod
     def rev_list(cls, project_id: str) -> List[dict]:
         """全部快照 rev 清单(D3/数据主权: 各 head 的基线数据管理面)。
 

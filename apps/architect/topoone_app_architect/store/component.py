@@ -95,6 +95,27 @@ class ComponentStore:
             (project_id,), project_id or None)
         return (rows[0] or {}).get("rev") or "" if rows else ""
 
+    @classmethod
+    def prune_old_revs(cls, project_id: str, keep: int = 2) -> int:
+        """修剪旧快照(数据主权批E): 按写入时间保留最近 keep 个 rev(当前+DIFF
+        基准), 更旧的组件/层级/命名行清理。图快照(graph_node/edge)由
+        GraphStore.prune_old_revs 同步修剪。返回删除组件行数。"""
+        db = _target_db(cls.TABLE, project_id)
+        rows = db.fetchall(
+            "SELECT rev FROM arch_components WHERE project_id=?"
+            " GROUP BY rev ORDER BY MAX(updated_at) DESC LIMIT -1 OFFSET ?",
+            (project_id, keep))
+        stale = [r["rev"] for r in (rows or [])]
+        n = 0
+        for rev in stale:
+            for t in ("arch_components", "arch_component_hierarchy", "arch_component_naming"):
+                cur = db.execute(f"DELETE FROM {t} WHERE project_id=? AND rev=?",
+                                 (project_id, rev))
+                n += cur.rowcount or 0
+        db.commit()
+        return n
+
+
     # ── 快速命名(批C) ─────────────────────────────────────────────
 
     @classmethod
