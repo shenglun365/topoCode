@@ -54,6 +54,11 @@ def _job_community_group(ctx: JobCtx) -> dict:
         if not cid:
             continue
         lvl = str(c.get("level") or "L0")
+        # 组件 = L0 顶层域(KB level 语义: L0 粗粒度顶层, L1/L2 子层细节)。
+        # 实测 topo-animation: L0 33 个覆盖 80 文件(≈3.2 文件/域), 全层级
+        # 平铺 86 会把子层碎片当组件(用户确认夸张)。L1/L2 待新思路重建。
+        if lvl != "L0":
+            continue
         comps.append({
             "id": cid, "name": cid, "summary": "",
             "owns": c.get("files") or [], "source": "community",
