@@ -530,7 +530,7 @@ export const semanticAssetService = {
 
   /** 启动「未归属文件」循环批量提取后端作业(daemon 线程，页面关闭不受影响)；action='stop' 请求停止。
    *  ⚠️ body 必须带 root/project——后端按它解析项目根，缺失会 invalid_root(此前 UI 批量按钮从未成功启动的根因)。 */
-  async unownedExtract(action: 'start' | 'stop' = 'start', opts?: { batch?: number; level?: string }): Promise<{ started?: boolean; total?: number; reason?: string; stopped?: boolean; unowned?: number; withAssets?: number; noSymbols?: number }> {
+  async unownedExtract(action: 'start' | 'stop' = 'start', opts?: { batch?: number; level?: string; force?: boolean }): Promise<{ started?: boolean; total?: number; reason?: string; stopped?: boolean; unowned?: number; withAssets?: number; noSymbols?: number }> {
     const { root, project } = currentProjectParams()
     return await apiPost('/kb/semantic/unowned-extract', {
       root,

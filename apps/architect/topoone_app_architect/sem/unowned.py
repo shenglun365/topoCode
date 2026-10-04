@@ -266,68 +266,12 @@ def unowned_cross_links(root: Optional[str], project: Optional[str],
 # 单飞：每项目同时至多一个作业。作业线程内逐批「取当前未提取前 N → extract_scope」，
 # 每批后重算清单(assetCount>0 自然退出待提取集)——中断/续传/幂等语义与前端旧循环一致。
 
-_JOB_MAX_BATCHES = 80                # 循环保险丝(500 cap / 批 10 → 理论 ≤50 批)
 
-
-def _pending_unowned(rid: str, project: Optional[str]) -> List[str]:
-    """当前待提取的未归属文件：零资产/仅剩 stale(重提可复活)，
-    且排除无独立符号的结构性无产出文件(config 聚合头等)。"""
-    res = unowned_files(rid, project, limit=_UNOWNED_CAP)
-    if res.get("error"):
-        return []
-    return [f["path"] for f in (res.get("files") or [])
-            if not f.get("activeCount") and f.get("extractable", True)]
-
-
-def _extract_job_loop(ctx) -> dict:
-    """批 1-4 收编：进度走 job 行，取消走 cancelRequested 协作标记。"""
-    from .structural_extract import extract_structural
-    rid = (ctx.scope or {}).get("root") or ""
-    project = (ctx.scope or {}).get("project") or ""
-    batch = max(1, int((ctx.scope or {}).get("batch") or 10))
-    level = (ctx.scope or {}).get("level") or "implementation"
-    tried: set = set()          # 本作业已尝试文件：产出为 0 的文件 assetCount 恒 0，
-                                # 不记录会每批重进待提取集 → 死循环(实测 44 批回归)
-    done = saved = batches = 0
-    errors: list = []
-    for _ in range(_JOB_MAX_BATCHES):
-        if ctx.cancelled():
-            return {"saved": saved, "errors": errors, "summary": f"已取消({done})"}
-        pending = [f for f in _pending_unowned(rid, project) if f not in tried]
-        if not pending:
-            break
-        files = pending[:batch]
-        tried.update(files)
-        ctx.progress(done=done, saved=saved, batch=batches, current=files[0])
-        try:
-            # 批6：批量提取走结构化(无 LLM)；语义增强用户按需触发
-            res = extract_structural(rid, project, files, rev="workspace")
-            if (res or {}).get("parseFailures") == len(files):
-                errors = (errors or [])[-4:] + [
-                    {"files": files, "error": "解析失败(符号库/KB 不可达?)"}]
-                break   # 整批全失败 → 停住如实上报
-            if isinstance(res, dict) and res.get("error"):
-                errors = (errors or [])[-4:] + [
-                    {"files": files, "error": str(res.get("error"))[:200]}]
-                break           # 范围/符号库类错误：继续批大概率同样失败，停住如实上报
-            saved += (res.get("saved") or 0)
-        except Exception as e:  # noqa: BLE001 — 作业线程必须吞异常保状态一致
-            logger.warning("[unowned] 批量提取作业异常: %s", e, exc_info=True)
-            errors = (errors or [])[-4:] + [
-                {"files": files, "error": str(e)[:200]}]
-            break
-        done += len(files)
-        batches += 1
-        ctx.progress(done=done, saved=saved, batch=batches)
-    return {"saved": saved, "errors": errors, "summary": f"完成({done} 文件/{batches} 批)"}
-
-
-from . import job_runner as _job_runner
-_job_runner.register("extract_unowned", _extract_job_loop)
 
 
 def unowned_extract_start(root: Optional[str], project: Optional[str],
-                          batch: int = 10, level: str = "implementation") -> dict:
+                          batch: int = 10, level: str = "implementation",
+                          force: bool = False) -> dict:
     """启动循环批量提取作业(已有作业在跑则返回其进度)。立即返回，不等待完成。
 
     响应附清单三分盘点 unowned = 待提取(total) + 已有资产(withAssets) +
@@ -338,8 +282,11 @@ def unowned_extract_start(root: Optional[str], project: Optional[str],
         return {"started": False, "reason": "invalid_root"}
     pid = project_id_for(root, project)
     files = (unowned_files(rid, project, limit=_UNOWNED_CAP).get("files") or [])
-    pending = [f["path"] for f in files
-               if not f.get("activeCount") and f.get("extractable", True)]
+    if force:
+        pending = [f["path"] for f in files if f.get("extractable", True)]
+    else:
+        pending = [f["path"] for f in files
+                   if not f.get("activeCount") and f.get("extractable", True)]
     breakdown = {"unowned": len(files),
                  "withAssets": sum(1 for f in files if f.get("activeCount")),
                  "noSymbols": sum(1 for f in files if f.get("extractable") is False)}
@@ -357,7 +304,7 @@ def unowned_extract_start(root: Optional[str], project: Optional[str],
     r = job_runner.start_job(
         pid, "extract_unowned",
         scope={"type": "project", "root": rid, "project": project,
-               "batch": max(1, batch), "level": level},
+               "batch": max(1, batch), "level": level, "force": bool(force)},
         llm=False)   # 结构化提取无 LLM(批6) → 并行档
     if r.get("started"):
         logger.info("[unowned] 批量提取作业启动: pid=%s total=%d batch=%d level=%s",

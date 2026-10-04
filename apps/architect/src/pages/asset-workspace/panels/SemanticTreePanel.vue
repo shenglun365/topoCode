@@ -31,6 +31,7 @@ const {
   diffRollup,
   expanded,
   extractAllUnowned,
+  unownedMsg,
   extractUnownedFile,
   fileBase,
   fileCard,
@@ -272,6 +273,11 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
                   >
                     <SparklesIcon class="w-3 h-3" />
                   </button>
+                  <span
+                    v-if="unownedMsg"
+                    class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0 max-w-[24rem] truncate"
+                    :title="unownedMsg"
+                  >{{ unownedMsg }}</span>
                 </template>
                 <template v-if="g.key !== OTHER_KEY">
                   <span

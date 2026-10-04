@@ -5111,7 +5111,8 @@ async def api_unowned_extract(request: Request):
     res = await asyncio.to_thread(_uo.unowned_extract_start, body.get("root"),
                                   body.get("project"),
                                   int(body.get("batch") or 10),
-                                  body.get("level") or "implementation")
+                                  body.get("level") or "implementation",
+                                  bool(body.get("force")))
     return ok(res)
 
 

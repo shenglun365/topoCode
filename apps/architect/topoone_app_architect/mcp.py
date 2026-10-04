@@ -6,7 +6,7 @@
 - stdio：`python3 -m topoone_app_architect.mcp` 供 Claude Code/Cursor/Cline
   本地拉起（独立进程，自建 ctx 指向同一 data_dir）。
 
-工具集见 asset_map_tools.TOOLS（map.overview/component/assets/rules/graph，
+工具集见 sem/map_tools.TOOLS（map.overview/component/assets/rules/graph，
 全部输出 Markdown 文档）。
 
 接入示例：
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 def build_mcp(name: str = "topo-architect"):
     """构建 FastMCP 实例（工具注册一次，双传输共用）。"""
     from mcp.server.fastmcp import FastMCP
-    from .arch_routes.asset_map_tools import run_tool, TOOLS
+    from .sem.map_tools import run_tool, TOOLS
 
     mcp = FastMCP(name, instructions=(
         "TopoCode architect 资产地图服务：查询项目架构资产（组件目录/语义资产/"

@@ -115,20 +115,25 @@ export function useUnownedExtract(D: WsDeps) {
     void pollUnownedJobOnce()
   }
 
+  /** 批量启动结果提示(组头可见)：此前只写 console——用户看不到任何反馈，
+   *  "nothing_to_extract" 时按钮像坏了(实测反馈)。 */
+  const unownedMsg = ref('')
   async function extractAllUnowned() {
-    const r = await semanticAssetService.unownedExtract('start', { batch: 10 })
+    unownedMsg.value = ''
+    // force=重建语义: 含已有资产的未归属文件(先清后提, 与单文件提取一致)——
+    // 纯增量口径会跳过已有资产 → "3 个已有资产+2 个无符号"时按钮无事可做(实测无效根因)
+    const r = await semanticAssetService.unownedExtract('start', { batch: 10, force: true })
     if (r.started || r.reason === 'already_running') {
       if (!unownedJob.value?.running) {
         unownedJob.value = { running: true, total: r.total ?? 0, done: 0, saved: 0, batches: 0, errors: [] }
       }
-      // 等式盘点：未归属 = 待提取 + 已有资产 + 无独立符号——进度 chip hint 呈现
       startUnownedJobPolling()
     } else if (r.reason === 'nothing_to_extract') {
-      console.info('[unowned] nothing to extract',
-        { unowned: r.unowned, withAssets: r.withAssets, noSymbols: r.noSymbols })
+      unownedMsg.value = t('assetMgmt.unowned.nothingToExtract', {
+        unowned: r.unowned ?? 0, withAssets: r.withAssets ?? 0, noSymbols: r.noSymbols ?? 0,
+      })
     } else {
-      // 请求失败(服务未启动/后端版本较旧路由缺失/项目根未解析)——不能伪装成"没有待提取"
-      console.warn('[unowned] job failed:', r.reason)
+      unownedMsg.value = t('assetMgmt.unowned.startFailed', { reason: r.reason || 'unknown' })
       void pollUnownedJobOnce()
     }
   }
@@ -165,7 +170,7 @@ export function useUnownedExtract(D: WsDeps) {
     unownedExtractingOne, extractUnownedFile,
     unownedJob, unownedExtracting, unownedJobHint,
     stopUnownedJobPolling, pollUnownedJobOnce, startUnownedJobPolling,
-    extractAllUnowned, stopUnownedExtract,
+    extractAllUnowned, stopUnownedExtract, unownedMsg,
     unownedLinkOf, unownedLinkTitle, unownedLinkByAssetId,
   }
 }
