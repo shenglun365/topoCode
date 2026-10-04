@@ -317,6 +317,40 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(id)
         root_path = project["root_path"]
 
+        # 先把镜像 fast-forward 到源 HEAD——否则变更检查(源 vs 镜像)永远
+        # 残留旧差异, 「更新」形同虚设。ff 失败(分叉/冲突)不阻塞重扫, 仅提示。
+        mirror_updated = ""
+        try:
+            from topoone.engine import git_service
+            if os.path.isdir(root_path) and git_service.is_git_repo(root_path):
+                mirror_head = git_service.rev_parse(root_path, "HEAD")
+                source_repo = project.get("local_repo_path") or ""
+                branch = project.get("branch") or git_service.current_branch(root_path)
+                source_head = ""
+                if source_repo and os.path.isdir(source_repo) and git_service.is_git_repo(source_repo):
+                    try:
+                        source_head = git_service.rev_parse(source_repo, "HEAD")
+                    except Exception:  # noqa: BLE001
+                        source_head = ""
+                if not source_head:
+                    try:
+                        git_service.fetch(root_path, timeout=300)
+                        source_head = git_service.rev_parse(
+                            root_path, f"origin/{branch}" if branch else "origin/HEAD")
+                    except Exception:  # noqa: BLE001
+                        source_head = ""
+                if source_head and mirror_head and source_head != mirror_head:
+                    try:
+                        _run = git_service._run_git
+                        _run(root_path, "fetch", source_repo or "origin", branch or "HEAD", timeout=300)
+                        _run(root_path, "merge", "--ff-only", "FETCH_HEAD", timeout=300)
+                        mirror_updated = git_service.rev_parse(root_path, "HEAD")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"[project.sync] mirror fast-forward failed: {e}")
+                        mirror_updated = f"ff-failed: {e}"
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[project.sync] mirror update skipped: {e}")
+
         # 清空旧文件
         project_db.execute("DELETE FROM source_files")
 
@@ -356,6 +390,8 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "updated_at": datetime.now().isoformat(),
             "has_file_changes": 0,
         }, "id = ?", (id,))
+        if mirror_updated:
+            logger.info(f"[project.sync] mirror head -> {mirror_updated[:12]}")
 
         # 同步后刷新存储统计缓存（源码已重扫）
         _refresh_project_storage_stats(id)
