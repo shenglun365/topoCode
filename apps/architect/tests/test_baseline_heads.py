@@ -36,6 +36,8 @@ class TestBaselineHeads(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        # 保存全局现场(setup 换库若不恢复会污染后续测试——字母序靠前先跑)
+        self._saved = (C._db, C._data_dir, C._kb, dict(C._project_dbs))
         C.setup(data_dir=self._tmp.name)
         # rev A: a.py + 组件 ca
         GraphStore.replace_rev(self.PID, self.REV_A,
@@ -58,6 +60,9 @@ class TestBaselineHeads(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+        C._db, C._data_dir, C._kb, dbs = self._saved
+        C._project_dbs.clear()
+        C._project_dbs.update(dbs)
 
     def test_rev_list(self):
         rows = GraphStore.rev_list(self.PID)
@@ -89,7 +94,7 @@ class TestBaselineHeads(unittest.TestCase):
         # 直接测 engine 端点函数(不经 HTTP)
         import asyncio
         from topoone_app_architect.sem import engine
-        C.set_project(self.PID)
+        token = C.set_project(self.PID)
         try:
             res = asyncio.run(engine.api_baselines(project=self.PID))
             body = res.body if hasattr(res, "body") else res
@@ -106,7 +111,7 @@ class TestBaselineHeads(unittest.TestCase):
             self.assertEqual(d2["components"]["counts"]["ownsChanged"], 1)
             self.assertEqual(d2["files"]["added"], ["b.py"])
         finally:
-            C.reset_project(C._project_var.get() and C.set_project(None))
+            C.reset_project(token)
 
 
 if __name__ == "__main__":
