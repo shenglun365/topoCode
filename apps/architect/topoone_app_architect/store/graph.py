@@ -40,10 +40,18 @@ class GraphStore:
         """整 rev 重灌（事务）：先清该 rev 旧快照再批量写入。返回 {nodes, edges}。"""
         db = _target_db(cls.NODE_TABLE, project_id)
         now = _now()
+        # 节点按 id 去重(keep-first): KB walker 对 TS/JS 变量声明存在双路径提取
+        # (显式路径+通用遍历), 同 id 重复条目会撞 UNIQUE(project_id,rev,id)。
+        # keep-first 实证安全: 361 重复组中 128 组 qualified_name 链不同, 全部
+        # 第一条=显式路径产出的完整作用域链(顺序稳定)。
+        seen_nodes: set = set()
         n_rows = []
         for n in nodes or []:
             if not (n or {}).get("id"):
                 continue
+            if n["id"] in seen_nodes:
+                continue
+            seen_nodes.add(n["id"])
             n_rows.append((
                 project_id, rev, n["id"], n.get("kind") or "",
                 n.get("name") or "", n.get("qualified_name") or "",

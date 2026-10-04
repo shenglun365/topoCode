@@ -59,6 +59,14 @@ class TestParseFileAst:
         assert "read_item" in names
         assert res["language"] == "python"
 
+    def test_symbols_dedup(self, tmp_path):
+        """walker 双路径提取的同 (name,startLine,kind) 重复条目在出口去重(keep-first)。"""
+        f = tmp_path / "api.py"
+        f.write_text(_PY_SRC, encoding="utf-8")
+        res = _parse(file_path=str(f), language="python")
+        keys = [(s["name"], s["startLine"], s["kind"]) for s in res["symbols"]]
+        assert len(keys) == len(set(keys)), f"出口符号仍有重复: {keys}"
+
     def test_no_impl_details_by_default(self, tmp_path):
         f = tmp_path / "api.py"
         f.write_text(_PY_SRC, encoding="utf-8")

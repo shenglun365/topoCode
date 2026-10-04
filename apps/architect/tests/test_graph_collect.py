@@ -64,6 +64,7 @@ class GraphBaselineTest(unittest.TestCase):
             {"source": nodes[1]["id"], "target": "alpha", "kind": "calls"},
             {"source": nodes[1]["id"], "target": "alpha", "kind": "calls"},  # 去重
         ]
+
         r = GraphStore.replace_rev(self.PID, "baseline:aaa", nodes, edges)
         self.assertEqual(r["nodes"], 2)
         self.assertEqual(r["edges"], 2)  # 重复边折叠
@@ -85,6 +86,21 @@ class GraphBaselineTest(unittest.TestCase):
         GraphStore.replace_rev(self.PID, "baseline:aaa", nodes[:1], edges[:1])
         self.assertEqual(GraphStore.counts(self.PID, "baseline:aaa"),
                          {"nodes": 1, "edges": 1})
+
+    def test_replace_rev_dedup_duplicate_ids(self):
+        """walker 双路径提取的重复 id 不撞 UNIQUE(keep-first: 首条=完整作用域链)。"""
+        dup_a = _norm_node("a.py", "alpha")
+        dup_a["qualified_name"] = "mod::alpha"
+        dup_b = dict(_norm_node("a.py", "alpha"))
+        dup_b["qualified_name"] = "alpha"  # 同 id 不同链(通用遍历弱链)
+        r = GraphStore.replace_rev(
+            self.PID, "baseline:dup",
+            [dup_a, dup_b, _norm_node("sub/b.py", "beta")], [])
+        self.assertEqual(r["nodes"], 2)
+        got = GraphStore.nodes(self.PID, "baseline:dup")
+        self.assertEqual(len(got), 2)
+        alpha = next(n for n in got if n["name"] == "alpha")
+        self.assertEqual(alpha["qualified_name"], "mod::alpha")  # keep-first
 
     def test_drop_rev(self):
         GraphStore.replace_rev(self.PID, "baseline:ccc", [_norm_node("a.py", "x")], [])

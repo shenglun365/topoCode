@@ -72,9 +72,18 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             if lang:
                 walker = TreeSitterWalker(fp, src_bytes, lang, extractor)
                 table = walker.extract()
+                # 同符号去重(keep-first): walker 对变量声明存在双路径提取
+                # (显式路径+通用遍历), 同 (name,startLine,kind) 重复条目导致
+                # 下游(architect 图谱落库/符号统计)重复。keep-first=显式路径
+                # 产出的完整作用域链(实证: 重复组第一条 qualified_name 链完整)。
+                seen_syms: set = set()
                 for n in table.nodes:
                     if getattr(n.kind, "value", str(n.kind)) in ("file", "import", "export"):
                         continue
+                    key = (n.name, n.start_line, getattr(n.kind, "value", str(n.kind)))
+                    if key in seen_syms:
+                        continue
+                    seen_syms.add(key)
                     symbols.append({
                         "name": n.name,
                         "kind": getattr(n.kind, "value", str(n.kind)),
