@@ -318,6 +318,7 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
         if part:
             PartitionStore.set_state(pid, part["head"], prow["idx"], "done")
         return {"nodes": 0, "edges": 0, "files": 0, "note": "无代码文件"}
+    from .buildgraph_client import _prune_old_snapshots  # noqa: F401 (作业尾部修剪)
     rev = scope.get("rev") or ""
     anchor_head = (scope.get("anchorHead") or "").strip()
     if not rev:
