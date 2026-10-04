@@ -380,7 +380,6 @@ onUnmounted(stopNamingPoll)
           <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.codeChanges') }}</span>
         </div>
 
-        <template>
         <div class="flex gap-4 mb-3 text-sm">
           <span class="text-ctp-subtext1 flex items-center gap-1">
             <DocumentTextIcon class="w-4 h-4 text-ctp-overlay0" />{{ overview.diff.filesChanged }} {{ t('overviewHome.filesChanged') }}
@@ -415,8 +414,6 @@ onUnmounted(stopNamingPoll)
           </table>
         </div>
         <p v-else class="text-xs text-ctp-subtext0">{{ t('overviewHome.noCodeChange') }}</p>
-      </template>
-      <p v-else class="text-xs text-ctp-subtext0">{{ t('overviewHome.noCodeNeedKb') }}</p>
       </section>
     </template>
   </div>
