@@ -326,7 +326,8 @@ async def git_info(request: Request):
     # 基线设定探测选单(可选 since=基线 head → 基线后提交, 最新 10 条)
     since = request.query_params.get("since") or ""
     try:
-        resp["log"] = arch_git.git_log(root, since=since, limit=10)
+        from .git_probe import git_log
+        resp["log"] = git_log(root, since=since, limit=10)
     except Exception:  # noqa: BLE001
         resp["log"] = []
     return ok(resp)
