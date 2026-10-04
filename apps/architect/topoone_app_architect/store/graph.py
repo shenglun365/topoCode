@@ -66,12 +66,18 @@ class GraphStore:
         seen_edges = set()
         for e in edges or []:
             key = (e.get("source"), e.get("target"), e.get("kind"))
-            if not all(key) or key in seen_edges:
+            if not all(key):
                 continue
-            seen_edges.add(key)
+            line = int(e.get("line") or 0)
+            # 去重键含 line: 同对节点多行调用是独立边(社区连接强度信号,
+            # 与 KB graph_edge 同口径)——只滤 (src,tgt,kind,line) 全同的真重复
+            dkey = key + (line,)
+            if dkey in seen_edges:
+                continue
+            seen_edges.add(dkey)
             e_rows.append((
-                project_id, rev, key[0], key[1], key[2],
-                int(e.get("line") or 0), int(e.get("col") or 0),
+                project_id, rev, key[0], key[1], key[2], line,
+                int(e.get("col") or 0),
             ))
         db.execute("DELETE FROM arch_graph_node WHERE project_id=? AND rev=?",
                    (project_id, rev))

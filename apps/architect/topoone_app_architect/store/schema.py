@@ -498,7 +498,9 @@ ARCH_PROJECT_TABLES_SQL = """
         kind TEXT NOT NULL,                 -- calls | contains | imports | references | extends | instantiates | implements
         line INTEGER DEFAULT 0,
         col INTEGER DEFAULT 0,
-        PRIMARY KEY (project_id, rev, source, target, kind)
+        -- PK 含 line: 同对节点的多行调用是独立边(连接强度信号), 与 KB
+        -- graph_edge(id 含 line)同口径——去重会把 Louvain 边权抹平 → 社区碎裂。
+        PRIMARY KEY (project_id, rev, source, target, kind, line)
     );
     CREATE INDEX IF NOT EXISTS idx_ag_edge_source ON arch_graph_edge(project_id, rev, source);
     CREATE INDEX IF NOT EXISTS idx_ag_edge_target ON arch_graph_edge(project_id, rev, target);
@@ -801,6 +803,38 @@ def architect_db_migrations(db) -> None:
 
 # ── 项目库迁移(旧项目库升级兜底，幂等) ─────────────────────────
 
+def _migrate_edge_line_pk(db) -> None:
+    """arch_graph_edge PK 加 line(同对节点多行调用=独立边, KB 同口径)。
+
+    SQLite 不能改 PK → 检测旧 PK(不含 line)则重建表迁数据。幂等。"""
+    cols = {r[1]: r for r in db.execute("PRAGMA table_info(arch_graph_edge)").fetchall()}
+    if not cols:
+        return
+    pk_cols = [r[1] for r in sorted(
+        (r for r in cols.values() if r[5]), key=lambda r: r[5])]
+    if pk_cols[-1:] == ["line"]:
+        return  # 已是新 PK
+    db.executescript("""
+CREATE TABLE arch_graph_edge_new (
+    project_id TEXT NOT NULL,
+    rev TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    line INTEGER DEFAULT 0,
+    col INTEGER DEFAULT 0,
+    PRIMARY KEY (project_id, rev, source, target, kind, line)
+);
+INSERT OR IGNORE INTO arch_graph_edge_new
+    SELECT project_id, rev, source, target, kind, line, col FROM arch_graph_edge;
+DROP TABLE arch_graph_edge;
+ALTER TABLE arch_graph_edge_new RENAME TO arch_graph_edge;
+CREATE INDEX IF NOT EXISTS idx_ag_edge_source ON arch_graph_edge(project_id, rev, source);
+CREATE INDEX IF NOT EXISTS idx_ag_edge_target ON arch_graph_edge(project_id, rev, target);
+""")
+    db.commit()
+
+
 def _migrate_lifecycle_v2(db) -> None:
     """生命周期重构迁移(一次性, 幂等; 新鲜库各列默认即新模型, 无行可迁)。
 
@@ -967,6 +1001,7 @@ def _project_migrations(db) -> None:
         ("dismissed_at", "INTEGER DEFAULT 0"),
     ])
     _migrate_lifecycle_v2(db)
+    _migrate_edge_line_pk(db)
     _add_cols(db, "arch_unit_tests", [
         ("asset_refs", "TEXT"),
     ])
