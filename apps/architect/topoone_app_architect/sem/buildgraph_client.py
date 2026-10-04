@@ -42,3 +42,16 @@ def collect_via_buildgraph(root: str, files: List[str]) -> Optional[Tuple[List[d
     except Exception as e:  # noqa: BLE001
         logger.warning("[graph-collect] buildGraph 不可用, 降级逐文件路径: %s", e)
         return None
+
+
+def _prune_old_snapshots(pid: str, keep: int = 2) -> None:
+    """采集完成即修剪旧快照: 组件三表+图节点/边只留最近 keep 个 rev
+    (当前+上一版 DIFF 基准), 更旧快照清理(用户裁决: 刷新后不留陈旧组件信息)。"""
+    try:
+        from ..store.graph import ComponentStore, GraphStore
+        n1 = ComponentStore.prune_old_revs(pid, keep=keep)
+        n2 = GraphStore.prune_old_revs(pid, keep=keep)
+        if n1 or n2:
+            logger.info("[graph-collect] 修剪旧快照: 组件行 -%s, 图 rev -%s", n1, n2)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[graph-collect] 快照修剪失败(不阻塞): %s", e)

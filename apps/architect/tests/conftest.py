@@ -39,3 +39,16 @@ def client(arch_env):
     from fastapi.testclient import TestClient
     from topoone_app_architect.server import build_app
     return TestClient(build_app(data_dir=arch_env))
+
+
+# ── 数据主权批E: 测试默认禁用 KB buildGraph 主路径(真调 KB 全量解析
+# 40s+/次 → 全量超时)——默认强制降级逐文件路径; 主路径行为由
+# test_build_graph 冒烟(KB 侧)与显式 mock 用例覆盖。 ──
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _no_buildgraph(monkeypatch):
+    import topoone_app_architect.kb_gateway as _kg
+    monkeypatch.setattr(_kg, "call_kb",
+                        lambda *a, **k: (_ for _ in ()).throw(Exception("kb disabled in tests")))

@@ -128,7 +128,9 @@ class GraphBaselineTest(unittest.TestCase):
                     "imports": ["a"],
                     "refs": [{"name": "alpha", "kind": "calls", "line": 4}]}
 
-        with patch.object(gc, "_parse_one", side_effect=fake_parse):
+        with patch.object(gc, "_parse_one", side_effect=fake_parse), \
+             patch("topoone_app_architect.kb_gateway.call_kb",
+                   side_effect=Exception("kb down")):   # 强制降级路径
             nodes, edges, stats = gc.collect_snapshot(
                 self.root, self.PID, ["a.py", "sub/b.py"], "baseline:d2")
         self.assertEqual(stats["crossFileRefs"], 1)
@@ -158,7 +160,9 @@ class GraphBaselineTest(unittest.TestCase):
                 "refs": [{"name": "alpha", "kind": "calls", "line": 4}],
             }
 
-        with patch.object(gc, "_parse_one", side_effect=fake_parse):
+        with patch.object(gc, "_parse_one", side_effect=fake_parse), \
+             patch("topoone_app_architect.kb_gateway.call_kb",
+                   side_effect=Exception("kb down")):   # 强制降级路径
             nodes, edges, stats = gc.collect_snapshot(
                 self.root, self.PID, ["a.py", "sub/b.py"], "baseline:test")
         self.assertEqual(stats["parsed"], 2)
@@ -180,15 +184,18 @@ class GraphBaselineTest(unittest.TestCase):
 
     def test_collect_snapshot_cache_hit(self):
         from topoone_app_architect.sem import graph_collect as gc
-        # 预置缓存(与磁盘内容 hash 一致)
-        h = gc._cache_content_hash(self.root, "a.py")
-        AstCacheStore.upsert(self.PID, "a.py", {
-            "contentHash": h, "language": "python",
-            "symbols": [_norm_node("a.py", "cached_sym")],
-            "imports": [], "refs": [], "source": "kb",
-        })
-        nodes, edges, stats = gc.collect_snapshot(
-            self.root, self.PID, ["a.py"], "baseline:test")
+        # 缓存命中是降级路径(逐文件)语义; 主路径 buildGraph 由 KB 全图直出无缓存
+        with patch("topoone_app_architect.kb_gateway.call_kb",
+                   side_effect=Exception("kb down")):   # 强制降级路径
+            # 预置缓存(与磁盘内容 hash 一致)
+            h = gc._cache_content_hash(self.root, "a.py")
+            AstCacheStore.upsert(self.PID, "a.py", {
+                "contentHash": h, "language": "python",
+                "symbols": [_norm_node("a.py", "cached_sym")],
+                "imports": [], "refs": [], "source": "kb",
+            })
+            nodes, edges, stats = gc.collect_snapshot(
+                self.root, self.PID, ["a.py"], "baseline:test")
         self.assertEqual(stats["cached"], 1)
         self.assertEqual(stats["parsed"], 0)
         self.assertIn("cached_sym", {n["name"] for n in nodes})

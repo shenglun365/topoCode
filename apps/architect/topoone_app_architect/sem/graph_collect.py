@@ -106,7 +106,7 @@ def collect_snapshot(root: str, project: str, files: List[str], rev: str, *,
     file_set = set(files or [])
 
     # ── 主路径: KB buildGraph(全层级同构图) ──
-    from .buildgraph_client import collect_via_buildgraph
+    from .buildgraph_client import _prune_old_snapshots, collect_via_buildgraph
     bg = collect_via_buildgraph(root, files or [])
     if bg is not None:
         if progress is not None:
@@ -370,19 +370,6 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
         result["importsResolved"] = stats.get("importsResolved", 0)
     logger.info("[graph-collect] 完成: %s", json.dumps(result, ensure_ascii=False))
     return result
-
-
-def _prune_old_snapshots(pid: str, keep: int = 2) -> None:
-    """采集完成即修剪旧快照: 组件三表+图节点/边只留最近 keep 个 rev
-    (当前+上一版 DIFF 基准), 更旧快照清理(用户裁决: 刷新后不留陈旧组件信息)。"""
-    try:
-        from ..store.graph import ComponentStore, GraphStore
-        n1 = ComponentStore.prune_old_revs(pid, keep=keep)
-        n2 = GraphStore.prune_old_revs(pid, keep=keep)
-        if n1 or n2:
-            logger.info("[graph-collect] 修剪旧快照: 组件行 -%s, 图 rev -%s", n1, n2)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[graph-collect] 快照修剪失败(不阻塞): %s", e)
 
 
 def _next_partition(pid: str, head: str):
