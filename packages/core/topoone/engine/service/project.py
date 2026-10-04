@@ -306,7 +306,13 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
 
     @server.register("project.sync")
-    async def sync_project(id: str):
+    async def sync_project(id: str, branch: str = None, head: str = None):
+        """更新项目(镜像对齐源仓库 + 文件清单重扫)。
+
+        branch/head 可选: 指定则把镜像落到该分支(缺省=项目记录分支)的该提交
+        (缺省=分支最新); head 相对上次发生变化时自动清除旧分析数据(版本一致性
+        ——避免旧 head 的图谱/社区/摘要与新代码对应不上)。
+        """
         project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
         if not project:
             raise ValueError(f"Project not found: {id}")
@@ -316,40 +322,58 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         project_db = multi_db.get_project_db(id)
         root_path = project["root_path"]
+        from topoone.engine import git_service
+        from topoone.engine.task_api.tasks_crud import ANALYSIS_TABLES
 
-        # 先把镜像 fast-forward 到源 HEAD——否则变更检查(源 vs 镜像)永远
-        # 残留旧差异, 「更新」形同虚设。ff 失败(分叉/冲突)不阻塞重扫, 仅提示。
-        mirror_updated = ""
-        try:
-            from topoone.engine import git_service
-            if os.path.isdir(root_path) and git_service.is_git_repo(root_path):
-                mirror_head = git_service.rev_parse(root_path, "HEAD")
+        # 镜像对齐源仓库(分支/提交可选): pull 模式=清脏+拉取+checkout 指定
+        # head——否则变更检查(源 vs 镜像)永远残留旧差异, 「更新」形同虚设。
+        # 对齐失败(网络/分叉)不阻塞重扫, 保留旧工作副本。
+        old_head = ""
+        mirror_ok = os.path.isdir(root_path) and git_service.is_git_repo(root_path)
+        if mirror_ok:
+            try:
+                old_head = git_service.rev_parse(root_path, "HEAD")
+            except Exception:  # noqa: BLE001
+                old_head = ""
+            target_branch = (branch or project.get("branch") or "").strip() or None
+            try:
                 source_repo = project.get("local_repo_path") or ""
-                branch = project.get("branch") or git_service.current_branch(root_path)
-                source_head = ""
                 if source_repo and os.path.isdir(source_repo) and git_service.is_git_repo(source_repo):
                     try:
-                        source_head = git_service.rev_parse(source_repo, "HEAD")
-                    except Exception:  # noqa: BLE001
-                        source_head = ""
-                if not source_head:
+                        git_service._run_git(root_path, "fetch", source_repo,
+                                             target_branch or "HEAD", timeout=300)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"[project.sync] fetch local source failed: {e}")
+                else:
                     try:
                         git_service.fetch(root_path, timeout=300)
-                        source_head = git_service.rev_parse(
-                            root_path, f"origin/{branch}" if branch else "origin/HEAD")
-                    except Exception:  # noqa: BLE001
-                        source_head = ""
-                if source_head and mirror_head and source_head != mirror_head:
-                    try:
-                        _run = git_service._run_git
-                        _run(root_path, "fetch", source_repo or "origin", branch or "HEAD", timeout=300)
-                        _run(root_path, "merge", "--ff-only", "FETCH_HEAD", timeout=300)
-                        mirror_updated = git_service.rev_parse(root_path, "HEAD")
                     except Exception as e:  # noqa: BLE001
-                        logger.warning(f"[project.sync] mirror fast-forward failed: {e}")
-                        mirror_updated = f"ff-failed: {e}"
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[project.sync] mirror update skipped: {e}")
+                        logger.warning(f"[project.sync] fetch origin failed: {e}")
+                new_head = git_service.checkout_ref(
+                    root_path, target_branch, head or None, method="pull")
+                if head and new_head != head:
+                    logger.warning(f"[project.sync] head mismatch: want {head[:12]}, got {new_head[:12]}")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[project.sync] mirror align failed (keep old worktree): {e}")
+
+        # head 变化 → 清旧分析数据(版本一致性, 保留 source_files/project_config)
+        if mirror_ok:
+            try:
+                new_head = git_service.rev_parse(root_path, "HEAD")
+            except Exception:  # noqa: BLE001
+                new_head = ""
+            if old_head and new_head and old_head != new_head:
+                cleared = {}
+                for t in ANALYSIS_TABLES:
+                    try:
+                        before = project_db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                        if before:
+                            project_db.execute(f"DELETE FROM {t}")
+                            cleared[t] = before
+                    except Exception:  # noqa: BLE001
+                        pass
+                project_db.commit()
+                logger.info(f"[project.sync] head {old_head[:12]} -> {new_head[:12]}, cleared: {cleared}")
 
         # 清空旧文件
         project_db.execute("DELETE FROM source_files")
@@ -390,8 +414,8 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "updated_at": datetime.now().isoformat(),
             "has_file_changes": 0,
         }, "id = ?", (id,))
-        if mirror_updated:
-            logger.info(f"[project.sync] mirror head -> {mirror_updated[:12]}")
+        if mirror_ok and new_head:
+            logger.info(f"[project.sync] mirror head -> {new_head[:12]}")
 
         # 同步后刷新存储统计缓存（源码已重扫）
         _refresh_project_storage_stats(id)
@@ -472,6 +496,61 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "invalidFiles": invalid_files,
             "needsResync": len(invalid_files) > 0,
         }
+
+    @server.register("project.listSourceBranches")
+    def list_source_branches(id: str):
+        """源仓库分支列表(更新目标选择)——local_repo_path 优先, 否则镜像远端。"""
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
+        if not project:
+            raise ValueError(f"Project not found: {id}")
+        from topoone.engine import git_service
+        source = project.get("local_repo_path") or ""
+        repo = source if (source and os.path.isdir(source) and git_service.is_git_repo(source)) \
+            else project["root_path"]
+        if not os.path.isdir(repo) or not git_service.is_git_repo(repo):
+            return {"branches": []}
+        try:
+            git_service.fetch(repo, timeout=120)
+        except Exception:  # noqa: BLE001
+            pass
+        raw = git_service.list_branches(repo, limit=100) or []
+        cur = project.get("branch") or ""
+        branches = []
+        for b in raw:
+            b = b.strip().lstrip("* ").replace("remotes/origin/", "")
+            if not b or b == "HEAD" or b in branches:
+                continue
+            branches.append(b)
+        cur = git_service.current_branch(repo) if not cur else cur
+        return {"branches": branches, "current": cur}
+
+    @server.register("project.listSourceCommits")
+    def list_source_commits(id: str, branch: str = None, limit: int = 20):
+        """源仓库指定分支提交列表(更新目标选择, 新→旧)。"""
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
+        if not project:
+            raise ValueError(f"Project not found: {id}")
+        from topoone.engine import git_service
+        source = project.get("local_repo_path") or ""
+        repo = source if (source and os.path.isdir(source) and git_service.is_git_repo(source)) \
+            else project["root_path"]
+        if not os.path.isdir(repo) or not git_service.is_git_repo(repo):
+            return {"commits": []}
+        ref = (branch or project.get("branch") or git_service.current_branch(repo) or "HEAD")
+        try:
+            raw = git_service._run_git(repo, "log", ref, f"-n{int(limit)}",
+                                       "--pretty=%H%x1f%h%x1f%an%x1f%at%x1f%s", timeout=60)
+        except Exception:  # noqa: BLE001
+            return {"commits": []}
+        commits = []
+        for line in (raw or "").splitlines():
+            h, short, author, at, msg = (line.split("\x1f") + [""] * 5)[:5]
+            if not h:
+                continue
+            commits.append({"hash": h, "short": short, "author": author,
+                            "date": int(at) if at.isdigit() else 0,
+                            "message": msg})
+        return {"commits": commits}
 
     @server.register("project.checkFileChanges")
     async def check_file_changes(id: str):

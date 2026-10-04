@@ -125,9 +125,15 @@ function createRealIPC() {
       removeStatus: async (requestId: string) => {
         return await api.call('project.removeStatus', { requestId })
       },
-      sync: async (id: string) => {
-        const result = await api.project.sync(id)
+      sync: async (id: string, branch?: string, head?: string) => {
+        const result = await api.project.sync(id, branch, head)
         return adaptProject(result)
+      },
+      listSourceBranches: async (id: string) => {
+        return await api.project.listSourceBranches(id)
+      },
+      listSourceCommits: async (id: string, branch?: string) => {
+        return await api.project.listSourceCommits(id, branch)
       },
       getFileTree: async (id: string, fromPath?: string | null) => {
         return await api.project.getFileTree(id, fromPath)

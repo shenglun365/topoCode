@@ -16,6 +16,16 @@ from topoone.engine.store.analysis_store import AnalysisStore
 from topoone.engine.analysis_utils import get_cascade_levels_impl, get_l0_comps
 from topoone.engine.community_data import unified_l0_components
 
+# 分析产物表清单(版本一致性清理共用: project.sync 换 head / clearProjectCache)
+ANALYSIS_TABLES = [
+    "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
+    "community_llm_results",
+    "ast_data", "dependencies", "call_chains", "components",
+    "ai_qa", "file_summaries",
+    "report_subdocs", "agent_task_history",
+]
+
+
 from topoone.engine.analyst_runner import (
     _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task,
 )
@@ -227,13 +237,7 @@ def register(server, multi_db, S):
 
         # 清除所有分析相关表，记录每个表的删除数量
         deleted_tables = {}
-        tables_to_clear = [
-            "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
-            "community_llm_results",
-            "ast_data", "dependencies", "call_chains", "components",
-            "ai_qa", "file_summaries",
-            "report_subdocs", "agent_task_history",
-        ]
+        tables_to_clear = ANALYSIS_TABLES
         for table in tables_to_clear:
             before = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             project_db.execute(f"DELETE FROM {table}")

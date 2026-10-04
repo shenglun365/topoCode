@@ -56,6 +56,14 @@ const {
   handleOpenGroupManagerFromDialog,
   handleResetProject,
   handleResyncFromDialog,
+  loadSyncBranches,
+  loadSyncCommits,
+  pickSyncBranch,
+  syncBranch,
+  syncBranches,
+  syncCommits,
+  syncHead,
+  syncTargetLoading,
   hideMenu,
   isDeleting,
   isResourceProject,
@@ -628,6 +636,29 @@ function formatTime(timeStr: string | null): string {
               {{ t('project.changes.noChanges') }}
             </div>
           </div>
+          <div class="changes-sync-target">
+            <span class="changes-sync-label">{{ t('project.changes.syncTarget') }}</span>
+            <select
+              class="changes-sync-select"
+              :value="syncBranch"
+              :disabled="syncTargetLoading"
+              @change="pickSyncBranch(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-if="!syncBranches.length" value="">{{ t('project.changes.syncNoBranches') }}</option>
+              <option v-for="b in syncBranches" :key="b" :value="b">{{ b }}</option>
+            </select>
+            <select
+              v-model="syncHead"
+              class="changes-sync-select changes-sync-commit"
+              :disabled="syncTargetLoading || !syncCommits.length"
+            >
+              <option value="">{{ t('project.changes.syncLatest') }}</option>
+              <option v-for="c in syncCommits" :key="c.hash" :value="c.hash">
+                {{ c.short }} · {{ c.message.length > 28 ? c.message.slice(0, 28) + '…' : c.message }}
+              </option>
+            </select>
+          </div>
+          <p v-if="syncHead" class="changes-sync-note">{{ t('project.changes.syncHeadNote') }}</p>
           <div class="changes-dialog-actions">
             <button
               class="btn btn-ghost btn-sm"
@@ -637,6 +668,7 @@ function formatTime(timeStr: string | null): string {
             </button>
             <button
               class="btn btn-primary btn-sm"
+              :disabled="syncTargetLoading"
               @click="handleResyncFromDialog"
             >
               {{ t('project.resyncConfirm') }}
@@ -1060,6 +1092,36 @@ function formatTime(timeStr: string | null): string {
   font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   text-align: center;
+}
+.changes-sync-target {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1)) 0;
+  flex-wrap: wrap;
+}
+.changes-sync-label {
+  font-size: calc(12px * var(--ui-scale, 1));
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.changes-sync-select {
+  max-width: calc(180px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  border: 1px solid var(--border);
+  border-radius: calc(6px * var(--ui-scale, 1));
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-scale, 1));
+}
+.changes-sync-commit {
+  max-width: calc(240px * var(--ui-scale, 1));
+  font-family: var(--font-mono, monospace);
+}
+.changes-sync-note {
+  padding: calc(4px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1)) 0;
+  font-size: calc(11px * var(--ui-scale, 1));
+  color: var(--text-tertiary, var(--text-secondary));
 }
 .changes-dialog-actions {
   display: flex;

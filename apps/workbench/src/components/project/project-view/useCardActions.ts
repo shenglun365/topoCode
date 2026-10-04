@@ -1,7 +1,11 @@
 /**
  * useCard · actions 域（MS6-W3 机械迁出：域内逐行原文，跨域引用 D. 前缀重写）。
  */
+import { ref } from 'vue'
 import { useProjectStore } from '@/stores/project'
+import { ipc } from '@/services/ipc'
+
+interface SyncCommit { hash: string; short: string; author: string; date: number; message: string }
 import { useI18n } from 'vue-i18n'
 
 import type { CardDeps } from './chatTypes'
@@ -57,6 +61,37 @@ async function onClearCacheDone() {
   await projectStore.loadProjects()
 }
 
+// ── 更新目标选择(分支/提交): 变更检查弹窗内可选, 缺省=源 HEAD ──
+const syncBranches = ref<string[]>([])
+const syncBranch = ref('')
+const syncCommits = ref<SyncCommit[]>([])
+const syncHead = ref('')
+const syncTargetLoading = ref(false)
+
+/** 打开变更检查弹窗时懒加载分支列表; 切分支时加载该分支提交列表。 */
+async function loadSyncBranches() {
+  syncTargetLoading.value = true
+  try {
+    const r = await ipc.project.listSourceBranches(props.project.id)
+    syncBranches.value = r?.branches || []
+    syncBranch.value = r?.current || syncBranches.value[0] || ''
+    await loadSyncCommits()
+  } catch { syncBranches.value = [] } finally { syncTargetLoading.value = false }
+}
+
+async function loadSyncCommits() {
+  syncTargetLoading.value = true
+  syncHead.value = ''
+  try {
+    const r = await ipc.project.listSourceCommits(props.project.id, syncBranch.value || undefined)
+    syncCommits.value = r?.commits || []
+  } catch { syncCommits.value = [] } finally { syncTargetLoading.value = false }
+}
+
+function pickSyncBranch(b: string) {
+  if (b !== syncBranch.value) { syncBranch.value = b; loadSyncCommits() }
+}
+
 async function handleCheckChanges() {
   D.menu.hideMenu()
   D.state.changesLoading.value = true
@@ -66,6 +101,7 @@ async function handleCheckChanges() {
   try {
     const result = await projectStore.checkFileChanges(props.project.id)
     D.state.changesResult.value = result
+    loadSyncBranches()
   } catch (err: any) {
     console.error('Failed to check changes:', err)
     D.state.changesError.value = err?.message || t('project.changes.checkFailed')
@@ -75,13 +111,28 @@ async function handleCheckChanges() {
 }
 
 async function handleResyncFromDialog() {
-  D.state.changesDialogVisible.value = false
-  await projectStore.syncProject(props.project.id)
+  D.state.changesLoading.value = true
+  try {
+    await projectStore.syncProject(
+      props.project.id,
+      syncBranch.value || undefined,
+      syncHead.value || undefined)
+    // 更新后重查: 镜像已对齐 → 应显示无变更(head 变化时旧分析数据已自动清除)
+    const result = await projectStore.checkFileChanges(props.project.id)
+    D.state.changesResult.value = result
+  } catch (err: any) {
+    console.error('Failed to resync:', err)
+    D.state.changesError.value = err?.message || t('project.changes.checkFailed')
+  } finally {
+    D.state.changesLoading.value = false
+  }
 }
 
   return {
     confirmDelete,
     handleCheckChanges,
+    syncBranches, syncBranch, syncCommits, syncHead, syncTargetLoading,
+    loadSyncBranches, loadSyncCommits, pickSyncBranch,
     handleClearCache,
     handleDelete,
     handleDeleteBackup,

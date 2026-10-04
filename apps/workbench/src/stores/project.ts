@@ -304,10 +304,10 @@ export const useProjectStore = defineStore('project', () => {
     return result
   }
 
-  async function syncProject(id: string) {
+  async function syncProject(id: string, branch?: string, head?: string) {
     loading.value = true
     try {
-      const project = await ipc.project.sync(id)
+      const project = await ipc.project.sync(id, branch, head)
       const idx = projects.value.findIndex(p => p.id === id)
       if (idx >= 0) projects.value[idx] = project
       return project

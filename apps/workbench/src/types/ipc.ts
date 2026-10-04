@@ -476,7 +476,9 @@ export interface IPCAPI {
     get: (id: string) => Promise<Project>
     remove: (id: string, wait?: boolean) => Promise<{ requestId?: string; status?: string; deleted?: boolean }>
     removeStatus: (requestId: string) => Promise<{ status: string; progress?: number; phase?: string; projectId?: string; error?: string }>
-    sync: (id: string) => Promise<Project>
+    sync: (id: string, branch?: string, head?: string) => Promise<Project>;
+    listSourceBranches: (id: string) => Promise<{ branches: string[]; current?: string }>;
+    listSourceCommits: (id: string, branch?: string) => Promise<{ commits: Array<{ hash: string; short: string; author: string; date: number; message: string }> }>;
     getFileTree: (id: string, fromPath?: string | null) => Promise<FileTreeNode[]>
     updatePath: (id: string, newRootPath: string) => Promise<{ project: Project; invalidFiles: string[]; needsResync: boolean }>
     checkFileChanges: (id: string) => Promise<{ added: string[]; modified: string[]; deleted: string[]; hasChanges: boolean }>

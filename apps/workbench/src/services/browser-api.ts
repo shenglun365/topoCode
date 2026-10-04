@@ -75,7 +75,11 @@ export function createBrowserAPI(): any {
     get: (id: string) => callRpc('project.get', { id }),
     remove: (id: string, wait?: boolean) => callRpc('project.remove', { id, wait }),
     removeStatus: (requestId: string) => callRpc('project.removeStatus', { requestId }),
-    sync: (id: string) => callRpc('project.sync', { id }),
+    sync: (id: string, branch?: string, head?: string) =>
+      callRpc('project.sync', { id, ...(branch ? { branch } : {}), ...(head ? { head } : {}) }),
+    listSourceBranches: (id: string) => callRpc('project.listSourceBranches', { id }),
+    listSourceCommits: (id: string, branch?: string) =>
+      callRpc('project.listSourceCommits', { id, ...(branch ? { branch } : {}) }),
     getFileTree: (id: string, fromPath?: string | null) => callRpc('project.getFileTree', { id, fromPath }),
     updatePath: (id: string, newRootPath: string) => callRpc('project.updatePath', { id, newRootPath }),
     checkFileChanges: (id: string) => callRpc('project.checkFileChanges', { id }),
