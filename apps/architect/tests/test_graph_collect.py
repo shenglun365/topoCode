@@ -139,11 +139,12 @@ class GraphBaselineTest(unittest.TestCase):
         self.assertEqual(names, {"alpha", "beta"})
         file_ids = {n["id"] for n in nodes if n["kind"] == "file"}
         self.assertIn("file:sub/b.py", file_ids)
-        # imports 文件级边(file 虚拟节点 → module)
+        # imports 文件级边(D1: 模块说明符解析为真实 file 节点 id)
         imps = [e for e in edges if e["kind"] == "imports"]
         self.assertEqual(len(imps), 1)
         self.assertEqual(imps[0]["source"], "file:sub/b.py")
-        self.assertEqual(imps[0]["target"], "a")
+        self.assertEqual(imps[0]["target"], "file:a.py")
+        self.assertEqual(stats["importsResolved"], 1)
         # ast cache 已回写(下次命中)
         cached = AstCacheStore.get(self.PID, "a.py")
         self.assertIsNotNone(cached)

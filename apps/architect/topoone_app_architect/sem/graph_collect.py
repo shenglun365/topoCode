@@ -98,10 +98,13 @@ def collect_snapshot(root: str, project: str, files: List[str], rev: str, *,
     stats: {parsed, cached, failed, source}
     """
     from .context import _norm_cache_symbol, _peek_docstring_at_line, _rebuild_edges_from_refs
+    from .import_resolver import AliasRegistry, build_alias_registry
 
     nodes: List[dict] = []
     edges: List[dict] = []
     stats = {"parsed": 0, "cached": 0, "failed": 0, "source": ""}
+    file_set = set(files or [])
+    registry = build_alias_registry(root, file_set)
     for i, rel in enumerate(files or []):
         if progress is not None and i % 20 == 0:
             progress(i, rel)
@@ -171,7 +174,35 @@ def collect_snapshot(root: str, project: str, files: List[str], rev: str, *,
             if isinstance(mod, str) and mod.strip():
                 edges.append({"source": file_node_id, "target": mod.strip(),
                               "kind": "imports"})
+    # imports 边批量改写(D1): 模块说明符 → file:<rel> 真实边; external 丢弃
+    from .import_resolver import resolve_imports_batch
+    jvm_roots = _jvm_package_roots(root, file_set)
+    edges, imp_stats = resolve_imports_batch(edges, file_set, registry,
+                                             jvm_package_dirs=jvm_roots)
+    stats["importsResolved"] = imp_stats["resolved"]
+    stats["importsExternal"] = imp_stats["external"]
     return nodes, edges, stats
+
+
+def _jvm_package_roots(root: str, file_set: set) -> dict:
+    """JVM 族 FQCN → 目录索引: 扫 package/use 声明(每文件一次, 上限 512 文件)。
+
+    import com.x.y.Z → 前缀 com.x.y 命中 → 目录 + Z + 扩展序探测。
+    """
+    import re as _re
+    out: dict = {}
+    jvm_files = [f for f in file_set
+                 if os.path.splitext(f)[1].lower() in (".java", ".kt", ".kts", ".scala")][:512]
+    for rel in jvm_files:
+        try:
+            with open(os.path.join(root, rel.replace("/", os.sep)), "rb") as fh:
+                head = fh.read(4096).decode("utf-8", "replace")
+        except OSError:
+            continue
+        m = _re.search(r"^\s*package\s+([\w.]+)", head, _re.M)
+        if m:
+            out[m.group(1)] = os.path.dirname(rel)
+    return out
 
 
 def _graph_kv_key(pid: str) -> str:
