@@ -59,6 +59,35 @@ class TestCtxProjectDb:
         assert not os.path.exists(C.project_db_path("proj-d4"))
         assert C.project_db("proj-d4", create=False) is None
 
+    def test_purge_project_rows(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        db = C.db()
+        from topoone_app_architect.sem.codegraph import ensure_arch_settings_table
+        ensure_arch_settings_table()
+        # 主库: 带 project_id 的孤儿行 + 项目级 KV + 全局配置
+        db.execute("INSERT INTO arch_logic_views (id, project_id, name, updated_at)"
+                   " VALUES ('lv-1', 'proj-x9', 'V', 1)")
+        db.execute("INSERT INTO arch_conversations (id, project_id, kind, title, created_at, updated_at)"
+                   " VALUES ('cv-1', 'proj-x9', 'jobcard', 't', 1, 1)")
+        db.execute("INSERT INTO arch_settings (key, value) VALUES"
+                   " ('arch.symbolSource.proj-x9', '{}'),"
+                   " ('arch.graphBaseline.proj-x9', '{}'),"
+                   " ('arch.codegraph.mode', 'auto'),"
+                   " ('llm.modelId', 'model-keep')")
+        db.commit()
+        # 项目库有文件
+        C.project_db("proj-x9")
+        purged = C.purge_project_rows("proj-x9")
+        assert purged.get("arch_logic_views") == 1
+        assert purged.get("arch_conversations") == 1
+        assert purged.get("arch_settings(kv)") == 2
+        # 全局配置不触碰
+        assert db.fetchone("SELECT value FROM arch_settings WHERE key='arch.codegraph.mode'")
+        assert db.fetchone("SELECT value FROM arch_settings WHERE key='llm.modelId'")
+        assert db.fetchone("SELECT COUNT(*) AS c FROM arch_logic_views")["c"] == 0
+        # 项目库文件由 delete_project_db 负责(此处只验证行级清理不抛)
+        C.delete_project_db("proj-x9")
+
 
 # ── store 路由 ─────────────────────────────────────────────────
 

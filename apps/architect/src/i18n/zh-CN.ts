@@ -225,7 +225,8 @@ export default {
     deleteTitle: '删除项目',
     deleteDesc: '从项目列表中移除该项目（不影响宿主机上的源码/工作目录）。',
     deleteDataLabel: '同时删除项目相关的 architect 数据',
-    deleteDataHint: '包括该项目的架构快照等，默认不删除。',
+    deleteDataHint: '删除项目子库(快照/资产等全部数据)、主库关联记录与项目级配置键，默认不删除。',
+    deletePurged: '已清理 {n} 类数据',
     deleteConfirm: '删除',
   },
   doc: {

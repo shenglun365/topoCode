@@ -27,6 +27,7 @@ const loading = ref(true)
 const search = ref('')
 const deleting = ref<ProjectInfo | null>(null)
 const deleteData = ref(false)
+const deletePurged = ref('')
 const busyId = ref<string | null>(null)
 
 const testingKb = ref(false)
@@ -163,8 +164,11 @@ async function confirmDelete() {
   if (!deleting.value) return
   busyId.value = deleting.value.id
   try {
-    await projectService.deleteProject({ execRoot: deleting.value.rootPath, deleteData: deleteData.value })
+    const res = await projectService.deleteProject({ execRoot: deleting.value.rootPath, deleteData: deleteData.value })
+    const groups = Object.keys(res.purged || {}).length
+    deletePurged.value = deleteData.value && groups ? t('overview.deletePurged', { n: groups }) : ''
     deleting.value = null
+    if (deletePurged.value) setTimeout(() => { deletePurged.value = '' }, 5000)
     await loadOverview()
   } finally {
     busyId.value = null
@@ -204,6 +208,9 @@ function openDoc(id: string) {
 
 <template>
   <div class="p-6 max-w-7xl mx-auto space-y-6">
+    <div v-if="deletePurged" class="fixed bottom-5 right-5 z-50 rounded-lg border border-ctp-green/40 bg-ctp-surface0 px-4 py-2 text-xs text-ctp-green shadow-lg">
+      {{ deletePurged }}
+    </div>
     <!-- 组① 顶部启动条：启动命令 + 新建 / 打开 -->
     <section class="panel p-5">
       <div class="flex flex-wrap items-center gap-4">

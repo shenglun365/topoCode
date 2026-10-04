@@ -185,6 +185,41 @@ def close_project_db(project_id: str) -> None:
             pass
 
 
+def purge_project_rows(project_id: str) -> dict:
+    """删除项目在主库中的全部关联数据(删项目级联清理, deleteData 分支用):
+    - 主库全部带 project_id 列的表按 pid 删除(PROJECT_TABLES 走项目子库,
+      但历史数据/路由变更可能在主库留行——一并清);
+    - arch_settings 项目级 KV(key 形如 `<ns>.<pid>`, 如 arch.symbolSource.<pid>/
+      arch.graphBaseline.<pid>)。
+    全局配置(arch_collab_config/arch.codegraph.mode 等)不触碰。
+    返回 {表: 删除行数}。"""
+    it = db()
+    if it is None:
+        return {}
+    purged: dict = {}
+    tabs = [r["name"] for r in it.fetchall(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+    for t in tabs:
+        try:
+            cols = [c["name"] for c in it.fetchall(f"PRAGMA table_info('{t}')")]
+            if "project_id" not in cols:
+                continue
+            cur = it.execute(f'DELETE FROM "{t}" WHERE project_id = ?', (project_id,))
+            if getattr(cur, "rowcount", 0) > 0:
+                purged[t] = cur.rowcount
+        except Exception:
+            continue
+    try:
+        cur = it.execute("DELETE FROM arch_settings WHERE key LIKE ?",
+                         (f"%.{project_id}",))
+        if getattr(cur, "rowcount", 0) > 0:
+            purged["arch_settings(kv)"] = cur.rowcount
+    except Exception:
+        pass
+    it.commit()
+    return purged
+
+
 def delete_project_db(project_id: str) -> None:
     """删除项目库(删项目用): 关连接 + 删文件 + 清空目录。"""
     close_project_db(project_id)

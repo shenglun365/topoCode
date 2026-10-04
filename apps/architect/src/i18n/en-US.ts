@@ -229,7 +229,8 @@ export default {
     deleteTitle: 'Delete Project',
     deleteDesc: 'Remove this project from the list (host source / working directory is untouched).',
     deleteDataLabel: 'Also delete project-related architect data',
-    deleteDataHint: 'Includes architecture snapshots for this project. Default off.',
+    deleteDataHint: 'Deletes the project sub-database (snapshots/assets), related main-db rows and per-project config keys. Default off.',
+    deletePurged: 'Purged {n} data groups',
     deleteConfirm: 'Delete',
   },
   doc: {

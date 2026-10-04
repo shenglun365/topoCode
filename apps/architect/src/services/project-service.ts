@@ -67,8 +67,8 @@ export const projectService = {
   async renameProject(opts: { name: string; execRoot?: string; root?: string; project?: string }): Promise<ProjectInfo> {
     return apiPost<ProjectInfo>('/project/rename', opts)
   },
-  /** 删除项目列表记录(可选同时删除 architect 相关数据，如架构快照)。 */
-  async deleteProject(opts: { execRoot?: string; root?: string; project?: string; deleteData?: boolean }): Promise<{ deleted: boolean; deleteData: boolean; id: string }> {
+  /** 删除项目列表记录(可选同时删除 architect 相关数据——项目子库/主库关联行/项目级 KV)。 */
+  async deleteProject(opts: { execRoot?: string; root?: string; project?: string; deleteData?: boolean }): Promise<{ deleted: boolean; deleteData: boolean; id: string; purged?: Record<string, number> }> {
     return apiPost('/project/delete', opts)
   },
   /** 打开工作目录并(可选)关联 KB：校验通过后登记 arch_projects(选择持久化在 URL ?root=)。 */

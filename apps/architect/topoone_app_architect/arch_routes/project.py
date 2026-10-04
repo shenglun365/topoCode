@@ -171,12 +171,15 @@ async def delete_project(request: Request):
     if not proj or not proj.get("id"):
         return err(400, "未定位到项目")
     delete_data = bool(body.get("deleteData"))
+    purged: dict = {}
     if delete_data:
         # 项目库整体删除(architect/<pid>/arch.db，含快照记录等全部项目数据)
         from .. import ctx as _ctx
         _ctx.delete_project_db(proj["id"])
+        # 主库级联清理: 带 project_id 的行 + 项目级 KV(symbolSource/graphBaseline 锚等)
+        purged = _ctx.purge_project_rows(proj["id"])
     store.ProjectsStore.delete(proj["id"])
-    return ok({"deleted": True, "deleteData": delete_data, "id": proj["id"]})
+    return ok({"deleted": True, "deleteData": delete_data, "id": proj["id"], "purged": purged})
 
 
 @router.post("/project/bound")
