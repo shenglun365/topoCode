@@ -62,9 +62,7 @@ async def api_req_drafts_tags(root: Optional[str] = None, project: Optional[str]
 async def api_req_drafts_get(draft_id: str):
     from ..store import ReqDraftsStore
     draft = ReqDraftsStore.get(draft_id)
-    if not draft:
-        return err(404, "草稿不存在")
-    return ok(draft)
+    return ok(draft) if draft else err(404, "草稿不存在")
 
 
 @router.put("/req-drafts/{draft_id}")
@@ -123,7 +121,11 @@ def split_agent_blocks(content_md: str) -> tuple:
     instructions: list = []
 
     def _drop(m) -> str:
-        instructions.append(m.group(1).strip())
+        # 注释行(# //开头)剥离——模板引导注释不进指令; 全注释块不产生空指令
+        text = "\n".join(l for l in m.group(1).splitlines()
+                         if not l.strip().startswith(("#", "//"))).strip()
+        if text:
+            instructions.append(text)
         return ""
 
     clean = _AGENT_FENCE_RE.sub(_drop, content_md or "")

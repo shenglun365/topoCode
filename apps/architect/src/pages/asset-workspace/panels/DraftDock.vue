@@ -225,6 +225,12 @@ async function createDraft(): Promise<void> {
     const d = await reqDraftService.create({ title: t('draft.untitled') })
     await loadList()
     await openDraft(d)
+    // 新草稿正文开头自动带 topo-cmd 模板(注释引导, 用户填写指令)
+    if (!contentDraft.value.trim()) {
+      contentDraft.value = `${cmdTemplate()}\n\n`
+      pending.value = true
+      await flush()
+    }
   } finally {
     loading.value = false
   }
@@ -505,11 +511,41 @@ function hasCmdBlock(): boolean {
   return /```topo-cmd[ \t]*\r?\n[\s\S]*?```/.test(contentDraft.value)
 }
 
+/** topo-cmd 指令模板(带注释引导; BE 剥离注释行, 注释不会发给 AI)。 */
+function cmdTemplate(): string {
+  return t('draft.ai.topoTemplate')
+}
+/** 围栏内指令文本(剥注释后)——空=全注释未填写。 */
+function cmdText(): string {
+  const m = contentDraft.value.match(/```topo-cmd[ \t]*\r?\n([\s\S]*?)```/)
+  if (!m) return ''
+  return (m[1] ?? '').split('\n')
+    .filter((l) => !l.trim().startsWith('#') && !l.trim().startsWith('//'))
+    .join('\n').trim()
+}
+/** 在正文开头插入指令块模板(已存在则不重复)。 */
+async function insertCmdTemplate(): Promise<void> {
+  if (hasCmdBlock()) return
+  await flush()
+  contentDraft.value = `${cmdTemplate()}\n\n${contentDraft.value.replace(/^\s+/, '')}`
+  pending.value = true
+  await flush()
+  syncListRow()
+}
+
 async function runAi(preset: 'generate' | 'review' | 'relate' | 'custom'): Promise<void> {
   if (!current.value || aiBusy.value || archived.value) return
-  if (preset === 'custom' && !hasCmdBlock()) {
-    aiStatus.value = t('draft.ai.noCmdBlock')
-    return
+  if (preset === 'custom') {
+    if (!hasCmdBlock()) {
+      // 无指令块 → 自动插入模板(不再仅报错), 用户填写后再次执行
+      await insertCmdTemplate()
+      aiStatus.value = t('draft.ai.cmdInserted')
+      return
+    }
+    if (!cmdText()) {
+      aiStatus.value = t('draft.ai.cmdEmpty')
+      return
+    }
   }
   await flush()   // AI 上下文=已保存正文
   aiBusy.value = true

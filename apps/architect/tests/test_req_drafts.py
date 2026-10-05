@@ -67,6 +67,18 @@ def test_draft_crud_lifecycle():
     assert _body(asyncio.run(api.api_req_drafts_delete(cp["id"]))).get("code") == 404
 
 
+def test_draft_ai_split_strips_comments():
+    """topo-cmd 注释行(# //)剥离——模板引导注释不进指令; 全注释块不产生空指令。"""
+    from topoone_app_architect.arch_routes.req_drafts import split_agent_blocks
+    md = "前文\n\n```topo-cmd\n# 模板注释\n// 注释2\n润色本文措辞\n```\n\n后文"
+    clean, emb = split_agent_blocks(md)
+    assert "前文" in clean and "后文" in clean and "topo-cmd" not in clean
+    assert emb == ["润色本文措辞"]
+    # 全注释块 → 指令列表为空(不产生空串指令)
+    _, emb2 = split_agent_blocks("```topo-cmd\n# 只有注释\n```")
+    assert emb2 == []
+
+
 def test_draft_tags_store_and_api():
     """tags: 归一(去重/trim/截限64B×20)/copy 继承/all_tags 聚合/API PUT+归档拒绝。"""
     from topoone_app_architect.arch_routes import req_drafts as api
