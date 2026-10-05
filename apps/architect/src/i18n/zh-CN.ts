@@ -1888,7 +1888,7 @@ export default {
         fullPaths: '全链路',
         fullPathsHint: '点击行选中该链终点',
       },
-      selActions: { quote: '引用', copy: '复制', copied: '已复制' },
+      selActions: { quote: '引用', copy: '复制', copied: '已复制', quoted: '已引用' },
       cardResetPos: '拖动改变位置，双击标题回到右下角',
       minimize: '最小化为图标',
       restore: '展开资产卡',

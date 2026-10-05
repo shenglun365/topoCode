@@ -8,7 +8,7 @@
  * - 草稿列表在右侧：点击打开（仅编辑 tab）、✎ 行内改名、删除、归档只读+续写。
  * - 自定义指令：正文 ```topo-cmd 标记块（预览过滤不解析）。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon, PlusIcon, TrashIcon, EyeIcon, XMarkIcon,
@@ -40,6 +40,7 @@ const loading = ref(false)
 /** 编辑缓冲（title/contentMd 本地）。 */
 const titleDraft = ref('')
 const contentDraft = ref('')
+const editTa = ref<HTMLTextAreaElement | null>(null)
 
 // ---- 列表视图（状态过滤 + 搜索；更新时间倒序为服务端既有排序） ----
 type ListFilter = 'all' | 'editing' | 'archived'
@@ -400,6 +401,14 @@ async function receiveDraftRef(p: DraftRefPayload): Promise<void> {
   pending.value = true
   await flush()          // 关键动作即时落库
   syncListRow()
+  // 引用块定位: 编辑区滚到尾部(预览 tab 同样滚底); 广播完成(浮条「已引用」反馈)
+  void nextTick(() => {
+    const ta = editTa.value as HTMLTextAreaElement | null
+    if (activeTab.value === 'edit' && ta) ta.scrollTop = ta.scrollHeight
+    const pv = document.querySelector('[data-draft-preview]')
+    if (pv) pv.scrollTop = pv.scrollHeight
+  })
+  window.dispatchEvent(new CustomEvent('draft-ref-done', { detail: { created: !usable } }))
 }
 onMounted(() => {
   startAutosave()
@@ -873,6 +882,7 @@ onBeforeUnmount(() => {
         <!-- 编辑 tab -->
         <textarea
           v-else-if="activeTab === 'edit'"
+          ref="editTa"
           v-model="contentDraft"
           class="h-full min-w-0 flex-1 resize-none bg-transparent p-3 pt-10 font-mono text-[12px] leading-relaxed text-ctp-text outline-none"
           :disabled="archived"
@@ -881,7 +891,7 @@ onBeforeUnmount(() => {
         />
 
         <!-- 预览 tab -->
-        <div v-else class="h-full min-w-0 flex-1 overflow-y-auto p-3">
+        <div v-else data-draft-preview class="h-full min-w-0 flex-1 overflow-y-auto p-3">
           <template v-for="(b, i) in previewBlocks" :key="i">
             <MarkdownView v-if="b.kind === 'text'" :content="b.text ?? ''" />
             <DiagramCard

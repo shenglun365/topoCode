@@ -149,6 +149,20 @@ const {
 // ---- 卡片内容选中 → 引用到草稿 / 复制(代码段/全文/关系 tab/符号卡共用容器) ----
 const selActionHost = ref<HTMLElement | null>(null)
 /** 选区起点所在代码段(refSel 时选区仍在; 全文/rel tab/符号卡 → null, payload 用兜底)。 */
+/** 选区起始行号(全文行 data-line; 无 → 0)。 */
+function selStartLine(): number {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return 0
+  let el: HTMLElement | null = sel.getRangeAt(0).startContainer instanceof HTMLElement
+    ? (sel.getRangeAt(0).startContainer as HTMLElement)
+    : sel.getRangeAt(0).startContainer.parentElement
+  while (el) {
+    const dl = el.getAttribute?.('data-line')
+    if (dl) return Number(dl)
+    el = el.parentElement
+  }
+  return 0
+}
 function selSeg(): { file: string; symbol: string } | null {
   const sel = window.getSelection()
   if (!sel || sel.rangeCount === 0) return null
@@ -163,20 +177,27 @@ function selSeg(): { file: string; symbol: string } | null {
   return null
 }
 const {
-  barVisible: codeSelBar, barPos: codeSelBarPos, copied: codeSelCopied, copySel: codeSelCopy, refSel: codeSelRef,
+  barVisible: codeSelBar, barPos: codeSelBarPos, copied: codeSelCopied, quoted: codeSelQuoted, copySel: codeSelCopy, refSel: codeSelRef,
 } = useSelectionActions(selActionHost, () => {
   const seg = selSeg()
+  // 全文视图: 按选中起始行归属资产(跨资产行选中 → 来源指向行所属资产)
+  const owner = (!seg && fullCode.value) ? fullCodeOwners.value.get(selStartLine()) : undefined
+  const ownerAsset = owner
+    ? (graph.value?.nodes ?? []).find((n) => n.id === owner) : undefined
+  const ownerAnchor = owner
+    ? (graph.value?.anchors ?? []).find((a) => a.assetId === owner && a.file === fullCode.value?.file)
+    : undefined
   const file = seg?.file || fullCode.value?.file || symDetail.value?.meta.file || ''
   const sym = symDetail.value
     ? symDetail.value.meta.qualifiedName
-    : (seg?.symbol || selAnchors.value[0]?.symbol || '')
+    : (seg?.symbol || (ownerAnchor?.symbol ?? '') || selAnchors.value[0]?.symbol || '')
   return {
     projectId: currentProjectParams().project || '',
     compId: selDetail.value?.scopeKey || '',
     fileId: file || undefined,
     fileLabel: file ? file.split('/').pop() : undefined,
-    assetId: symDetail.value ? undefined : (selId.value || undefined),
-    assetName: symDetail.value ? undefined : (sel.value?.name || undefined),
+    assetId: symDetail.value ? undefined : (owner || selId.value || undefined),
+    assetName: symDetail.value ? undefined : (ownerAsset?.name || sel.value?.name || undefined),
     symbolName: sym || undefined,
   }
 }, { lang: () => {
@@ -411,9 +432,10 @@ const {
             :style="{ left: codeSelBarPos.x + 'px', top: codeSelBarPos.y + 'px' }"
           >
             <button
-              class="rounded px-1.5 py-0.5 text-[10px] text-ctp-blue hover:bg-ctp-surface0"
+              class="rounded px-1.5 py-0.5 text-[10px] hover:bg-ctp-surface0"
+              :class="codeSelQuoted ? 'text-ctp-green' : 'text-ctp-blue'"
               @click.stop="codeSelRef"
-            >{{ t('assetMgmt.graph.selActions.quote') }}</button>
+            >{{ codeSelQuoted ? t('assetMgmt.graph.selActions.quoted') : t('assetMgmt.graph.selActions.quote') }}</button>
             <button
               class="rounded px-1.5 py-0.5 text-[10px] text-ctp-subtext1 hover:bg-ctp-surface0"
               @click.stop="codeSelCopy"

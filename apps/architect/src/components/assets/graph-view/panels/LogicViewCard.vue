@@ -40,9 +40,10 @@
         :style="{ left: selBarPos.x + 'px', top: selBarPos.y + 'px' }"
       >
         <button
-          class="rounded px-1.5 py-0.5 text-[10px] text-ctp-blue hover:bg-ctp-surface0"
+          class="rounded px-1.5 py-0.5 text-[10px] hover:bg-ctp-surface0"
+          :class="selQuoted ? 'text-ctp-green' : 'text-ctp-blue'"
           @click.stop="selRef"
-        >{{ t('assetMgmt.graph.selActions.quote') }}</button>
+        >{{ selQuoted ? t('assetMgmt.graph.selActions.quoted') : t('assetMgmt.graph.selActions.quote') }}</button>
         <button
           class="rounded px-1.5 py-0.5 text-[10px] text-ctp-subtext1 hover:bg-ctp-surface0"
           @click.stop="selCopy"
@@ -132,7 +133,7 @@ const firstCoreId = computed(() => {
 })
 const selHost = ref<HTMLElement | null>(null)
 const {
-  barVisible: selBar, barPos: selBarPos, copied: selCopied, copySel: selCopy, refSel: selRef,
+  barVisible: selBar, barPos: selBarPos, copied: selCopied, quoted: selQuoted, copySel: selCopy, refSel: selRef,
 } = useSelectionActions(selHost, () => ({
   projectId: currentProjectParams().project || '',
   viewId: view.value?.id || props.viewId,

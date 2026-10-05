@@ -15,7 +15,10 @@ export function useSelectionActions(
   const barVisible = ref(false)
   const barPos = ref({ x: 0, y: 0 })
   const copied = ref(false)
+  /** 引用完成反馈(草稿落库后广播 → 按钮「已引用」1.5s)。 */
+  const quoted = ref(false)
   let copiedTimer: ReturnType<typeof setTimeout> | null = null
+  let quotedTimer: ReturnType<typeof setTimeout> | null = null
   let selText = ''
 
   /** 选区起止行(向上找最近 [data-line]; 无行元素 → null)。 */
@@ -91,17 +94,27 @@ export function useSelectionActions(
     window.getSelection()?.removeAllRanges()
   }
 
+  /** 草稿侧完成广播 → 按钮「已引用」短反馈(浮条已隐, 由按钮态在下一次显示前保留)。 */
+  function onRefDone(): void {
+    quoted.value = true
+    if (quotedTimer) clearTimeout(quotedTimer)
+    quotedTimer = setTimeout(() => { quoted.value = false }, 1500)
+  }
+
   onMounted(() => {
     document.addEventListener('mouseup', onUp)
     document.addEventListener('mousedown', onDown)
+    window.addEventListener('draft-ref-done', onRefDone)
   })
   onBeforeUnmount(() => {
     document.removeEventListener('mouseup', onUp)
     document.removeEventListener('mousedown', onDown)
+    window.removeEventListener('draft-ref-done', onRefDone)
     if (copiedTimer) clearTimeout(copiedTimer)
+    if (quotedTimer) clearTimeout(quotedTimer)
   })
 
-  return { barVisible, barPos, copied, copySel, refSel }
+  return { barVisible, barPos, copied, quoted, copySel, refSel }
 }
 
 /** 文件路径 → fence 语言标记。 */
