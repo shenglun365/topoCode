@@ -162,6 +162,16 @@ def test_symbol_detail_and_note(env):
     assert out["data"]["note"] == "fb 是测试符号" and out["data"]["cached"]
 
 
+def test_trace_stale_asset(env):
+    """stale(过期未删)资产可跟踪——图谱上 stale 节点点链路不 404。"""
+    from topoone_app_architect.sem import trace as T
+    _mk_asset("sa-s", "过期资产", ["m::fa"])
+    SemanticAssetsStore.update("sa-s", {"status": "stale"})
+    r = T.trace(None, PID, "sa-s", direction="down")
+    assert "error" not in r["trace"] or not r["trace"].get("error")
+    assert r["trace"]["root"]["id"] == "n-a"
+
+
 def test_trace_api_endpoint(env):
     """API: /kb/semantic/trace asset 整链 + symbol 展开 + 缺参 400。"""
     from topoone_app_architect.arch_routes import sem_trace as api

@@ -292,8 +292,10 @@ def _trace_relations_graph(assets: List[dict], asset_id: str, *,
 
 
 def _load_assets(pid: str) -> List[dict]:
+    # stale(已过期未删)资产锚点仍在——图谱可点开链路跟踪, 与 active 同等参与;
+    # 仅排除 deleted/voided(图谱不渲染的态)
     return [r for r in SemanticAssetsStore.all_status(pid, limit=8000)
-            if r.get("status") == "active"]
+            if r.get("status") in ("active", "stale")]
 
 
 def trace(root: Optional[str], project: Optional[str], asset_id: str, *,
