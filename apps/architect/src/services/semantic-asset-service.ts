@@ -180,6 +180,24 @@ export interface SemanticGraphAnchor {
   kind?: string
 }
 
+export interface SemanticSymbolMeta {
+  id: string
+  kind: string
+  name: string
+  qualifiedName: string
+  file: string
+  startLine: number
+  endLine: number
+}
+
+export interface SemanticSymbolDetail {
+  symbol: string
+  meta: SemanticSymbolMeta
+  snippet: string
+  note: string
+  error?: string
+}
+
 export interface SemanticTraceNode {
   id: string
   symbol: string
@@ -928,6 +946,17 @@ export const semanticAssetService = {
     // 文件级/聚焦图谱查不到明明存在的资产(实测回归)。
     parts.push('limit=10000')
     return apiGet<SemanticGraphResult>(`/kb/semantic/graph${qsWith(parts.join('&'))}`)
+  },
+
+  /** 符号详情(代码资产卡·符号形态)：元数据+代码段+AI 解读缓存。 */
+  async symbolDetail(symbol: string): Promise<SemanticSymbolDetail> {
+    return apiGet<SemanticSymbolDetail>(`/kb/semantic/symbol-detail${qsWith(`symbol=${encodeURIComponent(symbol)}`)}`)
+  },
+
+  /** 符号 AI 解读(同步单次, grounded 于真实代码段, 服务端落缓存)。 */
+  async symbolNote(symbol: string): Promise<{ note: string; cached?: boolean; degraded?: boolean }> {
+    const { root, project } = currentProjectParams()
+    return apiPost(`/kb/semantic/symbol-note`, { root, project, symbol })
   },
 
   /** 链路跟踪(深度探索)：asset=整链 / symbol=侧栏懒加载展开; direction down=它调谁 / up=谁调它。 */

@@ -285,9 +285,21 @@ watch(selDetail, async (d) => {
 
 // ---- 代码段(多锚点多段展示) + 节点点击联动 + AI 逐行解读 ----
 
+/** 符号详情(链路 tab 符号节点点击 → 代码资产卡·符号形态)。 */
+const symDetail = ref<Awaited<ReturnType<typeof semanticAssetService.symbolDetail>> | null>(null)
+const symNoteLoading = ref(false)
+
 watch(selId, async (id) => {
   selDetail.value = null
+  symDetail.value = null
   if (!id) return
+  if (id.startsWith('sym:')) {
+    // 符号节点: 走符号详情(元数据+代码段+AI 解读缓存), 不查资产库
+    try {
+      symDetail.value = (await semanticAssetService.symbolDetail(id.slice(4))) ?? null
+    } catch { symDetail.value = null }
+    return
+  }
   try {
     const d = (await semanticAssetService.detail(id)) ?? null
     if (D.code.fullCode.value && d) {
@@ -312,6 +324,19 @@ watch(selId, async (id) => {
   }
 })
 
+/** 符号 AI 解读(点击按钮; 服务端落缓存)。 */
+async function generateSymbolNote(): Promise<void> {
+  const sym = symDetail.value?.symbol
+  if (!sym || symNoteLoading.value) return
+  symNoteLoading.value = true
+  try {
+    const r = await semanticAssetService.symbolNote(sym)
+    if (symDetail.value && symDetail.value.symbol === sym) {
+      symDetail.value = { ...symDetail.value, note: r.note ?? '' }
+    }
+  } finally { symNoteLoading.value = false }
+}
+
 // ---- 节点点击 → 选中资产 + 锚点代码闪烁突出 ----
 watch(selId, (id, old) => {
   if (!id || id === old || !D.render.cardMin.value) return
@@ -328,6 +353,7 @@ watch(selId, (id, old) => {
 
   return {
     FOCUS_LOCK_KEY,
+    symDetail, symNoteLoading, generateSymbolNote,
     clearSel,
     diagrams,
     edgeNotesLoading,

@@ -397,6 +397,16 @@ ARCH_PROJECT_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_arch_reqdrafts ON arch_req_drafts(project_id, status, updated_at);
 
+    CREATE TABLE IF NOT EXISTS arch_symbol_notes (
+        id TEXT PRIMARY KEY,
+        project_id TEXT DEFAULT '',
+        symbol_key TEXT DEFAULT '',            -- 符号 qualified_name(链路跟踪符号卡 AI 解读缓存)
+        note TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_symnotes ON arch_symbol_notes(project_id, symbol_key);
+
     CREATE TABLE IF NOT EXISTS arch_logic_views (
         id TEXT PRIMARY KEY,
         project_id TEXT DEFAULT '',

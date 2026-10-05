@@ -1,35 +1,97 @@
 /**
- * 链路跟踪(深度探索模式)：单资产上/下游处理链条的符号级 DFS。
+ * 链路跟踪(深度探索模式·trace tab)：单资产上/下游处理链条的符号级 DFS。
  *
- * 与邻域聚焦(focus+hops, BFS 广度)互补不交叉——聚焦在图内圈定子图，
- * 跟踪在侧栏按层展开链树(整链一次到位; 被剪枝/跨分支引用的节点可懒加载
- * expand 补全)并与图面选中联动。开启跟踪与聚焦互斥(状态机独立)。
+ * 形态=独立图谱 tab(kind='trace')：中心固定为打开时的资产(选中切换不重算)；
+ * 图面只渲染链路相关节点(资产子图 + 未锚定符号合成节点)；侧栏可拖动。
+ * 与邻域聚焦互不相关(不同 tab 形态)。方向切换/刷新=显式重算。
  */
 import { computed, ref, watch } from 'vue'
-import { semanticAssetService, type SemanticTraceNode } from '@/services/semantic-asset-service'
+import {
+  semanticAssetService,
+  type SemanticTraceNode,
+  type SemanticTraceResult,
+} from '@/services/semantic-asset-service'
 import type { WsDeps } from './graphTypes'
 
+/** 收集链树中全部已锚定资产 id(图面 assets= 收窄)。 */
+export function collectAssetIds(root: SemanticTraceNode | null): string[] {
+  const out = new Set<string>()
+  const walk = (n: SemanticTraceNode): void => {
+    if (n.assetId) out.add(n.assetId)
+    for (const c of n.children ?? []) walk(c)
+  }
+  if (root) walk(root)
+  return [...out]
+}
+
+interface SymNodeSeed {
+  symbol: string
+  name: string
+  file: string
+  kind: string
+}
+
+/** 收集链树中未锚定符号(图面合成节点注入, 去重保序)。 */
+export function collectSymbolNodes(root: SemanticTraceNode | null): SymNodeSeed[] {
+  const out = new Map<string, SymNodeSeed>()
+  const walk = (n: SemanticTraceNode): void => {
+    if (!n.assetId) {
+      out.set(n.symbol, { symbol: n.symbol, name: n.name, file: n.file, kind: n.nodeKind })
+    }
+    for (const c of n.children ?? []) walk(c)
+  }
+  if (root) walk(root)
+  return [...out.values()]
+}
+
+/** 链树父子边(from,to 均归一到图面节点 id)。 */
+export function collectTraceEdges(root: SemanticTraceNode | null): { from: string; to: string; type: string }[] {
+  const out: { from: string; to: string; type: string }[] = []
+  const nid = (n: SemanticTraceNode): string => n.assetId || `sym:${n.symbol}`
+  const walk = (n: SemanticTraceNode): void => {
+    for (const c of n.children ?? []) {
+      out.push({ from: nid(n), to: nid(c), type: c.edgeKind || 'calls' })
+      walk(c)
+    }
+  }
+  if (root) walk(root)
+  return out
+}
+
 export function useGraphTrace(D: WsDeps) {
-  const traceMode = ref(false)
-  const direction = ref<'down' | 'up'>('down')
+  const traceMode = computed(() => D.props.tab.kind === 'trace')
+  const direction = ref<'down' | 'up'>((D.props.tab.direction ?? 'down') as 'down' | 'up')
   const loading = ref(false)
   const degraded = ref(false)
   /** 整链跟踪结果(root 含逐层 children, 受限 DFS 一次到位)。 */
   const tree = ref<SemanticTraceNode | null>(null)
   const extraRoots = ref<SemanticTraceNode[]>([])
+  const paths = ref<SemanticTraceNode[][]>([])
+  const stats = ref<SemanticTraceResult['trace']['stats'] | null>(null)
   /** 懒加载补全的子树缓存: symbol → 子节点列表(truncated/跨分支引用深入)。 */
   const expanded = ref<Record<string, SemanticTraceNode[]>>({})
   const expanding = ref<Set<string>>(new Set())
   const error = ref('')
   /** 侧栏本地高亮(hover); 点击资产节点才驱动图面选中联动。 */
   const highlightId = ref('')
-  /** 折叠集合(默认全展开, 受限树体积可控)。 */
+  /** 折叠集合。 */
   const collapsed = ref<Set<string>>(new Set())
+  /** SemanticGraphView 注入: 请求宿主打开 trace tab(工具栏入口)。 */
+  const openTabRequest = ref<((assetId: string, assetName: string, direction: 'down' | 'up') => void) | null>(null)
 
-  async function load(assetId: string): Promise<void> {
+  /** 工具栏入口: 以当前选中资产为固定中心开新 trace tab。 */
+  function requestOpenTab(): void {
+    const aid = D.detail.selId.value
+    if (!aid) return
+    const name = D.detail.selDetail.value?.name || D.detail.sel.value?.name || aid
+    openTabRequest.value?.(aid, name, direction.value)
+  }
+
+  async function load(assetId: string, dir?: 'down' | 'up'): Promise<void> {
     if (!assetId) return
     loading.value = true
     error.value = ''
+    if (dir) direction.value = dir
     try {
       const r = await semanticAssetService.trace(assetId, direction.value)
       if (r?.error || r?.trace?.error) {
@@ -39,6 +101,8 @@ export function useGraphTrace(D: WsDeps) {
       }
       tree.value = r.trace?.root ?? null
       extraRoots.value = r.trace?.extraRoots ?? []
+      paths.value = r.trace?.paths ?? []
+      stats.value = r.trace?.stats ?? null
       degraded.value = !!r.trace?.stats?.degraded
       collapsed.value = new Set()
     } catch (e: unknown) {
@@ -72,25 +136,20 @@ export function useGraphTrace(D: WsDeps) {
     }
   }
 
-  function toggle(): void {
-    if (traceMode.value) {
-      close()
-      return
-    }
-    const aid = D.detail.selId.value
-    if (!aid) return                     // 需先选中资产(工具栏按钮已 disable)
-    D.detail.focusMode.value = false     // 与邻域聚焦互斥
-    traceMode.value = true
-    void load(aid)
+  /** 方向切换 = 显式重算(中心不变)。 */
+  function setDirection(d: 'down' | 'up'): void {
+    if (direction.value === d) return
+    void load(D.props.tab.assetId ?? '', d)
   }
 
-  function close(): void {
-    traceMode.value = false
-    tree.value = null
-    extraRoots.value = []
-    expanded.value = {}
-    highlightId.value = ''
-    collapsed.value = new Set()
+  /** 图面联动: 点击侧栏资产节点 → 选中(高亮+居中+浮卡), **不重算链路**(中心固定)。 */
+  function locate(node: SemanticTraceNode): void {
+    if (node.assetId) D.detail.selId.value = node.assetId
+  }
+
+  /** 刷新 = 显式重算(中心不变)。 */
+  function refresh(): void {
+    void load(D.props.tab.assetId ?? '')
   }
 
   /** 侧栏折叠开关。 */
@@ -101,28 +160,24 @@ export function useGraphTrace(D: WsDeps) {
     collapsed.value = next
   }
 
-  function setDirection(d: 'down' | 'up'): void {
-    if (direction.value === d) return
-    direction.value = d
-    const aid = D.detail.selId.value
-    if (aid) void load(aid)
+  /** 侧栏 ✕ = 关闭整个 trace tab。 */
+  function close(): void {
+    D.emit('close', D.props.tab.id)
   }
 
-  /** 图面联动: 点击侧栏资产节点 → 选中(高亮+视口居中, 复用既有联动)。 */
-  function locate(node: SemanticTraceNode): void {
-    if (node.assetId) D.detail.selId.value = node.assetId
-  }
-
-  // 跟踪开启时选中切换 → 跟随整链重查(以新选中为中心)
-  watch(() => D.detail.selId.value, (id) => {
-    if (traceMode.value && id) void load(id)
+  // tab 切换/首开 → 装载中心链(tab 打开时由 useGraphData.load 的 trace 分支触发一次;
+  // 这里兜底: tab 激活且无数据时补拉——避免切 tab 回来空侧栏)
+  watch(() => [D.props.tab.id, D.props.tab.kind] as const, ([, kind]) => {
+    if (kind === 'trace' && !tree.value && !loading.value) {
+      void load(D.props.tab.assetId ?? '')
+    }
   })
 
   const canToggle = computed(() => !!D.detail.selId.value)
 
   return {
-    traceMode, direction, loading, degraded, tree, extraRoots, expanded,
-    expanding, error, highlightId, collapsed, canToggle,
-    toggle, traceToggle: toggle, toggleCollapse, close, setDirection, expandNode, locate,
+    traceMode, direction, loading, degraded, tree, extraRoots, paths, stats,
+    expanded, expanding, error, highlightId, collapsed, canToggle, openTabRequest,
+    requestOpenTab, load, refresh, expandNode, setDirection, locate, toggleCollapse, close,
   }
 }

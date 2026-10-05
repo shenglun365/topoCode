@@ -434,6 +434,7 @@ onUnmounted(() => {
               :file-index="graphFileIndexes[gt.id] ?? []"
               :comp-names="graphCompNames"
               @close="closeGraphTab"
+              @open-trace="(aid: string, name: string, dir: 'down' | 'up') => openGraphTab('trace', aid, `${t('assetMgmt.graph.trace.title')}·${name}`, undefined, { direction: dir, assetName: name })"
             />
           </div>
         </div>

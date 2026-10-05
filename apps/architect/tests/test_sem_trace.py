@@ -26,14 +26,14 @@ def env(tmp_path, monkeypatch):
     # 符号库(内存, codegraph schema): A→B→C 链 + A→D + D→B(环) + B→E(超深截断候选)
     conn = sqlite3.connect(":memory:", check_same_thread=False)   # to_thread 线程查询
     conn.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, kind TEXT, name TEXT, "
-                 "qualified_name TEXT, file_path TEXT)")
+                 "qualified_name TEXT, file_path TEXT, start_line INT, end_line INT)")
     conn.execute("CREATE TABLE edges (id INTEGER PRIMARY KEY, source TEXT, target TEXT, "
                  "kind TEXT, metadata TEXT, line INT, col INT)")
     nodes = [("n-a", "func", "fa", "m::fa", "a.ts"), ("n-b", "func", "fb", "m::fb", "b.ts"),
              ("n-c", "func", "fc", "m::fc", "c.ts"), ("n-d", "func", "fd", "m::fd", "d.ts"),
              ("n-e", "func", "fe", "m::fe", "e.ts")]
     for nid, k, nm, qn, fp in nodes:
-        conn.execute("INSERT INTO nodes VALUES (?,?,?,?,?)", (nid, k, nm, qn, fp))
+        conn.execute("INSERT INTO nodes VALUES (?,?,?,?,?,0,0)", (nid, k, nm, qn, fp))
     edges = [("n-a", "n-b", "calls", 0.9, 10), ("n-a", "n-d", "calls", 0.8, 20),
              ("n-b", "n-c", "calls", 0.9, 30), ("n-d", "n-b", "calls", 0.7, 40),
              ("n-b", "n-e", "references", 0.9, 50)]   # references 默认不入链
@@ -44,6 +44,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr("topoone_app_architect.sem.trace.open_symbol_conn",
                         lambda root, project: (conn, "test"))
     monkeypatch.setattr("topoone_app_architect.sem.trace.close_symbol_conn",
+                        lambda c: None)
+    monkeypatch.setattr("topoone_app_architect.sem.symbol_notes.open_symbol_conn",
+                        lambda root, project: (conn, "test"))
+    monkeypatch.setattr("topoone_app_architect.sem.symbol_notes.close_symbol_conn",
                         lambda c: None)
     from topoone_app_architect.sem import trace as T
     T._cache.clear()
@@ -129,6 +133,33 @@ def test_trace_degraded_without_symbol_graph(tmp_path, monkeypatch):
     tr = r["trace"]
     assert tr["stats"]["degraded"]
     assert tr["root"]["children"][0]["assetId"] == "sa-y"
+
+
+def test_symbol_detail_and_note(env):
+    """符号详情: 元数据+代码段切片; AI 解读缓存 put/get; 详情携带缓存。"""
+    from topoone_app_architect.sem.paths import project_id_for
+    from topoone_app_architect.sem.symbol_notes import (
+        symbol_detail, symbol_note_get, symbol_note_put)
+    d = symbol_detail(None, PID, "m::fb")
+    assert d["meta"]["file"] == "b.ts" and d["meta"]["startLine"] == 0
+    assert isinstance(d["snippet"], str)
+    pid = project_id_for(None, PID)
+    symbol_note_put(pid, "m::fb", "fb 是测试符号")
+    assert symbol_note_get(pid, "m::fb") == "fb 是测试符号"
+    d2 = symbol_detail(None, PID, "m::fb")
+    assert d2["note"] == "fb 是测试符号"          # 详情携带缓存
+    # API: symbol-note 缓存回显(生成降级 → 回退缓存)
+    from topoone_app_architect.arch_routes import sem_trace as api
+
+    class _ReqJson:
+        def __init__(self, payload):
+            self._p = payload
+
+        async def json(self):
+            return self._p
+
+    out = asyncio.run(api.api_symbol_note(_ReqJson({"project": PID, "symbol": "m::fb"})))
+    assert out["data"]["note"] == "fb 是测试符号" and out["data"]["cached"]
 
 
 def test_trace_api_endpoint(env):

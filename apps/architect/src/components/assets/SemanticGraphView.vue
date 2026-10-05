@@ -38,7 +38,7 @@ const props = defineProps<{
   /** 组件 id → 名称(文件索引分组展示)。 */
   compNames?: Record<string, string>
 }>()
-const emit = defineEmits<{ close: [id: string] }>()
+const emit = defineEmits<{ close: [id: string]; 'open-trace': [assetId: string, assetName: string, direction: 'down' | 'up'] }>()
 
 /** 图谱规模闸门：范围资产超此值不自动渲染，须经文件索引手动圈定(≤预算)。 */
 
@@ -49,6 +49,9 @@ D.detail = useGraphDetail(D)
 D.code = useGraphCode(D)
 D.render = useGraphRender(D)
 D.trace = useGraphTrace(D)
+// 工具栏「链路跟踪」入口 → 宿主开新 trace tab(中心=当前选中)
+D.trace.openTabRequest.value = (assetId, assetName, direction) =>
+  emit('open-trace', assetId, assetName, direction)
 const ws = Object.assign({}, D.data, D.detail, D.code, D.render, D.trace)
 provide(SGV_WS_KEY, ws)
 const {

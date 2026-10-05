@@ -8,6 +8,7 @@ import { SemanticGraphResult, semanticAssetService } from '@/services/semantic-a
 
 export type DiffBucket = 'changed' | 'weak' | 'new' | 'removed'
 import type { WsDeps } from './graphTypes'
+import { collectAssetIds, collectSymbolNodes, collectTraceEdges } from './useGraphTrace'
 import { useI18n } from 'vue-i18n'
 
 
@@ -275,6 +276,32 @@ async function load(reset = false) {
   // 访问历史 tab 不在此清空：图谱 tab 切换经 :key 重建组件自然重置；
   // 聚焦模式/切视图触发的 load() 属同上下文重查，历史应保留(常驻)。
   try {
+    if (props.tab.kind === 'trace') {
+      // 链路 tab: 中心固定(tab 资产)——trace 一次 → 图面=链路相关资产子图 + 符号合成节点;
+      // 选中切换不重算(中心固定), 方向切换/刷新才重算
+      const dir = (D.trace?.direction.value ?? props.tab.direction ?? 'down') as 'down' | 'up'
+      await D.trace?.load(props.tab.assetId ?? '', dir)
+      const tr = D.trace?.tree.value ?? null
+      const assetIds = collectAssetIds(tr)
+      const g = await semanticAssetService.graph(undefined, undefined, undefined, {
+        assets: assetIds.length ? assetIds.join(',') : '__none__',
+        rev: graphRev.value,
+      })
+      const symNodes = collectSymbolNodes(tr).map((sy) => ({
+        id: `sym:${sy.symbol}`, kind: 'symbol', level: undefined,
+        name: sy.name, desc: sy.file, scopeType: 'symbol',
+        scopeKey: '', file: sy.file, nodeKind: sy.kind,
+      } as never))
+      const traceEdges = collectTraceEdges(tr)
+      graph.value = {
+        ...g,
+        nodes: [...(g.nodes ?? []), ...symNodes],
+        edges: [...(g.edges ?? []), ...traceEdges],
+      } as typeof g
+      kindFilter.value = ''
+      loading.value = false
+      return
+    }
     const scope = props.tab.kind === 'comp' ? [props.tab.compId!] : undefined
     // 文件范围：仅锚定该文件的资产子图(文件级图谱入口)
     const file = props.tab.kind === 'file' ? props.tab.fileId : undefined

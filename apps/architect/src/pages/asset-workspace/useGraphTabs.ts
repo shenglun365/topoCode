@@ -17,14 +17,14 @@ export function useGraphTabs(D: WsDeps) {
   const activeGraphTab = ref('')
 
   /** 打开(或激活已存在的同名资源)图谱 tab；kind 相同时复用，避免重复。 */
-  function openGraphTab(kind: GraphTabDef['kind'], id: string, title: string, members?: string[]) {
-    const key = `${kind}:${id}`
+  function openGraphTab(kind: GraphTabDef['kind'], id: string, title: string, members?: string[], extra?: { direction?: 'down' | 'up'; assetName?: string }) {
+    const key = `${kind}:${id}${kind === 'trace' ? `:${extra?.direction ?? 'down'}` : ''}`
     const existing = graphTabs.value.find((x) => x.id === key)
     if (existing) {
       if (kind === 'logic' && members) existing.members = members   // 重新分析后刷新成员快照
       activeGraphTab.value = existing.id
     } else {
-      const def: GraphTabDef = { id: key, kind, title, compId: kind === 'comp' ? id : undefined, assetId: kind === 'asset' ? id : undefined, fileId: kind === 'file' ? id : undefined, viewId: kind === 'logic' ? id : undefined, members }
+      const def: GraphTabDef = { id: key, kind, title, compId: kind === 'comp' ? id : undefined, assetId: kind === 'asset' || kind === 'trace' ? id : undefined, fileId: kind === 'file' ? id : undefined, viewId: kind === 'logic' ? id : undefined, members, direction: extra?.direction ?? (kind === 'trace' ? 'down' : undefined), assetName: extra?.assetName }
       graphTabs.value.push(def)
       activeGraphTab.value = def.id
     }

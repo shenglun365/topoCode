@@ -3,7 +3,7 @@
 /** MS6-W2-S2 自 SemanticGraphView 模板整块迁出(逐行未动)；状态经 SGV_WS_KEY 注入。 */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ShareIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ShareIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, ChevronRightIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon } from '@heroicons/vue/24/outline'
 import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
@@ -15,6 +15,7 @@ import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
 import type { SemanticGraphResult, SourceSnippet } from '@/services/semantic-asset-service'
 import { useI18n } from 'vue-i18n'
 import type { GraphTabDef } from '../graphTypes'
+import type { SemanticTraceNode } from '@/services/semantic-asset-service'
 import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semantic-kind-style'
 import { useSgvWs } from '../key'
 import { bringCardToFront, isCardTop } from '../cardZ'
@@ -35,6 +36,16 @@ function onScopeDone(viewIds: string[]) {
   }
 }
 const { t } = useI18n()
+
+// ---- 链路 tab 浮卡「全链路」分区 ----
+const tracePathsOpen = ref(false)
+function tracePathText(p: { name?: string; assetName?: string }[]): string {
+  return p.map((n) => n.assetName || n.name || '').join(' → ')
+}
+function highlightTracePath(p: SemanticTraceNode[]): void {
+  const last = p[p.length - 1]
+  if (last) traceLocate(last)   // 选中链终点(图面高亮+浮卡), 链路中心不变
+}
 const {
   FILE_BUDGET,
   MAX_SEGMENTS,
@@ -96,6 +107,7 @@ const {
   loading,
   matrixOpen,
   traceMode,
+  tree: traceTree, paths: tracePaths, stats: traceStats,
   nodeBriefLoading,
   nodeBriefText,
   onDiagramReady,
@@ -109,6 +121,8 @@ const {
   relTabEl,
   relTabSegs,
   scopeTotal,
+  symDetail, symNoteLoading, generateSymbolNote,
+  locate: traceLocate,
   scopedEdges,
   scopedNodes,
   segEls,
@@ -194,6 +208,30 @@ const {
         </button>
       </div>
 
+      <!-- 符号详情卡(链路 tab 符号节点): 元数据+代码段+AI 解读(缓存回显) -->
+      <div
+        v-if="symDetail && !cardMin"
+        class="fixed z-50 w-[420px] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl p-3"
+        :style="{ right: '1rem', top: '4rem' }"
+      >
+        <div class="mb-1 flex items-center gap-1.5">
+          <span class="text-[11px] font-semibold text-ctp-text truncate" :title="symDetail.symbol">{{ symDetail.meta.name }}</span>
+          <span class="chip !text-[9px] bg-ctp-overlay0/20 text-ctp-overlay1 shrink-0">{{ symDetail.meta.kind || 'symbol' }}</span>
+          <span class="flex-1" />
+          <button class="text-ctp-overlay0 hover:text-ctp-text p-0.5" @click="symDetail = null">✕</button>
+        </div>
+        <p class="mb-1.5 truncate font-mono text-[9px] text-ctp-overlay0" :title="`${symDetail.meta.file}:${symDetail.meta.startLine}-${symDetail.meta.endLine}`">
+          {{ symDetail.meta.file }}:{{ symDetail.meta.startLine }}-{{ symDetail.meta.endLine }}
+        </p>
+        <pre v-if="symDetail.snippet" class="mb-2 max-h-56 overflow-auto rounded bg-ctp-crust/60 p-1.5 font-mono text-[9px] leading-4 text-ctp-subtext0">{{ symDetail.snippet }}</pre>
+        <div class="flex items-start gap-1">
+          <button class="btn btn-ghost !py-0.5 !px-1.5 !text-[9px] shrink-0" :disabled="symNoteLoading" @click="generateSymbolNote">
+            <SparklesIcon class="w-3 h-3" :class="symNoteLoading ? 'animate-spin' : ''" />{{ t('assetMgmt.graph.trace.noteBtn') }}
+          </button>
+          <p v-if="symDetail.note" class="min-w-0 flex-1 text-[10px] leading-relaxed text-ctp-subtext1">{{ symDetail.note }}</p>
+          <span v-else class="flex-1 text-[9px] text-ctp-overlay0">{{ t('assetMgmt.graph.trace.noteEmpty') }}</span>
+        </div>
+      </div>
       <!-- 选中节点详情：网页全局浮窗(可拖动/可拉伸/可最小化；最小化图标停靠图谱区右下) -->
       <div
         v-if="sel && !cardMin"
@@ -283,6 +321,32 @@ const {
           >
             <MinusIcon class="w-3.5 h-3.5" />
           </button>
+        </div>
+        <!-- 全链路分区(链路 tab 且选中=中心节点)：完整路径列表, 点击行侧栏高亮该链 -->
+        <div
+          v-if="traceMode && sel?.id === props.tab.assetId && tracePaths?.length"
+          class="shrink-0 border-b border-ctp-surface0 px-3 py-1.5"
+        >
+          <button
+            class="flex w-full items-center gap-1 text-[10px] text-ctp-mauve"
+            @click="tracePathsOpen = !tracePathsOpen"
+          >
+            <ChevronRightIcon class="h-3 w-3" :class="tracePathsOpen ? 'rotate-90' : ''" />
+            {{ t('assetMgmt.graph.trace.fullPaths') }}
+            <span class="font-mono text-[9px] text-ctp-overlay0">
+              {{ tracePaths.length }} · {{ traceStats?.nodes ?? 0 }}n
+            </span>
+            <span class="flex-1" />
+            <span class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.graph.trace.fullPathsHint') }}</span>
+          </button>
+          <div v-if="tracePathsOpen" class="mt-1 max-h-36 space-y-0.5 overflow-y-auto">
+            <button
+              v-for="(p, i) in tracePaths" :key="i"
+              class="block w-full truncate rounded px-1 py-0.5 text-left font-mono text-[9px] text-ctp-subtext0 hover:bg-ctp-surface0"
+              :title="tracePathText(p)"
+              @click="highlightTracePath(p)"
+            >{{ i + 1 }}. {{ tracePathText(p) }}</button>
+          </div>
         </div>
         <!-- 文件 tab(常驻)：固定标题栏下方，不随代码滚动；访问历史 + 关系资产文件 -->
         <div v-if="fileTabs.length" class="shrink-0 flex items-center gap-1 flex-wrap px-3 pt-0.5 pb-1">

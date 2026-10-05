@@ -49,14 +49,16 @@ def _now() -> int:
 
 
 def _node_index(conn) -> Dict[str, dict]:
-    """node id → {name, qualifiedName, file, kind}。"""
+    """node id → {name, qualifiedName, file, kind, startLine, endLine}。"""
     out: Dict[str, dict] = {}
     try:
-        for nid, nm, qn, fp, k in conn.execute(
-                "SELECT id, name, qualified_name, file_path, kind FROM nodes"):
+        for nid, nm, qn, fp, k, sl, el in conn.execute(
+                "SELECT id, name, qualified_name, file_path, kind, "
+                "start_line, end_line FROM nodes"):
             out[nid] = {"name": nm or nid,
                         "qualifiedName": qn or nm or nid,
-                        "file": fp or "", "kind": k or ""}
+                        "file": fp or "", "kind": k or "",
+                        "startLine": int(sl or 0), "endLine": int(el or 0)}
     except Exception:
         pass
     return out
@@ -144,7 +146,9 @@ def _mk_node(node_id: str, ninfo: dict, edge: Optional[dict],
              aid: str, aname_by: Dict[str, str], depth: int) -> dict:
     n = {"id": node_id, "symbol": ninfo.get("qualifiedName") or node_id,
          "name": ninfo.get("name") or node_id, "file": ninfo.get("file") or "",
-         "nodeKind": ninfo.get("kind") or "", "depth": depth}
+         "nodeKind": ninfo.get("kind") or "", "depth": depth,
+         "startLine": ninfo.get("startLine") or 0,
+         "endLine": ninfo.get("endLine") or 0}
     if edge:
         n["edgeKind"] = edge["kind"]
         n["line"] = edge["line"] or None
