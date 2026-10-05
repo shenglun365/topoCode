@@ -267,6 +267,7 @@ const effectiveView = computed<SemanticGraphViewId>(() => {
 async function load(reset = false) {
   // 规模闸门：范围资产 >500 且未圈定文件范围 → 不自动渲染，强制打开文件索引。
   if (overLimit.value && !fileScopeSel.value.length) {
+    console.warn('[graph] overLimit gate hit', scopeTotal.value, fileScopeSel.value.length)
     graph.value = null
     fileScopeOpen.value = true
     return
@@ -280,7 +281,7 @@ async function load(reset = false) {
       // 链路 tab: 中心固定(tab 资产)——trace 一次 → 图面=链路相关资产子图 + 符号合成节点;
       // 选中切换不重算(中心固定), 方向切换/刷新才重算
       const dir = (D.trace?.direction.value ?? props.tab.direction ?? 'down') as 'down' | 'up'
-      await D.trace?.load(props.tab.assetId ?? '', dir)
+      await D.trace?.loadTrace(props.tab.assetId ?? '', dir)
       const tr = D.trace?.tree.value ?? null
       const assetIds = collectAssetIds(tr)
       const g = await semanticAssetService.graph(undefined, undefined, undefined, {
@@ -339,7 +340,8 @@ async function load(reset = false) {
     if (props.tab.kind === 'asset' && props.tab.assetId && !D.detail.selId.value) {
       D.detail.selId.value = props.tab.assetId
     }
-  } catch {
+  } catch (e) {
+    console.error('[graph] load failed', e)
     graph.value = null
   } finally {
     loading.value = false

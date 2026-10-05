@@ -11,7 +11,7 @@ import TraceNodeRow from './TraceNodeRow.vue'
 
 const { t } = useI18n()
 const {
-  traceMode, direction, loading, degraded, tree, extraRoots, error,
+  traceMode, direction, traceLoading, degraded, tree, extraRoots, error,
   setDirection, close, refresh,
 } = useSgvWs()
 
@@ -97,7 +97,7 @@ onBeforeUnmount(() => { onUp(); window.removeEventListener('resize', onUp) })
     <div v-if="error" class="shrink-0 bg-ctp-red/10 px-2 py-1 text-[10px] text-ctp-red">{{ error }}</div>
 
     <div class="min-h-0 flex-1 overflow-y-auto p-1.5">
-      <div v-if="loading" class="py-6 text-center text-[11px] text-ctp-overlay1">{{ t('assetMgmt.graph.trace.loading') }}</div>
+      <div v-if="traceLoading" class="py-6 text-center text-[11px] text-ctp-overlay1">{{ t('assetMgmt.graph.trace.loading') }}</div>
       <div v-else-if="!tree" class="py-6 text-center text-[11px] text-ctp-overlay0">{{ t('assetMgmt.graph.trace.empty') }}</div>
       <template v-else>
         <TraceNodeRow :node="tree" :depth="0" />

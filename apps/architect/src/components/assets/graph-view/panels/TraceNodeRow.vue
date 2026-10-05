@@ -11,7 +11,7 @@ import TraceNodeRow from './TraceNodeRow.vue'
 
 const props = defineProps<{ node: SemanticTraceNode; depth: number }>()
 const { t } = useI18n()
-const { expanded, expanding, collapsed, highlightId, toggleCollapse, expandNode, locate } = useSgvWs()
+const { expanded, traceExpanding, collapsed, highlightId, toggleCollapse, expandNode, locate } = useSgvWs()
 
 function kidsOf(node: SemanticTraceNode): SemanticTraceNode[] {
   return expanded.value?.[node.symbol] ?? node.children ?? []
@@ -63,9 +63,9 @@ function edgeCls(k?: string): string {
     <div v-if="canExpandMore(node)" class="flex" :style="{ paddingLeft: `${(depth + 1) * 12 + 4}px` }">
       <button
         class="text-[9px] text-ctp-blue hover:underline"
-        :disabled="expanding.has(node.symbol)"
+        :disabled="traceExpanding.has(node.symbol)"
         @click.stop="expandNode(node)"
-      >{{ expanding.has(node.symbol) ? t('assetMgmt.graph.trace.expanding') : t('assetMgmt.graph.trace.expandMore') }}</button>
+      >{{ traceExpanding.has(node.symbol) ? t('assetMgmt.graph.trace.expanding') : t('assetMgmt.graph.trace.expandMore') }}</button>
     </div>
     <template v-if="kidsOf(node).length && !collapsed.has(node.symbol)">
       <TraceNodeRow v-for="k in kidsOf(node)" :key="`${k.id}:${k.depth}`" :node="k" :depth="depth + 1" />

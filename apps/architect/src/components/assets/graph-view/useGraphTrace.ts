@@ -61,7 +61,7 @@ export function collectTraceEdges(root: SemanticTraceNode | null): { from: strin
 export function useGraphTrace(D: WsDeps) {
   const traceMode = computed(() => D.props.tab.kind === 'trace')
   const direction = ref<'down' | 'up'>((D.props.tab.direction ?? 'down') as 'down' | 'up')
-  const loading = ref(false)
+  const traceLoading = ref(false)
   const degraded = ref(false)
   /** 整链跟踪结果(root 含逐层 children, 受限 DFS 一次到位)。 */
   const tree = ref<SemanticTraceNode | null>(null)
@@ -70,7 +70,7 @@ export function useGraphTrace(D: WsDeps) {
   const stats = ref<SemanticTraceResult['trace']['stats'] | null>(null)
   /** 懒加载补全的子树缓存: symbol → 子节点列表(truncated/跨分支引用深入)。 */
   const expanded = ref<Record<string, SemanticTraceNode[]>>({})
-  const expanding = ref<Set<string>>(new Set())
+  const traceExpanding = ref<Set<string>>(new Set())
   const error = ref('')
   /** 侧栏本地高亮(hover); 点击资产节点才驱动图面选中联动。 */
   const highlightId = ref('')
@@ -89,7 +89,7 @@ export function useGraphTrace(D: WsDeps) {
 
   async function load(assetId: string, dir?: 'down' | 'up'): Promise<void> {
     if (!assetId) return
-    loading.value = true
+    traceLoading.value = true
     error.value = ''
     if (dir) direction.value = dir
     try {
@@ -109,16 +109,16 @@ export function useGraphTrace(D: WsDeps) {
       error.value = e instanceof Error && e.message ? e.message : String(e)
       tree.value = null
     } finally {
-      loading.value = false
+      traceLoading.value = false
     }
   }
 
   /** 被剪枝(branchLimit)/跨分支引用(seenElsewhere)的分支懒加载补全。 */
   async function expandNode(node: SemanticTraceNode): Promise<void> {
-    if (expanding.value.has(node.symbol) || expanded.value[node.symbol]) return
-    const next = new Set(expanding.value)
+    if (traceExpanding.value.has(node.symbol) || expanded.value[node.symbol]) return
+    const next = new Set(traceExpanding.value)
     next.add(node.symbol)
-    expanding.value = next
+    traceExpanding.value = next
     try {
       const r = await semanticAssetService.trace(node.assetId || '', direction.value,
         { symbol: node.symbol })
@@ -130,9 +130,9 @@ export function useGraphTrace(D: WsDeps) {
     } catch (e: unknown) {
       error.value = e instanceof Error && e.message ? e.message : String(e)
     } finally {
-      const done = new Set(expanding.value)
+      const done = new Set(traceExpanding.value)
       done.delete(node.symbol)
-      expanding.value = done
+      traceExpanding.value = done
     }
   }
 
@@ -168,16 +168,18 @@ export function useGraphTrace(D: WsDeps) {
   // tab 切换/首开 → 装载中心链(tab 打开时由 useGraphData.load 的 trace 分支触发一次;
   // 这里兜底: tab 激活且无数据时补拉——避免切 tab 回来空侧栏)
   watch(() => [D.props.tab.id, D.props.tab.kind] as const, ([, kind]) => {
-    if (kind === 'trace' && !tree.value && !loading.value) {
+    if (kind === 'trace' && !tree.value && !traceLoading.value) {
       void load(D.props.tab.assetId ?? '')
     }
   })
 
   const canToggle = computed(() => !!D.detail.selId.value)
 
+  // ⚠️ 键名不得与 data 域(load/loading)/code 域(expanding)撞名——ws=Object.assign 合并,
+  // 后域覆盖前域(曾致 trace.load 覆盖 data.load, 常规图谱整体失效)。
   return {
-    traceMode, direction, loading, degraded, tree, extraRoots, paths, stats,
-    expanded, expanding, error, highlightId, collapsed, canToggle, openTabRequest,
-    requestOpenTab, load, refresh, expandNode, setDirection, locate, toggleCollapse, close,
+    traceMode, direction, traceLoading, degraded, tree, extraRoots, paths, stats,
+    expanded, traceExpanding, error, highlightId, collapsed, canToggle, openTabRequest,
+    requestOpenTab, loadTrace: load, refresh, expandNode, setDirection, locate, toggleCollapse, close,
   }
 }
