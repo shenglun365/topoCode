@@ -49,7 +49,8 @@ function fmtTime(ts?: number): string {
       >清除已结束</button>
       <button class="text-ctp-overlay1 hover:text-ctp-text" title="收起" @click="close">—</button>
     </div>
-    <div class="overflow-y-auto p-1.5">
+    <!-- 列表视口限高≈5 条卡片：默认只见最新 5 条，向下滚动看更旧历史 -->
+    <div class="max-h-[20.5rem] overflow-y-auto p-1.5">
       <div v-if="!jobs.length" class="py-5 text-center text-xs text-ctp-overlay1">暂无作业</div>
       <div
         v-for="j in jobs" :key="j.id"

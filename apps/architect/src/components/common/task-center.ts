@@ -55,7 +55,8 @@ let intervalMs = 0
 const seenActiveIds = new Set<string>()
 
 const active = computed(() => jobs.value.filter((j) => j.state === 'queued' || j.state === 'running'))
-const recent = computed(() => jobs.value.slice(0, 30))
+/** 全量渲染(后端 created_at DESC, limit=50)——视口默认见最新 5 条，更旧历史向下滚动查看。 */
+const recent = computed(() => jobs.value)
 
 async function refresh(): Promise<void> {
   try {
