@@ -573,6 +573,8 @@ async function runAi(preset: 'generate' | 'review' | 'relate' | 'custom'): Promi
     if (aiJobTimer) { clearInterval(aiJobTimer); aiJobTimer = null }
     current.value = await reqDraftService.get(current.value.id) ?? current.value
     aiStatus.value = current.value.lastProposedMd ? t('draft.ai.done') : t('draft.ai.failed')
+    // 产物就绪 → 自动展开比对区(默认收起曾致「无结果」感知——用户需显式发现折叠条)
+    if (current.value.lastProposedMd) proposedOpen.value = true
   } catch (e) {
     aiStatus.value = e instanceof Error && e.message ? e.message : t('draft.ai.submitFailed')
   } finally {
