@@ -7,6 +7,7 @@ import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, Information
 import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
+import TracePanel from './TracePanel.vue'
 import LogicViewCard from './LogicViewCard.vue'
 import LogicScopeModal from './LogicScopeModal.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
@@ -94,6 +95,7 @@ const {
   loadLineNotes,
   loading,
   matrixOpen,
+  traceMode,
   nodeBriefLoading,
   nodeBriefText,
   onDiagramReady,
@@ -625,6 +627,8 @@ const {
         @select="onMatrixSelect"
         @close="matrixOpen = false"
       />
+      <!-- 链路跟踪侧栏(深度探索): 与邻域聚焦互斥, 点击资产节点与图面选中全联动 -->
+      <TracePanel />
       <!-- 资产节点索引浮窗：按索引探索图谱，点击行与图谱/资产卡/锚点全联动 -->
       <AssetIndexWindow
         v-if="indexOpen"

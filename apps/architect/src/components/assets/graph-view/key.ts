@@ -8,11 +8,13 @@ import type { useGraphData } from './useGraphData'
 import type { useGraphDetail } from './useGraphDetail'
 import type { useGraphCode } from './useGraphCode'
 import type { useGraphRender } from './useGraphRender'
+import type { useGraphTrace } from './useGraphTrace'
 
 export type SgvWs = ReturnType<typeof useGraphData> &
   ReturnType<typeof useGraphDetail> &
   ReturnType<typeof useGraphCode> &
-  ReturnType<typeof useGraphRender>
+  ReturnType<typeof useGraphRender> &
+  ReturnType<typeof useGraphTrace>
 
 export const SGV_WS_KEY: InjectionKey<SgvWs> = Symbol('sgv-ws')
 

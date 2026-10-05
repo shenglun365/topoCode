@@ -26,6 +26,7 @@ import { useGraphData } from './graph-view/useGraphData'
 import { useGraphDetail } from './graph-view/useGraphDetail'
 import { useGraphCode } from './graph-view/useGraphCode'
 import { useGraphRender } from './graph-view/useGraphRender'
+import { useGraphTrace } from './graph-view/useGraphTrace'
 import type { GraphTabDef, WsDeps } from './graph-view/graphTypes'
 
 const props = defineProps<{
@@ -47,7 +48,8 @@ D.data = useGraphData(D)
 D.detail = useGraphDetail(D)
 D.code = useGraphCode(D)
 D.render = useGraphRender(D)
-const ws = Object.assign({}, D.data, D.detail, D.code, D.render)
+D.trace = useGraphTrace(D)
+const ws = Object.assign({}, D.data, D.detail, D.code, D.render, D.trace)
 provide(SGV_WS_KEY, ws)
 const {
   CARD_MIN_KEY,

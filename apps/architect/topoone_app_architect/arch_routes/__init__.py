@@ -22,6 +22,7 @@ from . import naming
 from . import req_drafts
 from . import logic_views
 from . import mainkb
+from . import sem_trace
 from ..agent.reflection import mining as capability_mining
 from ..agent.reflection import dataset as llm_dataset
 from . import flow_policy
@@ -50,6 +51,7 @@ router.include_router(flow_policy.router)
 router.include_router(dirs.router)
 router.include_router(docs.router)
 router.include_router(logic_views.router)
+router.include_router(sem_trace.router)
 router.include_router(semantic_assets.router)
 router.include_router(agent_executors.router)
 router.include_router(cline_engines.router)

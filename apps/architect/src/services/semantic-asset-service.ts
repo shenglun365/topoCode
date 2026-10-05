@@ -180,6 +180,40 @@ export interface SemanticGraphAnchor {
   kind?: string
 }
 
+export interface SemanticTraceNode {
+  id: string
+  symbol: string
+  name: string
+  file: string
+  nodeKind: string
+  depth: number
+  edgeKind?: string
+  line?: number | null
+  confidence?: number
+  assetId?: string
+  assetName?: string
+  cycle?: boolean
+  seenElsewhere?: boolean
+  truncated?: number
+  branchTotal?: number
+  children?: SemanticTraceNode[]
+}
+
+export interface SemanticTraceResult {
+  trace: {
+    root: SemanticTraceNode
+    paths: SemanticTraceNode[][]
+    extraRoots: SemanticTraceNode[]
+    stats: { nodes: number; depthCut?: boolean; nodeCut?: boolean; degraded: boolean; error?: string }
+    error?: string
+  }
+  assetId?: string
+  symbol?: string
+  direction: 'down' | 'up'
+  generatedAt: number
+  error?: string
+}
+
 export interface SemanticGraphResult {
   nodes: SemanticGraphNode[]
   edges: SemanticGraphEdge[]
@@ -894,6 +928,15 @@ export const semanticAssetService = {
     // 文件级/聚焦图谱查不到明明存在的资产(实测回归)。
     parts.push('limit=10000')
     return apiGet<SemanticGraphResult>(`/kb/semantic/graph${qsWith(parts.join('&'))}`)
+  },
+
+  /** 链路跟踪(深度探索)：asset=整链 / symbol=侧栏懒加载展开; direction down=它调谁 / up=谁调它。 */
+  async trace(asset: string, direction: 'down' | 'up', opts?: { symbol?: string; maxDepth?: number; branchLimit?: number }): Promise<SemanticTraceResult> {
+    const parts = [`direction=${direction}`,
+      `max_depth=${opts?.maxDepth ?? 6}`, `branch_limit=${opts?.branchLimit ?? 3}`]
+    if (asset) parts.push(`asset=${encodeURIComponent(asset)}`)
+    if (opts?.symbol) parts.push(`symbol=${encodeURIComponent(opts.symbol)}`)
+    return apiGet<SemanticTraceResult>(`/kb/semantic/trace${qsWith(parts.join('&'))}`)
   },
 
   /** 静态资产图：entity → 类图(字段/方法)，state → 状态图。assetIds 缺省 = 项目内 entity/state 资产。 */

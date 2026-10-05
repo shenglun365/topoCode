@@ -3,7 +3,7 @@
 /** MS6-W2-S2 自 SemanticGraphView 模板整块迁出(逐行未动)；状态经 SGV_WS_KEY 注入。 */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon, WrenchScrewdriverIcon, EllipsisHorizontalIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon, MinusIcon, InformationCircleIcon, SparklesIcon, DocumentTextIcon, ViewfinderCircleIcon, ClipboardIcon, ChevronDownIcon, CheckIcon, PlusCircleIcon, TableCellsIcon, AdjustmentsHorizontalIcon, ListBulletIcon, LockClosedIcon, LockOpenIcon, FunnelIcon, FolderOpenIcon, WrenchScrewdriverIcon, EllipsisHorizontalIcon, ArrowDownTrayIcon, SignalIcon } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import type { GraphTabDef } from '../graphTypes'
 import { useSgvWs } from '../key'
@@ -58,6 +58,7 @@ const {
   overLimit,
   scopeAssets,
   sel,
+  selId,
   setCardLang,
   startEnhanceDesc,
   toggleCardSource,
@@ -66,6 +67,8 @@ const {
   toggleFocusLock,
   toggleIndex,
   toggleMatrix,
+  traceMode,
+  traceToggle,
   viewOptions,
   viewSel,
 } = useSgvWs()
@@ -196,9 +199,17 @@ function exportGraph(): void {
           class="fixed z-50 rounded-lg border border-ctp-surface1 bg-ctp-mantle shadow-lg p-1 space-y-0.5"
           :style="{ top: toolsPos.top + 'px', left: toolsPos.left + 'px', width: TOOLS_W + 'px' }"
         >
-          <button :class="MENU_ITEM" @click="focusMode = !focusMode">
+          <button :class="MENU_ITEM" @click="focusMode = !focusMode; if (focusMode) traceMode = false">
             <ViewfinderCircleIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.focusMenu') }}
             <span v-if="focusMode" class="ml-auto text-ctp-blue">●</span>
+          </button>
+          <button
+            :class="[MENU_ITEM, selId ? '' : 'opacity-50 cursor-not-allowed']"
+            :disabled="!selId"
+            @click="traceToggle(); toolsOpen = false"
+          >
+            <SignalIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.trace.menu') }}
+            <span v-if="traceMode" class="ml-auto text-ctp-mauve">●</span>
           </button>
           <button :class="[MENU_ITEM, expandable ? '' : 'opacity-50 cursor-not-allowed']" :disabled="!expandable || expanding" @click="expandSelected(); toolsOpen = false">
             <PlusCircleIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.graph.expandMenu') }}
