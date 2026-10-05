@@ -2845,6 +2845,68 @@ def test_edge_notes_diag_and_resample(tmp_path, monkeypatch):
     assert r2.get("error") and "target 与清单不符" in r2["error"], r2
 
 
+def test_edge_notes_stale_target_grounded(tmp_path, monkeypatch):
+    """stale(过期未删) target 曾被 by_id(active 口径)查空 → 接地校验必败 500。
+    修复: by_id 与 target 解析同口径(非 deleted)——stale target 可通过接地。"""
+    import topoone_app_architect.sem.engine as E
+    _ctx(tmp_path, monkeypatch)
+    root = tmp_path / "proj2"
+    root.mkdir()
+    (root / "b.ts").write_text("export function bMain() { return 1 }\n")
+    pid = S.project_id_for(str(root), None)
+    _mk_proc_asset(pid, "sa-en-tgt2", "路由配置", rels=[], file="b.ts")
+    store.SemanticAssetsStore.update("sa-en-tgt2", {"status": "stale"})
+    _mk_proc_asset(pid, "sa-en-from2", "边路径生成",
+                   rels=[{"target": "路由配置", "type": "calls"}], file="b.ts")
+
+    monkeypatch.setattr(
+        "topoone_app_architect.agent.turns.catalog.catalog_call",
+        lambda role, msgs, max_tokens=0, model_id=None, **kw:
+        {"ok": True, "content": '{"edges":[{"target":"路由配置","brief":"调用路由配置确定路径"}]}'})
+    r = E.generate_edge_notes("sa-en-from2", str(root), None)
+    assert not r.get("error"), r
+    assert list(r["notes"].values()) == ["调用路由配置确定路径"]
+
+
+def test_edge_notes_deterministic_fallback(tmp_path, monkeypatch):
+    """两级管线: 符号库调用边证据 → 确定性底稿; LLM 全败 → 底稿回退(永不 500)。"""
+    import sqlite3
+    import topoone_app_architect.sem.engine as E
+    _ctx(tmp_path, monkeypatch)
+    root = tmp_path / "proj3"
+    root.mkdir()
+    (root / "c.ts").write_text("export function cFrom() { return cTo() }\nexport function cTo() { return 2 }\n")
+    pid = S.project_id_for(str(root), None)
+    _mk_proc_asset(pid, "sa-en-to", "目标资产", rels=[], file="c.ts")
+    _mk_proc_asset(pid, "sa-en-from3", "源资产",
+                   rels=[{"target": "目标资产", "type": "calls"}], file="c.ts")
+    # 内存符号库: cFrom --calls--> cTo (line 1)
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, kind TEXT, name TEXT, qualified_name TEXT, file_path TEXT, start_line INT, end_line INT)")
+    conn.execute("CREATE TABLE edges (id INTEGER PRIMARY KEY, source TEXT, target TEXT, kind TEXT, metadata TEXT, line INT, col INT)")
+    conn.execute("INSERT INTO nodes VALUES ('nc1','func','源资产','c::源资产','c.ts',1,1)")
+    conn.execute("INSERT INTO nodes VALUES ('nc2','func','目标资产','c::目标资产','c.ts',2,2)")
+    conn.execute("INSERT INTO edges VALUES (1,'nc1','nc2','calls','{}',1,0)")
+    conn.commit()
+    monkeypatch.setattr(E, "open_symbol_conn", lambda root, project: (conn, "test"))
+    monkeypatch.setattr(E, "close_symbol_conn", lambda c: None)
+
+    # LLM 两轮全败(幻觉 target) → 确定性底稿兜底
+    monkeypatch.setattr(
+        "topoone_app_architect.agent.turns.catalog.catalog_call",
+        lambda role, msgs, max_tokens=0, model_id=None, **kw:
+        {"ok": True, "content": '{"edges":[{"target":"幻觉","brief":"x"}]}'})
+    r = E.generate_edge_notes("sa-en-from3", str(root), None)
+    assert not r.get("error"), r                      # 不再 500
+    assert r.get("source") == "deterministic"
+    desc = list(r["notes"].values())[0]
+    assert "源资产" in desc and "目标资产" in desc and "调用" in desc   # 真实符号+动词
+    # 落库可查
+    a = store.SemanticAssetsStore.get("sa-en-from3")
+    import json as _json
+    assert _json.loads(a["edgeNotes"])["sa-en-from3|sa-en-to"]["desc"] == desc
+
+
 def test_wait_llm_job_precheck_cached_no_job_row(tmp_path, monkeypatch):
     """缓存预检：已生成结果重复请求不再建作业行(任务中心不堆积)。
     node_brief 落库后二次 wait_llm_job → 直接 cached 返回, jobs 无新行。"""

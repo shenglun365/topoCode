@@ -2906,6 +2906,78 @@ def node_briefs_after_extract(pid: str, saved: List[dict], ctx: Dict[str, Any],
     return n
 
 
+_EDGE_NOTE_VERB = {"calls": "调用", "references": "引用", "instantiates": "实例化",
+                   "extends": "继承", "implements": "实现", "imports": "导入",
+                   "assigns": "赋值", "passes": "传参", "contains": "包含"}
+
+
+def _edge_note_deterministic(a: dict, rels: List[Tuple[str, dict]],
+                             root_r: Optional[str], by_id: dict) -> Dict[str, str]:
+    """确定性关系描述底稿：符号库调用边证据(AST 硬事实)生成
+    『在 <file>:<line> 的 <from符号> 中调用 <target名>』。
+
+    两级管线第一级(先确定性处理)：证据天然接地; LLM(第二级)语义润色失败时
+    逐条回退此底稿——关系描述永不 500。
+    """
+    out: Dict[str, str] = {}
+    try:
+        conn, _src = open_symbol_conn(root_r, None)
+    except Exception:  # noqa: BLE001
+        conn = None
+    if conn is None:
+        return out
+    try:
+        sym = _cg_symbol_to_node(conn)
+        from_ids = [sym.get((r.get("symbol") or "").strip())
+                    for r in (a.get("astRefs") or [])]
+        from_ids = [x for x in from_ids if x]
+        if not from_ids:
+            return out
+        t_ids: Dict[str, List[str]] = {}
+        for t, _rel in rels:
+            ta = by_id.get(t) or {}
+            ids = [sym.get((r.get("symbol") or "").strip())
+                   for r in (ta.get("astRefs") or [])]
+            t_ids[t] = [x for x in ids if x]
+        tset = sorted({x for v in t_ids.values() for x in v})
+        if not tset:
+            return out
+        ph = ",".join("?" * len(from_ids))
+        ph2 = ",".join("?" * len(tset))
+        rows = conn.execute(
+            f"SELECT e.source, e.target, e.kind, e.line FROM edges e "
+            f"WHERE e.source IN ({ph}) AND e.target IN ({ph2})",
+            tuple(from_ids + tset)).fetchall()
+        ninfo: Dict[str, tuple] = {}
+        for nid, nm, qn, fp in conn.execute(
+                "SELECT id, name, qualified_name, file_path FROM nodes"):
+            ninfo[nid] = (nm or qn or nid, (fp or "").split("/")[-1])
+        id2t: Dict[str, str] = {}
+        for t, ids in t_ids.items():
+            for x in ids:
+                id2t.setdefault(x, t)
+        best: Dict[str, tuple] = {}
+        for src, tgt, kind, line in rows:
+            t = id2t.get(tgt)
+            if not t:
+                continue
+            verb = _EDGE_NOTE_VERB.get(kind or "", "关联")
+            fname, ffile = ninfo.get(src, (src, "?"))
+            tname = (by_id.get(t) or {}).get("name") or t
+            ln = int(line or 0)
+            desc = f"在 {ffile or '?'}:{ln or '?'} 的 {fname} 中{verb} {tname}"
+            prev = best.get(f"{a.get('id')}|{t}")
+            if not prev or (ln or 10 ** 9) < prev[0]:
+                best[f"{a.get('id')}|{t}"] = (ln, desc)
+        return {k: v[1] for k, v in best.items()}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[semantic] edge notes 确定性证据失败: %s", e)
+        return out
+    finally:
+        if conn is not None:
+            close_symbol_conn(conn)   # 缓存(native)连接不关，勿直接 conn.close()
+
+
 def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[str],
                         model_id: Optional[str] = None, force: bool = False) -> dict:
     """资产出边的关系描述(≤40 字证据式)：在 from 资产锚点源码中定位被调用符号行作为证据。
@@ -2921,10 +2993,12 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
         old = json.loads((a.get("edgeNotes") or "") or "{}")
     except Exception:
         old = {}
-    idx = _relation_target_index([x for x in store.SemanticAssetsStore.all_status(pid, limit=4000)
-                                  if x.get("status") != "deleted"])
-    all_active = [x for x in store.SemanticAssetsStore.all_status(pid, limit=4000)
-                  if x.get("status") == "active"]
+    # target 解析与 by_id 同口径(非 deleted)——stale(过期未删)资产可被 relations
+    # 指向且锚点仍在; 曾只含 active → stale target 查空 → 接地校验必败(500)
+    _non_deleted = [x for x in store.SemanticAssetsStore.all_status(pid, limit=4000)
+                    if x.get("status") != "deleted"]
+    idx = _relation_target_index(_non_deleted)
+    all_active = _non_deleted
     rels: List[Tuple[str, dict]] = []
     for rel in (a.get("detail") or {}).get("relations") or []:
         tgt, resolved = _resolve_relation_target((rel.get("target") or "").strip(), idx)
@@ -2942,6 +3016,8 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
     if not snippet:
         return {"notes": {}, "cached": False, "degraded": True, "error": "源码不可读"}
     by_id = {x.get("id"): x for x in all_active}
+    # 第一级: 确定性证据底稿(AST 调用边硬事实)
+    det = _edge_note_deterministic(a, rels, root_r, by_id)
     tgt_blocks: List[str] = []
     for t, rel in rels:
         ta = by_id.get(t) or {}
@@ -2957,7 +3033,12 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
     user = (f"from 资产: [{a.get('kind')}] {a.get('name')}\n"
             + (terms_txt + "\n" if terms_txt else "") + (conv_txt + "\n" if conv_txt else "")
             + "\n真实源码片段:\n" + snippet
-            + "\n\ntarget 资产清单:\n" + "\n".join(tgt_blocks) + "\n\n请输出 JSON。")
+            + "\n\ntarget 资产清单:\n" + "\n".join(tgt_blocks))
+    if det:
+        user += ("\n\n已确认的调用证据(每条描述必须原样引用其中的真实符号名，"
+                 "在此基础上说明『在做什么的过程中与对方发生该关系』):\n"
+                 + "\n".join(f"- {v}" for v in det.values()))
+    user += "\n\n请输出 JSON。"
     from ..agent.tools.req_agent import get_max_tokens_preference
     from ..agent.turns.catalog import catalog_call
     notes: Dict[str, str] = {}
@@ -3031,8 +3112,25 @@ def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[st
         if attempt == 1:
             logger.info("[semantic] edge notes 输出无效(%s) → 重采样", diag)
     if not notes:
+        if det:
+            # 第二级失败 → 第一级底稿兜底: 确定性证据描述逐条回退, 永不 500
+            try:
+                merged = dict(old)
+                now = _ts()
+                for k, desc in det.items():
+                    merged[k] = {"desc": desc, "at": now}
+                store.SemanticAssetsStore.update(asset_id, {
+                    "edgeNotes": json.dumps(merged, ensure_ascii=False)})
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[semantic] edge notes 落库失败: %s", e)
+            out = {k.split("|", 1)[1]: v for k, v in det.items()}
+            return {"notes": out, "cached": False, "degraded": True,
+                    "source": "deterministic"}
         return {"notes": {}, "cached": False, "degraded": True,
                 "error": f"LLM 未返回有效关系描述({diag})"}
+    for k, desc in det.items():
+        if k not in notes:
+            notes[k] = desc   # LLM 未覆盖/未接地的条目 → 确定性底稿补齐
     try:
         merged = dict(old)
         now = _ts()
