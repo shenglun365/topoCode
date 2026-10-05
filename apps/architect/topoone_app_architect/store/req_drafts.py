@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import List, Optional
 
@@ -21,11 +22,34 @@ def _now() -> int:
     return int(time.time() * 1000)
 
 
+TAG_MAX_BYTES = 64    # 单 tag ≤64B(UTF-8, ≈21 汉字/64 英文字符, 中英文公平)
+TAG_MAX_COUNT = 20    # 每草稿 ≤20 个
+
+
+def _dump_tags(tags) -> str:
+    """tags 归一序列化: 字符串数组 → trim/去空/去重(保序)/截限。"""
+    if not isinstance(tags, (list, tuple)):
+        return "[]"
+    out: List[str] = []
+    for t in tags:
+        s = str(t or "").strip()
+        if not s or s in out:
+            continue
+        while s and len(s.encode("utf-8")) > TAG_MAX_BYTES:
+            s = s[:-1]           # 超长截断到字节上限(而非拒收)
+        if s and s not in out:
+            out.append(s)
+        if len(out) >= TAG_MAX_COUNT:
+            break
+    return json.dumps(out, ensure_ascii=False)
+
+
 class ReqDraftsStore:
     """arch_req_drafts CRUD。"""
 
     @classmethod
-    def create(cls, project_id: str, title: str = "", content_md: str = "") -> dict:
+    def create(cls, project_id: str, title: str = "", content_md: str = "",
+               tags: Optional[List[str]] = None) -> dict:
         now = _now()
         row = {
             "id": next_id("rd"), "projectId": project_id,
@@ -33,10 +57,32 @@ class ReqDraftsStore:
             "lastProposedMd": "", "lastProposedAt": 0,
             "status": "editing", "parentId": "",
             "publishedConvId": "", "publishedReqId": "",
+            "tags": _dump_tags(tags),
             "createdAt": now, "updatedAt": now,
         }
         _insert(TABLE, row)
         return cls.get(row["id"]) or row
+
+    @classmethod
+    def all_tags(cls, project_id: str, *, limit: int = 500) -> List[dict]:
+        """项目内 tag 全集(联想备选): 行聚合去重计数, 按引用数降序——
+        备选不受列表 limit 截断影响; 引用清零的 tag 自然消失(可增可减)。"""
+        rows, _ = _fetchall_routed(
+            TABLE,
+            f"SELECT tags FROM {TABLE} WHERE project_id = ? LIMIT ?",
+            (project_id, int(limit)), project_id or None)
+        counts: dict = {}
+        for r in rows:
+            try:
+                tags = json.loads(r.get("tags") or "[]") if isinstance(r.get("tags"), str) else (r.get("tags") or [])
+            except Exception:  # noqa: BLE001
+                continue
+            for t in tags if isinstance(tags, list) else []:
+                s = str(t or "").strip()
+                if s:
+                    counts[s] = counts.get(s, 0) + 1
+        return [{"name": k, "count": v} for k, v in
+                sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
 
     @classmethod
     def get(cls, draft_id: str) -> Optional[dict]:
@@ -47,7 +93,9 @@ class ReqDraftsStore:
     def update(cls, draft_id: str, data: dict) -> Optional[dict]:
         payload = {k: v for k, v in data.items() if k in (
             "title", "contentMd", "lastProposedMd", "lastProposedAt",
-            "status", "publishedConvId", "publishedReqId")}
+            "status", "publishedConvId", "publishedReqId", "tags")}
+        if "tags" in payload:
+            payload["tags"] = _dump_tags(payload["tags"])
         if not payload:
             return cls.get(draft_id)
         payload["updatedAt"] = _now()
@@ -81,6 +129,7 @@ class ReqDraftsStore:
             "lastProposedMd": "", "lastProposedAt": 0,
             "status": "editing", "parentId": draft_id,
             "publishedConvId": "", "publishedReqId": "",
+            "tags": _dump_tags(src.get("tags")),
             "createdAt": now, "updatedAt": now,
         }
         _insert(TABLE, row)

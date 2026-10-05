@@ -14,6 +14,7 @@ import {
   DocumentTextIcon, PlusIcon, TrashIcon, EyeIcon, XMarkIcon,
   PencilSquareIcon, ArchiveBoxIcon, SparklesIcon, ChevronRightIcon, CheckIcon,
   PaperAirplaneIcon, PlayCircleIcon, LinkIcon, CheckBadgeIcon, WrenchScrewdriverIcon, Bars3Icon,
+  TagIcon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
 import MarkdownView from '@/components/MarkdownView.vue'
@@ -195,6 +196,7 @@ async function openDraft(d: ReqDraft): Promise<void> {
   }
   await flush()   // 旧草稿落库（自动保存取代人工确认）
   loading.value = true
+  cancelTagEdit()
   try {
     const full = await reqDraftService.get(d.id)
     if (!full) return
@@ -264,6 +266,94 @@ async function commitRename(): Promise<void> {
 }
 function cancelRename(): void {
   renamingId.value = ''
+}
+
+// ---- 标签（概念泛化后的自由分类）：文档头部浮层(展示/编辑) + 联想 ----
+const tagsEditing = ref(false)
+const tagInput = ref('')
+const tagSuggestOpen = ref(false)
+const tagSuggestIdx = ref(-1)
+const allTags = ref<{ name: string; count: number }[]>([])
+const tagsOf = computed<string[]>(() => (Array.isArray(current.value?.tags) ? current.value!.tags! : []))
+/** 联想候选：备选全集 contains 匹配、排除已选；输入为空给 top 备选。 */
+const tagCandidates = computed(() => {
+  const q = tagInput.value.trim().toLowerCase()
+  return allTags.value
+    .filter((c) => !tagsOf.value.includes(c.name) && (!q || c.name.toLowerCase().includes(q)))
+    .slice(0, 8)
+})
+const tagHasNew = computed(() => {
+  const s = tagInput.value.trim()
+  return !!s && !tagsOf.value.includes(s) && !tagCandidates.value.some((c) => c.name === s)
+})
+
+async function refreshAllTags(): Promise<void> {
+  try {
+    allTags.value = await reqDraftService.allTags()
+  } catch { /* 备选加载失败静默——可继续手输新建 */ }
+}
+
+function startTagEdit(): void {
+  if (archived.value || !current.value) return
+  tagsEditing.value = true
+  tagInput.value = ''
+  tagSuggestIdx.value = -1
+  void refreshAllTags()
+}
+function cancelTagEdit(): void {
+  tagsEditing.value = false
+  tagInput.value = ''
+  tagSuggestOpen.value = false
+  tagSuggestIdx.value = -1
+}
+
+/** 增/删后立即落库(低频离散操作不走自动保存引擎)；服务端归一结果回填。 */
+async function commitTags(tags: string[]): Promise<void> {
+  if (!current.value) return
+  try {
+    const updated = await reqDraftService.update(current.value.id, { tags })
+    current.value = updated
+    syncListRow()
+    void refreshAllTags()
+  } catch { /* 失败保留本地，下次操作重试 */ }
+}
+function addTag(name: string): void {
+  const s = name.trim()
+  tagInput.value = ''
+  tagSuggestOpen.value = false
+  tagSuggestIdx.value = -1
+  if (!s || !current.value || tagsOf.value.includes(s) || tagsOf.value.length >= 20) return
+  void commitTags([...tagsOf.value, s])
+}
+function removeTag(name: string): void {
+  void commitTags(tagsOf.value.filter((x) => x !== name))
+}
+function onTagInput(): void {
+  tagSuggestOpen.value = true
+  tagSuggestIdx.value = -1
+}
+function onTagKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    if (tagSuggestOpen.value) { tagSuggestOpen.value = false; tagSuggestIdx.value = -1 }
+    else cancelTagEdit()
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    const pick = tagSuggestIdx.value >= 0 ? tagCandidates.value[tagSuggestIdx.value]?.name : undefined
+    addTag(pick || tagInput.value)
+  } else if (e.key === 'ArrowDown' && tagSuggestOpen.value) {
+    e.preventDefault()
+    tagSuggestIdx.value = Math.min(tagSuggestIdx.value + 1, tagCandidates.value.length - 1)
+  } else if (e.key === 'ArrowUp' && tagSuggestOpen.value) {
+    e.preventDefault()
+    tagSuggestIdx.value = Math.max(tagSuggestIdx.value - 1, 0)
+  } else if (e.key === 'Backspace' && !tagInput.value && tagsOf.value.length) {
+    removeTag(tagsOf.value[tagsOf.value.length - 1])
+  }
+}
+/** 列表 tag chip 点击 → 填入搜索框(按 tag 查找)。 */
+function filterByTag(name: string): void {
+  listQuery.value = name
 }
 
 async function removeDraft(): Promise<void> {
@@ -620,6 +710,72 @@ onBeforeUnmount(() => {
       {{ aiBusy ? t('draft.ai.running', { current: aiStatus }) : aiStatus }}
     </div>
 
+    <!-- 文档头部标签浮层(展示/编辑态; UI 层, 不在 MD 文本范围内) -->
+    <div
+      v-if="tabs.length && current"
+      class="relative z-10 flex shrink-0 flex-wrap items-center gap-1 border-b border-ctp-surface0 px-2 py-1"
+    >
+      <TagIcon class="h-3 w-3 shrink-0 text-ctp-overlay0" />
+      <template v-if="!tagsEditing">
+        <span
+          v-for="tg in tagsOf" :key="tg"
+          class="max-w-40 cursor-pointer truncate rounded bg-ctp-surface0 px-1.5 py-0.5 text-[10px] text-ctp-overlay1 hover:text-ctp-text"
+          :title="tg" @click="filterByTag(tg)"
+        >{{ tg }}</span>
+        <span v-if="!tagsOf.length" class="text-[10px] text-ctp-overlay0">{{ t('draft.tags.addPlaceholder') }}</span>
+        <button
+          v-if="!archived"
+          class="ml-0.5 rounded px-1 py-0.5 text-[10px] text-ctp-overlay1 hover:bg-ctp-surface0 hover:text-ctp-text"
+          :title="t('draft.tags.edit')" @click="startTagEdit"
+        >✎</button>
+      </template>
+      <template v-else>
+        <span
+          v-for="tg in tagsOf" :key="tg"
+          class="flex max-w-40 items-center gap-0.5 truncate rounded bg-ctp-surface0 px-1.5 py-0.5 text-[10px] text-ctp-subtext1"
+          :title="tg"
+        >
+          {{ tg }}
+          <button class="text-ctp-overlay0 hover:text-ctp-red" @click="removeTag(tg)">×</button>
+        </span>
+        <span class="relative inline-flex">
+          <input
+            v-model="tagInput" v-focus
+            class="input !w-36 !px-1.5 !py-0.5 !text-[10px]"
+            maxlength="32"
+            :placeholder="t('draft.tags.addPlaceholder')"
+            :title="t('draft.tags.tooLong')"
+            @input="onTagInput"
+            @keydown="onTagKeydown"
+            @blur="tagSuggestOpen = false"
+          >
+          <!-- 联想浮层：已有标签备选(含计数) + 新建项; Esc/失焦/选中关闭 -->
+          <div
+            v-if="tagSuggestOpen && (tagCandidates.length || tagHasNew)"
+            class="absolute left-0 top-full z-30 mt-0.5 max-h-44 w-48 overflow-y-auto rounded-md border border-ctp-surface1 bg-ctp-mantle py-0.5 shadow-lg"
+          >
+            <div v-if="tagCandidates.length" class="px-2 py-0.5 text-[9px] text-ctp-overlay0">{{ t('draft.tags.suggestTitle') }}</div>
+            <button
+              v-for="(c, i) in tagCandidates" :key="c.name"
+              class="flex w-full items-center gap-1 px-2 py-0.5 text-left text-[10px]"
+              :class="i === tagSuggestIdx ? 'bg-ctp-surface0 text-ctp-text' : 'text-ctp-subtext1 hover:bg-ctp-surface0/60'"
+              @mousedown.prevent="addTag(c.name)"
+            >
+              <span class="min-w-0 flex-1 truncate">{{ c.name }}</span>
+              <span class="font-mono text-[9px] text-ctp-overlay0">{{ c.count }}</span>
+            </button>
+            <button
+              v-if="tagHasNew"
+              class="w-full px-2 py-0.5 text-left text-[10px] text-ctp-blue"
+              :class="tagSuggestIdx === tagCandidates.length ? 'bg-ctp-surface0' : 'hover:bg-ctp-surface0/60'"
+              @mousedown.prevent="addTag(tagInput)"
+            >+ {{ t('draft.tags.tagNew', { name: tagInput.trim() }) }}</button>
+          </div>
+        </span>
+        <button class="btn btn-xs btn-blue ml-0.5" @click="cancelTagEdit">{{ t('draft.tags.done') }}</button>
+      </template>
+    </div>
+
     <div class="flex min-h-0 flex-1">
       <!-- 左：主区（编辑/预览 + 悬浮工具栏） -->
       <div ref="editorHost" class="relative flex min-h-0 min-w-0 flex-1">
@@ -744,6 +900,19 @@ onBeforeUnmount(() => {
                 ><TrashIcon class="h-3 w-3" /></button>
               </div>
               <div class="truncate text-[9px] text-ctp-overlay0" :title="d.excerpt">{{ d.excerpt || '—' }}</div>
+              <!-- 标签: 前 3 个直显(超宽 CSS 截断+title 全名), 更多收进 +N 徽标悬停看全部; 点击按 tag 查找 -->
+              <div
+                v-if="d.tags?.length"
+                class="flex items-center gap-0.5 overflow-hidden"
+                :title="d.tags.join('、')"
+              >
+                <span
+                  v-for="tg in d.tags.slice(0, 3)" :key="tg"
+                  class="max-w-[56px] cursor-pointer truncate rounded bg-ctp-surface0/70 px-1 text-[9px] leading-3.5 text-ctp-overlay1 hover:text-ctp-text"
+                  :title="tg" @click.stop="filterByTag(tg)"
+                >{{ tg }}</span>
+                <span v-if="d.tags.length > 3" class="shrink-0 text-[9px] text-ctp-overlay0">+{{ d.tags.length - 3 }}</span>
+              </div>
             </template>
           </div>
           <p v-if="!filteredDrafts.length && !loading" class="py-4 text-center text-[10px] text-ctp-overlay0">

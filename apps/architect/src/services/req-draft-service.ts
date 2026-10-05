@@ -17,6 +17,8 @@ export interface ReqDraft {
   parentId: string
   publishedConvId: string
   publishedReqId: string
+  /** 用户自定义标签(概念泛化后分类用; ≤20 个/个 ≤64B)。 */
+  tags?: string[]
   createdAt: number
   updatedAt: number
   /** 列表项摘要（不带正文）。 */
@@ -47,12 +49,19 @@ export const reqDraftService = {
     return apiGet<ReqDraft>(`/req-drafts/${encodeURIComponent(id)}`)
   },
 
-  async update(id: string, patch: { title?: string; contentMd?: string }): Promise<ReqDraft> {
+  async update(id: string, patch: { title?: string; contentMd?: string; tags?: string[] }): Promise<ReqDraft> {
     return apiPut<ReqDraft>(`/req-drafts/${encodeURIComponent(id)}`, patch)
   },
 
   async remove(id: string): Promise<void> {
     await apiDelete(`/req-drafts/${encodeURIComponent(id)}`)
+  },
+
+  /** 项目内 tag 全集(联想备选): 去重计数按引用数降序。 */
+  async allTags(): Promise<{ name: string; count: number }[]> {
+    const c = ctx()
+    const r = await apiGet<{ tags: { name: string; count: number }[] }>(`/req-drafts-tags${c ? `?${c}` : ''}`)
+    return r?.tags ?? []
   },
 
   /** 续写：复制为新的 editing 副本（归档草稿继续编写的主路径）。 */

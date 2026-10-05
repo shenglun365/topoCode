@@ -169,7 +169,7 @@
  "store/core.py": 182,
  "store/governance.py": 334,
  "store/migrations.py": 67,
- "store/schema.py": 1027,
+ "store/schema.py": 1079,
  "store/semantic.py": 414,
  "store/states.py": 84,
  "store/tasks.py": 172,

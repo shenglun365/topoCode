@@ -67,6 +67,41 @@ def test_draft_crud_lifecycle():
     assert _body(asyncio.run(api.api_req_drafts_delete(cp["id"]))).get("code") == 404
 
 
+def test_draft_tags_store_and_api():
+    """tags: 归一(去重/trim/截限64B×20)/copy 继承/all_tags 聚合/API PUT+归档拒绝。"""
+    from topoone_app_architect.arch_routes import req_drafts as api
+
+    class _Req:
+        def __init__(self, payload):
+            self._p = payload
+
+        async def json(self):
+            return self._p
+
+    d = ReqDraftsStore.create(PID, "T", tags=[" 需求 ", "需求", "分析"])
+    assert d["tags"] == ["需求", "分析"]                      # trim + 去重保序
+    # 聚合: 引用计数(先于后续覆盖校验)
+    ReqDraftsStore.create(PID, "T2", tags=["需求", "备忘录"])
+    agg = {x["name"]: x["count"] for x in ReqDraftsStore.all_tags(PID)}
+    assert agg["需求"] == 2 and agg["分析"] == 1 and agg["备忘录"] == 1
+    # 64B 截断 + 复制继承
+    ReqDraftsStore.update(d["id"], {"tags": ["a" * 80, "设计"]})
+    row = ReqDraftsStore.get(d["id"])
+    assert row["tags"] == ["a" * 64, "设计"]                  # 64B 截断(80 ASCII→64)
+    cp = ReqDraftsStore.copy(d["id"])
+    assert cp["tags"] == row["tags"]
+    # API: PUT tags 落库
+    out = _body(asyncio.run(api.api_req_drafts_update(d["id"], _Req({"tags": ["评审", "需求"]}))))
+    assert out["data"]["tags"] == ["评审", "需求"]
+    # API: 归档态 tags 只读拒绝(409)
+    ReqDraftsStore.update(d["id"], {"status": "archived"})
+    out = _body(asyncio.run(api.api_req_drafts_update(d["id"], _Req({"tags": ["y"]}))))
+    assert out["code"] == 409
+    # 联想端点
+    out = _body(asyncio.run(api.api_req_drafts_tags(project=PID)))
+    assert any(x["name"] == "评审" for x in out["data"]["tags"])
+
+
 def test_draft_store_list_order_and_copy_missing():
     a = ReqDraftsStore.create(PID, "A")
     b = ReqDraftsStore.create(PID, "B")

@@ -43,8 +43,19 @@ async def api_req_drafts_create(request: Request = None):
     pid = project_id_for(body.get("root"), body.get("project"))
     if not pid:
         return err(400, "缺少项目")
-    draft = ReqDraftsStore.create(pid, body.get("title") or "", body.get("contentMd") or "")
+    draft = ReqDraftsStore.create(pid, body.get("title") or "", body.get("contentMd") or "",
+                                  tags=body.get("tags"))
     return ok(draft)
+
+
+@router.get("/req-drafts-tags")
+async def api_req_drafts_tags(root: Optional[str] = None, project: Optional[str] = None):
+    """项目内 tag 全集(草稿 tag 联想备选): 去重计数按引用数降序。"""
+    from ..store import ReqDraftsStore
+    pid = project_id_for(root, project)
+    if not pid:
+        return ok({"tags": []})
+    return ok({"tags": await asyncio.to_thread(ReqDraftsStore.all_tags, pid)})
 
 
 @router.get("/req-drafts/{draft_id}")
@@ -71,6 +82,8 @@ async def api_req_drafts_update(draft_id: str, request: Request = None):
         data["title"] = str(body.get("title") or "")
     if "contentMd" in body:
         data["contentMd"] = str(body.get("contentMd") or "")
+    if "tags" in body:
+        data["tags"] = body.get("tags")   # store 层 _dump_tags 归一(去重/截限)
     updated = ReqDraftsStore.update(draft_id, data)
     return ok(updated)
 

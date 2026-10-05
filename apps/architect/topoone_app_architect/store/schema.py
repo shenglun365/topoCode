@@ -391,6 +391,7 @@ ARCH_PROJECT_TABLES_SQL = """
         parent_id TEXT DEFAULT '',             -- 续写溯源(归档草稿的副本)
         published_conv_id TEXT DEFAULT '',     -- 发布目标会话
         published_req_id TEXT DEFAULT '',      -- 产出的需求卡
+        tags TEXT DEFAULT '[]',                -- JSON: ["tag",...] 自定义标签(泛化分类)
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0
     );
@@ -911,6 +912,8 @@ def _migrate_lifecycle_v2(db) -> None:
 
 
 def _project_migrations(db) -> None:
+    # 草稿 tags(概念泛化分类; ≤64B/个): 联想备选由行聚合
+    _add_cols(db, "arch_req_drafts", [("tags", "TEXT DEFAULT '[]'")])
     # 会话模型 v3: coding 子会话归属 + 执行器一次绑定 + 执行器会话引用
     _add_cols(db, "arch_conversations", [
         ("parent_conv_id", "TEXT DEFAULT ''"),
