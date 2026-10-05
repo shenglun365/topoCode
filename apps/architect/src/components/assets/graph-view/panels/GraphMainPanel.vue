@@ -8,6 +8,7 @@ import GraphMatrixWindow from '../../GraphMatrixWindow.vue'
 import AssetIndexWindow from '../../AssetIndexWindow.vue'
 import FileIndexWindow from '../../FileIndexWindow.vue'
 import TracePanel from './TracePanel.vue'
+import { useSelectionActions, langOf } from '../useSelectionActions'
 import LogicViewCard from './LogicViewCard.vue'
 import LogicScopeModal from './LogicScopeModal.vue'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
@@ -17,6 +18,7 @@ import { useI18n } from 'vue-i18n'
 import type { GraphTabDef } from '../graphTypes'
 import type { SemanticTraceNode } from '@/services/semantic-asset-service'
 import { kindChipClass as kindChipCls, KIND_CARD_CLASS } from '@/services/semantic-kind-style'
+import { currentProjectParams } from '@/services/project-service'
 import { useSgvWs } from '../key'
 import { bringCardToFront, isCardTop } from '../cardZ'
 import { invalidateAssets } from '@/pages/asset-workspace/invalidate-bus'
@@ -36,6 +38,7 @@ function onScopeDone(viewIds: string[]) {
   }
 }
 const { t } = useI18n()
+
 
 // ---- 链路 tab 浮卡「全链路」分区 ----
 const tracePathsOpen = ref(false)
@@ -142,6 +145,44 @@ const {
   toggleFullCode,
   toggleSeg,
 } = useSgvWs()
+
+// ---- 卡片内容选中 → 引用到草稿 / 复制(代码段/全文/关系 tab/符号卡共用容器) ----
+const selActionHost = ref<HTMLElement | null>(null)
+/** 选区起点所在代码段(refSel 时选区仍在; 全文/rel tab/符号卡 → null, payload 用兜底)。 */
+function selSeg(): { file: string; symbol: string } | null {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return null
+  let el: HTMLElement | null = sel.getRangeAt(0).startContainer instanceof HTMLElement
+    ? (sel.getRangeAt(0).startContainer as HTMLElement)
+    : sel.getRangeAt(0).startContainer.parentElement
+  while (el) {
+    const f = el.getAttribute?.('data-seg-file')
+    if (f) return { file: f, symbol: el.getAttribute('data-seg-symbol') || '' }
+    el = el.parentElement
+  }
+  return null
+}
+const {
+  barVisible: codeSelBar, barPos: codeSelBarPos, copied: codeSelCopied, copySel: codeSelCopy, refSel: codeSelRef,
+} = useSelectionActions(selActionHost, () => {
+  const seg = selSeg()
+  const file = seg?.file || fullCode.value?.file || symDetail.value?.meta.file || ''
+  const sym = symDetail.value
+    ? symDetail.value.meta.qualifiedName
+    : (seg?.symbol || selAnchors.value[0]?.symbol || '')
+  return {
+    projectId: currentProjectParams().project || '',
+    compId: selDetail.value?.scopeKey || '',
+    fileId: file || undefined,
+    fileLabel: file ? file.split('/').pop() : undefined,
+    assetId: symDetail.value ? undefined : (selId.value || undefined),
+    assetName: symDetail.value ? undefined : (sel.value?.name || undefined),
+    symbolName: sym || undefined,
+  }
+}, { lang: () => {
+  const file = selSeg()?.file || fullCode.value?.file || symDetail.value?.meta.file || ''
+  return file ? langOf(file) : undefined
+} })
 </script>
 
 <template>
@@ -361,7 +402,23 @@ const {
             @click="tabClick(f)"
           >{{ f.label }}</button>
         </div>
-        <div class="flex-1 min-h-0 overflow-auto px-3 pb-3 pt-1 space-y-2">
+        <div ref="selActionHost" class="relative flex-1 min-h-0 overflow-auto px-3 pb-3 pt-1 space-y-2">
+          <!-- 选区浮条(引用到草稿/复制): useSelectionActions 定位选区下方 -->
+          <div
+            v-if="codeSelBar"
+            data-sel-actions
+            class="absolute z-20 flex items-center gap-0.5 rounded-md border border-ctp-surface1 bg-ctp-mantle px-1 py-0.5 shadow-lg"
+            :style="{ left: codeSelBarPos.x + 'px', top: codeSelBarPos.y + 'px' }"
+          >
+            <button
+              class="rounded px-1.5 py-0.5 text-[10px] text-ctp-blue hover:bg-ctp-surface0"
+              @click.stop="codeSelRef"
+            >{{ t('assetMgmt.graph.selActions.quote') }}</button>
+            <button
+              class="rounded px-1.5 py-0.5 text-[10px] text-ctp-subtext1 hover:bg-ctp-surface0"
+              @click.stop="codeSelCopy"
+            >{{ codeSelCopied ? t('assetMgmt.graph.selActions.copied') : t('assetMgmt.graph.selActions.copy') }}</button>
+          </div>
         <!-- 完整代码视图：单文件全文 + 文件内多资产锚点高亮(点击切资产，同文件不刷新卡) -->
         <template v-if="fullCode">
           <div class="font-medium text-[10px] text-ctp-mauve mb-0.5 flex items-center gap-1 truncate">
@@ -527,6 +584,8 @@ const {
           <template v-if="!collapsedSegs.has(si)">
           <pre
             v-if="seg.snippet?.lines?.length"
+            :data-seg-file="seg.file"
+            :data-seg-symbol="seg.symbol || ''"
             class="m-0 overflow-auto rounded border border-ctp-surface1 bg-ctp-surface0 p-2 font-mono leading-relaxed"
             :class="cardSize.h ? '' : 'max-h-52'"
             :style="{ fontSize: codeFontSize + 'px' }"

@@ -24,6 +24,7 @@ import { renderDiagram } from '@/services/topo-render'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import { sessionService } from '@/services/session-service'
 import { reqDraftService, type ReqDraft } from '@/services/req-draft-service'
+import { onDraftRef, type DraftRefPayload } from '../draft-ref-bus'
 import { currentProjectParams } from '@/services/project-service'
 import { diffLines, diffStat } from '@/utils/diff-lines'
 
@@ -356,6 +357,56 @@ function filterByTag(name: string): void {
   listQuery.value = name
 }
 
+// ---- 卡片内容引用接收(代码资产卡/符号卡/逻辑资产卡 → 草稿) ----
+function _esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/`/g, '\u0060')
+}
+function refSourceLine(src: DraftRefPayload['source']): string {
+  const parts: string[] = []
+  if (src.projectId) parts.push(`项目 \`${_esc(src.projectId)}\``)
+  if (src.compId) parts.push(`组件 \`${_esc(src.compId)}\``)
+  if (src.viewId) parts.push(`视图 \`${_esc(src.viewId)}\`「${_esc(src.viewName ?? '')}」`)
+  if (src.fileId) parts.push(`文件 \`${_esc(src.fileId)}\`${src.fileLabel ? `(${_esc(src.fileLabel)})` : ''}`)
+  if (src.assetId) parts.push(`资产 \`${_esc(src.assetId)}\`「${_esc(src.assetName ?? '')}」`)
+  if (src.coreAssetId) parts.push(`核心资产 \`${_esc(src.coreAssetId)}\``)
+  if (src.symbolName) {
+    const span = src.lineStart ? ` L${src.lineStart}${src.lineEnd && src.lineEnd !== src.lineStart ? `-L${src.lineEnd}` : ''}` : ''
+    parts.push(`符号 \`${_esc(src.symbolName)}\`${span}`)
+  }
+  return parts.join(' · ')
+}
+function refBlock(p: DraftRefPayload): string {
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 5)
+  const fence = '```'
+  const body = p.text.split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')
+  const lang = p.lang ? _esc(p.lang) : ''
+  return [
+    `> **引用** · ${time}`,
+    `> 来源：${refSourceLine(p.source) || '—'}`,
+    '>',
+    `> ${fence}${lang}`,
+    body,
+    `> ${fence}`,
+  ].join('\n')
+}
+async function receiveDraftRef(p: DraftRefPayload): Promise<void> {
+  await flush()
+  const usable = current.value && (current.value.status || 'editing') === 'editing' ? current.value : null
+  if (!usable) {
+    await createDraft()   // 无打开中的草稿 → 新建(openDraft 已切编辑态)
+  }
+  contentDraft.value = `${contentDraft.value.replace(/\s+$/, '')}\n\n${refBlock(p)}\n`
+  pending.value = true
+  await flush()          // 关键动作即时落库
+  syncListRow()
+}
+onMounted(() => {
+  startAutosave()
+  window.addEventListener('beforeunload', onBeforeUnload)
+  offDraftRef = onDraftRef((p) => { void receiveDraftRef(p) })
+})
+
 async function removeDraft(): Promise<void> {
   if (!current.value) return
   if (!(await dialog.confirm(t('draft.deleteConfirm', { title: current.value.title || t('draft.untitled') }), { danger: true }))) return
@@ -670,12 +721,15 @@ onMounted(() => {
   window.addEventListener('beforeunload', onBeforeUnload)
   void loadList()
 })
+let offDraftRef: (() => void) | null = null
 onBeforeUnmount(() => {
   void flush()
   stopAutosave()
   if (aiJobTimer) clearInterval(aiJobTimer)
   if (pickerSearchTimer) clearTimeout(pickerSearchTimer)
   window.removeEventListener('beforeunload', onBeforeUnload)
+  offDraftRef?.()
+  offDraftRef = null
 })
 </script>
 

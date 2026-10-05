@@ -31,7 +31,23 @@
       </button>
     </header>
 
-    <div class="overflow-y-auto px-3 py-2 space-y-3 text-xs">
+    <div ref="selHost" class="relative overflow-y-auto px-3 py-2 space-y-3 text-xs">
+      <!-- 选区浮条(引用到草稿/复制) -->
+      <div
+        v-if="selBar"
+        data-sel-actions
+        class="absolute z-30 flex items-center gap-0.5 rounded-md border border-ctp-surface1 bg-ctp-mantle px-1 py-0.5 shadow-lg"
+        :style="{ left: selBarPos.x + 'px', top: selBarPos.y + 'px' }"
+      >
+        <button
+          class="rounded px-1.5 py-0.5 text-[10px] text-ctp-blue hover:bg-ctp-surface0"
+          @click.stop="selRef"
+        >{{ t('assetMgmt.graph.selActions.quote') }}</button>
+        <button
+          class="rounded px-1.5 py-0.5 text-[10px] text-ctp-subtext1 hover:bg-ctp-surface0"
+          @click.stop="selCopy"
+        >{{ selCopied ? t('assetMgmt.graph.selActions.copied') : t('assetMgmt.graph.selActions.copy') }}</button>
+      </div>
       <!-- 概括 -->
       <p v-if="view?.summary" class="text-ctp-subtext1 leading-relaxed">{{ view.summary }}</p>
 
@@ -104,9 +120,26 @@ import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, ShareIcon, SparklesIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 import { useSgvWs } from '../key'
+import { useSelectionActions } from '../useSelectionActions'
+import { currentProjectParams } from '@/services/project-service'
 import { bringCardToFront, isCardTop } from '../cardZ'
 
 const props = defineProps<{ viewId: string }>()
+// ---- 内容选中 → 引用到草稿 / 复制 ----
+const firstCoreId = computed(() => {
+  try { return (JSON.parse(view.value?.coreIds || '[]') as string[])[0] || undefined }
+  catch { return undefined }
+})
+const selHost = ref<HTMLElement | null>(null)
+const {
+  barVisible: selBar, barPos: selBarPos, copied: selCopied, copySel: selCopy, refSel: selRef,
+} = useSelectionActions(selHost, () => ({
+  projectId: currentProjectParams().project || '',
+  viewId: view.value?.id || props.viewId,
+  viewName: view.value?.name || '',
+  coreAssetId: firstCoreId.value || undefined,
+  assetName: view.value?.name || '',
+}))
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
 const ws = useSgvWs()

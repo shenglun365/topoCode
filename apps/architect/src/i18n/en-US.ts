@@ -1874,6 +1874,7 @@ export default {
         fullPaths: 'Full chains',
         fullPathsHint: 'Click a row to select the chain end',
       },
+      selActions: { quote: 'Quote', copy: 'Copy', copied: 'Copied' },
       cardResetPos: 'Drag to move; double-click title to reset to bottom-right',
       minimize: 'Minimize to icon',
       restore: 'Restore card',
