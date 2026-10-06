@@ -18,6 +18,7 @@ from .symbols import resolve_base_commit
 _MAX_CTX_FILES = 30      # 解读上下文文件清单上限
 _MAX_CTX_SYMBOLS = 40    # 解读上下文符号清单上限
 _MAX_SNIPPET = 160       # 行解读代码窗口上限
+MAX_FILE_NODES = 200     # 文件级图谱节点上限(超出经范围树筛选分批查看)
 
 
 def _now() -> int:
@@ -115,6 +116,11 @@ def file_graph(root: Optional[str], project: Optional[str], components: List[str
         "compId": cid, "compName": comp_meta.get(cid, {}).get("name") or "",
         "change": fstatus.get(f, ""),
     } for f, cid in sorted(file_comp.items())]
+    total_files = len(nodes)
+    if total_files > MAX_FILE_NODES:
+        # 大范围分批查看: 数量多了看不过来——超出部分经范围树筛选分批
+        nodes = nodes[:MAX_FILE_NODES]
+        fset = set(n["path"] for n in nodes)
     fset = set(file_comp)
     edges: list = []
     head = resolve_base_commit(real_root, pid) if pid else ""
@@ -137,6 +143,8 @@ def file_graph(root: Optional[str], project: Optional[str], components: List[str
                 "strong": bool(a.get("strong")), "side": a.get("side") or ""})
     return {"nodes": nodes, "edges": edges, "changedAssets": changed_assets,
             "components": [{"id": k, **v} for k, v in comp_meta.items()],
+            "totalFiles": total_files, "truncated": total_files > MAX_FILE_NODES,
+            "maxFileNodes": MAX_FILE_NODES,
             "base": cmp_res.get("base") or base, "target": cmp_res.get("target") or target}
 
 

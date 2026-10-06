@@ -81,6 +81,8 @@ onMounted(async () => {
 })
 
 const lines = computed(() => snippet.value?.lines ?? [])
+/** 源码窗口上限 4000 行——达到即视为截断。 */
+const srcTruncated = computed(() => lines.value.length >= 4000)
 const addedCount = computed(() => lines.value.filter((l) => l.kind === 'add').length)
 const deletedCount = computed(() => lines.value.filter((l) => l.kind === 'del').length)
 
@@ -89,11 +91,16 @@ const notes = ref<Record<number, string>>({})
 const notesLoading = ref(false)
 const notesCached = ref(false)
 const notesError = ref('')
+const notesElapsed = ref(0)
+let notesTimer: ReturnType<typeof setInterval> | null = null
 
 async function loadNotes(force = false) {
   if (notesLoading.value || !lines.value.length) return
   notesLoading.value = true
   notesError.value = ''
+  notesElapsed.value = 0
+  if (notesTimer) clearInterval(notesTimer)
+  notesTimer = setInterval(() => { notesElapsed.value += 1 }, 1000)
   try {
     const first = lines.value[0].line
     const last = lines.value[lines.value.length - 1].line
@@ -106,6 +113,7 @@ async function loadNotes(force = false) {
   } catch (e: any) {
     notesError.value = e?.message || 'failed'
   } finally {
+    if (notesTimer) { clearInterval(notesTimer); notesTimer = null }
     notesLoading.value = false
   }
 }
@@ -215,7 +223,10 @@ async function copyLoc() {
             </button>
           </div>
           <p v-if="notesError" class="text-[11px] text-ctp-peach mb-1">{{ notesError }}</p>
-          <div v-if="loading" class="text-[11px] text-ctp-overlay0 animate-pulse py-4 text-center">{{ t('app.loading') }}</div>
+          <div v-if="loading" class="text-[11px] text-ctp-overlay0 animate-pulse py-4 text-center">
+            {{ t('app.loading') }} {{ notesElapsed }}s
+          </div>
+          <p v-else-if="srcTruncated" class="text-[10px] text-ctp-peach mb-1">{{ t('compGraph.srcTruncated') }}</p>
           <div v-else-if="loadError" class="text-[11px] text-ctp-peach py-2">{{ loadError }}</div>
           <div v-else class="rounded border border-ctp-surface0 overflow-x-auto font-mono text-[11px] leading-5">
             <div v-for="l in lines" :key="l.line" class="flex items-start group hover:bg-ctp-surface0/60"

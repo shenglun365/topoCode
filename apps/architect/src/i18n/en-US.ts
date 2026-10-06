@@ -1037,6 +1037,8 @@ export default {
     codeChanges: 'Code Change Summaries',
     viewCode: 'View',
     noChanges: 'No code change summaries for this graph',
+    truncated: '{total} files exceed the {max} limit — showing the first {max}; narrow the component scope on the left to view in batches',
+    srcTruncated: 'File too long — showing the first 4000 lines',
                 mapTitle: { structure: 'Data Structure Changes', dependency: 'Dependency Changes', calls: 'Call Changes' },
     mapKind: { structure: 'Struct', dependency: 'Depends', calls: 'Calls' },
   },

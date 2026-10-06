@@ -159,3 +159,64 @@ class CompGraphTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompGraphEndpointsTest(unittest.TestCase):
+    """HTTP 端点层(TestClient): comp-graph / file-graph / node-notes / file-line-notes。"""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        app_ctx.setup(data_dir=self._tmp.name)
+        from topoone_app_architect.arch_routes.project import resolve_project
+        from topoone_app_architect.store.core import ProjectsStore
+        self.root = os.path.join(self._tmp.name, "repo")
+        os.makedirs(self.root)
+        _git(self.root, "init", "-q", "-b", "main")
+        os.makedirs(os.path.join(self.root, "a"))
+        with open(os.path.join(self.root, "a/f0.py"), "w") as f:
+            f.write("x = 1\n")
+        _commit(self.root, "c1")
+        self.PID = resolve_project(self.root, None)["id"]
+        self.head = _sha(self.root)
+        ProjectsStore.update(self.PID, {"baselineCommit": self.head})
+        ComponentStore.replace_rev(self.PID, f"baseline:{self.head}",
+                                   [{"id": "comp-a", "name": "A", "owns": ["a/f0.py"]}], [])
+        record_graph_baseline(self.PID, self.head)
+        from fastapi.testclient import TestClient
+        from topoone_app_architect.server import build_app
+        self.client = TestClient(build_app(data_dir=self._tmp.name))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_comp_graph_endpoint(self):
+        r = self.client.get(f"/api/architect/kb/semantic/comp-graph?project={self.PID}&base={self.head}")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()["data"]
+        self.assertEqual([n["id"] for n in data["nodes"]], ["comp-a"])
+
+    def test_file_graph_endpoint(self):
+        r = self.client.get(
+            f"/api/architect/kb/semantic/file-graph?project={self.PID}&components=comp-a&base={self.head}")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()["data"]
+        self.assertEqual([n["path"] for n in data["nodes"]], ["a/f0.py"])
+        self.assertFalse(data["truncated"])
+
+    def test_file_graph_truncation(self):
+        """>200 文件范围截断: 渲染前 200 + truncated 标志(大范围分批查看裁决)。"""
+        comps = [{"id": f"comp-{i}", "name": f"C{i}", "owns": [f"d{i}/f.py"]} for i in range(210)]
+        rev = f"baseline:{self.head}"
+        ComponentStore.replace_rev(self.PID, rev, comps, [])
+        r = self.client.get(
+            f"/api/architect/kb/semantic/file-graph?project={self.PID}&components={','.join(c['id'] for c in comps)}&base={self.head}")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()["data"]
+        self.assertTrue(data["truncated"])
+        self.assertEqual(len(data["nodes"]), 200)
+        self.assertEqual(data["totalFiles"], 210)
+
+    def test_node_notes_endpoint_validation(self):
+        r = self.client.get(f"/api/architect/kb/semantic/node-notes?project={self.PID}&kind=component&key=")
+        self.assertEqual(r.status_code, 400)   # 缺 key → 400(错误契约)

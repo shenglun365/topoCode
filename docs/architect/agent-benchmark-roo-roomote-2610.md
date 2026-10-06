@@ -106,7 +106,7 @@ Architect 现状：Vue3 前端 + Python 后端（`:3470`，architect.db）的架
 
 | 借鉴点 | 来源锚点 | 落点 |
 |---|---|---|
-| **tree-sitter 结构大纲提取**（web-tree-sitter WASM，30+ 语言惰性加载） | Roo `services/tree-sitter/index.ts:97`, `languageParser.ts:78` | ★ 核心弹药：符号级大纲喂 graph-kernel/KB，比全文读便宜得多 |
+| **符号大纲→上下文注入的消费模式**（⚠️ 2026-10-10 评估修订：不自建 tree-sitter——KB parsers 底座**本就是 tree-sitter**（独立语言包模式，`language_loader.py` 已注册 19 个语言变体：c/cpp/python/js/ts/tsx/go/java/rust/c#/swift/ruby/kotlin/php/dart/scala/lua/luau/objc），主流语言全覆盖；缺的不是解析能力，是把已解析的大纲数据系统性喂给 agent 上下文的**消费模式**） | Roo `services/tree-sitter/index.ts:97`（参照用法） | ★ 图邻域上下文（D1 第一消费场景 = P2-T4 mandate 锚定勾稽的上下文供给），比全文读便宜得多 |
 | **工具三层防御**：请求前过滤 → 调用校验 → 提示词预告 | Roo `filter-tools-for-mode.ts:225` + `validateToolUse.ts:120` | 分析会话只给 read 组；产出类工具（写蓝图/规约）单独分组 |
 | **文件正则约束**（`["edit", {fileRegex}]` 元组设计） | Roo `packages/types/src/mode.ts:37` | architect 的"写"仅限产物类型：`.md`/mermaid/契约 JSON |
 | **`@mention` 上下文选择**（@file/@problems/@git-changes → 独立 content block） | Roo `core/mentions/index.ts:99` | 左栏对话引用代码位置的标准交互 |
@@ -177,7 +177,7 @@ Architect 现状：Vue3 前端 + Python 后端（`:3470`，architect.db）的架
 ## 四、优先级路线图建议
 
 - **P0（立即，低成本）**：提示词快照测试、三层 prompt 分离、`<request>` 转义、审批四值决策（增强提案卡）、Zod schema、序列号防竞态
-- **P1（核心竞争力）**：tree-sitter 结构大纲提取（喂 graph-kernel）、packaged skills 化现有服务、compact 交接单、native tool calling 流式四件套、AGENTS.md 规则链闭环
+- **P1（核心竞争力）**：图邻域上下文供给（消费自管 AST/图数据，非自建 tree-sitter——见 2610 评估修订；第一落点 P2-T4 mandate 加固）、packaged skills 化现有服务、compact 交接单、native tool calling 流式四件套、AGENTS.md 规则链闭环
 - **P2（规模化）**：judge subagent、actor-scoped turns、委派报告契约、模型角色路由、MCP 配置覆盖体系
 
 ---
@@ -245,7 +245,7 @@ Architect 现状：Vue3 前端 + Python 后端（`:3470`，architect.db）的架
 1. 归纳（已有）→ 2. 生成 AGENTS.md 注入 subagent（contract-service 已有管道）→ 3. scaffold/委派生成代码自动合规 → 4. 违约检查回归（已有）→ 5. 违约证据反哺规约修订（新）
 - 形成自我改进回路，是"学习型 agent"叙事的实证支点
 
-**D5. 架构学习路径生成（onboarding 场景）**
+**D5. 架构学习路径生成（onboarding 场景）**（⚠️ 2026-10-10 评估：与 roadmap §1.1"主线 A 降为地基、不加新表面"冲突——砍掉或后置 Phase 3+，学习叙事由 P3-T5 渐进披露间接承载，见 [评估文档](benchmark-adoption-assessment-2610.md) 裁决项 4）
 
 产品名定位是"源码架构分析与学习工具"，但"学习"尚未产品化：
 - 图上做路径规划（入口 → 核心域 → 边界），生成带叙事的学习路线 + 每站验证问题（followup_question 模式，E 节）

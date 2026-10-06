@@ -42,6 +42,8 @@
 | [agent-capability-design-2609.md](architect/agent-capability-design-2609.md) | agent 能力整体设计 v1（待评审实施） |
 | [agent-benchmark-roo-roomote-2610.md](architect/agent-benchmark-roo-roomote-2610.md) | Roo Code/Roomote 双项目对标分析 × Architect 能力定位（借鉴清单 + 差异化方向，输入型） |
 | [unit-test-repositioning-2610.md](architect/unit-test-repositioning-2610.md) | 单测能力重定位与感知补位机制设计（策略/执行/验收三层切分 + 事实层感知 + L0~L3 补位，输入型待评审） |
+| [benchmark-adoption-assessment-2610.md](architect/benchmark-adoption-assessment-2610.md) | 对标增强计划细化评估：五锚一致性核验 + 冲突裁决清单 + 优先级归位表（净增 12~16 人日） |
+| [adoption-batch1-plan-2610.md](architect/adoption-batch1-plan-2610.md) | **对标增强首批实施计划（2610-B1）**：W0~W6 任务卡 + 依赖排序 + 整批 DoD，待评审开工 |
 | [compensation-strategy-requirements-2609.md](architect/compensation-strategy-requirements-2609.md) | 模型能力分级补偿策略需求规格 |
 | [goal-understanding-2609.md](architect/goal-understanding-2609.md) | 目标理解层归一设计（v0 讨论稿，A1/D5 挂账） |
 | [tech-debt-ledger-2609.md](architect/tech-debt-ledger-2609.md) | 技术挂账台账（单源备忘录） |

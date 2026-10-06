@@ -169,7 +169,10 @@ const scopeNames = computed(() =>
           {{ base.slice(0, 7) }}→{{ target === 'worktree' ? '⌂' : target.slice(0, 7) }}
         </span>
         <span class="flex-1" />
-        <span v-if="compData?.noChanges" class="text-[9px] text-ctp-overlay0">{{ t('compGraph.noChanges') }}</span>
+        <span v-if="fileData?.truncated" class="text-[9px] text-ctp-peach">
+          {{ t('compGraph.truncated', { total: fileData.totalFiles ?? fileData.nodes.length, max: fileData.maxFileNodes ?? 200 }) }}
+        </span>
+        <span v-else-if="compData?.noChanges" class="text-[9px] text-ctp-overlay0">{{ t('compGraph.noChanges') }}</span>
       </div>
 
       <!-- 画布 -->

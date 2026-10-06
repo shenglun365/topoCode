@@ -21,30 +21,69 @@ type ChangeKey = 'added' | 'modified' | 'deleted' | ''
 function changeClass(ch: { added: number; modified: number; deleted: number } | '' | string): ChangeKey {
   if (ch === 'added' || ch === 'modified' || ch === 'deleted') return ch
   const c = ch as { added: number; modified: number; deleted: number }
-  if (c && (c.added || c.modified || c.deleted)) return 'modified'
-  return ''
+  if (!c || (!c.added && !c.modified && !c.deleted)) return ''
+  if (c.added && !c.modified && !c.deleted) return 'added'     // 纯新增 → 绿
+  if (c.deleted && !c.added && !c.modified) return 'deleted'   // 纯删除 → 红
+  return 'modified'                                            // 混合/仅修改 → 蓝
 }
 
-/** 组件级图: 节点=组件(徽标=变更计数), 边=dependsOn。 */
-export function compGraphMermaid(nodes: {
-  id: string; name: string; fileCount: number; level: string;
+export interface CompMermaidNode {
+  id: string; name: string; fileCount: number; level: string; parentId?: string
   change: { added: number; modified: number; deleted: number }
-}[], edges: { from: string; to: string }[]): MermaidResult {
+}
+
+/** 组件级图: 节点=组件(徽标=变更计数), 边=dependsOn; parentId → subgraph 层级分组
+ *  (子组件收进父组件 cluster, 父不在目录或悬挂时平铺)。 */
+export function compGraphMermaid(nodes: CompMermaidNode[],
+                                 edges: { from: string; to: string }[]): MermaidResult {
   const idMap: Record<string, string> = {}
-  const lines: string[] = ['graph TD']
+  const nodeOf = new Map(nodes.map((n) => [n.id, n]))
   const classLines: string[] = []
-  nodes.forEach((n, i) => {
-    const mid = `n${i}`
-    idMap[mid] = n.id
+  const midOf = new Map<string, string>()
+  const label = (n: CompMermaidNode) => {
     const badge = n.change.added || n.change.modified || n.change.deleted
       ? ` · +${n.change.added} ~${n.change.modified} -${n.change.deleted}` : ''
-    lines.push(`  ${mid}["${esc(n.name)}<br/>${n.fileCount} files${badge}"]`)
+    return `["${esc(n.name)}<br/>${n.fileCount} files${badge}"]`
+  }
+  // 分组: 父也在目录中的组件按父聚合(两轮: 父先于子)
+  const groups = new Map<string, CompMermaidNode[]>()   // parentId → 子组件
+  const loose: CompMermaidNode[] = []
+  for (const n of nodes) {
+    if (n.parentId && nodeOf.has(n.parentId) && n.parentId !== n.id) {
+      if (!groups.has(n.parentId)) groups.set(n.parentId, [])
+      groups.get(n.parentId)!.push(n)
+    } else {
+      loose.push(n)
+    }
+  }
+  const emitNode = (n: CompMermaidNode, out: string[]) => {
+    const mid = `n${midOf.size}`
+    midOf.set(n.id, mid)
+    idMap[mid] = n.id
+    out.push(`  ${mid}${label(n)}`)
     const cls = changeClass(n.change)
     if (cls) classLines.push(`  ${mid}:::${cls}`)
-  })
+  }
+  const lines: string[] = ['graph TD']
+  for (const n of loose) {
+    const kids = groups.get(n.id) || []
+    if (kids.length) {
+      const sg = `sg${midOf.size}`
+      lines.push(`  subgraph ${sg}["${esc(n.name)}"]`)
+      emitNode(n, lines)
+      for (const k of kids.sort((a, b) => a.name.localeCompare(b.name))) emitNode(k, lines)
+      lines.push('  end')
+    } else {
+      emitNode(n, lines)
+    }
+  }
+  // 悬挂子(父不在目录)兜底平铺
+  for (const [pid, kids] of groups) {
+    if (!nodeOf.has(pid)) for (const k of kids) emitNode(k, lines)
+  }
   for (const e of edges) {
-    const f = Object.keys(idMap).find((k) => idMap[k] === e.from)
-    const t = Object.keys(idMap).find((k) => idMap[k] === e.to)
+    const f = midOf.get(e.from)
+    const t = midOf.get(e.to)
     if (f && t) lines.push(`  ${f} --> ${t}`)
   }
   lines.push(
@@ -62,16 +101,18 @@ export function fileGraphMermaid(nodes: {
   const idMap: Record<string, string> = {}
   const lines: string[] = ['graph LR']
   const classLines: string[] = []
+  const midOf = new Map<string, string>()
   nodes.forEach((n, i) => {
     const mid = `n${i}`
+    midOf.set(n.id, mid)
     idMap[mid] = n.id
     const mark = n.change === 'added' ? ' [新增]' : n.change === 'modified' ? ' [改]' : n.change === 'deleted' ? ' [删]' : ''
     lines.push(`  ${mid}["${esc(n.name, 28)}${mark}"]`)
     if (n.change) classLines.push(`  ${mid}:::${n.change}`)
   })
   for (const e of edges) {
-    const f = Object.keys(idMap).find((k) => idMap[k] === e.from)
-    const t = Object.keys(idMap).find((k) => idMap[k] === e.to)
+    const f = midOf.get(e.from)
+    const t = midOf.get(e.to)
     if (f && t) lines.push(`  ${f} --> ${t}`)
   }
   lines.push(

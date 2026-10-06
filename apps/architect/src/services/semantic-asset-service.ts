@@ -563,6 +563,10 @@ export interface FileGraphData {
   edges: { from: string; to: string }[]
   changedAssets: Record<string, FileGraphChangedAsset[]>
   components: { id: string; name: string; kind: string }[]
+  /** 范围内文件总数(截断前)。 */
+  totalFiles?: number
+  truncated?: boolean
+  maxFileNodes?: number
   base: string
   target: string
 }

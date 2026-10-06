@@ -1044,6 +1044,8 @@ export default {
     codeChanges: '对应代码变更摘要',
     viewCode: '查看',
     noChanges: '该图暂无对应代码变更摘要',
+    truncated: '文件数 {total} 超过 {max} 上限——已渲染前 {max} 个，请在左侧组件范围树缩小组件范围分批查看',
+    srcTruncated: '文件过长，仅显示前 4000 行',
                 mapTitle: { structure: '数据结构变更图', dependency: '依赖关系变更图', calls: '调用关系变更图' },
     mapKind: { structure: '结构', dependency: '依赖', calls: '调用' },
   },

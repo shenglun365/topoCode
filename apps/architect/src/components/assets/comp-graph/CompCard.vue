@@ -63,10 +63,15 @@ const note = ref('')
 const noteLoading = ref(false)
 const noteCached = ref(false)
 const noteError = ref('')
+const noteElapsed = ref(0)
+let noteTimer: ReturnType<typeof setInterval> | null = null
 
 async function loadNote(force = false) {
   noteLoading.value = true
   noteError.value = ''
+  noteElapsed.value = 0
+  if (noteTimer) clearInterval(noteTimer)
+  noteTimer = setInterval(() => { noteElapsed.value += 1 }, 1000)
   try {
     const r = await semanticAssetService.nodeNotes('component', props.node.id, force)
     note.value = r?.note || ''
@@ -75,6 +80,7 @@ async function loadNote(force = false) {
   } catch (e: any) {
     noteError.value = e?.message || 'failed'
   } finally {
+    if (noteTimer) { clearInterval(noteTimer); noteTimer = null }
     noteLoading.value = false
   }
 }
@@ -176,7 +182,9 @@ async function copyLoc() {
             @click="loadNote(true)"
           ><ArrowPathIcon class="w-3.5 h-3.5" :class="noteLoading ? 'animate-spin' : ''" /></button>
         </div>
-        <p v-if="noteLoading" class="text-[11px] text-ctp-overlay0 animate-pulse">{{ t('app.loading') }}</p>
+        <p v-if="noteLoading" class="text-[11px] text-ctp-overlay0 animate-pulse">
+          {{ t('app.loading') }} {{ noteElapsed }}s
+        </p>
         <p v-else-if="noteError" class="text-[11px] text-ctp-peach">{{ noteError }}</p>
         <p v-else-if="note" class="text-[11px] text-ctp-subtext1 leading-relaxed whitespace-pre-wrap">{{ note }}</p>
         <button v-else class="btn !py-1 !px-2.5 !text-[10px]" @click="loadNote(false)">
