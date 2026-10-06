@@ -107,9 +107,6 @@ export const useArchProjectStore = defineStore('arch-project', {
       const project = await projectService.createGreenfield(opts)
       this.project = project
       this.status = null
-      this.snapshots = []
-      this.baseline = null
-      this.current = null
       if (project?.id && project.rootPath) {
         await setProjectQuery({ project: project.id, root: project.rootPath })
       }
