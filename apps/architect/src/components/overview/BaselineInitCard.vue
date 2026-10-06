@@ -36,25 +36,74 @@ function fmtAnchorTime(at?: number) {
   try { return new Date(at).toLocaleString() } catch { return '' }
 }
 
-// ── 基线锚定选单(数据主权批E): 基线行点击 → 基线后提交探测列表 → 选定锚定 ──
+// ── 基线锚定选单(数据主权批E+): 分支下拉 + 关键字搜索 + 分页滚动加载 ──
 const anchorHead = ref('')
 const pickerOpen = ref(false)
 const pickerLoading = ref(false)
 const pickerList = ref<GitCommitInfo[]>([])
+const branches = ref<string[]>([])
+const pickerBranch = ref('')          // 空串 = 跟随仓库当前分支
+const pickerSearch = ref('')
+const pickerHasMore = ref(false)
+const pickerOffset = ref(0)
+const listEl = ref<HTMLElement | null>(null)
+/** 当前基线 commit(列表内标徽标, 不再过滤隐藏)。 */
+const anchorHash = computed(() => base.value?.anchor?.head || '')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 打开探测列表: 基线(since=当前锚 head)后提交, 最新 10 条, 滚动选单。 */
-async function openPicker() {
-  pickerOpen.value = !pickerOpen.value
-  if (!pickerOpen.value) return
+/** 拉取提交页(offset 分页; append=滚动加载追加)。 */
+async function loadCommits(append = false) {
   pickerLoading.value = true
   try {
-    const git = await projectService.gitInfo()
-    pickerList.value = (git?.log ?? []).filter((c) => c.hash !== base.value?.anchor?.head)
+    const r = await projectService.gitCommits({
+      branch: pickerBranch.value || undefined,
+      search: pickerSearch.value || undefined,
+      offset: append ? pickerOffset.value : 0,
+    })
+    pickerList.value = append ? [...pickerList.value, ...r.commits] : r.commits
+    pickerHasMore.value = r.hasMore
+    pickerOffset.value = (append ? pickerOffset.value : 0) + r.commits.length
   } catch {
-    pickerList.value = []
+    if (!append) pickerList.value = []
+    pickerHasMore.value = false
   } finally {
     pickerLoading.value = false
   }
+}
+
+function switchBranch() {
+  if (pickerOpen.value) void loadCommits()
+}
+
+/** 搜索输入(debounce 300ms, 变更时重置分页)。 */
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { if (pickerOpen.value) void loadCommits() }, 300)
+}
+
+/** 滚动到底 → 追加下一页。 */
+function onListScroll() {
+  const el = listEl.value
+  if (!el || !pickerHasMore.value || pickerLoading.value) return
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) void loadCommits(true)
+}
+
+/** 打开选单: 分支列表(默认当前分支) + 首页提交(最新 10 条)。 */
+async function openPicker() {
+  pickerOpen.value = !pickerOpen.value
+  if (!pickerOpen.value) return
+  pickerSearch.value = ''
+  pickerHasMore.value = false
+  pickerOffset.value = 0
+  try {
+    const b = await projectService.gitBranches()
+    branches.value = b.branches
+    pickerBranch.value = b.current || b.branches[0] || ''
+  } catch {
+    branches.value = []
+    pickerBranch.value = ''
+  }
+  await loadCommits()
 }
 
 function pickAnchor(c: GitCommitInfo) {
@@ -246,30 +295,53 @@ async function refreshBaseline() {
             :title="t('overviewHome.baselineInit.anchorPickHint')"
             @click="openPicker"
           >{{ (anchorHead || base?.anchor?.head || '')?.slice(0, 7) }}<ChevronDownIcon class="w-3 h-3 inline ml-0.5" /></button>
-          <!-- 探测选单: 基线后提交(最新 10 条, 滚动) -->
+          <!-- 探测选单: 分支可选 + 关键字搜索 + 10 条/页滚动加载; HEAD/当前基线徽标 -->
           <div
             v-if="pickerOpen"
-            class="absolute right-0 top-6 z-30 w-[26rem] max-h-72 overflow-y-auto rounded-lg border border-ctp-surface1 bg-ctp-base shadow-xl"
+            class="absolute right-0 top-6 z-30 w-[28rem] rounded-lg border border-ctp-surface1 bg-ctp-base shadow-xl"
           >
-            <div class="px-3 py-2 text-[10px] text-ctp-overlay1 border-b border-ctp-surface0 sticky top-0 bg-ctp-base">
+            <div class="px-3 py-2 text-[10px] text-ctp-overlay1 border-b border-ctp-surface0">
               {{ t('overviewHome.baselineInit.anchorPickTitle') }}
             </div>
-            <p v-if="pickerLoading" class="px-3 py-3 text-xs text-ctp-overlay0">{{ t('app.loading') }}</p>
-            <p v-else-if="!pickerList.length" class="px-3 py-3 text-xs text-ctp-overlay0">{{ t('overviewHome.baselineInit.anchorPickEmpty') }}</p>
-            <button
-              v-for="c in pickerList"
-              :key="c.hash"
-              class="w-full text-left px-3 py-2 hover:bg-ctp-surface0 border-b border-ctp-surface0/50"
-              @click="pickAnchor(c)"
-            >
-              <div class="flex items-center gap-2">
-                <span class="font-mono text-[11px] text-ctp-mauve">{{ c.short }}</span>
-                <span v-if="c.isHead" class="chip bg-ctp-blue/15 text-ctp-blue !text-[9px]">HEAD</span>
-                <span class="text-[10px] text-ctp-overlay0">{{ fmtCommitDate(c.date) }}</span>
-                <span class="text-[10px] text-ctp-overlay0 ml-auto">{{ c.author }}</span>
-              </div>
-              <div class="text-xs text-ctp-text truncate">{{ c.message }}</div>
-            </button>
+            <div class="flex items-center gap-2 px-3 py-2 border-b border-ctp-surface0">
+              <select
+                v-model="pickerBranch"
+                class="text-[11px] font-mono bg-ctp-surface0 text-ctp-subtext1 rounded px-1.5 py-1 border border-ctp-surface1 outline-none max-w-[9rem]"
+                :title="t('overviewHome.baselineInit.pickerBranch')"
+                @change="switchBranch"
+              >
+                <option v-if="!branches.length" value="">{{ git?.branch || 'main' }}</option>
+                <option v-for="b in branches" :key="b" :value="b">{{ b }}</option>
+              </select>
+              <input
+                v-model="pickerSearch"
+                class="flex-1 min-w-0 text-[11px] bg-ctp-surface0 text-ctp-text rounded px-2 py-1 border border-ctp-surface1 outline-none focus:border-ctp-mauve placeholder:text-ctp-overlay0"
+                :placeholder="t('overviewHome.baselineInit.pickerSearch')"
+                @input="onSearchInput"
+              />
+            </div>
+            <div ref="listEl" class="max-h-72 overflow-y-auto" @scroll.passive="onListScroll">
+              <p v-if="pickerLoading && !pickerList.length" class="px-3 py-3 text-xs text-ctp-overlay0">{{ t('app.loading') }}</p>
+              <p v-else-if="!pickerList.length" class="px-3 py-3 text-xs text-ctp-overlay0">{{ t('overviewHome.baselineInit.anchorPickEmpty') }}</p>
+              <button
+                v-for="c in pickerList"
+                :key="c.hash"
+                class="w-full text-left px-3 py-2 hover:bg-ctp-surface0 border-b border-ctp-surface0/50"
+                :class="c.hash === anchorHash ? 'bg-ctp-mauve/5' : ''"
+                @click="pickAnchor(c)"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-[11px] text-ctp-mauve">{{ c.short }}</span>
+                  <span v-if="c.isHead" class="chip bg-ctp-blue/15 text-ctp-blue !text-[9px]">HEAD</span>
+                  <span v-if="c.hash === anchorHash" class="chip bg-ctp-mauve/15 text-ctp-mauve !text-[9px]">{{ t('overviewHome.baselineInit.pickerAnchor') }}</span>
+                  <span class="text-[10px] text-ctp-overlay0">{{ fmtCommitDate(c.date) }}</span>
+                  <span class="text-[10px] text-ctp-overlay0 ml-auto">{{ c.author }}</span>
+                </div>
+                <div class="text-xs text-ctp-text truncate">{{ c.message }}</div>
+              </button>
+              <p v-if="pickerLoading && pickerList.length" class="px-3 py-2 text-[10px] text-ctp-overlay0">{{ t('app.loading') }}</p>
+              <p v-else-if="!pickerHasMore && pickerList.length" class="px-3 py-2 text-center text-[10px] text-ctp-overlay0">{{ t('overviewHome.baselineInit.pickerEnd') }}</p>
+            </div>
           </div>
         </span>
         <button

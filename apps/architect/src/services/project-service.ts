@@ -1,4 +1,4 @@
-import type { EvolutionFrames, GitInfoLite, KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
+import type { EvolutionFrames, GitCommitInfo, GitInfoLite, KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import router from '@/router'
 
@@ -94,6 +94,20 @@ export const projectService = {
   /** 解除选择(URL 参数清除由 store 处理)。 */
   async unbind(): Promise<boolean> {
     return apiPost<boolean>('/project/unbind')
+  },
+  /** 工作目录本地分支列表(基线锚定选单分支下拉)。 */
+  async gitBranches(): Promise<{ branches: string[]; current: string }> {
+    const qs = projectQuery().toString()
+    return apiGet(`/project/git-branches${qs ? '?' + qs : ''}`)
+  },
+  /** 提交列表分页(基线锚定选单): branch/search/offset, 默认 10 条/页。 */
+  async gitCommits(opts: { branch?: string; search?: string; offset?: number; limit?: number }): Promise<{ commits: GitCommitInfo[]; hasMore: boolean }> {
+    const qs = projectQuery()
+    if (opts.branch?.trim()) qs.set('branch', opts.branch.trim())
+    if (opts.search?.trim()) qs.set('search', opts.search.trim())
+    qs.set('offset', String(Math.max(opts.offset ?? 0, 0)))
+    if (opts.limit) qs.set('limit', String(opts.limit))
+    return apiGet(`/project/git-commits?${qs.toString()}`)
   },
   /** 工作目录 git 状态轻量探测(不依赖 KB 关联)。 */
   async gitInfo(): Promise<GitInfoLite | null> {

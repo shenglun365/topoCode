@@ -333,6 +333,40 @@ async def git_info(request: Request):
     return ok(resp)
 
 
+@router.get("/project/git-branches")
+async def git_branches_ep(request: Request):
+    """工作目录本地分支列表(基线锚定选单分支下拉)。"""
+    body_root = request.query_params.get("root") or request.query_params.get("execRoot") or ""
+    proj = resolve_project(body_root or None, request.query_params.get("project"))
+    root = (proj or {}).get("rootPath") or body_root
+    from . import arch_git
+    if not root or not os.path.isdir(root) or not arch_git.is_git_repo(root):
+        return ok({"branches": [], "current": ""})
+    from .git_probe import git_branches
+    return ok(git_branches(root))
+
+
+@router.get("/project/git-commits")
+async def git_commits_ep(request: Request):
+    """提交列表分页(基线锚定选单): branch/search/offset/limit(默认 10, 上限 100)。"""
+    q = request.query_params
+    body_root = q.get("root") or q.get("execRoot") or ""
+    proj = resolve_project(body_root or None, q.get("project"))
+    root = (proj or {}).get("rootPath") or body_root
+    from . import arch_git
+    if not root or not os.path.isdir(root) or not arch_git.is_git_repo(root):
+        return ok({"commits": [], "hasMore": False})
+    from .git_probe import git_log
+    try:
+        limit = min(max(int(q.get("limit") or 10), 1), 100)
+        offset = max(int(q.get("offset") or 0), 0)
+    except ValueError:
+        limit, offset = 10, 0
+    rows = git_log(root, branch=q.get("branch") or "", search=q.get("search") or "",
+                   offset=offset, limit=limit + 1)
+    return ok({"commits": rows[:limit], "hasMore": len(rows) > limit})
+
+
 @router.post("/project/init-git")
 async def init_git_repo(request: Request):
     """自动初始化工作目录 git 仓库(概览页按钮授权; 已是 repo 则幂等返回)。"""
