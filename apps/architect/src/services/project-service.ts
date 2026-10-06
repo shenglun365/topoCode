@@ -1,4 +1,4 @@
-import type { EvolutionFrames, GitCommitInfo, GitInfoLite, KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
+import type { GitCommitInfo, GitInfoLite, KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import router from '@/router'
 
@@ -126,27 +126,5 @@ export const projectService = {
     const qs = projectQuery().toString()
     return apiGet<ProjectOverview | null>(`/project/overview${qs ? '?' + qs : ''}`)
   },
-  async snapshots(): Promise<Snapshot[]> {
-    const qs = projectQuery().toString()
-    return apiGet<Snapshot[]>(`/project/snapshots${qs ? '?' + qs : ''}`)
-  },
 
-  /** KB 版本列表只读(KB 表壳冻结期兼容; 基线管理宏观概览「版本历史」)：新→旧。 */
-  async versions(): Promise<Array<{ id: string; label: string; head: string; createdAt: string }>> {
-    const qs = projectQuery().toString()
-    return apiGet<Array<{ id: string; label: string; head: string; createdAt: string }>>(`/project/versions${qs ? '?' + qs : ''}`)
-  },
-
-  /** 演化帧序列(B2+ 真数据): 任意 base..head ref 对 → 组件图谱帧推演。
-   *  ref 接受 baseline / KB version id / branch / commit sha(前缀) / HEAD；缺省 baseline→HEAD。 */
-  async evolutionFrames(base?: string, head?: string, layer?: 'component' | 'file',
-                        refs?: string[]): Promise<EvolutionFrames | null> {
-    const qs = projectQuery()
-    if (base?.trim()) qs.set('base', base.trim())
-    if (head?.trim()) qs.set('head', head.trim())
-    if (layer) qs.set('layer', layer)
-    // 显式帧序列(需求 7)：指定分支/head 列表作为 step 帧
-    if (refs?.length) qs.set('refs', refs.filter((r) => r.trim()).join(','))
-    return apiGet<EvolutionFrames | null>(`/project/evolution-frames?${qs.toString()}`)
-  },
 }

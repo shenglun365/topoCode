@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from topoone_app_architect.arch_routes import agent_executors as AE
+from topoone_app_architect.arch_routes import opencode_detect as OD
 
 
 @pytest.fixture()
@@ -53,7 +54,7 @@ _PROVIDER_LIST = {
 
 
 def test_parse_oc_providers_filter_and_merge():
-    models, total = AE._parse_oc_providers(_PROVIDERS, _PROVIDER_LIST)
+    models, total = OD._parse_oc_providers(_PROVIDERS, _PROVIDER_LIST)
     assert total == 4
     got = {m["model"]: m for m in models}
     # google 无密钥未连接 → 过滤; 已连接(anthropic)与 source=config(ollama)保留
@@ -75,7 +76,7 @@ def test_parse_oc_providers_filter_and_merge():
 
 def test_parse_oc_providers_no_metadata_source():
     """仅 /config/providers(无 /provider 探测面) → 全部保留且无 limit。"""
-    models, total = AE._parse_oc_providers(_PROVIDERS, None)
+    models, total = OD._parse_oc_providers(_PROVIDERS, None)
     # source=config 恒保留; env 无密钥未连接被过滤
     assert total == 4
     assert {m["model"] for m in models} == {"ollama/qwen3:32b"}
@@ -83,7 +84,7 @@ def test_parse_oc_providers_no_metadata_source():
 
 
 def test_parse_oc_agents_sort_and_fullname():
-    agents = AE._parse_oc_agents([
+    agents = OD._parse_oc_agents([
         {"name": "reviewer", "mode": "subagent", "builtIn": False, "description": "评审",
          "model": {"providerID": "anthropic", "modelID": "claude-sonnet-4"}},
         {"name": "plan", "mode": "primary", "builtIn": True},
@@ -118,7 +119,7 @@ def _detect(client, **kw):
 
 
 def test_detect_route_providers_and_agents(client, monkeypatch):
-    monkeypatch.setattr(AE, "_start_opencode_serve",
+    monkeypatch.setattr(OD, "_start_opencode_serve",
                         lambda cfg, cwd="": {"status": "ok", "port": 3478,
                                              "note": "serve 已拉起"})
     by_path = {"/config/providers": _PROVIDERS,
@@ -126,9 +127,9 @@ def test_detect_route_providers_and_agents(client, monkeypatch):
                "/agent": [{"name": "build", "mode": "primary", "builtIn": True}]}
 
     def fake_get_json(url, timeout=10.0):
-        return by_path.get(f"http://127.0.0.1:3478".join(url.split("http://127.0.0.1:3478")[1:]))
+        return by_path.get(url.removeprefix("http://127.0.0.1:3478"))
 
-    monkeypatch.setattr(AE, "_get_json", fake_get_json)
+    monkeypatch.setattr(OD, "_get_json", fake_get_json)
     r = _detect(client)
     assert r.status_code == 200
     d = r.json()["data"]
@@ -144,10 +145,10 @@ def test_detect_route_providers_and_agents(client, monkeypatch):
 def test_detect_route_config_fallback(client, monkeypatch):
     """旧版 serve(无 /config/providers 与 /agent)→ /config 兜底解析。"""
     import time as _t
-    monkeypatch.setattr(AE, "_start_opencode_serve",
+    monkeypatch.setattr(OD, "_start_opencode_serve",
                         lambda cfg, cwd="": {"status": "ok", "port": 3478, "note": ""})
-    monkeypatch.setattr(AE, "_get_json", lambda url, timeout=10.0: None)
-    monkeypatch.setattr(AE.urllib.request, "urlopen",
+    monkeypatch.setattr(OD, "_get_json", lambda url, timeout=10.0: None)
+    monkeypatch.setattr(OD.urllib.request, "urlopen",
                         lambda url, timeout=10: _FakeResp({"provider": {
                             "ollama": {"options": {"baseURL": "http://127.0.0.1:11434/v1"},
                                        "models": {"qwen3:32b": {}}}}}))
@@ -157,3 +158,61 @@ def test_detect_route_config_fallback(client, monkeypatch):
     assert d["models"] == [{"name": "qwen3:32b", "model": "ollama/qwen3:32b",
                             "url": "http://127.0.0.1:11434/v1", "kind": "local"}]
     assert d["agents"] == [] and d["total"] == 0 and d["omitted"] == 0
+
+
+def test_probe_opencode_model_static(monkeypatch):
+    """opencode 侧静态探活: 目录命中 + 凭据判定(零 token)。"""
+    monkeypatch.setattr(OD, "_start_opencode_serve",
+                        lambda cfg, cwd="": {"status": "ok", "port": 3478, "note": ""})
+    by_path = {"/config/providers": _PROVIDERS, "/provider": _PROVIDER_LIST}
+    monkeypatch.setattr(OD, "_get_json",
+                        lambda url, timeout=10.0:
+                        by_path.get(url.removeprefix("http://127.0.0.1:3478")))
+    # ok: 已连接 provider 全名
+    d = OD._probe_opencode_model({}, "", "anthropic/claude-sonnet-4")
+    assert d["status"] == "ok" and "已连接" in d["detail"] and "anthropic" in d["detail"]
+    # ok: source=config(本地显式配置, 未连接但凭据面成立)
+    d = OD._probe_opencode_model({}, "", "ollama/qwen3:32b")
+    assert d["status"] == "ok" and "已显式配置" in d["detail"]
+    # ok: 裸名(三级匹配)命中已连接 provider
+    d = OD._probe_opencode_model({}, "", "claude-opus-4")
+    assert d["status"] == "ok"
+    # fail: serve 起不来透传
+    monkeypatch.setattr(OD, "_start_opencode_serve",
+                        lambda cfg, cwd="": {"status": "fail", "detail": "boom"})
+    assert OD._probe_opencode_model({}, "", "anthropic/x") == {
+        "status": "fail", "detail": "boom"}
+    monkeypatch.setattr(OD, "_start_opencode_serve",
+                        lambda cfg, cwd="": {"status": "ok", "port": 3478, "note": ""})
+    # fail: 模型不在目录
+    d = OD._probe_opencode_model({}, "", "nope/none")
+    assert d["status"] == "fail" and "不在 opencode 目录" in d["detail"]
+    # fail: provider 无凭据(google 无密钥未连接)
+    d = OD._probe_opencode_model({}, "", "google/gemini-3-pro")
+    assert d["status"] == "fail" and "未配置密钥" in d["detail"]
+
+
+def test_model_probe_route_opencode_branch(client, monkeypatch):
+    """路由分派: opencode+空 url → opencode 探活; 其余直连路径不变。"""
+    h = _h(client)
+    seen = {}
+
+    def fake_probe(cfg, cwd, model):
+        seen.update(cfg=cfg, cwd=cwd, model=model)
+        return {"status": "ok", "detail": "静态"}
+
+    monkeypatch.setattr(AE, "_probe_opencode_model", fake_probe)
+    r = client.post("/api/architect/agent/executors/model-probe",
+                    json={"url": "", "model": "anthropic/claude-sonnet-4",
+                          "entry": {"type": "opencode", "config": {"base_port": 3500}},
+                          "cwd": "/tmp/proj"},
+                    headers=h)
+    assert r.status_code == 200
+    assert seen == {"cfg": {"base_port": 3500}, "cwd": "/tmp/proj",
+                    "model": "anthropic/claude-sonnet-4"}
+    # 非 opencode 类型(或带 url)不被劫持 → 直连探测原语义(缺 url 报错)
+    r2 = client.post("/api/architect/agent/executors/model-probe",
+                     json={"url": "", "model": "m",
+                           "entry": {"type": "cline-sdk", "config": {}}}, headers=h)
+    d2 = r2.json()["data"]
+    assert d2["status"] == "fail" and "缺少模型服务 url" in d2["detail"]

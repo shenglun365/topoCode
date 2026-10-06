@@ -38,6 +38,7 @@
 | [agent-harness-evaluation-2609.md](architect/agent-harness-evaluation-2609.md) | 外部 Agent 源码评估与采纳路线（多线状态归位表） |
 | [agent-structure-review-2609.md](architect/agent-structure-review-2609.md) | agent 结构评估（批次 A/B/C，部分已被 adoption 改道） |
 | [agent-capability-design-2609.md](architect/agent-capability-design-2609.md) | agent 能力整体设计 v1（待评审实施） |
+| [agent-benchmark-roo-roomote-2610.md](architect/agent-benchmark-roo-roomote-2610.md) | Roo Code/Roomote 双项目对标分析 × Architect 能力定位（借鉴清单 + 差异化方向，输入型） |
 | [compensation-strategy-requirements-2609.md](architect/compensation-strategy-requirements-2609.md) | 模型能力分级补偿策略需求规格 |
 | [goal-understanding-2609.md](architect/goal-understanding-2609.md) | 目标理解层归一设计（v0 讨论稿，A1/D5 挂账） |
 | [tech-debt-ledger-2609.md](architect/tech-debt-ledger-2609.md) | 技术挂账台账（单源备忘录） |

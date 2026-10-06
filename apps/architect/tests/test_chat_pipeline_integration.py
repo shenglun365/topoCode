@@ -224,7 +224,8 @@ def test_full_pipeline_text_confirm_runs_task(pipeline, monkeypatch):
     assert "已确认任务" in ev["content"]
     assert store.TasksStore.get(t["id"])["status"] == "running"
     assert impl_payload.get("executorId") == "cline"
-    assert impl_payload.get("model") == "M1"
+    # models[0] 回落取全名/模型 id(展示名跨 provider 可重复; _resolve_model 三级匹配)
+    assert impl_payload.get("model") == "m-1"
     assert (impl_payload.get("executorConfig") or {}).get("models")
 
 

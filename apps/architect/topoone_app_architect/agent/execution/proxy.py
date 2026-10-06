@@ -324,14 +324,15 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     if hint:
         model = str(hint.get("model") or "").strip()
     else:
-        # 兜底链与 executor_hint_by_id/_resolve_model 同序: 会话绑定 > model_id > models[0]
-        names = [str(m.get("name") or m.get("model") or "")
+        # 兜底链与 executor_hint_by_id/_resolve_model 同序:
+        # 会话绑定 > 顶层默认(model_id/model, UI「默认模型」) > models[0]
+        names = [str(m.get("model") or m.get("name") or "")
                  for m in (ecfg.get("models") or [])
-                 if (m.get("name") or m.get("model"))]
+                 if (m.get("model") or m.get("name"))]
         model = (str((conv or {}).get("executorModel") or "").strip()
                  or str(ecfg.get("model_id") or "").strip()
-                 or (names[0] if names else "")
-                 or str(ecfg.get("model") or ""))
+                 or str(ecfg.get("model") or "").strip()
+                 or (names[0] if names else ""))
 
     job = _PROXY_JOBS.get(conv_id)
     if job:

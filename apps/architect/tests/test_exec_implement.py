@@ -154,7 +154,7 @@ def test_bind_with_model_and_switch(tmp_path, monkeypatch):
 
 
 def test_executor_hint_model_priority(tmp_path, monkeypatch):
-    """hint 模型优先级: conv.executorModel > config.models[0] > cfg.model。"""
+    """hint 模型优先级: conv.executorModel > 顶层默认(model_id/model) > models[0]。"""
     _setup(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import agent_executors as ae
     from topoone_app_architect.agent.execution import exec_bridge as eb
@@ -164,17 +164,25 @@ def test_executor_hint_model_priority(tmp_path, monkeypatch):
          "config": {"model": "cfg-m", "models": []}}])
     conv = {"executorId": "ex1", "executorModel": ""}
     assert eb.executor_hint_by_id(conv.get("executorId") or "", conv)["model"] == "cfg-m"
-    # 顶层默认 model_id 优先于 models[0](不再被白名单首个旁路)
+    # 顶层默认(model_id=cline / model=opencode UI「默认模型」)优先于 models[0]
+    # (不再被白名单首个旁路——展示名跨 provider 可重复, 首条无裁量权)
     monkeypatch.setattr(ae, "load_executors", lambda: [
         {"id": "ex1", "type": "cline-sdk", "enabled": True,
          "config": {"model": "cfg-m", "model_id": "top-default",
                     "models": [{"name": "wl-1"}, {"name": "wl-2"}]}}])
     assert eb.executor_hint_by_id(conv.get("executorId") or "", conv)["model"] == "top-default"
-    # 无顶层默认 → 首个
     monkeypatch.setattr(ae, "load_executors", lambda: [
         {"id": "ex1", "type": "opencode", "enabled": True,
-         "config": {"model": "cfg-m", "models": [{"name": "wl-1"}, {"name": "wl-2"}]}}])
-    assert eb.executor_hint_by_id(conv.get("executorId") or "", conv)["model"] == "wl-1"
+         "config": {"model": "prov-a/m1", "models": [
+             {"name": "m1", "model": "prov-a/m1"},
+             {"name": "m1", "model": "prov-b/m1"}]}}])
+    assert eb.executor_hint_by_id(conv.get("executorId") or "", conv)["model"] == "prov-a/m1"
+    # 无顶层默认 → 首个(全名优先: models[0] 回落取 服务商/模型id)
+    monkeypatch.setattr(ae, "load_executors", lambda: [
+        {"id": "ex1", "type": "opencode", "enabled": True,
+         "config": {"models": [{"name": "wl-1", "model": "prov/wl-1"},
+                               {"name": "wl-2"}]}}])
+    assert eb.executor_hint_by_id(conv.get("executorId") or "", conv)["model"] == "prov/wl-1"
     # 会话选型最优先
     assert eb.executor_hint_by_id("ex1", {"executorModel": "wl-2"})["model"] == "wl-2"
 

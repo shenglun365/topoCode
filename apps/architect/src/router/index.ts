@@ -69,10 +69,9 @@ const routes: RouteRecordRaw[] = [
         redirect: '/workbench/sessions',
       },
       {
+        // 基线管理已并入概览页(BaselineInitCard), 组件图谱能力迁资产图谱——旧 URL 兼容回概览
         path: 'archmap',
-        name: 'ArchMap',
-        component: () => import('@/pages/ArchMapPage.vue'),
-        meta: { workbench: true, title: '架构变更视图' },
+        redirect: '/workbench',
       },
       {
         path: 'config',

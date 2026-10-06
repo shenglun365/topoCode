@@ -111,6 +111,9 @@ async function load() {
   try {
     const d = await apiGet<{ executors: ExecEntry[]; runtime: any }>('/agent/executors')
     entries.value = d.executors ?? []
+    for (const e of entries.value) {
+      if (!Array.isArray(e.config.models)) e.config.models = []   // 快照形状稳定
+    }
     runtime.value = d.runtime
     // 重载后按 id 找回展开中的条目(id 未变则保持展开)
     if (expandedEntry.value) {
@@ -120,6 +123,8 @@ async function load() {
     entries.value = []
   } finally {
     loading.value = false
+    // 成功/失败均以当前视图为新基线(失败=空视图 → dirty=false 防误点全量覆盖)
+    takeSnapshot()
   }
 }
 onMounted(() => { load(); detectEnv() })
@@ -221,9 +226,14 @@ async function detectModels(e: ExecEntry) {
   } finally { detecting.value = '' }
 }
 
-/** 代理绑定(单选): 空=执行器默认(build); 点击已绑定项=取消绑定 */
+/** 代理绑定(单选): 空=执行器默认(build); 点击已绑定项=取消绑定。均自动保存 */
 function bindAgent(e: ExecEntry, name: string) {
   e.config.agent = e.config.agent === name ? '' : name
+  schedulePersist()
+}
+function unbindAgent(e: ExecEntry) {
+  e.config.agent = ''
+  schedulePersist()
 }
 /** 检测到的代理名清单(绑定代理下拉选项源)。 */
 function agentNames(e: ExecEntry): string[] {
@@ -242,11 +252,13 @@ function detectBtnLabel(e: ExecEntry): string {
   return showDetected.value[k] ? t('config.executors.hideList') : t('config.executors.showList')
 }
 
-/** 执行器白名单模型名列表(默认模型下拉选项源)。 */
+/** 执行器白名单模型 id 清单(默认模型下拉选项源)。
+ * 全名优先(m.model="服务商/模型id"): 展示名跨 provider 可重复, 全名唯一可辨;
+ * 去重防同 id 重复渲染。存量落盘的展示名经「白名单外」兜底选项仍可选。 */
 function modelNames(e: ExecEntry): string[] {
-  return ((e.config as any)?.models || [])
-    .map((m: any) => m?.name || m?.model || '')
-    .filter(Boolean)
+  return Array.from(new Set(((e.config as any)?.models || [])
+    .map((m: any) => m?.model || m?.name || '')
+    .filter(Boolean)))
 }
 
 function isChecked(e: ExecEntry, model: string): boolean {
@@ -255,11 +267,14 @@ function isChecked(e: ExecEntry, model: string): boolean {
 function toggleModel(e: ExecEntry, dm: { name: string; model: string; url: string }) {
   if (!Array.isArray(e.config.models)) e.config.models = []
   const i = e.config.models.findIndex((m) => m.model === dm.model)
-  if (i >= 0) { e.config.models.splice(i, 1); return }
+  if (i >= 0) { e.config.models.splice(i, 1); schedulePersist(); return }
+  // name 存全名(=model): 展示名跨 provider 可重复(同 bare id),
+  // 重名校验会误伤多 provider 同 id 勾选, 运行期 name 引用亦歧义
   e.config.models.push({
     id: `m${Date.now()}${e.config.models.length}`,
-    name: dm.name, model: dm.model, url: dm.url, apiKey: '', maxTokens: 0,
+    name: dm.model, model: dm.model, url: dm.url, apiKey: '', maxTokens: 0,
   })
+  schedulePersist()
 }
 
 /** 表单字段: 内置 cline 模型面只剩默认模型选择(实例实时投影)——
@@ -316,34 +331,68 @@ function addModel(e: ExecEntry) {
 function removeModel(e: ExecEntry, i: number) {
   e.config.models?.splice(i, 1)
 }
+/** 白名单 chip 移除(opencode 常显区): 反选 + 自动保存 */
+function removeWhitelist(e: ExecEntry, i: number) {
+  e.config.models?.splice(i, 1)
+  schedulePersist()
+}
 async function probeModel(e: ExecEntry, m: ExecModel) {
   const key = `${e.id}/${m.name || m.model || '?'}`
   modelProbing.value[key] = '…'
   try {
+    // entry 供路由分派: opencode 且 url 空 → opencode 侧静态探活(目录+凭据)
     const d = await apiPost<{ status: string; detail: string }>('/agent/executors/model-probe',
-      { url: m.url, model: m.model, apiKey: m.apiKey })
+      { url: m.url, model: m.model, apiKey: m.apiKey, entry: e,
+        cwd: project.project?.rootPath || '' })
     modelProbing.value[key] = `${d.status === 'ok' ? '✓' : '✗'} ${d.detail}`
   } catch (err: any) {
     modelProbing.value[key] = `✗ ${err?.message || err}`
   }
 }
 
-async function save() {
+/** ── 未保存变更跟踪 ──
+ * 快照 = 最近一次成功加载/持久化的注册表; JSON 序列化比对(键序稳定:
+ * 条目仅经 load 赋值与响应式字段写入, 无键重排)。dirty=新增/变化 → 保存按钮可点;
+ * 勾选模型/代理绑定走自动保存, 按钮态只补陈"其它编辑"(连接参数/白名单表格等)。 */
+const savedSnapshot = ref('[]')
+function takeSnapshot() {
+  savedSnapshot.value = JSON.stringify(entries.value)
+}
+const dirty = computed(() => JSON.stringify(entries.value) !== savedSnapshot.value)
+
+/** ── 持久化: 手动保存(保存注册表按钮) + 勾选/绑定自动保存(800ms 防抖) ──
+ * persist 默认不触发 load: entries 身份重建会让检测面板(keyOf 对象身份)塌陷;
+ * 自动保存失败时 reload 回服务器真值——勾选态弹回, 所见即所存。 */
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+async function persist(opts: { reload?: boolean; manual?: boolean } = {}) {
   saving.value = true
   savedMsg.value = ''
   try {
     const d = await apiPut<{ runnerRefreshed: boolean }>('/agent/executors',
       { executors: entries.value })
-    savedMsg.value = d.runnerRefreshed
-      ? t('config.executors.savedRefreshed')
-      : t('config.executors.savedNoRunner')
-    await load()
+    savedMsg.value = opts.manual
+      ? (d.runnerRefreshed
+          ? t('config.executors.savedRefreshed')
+          : t('config.executors.savedNoRunner'))
+      : t('config.executors.autoSaved')
+    savedSnapshot.value = JSON.stringify(entries.value)   // 本地态已获服务器接受
+    if (opts.reload) await load()
   } catch (e: any) {
     savedMsg.value = e?.message || String(e)
+    if (!opts.manual) await load()
   } finally {
     saving.value = false
     setTimeout(() => { savedMsg.value = '' }, 4000)
   }
+}
+function schedulePersist() {
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => { persistTimer = null; void persist() }, 800)
+}
+
+async function save() {
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null }
+  await persist({ reload: true, manual: true })
 }
 
 async function probe(e: ExecEntry) {
@@ -474,8 +523,15 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
         <button class="btn !py-1 !px-3 !text-xs" @click="addEntry">
           <PlusIcon class="w-3.5 h-3.5" />{{ t('config.executors.add') }}
         </button>
-        <button class="btn btn-primary !py-1 !px-3 !text-xs" :disabled="saving" @click="save">
-          {{ saving ? t('config.executors.saving') : t('config.executors.save') }}
+        <button
+          class="btn btn-primary !py-1 !px-3 !text-xs"
+          :disabled="saving || !dirty"
+          :title="dirty ? '' : t('config.executors.noChanges')"
+          @click="save"
+        >
+          {{ saving
+            ? t('config.executors.saving')
+            : (dirty ? t('config.executors.save') : t('config.executors.saved')) }}
         </button>
       </span>
     </div>
@@ -690,6 +746,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
 
           <!-- ══ opencode 专属: 服务内模型检测 → 勾选白名单 ══ -->
           <div v-if="e.type === 'opencode'" class="px-2.5 py-2 border-t border-ctp-surface0/60 space-y-1.5">
+            <span class="text-[10px] text-ctp-overlay0">{{ t('config.executors.hintOpencode') }}</span>
             <div class="flex items-center gap-2">
               <span class="text-[10px] text-ctp-overlay1">{{ t('config.executors.modelsTitle') }}</span>
               <span class="text-[10px] text-ctp-overlay0">{{ t('config.executors.whitelistHint') }}</span>
@@ -697,6 +754,20 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
               <button class="btn !py-0 !px-2 !text-[10px]" :disabled="detecting === e.id" @click="toggleDetectPanel(e)">
                 {{ detecting === e.id ? t('config.executors.detecting') : detectBtnLabel(e) }}
               </button>
+            </div>
+            <!-- 已选白名单(常显): 刷新/保存后回显, 独立于检测面板; 点 × 移除并自动保存 -->
+            <div
+              v-if="e.config.models?.length"
+              class="flex flex-wrap items-center gap-1"
+            >
+              <span class="text-[10px] text-ctp-overlay0">{{ t('config.executors.whitelistShort', { n: e.config.models.length }) }}</span>
+              <span
+                v-for="(m, mi) in e.config.models"
+                :key="m.id || m.model"
+                class="chip !text-[9px] font-mono bg-ctp-blue/10 text-ctp-sapphire cursor-pointer hover:bg-ctp-blue/20"
+                :title="t('config.executors.removeWhitelist')"
+                @click="removeWhitelist(e, mi)"
+              >{{ m.model }} ×</span>
             </div>
             <div v-if="detected[keyOf(e)]?.length && showDetected[keyOf(e)]" class="grid grid-cols-1 sm:grid-cols-2 gap-1">
               <label
@@ -727,7 +798,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                 <button
                   class="btn !py-0 !px-2 !text-[10px] font-mono"
                   :class="!e.config.agent ? 'bg-ctp-blue/20 text-ctp-blue' : ''"
-                  @click="e.config.agent = ''"
+                  @click="unbindAgent(e)"
                 >{{ t('config.executors.agentDefault') }}</button>
                 <button
                   v-for="a in detectedAgents[keyOf(e)]"
@@ -747,6 +818,14 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             <span class="text-[10px] text-ctp-overlay0">
               模型列表随 architect 实例配置实时同步（无需白名单/端点/密钥重复配置）；「默认模型」在列表范围内选定，会话级可临时切换
             </span>
+          </div>
+
+          <!-- ══ codex 专属: 模型适配建议(本地中小模型支持弱) ══ -->
+          <div
+            v-if="e.type === 'codex-server'"
+            class="px-2.5 py-1.5 border-t border-ctp-surface0/60"
+          >
+            <span class="text-[10px] text-ctp-overlay0">{{ t('config.executors.hintCodex') }}</span>
           </div>
 
           <!-- ══ cline 专属(内置): SDK 引擎版本管理(多版本共存·进程/存储按版本隔离) ══ -->
@@ -857,7 +936,8 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                 <PlusIcon class="w-3 h-3" />{{ t('config.executors.addModel') }}
               </button>
             </div>
-            <div class="hidden lg:grid grid-cols-[7rem_10rem_minmax(0,1fr)_8rem_5rem_4.5rem] gap-1.5 text-[10px] text-ctp-overlay0">
+            <!-- 列宽: 模型ID 加宽适配 服务商/模型ID 全名(≥qwen3.8-flash 类长名), URL 弹性下限防挤压 -->
+            <div class="hidden lg:grid grid-cols-[8rem_minmax(14rem,22rem)_minmax(10rem,1fr)_8rem_5rem_4.5rem] gap-1.5 text-[10px] text-ctp-overlay0">
               <span>{{ t('config.executors.mName') }}</span>
               <span>{{ t('config.executors.mModel') }}</span>
               <span>{{ t('config.executors.mUrl') }}</span>
@@ -868,7 +948,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
             <div
               v-for="(m, mi) in e.config.models"
               :key="m.id || mi"
-              class="grid grid-cols-2 lg:grid-cols-[7rem_10rem_minmax(0,1fr)_8rem_5rem_4.5rem] gap-1.5 items-center"
+              class="grid grid-cols-2 lg:grid-cols-[8rem_minmax(14rem,22rem)_minmax(10rem,1fr)_8rem_5rem_4.5rem] gap-1.5 items-center"
             >
               <input v-model="m.name" class="input !py-0.5 !text-[11px]" :placeholder="t('config.executors.mName')">
               <input v-model="m.model" class="input !py-0.5 !text-[11px] font-mono" :placeholder="t('config.executors.mModel')">

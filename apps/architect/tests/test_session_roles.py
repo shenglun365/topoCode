@@ -54,3 +54,28 @@ def test_model_probe_missing_params(client):
     r = client.post("/api/architect/agent/executors/model-probe",
                     json={"url": ""}, headers=h)
     assert r.status_code == 400
+
+
+def test_put_duplicate_model_name_is_400_not_500(client):
+    """校验失败须回 400+文案(err 单参曾 TypeError→500, 保存静默失败)。"""
+    h = _h(client)
+    base = client.get("/api/architect/agent/executors", headers=h).json()["data"]["executors"]
+    entries = [dict(e) for e in base]   # 保住内置 cline
+    oc = next(e for e in entries if e["id"] == "opencode")
+    # 同 bare id 跨 provider(name 重复) → 校验拒绝
+    oc["config"]["models"] = [
+        {"name": "qwen3.8-flash", "model": "dashscope/qwen3.8-flash", "url": ""},
+        {"name": "qwen3.8-flash", "model": "qwen/qwen3.8-flash", "url": ""}]
+    r = client.put("/api/architect/agent/executors", json={"executors": entries}, headers=h)
+    assert r.status_code == 400
+    assert "模型名称重复" in r.json()["message"]
+    # 全名 name(前端 toggleModel 现行为) → 同 bare id 亦可通过
+    oc["config"]["models"] = [
+        {"name": "dashscope/qwen3.8-flash", "model": "dashscope/qwen3.8-flash", "url": ""},
+        {"name": "qwen/qwen3.8-flash", "model": "qwen/qwen3.8-flash", "url": ""}]
+    r2 = client.put("/api/architect/agent/executors", json={"executors": entries}, headers=h)
+    assert r2.status_code == 200, r2.json()
+    saved = client.get("/api/architect/agent/executors", headers=h).json()["data"]["executors"]
+    oc2 = next(e for e in saved if e["id"] == "opencode")
+    assert [m["model"] for m in oc2["config"]["models"]] == [
+        "dashscope/qwen3.8-flash", "qwen/qwen3.8-flash"]

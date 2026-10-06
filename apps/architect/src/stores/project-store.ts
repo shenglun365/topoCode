@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { GranularityConfig, ProductForm, ProjectInfo, ProjectMode, ProjectScaffold, RepoStatus, Snapshot } from '@/types'
+import type { GranularityConfig, ProductForm, ProjectInfo, ProjectMode, ProjectScaffold, RepoStatus, } from '@/types'
 import { projectService, currentProjectParams } from '@/services/project-service'
 import router from '@/router'
 
@@ -29,9 +29,6 @@ export const useArchProjectStore = defineStore('arch-project', {
     loadedKey: '',
     project: null as ProjectInfo | null,
     status: null as RepoStatus | null,
-    snapshots: [] as Snapshot[],
-    baseline: null as Snapshot | null,
-    current: null as Snapshot | null,
   }),
   getters: {
     mode(): ProjectMode { return this.project?.mode ?? 'existing' },
@@ -46,21 +43,16 @@ export const useArchProjectStore = defineStore('arch-project', {
       if (this.loaded && !force && key === this.loadedKey) return
       this.loading = true
       try {
-        const [project, status, snapshots] = await Promise.all([
+        const [project, status] = await Promise.all([
           projectService.getBound(),
           projectService.status(),
-          projectService.snapshots(),
         ])
         this.project = project
         this.status = status
-        this.snapshots = snapshots
       } catch {
         this.project = null
         this.status = null
-        this.snapshots = []
       }
-      this.baseline = this.snapshots.find((s) => s.id === 'snap-v0') ?? this.snapshots[0] ?? null
-      this.current = this.snapshots.find((s) => s.id === 'snap-v1') ?? this.snapshots[1] ?? null
       this.loaded = true
       this.loadedKey = key
       this.loading = false
@@ -105,9 +97,6 @@ export const useArchProjectStore = defineStore('arch-project', {
       await clearProjectQuery()
       this.project = null
       this.status = null
-      this.snapshots = []
-      this.baseline = null
-      this.current = null
       this.loadedKey = projectKey()
       return ok
     },

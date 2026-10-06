@@ -974,16 +974,19 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                     live = _builtin_cline_models()
                     if live:
                         cfg = {**cfg, "models": live}
-                model_names = [str(m.get("name") or m.get("model") or "")
+                model_names = [str(m.get("model") or m.get("name") or "")
                                for m in (cfg.get("models") or [])
-                               if (m.get("name") or m.get("model"))]
+                               if (m.get("model") or m.get("name"))]
                 # 模型选择链对齐(turn_adapter._resolve_model 同序):
-                # 会话绑定 > 注册表顶层默认(model_id) > models[0] > cfg.model。
-                # 教训(cv-163/166): 各层各自兜底 → 实际执行模型与 UI 展示不一致。
+                # 会话绑定 > 注册表顶层默认(UI「默认模型」: cline=model_id,
+                # opencode/codex=model) > models[0]。
+                # 教训(cv-163/166): 各层各自兜底 → 实际执行模型与 UI 展示不一致;
+                # 顶层默认必须在白名单首条之前——展示名跨 provider 可重复,
+                # models[0] 旁路用户显式选型是同一教训的变体。
                 model = (conv_model
                          or (cfg.get("model_id") or "")
-                         or (model_names[0] if model_names else "")
-                         or cfg.get("model") or "")
+                         or (cfg.get("model") or "")
+                         or (model_names[0] if model_names else ""))
                 # cline 引擎解析链(单点收口): 显式 sidecar_script > 引擎默认版本
                 # (>仓库内置 dist)。引擎命中时随发 cline_data_dir——runner 按
                 # 版本注入 TOPOCODE_CLINE_DATA_DIR, 会话/设置按版本隔离。
