@@ -7,9 +7,9 @@
  *   (本地编排 采集→分组→命名, 数据主权批E)
  * 组件命名状态展示在「组件变更情况」面板(ProjectOverviewPage)。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDownIcon, CircleStackIcon, BoltIcon, CodeBracketIcon, ArrowPathIcon } from '@heroicons/vue/24/outline'
+import { ChevronDownIcon, CircleStackIcon, BoltIcon, CodeBracketIcon, ArrowPathIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { projectService } from '@/services/project-service'
 import { semanticAssetService, type CollectGraphStatus } from '@/services/semantic-asset-service'
 import type { GitCommitInfo } from '@/types'
@@ -50,6 +50,19 @@ const listEl = ref<HTMLElement | null>(null)
 /** 当前基线 commit(列表内标徽标, 不再过滤隐藏)。 */
 const anchorHash = computed(() => base.value?.anchor?.head || '')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+// 鼠标移出浮窗 1s 后自动关闭(移回取消; 读列表时不被误关)
+let pickerCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+function armPickerClose() {
+  cancelPickerClose()
+  pickerCloseTimer = setTimeout(() => { pickerOpen.value = false }, 1000)
+}
+
+function cancelPickerClose() {
+  if (pickerCloseTimer) { clearTimeout(pickerCloseTimer); pickerCloseTimer = null }
+}
+
+onUnmounted(cancelPickerClose)
 
 /** 拉取提交页(offset 分页; append=滚动加载追加)。 */
 async function loadCommits(append = false) {
@@ -92,6 +105,7 @@ function onListScroll() {
 async function openPicker() {
   pickerOpen.value = !pickerOpen.value
   if (!pickerOpen.value) return
+  cancelPickerClose()
   pickerSearch.value = ''
   pickerHasMore.value = false
   pickerOffset.value = 0
@@ -289,6 +303,7 @@ async function refreshBaseline() {
         <!-- 分支 + 锚定 head(可点击弹出探测选单) -->
         <span class="text-ctp-overlay0"> ·</span>
         <span class="font-mono text-ctp-subtext1">{{ git?.branch || 'main' }}</span>
+        <span class="text-ctp-overlay0"> ·</span>
         <span class="relative">
           <button
             class="font-mono text-ctp-mauve hover:text-ctp-pink underline decoration-dotted underline-offset-2"
@@ -299,9 +314,16 @@ async function refreshBaseline() {
           <div
             v-if="pickerOpen"
             class="absolute right-0 top-6 z-30 w-[28rem] rounded-lg border border-ctp-surface1 bg-ctp-base shadow-xl"
+            @mouseenter="cancelPickerClose"
+            @mouseleave="armPickerClose"
           >
-            <div class="px-3 py-2 text-[10px] text-ctp-overlay1 border-b border-ctp-surface0">
-              {{ t('overviewHome.baselineInit.anchorPickTitle') }}
+            <div class="flex items-center gap-2 px-3 py-2 text-[10px] text-ctp-overlay1 border-b border-ctp-surface0">
+              <span>{{ t('overviewHome.baselineInit.anchorPickTitle') }}</span>
+              <button
+                class="ml-auto p-0.5 rounded hover:bg-ctp-surface0 text-ctp-overlay1 hover:text-ctp-text"
+                :title="t('overviewHome.baselineInit.pickerClose')"
+                @click="pickerOpen = false"
+              ><XMarkIcon class="w-3.5 h-3.5" /></button>
             </div>
             <div class="flex items-center gap-2 px-3 py-2 border-b border-ctp-surface0">
               <select

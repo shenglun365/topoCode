@@ -1002,6 +1002,7 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
                         "executorType": e.get("type") or "",
                         "executorConfig": {
                             "model": cfg.get("model") or "",
+                            "agent": cfg.get("agent") or "",
                             "base_port": cfg.get("base_port"),
                             "auto_start": cfg.get("auto_start"),
                             "base_url": cfg.get("base_url") or cfg.get("serve_url") or "",

@@ -83,8 +83,16 @@ async function installAgent(name: string) {
 }
 
 /** ── 实例模型(白名单)检测/同步 ── */
+interface DetectedModel {
+  name: string; model: string; url: string; kind: string
+  /** opencode 探测面元数据(source: builtin|config|env|custom|api) */
+  source?: string; authed?: boolean; connected?: boolean
+  context?: number; output?: number
+}
+interface DetectedAgent { name: string; mode: string; builtIn: boolean; description: string; model: string }
 const modelProbing = ref<Record<string, string>>({})   // key: `${execId}/${modelName}`
-const detected = ref<Record<string, { name: string; model: string; url: string; kind: string }[]>>({})
+const detected = ref<Record<string, DetectedModel[]>>({})
+const detectedAgents = ref<Record<string, DetectedAgent[]>>({})
 const showDetected = ref<Record<string, boolean>>({})
 const detecting = ref('')
 
@@ -195,7 +203,7 @@ async function stopServe(e: ExecEntry) {
 async function detectModels(e: ExecEntry) {
   detecting.value = e.id
   try {
-    const d = await apiPost<{ status: string; models?: { name: string; model: string; url: string; kind: string }[]; note?: string; detail?: string }>(
+    const d = await apiPost<{ status: string; models?: DetectedModel[]; agents?: DetectedAgent[]; note?: string; detail?: string }>(
       '/agent/executors/models/detect', { entry: e, cwd: project.project?.rootPath || '' })
     if (d.status !== 'ok' || !d.models) {
       probing.value[e.id] = `✗ ${d.detail || 'fail'}`
@@ -203,12 +211,23 @@ async function detectModels(e: ExecEntry) {
     }
     const k = keyOf(e)
     detected.value[k] = d.models
+    detectedAgents.value[k] = d.agents ?? []
     showDetected.value[k] = true
     if (!Array.isArray(e.config.models)) e.config.models = []
     probing.value[e.id] = `✓ ${t('config.executors.modelsDetected', { n: d.models.length })}`
+      + (d.note ? ` · ${d.note}` : '')
   } catch (err: any) {
     probing.value[e.id] = `✗ ${err?.message || err}`
   } finally { detecting.value = '' }
+}
+
+/** 代理绑定(单选): 空=执行器默认(build); 点击已绑定项=取消绑定 */
+function bindAgent(e: ExecEntry, name: string) {
+  e.config.agent = e.config.agent === name ? '' : name
+}
+/** 检测到的代理名清单(绑定代理下拉选项源)。 */
+function agentNames(e: ExecEntry): string[] {
+  return (detectedAgents.value[keyOf(e)] || []).map((a) => a.name)
 }
 
 /** 检测面板三态: 未检测=检测模型 → 成功后=隐藏列表 ⇄ 显示列表 */
@@ -389,7 +408,7 @@ function isBuiltinExec(e: ExecEntry): boolean {
 const runnerReachable = computed(() => !!runtime.value?.executors)
 const srcDir = computed(() => project.project?.rootPath || '')
 
-const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'bool' | 'select' | 'model-select'; options?: string[] }[]> = {
+const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'bool' | 'select' | 'model-select' | 'agent-select'; options?: string[] }[]> = {
   opencode: [
     { key: 'base_port', label: 'serve 端口', kind: 'num' },
     { key: 'auto_start', label: '自动拉起', kind: 'bool' },
@@ -397,6 +416,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
     { key: 'timeout', label: '超时(秒)', kind: 'num' },
     { key: 'capability', label: '能力档位(空=未标定)', kind: 'select', options: ['', 'T0', 'T1', 'T2'] },
     { key: 'model', label: '默认模型', kind: 'model-select' },
+    { key: 'agent', label: '绑定代理(空=默认)', kind: 'agent-select' },
   ],
   'remote-agent': [
     { key: 'agent_url', label: '远端 serve URL' },
@@ -648,6 +668,16 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                     :value="e.config[f.key]">{{ e.config[f.key] }}(白名单外)</option>
                   <option v-for="m in modelNames(e)" :key="m" :value="m">{{ m }}</option>
                 </select>
+                <select
+                  v-else-if="f.kind === 'agent-select' && (agentNames(e).length || e.config[f.key])"
+                  v-model="e.config[f.key]"
+                  class="input !py-0.5 !text-[11px] font-mono"
+                >
+                  <option value="">{{ t('config.executors.agentDefault') }}</option>
+                  <option v-if="e.config[f.key] && !agentNames(e).includes(e.config[f.key])"
+                    :value="e.config[f.key]">{{ e.config[f.key] }}({{ t('config.executors.notDetected') }})</option>
+                  <option v-for="a in agentNames(e)" :key="a" :value="a">{{ a }}</option>
+                </select>
                 <input
                   v-else
                   v-model="e.config[f.key]"
@@ -673,7 +703,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                 v-for="dm in detected[keyOf(e)]"
                 :key="dm.model"
                 class="flex items-center gap-1.5 text-[11px] cursor-pointer"
-                :title="`${dm.url} · ${dm.kind}`"
+                :title="`${dm.url || 'opencode 内置目录'} · ${dm.kind}${dm.context ? ` · ctx ${dm.context}` : ''}${dm.source ? ` · ${dm.source}` : ''}`"
               >
                 <input
                   type="checkbox"
@@ -686,9 +716,30 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                   class="chip shrink-0 !text-[9px]"
                   :class="dm.kind === 'local' ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-yellow/15 text-ctp-yellow'"
                 >{{ dm.kind }}</span>
+                <span v-if="dm.connected" class="chip shrink-0 !text-[9px] bg-ctp-blue/15 text-ctp-blue">✓</span>
+                <span v-else-if="dm.authed === false" class="chip shrink-0 !text-[9px] bg-ctp-red/15 text-ctp-red">{{ t('config.executors.needsAuth') }}</span>
               </label>
             </div>
-            <div v-else-if="!detected[keyOf(e)]?.length" class="text-[10px] text-ctp-overlay0">{{ t('config.executors.detectHint') }}</div>
+            <!-- 检测到的代理(builtIn 置前): 点击绑定, 再点取消; 空=执行器默认 build -->
+            <div v-if="detectedAgents[keyOf(e)]?.length && showDetected[keyOf(e)]" class="space-y-1 pt-0.5">
+              <div class="text-[10px] text-ctp-overlay1">{{ t('config.executors.agentsTitle') }}</div>
+              <div class="flex flex-wrap gap-1">
+                <button
+                  class="btn !py-0 !px-2 !text-[10px] font-mono"
+                  :class="!e.config.agent ? 'bg-ctp-blue/20 text-ctp-blue' : ''"
+                  @click="e.config.agent = ''"
+                >{{ t('config.executors.agentDefault') }}</button>
+                <button
+                  v-for="a in detectedAgents[keyOf(e)]"
+                  :key="a.name"
+                  class="btn !py-0 !px-2 !text-[10px] font-mono"
+                  :class="e.config.agent === a.name ? 'bg-ctp-blue/20 text-ctp-blue' : ''"
+                  :title="`${a.builtIn ? t('config.executors.agentBuiltIn') : t('config.executors.agentCustom')}${a.description ? ` · ${a.description}` : ''}${a.model ? ` · ${a.model}` : ''}`"
+                  @click="bindAgent(e, a.name)"
+                >{{ a.name }}</button>
+              </div>
+            </div>
+            <div v-if="!detected[keyOf(e)]?.length && !detectedAgents[keyOf(e)]?.length" class="text-[10px] text-ctp-overlay0">{{ t('config.executors.detectHint') }}</div>
           </div>
 
           <!-- ══ cline 专属(内置): 模型面=architect 实例实时投影, 仅选默认模型 ══ -->

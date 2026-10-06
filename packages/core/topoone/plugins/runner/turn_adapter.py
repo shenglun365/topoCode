@@ -588,6 +588,10 @@ class OpenCodeTurnAdapter(TurnAdapter):
                 body["model"] = {"providerID": pid, "modelID": mid}
             else:
                 body["model"] = {"modelID": job.model}
+        # 执行器绑定代理(executor config.agent → message body.agent;
+        # opencode 内置 build/plan/general 或用户自定义代理)
+        if getattr(job, "agent", ""):
+            body["agent"] = job.agent
         job.last_activity_ts = time.time()
         async with httpx.AsyncClient(
                 timeout=job.turn_timeout,

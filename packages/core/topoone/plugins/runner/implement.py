@@ -115,7 +115,8 @@ class ImplementJob:
                  stall_sec: float = _DEFAULT_STALL_SEC,
                  project_id: str = "",
                  verify_config: Optional[Dict[str, Any]] = None,
-                 session_role: str = "task"):
+                 session_role: str = "task",
+                 agent: str = ""):
         self.id = job_id
         self.root = os.path.abspath(root)
         self.wt = wt
@@ -133,6 +134,8 @@ class ImplementJob:
         # readOnly: bool(只读作业豁免写互斥)}
         self.boundaries = boundaries or {}
         self.model = model
+        # 执行器绑定代理(opencode message body.agent; 空=执行器默认 build)
+        self.agent = agent
         self.base_port = base_port
         self.auto_start = auto_start
         self.base_url = base_url.rstrip("/") if base_url else ""
@@ -850,6 +853,8 @@ def register(app: FastAPI) -> None:
             base_port=int(body.get("basePort") or 3478),
             auto_start=bool(body.get("autoStart", True)),
             base_url=str(body.get("baseUrl") or ""),
+            agent=str((body.get("executorConfig") or {}).get("agent")
+                      or body.get("agent") or ""),
             boundaries=body.get("boundaries") or {},
             adapter=adapter,
             turn_timeout=float(body.get("turnTimeout") or _TURN_TIMEOUT),

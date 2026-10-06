@@ -586,31 +586,157 @@ def _parse_oc_config(cfg_json: dict) -> list:
     return out
 
 
+def _get_json(url: str, timeout: float = 10.0):
+    """GET URL → JSON(任意类型); 失败返回 None(探测面缺失由调用方降级)。"""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _parse_oc_providers(providers_json, provider_list_json) -> tuple:
+    """opencode 全量可用模型目录 → (条目清单, 目录全量计数)。
+
+    数据源(二者缺一可, /config/providers 为主):
+    - GET /config/providers → providers[].{id, source(env|config|custom|api),
+      key?, options.baseURL, models{}}——models.dev 内置目录 + 用户配置 + env 密钥
+    - GET /provider         → {connected[], all[].models{}.limit{context,output}}
+
+    过滤降噪(目录全量数百条): 只保留 已连接 ∪ 有密钥 ∪ source=config 的
+    provider; 其余折叠进 total/omitted 计数(前端可感知)。
+    条目 name/model/url/kind 与旧 /config 解析同形(白名单三级匹配兼容),
+    另附 source/authed/connected/context/output 元数据。
+    """
+    connected: set = set()
+    limits: dict = {}
+    if isinstance(provider_list_json, dict):
+        connected = set(provider_list_json.get("connected") or [])
+        for prov in provider_list_json.get("all") or []:
+            if not isinstance(prov, dict):
+                continue
+            pid = str(prov.get("id") or "")
+            for mid, m in (prov.get("models") or {}).items():
+                lim = (m or {}).get("limit") or {}
+                if isinstance(lim, dict) and (lim.get("context") or lim.get("output")):
+                    limits[(pid, str(mid))] = {"context": int(lim.get("context") or 0),
+                                               "output": int(lim.get("output") or 0)}
+    if isinstance(providers_json, dict):
+        provs = providers_json.get("providers") or []
+    else:
+        provs = providers_json or []
+
+    out: list = []
+    total = 0
+    for pc in provs:
+        if not isinstance(pc, dict):
+            continue
+        prov = str(pc.get("id") or "")
+        models = pc.get("models") or {}
+        if not prov or not models:
+            continue
+        total += len(models)
+        source = str(pc.get("source") or "")
+        is_conn = prov in connected
+        # 降噪白名单: 已连接/有密钥/用户显式配置 三者其一
+        if not (is_conn or pc.get("key") or source == "config"):
+            continue
+        base = ((pc.get("options") or {}).get("baseURL") or "").rstrip("/")
+        host = urllib.parse.urlparse(base).hostname or "" if base else ""
+        private = host in ("localhost", "127.0.0.1") or host.startswith("192.168.")             or host.startswith("10.") or host.startswith("172.")
+        for mid in models:
+            entry = {"name": str(mid), "model": f"{prov}/{mid}", "url": base,
+                     "kind": "local" if (base and private) else "cloud",
+                     "source": source or ("config" if base else "builtin"),
+                     "authed": bool(pc.get("key")) or source == "config" or is_conn,
+                     "connected": is_conn}
+            lim = limits.get((prov, str(mid)))
+            if lim:
+                entry["context"] = lim["context"]
+                entry["output"] = lim["output"]
+            out.append(entry)
+    out.sort(key=lambda e: e["model"].lower())
+    return out, total
+
+
+def _parse_oc_agents(agents_json) -> list:
+    """GET /agent → 代理条目[{name, mode, builtIn, description, model}]。
+
+    builtIn 置前; model 拼 providerID/modelID 全名(与白名单/job.model 同形)。
+    内置代理(build/plan/general/…)与用户自定义(.opencode/agent/*)同面返回。
+    """
+    out = []
+    for a in agents_json or []:
+        if not isinstance(a, dict):
+            continue
+        name = str(a.get("name") or "")
+        if not name:
+            continue
+        m = a.get("model") or {}
+        model = ""
+        if isinstance(m, dict) and m.get("modelID"):
+            pid = str(m.get("providerID") or "")
+            model = f"{pid}/{m['modelID']}" if pid else str(m["modelID"])
+        out.append({"name": name,
+                    "mode": str(a.get("mode") or ""),
+                    "builtIn": bool(a.get("builtIn")),
+                    "description": str(a.get("description") or ""),
+                    "model": model})
+    out.sort(key=lambda x: (not x["builtIn"], x["name"].lower()))
+    return out
+
+
 def _detect_opencode_models(cfg: dict, cwd: str = "") -> dict:
-    """检测 opencode 可用模型: ensure serve → GET /config → provider×models。"""
+    """检测 opencode 可用模型与内置代理: ensure serve → 探测链逐级降级。
+
+    - GET /config/providers → 全量 provider×models(内置目录+用户配置+env 密钥)
+    - GET /provider         → connected/limit 元数据合并
+    - GET /agent            → 内置/自定义代理清单
+    - GET /config           → 旧版兜底(仅用户配置 provider; 1.x 早期无前两者)
+    任一探测面缺失不影响其余; 全部缺失时报 /config 重试失败。
+    """
     started = _start_opencode_serve(cfg, cwd)
     if started.get("status") != "ok":
         return started
     port = started["port"]
-    cfg_json = None
-    last_err = ""
-    raw = b""
-    for _ in range(3):
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/config", timeout=10) as r:
-                raw = r.read()
-            cfg_json = json.loads(raw.decode("utf-8"))
-            break
-        except Exception as e:  # noqa: BLE001
-            head = f"; 头字节 {raw[:8].hex()}" if raw else ""
-            last_err = f"{e}{head}"
-            import time as _t
-            _t.sleep(1.0)
-    if cfg_json is None:
-        return {"status": "fail", "detail": f"/config 读取失败(重试 3 次): {last_err}"}
-    models = _parse_oc_config(cfg_json)
-    return {"status": "ok", "port": port, "models": models,
-            "note": started.get("note", "")}
+    base_url = f"http://127.0.0.1:{port}"
+
+    providers_json = _get_json(f"{base_url}/config/providers")
+    provider_list_json = _get_json(f"{base_url}/provider")
+    if providers_json or provider_list_json:
+        models, total = _parse_oc_providers(providers_json, provider_list_json)
+        # /config/providers 缺失(旧版) → /provider.all 形状兼容, 同解析器复用
+        if not providers_json and provider_list_json:
+            models, total = _parse_oc_providers(
+                {"providers": provider_list_json.get("all") or []},
+                provider_list_json)
+    else:
+        cfg_json = None
+        last_err = ""
+        raw = b""
+        for _ in range(3):
+            try:
+                with urllib.request.urlopen(f"{base_url}/config", timeout=10) as r:
+                    raw = r.read()
+                cfg_json = json.loads(raw.decode("utf-8"))
+                break
+            except Exception as e:  # noqa: BLE001
+                head = f"; 头字节 {raw[:8].hex()}" if raw else ""
+                last_err = f"{e}{head}"
+                import time as _t
+                _t.sleep(1.0)
+        if cfg_json is None:
+            return {"status": "fail", "detail": f"/config 读取失败(重试 3 次): {last_err}"}
+        models, total = _parse_oc_config(cfg_json), 0
+
+    agents = _parse_oc_agents(_get_json(f"{base_url}/agent"))
+    note = str(started.get("note") or "")
+    omitted = max(total - len(models), 0)
+    if omitted:
+        note = (f"{note}; " if note else "") \
+            + f"另有 {omitted} 个未配置密钥的内置目录模型未列出"
+    return {"status": "ok", "port": port, "models": models, "agents": agents,
+            "total": total, "omitted": omitted, "note": note}
 
 
 def _bin_version(bin_name: str, args: tuple = ("--version",)) -> str:

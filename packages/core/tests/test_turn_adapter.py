@@ -431,6 +431,61 @@ def test_opencode_run_turn_model_body(monkeypatch):
                                   "modelID": "qwen3"}
 
 
+def test_opencode_run_turn_agent_body(monkeypatch):
+    """executor config.agent 绑定 → body.agent 下发(opencode 代理选择)。"""
+    bodies = []
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"parts": [{"type": "text", "text": "ok"}]}
+
+    class _AC:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            bodies.append(json)
+            return _Resp()
+
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _AC)
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    a._start_sse = lambda job: None
+
+    class _J:
+        id = "ja"
+        session_id = "s1"
+        serve_url = "http://x"
+        wt = "/tmp/x-wt"
+        model = ""
+        agent = "plan"
+        turn_timeout = 10.0
+        last_activity_ts = 0.0
+
+        def emit(self, *a, **k):
+            pass
+
+    asyncio.run(a.run_turn(_J(), "hi"))
+    assert bodies[0]["agent"] == "plan"
+    assert "model" not in bodies[0]
+
+    class _J2(_J):
+        agent = ""          # 未绑定 → 不下发 agent 字段
+
+    asyncio.run(a.run_turn(_J2(), "hi"))
+    assert "agent" not in bodies[1]
+
+
 # ── P2: opencode/codex 流式事件 + codex sandbox 映射 ────────────────────────
 
 def _stream_job(jid="js"):
