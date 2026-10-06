@@ -210,7 +210,7 @@ Architect 现状：Vue3 前端 + Python 后端（`:3470`，architect.db）的架
 | 1 | **知识资产沉淀 + 提案确认工作流** | naming-service 提案卡（agent 归纳 → pending → 界面确认 → active）；kb-assets/semantic-asset-service | 对标"知识的 PR review"。Roo/Roomote 的对话产物即焚，Architect 的分析结论是**带确认链的持久资产**——数据壁垒 + 工作流切换成本 |
 | 2 | **命名规约归纳 + 带证据违约检查** | naming-service（规约归纳提议、`规约违约检查(agent 通道): active 规约 × 变更符号 → 带证据违约清单`） | "从代码学规约"而非"人写规约"。Roo 的 `.roo/rules` 靠人写；Architect 反向归纳，且违约有证据链 |
 | 3 | **AGENTS.md 双向闭环** | contract-service（agentsMd 生成 + 条目 injected） | 既能生成 AGENTS.md 给下游 coding agent 消费，又能从代码/会话归纳条目——Roo 只读不写 |
-| 4 | **需求 → 蓝图 → 脚手架 → 单测工作流闭环** | requirement-service / req-draft-service → overview-service（蓝图）→ scaffold-service → unit-test-service | 四段全链路；竞品各占一段（Jira 管需求、Cursor 写码），无人串成架构主线 |
+| 4 | **需求 → 蓝图 → 脚手架 → 单测工作流闭环** | requirement-service / req-draft-service → overview-service（蓝图）→ scaffold-service → unit-test-service | 四段全链路；竞品各占一段（Jira 管需求、Cursor 写码），无人串成架构主线。单测段的定位细化见 [unit-test-repositioning-2610.md](unit-test-repositioning-2610.md)（策略层 owner + 感知补位机制） |
 | 5 | **多 harness 中立编排** | v2 统一会话 `agent` 字段（`''`=外循环；cline/opencode/codex=subagent） | 与 Roomote "harness 可替换"同构，但面向**分析域**而非编码域。下游 harness 换代不伤上层知识资产 |
 | 6 | **graph-kernel 图内核** | packages/graph-kernel | ★ Roo/Roomote 都没有图结构。竞品 agent 用 grep/AST 碎片化理解；图内核是一等公民 |
 | 7 | **Mermaid 蓝图人机共编** | diagram 组件、guide-service（"由 agent 依据需求草拟，用户逐层细化确认"） | C4 工具是纯手工，agent 蓝图工具是纯自动；"草拟-细化-确认"的共编模式是第三条路 |

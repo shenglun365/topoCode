@@ -15,6 +15,7 @@ import {
   SparklesIcon, TrashIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
+import CompGraphWorkspace from '@/components/assets/comp-graph/CompGraphWorkspace.vue'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView from '@/components/assets/SemanticGraphView.vue'
@@ -119,7 +120,7 @@ onUnmounted(() => {
         </h2>
         <div class="flex items-center gap-1">
           <button
-            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
+            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }, { id: 'compgraph' as const, label: t('assetMgmt.tab.compgraph') }]"
             :key="tb.id"
             class="btn btn-xs"
             :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
@@ -388,6 +389,12 @@ onUnmounted(() => {
             />
           </template>
         </div>
+
+        <!-- 组件图谱: 组件级全局图 → 文件级结构图(组件树多选范围) + 双资产卡 + AI 解读 -->
+        <CompGraphWorkspace
+          v-if="tab === 'compgraph'"
+          :compare-data="compareData"
+        />
 
         <!-- 语义层图谱(多资源 tab，从语义/组件列表打开) -->
         <div

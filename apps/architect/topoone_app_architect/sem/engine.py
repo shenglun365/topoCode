@@ -5135,6 +5135,49 @@ async def api_asset_compare(root: Optional[str] = None, project: Optional[str] =
     return ok(res)
 
 
+@router.get("/kb/semantic/comp-graph")
+async def api_comp_graph(root: Optional[str] = None, project: Optional[str] = None,
+                         base: str = "", target: str = "worktree"):
+    """组件级图谱：组件节点+依赖边+变更徽标(asset-compare 同引擎聚合)。"""
+    from .comp_graph import comp_graph
+    res = await asyncio.to_thread(comp_graph, root, project, base, target)
+    return ok(res)
+
+
+@router.get("/kb/semantic/file-graph")
+async def api_file_graph(root: Optional[str] = None, project: Optional[str] = None,
+                         components: str = "", base: str = "", target: str = "worktree"):
+    """文件级图谱：多组件范围内文件节点+imports 边+文件变更态/变更资产。"""
+    from .comp_graph import file_graph
+    res = await asyncio.to_thread(
+        file_graph, root, project,
+        [c.strip() for c in (components or "").split(",") if c.strip()], base, target)
+    return ok(res)
+
+
+@router.get("/kb/semantic/node-notes")
+async def api_node_notes(root: Optional[str] = None, project: Optional[str] = None,
+                         kind: str = "", key: str = "", force: bool = False):
+    """组件/文件级 AI 语义解读(arch_symbol_notes 缓存, force 重生成)。"""
+    from .comp_graph import node_notes
+    res = await asyncio.to_thread(node_notes, root, project, kind, key, bool(force))
+    if isinstance(res, dict) and res.get("error"):
+        return err(400, res["error"])
+    return ok(res)
+
+
+@router.get("/kb/semantic/file-line-notes")
+async def api_file_line_notes(root: Optional[str] = None, project: Optional[str] = None,
+                              file: str = "", start: int = 1, end: int = 1,
+                              force: bool = False):
+    """文件级行解读(文件卡全文件模式, 窗口内容 md5 缓存)。"""
+    from .comp_graph import file_line_notes
+    res = await asyncio.to_thread(file_line_notes, root, project, file, start, end, bool(force))
+    if isinstance(res, dict) and res.get("error"):
+        return err(400, res["error"])
+    return ok(res)
+
+
 @router.get("/kb/semantic/unowned-files")
 async def api_unowned_files(root: Optional[str] = None, project: Optional[str] = None,
                             limit: int = 500):

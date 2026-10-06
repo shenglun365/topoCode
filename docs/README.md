@@ -17,6 +17,8 @@
 | [architect-v2-todo.md](architect-v2-todo.md) | 现行 | architect v2 重构待办（P0 遗留/P1 资产表/P2 旧机制清退/P3 引擎打磨） |
 | [kb-unified-components-plan.md](kb-unified-components-plan.md) | Stage 5 待办 | KB 组件双线统一方案（Stage 0~4 已完成） |
 | [runner-verify-gate-design.md](runner-verify-gate-design.md) | 设计定稿待实现 | runner 程序化验收门禁 V1~V5（roadmap P2-T5） |
+| [architect-repositioning-20260926.md](architect-repositioning-20260926.md) | **治理单源** | 主 agent 定位裁决：三原则 + 职责白名单/负面清单 + 执行器协作演进（cv 批次日志） |
+| [handover-20260925.md](handover-20260925.md) | 现行 | 重构程序移交清单（MS1~MS7 完结）：剩余任务/验证方法/文档索引唯一入口 |
 | [architect-reconstruction/global-promotion-design.md](architect-reconstruction/global-promotion-design.md) | 设计定稿待实现 | 认知层→主库提升策略（WS8） |
 
 ## 设计参考
@@ -39,6 +41,7 @@
 | [agent-structure-review-2609.md](architect/agent-structure-review-2609.md) | agent 结构评估（批次 A/B/C，部分已被 adoption 改道） |
 | [agent-capability-design-2609.md](architect/agent-capability-design-2609.md) | agent 能力整体设计 v1（待评审实施） |
 | [agent-benchmark-roo-roomote-2610.md](architect/agent-benchmark-roo-roomote-2610.md) | Roo Code/Roomote 双项目对标分析 × Architect 能力定位（借鉴清单 + 差异化方向，输入型） |
+| [unit-test-repositioning-2610.md](architect/unit-test-repositioning-2610.md) | 单测能力重定位与感知补位机制设计（策略/执行/验收三层切分 + 事实层感知 + L0~L3 补位，输入型待评审） |
 | [compensation-strategy-requirements-2609.md](architect/compensation-strategy-requirements-2609.md) | 模型能力分级补偿策略需求规格 |
 | [goal-understanding-2609.md](architect/goal-understanding-2609.md) | 目标理解层归一设计（v0 讨论稿，A1/D5 挂账） |
 | [tech-debt-ledger-2609.md](architect/tech-debt-ledger-2609.md) | 技术挂账台账（单源备忘录） |

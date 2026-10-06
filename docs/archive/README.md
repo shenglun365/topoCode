@@ -17,6 +17,7 @@
 | [plan-C-UI.md](plan-C-UI.md) | `docs/architect-reconstruction/plan-C-UI.md` | 界面变化明细——M1~M3 前端已全部落地 | 代码（AssetManagementWorkspace / NamingGovernancePanel 等） |
 | [nine-layer-refactor.md](nine-layer-refactor.md) | `docs/architect-reconstruction/nine-layer-refactor.md` | agent 九层重构实录（已完成，456+172 tests 全绿） | `apps/architect/topoone_app_architect/agent/`（现行九层结构） |
 | [agent-arch-gap-review-2609.md](agent-arch-gap-review-2609.md) | `docs/architect/agent-arch-gap-review-2609.md` | 架构对照评审——裁决回执（2026-09-21）明示「后续以 adoption 为准」 | [agent-arch-gap-adoption-2609.md](../architect/agent-arch-gap-adoption-2609.md) |
+| [architecture-review-20260925.md](architecture-review-20260925.md) | `docs/architecture-review-20260925.md` | MS7 收官评审记录（自题"归档"的历史快照，判据已全部 ✅ 结案）——2026-10-10 文档清理时按治理规则移入 archive | [handover-20260925.md](../handover-20260925.md)（移交入口）+ MS7 判据见 [refactor/milestones.md](../refactor/milestones.md) |
 
 ## 未归档但在 git 历史中的已删文档
 

@@ -516,6 +516,71 @@ export interface AssetCompareResult {
   cached?: boolean
 }
 
+// ---- 组件图谱域(comp-graph): 组件/文件两级图谱 + 节点 AI 解读 ----
+
+export interface CompGraphNode {
+  id: string
+  name: string
+  kind: string
+  level: string
+  desc: string
+  fileCount: number
+  dependsOn: string[]
+  parentId: string
+  change: { added: number; modified: number; deleted: number }
+  changedFiles: Record<string, string[]>
+}
+
+export interface CompGraphData {
+  nodes: CompGraphNode[]
+  edges: { from: string; to: string }[]
+  base: string
+  target: string
+  noChanges: boolean
+  compareError: string
+}
+
+export interface FileGraphNode {
+  id: string
+  path: string
+  name: string
+  compId: string
+  compName: string
+  /** '' = 无变更 */
+  change: '' | 'added' | 'modified' | 'deleted'
+}
+
+export interface FileGraphChangedAsset {
+  id: string
+  name: string
+  kind: string
+  strong: boolean
+  side: string
+}
+
+export interface FileGraphData {
+  nodes: FileGraphNode[]
+  edges: { from: string; to: string }[]
+  changedAssets: Record<string, FileGraphChangedAsset[]>
+  components: { id: string; name: string; kind: string }[]
+  base: string
+  target: string
+}
+
+export interface NodeNotesResult {
+  note: string
+  cached: boolean
+  degraded: boolean
+  error?: string
+}
+
+export interface FileLineNotesResult {
+  notes: Record<string, string>
+  cached: boolean
+  degraded: boolean
+  error?: string
+}
+
 export const semanticAssetService = {
   /** codegraph 符号源开关：状态查询 / 三档切换(on|off|auto，KV 持久化)。 */
   async codegraphStatus(): Promise<CodegraphStatus | undefined> {
@@ -565,6 +630,36 @@ export const semanticAssetService = {
     if (target) parts.push(`target=${encodeURIComponent(target)}`)
     const qs = [parts.join('&'), ctx()].filter(Boolean).join('&')
     return await apiGet<AssetCompareResult>(`/kb/semantic/asset-compare${qs ? `?${qs}` : ''}`)
+  },
+
+  /** 组件级图谱：组件节点+依赖边+变更徽标(asset-compare 同引擎聚合)。 */
+  async compGraph(base?: string, target?: string): Promise<CompGraphData | undefined> {
+    const parts: string[] = []
+    if (base) parts.push(`base=${encodeURIComponent(base)}`)
+    if (target && target !== 'worktree') parts.push(`target=${encodeURIComponent(target)}`)
+    const qs = [parts.join('&'), ctx()].filter(Boolean).join('&')
+    return apiGet<CompGraphData>(`/kb/semantic/comp-graph${qs ? `?${qs}` : ''}`)
+  },
+
+  /** 文件级图谱：多组件范围内文件节点+imports 边+文件变更态。 */
+  async fileGraph(components: string[], base?: string, target?: string): Promise<FileGraphData | undefined> {
+    const parts = [`components=${encodeURIComponent(components.filter(Boolean).join(','))}`]
+    if (base) parts.push(`base=${encodeURIComponent(base)}`)
+    if (target && target !== 'worktree') parts.push(`target=${encodeURIComponent(target)}`)
+    const qs = [parts.join('&'), ctx()].filter(Boolean).join('&')
+    return apiGet<FileGraphData>(`/kb/semantic/file-graph${qs ? `?${qs}` : ''}`)
+  },
+
+  /** 组件/文件级 AI 语义解读(arch_symbol_notes 缓存; force 重生成)。 */
+  async nodeNotes(kind: 'component' | 'file', key: string, force = false): Promise<NodeNotesResult | undefined> {
+    const qs = [`kind=${kind}`, `key=${encodeURIComponent(key)}`, `force=${force}`, ctx()].filter(Boolean).join('&')
+    return apiGet<NodeNotesResult>(`/kb/semantic/node-notes?${qs}`)
+  },
+
+  /** 文件级行解读(文件卡全文件模式, 窗口 md5 缓存)。 */
+  async fileLineNotes(file: string, start: number, end: number, force = false): Promise<FileLineNotesResult | undefined> {
+    const qs = [`file=${encodeURIComponent(file)}`, `start=${start}`, `end=${end}`, `force=${force}`, ctx()].filter(Boolean).join('&')
+    return apiGet<FileLineNotesResult>(`/kb/semantic/file-line-notes?${qs}`)
   },
 
   /** 未归属组件的文件清单(KB owns 未覆盖, 含每文件已提取资产数)。 */
