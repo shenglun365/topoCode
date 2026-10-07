@@ -37,25 +37,42 @@ let resizeStart = { x: 0, w: 0 }
 
 function beginDrag(e: PointerEvent) {
   dragging.value = true
+  // 指针捕获: 拖出元素仍持续收到 move/up——否则松开在元素外时 up 丢失, dragging 卡死
+  try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ignore */ }
   const el = (e.currentTarget as HTMLElement).closest('.file-card') as HTMLElement
   const r = el.getBoundingClientRect()
   dragOff = { dx: e.clientX - r.left, dy: e.clientY - r.top }
   dragPos.value = { x: r.left, y: r.top }
+  console.debug('[comp-graph] file-card drag begin (captured pid=%s)', e.pointerId)
 }
 function onDrag(e: PointerEvent) {
   if (!dragging.value) return
   dragPos.value = { x: e.clientX - dragOff.dx, y: e.clientY - dragOff.dy }
 }
-function endDrag() { dragging.value = false }
+function endDrag(e: PointerEvent) {
+  if (!dragging.value) return
+  dragging.value = false
+  try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+  console.debug('[comp-graph] file-card drag end')
+}
 function beginResize(e: PointerEvent) {
   resizing.value = true
+  // 捕获缺失时: 拖出 6px 细条松开 → up 不达 handle → resizing 卡 true,
+  // 此后悬停扫过细条即误触发 onResize → 宽度失控跳动
+  try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ignore */ }
   resizeStart = { x: e.clientX, w: cardW.value || (cardEl.value?.getBoundingClientRect().width || 680) }
+  console.debug('[comp-graph] file-card resize begin (captured pid=%s, startW=%s)', e.pointerId, resizeStart.w)
 }
 function onResize(e: PointerEvent) {
   if (!resizing.value) return
   cardW.value = Math.max(420, resizeStart.w + (e.clientX - resizeStart.x))
 }
-function endResize() { resizing.value = false }
+function endResize(e: PointerEvent) {
+  if (!resizing.value) return
+  resizing.value = false
+  try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+  console.debug('[comp-graph] file-card resize end, w=%s', cardW.value)
+}
 
 const cardEl = ref<HTMLElement | null>(null)
 
@@ -161,9 +178,9 @@ async function copyLoc() {
       }"
     >
       <div class="absolute top-0 bottom-0 right-0 w-1.5 cursor-ew-resize z-20" :class="resizing ? 'bg-ctp-mauve/40' : 'hover:bg-ctp-mauve/25'"
-        @pointerdown="beginResize" @pointermove="onResize" @pointerup="endResize" />
+        @pointerdown="beginResize" @pointermove="onResize" @pointerup="endResize" @pointercancel="endResize" />
       <div class="flex items-center gap-1.5 px-3 pt-2.5 pb-1.5 border-b border-ctp-surface0 shrink-0 cursor-move"
-        @pointerdown="beginDrag" @pointermove="onDrag" @pointerup="endDrag">
+        @pointerdown="beginDrag" @pointermove="onDrag" @pointerup="endDrag" @pointercancel="endDrag">
         <DocumentTextIcon class="w-4 h-4 shrink-0"
           :class="node.change === 'added' ? 'text-ctp-green' : node.change === 'deleted' ? 'text-ctp-red' : 'text-ctp-blue'" />
         <span class="font-mono text-xs text-ctp-text truncate" :title="node.path">{{ node.path }}</span>

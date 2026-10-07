@@ -32,16 +32,24 @@ let dragOff = { dx: 0, dy: 0 }
 
 function beginDrag(e: PointerEvent) {
   dragging.value = true
+  // 指针捕获: 拖出元素仍持续收到 move/up——否则松开在元素外时 up 丢失, dragging 卡死
+  try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ignore */ }
   const el = (e.currentTarget as HTMLElement).closest('.comp-card') as HTMLElement
   const r = el.getBoundingClientRect()
   dragOff = { dx: e.clientX - r.left, dy: e.clientY - r.top }
   dragPos.value = { x: r.left, y: r.top }
+  console.debug('[comp-graph] comp-card drag begin (captured pid=%s)', e.pointerId)
 }
 function onDrag(e: PointerEvent) {
   if (!dragging.value) return
   dragPos.value = { x: e.clientX - dragOff.dx, y: e.clientY - dragOff.dy }
 }
-function endDrag() { dragging.value = false }
+function endDrag(e: PointerEvent) {
+  if (!dragging.value) return
+  dragging.value = false
+  try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+  console.debug('[comp-graph] comp-card drag end')
+}
 
 const deps = computed(() =>
   props.node.dependsOn
@@ -121,6 +129,7 @@ async function copyLoc() {
       @pointerdown="beginDrag"
       @pointermove="onDrag"
       @pointerup="endDrag"
+      @pointercancel="endDrag"
     >
       <CubeTransparentIcon class="w-4 h-4 text-ctp-mauve shrink-0" />
       <span class="text-sm font-medium text-ctp-text truncate">{{ node.name }}</span>
