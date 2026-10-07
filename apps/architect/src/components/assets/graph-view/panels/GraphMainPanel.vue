@@ -254,7 +254,6 @@ const {
           :theme="themeMode"
           :theme-variables="themeVars"
           security-level="loose"
-          :auto-play="false"
           :zoom-fit-min-scale="0.3"
           :zoom-max-scale="24"
           @ready="onDiagramReady"

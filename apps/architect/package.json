@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@heroicons/vue": "2.2.0",
-    "@topo/engine": "*",
     "@topo/graph-kernel": "*",
     "markdown-it": "14.1.1",
     "pinia": "3.0.3",

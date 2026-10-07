@@ -7,7 +7,6 @@
   "workspaces": [
     "packages/web-core",
     "packages/cline-sidecar",
-    "packages/engine",
     "packages/graph-kernel",
     "apps/workbench",
     "apps/docs",
