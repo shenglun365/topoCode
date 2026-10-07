@@ -484,13 +484,27 @@ def compare_changes(root: Optional[str], project: Optional[str],
     }
 
 
+def _worktree_fingerprint(root: str) -> str:
+    """工作区状态指纹（porcelain 输出 md5）：未提交/未跟踪内容变化即失效缓存，
+    避免 60s TTL 内「改了文件刷新仍显示无变更」（组件图谱三态实测坑）。"""
+    import hashlib
+    try:
+        out = _git(root, ["status", "--porcelain"], timeout=10.0)
+        return hashlib.md5((out or "").encode("utf-8")).hexdigest()[:12]
+    except Exception:  # noqa: BLE001 — 指纹失败退化为不区分(旧行为)
+        return ""
+
+
 def cached_compare(root: Optional[str], project: Optional[str],
                    base: str = "", target: str = "worktree") -> dict:
-    """带进程内缓存的对比入口（TTL 60s + LRU 32；键含 pid/base/target）。"""
+    """带进程内缓存的对比入口（TTL 60s + LRU 32；键含 pid/base/target；
+    worktree 目标额外掺工作区指纹——内容变化即时失效，不等 TTL）。"""
     _root = (resolve_root(root, project) or "").strip()
     pid = project_id_for(_root, project) if _root else ""
     _base = (base or "").strip() or (baseline_commit(_root, project) if _root else "")
-    key = (pid, _base, (target or "worktree").strip() or "worktree")
+    _target = (target or "worktree").strip() or "worktree"
+    key = (pid, _base, _target,
+           _worktree_fingerprint(_root) if _target == "worktree" and _root else "")
     now = time.time()
     hit = _cmp_cache.get(key)
     if hit and now - hit[0] < CACHE_TTL:
