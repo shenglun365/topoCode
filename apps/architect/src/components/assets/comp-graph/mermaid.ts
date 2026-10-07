@@ -62,8 +62,9 @@ export function compGraphMermaid(nodes: CompMermaidNode[],
     idMap[mid] = n.id
     out.push(`  ${mid}${label(n)}`)
     const cls = changeClass(n.change)
-    // 默认配色对齐语义图谱(catppuccin, 非黑): 组件 mauve 描边/文件 sapphire 描边
-    classLines.push(`  ${mid}:::comp${cls ? `,${cls}` : ''}`)
+    // 默认配色对齐语义图谱(catppuccin, 非黑); 变更态整类替换——
+    // ⚠️ mermaid ::: 语法只支持单个 class 名, `:::a,b` 解析失败回退 default
+    classLines.push(`  ${mid}:::${cls || 'comp'}`)
   }
   const lines: string[] = ['graph TD']
   for (const n of loose) {
@@ -92,7 +93,6 @@ export function compGraphMermaid(nodes: CompMermaidNode[],
     '  classDef added fill:#274035,stroke:#a6e3a1,stroke-width:2.5px,color:#cdd6f4',
     '  classDef modified fill:#2b3a56,stroke:#89b4fa,stroke-width:2.5px,color:#cdd6f4',
     '  classDef deleted fill:#46303c,stroke:#f38ba8,stroke-width:2.5px,stroke-dasharray:4,color:#cdd6f4',
-    '  classDef default fill:#313244,stroke:#74c7ec,color:#cdd6f4',
   )
   return { code: [...lines, ...classLines].join('\n'), idMap }
 }
@@ -111,7 +111,7 @@ export function fileGraphMermaid(nodes: {
     idMap[mid] = n.id
     const mark = n.change === 'added' ? ' [新增]' : n.change === 'modified' ? ' [改]' : n.change === 'deleted' ? ' [删]' : ''
     lines.push(`  ${mid}["${esc(n.name, 28)}${mark}"]`)
-    classLines.push(`  ${mid}:::file${n.change ? `,${n.change}` : ''}`)
+    classLines.push(`  ${mid}:::${n.change || 'file'}`)
   })
   for (const e of edges) {
     const f = midOf.get(e.from)
