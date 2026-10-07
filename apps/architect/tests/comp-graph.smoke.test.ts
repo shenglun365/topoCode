@@ -46,7 +46,7 @@ describe('compGraphMermaid 层级渲染', () => {
     expect(code).toContain('n0:::modified')
     expect(code).toContain('n2:::added')
     expect(code).toContain('n1:::comp')
-        expect(code).toContain('classDef comp fill:#313244,stroke:#cba6f7')
+        expect(code).toContain('classDef comp fill:#2a2b3d,stroke:#cba6f7')
     expect(code).toContain('classDef added fill:#24382e,stroke:#a6e3a1')
   })
 })

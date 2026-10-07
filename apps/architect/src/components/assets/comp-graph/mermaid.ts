@@ -89,7 +89,7 @@ export function compGraphMermaid(nodes: CompMermaidNode[],
     if (f && t) lines.push(`  ${f} --> ${t}`)
   }
   lines.push(
-    '  classDef comp fill:#313244,stroke:#cba6f7,color:#cdd6f4',
+    '  classDef comp fill:#2a2b3d,stroke:#cba6f7,color:#cdd6f4',
     '  classDef added fill:#24382e,stroke:#a6e3a1,stroke-width:2.5px,color:#cdd6f4',
     '  classDef modified fill:#26304a,stroke:#89b4fa,stroke-width:2.5px,color:#cdd6f4',
     '  classDef deleted fill:#3a2b34,stroke:#f38ba8,stroke-width:2.5px,stroke-dasharray:4,color:#cdd6f4',
@@ -125,7 +125,7 @@ export function fileGraphMermaid(nodes: {
     if (f && t) lines.push(`  ${f} --> ${t}`)
   }
   lines.push(
-    '  classDef file fill:#313244,stroke:#74c7ec,color:#cdd6f4',
+    '  classDef file fill:#2a2b3d,stroke:#74c7ec,color:#cdd6f4',
     '  classDef added fill:#24382e,stroke:#a6e3a1,stroke-width:2.5px,color:#cdd6f4',
     '  classDef modified fill:#26304a,stroke:#89b4fa,stroke-width:2.5px,color:#cdd6f4',
     '  classDef deleted fill:#3a2b34,stroke:#f38ba8,stroke-width:2.5px,stroke-dasharray:4,color:#cdd6f4',
