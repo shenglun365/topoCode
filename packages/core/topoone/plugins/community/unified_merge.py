@@ -355,6 +355,23 @@ def assign_files(new_comps: List[Dict], pool: List[str], inc_pairs: Set,
             best = tied[0]
         assignment[f] = best
 
+    # C/C++ stem 配对接管: 头文件(foo.h/.hpp/.hh)跟随其同名实现文件
+    # (foo.c/.cpp/.cc/.cxx/.m/.mm)所在组件——同一实现单元不被社区拆开。
+    import os as _os
+    _HEADER_EXT = {'.h', '.hpp', '.hh'}
+    _IMPL_EXT = {'.c', '.cpp', '.cc', '.cxx', '.m', '.mm'}
+    impl_owner: Dict[str, int] = {}
+    for f, idx in assignment.items():
+        stem, ext = _os.path.splitext(_os.path.basename(f))
+        if ext.lower() in _IMPL_EXT and stem not in impl_owner:
+            impl_owner[stem] = idx
+    for f, idx in list(assignment.items()):
+        stem, ext = _os.path.splitext(_os.path.basename(f))
+        if ext.lower() in _HEADER_EXT:
+            owner = impl_owner.get(stem)
+            if owner is not None and owner != idx:
+                assignment[f] = owner
+
     # F3 仲裁池
     for f in sorted(set(pool)):
         if f in assignment:

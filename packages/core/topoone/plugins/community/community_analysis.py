@@ -112,6 +112,9 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         f" (枢纽={len(hub_nodes)}, 孤立={len(orphan_nodes)})"
     )
 
+    # 2.5 C/C++ 头文件-实现配对虚拟边(主图注入→子图递归继承归属)
+    _inject_stem_pairs(graph, all_nodes, edge_type)
+
     # 3. 执行社区检测
     communities = _detect_communities(graph, all_nodes)
 
@@ -212,6 +215,50 @@ def _build_node_lookup(analysis_store, task_id: str) -> dict:
     if path_samples:
         logger.info(f"[COMMUNITY] node_lookup 样例: {path_samples}")
     return lookup
+
+
+# C/C++ 系头文件/实现文件后缀对: 同 stem 的 header↔impl 注入虚拟边,
+# 使 Louvain/Leiden 天然聚合同一实现单元(否则公共头簇与实现簇被社区拆开)。
+_HEADER_EXTS = {'.h', '.hpp', '.hh'}
+_IMPL_EXTS = {'.c', '.cpp', '.cc', '.cxx', '.m', '.mm'}
+
+
+def _stem_key(path: str) -> Tuple[Optional[str], Optional[str]]:
+    """文件路径 → (stem, ext)——按社区图内文件节点口径(可能带目录)。"""
+    import os
+    base = os.path.basename(path or "")
+    stem, ext = os.path.splitext(base)
+    return stem, ext.lower()
+
+
+def _inject_stem_pairs(graph: Dict[str, Set[str]], all_nodes: Set[str],
+                       edge_type: str) -> int:
+    """C/C++ 头文件-实现配对虚拟边：同名 stem 的 header↔impl 双向加边。
+
+    仅 INCLUDE 图调用(头文件关联本质是 include 语义)。返回注入对数。
+    非 C/C++ 项目(无 .h 类文件)零注入零影响。"""
+    if edge_type != "INCLUDE" or not all_nodes:
+        return 0
+    headers: Dict[str, str] = {}
+    impls: Dict[str, str] = {}
+    for n in all_nodes:
+        stem, ext = _stem_key(n)
+        if not stem:
+            continue
+        if ext in _HEADER_EXTS:
+            headers.setdefault(stem, n)
+        elif ext in _IMPL_EXTS:
+            impls.setdefault(stem, n)
+    injected = 0
+    for stem, h in headers.items():
+        impl = impls.get(stem)
+        if impl and impl != h and impl in all_nodes and h in all_nodes:
+            graph[h].add(impl)
+            graph[impl].add(h)
+            injected += 1
+    if injected:
+        logger.info(f"[COMMUNITY] injected {injected} header-impl stem pair edges (C/C++)")
+    return injected
 
 
 def _build_graph(edges: List[Dict], edge_type: str, *,
