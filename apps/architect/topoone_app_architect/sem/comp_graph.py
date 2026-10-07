@@ -284,7 +284,7 @@ def file_line_notes(root: Optional[str], project: Optional[str], file: str,
         return {"notes": {}, "cached": False, "degraded": True, "error": "行段为空"}
     win_hash = hashlib.md5("\n".join(codes).encode("utf-8")).hexdigest()
     from .symbol_notes import symbol_note_get, symbol_note_put
-    sk = f"filelines:{file}#{start}-{end}#{win_hash}"
+    sk = f"filelines:v2:{file}#{start}-{end}#{win_hash}"
     if not force:
         cached = symbol_note_get(pid, sk) if pid else ""
         if cached:
@@ -309,14 +309,26 @@ def file_line_notes(root: Optional[str], project: Optional[str], file: str,
     except Exception as e:  # noqa: BLE001
         return {"notes": {}, "cached": False, "degraded": True, "error": str(e)[:200]}
     import json
+    import re as _re
     raw = ((res or {}).get("content") or "").strip()
     notes: dict = {}
     try:
         m = raw[raw.index("{"):raw.rindex("}") + 1]
         data = json.loads(m)
         for k, v in (data or {}).items():
-            if str(k).isdigit() and start <= int(k) <= end:
-                notes[int(k)] = str(v)[:120]
+            ks = str(k).strip()
+            lines_hit: list = []
+            if ks.isdigit():
+                lines_hit = [int(ks)]
+            else:
+                rm = _re.fullmatch(r"(\d+)\s*[-–~]\s*(\d+)", ks)
+                if rm:  # 模型常返回区间键("16-24")——展开为逐行注释
+                    a, b = int(rm.group(1)), int(rm.group(2))
+                    if a <= b:
+                        lines_hit = list(range(a, b + 1))
+            for ln in lines_hit:
+                if start <= ln <= end:
+                    notes[ln] = str(v)[:120]
     except Exception:  # noqa: BLE001
         return {"notes": {}, "cached": False, "degraded": True,
                 "error": (res or {}).get("error") or "回复格式无效"}
