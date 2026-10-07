@@ -1,8 +1,11 @@
 /**
  * 组件图谱域 · mermaid 生成(组件图/文件图 → graph TD code)。
  * 节点 id 编码为安全短 id(n0/n1…)——点击事件经 idMap 反查真实 id。
- * 变更着色 classDef: added=绿 modified=蓝 deleted=红(与资产 diff 口径一致)。
+ * 配色对齐实现级语义资产(semanticGraphToMermaid): 主题色板 fill + kind 色相描边;
+ * 变更态描边 added=绿 modified=黄 deleted=红虚线(同 CHANGE 口径)。
  */
+
+import { currentDiagramPalette } from '@/utils/diagram-gen'
 
 export interface MermaidResult {
   code: string
@@ -88,11 +91,13 @@ export function compGraphMermaid(nodes: CompMermaidNode[],
     const t = midOf.get(e.to)
     if (f && t) lines.push(`  ${f} --> ${t}`)
   }
+  // 配色对齐实现级语义资产(semanticGraphToMermaid): 主题色板 fill/text + kind 色相描边 2px
+  const P = currentDiagramPalette()
   lines.push(
-    '  classDef comp fill:#2a2b3d,stroke:#cba6f7,color:#cdd6f4',
-    '  classDef added fill:#24382e,stroke:#a6e3a1,stroke-width:2.5px,color:#cdd6f4',
-    '  classDef modified fill:#26304a,stroke:#89b4fa,stroke-width:2.5px,color:#cdd6f4',
-    '  classDef deleted fill:#3a2b34,stroke:#f38ba8,stroke-width:2.5px,stroke-dasharray:4,color:#cdd6f4',
+    `  classDef comp fill:${P.fill},stroke:#cba6f7,stroke-width:2px,color:${P.text}`,
+    `  classDef added fill:${P.fill},stroke:#a6e3a1,stroke-width:2px,color:${P.text}`,
+    `  classDef modified fill:${P.fill},stroke:#fab387,stroke-width:2px,color:${P.text}`,
+    `  classDef deleted fill:${P.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.text}`,
   )
   const code = [...lines, ...classLines].join('\n')
   console.info('[comp-graph] compGraphMermaid', {
@@ -124,11 +129,12 @@ export function fileGraphMermaid(nodes: {
     const t = midOf.get(e.to)
     if (f && t) lines.push(`  ${f} --> ${t}`)
   }
+  const P2 = currentDiagramPalette()
   lines.push(
-    '  classDef file fill:#2a2b3d,stroke:#74c7ec,color:#cdd6f4',
-    '  classDef added fill:#24382e,stroke:#a6e3a1,stroke-width:2.5px,color:#cdd6f4',
-    '  classDef modified fill:#26304a,stroke:#89b4fa,stroke-width:2.5px,color:#cdd6f4',
-    '  classDef deleted fill:#3a2b34,stroke:#f38ba8,stroke-width:2.5px,stroke-dasharray:4,color:#cdd6f4',
+    `  classDef file fill:${P2.fill},stroke:#89b4fa,stroke-width:2px,color:${P2.text}`,
+    `  classDef added fill:${P2.fill},stroke:#a6e3a1,stroke-width:2px,color:${P2.text}`,
+    `  classDef modified fill:${P2.fill},stroke:#fab387,stroke-width:2px,color:${P2.text}`,
+    `  classDef deleted fill:${P2.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P2.text}`,
   )
   const code = [...lines, ...classLines].join('\n')
   console.info('[comp-graph] fileGraphMermaid', {
