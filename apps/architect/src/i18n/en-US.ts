@@ -1636,6 +1636,7 @@ export default {
   compGraph: {
     title: 'Component Graph',
     scopeTitle: 'Component scope',
+    scopeBtn: 'Component scope',
     scopeSearch: 'Search components',
     scopeAll: 'Select all',
     scopeNone: 'Clear',

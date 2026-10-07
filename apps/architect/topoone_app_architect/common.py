@@ -55,6 +55,19 @@ class KbUnavailableError(Exception):
     """KB 调用失败/不可达/能力不足 —— 调用方应转 502 并给出明确提示。"""
 
 
+def normalize_file_ref(v: str, root: str = "") -> str:
+    """图谱边端点归一化：剥 file: 前缀 + 绝对路径归一为相对 root 路径。
+
+    采集管线写 file:<绝对路径>，组件 owns 存相对路径——两侧需同一口径
+    才能归并出组件级依赖(否则 0 边, 7月批次实测坑)。"""
+    v = (v or "").strip()
+    if v.startswith("file:"):
+        v = v[5:]
+    if root and v.startswith(root):
+        v = v[len(root):].lstrip("/")
+    return v
+
+
 def _self_components(root=None, project=None) -> list:
     """自管组件目录(数据主权): arch_components 最新 rev + 组件级依赖聚合。
 
@@ -80,15 +93,15 @@ def _self_components(root=None, project=None) -> list:
     deps: dict = {}
     head = resolve_base_commit(root, pid)
     if head:
+        # 结构依赖多类归并(汇总抽象为组件级, 不逐条展示): 依赖+调用+继承+实现
         try:
-            for e in GraphStore.edges(pid, f"baseline:{head}", kind="imports", limit=100000):
-                s = (e.get("source") or "")
-                t = (e.get("target") or "")
-                s = s[5:] if s.startswith("file:") else ""
-                t = t[5:] if t.startswith("file:") else ""
-                cs, ct = file2comp.get(s), file2comp.get(t)
-                if cs and ct and cs != ct:
-                    deps.setdefault(cs, set()).add(ct)
+            for kind in ("imports", "calls", "extends", "implements"):
+                for e in GraphStore.edges(pid, f"baseline:{head}", kind=kind, limit=100000):
+                    s = normalize_file_ref(e.get("source") or "", root)
+                    t = normalize_file_ref(e.get("target") or "", root)
+                    cs, ct = file2comp.get(s), file2comp.get(t)
+                    if cs and ct and cs != ct:
+                        deps.setdefault(cs, set()).add(ct)
         except Exception:  # noqa: BLE001
             pass
     return [{

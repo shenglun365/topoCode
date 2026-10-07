@@ -105,6 +105,15 @@ class CompGraphTest(unittest.TestCase):
         self.assertEqual(st["a/f2.py"], "added")
         self.assertEqual(st["a/f0.py"], "")
 
+    def test_file_graph_absolute_path_edges(self):
+        """生产形态: 边端点=file:<绝对路径> → 归一化为相对路径后归并(7月批次 0 边坑)。"""
+        GraphStore.replace_rev(self.PID, f"baseline:{self.head}", [], [
+            {"source": f"file:{self.root}/a/f0.py", "target": f"file:{self.root}/b/f0.py",
+             "kind": "imports", "line": 1, "col": 0},
+        ])
+        res = cg.file_graph(self.root, self.PID, ["comp-a", "comp-b"], base=self.head)
+        self.assertIn({"from": "a/f0.py", "to": "b/f0.py"}, res["edges"])
+
     def test_node_notes_cache_and_force(self):
         import topoone_app_architect.agent.turns.catalog as catalog
         calls = []

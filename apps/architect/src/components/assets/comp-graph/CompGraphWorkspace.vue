@@ -8,8 +8,9 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUturnLeftIcon, CubeTransparentIcon, DocumentTextIcon, FolderIcon } from '@heroicons/vue/24/outline'
+import { ArrowUturnLeftIcon, CubeTransparentIcon, DocumentTextIcon, FolderIcon, FunnelIcon } from '@heroicons/vue/24/outline'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
+import { themeVariablesFor } from '@topo/graph-kernel/vue/themes.ts'
 import type { NodeClickEvent } from '@topo/graph-kernel/plugins/types.ts'
 import type { AssetCompareResult } from '@/services/semantic-asset-service'
 import {
@@ -28,6 +29,12 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+
+const themeMode = computed<'dark' | 'light'>(() =>
+  (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light') ? 'light' : 'dark')
+const themeVars = computed(() => themeVariablesFor(themeMode.value))
+/** 范围选择浮层(文件模式, header 下拉)。 */
+const scopeOpen = ref(false)
 
 type Mode = 'comp' | 'file'
 const mode = ref<Mode>('comp')
@@ -142,13 +149,8 @@ const scopeNames = computed(() =>
 </script>
 
 <template>
-  <div class="flex-1 min-h-0 flex">
-    <!-- 文件模式: 左侧范围树 -->
-    <div v-if="mode === 'file'" class="w-60 shrink-0 border-r border-ctp-surface0 bg-ctp-mantle/60">
-      <CompTreePicker v-model="scopeIds" :nodes="compData?.nodes ?? []" />
-    </div>
-
-    <div class="flex-1 min-w-0 flex flex-col">
+  <div class="flex-1 min-h-0 flex flex-col">
+    <div class="flex-1 min-w-0 flex flex-col min-h-0">
       <!-- 顶栏: 标题/面包屑 + 统计 + 返回 -->
       <div class="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-ctp-surface0 text-xs">
         <CubeTransparentIcon v-if="mode === 'comp'" class="w-4 h-4 text-ctp-mauve shrink-0" />
@@ -169,6 +171,23 @@ const scopeNames = computed(() =>
           {{ base.slice(0, 7) }}→{{ target === 'worktree' ? '⌂' : target.slice(0, 7) }}
         </span>
         <span class="flex-1" />
+        <span v-if="mode === 'file'" class="relative shrink-0">
+          <button
+            class="btn !py-0.5 !px-2 !text-[10px]"
+            :class="scopeOpen ? 'btn-blue' : 'btn-ghost'"
+            @click="scopeOpen = !scopeOpen"
+          >
+            <FunnelIcon class="w-3 h-3" />{{ t('compGraph.scopeBtn') }}
+            <span class="chip bg-ctp-mauve/15 text-ctp-mauve !text-[9px]">{{ scopeIds.length }}</span>
+          </button>
+          <div
+            v-if="scopeOpen"
+            class="absolute right-0 top-7 z-30 w-72 h-80 flex flex-col rounded-lg border border-ctp-surface1 bg-ctp-base shadow-xl"
+          >
+            <CompTreePicker v-model="scopeIds" :nodes="compData?.nodes ?? []" />
+          </div>
+          <div v-if="scopeOpen" class="fixed inset-0 z-20" @click="scopeOpen = false" />
+        </span>
         <span v-if="fileData?.truncated" class="text-[9px] text-ctp-peach">
           {{ t('compGraph.truncated', { total: fileData.totalFiles ?? fileData.nodes.length, max: fileData.maxFileNodes ?? 200 }) }}
         </span>
@@ -187,16 +206,19 @@ const scopeNames = computed(() =>
           class="absolute inset-0 flex items-center justify-center text-xs text-ctp-overlay0">
           {{ t('compGraph.empty') }}
         </div>
-        <TopoDiagram
-          v-else
-          class="absolute inset-0"
-          :code="mode === 'comp' ? compMermaid.code : fileMermaid.code"
-          engine="mermaid"
-          theme="dark"
-          :zoom-fit-min-scale="0.25"
-          :zoom-max-scale="8"
-          @node-click="onNodeClick"
-        />
+        <div v-else class="h-full relative">
+          <TopoDiagram
+            class="h-full"
+            :code="mode === 'comp' ? compMermaid.code : fileMermaid.code"
+            engine="mermaid"
+            :theme="themeMode"
+            :theme-variables="themeVars"
+            security-level="loose"
+            :zoom-fit-min-scale="0.3"
+            :zoom-max-scale="24"
+            @node-click="onNodeClick"
+          />
+        </div>
         <p class="absolute left-2 bottom-2 text-[9px] text-ctp-overlay0 pointer-events-none">
           {{ t('compGraph.legend') }}
           <span class="text-ctp-green">■</span>{{ t('compGraph.legendAdded') }}

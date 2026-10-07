@@ -125,15 +125,18 @@ def file_graph(root: Optional[str], project: Optional[str], components: List[str
     edges: list = []
     head = resolve_base_commit(real_root, pid) if pid else ""
     if pid and head and fset:
+        # 结构依赖多类归并(imports/calls/extends/implements), 去重汇总
+        from ..common import normalize_file_ref
         seen_edge = set()
-        for e in GraphStore.edges(pid, f"baseline:{head}", kind="imports", limit=100000):
-            s = (e.get("source") or "")[5:] if (e.get("source") or "").startswith("file:") else ""
-            t = (e.get("target") or "")[5:] if (e.get("target") or "").startswith("file:") else ""
-            if s in fset and t in fset and s != t:
-                k = f"{s}|{t}"
-                if k not in seen_edge:
-                    seen_edge.add(k)
-                    edges.append({"from": s, "to": t})
+        for kind in ("imports", "calls", "extends", "implements"):
+            for e in GraphStore.edges(pid, f"baseline:{head}", kind=kind, limit=100000):
+                s = normalize_file_ref(e.get("source") or "", real_root)
+                t = normalize_file_ref(e.get("target") or "", real_root)
+                if s in fset and t in fset and s != t:
+                    k = f"{s}|{t}"
+                    if k not in seen_edge:
+                        seen_edge.add(k)
+                        edges.append({"from": s, "to": t})
     # 范围内变更资产(strong/weak)按文件归组
     changed_assets: dict = defaultdict(list)
     for a in (cmp_res.get("assets") or {}).get("changed") or []:
@@ -182,14 +185,16 @@ def _file_ctx(real_root: str, pid: str, key: str, cmp_res: dict) -> str:
             symbols.append(f"- {n.get('name')} ({n.get('kind')}) L{n.get('startLine')}")
     imports_in: list = []
     imports_out: list = []
+    from ..common import normalize_file_ref
     if pid and head:
-        for e in GraphStore.edges(pid, f"baseline:{head}", kind="imports", limit=100000):
-            s = (e.get("source") or "")[5:] if (e.get("source") or "").startswith("file:") else ""
-            t = (e.get("target") or "")[5:] if (e.get("target") or "").startswith("file:") else ""
-            if t == key and s:
-                imports_in.append(s)
-            if s == key and t:
-                imports_out.append(t)
+        for kind in ("imports", "calls", "extends", "implements"):
+            for e in GraphStore.edges(pid, f"baseline:{head}", kind=kind, limit=100000):
+                s = normalize_file_ref(e.get("source") or "", real_root)
+                t = normalize_file_ref(e.get("target") or "", real_root)
+                if t == key and s:
+                    imports_in.append(s)
+                if s == key and t:
+                    imports_out.append(t)
     st = ""
     for s, files in _changed_files(cmp_res).items():
         if key in files:

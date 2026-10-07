@@ -43,9 +43,10 @@ describe('compGraphMermaid 层级渲染', () => {
     const { code } = compGraphMermaid(nodes as never, [{ from: 'c0', to: 'c1' }, { from: 'c0', to: 'nope' }])
     expect(code).toMatch(/n\d+ --> n\d+/)
     expect(code).not.toMatch(/nope/)
-    expect(code).toContain('n0:::modified')
-    expect(code).toContain('n2:::added')
-    expect(code).toContain('classDef added stroke:#a6e3a1')
+    expect(code).toContain('n0:::comp,modified')
+    expect(code).toContain('n2:::comp,added')
+        expect(code).toContain('classDef comp fill:#313244,stroke:#cba6f7')
+    expect(code).toContain('classDef added fill:#313244,stroke:#a6e3a1')
   })
 })
 
@@ -59,8 +60,9 @@ describe('fileGraphMermaid', () => {
     expect(code).toContain('graph LR')
     expect(code).toContain('[新增]')
     expect(code).toContain('-->')
-    expect(code).toContain('n0:::added')
-    expect(code).not.toContain('n1:::')
+    expect(code).toContain('n0:::file,added')
+    expect(code).toContain('n1:::file')     // 无变更也挂基础配色
+    expect(code).not.toContain('n1:::file,added')
   })
 })
 

@@ -1645,6 +1645,7 @@ export default {
   compGraph: {
     title: '组件图谱',
     scopeTitle: '组件范围',
+    scopeBtn: '组件范围',
     scopeSearch: '搜索组件',
     scopeAll: '全选',
     scopeNone: '清空',
