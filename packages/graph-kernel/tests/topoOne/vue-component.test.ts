@@ -14,7 +14,6 @@ const FLOWCHART_SCHEMA = {
 
 type Vm = {
   getSvg(): SVGSVGElement | null;
-  getAnimation(): unknown;
   zoomToFit(): void;
 };
 
@@ -51,10 +50,6 @@ describe('TopoDiagram (vue, jsdom)', () => {
     await waitFor(() => host.querySelector('svg') !== null);
     expect(host.querySelector('svg')).toBeInstanceOf(SVGSVGElement);
     expect(vm.getSvg()).toBeInstanceOf(SVGSVGElement);
-    // flowcharts fall back to the generic document-order reveal adapter
-    const anim = vm.getAnimation() as { mode?: string } | null;
-    expect(anim).not.toBeNull();
-    expect(anim!.mode).toBe('reveal');
     expect(host.querySelector('.topo-diagram__canvas svg')).not.toBeNull();
     app.unmount();
   }, 30000);

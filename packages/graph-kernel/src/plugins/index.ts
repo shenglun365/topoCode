@@ -1,7 +1,6 @@
 import { createExportPlugin } from './export';
 import { createNodeClickPlugin } from './node-click';
 import { createZoomPanPlugin, type ZoomPanApi, type ZoomPanOptions } from './zoom-pan';
-import { createAnimationPlugin, type AnimationPluginOptions } from '../animation/plugin';
 import type { DiagramPlugin } from './types';
 
 export interface InteractionOptions {
@@ -10,8 +9,6 @@ export interface InteractionOptions {
   zoomPanOptions?: ZoomPanOptions;
   nodeClick?: boolean;
   export?: boolean;
-  /** Playback toolbar + animation controller (built-in adapters or custom steps/plan). */
-  animation?: AnimationPluginOptions | false;
 }
 
 export interface PluginSet {
@@ -29,10 +26,6 @@ export function createInteractionPlugins(opts: InteractionOptions = {}): PluginS
   }
   if (opts.nodeClick !== false) plugins.push(createNodeClickPlugin());
   if (opts.export !== false) plugins.push(createExportPlugin());
-  if (opts.animation !== false) {
-    const a = opts.animation && typeof opts.animation === 'object' ? opts.animation : {};
-    plugins.push(createAnimationPlugin(a));
-  }
   return { plugins, zoomPan };
 }
 

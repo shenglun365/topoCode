@@ -2,7 +2,6 @@
  * Unified diagram data model - mirrors schema/diagram.schema.json (single source of truth).
  * Contract alignment is enforced by web/test/contract.test.ts and server/tests/test_contract.py.
  */
-import type { AnimationMode } from '../animation/types';
 
 export const DIAGRAM_TYPES = [
   'flowchart',
@@ -164,24 +163,6 @@ export interface PieSlice {
   value: number;
 }
 
-/** Agent-friendly playback block: steps reference diagram ids (validated
- *  server-side); raw `selectors` are an escape hatch resolved in the DOM. */
-export interface SchemaAnimationStep {
-  label?: string;
-  /** Ids of the type's primary entities (nodes / participants / states / classes / entities / tasks). */
-  nodes?: string[];
-  /** Edge ids (graph types only). */
-  edges?: string[];
-  /** Raw CSS selectors, resolved inside the rendered SVG. */
-  selectors?: string[];
-}
-
-export interface SchemaAnimation {
-  mode?: AnimationMode;
-  stepMs?: number;
-  steps: SchemaAnimationStep[];
-}
-
 export interface DiagramSchema {
   version: 1;
   type: DiagramType;
@@ -202,6 +183,5 @@ export interface DiagramSchema {
   sections?: GanttSection[];
   tasks?: GanttTask[];
   slices?: PieSlice[];
-  animation?: SchemaAnimation;
   extra?: Record<string, unknown>;
 }

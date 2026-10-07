@@ -6,8 +6,6 @@ import type { DegradeWarning, ThemeName } from '../engines/types';
 import type { InteractionOptions } from '../plugins';
 import type { ZoomPanOptions } from '../plugins/zoom-pan';
 import type { NodeClickEvent } from '../plugins/types';
-import type { AnimationController } from '../animation/controller';
-import type { AnimationPluginOptions } from '../animation/plugin';
 
 export type EngineName = 'auto' | 'mermaid' | 'plantuml';
 export type SecurityLevel = 'strict' | 'loose' | 'antiscript' | 'sandbox';
@@ -29,9 +27,6 @@ export interface UseTopoDiagramOptions {
   interactions?: InteractionOptions | false;
   /** Zoom/pan config (e.g. min fit scale). Merged into `interactions.zoomPanOptions`. */
   zoomPanOptions?: ZoomPanOptions;
-  /** Playback: autoPlay + optional custom steps (selectors) / plan factory.
-   *  `false` disables the animation plugin entirely (omit 会走内置默认=启用). */
-  animation?: AnimationPluginOptions | false;
   /** PlantUml engine only: rendering server base URL (默认 /api/topo 同源网关，随浏览器访问的主机自适应；需带鉴权)。 */
   plantUmlBaseUrl?: string;
   onNodeClick?: (e: NodeClickEvent) => void;
@@ -46,7 +41,6 @@ export interface TopoDiagramApi {
   ready: Ref<boolean>;
   error: Ref<{ engine: string; message: string } | null>;
   warnings: Ref<DegradeWarning[]>;
-  getAnimation(): AnimationController | null;
   getSvg(): SVGSVGElement | null;
   zoomToFit(): void;
   centerOn(vbX: number, vbY: number): void;
@@ -97,7 +91,6 @@ export function useTopoDiagram(opts: UseTopoDiagramOptions): TopoDiagramApi {
       securityLevel: opts.securityLevel,
       themeVariables: opts.themeVariables,
       interactions,
-      animation: opts.animation,
       engineOptions: { baseUrl: opts.plantUmlBaseUrl ?? '/api/topo/plantuml', headers: kernelAuthHeaders() },
       onReady: (v) => {
         ready.value = true;
@@ -128,7 +121,6 @@ export function useTopoDiagram(opts: UseTopoDiagramOptions): TopoDiagramApi {
     ready,
     error,
     warnings,
-    getAnimation: () => view?.getAnimation() ?? null,
     getSvg: () => view?.getSvg() ?? null,
     zoomToFit: () => view?.zoomToFit(),
     centerOn: (vbX, vbY) => view?.centerOn(vbX, vbY),

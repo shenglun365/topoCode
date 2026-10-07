@@ -1,4 +1,3 @@
-import type { AnimationController } from '../animation/controller';
 
 export interface NodeClickEvent {
   engine: string;
@@ -13,7 +12,6 @@ export interface NodeClickEvent {
 /** Per-view mutable state shared between plugins (e.g. zoom-pan -> node-click drag suppression). */
 export interface SharedInteractionState {
   dragDistance: number;
-  animation: AnimationController | null;
 }
 
 export interface PluginContext {

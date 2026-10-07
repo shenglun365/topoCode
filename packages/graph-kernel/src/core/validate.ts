@@ -47,21 +47,8 @@ const TYPE_REQUIRED: Record<string, (keyof DiagramSchema)[]> = {
   gantt: ['tasks'],
 };
 
-/** Per-type id space an animation step may address: [node-like collection, edge collection?]. */
-const ANIM_ID_SPACE: Record<string, [keyof DiagramSchema, keyof DiagramSchema | null]> = {
-  flowchart: ['nodes', 'edges'],
-  activity: ['nodes', 'edges'],
-  usecase: ['nodes', 'edges'],
-  component: ['nodes', 'edges'],
-  architecture: ['nodes', 'edges'],
-  sequence: ['participants', null],
-  state: ['states', null],
-  class: ['classes', null],
-  er: ['entities', null],
-  gantt: ['tasks', null],
-};
 
-/** Semantic validation: duplicate ids, dangling references, per-type rules, animation consistency. */
+/** Semantic validation: duplicate ids, dangling references, per-type rules. */
 export function validateSemantics(doc: DiagramSchema): SchemaValidationResult {
   const errors: SchemaError[] = [];
   const warnings: SchemaError[] = [];
@@ -193,26 +180,6 @@ export function validateSemantics(doc: DiagramSchema): SchemaValidationResult {
     if (cycle) errors.push({ path: '/tasks', message: `dependency cycle: ${cycle.join(' -> ')}` });
   }
 
-  // ── animation block consistency (L4) ──────────────────────────────────────
-  if (doc.animation?.steps?.length) {
-    const [nodeField, edgeField] = ANIM_ID_SPACE[doc.type] ?? ['nodes', 'edges'];
-    const nodeItems = (doc[nodeField] ?? []) as { id: string }[];
-    const nodeIds = nodeItems.map((n) => n.id);
-    const edgeIds = edgeField ? ((doc.edges ?? []) as { id?: string }[]).map((e) => e.id).filter((x): x is string => !!x) : [];
-    doc.animation.steps.forEach((step, i) => {
-      (step.nodes ?? []).forEach((nid, j) => {
-        if (!nodeIds.includes(nid))
-          errors.push({ path: `/animation/steps/${i}/nodes/${j}`, message: `animation step ${i} references unknown id '${nid}' (available: ${avail(nodeIds)})` });
-      });
-      (step.edges ?? []).forEach((eid, j) => {
-        if (!edgeField) {
-          errors.push({ path: `/animation/steps/${i}/edges/${j}`, message: `type '${doc.type}' has no addressable edges; use 'nodes' or 'selectors'` });
-        } else if (!edgeIds.includes(eid)) {
-          errors.push({ path: `/animation/steps/${i}/edges/${j}`, message: `animation step ${i} references unknown edge id '${eid}' (available: ${avail(edgeIds)})` });
-        }
-      });
-    });
-  }
 
   return { valid: errors.length === 0, errors, warnings };
 }

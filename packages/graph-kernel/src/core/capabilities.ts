@@ -3,16 +3,9 @@ import type { DiagramType } from './types';
 
 export type TypeSupport = 'native' | 'emulated' | 'unsupported';
 
-export interface AnimationCapability {
-  sequencePlayback: boolean;
-  nodeHighlight: boolean;
-  ganttTimeline: boolean;
-}
-
 export interface EngineCapability {
   types: Record<DiagramType, TypeSupport>;
   features: Record<string, boolean | 'partial'>;
-  animation: AnimationCapability;
 }
 
 export interface CapabilitiesFile {

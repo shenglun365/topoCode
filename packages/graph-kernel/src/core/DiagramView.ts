@@ -6,9 +6,6 @@ import { resolveEngine } from '../engines/registry';
 import type { DegradeWarning, EngineOptions, ThemeName } from '../engines/types';
 import { createInteractionPlugins, type InteractionOptions, type PluginSet } from '../plugins';
 import type { NodeClickEvent, SharedInteractionState } from '../plugins/types';
-import type { AnimationController } from '../animation/controller';
-import { compileSchemaAnimation } from '../animation/compile';
-import type { AnimationPluginOptions } from '../animation/plugin';
 
 export type DiagramSource =
   | { engine: string; code: string }
@@ -22,12 +19,6 @@ export interface DiagramOptions {
   policy?: DegradationPolicy;
    /** Interaction plugins. All enabled by default; `false` disables them entirely. */
    interactions?: InteractionOptions | false;
-   /**
-    * Playback. Built-in adapters decide what is animatable by default;
-    * `steps` (CSS selectors per step) or `plan` (full factory) override them.
-    * `false` disables the animation plugin entirely (render final graph as-is).
-    */
-   animation?: AnimationPluginOptions | false;
    /** Mermaid only: click-handler security level (default 'strict'; main project uses 'loose'). */
    securityLevel?: 'strict' | 'loose' | 'antiscript' | 'sandbox';
    /** Mermaid only: theme variable overrides (e.g. catppuccin palette, see themes.ts). */
@@ -47,8 +38,6 @@ export interface DiagramView {
   resetView(): void;
   zoomIn(): void;
   zoomOut(): void;
-  /** Controller of the animation plugin, or null when the diagram is not animatable. */
-  getAnimation(): AnimationController | null;
 }
 
 interface Resolved {
@@ -92,30 +81,13 @@ function resolveSource(opts: DiagramOptions): Resolved {
 }
 
 export function createDiagram(container: HTMLElement, opts: DiagramOptions): DiagramView {
-  // Animation resolution: user plan/steps > schema-level animation block > built-in adapter.
-  const userAnimRaw: AnimationPluginOptions | false | undefined =
-    opts.animation ?? (opts.interactions ? opts.interactions.animation : undefined);
-  const userAnim = userAnimRaw && typeof userAnimRaw === 'object' ? userAnimRaw : undefined;
-  const animOpts: AnimationPluginOptions | false | undefined =
-    userAnimRaw === false
-      ? false
-      : userAnim?.plan || userAnim?.steps?.length
-        ? userAnim
-        : (() => {
-            const schema = opts.source && 'schema' in opts.source ? opts.source.schema : undefined;
-            const compiled = schema ? compileSchemaAnimation(schema, schema.animation) : null;
-            return compiled
-              ? { ...userAnim, steps: compiled.steps, mode: userAnim?.mode ?? compiled.mode, stepMs: userAnim?.stepMs ?? compiled.stepMs }
-              : userAnim;
-          })();
   const pluginSet: PluginSet =
     opts.interactions === false
       ? { plugins: [], zoomPan: null }
       : createInteractionPlugins({
           ...opts.interactions,
-          animation: animOpts,
         });
-  const shared: SharedInteractionState = { dragDistance: 0, animation: null };
+  const shared: SharedInteractionState = { dragDistance: 0 };
   let theme: ThemeName = opts.theme ?? 'dark';
   let disposed = false;
   let renderSeq = 0;
@@ -131,7 +103,6 @@ export function createDiagram(container: HTMLElement, opts: DiagramOptions): Dia
   };
 
   const attachPlugins = (svg: SVGSVGElement | null, code: string) => {
-    shared.animation = null;
     for (const p of pluginSet.plugins) {
       try {
         p.onAfterRender?.({
@@ -224,7 +195,6 @@ export function createDiagram(container: HTMLElement, opts: DiagramOptions): Dia
     resetView: () => pluginSet.zoomPan?.resetView(),
     zoomIn: () => pluginSet.zoomPan?.zoomIn(),
     zoomOut: () => pluginSet.zoomPan?.zoomOut(),
-    getAnimation: () => shared.animation,
   };
 
   void render();

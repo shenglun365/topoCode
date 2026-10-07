@@ -1,8 +1,6 @@
-import SceneCanvas from './SceneCanvas.vue';
 import TopoDiagram from './TopoDiagram.vue';
-import TopoStory from './TopoStory.vue';
 
-export { SceneCanvas, TopoDiagram, TopoStory };
+export { TopoDiagram };
 export { useTopoDiagram } from './useTopoDiagram';
 export type {
   EngineName,
@@ -12,4 +10,3 @@ export type {
   UseTopoDiagramOptions,
 } from './useTopoDiagram';
 export { catppuccinDark, catppuccinLight, themeVariablesFor } from './themes';
-export { useGraphStory } from '../story/useTopoStory';

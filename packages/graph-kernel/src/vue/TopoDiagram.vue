@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { AnimationPlan } from '../animation';
 import type { DiagramView } from '../core/DiagramView';
 import type { DiagramSchema } from '../core/types';
 import type { DegradeWarning } from '../engines/types';
@@ -16,8 +15,6 @@ const props = withDefaults(
     /** 'auto' negotiates the engine from the schema type (schema source only). */
     engine?: EngineName;
     theme?: 'light' | 'dark';
-    /** Auto-start animation playback for supported diagram types. */
-    autoPlay?: boolean;
     /** Mermaid click-handler security level (main project convention: 'loose'). */
     securityLevel?: SecurityLevel;
     /** Mermaid theme variable overrides (e.g. catppuccinDark from ./themes). */
@@ -28,17 +25,10 @@ const props = withDefaults(
     zoomFitMinScale?: number;
     /** 最大缩放上限(默认 8)；语义图谱等组件级复杂关系图可调大。 */
     zoomMaxScale?: number;
-    /** Custom playback: steps (CSS selectors per step) and/or a plan factory. */
-    animation?: {
-      steps?: { label: string; selectors: string[] }[];
-      plan?: (ctx: { svg: SVGSVGElement; code: string; engine: string; type: string }) => AnimationPlan | null;
-      mode?: 'reveal' | 'highlight';
-      stepMs?: number;
-    };
     /** PlantUml engine only: rendering server base URL (默认 /api/topo/plantuml，CLI 统一端点)。*/
     plantUmlBaseUrl?: string;
   }>(),
-  { engine: 'auto', theme: 'dark', autoPlay: false, interactions: true },
+  { engine: 'auto', theme: 'dark', interactions: true },
 );
 
 const emit = defineEmits<{
@@ -64,10 +54,6 @@ const api = useTopoDiagram({
   zoomPanOptions: props.zoomFitMinScale != null || props.zoomMaxScale != null
     ? { ...(props.zoomFitMinScale != null ? { minFitScale: props.zoomFitMinScale } : {}), ...(props.zoomMaxScale != null ? { maxScale: props.zoomMaxScale } : {}) }
     : undefined,
-  animation:
-    props.autoPlay || props.animation
-      ? { enabled: true, autoPlay: props.autoPlay, ...props.animation }
-      : false, // 显式禁用动画插件；undefined 会被当作"启用默认"→ 停在第 0 步
   plantUmlBaseUrl: props.plantUmlBaseUrl,
   onNodeClick: (e) => emit('node-click', e),
   onReady: (view) => emit('ready', view),
