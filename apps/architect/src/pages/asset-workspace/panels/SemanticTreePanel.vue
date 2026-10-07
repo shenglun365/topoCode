@@ -7,11 +7,11 @@ import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, ArrowsRightLeftIcon, BeakerIcon, ChartBarSquareIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, PlusIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StopIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import { useAssetWorkspaceCtx } from '..'
+import { OTHER_KEY } from '../useAssetCore'
 import type { SemanticAsset } from '@/types'
 
 const { t } = useI18n()
 const {
-  OTHER_KEY,
   addedFileSet,
   askExtractComponent,
   changeMarkById,
@@ -292,7 +292,9 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
                   >
                     <SparklesIcon class="w-3 h-3" />
                   </button>
+                  <!-- 未归属组去掉「整类为视角」的图谱入口(分类无实体语义), 只保留组内每个文件的图谱入口 -->
                   <button
+                    v-if="g.key !== OTHER_KEY"
                     class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
                     :title="t('assetMgmt.graph.viewCompGraph')"
                     @click="openGraphTab('comp', g.key, g.name)"
