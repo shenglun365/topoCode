@@ -210,13 +210,17 @@ async function copyLoc() {
           </div>
         </div>
 
-        <!-- 全文件源码 + 行级 diff + 行级 AI 解读 -->
+        <!-- 全文件源码 + 行级 diff + 行级 AI 解读(工具条吸顶: 大文件滚动时按钮常驻) -->
         <div class="border-t border-ctp-surface0 pt-2">
-          <div class="flex items-center gap-1.5 mb-1.5">
+          <div class="sticky top-0 z-10 -mt-3 -mx-3 px-3 pt-3 pb-1.5 mb-1.5 flex items-center gap-1.5 bg-ctp-mantle border-b border-ctp-surface0">
             <SparklesIcon class="w-3.5 h-3.5 text-ctp-mauve" />
             <span class="text-[10px] text-ctp-overlay1">{{ t('compGraph.lineNotes') }}</span>
             <span v-if="notesCached && Object.keys(notes).length" class="text-[9px] text-ctp-overlay0">{{ t('compGraph.cached') }}</span>
             <span class="flex-1" />
+            <button v-if="!notesLoading && !Object.keys(notes).length && !loadError"
+              class="btn !py-1 !px-2.5 !text-[10px]" @click="loadNotes(false)">
+              <SparklesIcon class="w-3.5 h-3.5" />{{ t('compGraph.genNote') }}
+            </button>
             <button class="p-0.5 rounded hover:bg-ctp-surface0 text-ctp-overlay1 hover:text-ctp-mauve"
               :title="t('compGraph.regenerate')" :disabled="notesLoading" @click="loadNotes(true)">
               <ArrowPathIcon class="w-3.5 h-3.5" :class="notesLoading ? 'animate-spin' : ''" />
@@ -239,10 +243,6 @@ async function copyLoc() {
               </span>
             </div>
           </div>
-          <button v-if="!notesLoading && !Object.keys(notes).length && !loadError"
-            class="btn !py-1 !px-2.5 !text-[10px] mt-2" @click="loadNotes(false)">
-            <SparklesIcon class="w-3.5 h-3.5" />{{ t('compGraph.genNote') }}
-          </button>
         </div>
       </div>
 
