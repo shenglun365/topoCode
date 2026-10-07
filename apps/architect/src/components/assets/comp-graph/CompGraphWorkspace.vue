@@ -6,7 +6,7 @@
  * - 文件图: 左侧组件树多选(默认=下钻组件, 可追加范围) + imports 结构边;
  *   点击文件节点出文件卡(全文件+行级 diff+行级 AI 解读)。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUturnLeftIcon, CubeTransparentIcon, DocumentTextIcon, FolderIcon, FunnelIcon } from '@heroicons/vue/24/outline'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
@@ -79,6 +79,13 @@ async function loadComp() {
   try {
     compData.value = (await semanticAssetService.compGraph(base.value, target.value)) ?? null
     compIdMap.value = compMermaid.value.idMap
+    console.info('[comp-graph] comp-graph API', {
+      base: base.value || '(baseline)', target: target.value,
+      nodes: compData.value?.nodes.length ?? 0, edges: compData.value?.edges.length ?? 0,
+      noChanges: compData.value?.noChanges, compareError: compData.value?.compareError || '',
+      changes: (compData.value?.nodes ?? []).filter((n) => n.change.added || n.change.modified || n.change.deleted)
+        .map((n) => `${n.name}: +${n.change.added} ~${n.change.modified} -${n.change.deleted}`),
+    })
   } catch (e: any) {
     error.value = e?.message || 'failed'
   } finally {
@@ -92,11 +99,33 @@ async function loadFile() {
   try {
     fileData.value = (await semanticAssetService.fileGraph(scopeIds.value, base.value, target.value)) ?? null
     fileIdMap.value = fileMermaid.value.idMap
+    console.info('[comp-graph] file-graph API', {
+      scope: scopeIds.value, base: base.value || '(baseline)', target: target.value,
+      nodes: fileData.value?.nodes.length ?? 0, edges: fileData.value?.edges.length ?? 0,
+      truncated: fileData.value?.truncated,
+      changes: (fileData.value?.nodes ?? []).filter((n) => n.change)
+        .map((n) => `${n.path}: ${n.change}`),
+    })
   } catch (e: any) {
     error.value = e?.message || 'failed'
   } finally {
     loading.value = false
   }
+}
+
+/** 渲染完成后扫描 DOM: 实际节点 class 与背景色(对照生成侧 class 附着)。 */
+function scanRenderedNodes(tag: string) {
+  void nextTick(() => setTimeout(() => {
+    const nodes = [...document.querySelectorAll('.topo-diagram svg g.node')]
+    const rows = nodes.slice(0, 12).map((n) => ({
+      cls: (n.getAttribute('class') || '').replace('node ', ''),
+      fill: (n.querySelector('rect, path, polygon') as SVGElement | null)
+        ?.getAttribute('style')?.match(/fill:([^;]+)/)?.[1]?.trim() ?? '',
+    }))
+    const dist: Record<string, number> = {}
+    for (const r of rows) dist[r.cls + '→' + r.fill] = (dist[r.cls + '→' + r.fill] || 0) + 1
+    console.info(`[comp-graph] rendered ${tag}`, { total: nodes.length, sample: rows, dist })
+  }, 300))
 }
 
 function onNodeClick(ev: NodeClickEvent) {
@@ -217,6 +246,7 @@ const scopeNames = computed(() =>
             :zoom-fit-min-scale="0.3"
             :zoom-max-scale="24"
             @node-click="onNodeClick"
+            @ready="() => scanRenderedNodes(mode === 'comp' ? 'comp' : 'file')"
           />
         </div>
         <p class="absolute left-2 bottom-2 text-[9px] text-ctp-overlay0 pointer-events-none">

@@ -94,7 +94,13 @@ export function compGraphMermaid(nodes: CompMermaidNode[],
     '  classDef modified fill:#2b3a56,stroke:#89b4fa,stroke-width:2.5px,color:#cdd6f4',
     '  classDef deleted fill:#46303c,stroke:#f38ba8,stroke-width:2.5px,stroke-dasharray:4,color:#cdd6f4',
   )
-  return { code: [...lines, ...classLines].join('\n'), idMap }
+  const code = [...lines, ...classLines].join('\n')
+  console.info('[comp-graph] compGraphMermaid', {
+    nodes: nodes.length, edges: edges.length, classed: classLines.length,
+    changeDist: nodes.reduce((m, n) => { const k = changeClass(n.change) || 'none'; m[k] = (m[k] || 0) + 1; return m }, {} as Record<string, number>),
+  })
+  console.info('[comp-graph] comp mermaid code:\n' + code)
+  return { code, idMap }
 }
 
 /** 文件级图: 节点=文件(徽标=变更态), 边=imports。 */
@@ -124,5 +130,11 @@ export function fileGraphMermaid(nodes: {
     '  classDef modified fill:#2b3a56,stroke:#89b4fa,stroke-width:2.5px,color:#cdd6f4',
     '  classDef deleted fill:#46303c,stroke:#f38ba8,stroke-width:2.5px,stroke-dasharray:4,color:#cdd6f4',
   )
-  return { code: [...lines, ...classLines].join('\n'), idMap }
+  const code = [...lines, ...classLines].join('\n')
+  console.info('[comp-graph] fileGraphMermaid', {
+    nodes: nodes.length, edges: edges.length, classed: classLines.length,
+    changeDist: nodes.reduce((m, n) => { const k = n.change || 'none'; m[k] = (m[k] || 0) + 1; return m }, {} as Record<string, number>),
+  })
+  console.info('[comp-graph] file mermaid code:\n' + code)
+  return { code, idMap }
 }
