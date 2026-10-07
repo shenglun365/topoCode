@@ -446,7 +446,7 @@ onUnmounted(() => {
           </div>
         </div>
         <div
-          v-else
+          v-else-if="tab !== 'compgraph'"
           ref="semScrollEl"
           class="flex-1 min-h-0 overflow-auto p-2.5 space-y-1.5"
         >
