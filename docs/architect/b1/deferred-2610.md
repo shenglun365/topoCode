@@ -1,6 +1,6 @@
 # B1 遗留项实施计划（2610-B1-deferred）
 
-> 2026-10-10 · 性质：**实施方案（待排期，不阻塞 B1 验收）**
+> 2026-10-10 · 性质：**实施方案（执行进度见文末）**
 > 来源：[adoption-batch1-plan-2610.md](../adoption-batch1-plan-2610.md) 执行进度遗留登记
 > 载体已实证：`exec_bridge.py:200-218`（越界检测现点）· `parse_scope_files`（req_agent）· `store/component.py`（arch_components: owns/source + hierarchy.level）· `ConfigPage.vue` 子 tab 体系（instance/executors/roleModels/other）
 
@@ -62,3 +62,17 @@
 ```
 
 三项均不阻塞 B1 验收；L-1② 与 P2-T4（mandate 质量加固）同批做可共用符号解析与测试夹具，建议捆绑排期。
+
+---
+
+## 执行进度（2026-10-10）
+
+| 项 | 状态 | 提交 | 备注 |
+|---|---|---|---|
+| L-3 组件域乘数 | ✅ | `1983b8d2` | 层级 1.0/1.5/2.0 + component 字段 + FE 徽标；查不到恒 1 回退位验证 |
+| L-1① 越界回执自纠正 | ✅ | `62f41ce0` | 允许集全集 + 最近前缀建议（零共享=明确指引）；`_nearest_scope` |
+| L-2 资产/技能管理 UI | ✅ | `94b6051e` | ConfigPage 第 5 子 tab + AssetsCard（route_hint 校验对齐 REST） |
+| L-1② 符号勾稽前置 | ⬜ | — | **随 P2-T4 同批**（共用符号解析与测试夹具，捆绑排期） |
+
+门禁终态：pytest **1406** / vitest **89** / tsc 0 / vite build ✓ / 棘轮绿。
+过程修复：`b614800a`（SFC 属性引号嵌套，vite build 捕获）。
