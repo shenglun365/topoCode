@@ -85,3 +85,13 @@ KB 重建功能**待重新规划**（用户裁决 2026-09-26，稍后再议—�
 
 **cv-279~285 批次纪律执行**: 单源复用零并行通道(spec_append/propose→confirm/task_input/confirm_task 全链既有); 门禁不削弱(无 bypass); 稳定 key 非 UI 文本匹配; 行数基线登记(dispatch 966/gate_ask 90/proxy 479/sessions_tasks 282/exec_control 146)。门禁: BE 1211+FE 64+TSC 0。
 
+---
+
+## 定位诠释细化（2026-10-10）
+
+「人在环上」（产品基调锚点 2）的环位细化（用户裁决，**不改三原则**）：环的重心在**头尾**——
+**执行前规划确认 + 执行后审核**（多角度证据呈现 + 人工终审），中间过程放活，**不做逐步
+审批流**。预留通用 `approval` 扩展位（缺省 `none`=无行为）供未来人工审批或主控 agent
+审批按需接入。详见 `docs/architect/adoption-batch1-plan-2610.md` §1.4 与
+`tech-debt-ledger-2609.md` 对标增强轨道 G2 条。
+
