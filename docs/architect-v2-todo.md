@@ -47,7 +47,7 @@ TurnAdapter 协议解耦) / 意图识别按**通用 agent 模式**(不局限 KB/
 
 ## 已知小问题(随手修)
 
-- SSE progress 事件里 `msgCount` 统计含 reasoning 消息(粒度粗, 无碍)
+- ~~SSE progress 事件里 `msgCount` 统计含 reasoning 消息(粒度粗, 无碍)~~ ✅ 已过期: cv-270 重构后 `msg_tools` 只登记含工具 part 消息, 2610-B1 W1-3 核验勾销
 - `_task_instruction` 的 prior_brief 参数未接线(重试前情简报, P1 资产化时做)
 - runner `[[NEED_INPUT]]` 回合标记契约仍在(v2 语义降级为状态提示, P3 评审)
 

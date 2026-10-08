@@ -9,12 +9,21 @@ from typing import List, Optional
 
 
 def history_window(history, cap: int = 20) -> List[dict]:
-    """滑动历史窗口: 仅保留 user/assistant 且非空消息, 尾部 cap 条。"""
+    """滑动历史窗口: 仅保留 user/assistant 且非空消息, 尾部 cap 条。
+
+    W1-2: user 消息经 <request> 数据信封包裹(防注入); 工具回喂与结构化降级
+    提示(同为 user 角色)跳过——它们是系统协议消息, 非用户可控文本。
+    """
+    from ..cognition.prompt import TOOL_FEED_PREFIX, wrap_user_request
     out = []
     for m in (history or [])[-cap:]:
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") \
                 and (m.get("content") or "").strip():
-            out.append({"role": m["role"], "content": m["content"]})
+            c = m["content"]
+            if m["role"] == "user" and not c.startswith(TOOL_FEED_PREFIX) \
+                    and not c.startswith("结构化工具调用未成功"):
+                c = wrap_user_request(c)
+            out.append({"role": m["role"], "content": c})
     return out
 
 

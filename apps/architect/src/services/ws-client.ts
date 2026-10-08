@@ -35,6 +35,9 @@ export class ArchWs {
   private anyHandlers = new Set<Handler>()
   private onType = new Map<string, Set<Handler>>()
   private closeHandlers = new Set<() => void>()
+  /** W1-3: 连接级事件序号(后端注入); 迟到/乱序事件丢弃。 */
+  private _lastSeq = 0
+  private _dropped = 0
 
   constructor(path: string) {
     this.ws = new WebSocket(`${WS_BASE}/${path}${tokenQuery()}`)
@@ -50,10 +53,23 @@ export class ArchWs {
       } catch {
         return
       }
+      if (typeof msg?.seq === 'number') {
+        if (msg.seq <= this._lastSeq) {
+          this._dropped += 1
+          return
+        }
+        this._lastSeq = msg.seq
+      }
       this.anyHandlers.forEach((h) => h(msg))
       this.onType.get(msg?.type)?.forEach((h) => h(msg))
     }
   }
+
+  /** 已处理的最新事件序号(0=未见带 seq 的事件)。 */
+  get lastSeq(): number { return this._lastSeq }
+
+  /** 被丢弃的迟到/乱序事件数(遥测/测试用)。 */
+  get droppedStale(): number { return this._dropped }
 
   async ready(): Promise<void> {
     await this.readyPromise

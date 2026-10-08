@@ -85,7 +85,9 @@ def render_context_pack_md(pack: Dict[str, Any]) -> str:
                      "——按现有信息执行, 遇歧义先提问。")
     spec = str(pack.get("specMd") or "").strip()
     if spec:
-        lines.append("### 规约\n" + spec[:3000])
+        # W1-2: 规约含用户可控需求文本 → <request> 数据信封(防执行器指令注入)
+        from ..cognition.prompt import wrap_user_request
+        lines.append("### 规约\n" + wrap_user_request(spec[:3000]))
     refs = pack.get("assetRefs") or {}
     scope = refs.get("allowedScope") or []
     boundary = refs.get("boundaryFiles") or []

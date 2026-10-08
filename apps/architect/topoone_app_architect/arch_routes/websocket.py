@@ -18,6 +18,20 @@ router = APIRouter()
 # 兼容 re-export(P0 特征测试引用): 通用执行意图正则已迁至 agent.perception.intent
 from ..agent.perception.intent import GENERIC_EXEC_RE as _GENERIC_EXEC_RE  # noqa: F401,E402
 
+
+def _seq_sender(ws: WebSocket):
+    """W1-3: 连接级单调 seq 注入(协议增量字段, 老前端忽略未知字段兼容)。
+    前端 ArchWs 丢弃迟到事件防乱序(详见 docs/architect/b1/W1-foundation.md)。"""
+    n = [0]
+    async def _send(payload: dict) -> None:
+        n[0] += 1
+        try:
+            await ws.send_json({**payload, "seq": n[0]})
+        except Exception:  # noqa: BLE001 — 断连吞发, 服务端回合继续落库
+            pass
+    return _send
+
+
 @router.websocket("/ws/kb-analysis")
 async def kb_analysis_ws(websocket: WebSocket):
     """需求分析 <=> KB agent 会话流(事件形状契约见 docs/architect/api-unit-test.md 同级约定)。
@@ -25,8 +39,8 @@ async def kb_analysis_ws(websocket: WebSocket):
     客户端消息:
       chat   { conversationId?, kind?, projectId?, reqId?, title?, messages:[{role,content}], modelId?,
                attachTo?, agent?, analysisMode?, clarifyMode?, isolated? }
-             → streaming: chat_start → chunk/reasoning/status/tool_call/tool_result* → done | error
-             (挡位三字段=空白态预置, 仅会话创建时消费; 已存在会话挡位走 REST 切换)
+              → streaming: chat_start → chunk/reasoning/status/tool_call/tool_result* → done | error
+              (挡位三字段=空白态预置, 仅会话创建时消费; 已存在会话挡位走 REST 切换)
       ping   → pong
 
     回合管道: agent.orchestrator.handle_chat(九层内核)。
@@ -34,13 +48,7 @@ async def kb_analysis_ws(websocket: WebSocket):
     await websocket.accept()
     from ..agent import orchestrator
 
-    async def _send(payload: dict) -> None:
-        # 安全发送: 客户端断连后吞掉发送异常, 服务端继续消费流/守卫/落库——
-        # 避免回合中断且历史整段丢失(实测断连即丢整回合)
-        try:
-            await websocket.send_json(payload)
-        except Exception:  # noqa: BLE001
-            pass
+    _send = _seq_sender(websocket)
 
     try:
         while True:
@@ -48,7 +56,7 @@ async def kb_analysis_ws(websocket: WebSocket):
             msg_type = data.get("type", "")
 
             if msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
+                await _send({"type": "pong"})
 
             elif msg_type == "chat":
                 try:
@@ -101,20 +109,21 @@ def _push_session_message(session_id: str, role: str, content: str, tool=None):
 async def unit_test_ws(websocket: WebSocket):
     """单测执行流(阶段 1 服务端模拟)。契约见 docs/architect/api-unit-test.md §4。"""
     await websocket.accept()
+    _emit = _seq_sender(websocket)
     try:
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type", "")
 
             if msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
+                await _emit({"type": "pong"})
 
             elif msg_type == "message":
                 session_id = data.get("sessionId")
                 content = data.get("content", "")
                 session = store.UnitTestSessionsStore.get(session_id)
                 if not session:
-                    await websocket.send_json({"type": "error", "message": "Session not found"})
+                    await _emit({"type": "error", "message": "Session not found"})
                     continue
                 _push_session_message(session_id, "user", content)
                 session = store.UnitTestSessionsStore.get(session_id)
@@ -126,7 +135,7 @@ async def unit_test_ws(websocket: WebSocket):
                 )
                 msg = _push_session_message(session_id, "assistant", reply)
                 store.UnitTestSessionsStore.update(session_id, {"updatedAt": _ts()})
-                await websocket.send_json({"type": "message", "role": "assistant", "content": reply,
+                await _emit({"type": "message", "role": "assistant", "content": reply,
                                            "id": msg["id"], "time": msg["time"]})
 
             elif msg_type == "run":
@@ -135,16 +144,16 @@ async def unit_test_ws(websocket: WebSocket):
                 root = data.get("root") or ""
                 session = store.UnitTestSessionsStore.get(session_id)
                 if not session:
-                    await websocket.send_json({"type": "error", "message": "Session not found"})
+                    await _emit({"type": "error", "message": "Session not found"})
                     continue
                 store.UnitTestSessionsStore.update(session_id, {"status": "running", "updatedAt": _ts()})
-                await websocket.send_json({"type": "status", "sessionId": session_id, "status": "running"})
+                await _emit({"type": "status", "sessionId": session_id, "status": "running"})
 
                 stopped = False
                 for test_id in test_ids:
                     test = store.UnitTestsStore.get(test_id)
                     if not test:
-                        await websocket.send_json({
+                        await _emit({
                             "type": "result", "testId": test_id, "status": "error",
                             "lastResult": {"passed": 0, "failed": 0, "error": "test not found", "note": "", "at": _ts()},
                         })
@@ -154,7 +163,7 @@ async def unit_test_ws(websocket: WebSocket):
                     # 开始 tool 消息
                     tool_start = {"type": "run-test", "label": script or name, "detail": f"开始执行「{name}」", "ok": True}
                     start_msg = _push_session_message(session_id, "tool", "", tool_start)
-                    await websocket.send_json({"type": "tool_call", "tool": tool_start, "id": start_msg["id"], "time": start_msg["time"]})
+                    await _emit({"type": "tool_call", "tool": tool_start, "id": start_msg["id"], "time": start_msg["time"]})
                     # 真实 subprocess 执行（自主路径·确定性），替代服务端模拟判定
                     from .test_runner import run_test_script
                     raw = await asyncio.to_thread(run_test_script, script, root)
@@ -164,10 +173,10 @@ async def unit_test_ws(websocket: WebSocket):
                               else f"通过: {raw.get('passed', 0)} 用例")
                     store.UnitTestsStore.update(test_id, {"status": status, "lastResult": last_result, "updatedAt": _ts()})
                     store.UnitTestSessionsStore.update(session_id, {"updatedAt": _ts()})
-                    await websocket.send_json({"type": "result", "testId": test_id, "status": status, "lastResult": last_result})
+                    await _emit({"type": "result", "testId": test_id, "status": status, "lastResult": last_result})
                     tool_end = {"type": "run-test", "label": script or name, "detail": detail, "ok": status == "passed"}
                     end_msg = _push_session_message(session_id, "tool", "", tool_end)
-                    await websocket.send_json({"type": "tool_call", "tool": tool_end, "id": end_msg["id"], "time": end_msg["time"]})
+                    await _emit({"type": "tool_call", "tool": tool_end, "id": end_msg["id"], "time": end_msg["time"]})
 
                 # 汇总
                 session = store.UnitTestSessionsStore.get(session_id)
@@ -185,14 +194,14 @@ async def unit_test_ws(websocket: WebSocket):
                 msg = _push_session_message(session_id, "assistant", summary)
                 terminate_status = "done" if not stopped else "stopped"
                 store.UnitTestSessionsStore.update(session_id, {"status": terminate_status, "updatedAt": _ts()})
-                await websocket.send_json({"type": "message", "role": "assistant", "content": summary,
+                await _emit({"type": "message", "role": "assistant", "content": summary,
                                            "id": msg["id"], "time": msg["time"]})
-                await websocket.send_json({"type": "status", "sessionId": session_id, "status": terminate_status})
+                await _emit({"type": "status", "sessionId": session_id, "status": terminate_status})
 
             elif msg_type == "stop":
                 session_id = data.get("sessionId")
                 store.UnitTestSessionsStore.update(session_id, {"status": "stopped", "updatedAt": _ts()})
-                await websocket.send_json({"type": "status", "sessionId": session_id, "status": "stopped"})
+                await _emit({"type": "status", "sessionId": session_id, "status": "stopped"})
 
     except WebSocketDisconnect:
         logger.info("Unit-test WebSocket disconnected")

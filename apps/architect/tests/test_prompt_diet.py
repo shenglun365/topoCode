@@ -262,8 +262,10 @@ def test_slim_capability_drops_scope():
 
 
 def test_static_diet_actual_savings():
-    """体检对账: 压缩后协议段较原 731 字显著下降; 工具子集降幅 ≥60%。"""
-    assert len(pr._PROTOCOL_DOC) < 520            # 原 731
+    """体检对账: 压缩后协议段较原 731 字显著下降; 工具子集降幅 ≥60%。
+
+    W1-2: REQUEST_ENVELOPE_DOC(<request> 信封纪律, ~85 字)入协议 → 阈值放宽。"""
+    assert len(pr._PROTOCOL_DOC) < 610            # 原 731; 含信封纪律段
     full = pr.capability_doc_from_tools()
     sub = pr.capability_doc_from_tools(allowed={"req.propose", "kb.asset.search"})
     assert len(sub) <= len(full) * 0.4

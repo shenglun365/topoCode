@@ -15,10 +15,12 @@ from topoone_app_architect.agent.tools import req_agent
 
 
 def test_protocol_doc_composed_from_constants():
-    """chat 面 _PROTOCOL_DOC 必须由常量拼接(常量改动自动生效, 无第二份手写)。"""
+    """chat 面 _PROTOCOL_DOC 必须由常量拼接(常量改动自动生效, 无第二份手写)。
+
+    W1-2: REQUEST_ENVELOPE_DOC(<request> 信封纪律)入组合——golden 同步锁定。"""
     expected = (disc.TOOL_PROTOCOL_HEAD + disc.ANTI_FABRICATION
-                + disc.REQ_CARD_DISCIPLINE + disc.DIRECT_CMD_SYMBOLS
-                + disc.TOOL_TAIL)
+                + disc.REQ_CARD_DISCIPLINE + disc.REQUEST_ENVELOPE_DOC
+                + disc.DIRECT_CMD_SYMBOLS + disc.TOOL_TAIL)
     assert disc._PROTOCOL_DOC == expected
 
 

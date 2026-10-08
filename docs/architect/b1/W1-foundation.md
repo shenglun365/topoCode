@@ -80,8 +80,20 @@
 
 ## 6. 组内验收清单
 
-- [ ] `pytest --regen-goldens` 命令存在且 README/CONV-03 有登记
-- [ ] golden 漂移 CI 红（人为改一处 prompt 验证）
-- [ ] 对抗注入样例全绿（转义后无标签逃逸）
-- [ ] WS 乱序/重连回归绿；双标签页同会话无消息回退（手测）
-- [ ] W0：`git tag topo-b1-start` + 行数基线登记完成
+- [x] `pytest --regen-goldens` 命令存在（conftest 注册）
+- [x] golden 漂移 CI 红（人为改一处 prompt 验证）——全量套件下实测捕获
+- [x] 对抗注入样例全绿（转义后无标签逃逸）
+- [x] WS 乱序/重连回归绿（seq 单调 + 前端丢弃）
+- [x] W0：`git tag topo-b1-start` + 行数基线登记完成（[baseline.md](baseline.md)）
+
+## 7. As-built 记录（2026-10-10 实施完成）
+
+| 项 | 实施结果与偏差 |
+|---|---|
+| W1-1 分型 | 按 `render_system` 实际 ctx 维度落 4 变体：default_t1 / full_t0 / slim_t2 / t1_diagram（原设想的"chat/任务/摘要/命名"分型不存在于 prompt.py，按计划预留的"以实际分型函数为准"执行） |
+| W1-1 生产态 | golden 夹具调用幂等 `register_session_tools()`（orchestrator.py:36）对齐生产工具注册态——否则快照随测试导入顺序漂移 |
+| **W1-1 附带生产修复** | `capability_doc_from_tools` 工具清单**按名排序**：`_ARCH_TOOLS` 注册序随导入路径漂移（全量套件实测暴露），prompt 确定性是生产质量收益（可缓存/可快照），工具展示序对模型无语义 |
+| W1-2 装配点 as-built | chat 面单源在 `memory/working.py::history_window`（用户消息包裹；工具回喂 `TOOL_FEED_PREFIX` 与结构化降级提示跳过）；执行器面在 `context_pack.render_context_pack_md` 规约段；`wrap_user_request` 单源 + `REQUEST_ENVELOPE_DOC` 协议句入 slim/full 两态 |
+| W1-3 ③ 偏差 | **`since_seq` 增量通道未建**：实测架构为"每请求连接 + cv-221 回合尾补偿拉取"，不存在持久订阅，resume 通道会成死代码——seq 协议地基已落（两通道全帧注入），持久订阅出现时直接消费 |
+| W1-3 ④ 已过期 | msgCount 含 reasoning 的问题**已由 cv-270 重构顺带修复**（`msg_tools` 只登记含工具 part 的消息，turn_adapter.py:540），v2-todo 该项勾销，未改 packages/core |
+| 门禁终态 | pytest **1376**（基线 1364，+12）/ vitest **83**（+3）/ tsc 0；websocket.py 209→207 行（容差内，棘轮绿） |

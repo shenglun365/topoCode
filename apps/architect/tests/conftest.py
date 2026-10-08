@@ -13,6 +13,12 @@ import pytest
 import topoone_app_architect.ctx as C
 
 
+def pytest_addoption(parser):
+    """W1-1: golden 再生显式开关(默认关——再生即契约变更, 须人工过目 diff)。"""
+    parser.addoption("--regen-goldens", action="store_true", default=False,
+                     help="再生 prompt goldens(意图变更时显式使用, 过目 diff 后提交)")
+
+
 def isolate_arch(tmp_path, monkeypatch) -> str:
     """architect 环境隔离: 独立数据目录 + 单例/上下文全重置。返回 data 路径。"""
     data = str(tmp_path / "arch")
