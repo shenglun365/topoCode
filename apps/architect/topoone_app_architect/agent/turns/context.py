@@ -25,6 +25,18 @@ def _swallow(tag: str) -> None:
         pass
 
 
+# W3 交接单模板 v2(2610-B1, 学 Roomote compact——摘要是"给下一个上下文的交接单"
+# 而非纯纪要): 末尾两段【必读清单】(历史引用的资产/规约/AGENTS.md, 恢复后必须
+# 重读) + 【恢复动作】(恢复后第一步)。模板变更走成对版本化(结构断言见
+# test_flow_policy.py::test_overflow_digest_handover_template)。
+_OVERFLOW_DIGEST_SYSTEM = (
+    "你是会话摘要器。将历史对话压缩为要点纪要(已做决策/关键事实/未尽事项)，"
+    "不超过 400 字，中文；末尾必附【必读清单】(历史中引用的资产ID/规约/"
+    "AGENTS.md 等恢复后必须重读的对象, 无则写'无')与【恢复动作】(恢复后第一"
+    "步该做什么, 一句话)。"
+)
+
+
 def _kb_face_enabled(gear, r34: bool, root: str, project: str) -> bool:
     """R3.4 挡位 kb 开关 ∧ cv-187 项目关联硬门(kb_degraded 共用口径)。
 
@@ -187,8 +199,7 @@ def _overflow_digest_msg(conv: dict, history: list, pol: dict) -> str:
                 from ..reflection.repair import summarize_task
                 res = summarize_task(
                     task_id="overflow_digest",
-                    system=("你是会话摘要器。将历史对话压缩为要点纪要"
-                            "(已做决策/关键事实/未尽事项)，不超过 400 字，中文。"),
+                    system=_OVERFLOW_DIGEST_SYSTEM,
                     material=material,
                     dataset_kind="overflow_digest")
             except Exception:  # noqa: BLE001 — 含 ModelNotConfigured: 禁降级出垃圾

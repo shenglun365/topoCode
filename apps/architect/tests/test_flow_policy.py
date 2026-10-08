@@ -346,3 +346,15 @@ def test_memory_store_retired():
     assert importlib.util.find_spec(
         "topoone_app_architect.agent.memory.store") is None
     assert not hasattr(mem, "MemoryStore")
+
+
+# ── W3 交接单模板 v2(2610-B1): 结构断言——两段契约句恒在(成对版本化锚点) ──
+
+def test_overflow_digest_handover_template():
+    """交接单模板 v2: 必读清单 + 恢复动作两段契约句(模板变更须过目并 bump)。"""
+    from topoone_app_architect.agent.turns.context import _OVERFLOW_DIGEST_SYSTEM
+    assert "【必读清单】" in _OVERFLOW_DIGEST_SYSTEM
+    assert "【恢复动作】" in _OVERFLOW_DIGEST_SYSTEM
+    assert "重读" in _OVERFLOW_DIGEST_SYSTEM          # 必读语义
+    # 瘦身纪律: system 模板 ≤ 160 字
+    assert len(_OVERFLOW_DIGEST_SYSTEM) <= 160
