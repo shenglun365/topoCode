@@ -29,7 +29,7 @@ const exists = ref(false)
 const loading = ref(true)
 const saving = ref(false)
 const dirty = ref(false)
-const mode = ref<'edit' | 'preview'>('edit')
+const mode = ref<'edit' | 'preview'>('preview')
 const initReport = ref('')
 
 async function load(keepLocal = false) {
