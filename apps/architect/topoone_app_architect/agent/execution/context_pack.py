@@ -74,6 +74,28 @@ def build_context_pack(task: dict, conv: Optional[dict], root: str,
         pack["missing"] = missing
         logger.warning("[context-pack] 契约不完整 task=%s missing=%s",
                        task.get("id"), missing)
+    # W2 图邻域摘要(2610-B1): 焦点=规约 allowedScope 首符号; 开关缺省开可回退;
+    # outline 字数受 budget 钳制(1200), 渲染段过 ctx_budget 统一裁剪
+    try:
+        from ..compensation.overrides import override_enabled, read_overrides
+        from ... import store as _s
+        enabled = override_enabled(read_overrides(_s.CollabConfigStore.get),
+                                   "graph_context_injection")
+        pid_of = str(task.get("projectId") or "")
+        focus = allowed_scope[0] if allowed_scope else ""
+        if enabled and pid_of and focus:
+            from ...sem.graph_context import graph_neighborhood
+            nb = graph_neighborhood(pid_of, focus, depth=2,
+                                    budget=1200, root=root)
+            if nb.get("outline"):
+                pack["graphNeighborhood"] = {
+                    "outline": nb["outline"],
+                    "truncated": bool(nb.get("truncated")),
+                    "baselineCommit": nb.get("baseline_commit") or "",
+                    "baselineStale": bool(nb.get("baseline_stale")),
+                }
+    except Exception as e:  # noqa: BLE001 — 邻域失败不阻塞契约装配
+        logger.warning("[context-pack] 图邻域注入失败: %s", e)
     return pack
 
 
@@ -102,6 +124,10 @@ def render_context_pack_md(pack: Dict[str, Any]) -> str:
     acc = pack.get("acceptance") or []
     if acc:
         lines.append("### 验收判据\n" + "\n".join(f"- [ ] {a}" for a in acc))
+    nb = pack.get("graphNeighborhood") or {}
+    if nb.get("outline"):
+        stale = "（⚠️ 基线可能过期：工作区 HEAD 已前移）" if nb.get("baselineStale") else ""
+        lines.append(f"### 图邻域（焦点符号 N 跳大纲{stale}）\n{nb['outline']}")
     return "\n\n".join(lines)
 
 
