@@ -69,3 +69,41 @@ UI: 单页统一编辑器(预览+编辑+sync+命名治理折叠)
   (extract/verify/induce/pseudo/evaluate/mine)按角色路由，改默认模型需同步角色或清空跟随
 - L-1② 符号勾稽仍随 P2-T4（见 [b1/deferred-2610.md](b1/deferred-2610.md)）
 - arch_specs 表留存仅迁移兼容，无消费者，可在后续大版本清理
+
+---
+
+## 五、修订：纯 AGENTS.md 模式（2026-10-08 晚，推翻 §一 S-1）
+
+> 触发：用户裁决"除了 AGENTS.md 其他的都画蛇添足"。对标调研（官方文档）：
+> Codex=根目录单文件+monorepo 嵌套；Claude Code=CLAUDE.md/AGENTS.md 人治文件
+> （"context, not enforced configuration"）；opencode=AGENTS.md+instructions 数组。
+> **三家均无规约管理 UI/状态机/store 表**——细分目录只是可选组织手段，交付面
+> 永远是合并后的一套指令；自定义 AGENTS-xxx.md 无任何执行器认。
+
+### 修订后形态
+
+```
+repo/AGENTS.md = 项目规约唯一真相源（100% 人治 markdown，git 版本化）
+ ├ ## 命名规约（行式 `- [场景] 规则`）──┐ 解析契约：文件→store 缓存
+ └ ## 术语表（三列表格）──────────────┘ (惰性同步, active 全量重建, 坏行容错)
+其余章节自由格式（架构约束/编码规约/需求对齐），不参与解析
+architect 职责仅两件: ①agents.md.init 初稿（/init 模式不盲改+.topo/rules 迁移）
+                     ②挖掘采纳 append（人审显式动作落文件）
+```
+
+### 裁决修订记录
+
+| # | 修订 | 推翻 |
+|---|---|---|
+| S-6 | AGENTS.md 100% 人治单文件为真相源；无生成段/指纹定界 | S-1（store 单源+投影） |
+| S-7 | store 降级为引擎缓存（convention_check/提取注入/词汇映射零改动；无文件时 no-op 兼容遗留数据） | — |
+| S-8 | pending 状态机保留但仅剩提案队列语义（会话确认→append 文件）；墓碑/scenarios 面板退役 | §一治理面板 |
+| S-9 | `.topo/rules/` 合并链退役（init 一次性迁移并入初稿） | W4/D-2 |
+
+### 增量实施（R1-R4，提交 93a646c1 起）
+
+- `sem/rules_file.py`：解析契约+乐观锁读写+惰性缓存同步+采纳 append
+- `agents_md.py` 重写：GET/PUT(409)/init REST；`agents.md.sync`→`agents.md.init`
+- `agents_md_chain.py` 删除；rules-files/preview REST 退役
+- mining accept + naming PUT 确认 → append 文件
+- FE：SpecWorkspace 单文件编辑器（预览/体检/初稿引导），NamingGovernancePanel 删除
