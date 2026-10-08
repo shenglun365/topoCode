@@ -242,6 +242,8 @@ export default {
     noEvents: 'No events (legacy session or unpumped)',
     live: 'Live',
     liveOn: 'Live on',
+    openConv: 'chat',
+    centerHint: 'Chat/approval/acceptance live in the conversation — this page is the event archive; direct chat via quick mode',
   },
   mcp: {
     title: 'MCP Service',

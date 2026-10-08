@@ -240,6 +240,8 @@ export default {
     noEvents: '无事件（存量会话或未过泵）',
     live: '跟进',
     liveOn: '跟进中',
+    openConv: '会话流',
+    centerHint: '对话/审批/验收在会话流进行——本页为事件档案；直通对话经会话 quick 挡',
   },
   mcp: {
     title: 'MCP 服务',

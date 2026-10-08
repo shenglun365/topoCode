@@ -8,7 +8,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   CommandLineIcon, BoltIcon, ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
@@ -17,6 +17,7 @@ import { apiGet } from '@/services/api-client'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 
 interface SessionRow {
   jobId: string; eventCount: number; firstTs: number; lastTs: number
@@ -55,6 +56,16 @@ const KIND_META: Record<string, { color: string; tag: string }> = {
 const kindMeta = (k: string) => KIND_META[k] || { color: 'text-ctp-overlay0', tag: k.slice(0, 6).toUpperCase() }
 
 const isActive = (s: SessionRow) => !s.lastStatus && s.taskStatus !== 'done'
+
+const execStats = computed(() => {
+  const m: Record<string, number> = {}
+  for (const s of sessions.value) m[s.executorType || '?'] = (m[s.executorType || '?'] || 0) + 1
+  return Object.entries(m).sort((a, b) => b[1] - a[1])
+})
+
+function openConv(s: SessionRow) {
+  if (s.conversationId) router.push({ path: '/workbench/sessions', query: { conv: s.conversationId } })
+}
 const selectedRow = computed(() => sessions.value.find((s) => s.jobId === selected.value))
 
 async function loadSessions(keep = true) {
@@ -102,6 +113,15 @@ const fmt = (ts: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTi
   <div class="p-5 space-y-3">
     <PageHeader :title="t('execSessions.title')" :desc="t('execSessions.desc')" />
 
+    <!-- 执行器分布 + 直通说明 -->
+    <div class="flex items-center gap-2 flex-wrap">
+      <span
+        v-for="[ex, n] in execStats" :key="ex"
+        class="chip bg-ctp-surface0 text-ctp-subtext0"
+      >{{ ex }} × {{ n }}</span>
+      <span class="text-[10px] text-ctp-overlay0 ml-auto">{{ t('execSessions.centerHint') }}</span>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-[20rem_1fr] gap-3">
       <!-- 左: 会话档案 -->
       <div class="panel overflow-hidden flex flex-col">
@@ -125,6 +145,11 @@ const fmt = (ts: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTi
               <span class="chip shrink-0 bg-ctp-surface0 text-ctp-subtext0">{{ s.executorType || '?' }}</span>
               <span class="flex-1 truncate font-medium">{{ s.title || s.jobId }}</span>
               <span v-if="isActive(s)" class="w-1.5 h-1.5 rounded-full bg-ctp-green shrink-0 animate-pulse" />
+              <button
+                v-if="s.conversationId"
+                class="shrink-0 text-[10px] text-ctp-sky hover:underline"
+                @click.stop="openConv(s)"
+              >↗ {{ t('execSessions.openConv') }}</button>
             </div>
             <div class="text-[10px] text-ctp-overlay0 mt-0.5 flex gap-2">
               <span>{{ s.eventCount }} ev</span>
