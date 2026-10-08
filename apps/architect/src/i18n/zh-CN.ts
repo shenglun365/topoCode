@@ -249,6 +249,7 @@ export default {
       overview: '项目资产地图总览（组件目录/统计/基线视图）——写码前先看',
       component: '组件档案：文件/语义资产/依赖出入',
       assets: '语义资产检索（kind/关键词）',
+      tools: '工具能力',
       rules: '规约全集=AGENTS.md 全文(唯一真相源)',
       graph: '关系图（mermaid）：组件依赖/语义关系',
       mandate: '开工前取执行契约：规约/允许范围/约束/验收判据',
@@ -1141,6 +1142,11 @@ export default {
       childRegistryPh: '子技能引用, 逗号分隔',
       overrideConfirm: '已有同名技能「{name}」, 保存将覆盖?',
       deleteConfirm: '删除技能「{name}」? (删除后回退内置同名技能, 如有)',
+    },
+    tools: {
+      title: '工具能力',
+      hint: 'architect 原生工具注册表(能力执行面, 只读快照)——与技能(执行路线)分工',
+      search: '搜索工具…',
     },
 
     otherConfig: '其他配置',

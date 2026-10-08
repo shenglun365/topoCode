@@ -107,7 +107,7 @@ def test_bad_json_not_clobbered(tmp_path):
 
 # ── 技能管理面: /arch/skills 分类分组 ────────────────────────────────
 
-def test_skills_groups(tmp_path):
+def test_skills_groups(arch_env, tmp_path):
     import asyncio
     from topoone_app_architect.arch_routes import assets_api
     root = str(tmp_path / "repo-skill")
@@ -141,3 +141,19 @@ def test_skills_groups(tmp_path):
     assert custom == {"my.skill", "off.skill"}           # 需求类不入
     off = next(s for s in cats["custom"]["skills"] if s["name"] == "off.skill")
     assert off["enabled"] is False                       # 管理视角含禁用行
+
+
+# ── 工具能力面: /arch/tools 注册表快照 ───────────────────────────────
+
+def test_tools_snapshot_groups(tmp_path):
+    import asyncio
+    from topoone_app_architect.arch_routes import tools_api
+    r = asyncio.run(tools_api.list_tools())["data"]
+    groups = {g["group"]: g for g in r}
+    assert {"req", "asset", "map"} <= set(groups)          # 主要前缀域
+    req = {x["name"] for x in groups["req"]["tools"]}
+    assert "req.propose" in req
+    entry = next(x for x in groups["req"]["tools"] if x["name"] == "req.propose")
+    assert entry["description"] and "brief" in entry and "params_doc" in entry
+    total = sum(len(g["tools"]) for g in r)
+    assert total >= 30                                     # 注册表量级

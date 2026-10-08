@@ -10,6 +10,7 @@ import { useAppDialog } from '@/composables/useAppDialog'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
 import AssetsCard from '@/components/config/AssetsCard.vue'
+import ToolsCard from '@/components/config/ToolsCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t, te } = useI18n()
@@ -21,6 +22,7 @@ const TABS = [
   { key: 'executors', label: 'config.tabs.executors' },
   { key: 'roleModels', label: 'config.tabs.roleModels' },
   { key: 'assets', label: 'config.tabs.assets' },
+  { key: 'tools', label: 'config.tabs.tools' },
   { key: 'other', label: 'config.tabs.other' },
 ] as const
 const activeTab = ref<string>('instance')
@@ -1006,9 +1008,14 @@ onMounted(() => { void loadCgStatus() })
 
 
 
-    <!-- ═══ tab: L-2 资产/技能管理(arch_assets, 2610-B1 deferred) ═══ -->
+    <!-- ═══ tab: L-2 技能管理(arch_assets kind=skill, 2610) ═══ -->
     <div v-show="activeTab === 'assets'" class="space-y-4">
       <AssetsCard />
+    </div>
+
+    <!-- ═══ tab: 工具能力(原生注册表快照, 2610) ═══ -->
+    <div v-show="activeTab === 'tools'" class="space-y-4">
+      <ToolsCard />
     </div>
 
     <!-- ═══ tab: 资产助理(数据资产·语义分析) + 轻任务模型(编排侧) ═══ -->

@@ -57,6 +57,13 @@ def architect_tools() -> List[Dict[str, str]]:
     return [{"name": t["name"], "description": t["description"]} for t in _ARCH_TOOLS.values()]
 
 
+def architect_tools_full() -> List[Dict[str, str]]:
+    """全量元数据(含 brief/params_doc)——能力展示面(工具管理页)单源。"""
+    return [{"name": t["name"], "description": t.get("description") or "",
+             "brief": t.get("brief") or "", "params_doc": t.get("params_doc") or ""}
+            for t in _ARCH_TOOLS.values()]
+
+
 
 
 # 归档会话上禁止的动作类工具(生成/落库/指派); 检索与读取类不在此列

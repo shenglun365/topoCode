@@ -251,6 +251,7 @@ export default {
       overview: 'Asset-map overview (components/stats/baseline)',
       component: 'Component profile: files/semantic assets/deps',
       assets: 'Semantic asset search (kind/keyword)',
+      tools: 'Tools',
       rules: 'Full rules = AGENTS.md content (single source of truth)',
       graph: 'Graphs (mermaid): component deps / semantic relations',
       mandate: 'Pull execution mandate before start: spec/scope/constraints/acceptance',
@@ -1132,6 +1133,11 @@ export default {
       childRegistryPh: 'Child skills, comma separated',
       overrideConfirm: 'Skill "{name}" exists. Override?',
       deleteConfirm: 'Delete skill "{name}"? (falls back to a built-in with the same name if any)',
+    },
+    tools: {
+      title: 'Tool Capabilities',
+      hint: 'architect native tool registry (execution surface, read-only snapshot) — distinct from skills (routing)',
+      search: 'Search tools…',
     },
 
     otherConfig: 'Other Configuration',
