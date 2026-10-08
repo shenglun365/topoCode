@@ -24,7 +24,7 @@ TOOLS = [
      "args": {"project": "项目 id（多项目时必填，可先 project.list）"}},
     {"name": "map.component", "desc": "组件档案：文件清单/语义资产/依赖出入", "args": {"name": "组件名或 id", "project": "项目 id"}},
     {"name": "map.assets", "desc": "语义资产检索（kind/level/关键词）", "args": {"query": "关键词", "kind": "类别", "level": "粒度(business/implementation/logic)", "limit": "条数", "project": "项目 id"}},
-    {"name": "map.rules", "desc": "规约全集：架构规约+编码规约+命名规约+词汇表（编码必须遵守）", "args": {"project": "项目 id"}},
+    {"name": "map.rules", "desc": "规约全集：编码规约(自管)+词汇表+项目规则(.topo/rules)（编码必须遵守）", "args": {"project": "项目 id"}},
     {"name": "map.graph", "desc": "关系图（mermaid）：component=组件依赖图 / semantic=语义关系图", "args": {"kind": "component|semantic", "project": "项目 id"}},
     {"name": "ctx.search", "desc": "跨会话检索历史上下文（单元/消息/备案文档；讨论关联结论先查这里）", "args": {"query": "关键词", "type": "单元类型", "conversation": "限定会话 id", "limit": "条数", "project": "项目 id"}},
     {"name": "ctx.get", "desc": "会话上下文包：摘要+关键单元+备案文档", "args": {"conversation": "会话 id", "project": "项目 id"}},

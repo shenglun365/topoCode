@@ -35,8 +35,9 @@ def test_build_contains_rules_and_glossary(proj_with_rules):
     assert "# AGENTS.md — agents-fixture" in md
     assert "动词开头小驼峰" in md
     assert "Scene——一次可播放的动画编排" in md
-    assert "## 资产概览" in md
-    assert "本地语义资产为空" in md
+    # 规约定型(2610): AGENTS.md 只含约束性信息, 资产概览(参考性质)已裁
+    assert "资产概览" not in md
+    assert "本地语义资产为空" not in md
 
 
 def test_sync_writes_and_idempotent(proj_with_rules):

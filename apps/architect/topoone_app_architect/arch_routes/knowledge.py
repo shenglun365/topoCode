@@ -62,33 +62,6 @@ async def get_code_mappings(root: Optional[str] = None, project: Optional[str] =
     return ok(model.get("codeMappings") or [])
 
 
-@router.get("/kb/coding-rules")
-async def get_coding_rules(root: Optional[str] = None, project: Optional[str] = None):
-    """编码规约(数据主权批E: 自管)——arch_naming_conventions 活跃规则聚合。
-
-    路径与键名保留(kb-assets.ts 消费), 数据源已是 architect 自管表。"""
-    try:
-        from .. import ctx
-        from ..arch_routes.project import resolve_project
-        proj = resolve_project(root, project)
-        pid = (proj or {}).get("id") or ""
-        db = ctx.project_db(pid) if pid else None
-        if db is None:
-            return ""
-        rows = db.fetchall(
-            "SELECT rule_text, scope, source FROM arch_naming_conventions"
-            " WHERE project_id=? AND status='active' ORDER BY rowid", (pid,))
-        blocks = []
-        for r in (rows or []):
-            tag = {"induced": "派生", "manual": "人工"}.get(r["source"], r["source"])
-            blocks.append(f"- [{tag}] {r['rule_text']}")
-        if not blocks:
-            return ""
-        return "## 编码规约（自管，architect 独立维护）\n\n" + "\n".join(blocks)
-    except Exception:  # noqa: BLE001
-        return ""
-
-
 # 组件的字段统一转换(自管组件字段缺省容错——数据主权批E 组件行无
 # change/lang/kind/responsibilities 等 KB 分析域字段, 缺省同义值)。
 def _comp_to_asset(c):

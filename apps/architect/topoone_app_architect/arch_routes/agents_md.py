@@ -47,8 +47,9 @@ def build_project_agents_md(root: str, project: Optional[str] = None) -> str:
     name = (proj or {}).get("name") or os.path.basename(root or "") or "project"
     out = [f"# AGENTS.md — {name}",
            "",
-           "> 本文件由 architect 维护(源: 规约全集/命名规约/词汇表/资产统计)。"
-           "编码代理开工前必读；冲突时以人工覆盖层 > 用户显式 > 派生约束。",
+           "> 本文件由 architect 维护(源: 自管编码规约/词汇表 + .topo/rules 项目规则)。"
+           "编码代理开工前必读；本文件只含约束性信息，参考/概览性内容不进入"
+           "(规约定型 2610)；冲突时以人工规则 > 用户显式 > 派生约束。",
            ""]
 
     rules = ""
@@ -62,23 +63,6 @@ def build_project_agents_md(root: str, project: Optional[str] = None) -> str:
     except Exception as e:  # noqa: BLE001
         rules = f"(规约集合不可用: {e})"
     out.append(rules)
-
-    try:
-        stats: Dict[str, int] = {}
-        if pid:
-            for a in _store.SemanticAssetsStore.all(pid, limit=5000) or []:
-                stats[str(a.get("kind") or "?")] = \
-                    stats.get(str(a.get("kind") or "?"), 0) + 1
-        out.append("\n## 资产概览\n")
-        if stats:
-            out.append("| kind | 数量 |")
-            out.append("|---|---|")
-            for k, v in sorted(stats.items(), key=lambda x: -x[1]):
-                out.append(f"| {k} | {v} |")
-        else:
-            out.append("(本地语义资产为空——可在会话中请求 asset.semantic.extract 建立)")
-    except Exception as e:  # noqa: BLE001
-        out.append(f"(资产统计不可用: {e})")
     return "\n".join(out).rstrip() + "\n"
 
 

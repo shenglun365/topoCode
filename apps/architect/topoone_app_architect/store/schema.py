@@ -55,6 +55,7 @@ ARCH_MAIN_TABLES_SQL = """
         default_branch TEXT DEFAULT 'main'
     );
 
+    -- 已废弃(2610 规约定型): 三层规约面退役, 表留存仅历史数据迁移兼容
     CREATE TABLE IF NOT EXISTS arch_specs (
         version TEXT PRIMARY KEY,
         overrides TEXT,                     -- JSON

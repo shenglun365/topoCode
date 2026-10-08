@@ -1,4 +1,7 @@
-"""Architecture change / staging / compliance / spec routes (KB 真实数据).
+"""Architecture change / staging / compliance routes (KB 真实数据).
+
+规约定型(2610): /spec 三层规约+confirm 已退役——项目规约统一为 AGENTS.md
+单文件模式(store 单源+.topo/rules 人工段), 见 mcp-spec-finalization-2610。
 
 阶段 3/4 收尾: 变更/合规/基线均基于 KB 真实数据计算——组件模型
 (architecture.model)、工作区文件变更(project.checkFileChanges)、版本差异
@@ -246,116 +249,4 @@ async def verify_baseline(request: Request):
         "baselineId": proj.get("baselineId") or "",
     })
 
-
-def _load_spec():
-    db = store._db()
-    row = db.fetchone("SELECT * FROM arch_specs WHERE version = 'v1.0'")
-    if not row:
-        return None
-    return {
-        "version": row["version"],
-        "overrides": store._loads(row["overrides"], []),
-        "explicitRules": store._loads(row["explicit_rules"], []),
-        "derivedRules": store._loads(row["derived_rules"], []),
-        "changelog": store._loads(row["changelog"], []),
-        "updatedAt": row["updated_at"],
-    }
-
-
-def _spec_from_self(root=None, project=None):
-    """规约推导(数据主权批E: 自管)：
-    - 显式规则: 项目规约文档(CONVENTIONS/ARCHITECTURE/README) + 自管命名规约表
-    - 派生规则: 基于自管组件模型推导(组件边界/依赖方向/分层约束)
-    """
-    proj = _resolve(root, project)[0]
-    if not proj:
-        return None
-    model = _self_model(proj)
-    comps = model.get("components") or []
-
-    # ── 显式规则: 项目规约文档 + 自管命名规约 ──
-    explicit: list = []
-    try:
-        from ..store.base import _target_db
-        db = _target_db("arch_naming_conventions", proj.get("id") or "")
-        rows = db.fetchall(
-            "SELECT rule_text, source FROM arch_naming_conventions"
-            " WHERE project_id=? AND status='active' ORDER BY rowid",
-            (proj.get("id") or "",))
-        for r in (rows or []):
-            tag = {"induced": "派生规约", "manual": "人工规约"}.get(r["source"], r["source"])
-            explicit.append({
-                "id": f"conv-{abs(hash(r['rule_text'])) % 10 ** 8}",
-                "text": f"{tag}：{r['rule_text']}",
-                "level": "major", "source": "explicit",
-            })
-    except Exception:  # noqa: BLE001
-        pass
-
-    # ── 派生规则: 组件边界与依赖方向(真实模型) ──
-    derived: list = []
-    if comps:
-        # 组件内文件归属 → 边界约束
-        derived.append({
-            "id": "d-boundary", "text": "组件文件归属边界：文件须归属且仅归属一个已识别组件",
-            "level": "blocker", "source": "derived",
-        })
-        # 依赖方向: 上层(父组件)不依赖下层子组件 — 由 parentId 推导
-        parented = [c for c in comps if c.get("parentId")]
-        if parented:
-            derived.append({
-                "id": "d-hierarchy", "text": f"分层依赖：{len(parented)} 个子组件仅经父组件边界对外暴露",
-                "level": "major", "source": "derived",
-            })
-        # 依赖存在性: dependsOn 均解析到已知组件
-        dangling = [d for c in comps for d in (c.get("dependsOn") or []) if d not in {x["id"] for x in comps}]
-        if not dangling:
-            derived.append({
-                "id": "d-dep", "text": "依赖完整性：所有组件 dependsOn 均解析到已知组件",
-                "level": "major", "source": "derived",
-            })
-
-    return {
-        "version": "v1.0", "overrides": [],
-        "explicitRules": explicit,
-        "derivedRules": derived,
-        "changelog": [],
-    }
-
-
-@router.get("/spec")
-async def get_spec(root: Optional[str] = None, project: Optional[str] = None):
-    # 已确认的规约(用户落地)优先；否则由自管数据动态推导
-    confirmed = _load_spec()
-    if confirmed:
-        return ok(confirmed)
-    derived = _spec_from_self(root, project)
-    if derived is None:
-        return err(400, "未定位到项目，无法推导规约。")
-    return ok(derived)
-
-
-@router.post("/spec/confirm")
-async def confirm_spec(request: Request):
-    body = await request.json() or {}
-    spec = _load_spec() or _spec_from_self(body.get("root"), body.get("project"))
-    if spec is None:
-        return err(400, "未定位到项目，无法确认规约。")
-    db = store._db()
-    db.execute(
-        "INSERT INTO arch_specs (version, overrides, explicit_rules, derived_rules, changelog, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(version) DO UPDATE SET overrides = excluded.overrides, "
-        "explicit_rules = excluded.explicit_rules, derived_rules = excluded.derived_rules, "
-        "changelog = excluded.changelog, updated_at = excluded.updated_at",
-        (
-            spec["version"],
-            store._dumps(spec["overrides"]),
-            store._dumps(spec["explicitRules"]),
-            store._dumps(spec["derivedRules"]),
-            store._dumps(spec["changelog"]),
-            _ts(),
-        ),
-    )
-    db.commit()
     return ok({"confirmed": True, "version": "v1.0"})
