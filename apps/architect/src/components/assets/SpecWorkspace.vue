@@ -1,229 +1,167 @@
 <script setup lang="ts">
 /**
- * P2 规约统一编辑器（2610 定型）——AGENTS.md 单文件模式。
+ * AGENTS.md 单文件编辑器（纯文件模式，2610 定型修订）。
  *
- * 三层结构（原 3-tab 工作台退役）：
- * - 预览：AGENTS.md 最终内容（生成段=store 投影只读 + .topo/rules 人工段）；
- * - 编辑：.topo/rules/*.md 人工规则文件（list/读/写/删，REST 路径钳制）；
- * - 治理：命名规约/词汇表管理（NamingGovernancePanel 折叠保留，store 单源）。
- * 一键 sync 落盘 repo 根（幂等；manual_edit_conflict 询问 force）。
+ * 对齐 Codex/Claude Code/opencode：repo 根 AGENTS.md = 项目规约唯一真相源，
+ * 100% 人治 markdown。本页三件事：
+ * - 编辑/保存（sha1 乐观锁，外部改动 409 提示重读）；
+ * - Markdown 预览切换；
+ * - 初始化（文件不存在时生成初稿；存在时 init 只给体检建议不盲改）。
+ * 引擎消费（命名规约/术语表章节）由后端解析进 store 缓存，本页无管理面板。
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ShieldCheckIcon, DocumentTextIcon, PlusIcon, TrashIcon,
-  ArrowPathIcon, ChevronDownIcon, ChevronRightIcon, CheckIcon, BookOpenIcon,
+  ShieldCheckIcon, ArrowPathIcon, SparklesIcon,
+  DocumentTextIcon, PencilSquareIcon, CheckCircleIcon,
 } from '@heroicons/vue/24/outline'
 import MarkdownView from '@/components/MarkdownView.vue'
-import NamingGovernancePanel from '@/components/assets/NamingGovernancePanel.vue'
-import { apiGet, apiPost, apiDelete } from '@/services/api-client'
+import { apiGet, apiPost, apiPut } from '@/services/api-client'
 import { useAppDialog } from '@/composables/useAppDialog'
 import { currentProjectParams } from '@/services/project-service'
 
 const { t } = useI18n()
 const dialog = useAppDialog()
 
-const ctx = () => currentProjectParams()
+const content = ref('')
+const baseHash = ref('')
+const exists = ref(false)
+const loading = ref(true)
+const saving = ref(false)
+const dirty = ref(false)
+const mode = ref<'edit' | 'preview'>('edit')
+const initReport = ref('')
 
-// ── AGENTS.md 预览 ──
-const preview = ref('')
-const previewLoading = ref(false)
-const syncResult = ref('')
-
-async function loadPreview() {
-  previewLoading.value = true
+async function load(keepLocal = false) {
+  loading.value = true
   try {
-    const { root, project } = ctx()
+    const { root, project } = currentProjectParams()
     const qs = new URLSearchParams()
     if (root) qs.set('root', root)
     if (project) qs.set('project', project)
-    const r = await apiGet<{ content: string }>(`/arch/agents-md/preview?${qs}`)
-    preview.value = r.content
-  } catch { preview.value = '' } finally { previewLoading.value = false }
+    const r = await apiGet<{ exists: boolean; content: string; hash: string }>(
+      `/arch/agents-md?${qs}`)
+    if (!keepLocal || !dirty.value) {
+      exists.value = r.exists
+      content.value = r.content
+      baseHash.value = r.hash
+      dirty.value = false
+    }
+  } catch (e) {
+    initReport.value = e instanceof Error ? e.message : String(e)
+  } finally { loading.value = false }
 }
 
-async function syncNow() {
-  const { root, project } = ctx()
+async function save() {
+  const { root, project } = currentProjectParams()
+  saving.value = true
   try {
-    const r = await apiPost<{ changed?: boolean; status?: string }>('/arch/agents-md/sync', { root, project })
-    if (r.status === 'manual_edit_conflict') {
-      syncResult.value = t('spec.sync.conflict')
-      if (await dialog.confirm(t('spec.sync.forceConfirm'), { danger: true })) {
-        const r2 = await apiPost<{ changed: boolean }>('/arch/agents-md/sync', { root, project, force: true })
-        syncResult.value = r2.changed ? t('spec.sync.done') : t('spec.sync.idle')
+    const r = await apiPut<{ hash: string }>('/arch/agents-md', {
+      root, project, content: content.value, baseHash: baseHash.value,
+    })
+    baseHash.value = r.hash
+    dirty.value = false
+    exists.value = true
+    initReport.value = t('spec.editor.saved')
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes('409') || msg.includes('已被外部修改')) {
+      initReport.value = t('spec.editor.conflict')
+      if (await dialog.confirm(t('spec.editor.conflictReload'), { danger: true })) {
+        await load(true)
       }
     } else {
-      syncResult.value = r.changed ? t('spec.sync.done') : t('spec.sync.idle')
+      initReport.value = msg
     }
-    await loadPreview()
-  } catch (e) {
-    syncResult.value = e instanceof Error ? e.message : String(e)
-  }
+  } finally { saving.value = false }
 }
 
-// ── .topo/rules 文件管理 ──
-interface RuleFile { name: string; bytes: number }
-const files = ref<RuleFile[]>([])
-const activeName = ref('')
-const editing = ref('')
-const dirty = ref(false)
-const creating = ref(false)
-const newName = ref('')
-
-async function loadFiles(keep?: string) {
-  const { root } = ctx()
-  const qs = new URLSearchParams()
-  if (root) qs.set('root', root)
-  const r = await apiGet<RuleFile[]>(`/arch/rules-files?${qs}`)
-  files.value = r
-  if (keep && r.some((f) => f.name === keep)) { await openFile(keep); return }
-  if (!keep && r.length && !activeName.value) await openFile(r[0].name)
-}
-
-async function openFile(name: string) {
-  if (dirty.value && !(await dialog.confirm(t('spec.rules.unsaved')))) return
-  const { root } = ctx()
-  const r = await apiGet<{ name: string; content: string }>(
-    `/arch/rules-files/${encodeURIComponent(name)}?root=${encodeURIComponent(root || '')}`)
-  activeName.value = name
-  editing.value = r.content
-  dirty.value = false
-  creating.value = false
-}
-
-async function saveFile() {
-  const { root } = ctx()
-  const name = creating.value ? newName.value.trim() : activeName.value
-  if (!name || !/[\w.-]+\.md$/.test(name)) {
-    await dialog.alert(t('spec.rules.nameInvalid')); return
-  }
-  if (!editing.value.trim()) { await dialog.alert(t('spec.rules.empty')); return }
+async function initDraft() {
+  const { root, project } = currentProjectParams()
   try {
-    await apiPost('/arch/rules-files', { root, name, content: editing.value })
-    creating.value = false
-    dirty.value = false
-    await loadFiles(name)
+    const r = await apiPost<{
+      created: boolean; lines: number; conventions: number
+      glossary: number; suggestions: string[]
+    }>('/arch/agents-md/init', { root, project })
+    initReport.value = (r.created
+      ? t('spec.editor.initDone', { lines: r.lines })
+      : t('spec.editor.initCheck', { lines: r.lines })) + ' — ' + r.suggestions.join('；')
+    await load()
   } catch (e) {
-    await dialog.alert(e instanceof Error ? e.message : String(e))
+    initReport.value = e instanceof Error ? e.message : String(e)
   }
 }
 
-async function deleteFile() {
-  if (!activeName.value || creating.value) return
-  if (!(await dialog.confirm(t('spec.rules.deleteConfirm', { name: activeName.value }), { danger: true }))) return
-  const { root } = ctx()
-  await apiDelete(`/arch/rules-files/${encodeURIComponent(activeName.value)}?root=${encodeURIComponent(root || '')}`)
-  activeName.value = ''
-  editing.value = ''
-  await loadFiles()
-}
-
-function startCreate() {
-  creating.value = true
-  newName.value = ''
-  editing.value = t('spec.rules.template')
-  dirty.value = true
-}
-
-// ── 命名治理折叠 ──
-const governanceOpen = ref(false)
-
-onMounted(() => { loadPreview(); loadFiles() })
-const previewStats = computed(() => `${preview.value.length} chars`)
+onMounted(() => load())
+const lineCount = computed(() => content.value.split('\n').length)
+const tooLong = computed(() => lineCount.value > 200)
 </script>
 
 <template>
   <div class="p-5 space-y-4">
-    <!-- 头部: 标题 + sync -->
+    <!-- 头部 -->
     <div class="flex items-center gap-3">
       <ShieldCheckIcon class="w-5 h-5 text-ctp-peach" />
-      <h2 class="text-base font-semibold">{{ t('spec.unified.title') }}</h2>
-      <span class="text-[11px] text-ctp-overlay1">{{ t('spec.unified.desc') }}</span>
+      <h2 class="text-base font-semibold">{{ t('spec.editor.title') }}</h2>
+      <span class="text-[11px] text-ctp-overlay1">{{ t('spec.editor.desc') }}</span>
       <div class="ml-auto flex items-center gap-2">
-        <span v-if="syncResult" class="text-[11px] text-ctp-overlay1">{{ syncResult }}</span>
-        <button class="btn btn-sm btn-green" @click="syncNow">
-          <ArrowPathIcon class="w-3.5 h-3.5" />{{ t('spec.sync.btn') }}
+        <span v-if="initReport" class="text-[11px] text-ctp-overlay1 truncate max-w-[24rem]" :title="initReport">
+          {{ initReport }}
+        </span>
+        <button class="btn btn-sm" :disabled="loading" @click="initDraft">
+          <SparklesIcon class="w-3.5 h-3.5" />
+          {{ exists ? t('spec.editor.check') : t('spec.editor.init') }}
+        </button>
+        <button class="btn btn-sm btn-green" :disabled="!dirty || saving" @click="save">
+          <CheckCircleIcon v-if="!dirty" class="w-3.5 h-3.5" />
+          {{ saving ? '…' : t('common.save') }}<span v-if="dirty" class="text-ctp-yellow"> ●</span>
         </button>
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <!-- 左: AGENTS.md 预览(只读) -->
-      <div class="panel overflow-hidden flex flex-col">
-        <div class="panel-header">
-          <span class="flex items-center gap-2">
-            <DocumentTextIcon class="w-4 h-4 text-ctp-sky" />AGENTS.md
-            <span class="chip bg-ctp-surface0 text-ctp-overlay0">{{ previewStats }}</span>
-          </span>
-          <span class="text-[10px] text-ctp-overlay0">{{ t('spec.preview.readonly') }}</span>
-        </div>
-        <div class="p-3 overflow-auto max-h-[32rem] text-xs">
-          <p v-if="previewLoading" class="text-ctp-overlay1">…</p>
-          <MarkdownView v-else :content="preview" />
-        </div>
+    <!-- 工具条 -->
+    <div class="flex items-center gap-2 text-[11px] text-ctp-overlay1">
+      <div class="flex rounded-lg border border-ctp-surface0 overflow-hidden">
+        <button
+          class="px-2.5 py-1 flex items-center gap-1"
+          :class="mode === 'edit' ? 'bg-ctp-surface1 text-ctp-text' : 'hover:text-ctp-text'"
+          @click="mode = 'edit'"
+        ><PencilSquareIcon class="w-3 h-3" />{{ t('spec.editor.edit') }}</button>
+        <button
+          class="px-2.5 py-1 flex items-center gap-1"
+          :class="mode === 'preview' ? 'bg-ctp-surface1 text-ctp-text' : 'hover:text-ctp-text'"
+          @click="mode = 'preview'"
+        ><DocumentTextIcon class="w-3 h-3" />{{ t('spec.editor.preview') }}</button>
       </div>
+      <span :class="tooLong ? 'text-ctp-red' : ''">
+        {{ lineCount }} / 200 {{ t('spec.editor.lines') }}
+      </span>
+      <span v-if="dirty" class="text-ctp-yellow">{{ t('spec.editor.unsaved') }}</span>
+      <span class="ml-auto">{{ t('spec.editor.contract') }}</span>
+    </div>
 
-      <!-- 右: .topo/rules 编辑器 -->
-      <div class="panel overflow-hidden flex flex-col">
-        <div class="panel-header">
-          <span class="flex items-center gap-2">
-            {{ t('spec.rules.title') }}
-            <span class="chip bg-ctp-surface0 text-ctp-subtext0">{{ files.length }}</span>
-          </span>
-          <button class="btn btn-xs" @click="startCreate">
-            <PlusIcon class="w-3 h-3" />{{ t('common.create') }}
-          </button>
-        </div>
-        <div class="flex gap-px border-b border-ctp-surface0">
-          <div class="w-36 shrink-0 border-r border-ctp-surface0 max-h-[32rem] overflow-auto">
-            <button
-              v-for="f in files" :key="f.name"
-              class="w-full text-left px-2.5 py-1.5 text-[11px] font-mono truncate"
-              :class="f.name === activeName && !creating ? 'bg-ctp-surface1 text-ctp-text' : 'text-ctp-subtext0 hover:text-ctp-text'"
-              @click="openFile(f.name)"
-            >{{ f.name }}</button>
-          </div>
-          <div class="flex-1 flex flex-col">
-            <div v-if="creating" class="flex items-center gap-1.5 px-2 py-1.5 border-b border-ctp-surface0">
-              <input v-model="newName" class="input !py-0.5 text-[11px] font-mono flex-1" placeholder="arch-style.md" />
-              <CheckIcon class="w-3.5 h-3.5 text-ctp-green" />
-            </div>
-            <div v-else class="px-2 py-1 border-b border-ctp-surface0 text-[10px] text-ctp-overlay0 font-mono">
-              {{ activeName || t('common.empty') }}<span v-if="dirty" class="text-ctp-yellow"> ●</span>
-            </div>
-            <textarea
-              v-model="editing"
-              class="flex-1 min-h-[24rem] p-2.5 text-[11px] font-mono bg-transparent outline-none resize-none"
-              :placeholder="t('spec.rules.placeholder')"
-              @input="dirty = true"
-            />
-            <div class="flex justify-end gap-2 px-2 py-1.5 border-t border-ctp-surface0">
-              <button class="btn btn-xs btn-red" :disabled="!activeName || creating" @click="deleteFile">
-                <TrashIcon class="w-3 h-3" />
-              </button>
-              <button class="btn btn-xs btn-green" :disabled="!dirty && !creating" @click="saveFile">
-                {{ t('common.save') }}
-              </button>
-            </div>
-          </div>
-        </div>
+    <!-- 主体 -->
+    <div class="panel overflow-hidden">
+      <p v-if="loading" class="p-4 text-xs text-ctp-overlay1">…</p>
+      <textarea
+        v-else-if="mode === 'edit'"
+        v-model="content"
+        class="w-full min-h-[34rem] p-4 text-xs font-mono bg-transparent outline-none resize-y"
+        :placeholder="t('spec.editor.placeholder')"
+        @input="dirty = true"
+      />
+      <div v-else class="p-4 max-h-[34rem] overflow-auto text-xs">
+        <MarkdownView :content="content" />
       </div>
     </div>
 
-    <!-- 命名治理(折叠) -->
-    <div class="panel overflow-hidden">
-      <button
-        class="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-ctp-surface0/50"
-        @click="governanceOpen = !governanceOpen"
-      >
-        <component :is="governanceOpen ? ChevronDownIcon : ChevronRightIcon" class="w-4 h-4 text-ctp-overlay1" />
-        <BookOpenIcon class="w-4 h-4 text-ctp-mauve" />
-        <span class="font-medium">{{ t('spec.governance.title') }}</span>
-        <span class="text-[11px] text-ctp-overlay1 ml-1">{{ t('spec.governance.desc') }}</span>
+    <!-- 首次引导 -->
+    <div v-if="!loading && !exists && !dirty" class="panel p-4 flex items-center gap-3">
+      <ArrowPathIcon class="w-5 h-5 text-ctp-sky shrink-0" />
+      <div class="text-xs text-ctp-subtext0 flex-1">{{ t('spec.editor.emptyHint') }}</div>
+      <button class="btn btn-sm btn-green" @click="initDraft">
+        <SparklesIcon class="w-3.5 h-3.5" />{{ t('spec.editor.init') }}
       </button>
-      <div v-show="governanceOpen" class="border-t border-ctp-surface0">
-        <NamingGovernancePanel />
-      </div>
     </div>
   </div>
 </template>
