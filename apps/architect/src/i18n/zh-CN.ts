@@ -233,7 +233,7 @@ export default {
   },
   mcp: {
     title: 'MCP 服务',
-    desc: 'architect 资产地图对外服务：外部 AI coding agent（Claude Code/Cursor/Cline/opencode）经 MCP 查询架构资产，全部返回 Markdown 文档。',
+    desc: 'architect 对外 MCP 服务：serve 执行器/外部 TUI 经此与 architect 交互——两端(取执行契约/提交回执)+资产地图与历史上下文按需取用，全部返回 Markdown。',
     copy: '复制',
     stdio: {
       title: 'stdio 通道（推荐本地）',
@@ -249,8 +249,13 @@ export default {
       overview: '项目资产地图总览（组件目录/统计/基线视图）——写码前先看',
       component: '组件档案：文件/语义资产/依赖出入',
       assets: '语义资产检索（kind/关键词）',
-      rules: '规约全集：编码规约+命名规约+词汇表',
+      rules: '规约全集：编码规约(自管)+词汇表+项目规则',
       graph: '关系图（mermaid）：组件依赖/语义关系',
+      mandate: '开工前取执行契约：规约/允许范围/约束/验收判据',
+      receipt: '完工后提交回执：越界检测(自纠正)+验收对照+改动分布',
+      ctxSearch: '跨会话检索历史上下文（工具轨迹/产物/决策/摘要）',
+      ctxGet: '会话上下文包：摘要+关键单元+备案文档',
+      ctxSummarize: '生成/刷新会话摘要',
     },
     calls: { title: '调用日志', empty: '暂无调用记录' },
     done: '成功',

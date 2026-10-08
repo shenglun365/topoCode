@@ -105,12 +105,14 @@ def test_degraded_prompt_free_of_kb_narrative(arch_env):
     assert "KB 已绑定" in linked and "kb.asset.search" in linked
 
 
-def test_run_arch_tool_blocks_mcp_call_when_degraded(arch_env):
-    """执行面: mcp.call(KB MCP 出向代理)在降级项目上硬拦。"""
+def test_mcp_call_retired_from_registry(arch_env):
+    """mcp.call 出向代理已退役(2610 MCP 定型): 注册表与执行面均不存在。"""
     from topoone_app_architect.agent.tools import req_agent
+    names = [t["name"] for t in req_agent.architect_tools()]
+    assert "mcp.call" not in names
     r = req_agent.run_arch_tool("mcp.call", {"tool": "x", "params": {}},
                                 root=None, project=None)
-    assert "未关联知识库" in str(r.get("error")), r
+    assert "未关联知识库" not in str(r)          # 非拦截, 是未知工具
 
 
 def test_placeholder_only_turn_not_landed_as_noise():

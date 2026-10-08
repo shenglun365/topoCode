@@ -142,12 +142,12 @@ def _r_capability(ctx: Dict[str, Any]) -> str:
 # R3.4: 工具面按挡裁剪(toolsurface 消费落地; kb=False → 检索工具同裁)
 KB_RETRIEVAL_TOOLS = ("kb.asset.search", "kb.code_mappings", "kb.baseline",
                       "kb.graph")
-# cv-187 KB 面(检索四件 + mcp.call KB MCP 出向代理)——提示面裁剪与执行面
-# 拦截共用的单源集合(禁止字面量散落)
-KB_FACE_TOOLS = frozenset(KB_RETRIEVAL_TOOLS) | {"mcp.call"}
+# cv-187 KB 面(检索四件)——提示面裁剪与执行面拦截共用的单源集合。
+# mcp.call 出向代理已退役(2610 MCP 定型: 主 agent 非 MCP 消费者)
+KB_FACE_TOOLS = frozenset(KB_RETRIEVAL_TOOLS)
 _WRITE_TOOLS = ("asset.semantic.save", "asset.semantic.update",
                 "asset.semantic.merge", "asset.semantic.split",
-                "asset.upsert", "mcp.call", "convention.propose",
+                "asset.upsert", "convention.propose",
                 "contract.propose")
 _MINIMAL_KEEP = ("kb.asset.search", "project.ctx", "map.overview",
                  "code.read_symbols", "asset.semantic.search",
@@ -190,18 +190,6 @@ def _r_diagram_skill(ctx: Dict[str, Any]) -> str:
     return _req4._diagram_skill_doc()
 
 
-def _r_mcp(_ctx: Dict[str, Any]) -> str:
-    # cv-189 注入层硬控制: 未关联 KB → MCP 块整块不装配(mcp.call 走 KB :3460)
-    try:
-        from ...arch_routes.project import kb_degraded as _kd
-        if _kd(_ctx.get("root"), _ctx.get("project")):
-            return ""
-    except Exception:  # noqa: BLE001 — 判定失败保持原状
-        pass
-    from ...agent.tools import req_agent as _req5
-    return _req5._mcp_doc()
-
-
 def _r_skill_docs(ctx: Dict[str, Any]) -> str:
     scenarios = ctx.get("skill_scenarios") or []
     if not scenarios:
@@ -236,7 +224,6 @@ def _register_defaults() -> None:
     register_block(PromptBlock("capability", _r_capability, order=10, priority=10, required=True))
     register_block(PromptBlock("ir_schema", _r_ir_schema, order=12, priority=45))
     register_block(PromptBlock("diagram_skill", _r_diagram_skill, order=14, priority=40))
-    register_block(PromptBlock("mcp", _r_mcp, order=16, priority=30))
     register_block(PromptBlock("skill_catalog", _r_skill_catalog, order=17, priority=26))
     register_block(PromptBlock("skill_docs", _r_skill_docs, order=18, priority=22))
 
@@ -318,7 +305,6 @@ TOOL_BRIEFS: Dict[str, str] = {
         "把观察到的命名重复模式固化为命名规约提案(pending，待设计者确认/忽略)",
     "contract.propose":
         "把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)",
-    "mcp.call": '调用 MCP 开放工具(外部/注册工具)，参数 {"tool":"<名>","params":{…}}',
     "req.propose":
         "需求提案(新建或幂等更新)——**开发类需求**(要写代码/改代码/交付组件)时调用，"
         "创建需求卡即 ready(designMd=选型与结构)；分析/问答类请求不要产卡。"
@@ -380,7 +366,6 @@ TOOL_PARAM_DOCS: Dict[str, str] = {
     "contract.propose":
         '{"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, '
         "acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)",
-    "mcp.call": '{"tool": "<mcp工具名>", "params": {…}}',
     "req.propose":
         '{"title": "需求标题(必填)", "requirementMd": "需求目标(全文)", '
         '"designMd": "选型与结构方案", "priority": "P1", "estMin": 30, '

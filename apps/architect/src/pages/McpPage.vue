@@ -27,11 +27,16 @@ const claudeCmd = computed(() => `claude mcp add topo-architect -- ${stdioCmd}`)
 const copied = ref('')
 
 const TOOLS = [
+  { name: 'task.mandate', desc: () => t('mcp.tools.mandate'), twoEnds: true },
+  { name: 'task.receipt', desc: () => t('mcp.tools.receipt'), twoEnds: true },
   { name: 'map.overview', desc: () => t('mcp.tools.overview') },
   { name: 'map.component', desc: () => t('mcp.tools.component') },
   { name: 'map.assets', desc: () => t('mcp.tools.assets') },
   { name: 'map.rules', desc: () => t('mcp.tools.rules') },
   { name: 'map.graph', desc: () => t('mcp.tools.graph') },
+  { name: 'ctx.search', desc: () => t('mcp.tools.ctxSearch') },
+  { name: 'ctx.get', desc: () => t('mcp.tools.ctxGet') },
+  { name: 'ctx.summarize', desc: () => t('mcp.tools.ctxSummarize') },
 ]
 
 onMounted(async () => {
@@ -105,6 +110,10 @@ async function copy(text: string, key: string) {
       <div class="divide-y divide-ctp-surface0">
         <div v-for="tool in TOOLS" :key="tool.name" class="flex items-start gap-2 px-4 py-2 text-xs">
           <code class="font-mono text-ctp-sapphire shrink-0">{{ tool.name }}</code>
+          <span
+            v-if="tool.twoEnds"
+            class="chip bg-ctp-green/15 text-ctp-green shrink-0"
+          >两端</span>
           <span class="text-ctp-subtext1">{{ tool.desc() }}</span>
         </div>
       </div>

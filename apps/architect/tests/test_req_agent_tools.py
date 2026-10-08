@@ -1,4 +1,4 @@
-"""plan agent P2 工具测试：req.finalize(定稿→待执行) + mcp.call(MCP 出向) + 能力文档注入。
+"""plan agent P2 工具测试：req.finalize(定稿→待执行) + 能力文档注入(mcp.call 已退役)。
 
 Run: cd <repo> && python -m pytest apps/architect/tests/test_req_agent_tools.py -q
 """
@@ -22,8 +22,6 @@ def _setup(tmp_path, monkeypatch):
     C._project_dbs.clear()
     C.reset_project(C._project_var.set(None))
     C.reset_req(C._req_var.set(None))
-    req_agent._MCP_TOOLS_CACHE["ts"] = 0.0
-    req_agent._MCP_TOOLS_CACHE["tools"] = []
     return C.setup(data_dir=data)
 
 
@@ -44,68 +42,12 @@ class _FakeGW:
         return self._tools_ret
 
 
-class TestMcpCall:
-    def test_mcp_call_forwards(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        fake = _FakeGW(query_ret={"ok": True, "tool": "arch.read", "call": {"data": 42}})
-        monkeypatch.setattr(req_agent, "_kb_gateway", lambda: fake)
-        res = req_agent.tool_mcp_call("arch.read", {"path": "/x"})
-        assert res["ok"] is True
-        assert fake.calls == [("arch.read", {"path": "/x"})]
-
-    def test_mcp_call_missing_tool(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        res = req_agent.tool_mcp_call("")
-        assert res["ok"] is False
-        assert "缺少" in res["error"]
-
-    def test_mcp_call_unreachable(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        monkeypatch.setattr(req_agent, "_kb_gateway", lambda: _FakeGW(query_ret=None))
-        res = req_agent.tool_mcp_call("arch.read", {})
-        assert res["ok"] is False
-        assert "不可达" in res["error"]
-
 
 class TestCapabilityDoc:
-    def test_doc_lists_mcp_tools(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        req_agent._MCP_TOOLS_CACHE.update({
-            "ts": 9999999999.0,
-            "tools": [{"name": "arch.read", "description": "Read a file"},
-                      {"name": "arch.status", "description": "Query status"}],
-        })
-        doc = req_agent._mcp_doc()
-        assert "arch.read" in doc
-        assert "arch.status" in doc
+    """mcp.call/_mcp_doc 已退役(2610 MCP 定型): 系统提示不再含 MCP 出向块。"""
 
-    def test_doc_empty_when_no_tools(self, tmp_path, monkeypatch):
+    def test_system_prompt_excludes_mcp_call(self, tmp_path, monkeypatch):
         _setup(tmp_path, monkeypatch)
-        monkeypatch.setattr(req_agent, "_kb_gateway",
-                            lambda: _FakeGW(tools_ret=[]))
-        doc = req_agent._mcp_doc()
-        assert "无可用 MCP 工具" in doc
-
-    def test_mcp_tool_list_caches(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        fake = _FakeGW(tools_ret=[{"name": "arch.read", "description": "x"}])
-        monkeypatch.setattr(req_agent, "_kb_gateway", lambda: fake)
-        assert req_agent._mcp_tool_list()[0]["name"] == "arch.read"
-        n = len(fake.calls)  # tools() 被调用次数
-        req_agent._mcp_tool_list()  # 命中缓存
-        assert len(fake.calls) == n  # 不再调用
-
-    def test_system_prompt_includes_new_tools(self, tmp_path, monkeypatch):
-        _setup(tmp_path, monkeypatch)
-        # cv-189: 降级项目 MCP 块整块不注入——本测试测 MCP 渲染, 用非降级口径
-        import topoone_app_architect.arch_routes.project as _proj_mod
-        monkeypatch.setattr(_proj_mod, "kb_degraded",
-                            lambda root=None, project_id=None: False)
-        req_agent._MCP_TOOLS_CACHE.update({
-            "ts": 9999999999.0,
-            "tools": [{"name": "arch.read", "description": "x"}],
-        })
         prompt = req_agent.chat_system_prompt(None, "proj-x")
-        assert "mcp.call" in prompt
+        assert "mcp.call" not in prompt
         assert "req.finalize" not in prompt   # 已退役(需求卡创建即 ready)
-        assert "arch.read" in prompt

@@ -362,51 +362,8 @@ from ...agent.tools.impl.asset import (tool_asset_semantic_merge,
 from ...agent.tools.impl.diagram import tool_diagram_build, tool_diagram_validate
 
 
-# ── MCP 出向工具(经 MCP server 转发，供 plan agent 调用开放/外部 MCP 工具) ──
-
-_MCP_TOOLS_CACHE: Dict[str, Any] = {"ts": 0.0, "tools": []}
-_MCP_TOOLS_TTL = 60.0  # 秒：列工具带 TTL 缓存，避免每回合网络往返
-
-
-def _mcp_tool_list() -> List[Dict[str, Any]]:
-    """列 MCP 可用工具(GET /v1/tools，带 TTL 缓存)。不可达返回缓存/[]。"""
-    import time
-    now = time.time()
-    if _MCP_TOOLS_CACHE["tools"] and now - _MCP_TOOLS_CACHE["ts"] <= _MCP_TOOLS_TTL:
-        return _MCP_TOOLS_CACHE["tools"]
-    from ...agent.governance.timeouts import get as _timeout_of
-    tools = _kb_gateway().tools(timeout=_timeout_of("kb_mcp_tools")) or []
-    if tools:
-        _MCP_TOOLS_CACHE["ts"] = now
-        _MCP_TOOLS_CACHE["tools"] = tools
-    return tools
-
-
-def _mcp_doc() -> str:
-    """MCP 开放工具清单(动态)：注入系统提示，供 plan agent 经 mcp.call 调用。"""
-    tools = _mcp_tool_list()
-    if not tools:
-        return ("MCP(mcp.call)：当前无可用 MCP 工具(MCP server 不可达或未注册工具)，"
-                "如需外部工具请先在「外部调用」页配置。")
-    lines = ["MCP 开放工具(经 mcp.call 调用，参数 {\"tool\":\"<名>\",\"params\":{…}})："]
-    for t in tools[:20]:
-        lines.append(f"- {t.get('name', '')}: {t.get('description', '')}")
-    return "\n".join(lines)
-
-
-@register_architect_tool(
-    "mcp.call",
-    "调用 MCP 开放工具(经 MCP server 转发，可调用外部/注册的工具)。"
-    "参数 {\"tool\": \"<mcp工具名>\", \"params\": {…工具参数}}。返回 {ok, tool, call|error}。",
-)
-def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    if not tool:
-        return {"ok": False, "error": "缺少 MCP 工具名(tool)"}
-    from ...agent.governance.timeouts import get as _timeout_of
-    result = _kb_gateway().query(tool, timeout=_timeout_of("kb_mcp_call"), **(params or {}))
-    if result is None:
-        return {"ok": False, "tool": tool, "error": "MCP 不可达或超时"}
-    return result
+# ── MCP 出向(mcp.call)已退役(2610 MCP 定型): 主 agent 非 MCP 消费者,
+# 出向代理与定位冲突; KB 面 kb.* 检索四件保留原 kb_enabled 拦截语义。──
 
 
 # ── 需求分析工具(plan 结论 → 结构化分析) ────────────────
@@ -1162,7 +1119,7 @@ _CAPABILITY_DOC = (
     "- asset.semantic.split：拆分资产(按 anchorKeys 锚点组拆出新资产；原资产留痕 splitInto)\n"
     "- convention.propose：把观察到的命名重复模式固化为命名规约提案(pending，待设计者确认/忽略)\n"
     "- contract.propose：把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)\n"
-    "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
+
     "- req.propose：需求提案(新建或幂等更新)——**开发类需求**(要写代码/改代码/交付组件)时调用，"
     "创建需求卡即 ready(designMd=选型与结构)；分析/问答类请求不要产卡。"
     "用户要求 编写脚本/工具/程序 时**必须先调本工具**，由 /执行 链路产出代码——"
@@ -1340,12 +1297,6 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
     )
     ir_doc = f"\n\n{_ir_schema_doc()}"
     extra = f"\n\n{_diagram_skill_doc()}" if diagram_skill else ""
-    try:
-        from ...arch_routes.project import kb_degraded as _kd
-        _mcp_on = not _kd(root, project)
-    except Exception:  # noqa: BLE001
-        _mcp_on = True
-    mcp_extra = f"\n\n{_mcp_doc()}" if _mcp_on else ""
     skill_extra = ""
     if skill_scenarios:
         try:
@@ -1364,7 +1315,7 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
         "已创建需求(RQ 编号以系统回执为准)后继续跟进完善，不得再声明该任务不属于职责范围。\n\n"
         # GU-3 人格统一: posture 判据块与注册表同源(cognition.prompt)
         f"{_posture_textLegacy()}\n\n"
-        f"{_CAPABILITY_DOC}{ir_doc}{extra}{mcp_extra}{skill_extra}"
+        f"{_CAPABILITY_DOC}{ir_doc}{extra}{skill_extra}"
     )
 
 

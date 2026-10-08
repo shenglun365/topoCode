@@ -40,7 +40,7 @@ _OVERFLOW_DIGEST_SYSTEM = (
 def _kb_face_enabled(gear, r34: bool, root: str, project: str) -> bool:
     """R3.4 挡位 kb 开关 ∧ cv-187 项目关联硬门(kb_degraded 共用口径)。
 
-    未关联 KB(无基线) → kb.*/mcp.call 工具自动关闭(提示面; 执行面拦截在
+    未关联 KB(无基线) → kb.* 工具自动关闭(mcp.call 已退役)(提示面; 执行面拦截在
     run_arch_tool)。判定失败保持原状不误关。"""
     enabled = bool(getattr(gear, "kb", True)) if r34 else True
     try:

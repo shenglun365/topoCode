@@ -19,14 +19,14 @@ from topoone_app_architect.agent.cognition.prompt import (
 
 def test_r34_full_surface_unchanged():
     doc = capability_doc_from_tools()
-    assert "kb.asset.search" in doc and "mcp.call" in doc
+    assert "kb.asset.search" in doc
     assert "asset.semantic.save" in doc
 
 
 def test_r34_kb_false_drops_retrieval():
     doc = capability_doc_from_tools(kb_enabled=False)
     assert "kb.asset.search" not in doc and "kb.graph" not in doc
-    assert "mcp.call" not in doc                          # cv-189: KB MCP 出向同裁
+    assert "mcp.call" not in doc   # mcp.call 已退役(2610 MCP 定型)
 
 
 def test_r34_reduced_drops_writes():

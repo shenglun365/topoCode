@@ -28,6 +28,8 @@ TOOLS = [
     {"name": "map.graph", "desc": "关系图（mermaid）：component=组件依赖图 / semantic=语义关系图", "args": {"kind": "component|semantic", "project": "项目 id"}},
     {"name": "ctx.search", "desc": "跨会话检索历史上下文（单元/消息/备案文档；讨论关联结论先查这里）", "args": {"query": "关键词", "type": "单元类型", "conversation": "限定会话 id", "limit": "条数", "project": "项目 id"}},
     {"name": "ctx.get", "desc": "会话上下文包：摘要+关键单元+备案文档", "args": {"conversation": "会话 id", "project": "项目 id"}},
+    {"name": "task.mandate", "desc": "开工前取执行契约: 规约/允许范围/约束/验收判据+项目规约全集(task_id 或 req_id)", "args": {"task_id": "任务 id", "req_id": "需求 id(无任务卡时)", "project": "项目 id"}},
+    {"name": "task.receipt", "desc": "完工后提交回执: architect 越界检测(L-1① 自纠正)+验收对照+改动分布——评估性返回不改任务状态", "args": {"task_id": "任务 id", "changed_files": "改动文件相对路径清单", "summary": "执行摘要(可选)"}},
     {"name": "ctx.summarize", "desc": "生成/刷新会话摘要（标题+结论/决策/待办）", "args": {"conversation": "会话 id"}},
 ]
 
@@ -276,6 +278,10 @@ def run_tool(name: str, args: dict) -> str:
         "map.graph": lambda: tool_graph(args.get("kind") or "component",
                                         args.get("project")),
     }
+    if name.startswith("task."):
+        from .task_tools import run_task_tool
+        _record(name, f"{name} {args}")
+        return run_task_tool(name, args)
     if name.startswith("ctx."):
         from ..agent.memory import units as context_registry
         _record(name, f"{name} {args}")

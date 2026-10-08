@@ -61,6 +61,21 @@ def build_mcp(name: str = "topo-architect"):
         """关系图（mermaid）：component=组件依赖图 / semantic=语义关系图。"""
         return run_tool("map.graph", {"kind": kind, "project": project})
 
+    @mcp.tool(name="task.mandate")
+    def task_mandate(task_id: str = "", req_id: str = "",
+                     project: Optional[str] = None) -> str:
+        """开工前取执行契约: 规约/允许范围/约束/验收判据+项目规约全集。task_id 或 req_id 二选一。"""
+        return run_tool("task.mandate", {"task_id": task_id, "req_id": req_id,
+                                         "project": project})
+
+    @mcp.tool(name="task.receipt")
+    def task_receipt(task_id: str, changed_files: list[str],
+                     summary: str = "") -> str:
+        """完工后提交回执: architect 越界检测+验收对照+改动分布(自纠正信息)。changed_files=相对路径清单。"""
+        return run_tool("task.receipt", {"task_id": task_id,
+                                         "changed_files": changed_files,
+                                         "summary": summary})
+
     @mcp.tool(name="ctx.search")
     def ctx_search(query: str, type: str = "", conversation: str = "",  # noqa: A002
                    limit: int = 20, project: Optional[str] = None) -> str:

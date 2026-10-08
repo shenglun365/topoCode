@@ -120,8 +120,8 @@ from ..agent.tools.req_agent import register_architect_tool  # noqa: E402
 
 @register_architect_tool(
     "agents.md.sync",
-    "生成/刷新项目根 AGENTS.md(规约全集+命名规约+词汇表+资产概览+项目规则目录,"
-    "幂等)。用户要求 维护/更新/生成 AGENTS.md 或「把规约固化给执行器」时调用。"
+    "生成/刷新项目根 AGENTS.md(自管编码规约+词汇表+项目规则目录, 幂等)。"
+    "用户要求 维护/更新/生成 AGENTS.md 或「把规约固化给执行器」时调用。"
     "写用户仓库属显式动作——仅用户表达该意图时调用。"
     "返回 manual_edit_conflict=生成段被手改: 询问用户是否覆盖, 确认后带 force=true 重调。",
 )
