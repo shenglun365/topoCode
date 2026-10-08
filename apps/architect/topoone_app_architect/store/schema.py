@@ -818,8 +818,37 @@ def _drop_retired_tables(db) -> None:
         db.execute(f"DROP TABLE IF EXISTS {t}")
 
 
+def _rebuild_legacy_arch_assets(db) -> None:
+    """arch_assets 两代同名旧表兜底(须在各库 DDL executescript 前调用)。
+
+    旧 schema(id/conversation_id/title/content/meta…)残留时 CREATE TABLE
+    IF NOT EXISTS 永不生效, 新代码 ORDER BY name 直接崩(no such column)。
+    空旧表 → DROP(随后 DDL 按新结构重建); 非空旧表 → 幂等补列保数据可读。"""
+    try:
+        cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_assets)")}
+    except Exception:  # noqa: BLE001 — 无表/无权限: 交给后续 DDL
+        return
+    if not cols or "name" in cols:
+        return
+    try:
+        row = db.fetchone("SELECT COUNT(*) FROM arch_assets")
+        cnt = row[0] if row else 0
+    except Exception:  # noqa: BLE001
+        cnt = 0
+    if cnt == 0:
+        db.execute("DROP TABLE arch_assets")
+    else:
+        _add_cols(db, "arch_assets", [
+            ("name", "TEXT DEFAULT ''"),
+            ("description", "TEXT DEFAULT ''"),
+            ("payload", "TEXT DEFAULT '{}'"),
+            ("enabled", "INTEGER DEFAULT 1"),
+        ])
+
+
 def architect_db_migrations(db) -> None:
     """architect 主库增量迁移(旧库补列/补表)。幂等: 已存在跳过。"""
+    _rebuild_legacy_arch_assets(db)
     db.executescript(ARCH_MAIN_TABLES_SQL)
     _drop_retired_tables(db)
     _main_migrations(db)
@@ -1091,6 +1120,7 @@ def init_architect_db(db) -> None:
     主库 = 全局表 + arch_projects 注册表 + 全局 id 序列，同时容纳项目表作为
     「未绑定项目」的默认桶(无项目上下文时的读写落点)。
     """
+    _rebuild_legacy_arch_assets(db)
     db.executescript(ARCH_MAIN_TABLES_SQL + "\n" + ARCH_PROJECT_TABLES_SQL)
     _main_migrations(db)
     _project_migrations(db)
@@ -1098,5 +1128,6 @@ def init_architect_db(db) -> None:
 
 def init_architect_project_db(db) -> None:
     """初始化 architect 项目库(architect/<pid>/arch.db)。幂等。"""
+    _rebuild_legacy_arch_assets(db)
     db.executescript(ARCH_PROJECT_TABLES_SQL)
     _project_migrations(db)
