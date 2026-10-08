@@ -115,3 +115,31 @@ def test_scan_diff_recorded(advice_env):
     out = record_test_scan(advice_env["pid"], root)
     assert out["diff"]["added"] == ["tests/b_test.py"]
     assert read_test_scan(advice_env["pid"])["count"] == 2
+
+
+# ── L-3 组件域乘数(deferred-2610): 层级 1.0/1.5/2.0 + component 字段 ──
+
+def test_component_level_multiplier(advice_env):
+    from topoone_app_architect.store.component import ComponentStore
+    pid = advice_env["pid"]
+    d = _get(advice_env["client"], "/unit-tests/advice", root=advice_env["root"])
+    base_weight = next(g["weight"] for g in d["items"] if g["symbol"] == "m.Report")
+    assert base_weight == 3 and d["items"][0]["component"] == ""   # 无组件=1.0
+
+    # Report 归属 L2 核心域组件 → 乘 2.0
+    ComponentStore.replace_rev(pid, REV,
+                               [{"id": "core", "name": "CoreDomain",
+                                 "owns": ["src/report.py"], "source": "community"}],
+                               [{"childId": "core", "parentId": "root", "level": 2}])
+    d2 = _get(advice_env["client"], "/unit-tests/advice", root=advice_env["root"])
+    top = next(g for g in d2["items"] if g["symbol"] == "m.Report")
+    assert top["weight"] == 6                                   # 1×3×2.0
+    assert top["component"] == "CoreDomain"
+
+    # L0 归属 → 乘 1.0(与无组件一致)
+    ComponentStore.replace_rev(pid, REV,
+                               [{"id": "c0", "name": "Atom",
+                                 "owns": ["src/report.py"], "source": "community"}],
+                               [{"childId": "c0", "parentId": "root", "level": 0}])
+    d3 = _get(advice_env["client"], "/unit-tests/advice", root=advice_env["root"])
+    assert next(g for g in d3["items"] if g["symbol"] == "m.Report")["weight"] == 3

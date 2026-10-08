@@ -1289,6 +1289,7 @@ export default {
       advisory: 'Advisory · for reference',
       factsBar: 'Facts: {scanned} test files scanned · {claimed} claimed by receipts',
       claimedOnly: '{n} claimed tests missing on disk (to verify)',
+      componentHint: 'Owning component domain (level-weighted)',
       fanIn: 'weight = fan-in × kind weight',
       stale: 'baseline may be stale',
       staleHint: 'analysis may lag behind current code',

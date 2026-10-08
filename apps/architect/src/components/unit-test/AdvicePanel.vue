@@ -110,6 +110,8 @@ onMounted(refresh)
           <span class="chip bg-ctp-yellow/10 text-ctp-yellow" :title="t('unitTest.advice.fanIn')">
             ⚖ {{ item.weight }} <span class="text-ctp-overlay1">(fan-in {{ item.fan_in }})</span>
           </span>
+          <span v-if="item.component" class="chip bg-ctp-green/10 text-ctp-green text-[10px]"
+            :title="t('unitTest.advice.componentHint')">{{ item.component }}</span>
           <span v-if="item.evidence?.baseline_stale" class="chip bg-ctp-peach/15 text-ctp-peach text-[10px]">
             {{ t('unitTest.advice.stale') }}
           </span>

@@ -1298,6 +1298,7 @@ export default {
       advisory: '建议视角 · 仅供参考',
       factsBar: '事实层: 扫描 {scanned} 个测试文件 · 回执主张 {claimed} 个',
       claimedOnly: '{n} 个回执主张未落盘(待核验)',
+      componentHint: '所属组件域(层级加权)',
       fanIn: '权重 = 扇入 × 类型权重',
       stale: '基线可能过期',
       staleHint: '分析结论可能滞后于当前代码',

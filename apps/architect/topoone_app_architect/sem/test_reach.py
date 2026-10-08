@@ -31,6 +31,9 @@ _SKIP_DIRS = {".git", "node_modules", "__pycache__", "dist", "build",
               ".venv", "venv", ".topo", ".idea", ".vscode"}
 _KIND_WEIGHT = {"class": 3, "interface": 3, "struct": 2, "function": 1,
                 "method": 1}
+# L-3 组件域乘数(deferred-2610): 聚合层(架构核心域)组件内符号权重更高;
+# 无组件归属/L0 原子层 = 1.0(查不到恒 1, 行为与无乘数时一致——回退位)
+_LEVEL_MULT = {0: 1.0, 1: 1.5, 2: 2.0}
 _SCAN_CAP = 20000   # 防御性文件数上限
 
 
@@ -96,6 +99,20 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _component_index(pid: str, rev: str) -> Dict[str, tuple]:
+    """文件 → (组件名, 层级乘数)。无组件数据 → {}(乘数恒 1)。"""
+    out: Dict[str, tuple] = {}
+    try:
+        from ..store.component import ComponentStore
+        for c in ComponentStore.list_rev(pid, rev):
+            mult = _LEVEL_MULT.get(int(c.get("level") or 0), 1.0)
+            for f in c.get("owns") or []:
+                out[str(f)] = (str(c.get("name") or c.get("id") or ""), mult)
+    except Exception:  # noqa: BLE001 — 组件目录不可用 → 乘数退 1
+        pass
+    return out
+
+
 def test_reach_gaps(pid: str, top_n: int = 10, root: str = "") -> List[Dict[str, Any]]:
     """图加权缺口清单：无测试可达符号 × (扇入 × kind 权重) Top-N（建议视角）。"""
     from .graph_context import baseline_rev
@@ -130,6 +147,7 @@ def test_reach_gaps(pid: str, top_n: int = 10, root: str = "") -> List[Dict[str,
     for e in edges:
         if str(e.get("kind") or "").lower() not in ("contains",):
             fan_in[e["target"]] = fan_in.get(e["target"], 0) + 1
+    comp_idx = _component_index(pid, rev)
     gaps = []
     for n in nodes:
         if n["id"] in reach or n["id"] in in_test:
@@ -138,11 +156,12 @@ def test_reach_gaps(pid: str, top_n: int = 10, root: str = "") -> List[Dict[str,
         if fi <= 0:
             continue                              # 孤岛符号不进建议(无影响面)
         kind = str(n.get("kind") or "?")
-        weight = fi * _KIND_WEIGHT.get(kind, 1)
+        comp, mult = comp_idx.get(str(n.get("file_path") or ""), ("", 1.0))
+        weight = int(round(fi * _KIND_WEIGHT.get(kind, 1) * mult))
         gaps.append({"symbol": str(n.get("qualified_name") or n.get("name")),
                      "kind": kind, "file": str(n.get("file_path") or ""),
                      "line": int(n.get("start_line") or 0),
-                     "fan_in": fi, "weight": weight})
+                     "fan_in": fi, "weight": weight, "component": comp})
     gaps.sort(key=lambda g: -g["weight"])
     top = gaps[:max(1, int(top_n))]
     for g in top:                                  # 最小证据视图(一跳邻域)

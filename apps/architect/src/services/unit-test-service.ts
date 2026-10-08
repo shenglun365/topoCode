@@ -11,6 +11,7 @@ export interface UnitTestAdviceItem {
   line: number
   fan_in: number
   weight: number
+  component?: string
   evidence: { neighborhood: string; truncated: boolean; baseline_stale: boolean }
   reason?: string
 }
