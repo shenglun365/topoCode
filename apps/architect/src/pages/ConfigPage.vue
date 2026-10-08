@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon, PencilSquareIcon, BoltIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
-import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { apiGet, apiPost, apiPut, apiDelete, apiBaseUrl, getToken } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
@@ -25,10 +24,8 @@ const TABS = [
   { key: 'other', label: 'config.tabs.other' },
 ] as const
 const activeTab = ref<string>('instance')
-const spec = useArchSpecStore()
 
 const project = useArchProjectStore()
-spec.load()
 
 
 // ── 资产助理（数据资产·语义分析管线工种；per-call 生效，不写全局 llm 配置） ──
@@ -635,14 +632,6 @@ onMounted(() => { void loadCgStatus() })
           </span>
         </div>
         <div class="p-3 space-y-3 text-xs">
-          <div class="border border-ctp-surface0 rounded-lg p-3">
-            <div class="flex items-center gap-2">
-              <span class="text-ctp-overlay1">{{ t('config.specVersion') }}</span>
-              <span class="chip bg-ctp-mauve/15 text-ctp-mauve font-mono">{{ spec.spec?.version ?? '—' }}</span>
-              <span class="text-ctp-overlay1 ml-2">{{ t('config.rulesCount') }}</span>
-              <span class="chip bg-ctp-surface0 text-ctp-subtext1">{{ spec.ruleCount }}</span>
-            </div>
-          </div>
           <div class="border border-ctp-surface0 rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
               <div class="text-ctp-overlay1">

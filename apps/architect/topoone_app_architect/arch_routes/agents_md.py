@@ -1,8 +1,10 @@
 """项目级 AGENTS.md 生成/维护(用户需求 2026-09-26: architect 主 agent 具备
 生成、更新、维护 AGENTS.md 的能力)。
 
-- 内容源全部复用既有能力单源: 规约全集(sem.map_tools.tool_rules——KB 规约文档
-  +命名规约+词汇表) + 资产统计(SemanticAssetsStore)。不新建知识管道。
+- 内容源全部复用既有能力单源: 规约全集(sem.map_tools.tool_rules——自管编码
+  规约+词汇表) + .topo/rules 人工段。不新建知识管道。
+- 规约定型(2610): AGENTS.md = 唯一对外规约产物, 只含约束性信息(资产概览已裁);
+  统一编辑器经 rules-files REST 读写 .topo/rules/*.md(人工段), 生成段只读。
 - 语义: 用户/主 agent 显式触发(问什么答什么——不自动写仓库); 幂等 sync
   (内容无变化不动文件)。
 - 执行器侧读取能力已内建(任务下发按 caps 映射 AGENTS.md/规则目录——见
@@ -25,7 +27,7 @@ router = APIRouter()
 
 
 def build_project_agents_md(root: str, project: Optional[str] = None) -> str:
-    """组装项目级 AGENTS.md(规约全集 + 资产概览)。纯组装, 不落盘。"""
+    """组装项目级 AGENTS.md(规约全集约束段)。纯组装, 不落盘。"""
     from ..sem.map_tools import tool_overview, tool_rules
     from .. import store as _store
 
@@ -127,3 +129,84 @@ def tool_agents_md_sync(root: Optional[str] = None,
                         project: Optional[str] = None,
                         force: bool = False) -> Dict[str, Any]:
     return sync_agents_md(root or "", project or None, force=force)
+
+
+# ── P2 规约统一编辑器(2610 定型): .topo/rules 文件管理 + AGENTS.md 预览 ──
+
+_SAFE_NAME = __import__("re").compile(r"^[\w.-]+\.md$")
+
+
+def _rules_dir(root: str) -> str:
+    return os.path.join(root or "", ".topo", "rules")
+
+
+def _require_root(root: str) -> Optional[str]:
+    if not root or not os.path.isdir(root):
+        return None
+    return root
+
+
+@router.get("/arch/rules-files")
+async def api_rules_files_list(root: str = ""):
+    """列出 .topo/rules/*.md(统一编辑器左栏)。"""
+    root = _require_root(root) or ""
+    if not root:
+        return err(400, "root 不可用")
+    from .agents_md_chain import load_project_rules
+    return ok([{"name": n, "bytes": len(c.encode("utf-8"))}
+               for n, c in load_project_rules(root)])
+
+
+@router.get("/arch/rules-files/{name}")
+async def api_rules_files_get(name: str, root: str = ""):
+    """读单个规则文件。"""
+    root = _require_root(root) or ""
+    if not root or not _SAFE_NAME.match(name or ""):
+        return err(400, "参数非法")
+    path = os.path.join(_rules_dir(root), name)
+    if not os.path.isfile(path):
+        return err(404, f"规则文件不存在: {name}")
+    return ok({"name": name, "content": open(path, encoding="utf-8").read()})
+
+
+@router.post("/arch/rules-files")
+async def api_rules_files_write(request: Request):
+    """写/新建规则文件 {root, name, content}。名称钳制 *.md 无路径分隔,
+    防穿越; 内容经 merge_agents_md 于下次 sync 投影进 AGENTS.md。"""
+    body = await request.json() or {}
+    root = _require_root(str(body.get("root") or "")) or ""
+    name = str(body.get("name") or "")
+    content = str(body.get("content") or "").strip()
+    if not root or not _SAFE_NAME.match(name):
+        return err(400, "root 或 name 非法(须为 *.md 文件名, 不含路径)")
+    if not content:
+        return err(400, "内容为空(删除请用 DELETE)")
+    d = _rules_dir(root)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, name)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(content.rstrip() + "\n")
+    return ok({"name": name, "bytes": len(content.encode("utf-8"))})
+
+
+@router.delete("/arch/rules-files/{name}")
+async def api_rules_files_delete(name: str, root: str = ""):
+    root = _require_root(root) or ""
+    if not root or not _SAFE_NAME.match(name or ""):
+        return err(400, "参数非法")
+    path = os.path.join(_rules_dir(root), name)
+    if not os.path.isfile(path):
+        return err(404, "规则文件不存在")
+    os.remove(path)
+    return ok({"deleted": True})
+
+
+@router.get("/arch/agents-md/preview")
+async def api_agents_md_preview(root: str = "", project: str = ""):
+    """AGENTS.md 最终内容预览(生成段+规则段, 不落盘)。"""
+    root = _require_root(root) or ""
+    if not root:
+        return err(400, "root 不可用")
+    from .agents_md_chain import merge_agents_md
+    return ok({"content": merge_agents_md(
+        build_project_agents_md(root, project or None), root)})

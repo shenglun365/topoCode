@@ -125,3 +125,55 @@ def test_legacy_undelimited_file_conflicts(proj_with_rules):
     assert r["status"] == "manual_edit_conflict"
     assert sync_agents_md(root, pid, force=True)["changed"] is True
     assert "topo:generated-begin:" in _read(path)
+
+
+# ── P2 规约统一编辑器(2610 定型): rules-files REST + 预览 ─────────────
+
+def _rules_api():
+    from topoone_app_architect.arch_routes import agents_md as am
+    import asyncio
+    async def call(fn, *a, **kw):
+        return await fn(*a, **kw)
+    return am, call
+
+
+def test_rules_files_crud_and_path_escape(proj_with_rules):
+    import asyncio
+    am, _ = _rules_api()
+    root = proj_with_rules["root"]
+    # 写
+    r = asyncio.run(am.api_rules_files_write.__wrapped__(None)) if False else None
+    class _Req:
+        def __init__(self, body): self._b = body
+        async def json(self): return self._b
+    w = asyncio.run(am.api_rules_files_write(_Req(
+        {"root": root, "name": "arch-style.md", "content": "# 架构约束\n分层单向"})))
+    assert w["data"]["name"] == "arch-style.md"
+    # 读
+    g = asyncio.run(am.api_rules_files_get("arch-style.md", root=root))
+    assert "分层单向" in g["data"]["content"]
+    # 列表
+    lst = asyncio.run(am.api_rules_files_list(root=root))
+    assert any(x["name"] == "arch-style.md" for x in lst["data"])
+    # 路径穿越钳制
+    import json as _j
+    bad = asyncio.run(am.api_rules_files_write(_Req(
+        {"root": root, "name": "../escape.md", "content": "x"})))
+    body = _j.loads(bad.body)
+    assert body["code"] != 0 and "非法" in body["message"]  # 路径穿越钳制
+    # 删除
+    d = asyncio.run(am.api_rules_files_delete("arch-style.md", root=root))
+    assert d["data"]["deleted"] is True
+    g2 = asyncio.run(am.api_rules_files_get("arch-style.md", root=root))
+    assert g2.status_code == 404                              # 删除后 404
+
+
+def test_agents_md_preview_contains_rules_dir(proj_with_rules):
+    import asyncio
+    am, _ = _rules_api()
+    root = proj_with_rules["root"]
+    p = asyncio.run(am.api_agents_md_preview(root=root,
+                                             project=proj_with_rules["pid"]))
+    md = p["data"]["content"]
+    assert "topo:generated-begin:" in md
+    assert "动词开头小驼峰" in md                    # 生成段(命名规约投影)

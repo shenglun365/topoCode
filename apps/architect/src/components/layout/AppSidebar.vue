@@ -7,16 +7,13 @@ import {
   Squares2X2Icon, Cog6ToothIcon,
   ChevronDoubleLeftIcon, ChevronDoubleRightIcon,
 } from '@heroicons/vue/24/outline'
-import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchMcpStore } from '@/stores/mcp-store'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
-const spec = useArchSpecStore()
 const mcp = useArchMcpStore()
 mcp.load()
-spec.load()
 
 /** 缩略 rail 模式(仅图标)：持久化，腾出工作区可视空间。 */
 const RAIL_KEY = 'arch.sidebar.rail'
@@ -42,7 +39,7 @@ function isOverviewActive() {
 /** P1 会话中心：扁平导航(单层) —— 项目概览/项目规约/资产地图/会话管理/MCP/系统管理 */
 const items = computed(() => ([
   { key: 'overview', path: '/workbench/', icon: GlobeAltIcon, color: 'text-ctp-mauve', exact: true, chip: '' },
-  { key: 'spec', path: '/workbench/assets', query: { tab: 'spec' }, icon: ShieldCheckIcon, color: 'text-ctp-peach', chip: String(spec.ruleCount || '') },
+  { key: 'spec', path: '/workbench/assets', icon: ShieldCheckIcon, color: 'text-ctp-peach', chip: '' },
   { key: 'assetMap', path: '/workbench/asset-mgmt', icon: MapIcon, color: 'text-ctp-mauve', chip: '' },
   { key: 'sessions', path: '/workbench/sessions', icon: ChatBubbleLeftRightIcon, color: 'text-ctp-sky', chip: '' },
   { key: 'mcp', path: '/workbench/mcp', icon: Squares2X2Icon, color: 'text-ctp-sky', chip: String(mcp.calls.length || '') },
@@ -62,7 +59,7 @@ const items = computed(() => ([
         class="tree-item"
         :class="{ 'is-active': item.exact ? isOverviewActive() : isActive(item.path) }"
         :title="t(`nav.tree.flat.${item.key}`)"
-        @click="nav(item.path, item.query)"
+        @click="nav(item.path)"
       >
         <component :is="item.icon" class="w-4 h-4" :class="item.color" />
         <span v-if="!rail" class="flex-1 text-left">{{ t(`nav.tree.flat.${item.key}`) }}</span>

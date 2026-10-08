@@ -11,7 +11,6 @@ function ctx(): string {
 }
 
 let mappingsCache: CodeMapping[] | undefined
-let rulesCache: string | undefined
 
 export const kbAssetService = {
   async detail(assetId: string): Promise<AssetDetail | undefined> {
@@ -44,9 +43,4 @@ export const kbAssetService = {
   async codeMappings(): Promise<CodeMapping[]> {
     if (!mappingsCache) mappingsCache = await apiGet<CodeMapping[]>('/kb/code-mappings')
     return mappingsCache
-  },
-  async codingRules(): Promise<string> {
-    if (!rulesCache) rulesCache = await apiGet<string>('/kb/coding-rules')
-    return rulesCache
-  },
-}
+  },}
