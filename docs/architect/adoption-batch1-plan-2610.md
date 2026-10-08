@@ -217,4 +217,4 @@ W6 skills(2~2.5d)：D-1 已裁决解除阻塞，与 W2~W5 无强依赖，可并�
 | W6 skills 化 | ✅ | `b337631c`（arch_assets 表为真相源/目录强制路由/test.advice+test.strategy） |
 
 门禁基线推移：pytest 1364 → **1403**（+39）；vitest 80 → **86**；tsc 0；行数棘轮全程绿。
-遗留（下轮）：W2-④ mandate 违规回执（挂 P2-T4）；asset 管理 UI（REST 先行，C1 先例）；W5 组件域乘数（components 目录接入后）。
+遗留三项已出具体实施计划：**[b1/deferred-2610.md](b1/deferred-2610.md)**——L-1 mandate 违规回执（①回执自纠正信息 1d 可独立 / ②符号勾稽 1.5d 随 P2-T4）、L-2 资产/技能管理 UI（1.5~2d，ConfigPage 第 5 子 tab）、L-3 组件域乘数（0.5~1d，层级乘数 L0/L1/L2→1.0/1.5/2.0）；合计 4.5~5.5d，均不阻塞验收。
