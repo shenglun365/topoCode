@@ -39,6 +39,7 @@ class _SubCtx:
 
 def _job_baseline_refresh(ctx: JobCtx) -> dict:
     from . import component_naming, graph_collect
+    from .. import store as _store_mod
 
     pid = ctx.pid
     scope = dict(ctx.scope or {})
@@ -64,6 +65,17 @@ def _job_baseline_refresh(ctx: JobCtx) -> dict:
     ctx.progress(total=2, done=2, current="完成")
     out["rev"] = (r1 or {}).get("rev") or ""
     out["head"] = (r1 or {}).get("head") or ""
+    # W5 轻事实层(2610-B1): 尾步挂测试文件模式扫描(纯文件名 glob, 成本极低;
+    # 失败容错不影响基线刷新)。D-8: 覆盖率不采(未来 CI/CD 整合供数)。
+    try:
+        from .test_reach import record_test_scan
+        root = str((scope or {}).get("root") or "")
+        if not root:
+            _p = _store_mod.ProjectsStore.get(pid) or {}
+            root = str(_p.get("rootPath") or _p.get("root_path") or "")
+        out["steps"]["testScan"] = record_test_scan(pid, root)
+    except Exception as e:  # noqa: BLE001
+        out["steps"]["testScan"] = {"error": str(e)}
     logger.info("[baseline-refresh] 完成: %s", {k: (v or {}).get("error") or "ok"
                                                 for k, v in out["steps"].items()})
     return out

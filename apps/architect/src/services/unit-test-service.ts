@@ -3,6 +3,33 @@ import { apiGet, apiPost } from './api-client'
 import { ArchWs } from './ws-client'
 import { currentProjectParams } from './project-service'
 
+/** W5 建议层类型（advice/facts 端点；approval 扩展位 D-4 预留，缺省 none）。 */
+export interface UnitTestAdviceItem {
+  symbol: string
+  kind: string
+  file: string
+  line: number
+  fan_in: number
+  weight: number
+  evidence: { neighborhood: string; truncated: boolean; baseline_stale: boolean }
+  reason?: string
+}
+export interface UnitTestAdvice {
+  items: UnitTestAdviceItem[]
+  projectId?: string
+  approval?: { mode: string }
+  reason?: string
+}
+export interface UnitTestFacts {
+  projectId?: string
+  scannedCount?: number
+  claimedCount?: number
+  claimedOnly?: string[]
+  scannedOnly?: string[]
+  scanAt?: number
+  reason?: string
+}
+
 /**
  * 单元测试适配接口。
  * 后端可用: REST(列表/添加/会话) + WS(执行/对话), 服务端模拟并落库。
@@ -96,5 +123,20 @@ export const unitTestService = {
     }
     ws.close()
     return userMsg
+  },
+}
+/** W5 建议层 API 适配。 */
+export const unitTestAdviceService = {
+  async listAdvice(topN = 10): Promise<UnitTestAdvice> {
+    const { project } = currentProjectParams()
+    const qs = new URLSearchParams()
+    if (project) qs.set('project', project)
+    qs.set('top_n', String(topN))
+    return apiGet<UnitTestAdvice>(`/unit-tests/advice?${qs}`)
+  },
+  async getFacts(): Promise<UnitTestFacts> {
+    const { project } = currentProjectParams()
+    const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+    return apiGet<UnitTestFacts>(`/unit-tests/facts${qs}`)
   },
 }
