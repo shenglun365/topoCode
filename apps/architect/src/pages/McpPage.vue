@@ -9,11 +9,14 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ServerIcon, CommandLineIcon, GlobeAltIcon, WrenchIcon, ClipboardDocumentIcon,
+  CheckCircleIcon, XCircleIcon, BoltIcon,
 } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchMcpStore } from '@/stores/mcp-store'
 import { backendUp } from '@/services/backend'
 import { copyText } from '@/utils/clipboard'
+import { apiGet, apiPost } from '@/services/api-client'
+import { currentProjectParams } from '@/services/project-service'
 
 const { t } = useI18n()
 const mcp = useArchMcpStore()
@@ -39,10 +42,46 @@ const TOOLS = [
   { name: 'ctx.summarize', desc: () => t('mcp.tools.ctxSummarize') },
 ]
 
+// ── 执行器接入（cline/opencode/qwen-code/codex 探测 + 一键写入 MCP 配置）──
+interface ExecScope { path: string; exists: boolean; configured: boolean }
+interface ExecRow {
+  key: string
+  installed: boolean
+  scopes: { global: ExecScope | null; project: ExecScope | null }
+}
+const execRows = ref<ExecRow[]>([])
+const accessMsg = ref('')
+const applying = ref('')
+
+async function loadAccess() {
+  try {
+    const { root } = currentProjectParams()
+    execRows.value = await apiGet<ExecRow[]>(
+      `/arch/mcp-access?root=${encodeURIComponent(root || '')}`)
+  } catch { execRows.value = [] }
+}
+
+async function applyAccess(row: ExecRow, scope: 'global' | 'project') {
+  const { root } = currentProjectParams()
+  applying.value = row.key + scope
+  accessMsg.value = ''
+  try {
+    const r = await apiPost<{ written: boolean; already: boolean; path: string }>(
+      '/arch/mcp-access/apply', { executor: row.key, scope, root, url: httpUrl.value })
+    accessMsg.value = r.already
+      ? t('mcp.access.already', { path: r.path })
+      : t('mcp.access.done', { key: row.key })
+    await loadAccess()
+  } catch (e) {
+    accessMsg.value = e instanceof Error ? e.message : String(e)
+  } finally { applying.value = '' }
+}
+
 onMounted(async () => {
   try {
     httpUp.value = await backendUp() // 探活（同进程架构：architect 可达即 MCP HTTP 可达）
   } catch { httpUp.value = false }
+  loadAccess()
 })
 
 async function copy(text: string, key: string) {
@@ -115,6 +154,47 @@ async function copy(text: string, key: string) {
             class="chip bg-ctp-green/15 text-ctp-green shrink-0"
           >两端</span>
           <span class="text-ctp-subtext1">{{ tool.desc() }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 执行器接入（探测 + 一键写入 MCP 配置） -->
+    <div class="panel overflow-hidden">
+      <div class="panel-header">
+        <span class="flex items-center gap-2">
+          <BoltIcon class="w-4 h-4 text-ctp-green" />{{ t('mcp.access.title') }}
+        </span>
+        <span class="text-[11px] text-ctp-overlay1">{{ t('mcp.access.hint') }}</span>
+      </div>
+      <div class="px-4 py-2 text-[11px] text-ctp-overlay0 border-b border-ctp-surface0">
+        {{ t('mcp.access.endpoint') }}: <code class="font-mono text-ctp-sapphire">{{ httpUrl }}</code>
+      </div>
+      <div class="divide-y divide-ctp-surface0">
+        <div v-if="accessMsg" class="px-4 py-1.5 text-[11px] text-ctp-overlay1">{{ accessMsg }}</div>
+        <div v-for="row in execRows" :key="row.key" class="flex items-center gap-2 px-4 py-2.5 text-xs">
+          <code class="font-mono text-ctp-sapphire w-20 shrink-0">{{ row.key }}</code>
+          <span class="chip shrink-0" :class="row.installed ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-surface0 text-ctp-overlay0'">
+            {{ row.installed ? t('mcp.access.installed') : t('mcp.access.notFound') }}
+          </span>
+          <div class="flex items-center gap-1.5 ml-auto shrink-0">
+            <template v-for="scope in (['global', 'project'] as const)" :key="scope">
+              <template v-if="row.scopes[scope]">
+                <span
+                  class="chip shrink-0"
+                  :class="row.scopes[scope]!.configured ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-surface0 text-ctp-subtext0'"
+                >{{ scope === 'global' ? t('mcp.access.global') : t('mcp.access.project') }}{{ row.scopes[scope]!.configured ? ' ✓' : '' }}</span>
+                <button
+                  class="btn btn-xs"
+                  :class="row.scopes[scope]!.configured ? '' : 'btn-blue'"
+                  :disabled="applying === row.key + scope"
+                  @click="applyAccess(row, scope)"
+                >{{ row.scopes[scope]!.configured ? t('mcp.access.reapply') : t('mcp.access.apply') }}</button>
+              </template>
+            </template>
+          </div>
+        </div>
+        <div v-if="!execRows.length" class="px-4 py-3 text-xs text-ctp-overlay1">
+          {{ t('mcp.access.empty') }}
         </div>
       </div>
     </div>
