@@ -274,6 +274,19 @@ ARCH_PROJECT_TABLES_SQL = """
     -- 结果/当前状态; 分类与操作类型为可配置字典(collab config tracking.*)非固化枚举。
     -- 主会话+子会话双 ID: 精确跟踪需求在主线与其 coding 子会话中的执行。
     -- (运行时台账, 非知识资产——不进 kb-schema-versions 登记, 同 arch_tasks 先例)
+    CREATE TABLE IF NOT EXISTS arch_assets (
+        id TEXT PRIMARY KEY,
+        project_id TEXT DEFAULT '',        -- 项目域(空=全局)
+        kind TEXT DEFAULT 'skill',         -- skill | requirement | todo | plan | data_asset | analysis(v2-todo P1 五类预留)
+        name TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        payload TEXT DEFAULT '{}',         -- kind 专属: skill={route_hint, child_registry[], instructions_md, enabled}
+        enabled INTEGER DEFAULT 1,
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0,
+        UNIQUE(project_id, kind, name)
+    );
+
     CREATE TABLE IF NOT EXISTS arch_tracking_items (
         id TEXT PRIMARY KEY,
         category TEXT DEFAULT '',           -- 开放分类标签: 需求|方案|任务|回执|决策|异常|…(字典)

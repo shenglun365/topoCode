@@ -67,3 +67,36 @@ async def unit_test_facts(root: str = "", project: str = ""):
                "scannedOnly": rec["scanned_only"],
                "scanAt": rec["scan_at"],
                "diff": scan.get("diff") or {}})
+
+
+# ── W6: test.advice 工具 + test.strategy 内置技能(首批, W5 建议层的 agent 面) ──
+
+from ..agent.tools.req_agent import register_architect_skill, register_architect_tool
+
+
+@register_architect_tool(
+    "test.advice",
+    "测试缺口建议——图加权 Top-N 高风险无测试符号(扇入×类型权重, 附一跳邻域证据)。"
+    "用户询问 测试覆盖/该测什么/测试建议 或准备补测试时先调用。",
+    params_doc='{"top_n": 10}',
+)
+def tool_test_advice(top_n: int = 10) -> dict:
+    from ..sem.test_reach import test_reach_gaps
+    from .. import ctx as _ctx
+    pid = _ctx.get_project() or ""
+    if not pid:
+        return {"ok": False, "error": "no_project"}
+    prow = store.ProjectsStore.get(pid) or {}
+    root = str(prow.get("rootPath") or prow.get("root_path") or "")
+    items = test_reach_gaps(pid, top_n=max(1, min(int(top_n or 10), 50)), root=root)
+    return {"ok": True, "items": items, "count": len(items)}
+
+
+@register_architect_skill(
+    "test.strategy",
+    "测试策略：先调 test.advice 取缺口建议(高风险无测试符号+邻域证据)，"
+    "再按建议组织补测/委派——建议视角，确认由人。",
+    steps=2, category="quality",
+)
+def _skill_test_strategy():
+    pass

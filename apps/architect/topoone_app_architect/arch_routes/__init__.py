@@ -6,9 +6,8 @@
 
 from fastapi import APIRouter
 
-from . import project, knowledge, requirements, execution, arch_change, mcp_collab, unit_test, unit_advice, websocket, git, greenfield, tags, overview, dirs, docs, semantic_assets, diagram, design, agents_md
-from . import sessions, sessions_tasks
-from . import execution_control
+from . import project, knowledge, requirements, execution, arch_change, mcp_collab, unit_test, unit_advice, websocket, assets_api, git, greenfield, tags, overview, dirs, docs, semantic_assets, diagram, design, agents_md
+from . import sessions, sessions_tasks, execution_control
 from . import session_docs
 from . import dev_digest
 from . import asset_framework
@@ -41,6 +40,7 @@ router.include_router(agents_md.router)
 router.include_router(mcp_collab.router)
 router.include_router(unit_test.router)
 router.include_router(unit_advice.router)
+router.include_router(assets_api.router)
 router.include_router(websocket.router)
 router.include_router(git.router)
 router.include_router(greenfield.router)

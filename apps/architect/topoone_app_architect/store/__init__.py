@@ -6,6 +6,7 @@ from . import logic_views
 """
 from __future__ import annotations
 
+from .assets import ArchAssetsStore
 from .contract import AcceptanceStore, ContractItemStore, ContractPackageStore
 from .conv import ContextUnitsStore, ConversationsStore, DocsStore, InteractionsStore, McpCallsStore, StreamItemsStore, UnitTestSessionsStore, UnitTestsStore
 from .jobs import SemanticJobsStore
