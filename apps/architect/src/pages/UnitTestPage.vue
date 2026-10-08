@@ -97,7 +97,7 @@ const filtered = computed(() => {
       >
         <span class="whitespace-nowrap">{{ tab.label }}</span>
         <button
-          v-if="!["list", "advice", "acceptance"].includes(tab.key)"
+          v-if="!['list', 'advice', 'acceptance'].includes(tab.key)"
           class="text-ctp-overlay1 hover:text-ctp-red"
           @click.stop="closeTab(tab.key)"
         >
