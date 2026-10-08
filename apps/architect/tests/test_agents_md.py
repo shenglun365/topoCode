@@ -65,3 +65,62 @@ def test_tool_registered_and_invocable(proj_with_rules):
 def test_sync_refuses_missing_root(arch_env):
     res = sync_agents_md("/nonexistent/xyz", "")
     assert res["ok"] is False and "root" in res["error"]
+
+
+# ── W4 规则链(D-2 方案 A, 2610-B1): 定界/规则追加/手改保护 ─────────────
+
+def _read(path):
+    return open(path, encoding="utf-8").read()
+
+
+def test_rules_dir_appended_sorted(proj_with_rules, tmp_path):
+    import topoone_app_architect.arch_routes.agents_md_chain as chain
+    root = proj_with_rules["root"]
+    rules = tmp_path / "repo" / ".topo" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "b-style.md").write_text("B 规则", encoding="utf-8")
+    (rules / "a-naming.md").write_text("A 规则", encoding="utf-8")
+    (rules / "cache.log").write_text("应被过滤", encoding="utf-8")
+    r = sync_agents_md(root, proj_with_rules["pid"])
+    assert r["ok"] and r["changed"] is True
+    md = _read(r["path"])
+    assert "topo:generated-begin:" in md and "<!-- topo:generated-end -->" in md
+    assert md.index("### a-naming.md") < md.index("### b-style.md")   # 按名排序
+    assert "A 规则" in md and "B 规则" in md and "应被过滤" not in md
+    assert md.index("topo:generated-end") < md.index("## 项目规则")    # 生成段在前
+
+
+def test_regenerate_clean_when_fingerprint_intact(proj_with_rules):
+    """规约更新 → 数据驱动再生成: 指纹校验通过, 照常覆盖(非冲突)。"""
+    root, pid = proj_with_rules["root"], proj_with_rules["pid"]
+    assert sync_agents_md(root, pid)["changed"] is True
+    store.NamingConventionStore.create(pid, "新规约条目", scenarios=["general"])
+    r = sync_agents_md(root, pid)
+    assert r["changed"] is True and "status" not in r        # 非冲突
+    assert "新规约条目" in _read(r["path"])
+
+
+def test_manual_edit_conflict_not_silently_overwritten(proj_with_rules):
+    root, pid = proj_with_rules["root"], proj_with_rules["pid"]
+    path = sync_agents_md(root, pid)["path"]
+    md = _read(path)
+    hand = md.replace("# AGENTS.md", "# AGENTS.md(手改标题)", 1)
+    open(path, "w", encoding="utf-8").write(hand)
+    r = sync_agents_md(root, pid)
+    assert r["status"] == "manual_edit_conflict" and r["changed"] is False
+    assert r["options"] == ["force_overwrite", "cancel"]
+    assert "(手改标题)" in _read(path)                        # 未被覆盖
+    r2 = sync_agents_md(root, pid, force=True)
+    assert r2["changed"] is True
+    assert "(手改标题)" not in _read(path)                    # force 后重建
+
+
+def test_legacy_undelimited_file_conflicts(proj_with_rules):
+    """无定界旧文件(手写/旧版生成) → 冲突; force 一次入定界形态。"""
+    root, pid = proj_with_rules["root"], proj_with_rules["pid"]
+    path = f"{root}/AGENTS.md"
+    open(path, "w", encoding="utf-8").write("# 手写 AGENTS.md\n内容")
+    r = sync_agents_md(root, pid)
+    assert r["status"] == "manual_edit_conflict"
+    assert sync_agents_md(root, pid, force=True)["changed"] is True
+    assert "topo:generated-begin:" in _read(path)

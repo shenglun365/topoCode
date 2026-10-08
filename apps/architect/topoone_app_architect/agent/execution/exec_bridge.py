@@ -30,6 +30,10 @@ RUNNER_BASE = os.environ.get("RUNNER_BASE_URL", "http://127.0.0.1:3458").rstrip(
 # 执行器会话 MCP 默认接线(ctx.* 历史检索)的 URL 基址; env 可覆盖。
 ARCH_BASE = os.environ.get("ARCH_BASE_URL", "http://127.0.0.1:3470").rstrip("/")
 _TERMINAL = ("done", "failed", "stopped", "lost")   # 存量 jobs 账本终态(只读兼容)
+# W4 K2: 变更文件中的测试文件识别(主张层清单; 与 W5 事实层扫描同款模式)
+_TEST_FILE_RE = re.compile(
+    r"(test_[^/]*\.py$|[^/]*_test\.py$|[^/]*\.test\.(ts|tsx|js|jsx|mjs)$"
+    r"|[^/]*\.spec\.(ts|tsx|js|jsx|mjs)$|[^/]*_test\.go$)", re.IGNORECASE)
 
 
 def _runner(path: str, payload: Optional[dict] = None, timeout: float = 12.0) -> Optional[dict]:
@@ -502,6 +506,8 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
     归因来源: coding agent 执行报告(正文 summary)——P1 distill-errors 的材料。
     重定位 P3 闭环: 验收材料(边界比对/越界/判据对照)并入沉淀——done 任务的
     验收记录持久化于 execution_report 单元(不再只存活于消息文本)。
+    W4 K2: refs.tests 测试段(变更测试文件清单 + run_result)——主张层字段地基,
+    事实层对账消费(单测建议层); 清单即字段, 不新造 .topo/tests.yaml。
     """
     t = store.TasksStore.get(task_id) or {}
     prog = t.get("progress") or {}
@@ -510,6 +516,15 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
                        ("verify_test", "测试")):
         if prog.get(key) is not None:
             meta_lines.append(f"- {label}: {prog[key]}")
+    changed = [str(f) for f in (changed_files or [])][:50]
+    test_files = [f for f in changed if _TEST_FILE_RE.search(f)][:20]
+    refs = {"taskId": task_id, "reqId": rid, "files": changed,
+            "executorType": t.get("executorType") or ""}
+    if test_files:
+        refs["tests"] = {"files": [{"path": f, "target_symbols": []}
+                                   for f in test_files],
+                         "run_result": str(prog.get("verify_test") or "not_run")}
+        meta_lines.append(f"- 测试文件: {len(test_files)} 个(回执 tests 段)")
     acc_section = ""
     if acceptance_brief:
         acc_section = ("\n\n**验收材料**(资产比对基底)\n" + str(acceptance_brief)[:2000])
@@ -519,9 +534,7 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
         "title": f"任务回执[{status}]：{title}",
         "content": ((summary or "")[:4000] + "\n\n**回执**\n"
                     + "\n".join(meta_lines) + acc_section),
-        "refs": {"taskId": task_id, "reqId": rid,
-                 "files": [str(f) for f in (changed_files or [])][:50],
-                 "executorType": t.get("executorType") or ""},
+        "refs": refs,
         "importance": 1})
     # 需求跟踪台账: 回执挂账(终态结果), 失败不阻断沉淀
     try:
