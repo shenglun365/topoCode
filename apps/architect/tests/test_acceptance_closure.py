@@ -83,3 +83,38 @@ def test_sediment_no_test_files_omits_tests(arch_env):
     unit = _sediment_task_receipt(conv_id, task["id"], "", "done", "纯实现",
                                   "摘要", ["src/only.ts"], "", "")
     assert "tests" not in unit["refs"]
+
+
+# ── L-1① 越界回执自纠正(deferred-2610): 允许集+最近前缀建议 ──────────
+
+def test_overrun_receipt_self_correcting(arch_env):
+    """越界回执含允许范围全集 + 最近前缀建议 + 无相近时的明确指引。"""
+    from topoone_app_architect.agent.execution.exec_bridge import (
+        _acceptance_brief, _nearest_scope)
+    # 规约快照桩: 允许 src/auth/ 与 scripts/
+    from topoone_app_architect.store.core import RequirementsStore
+    orig = RequirementsStore.spec_active
+    RequirementsStore.spec_active = classmethod(
+        lambda cls, rid: {"snapshot": {
+            "allowedScope": ["src/auth/", "scripts/"],
+            "acceptance": ["条目1"]}})
+    try:
+        brief = _acceptance_brief("c1", "rq-1",
+                                  ["src/auth/a.ts", "src/crypto/hash.py",
+                                   "docs/readme.md"])
+        assert "越界改动" in brief
+        assert "src/crypto/hash.py" in brief and "docs/readme.md" in brief
+        assert "src/auth/a.ts" not in brief.split("允许范围全集")[0]  # 未越界不在清单
+        assert "建议移入允许前缀 `src/auth" in brief       # 最近前缀(共享 src/, 斜杠归一无关)
+        assert "允许范围全集" in brief and "`scripts`" in brief
+        assert "无相近允许前缀" in brief                     # docs/ 无共享段
+    finally:
+        RequirementsStore.spec_active = orig
+
+
+def test_nearest_scope_longest_shared_segments():
+    from topoone_app_architect.agent.execution.exec_bridge import _nearest_scope
+    assert _nearest_scope("src/auth/deep/x.py",
+                          ["src/", "src/auth/", "scripts/"]) == "src/auth/"
+    assert _nearest_scope("docs/x.md", ["src/", "scripts/"]) == ""   # 零共享=无相近
+    assert _nearest_scope("x.py", []) == ""

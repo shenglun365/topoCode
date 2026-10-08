@@ -195,11 +195,24 @@ def _copy_impl_flag(worktree: str, changed_files: List[str],
             "请核查测试对象；若属有意镜像，请在交付摘要中声明\"复制实现\"及原因。")
 
 
-def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
-    """验收简报: 实际改动 vs 规约边界(越界检测) + 验收标准静态对照。
+def _nearest_scope(file: str, prefixes: List[str]) -> str:
+    """越界文件 → 共享路径段最多的允许前缀(L-1① 自纠正建议)。"""
+    segs = str(file or "").split("/")
+    best, best_n = "", -1
+    for p in sorted(prefixes or []):
+        n = 0
+        for a, b in zip(segs, str(p).rstrip("/").split("/")):
+            if a != b:
+                break
+            n += 1
+        if n > best_n:
+            best_n, best = n, str(p)
+    return best if best_n > 0 else ""
 
-    architect 辅助判定材料——完成与否由用户判定(裁决#3)。
-    """
+
+def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
+    """验收简报: 改动 vs 规约边界 + 验收标准对照(完成与否由用户判定, 裁决#3)。
+    L-1①: 越界回执=自纠正信息(允许集全集+最近前缀建议, 一轮修正)。"""
     from ..tools.req_agent import parse_scope_files
     active = store.RequirementsStore.spec_active(rid or "") or {}
     snap = active.get("snapshot") or {}
@@ -209,8 +222,14 @@ def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
         overrun = [f for f in changed_files
                    if not any(f.startswith(p) for p in scope_files)]
         if overrun:
-            out_lines.append("**⚠️ 越界改动**(超出规约允许范围，请核查)：\n"
-                             + "\n".join(f"- `{f}`" for f in overrun[:15]))
+            lines = ["**⚠️ 越界改动**(超出规约允许范围，请核查)："]
+            for f in overrun[:15]:
+                near = _nearest_scope(f, scope_files)
+                lines.append(f"- `{f}` → " + (f"建议移入允许前缀 `{near}`，或修订规约边界将其纳入"
+                             if near else "无相近允许前缀，需修订规约边界或回退该改动"))
+            lines.append("- 允许范围全集: " + ", ".join(
+                f"`{p}`" for p in sorted(scope_files)[:10]))
+            out_lines.append("\n".join(lines))
         else:
             out_lines.append(f"✅ 边界符合：{len(changed_files)} 个改动文件均在允许范围内")
     else:
