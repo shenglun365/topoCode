@@ -55,6 +55,7 @@ export default {
       flat: {
         overview: '项目概览',
         sessions: '会话管理',
+      execSessions: '执行器会话',
         spec: '项目规约',
         assetMap: '资产地图',
         mcp: 'MCP 服务',
@@ -230,6 +231,15 @@ export default {
     back: '返回',
     readonly: '只读预览，不可修改',
     loadFailed: '加载失败',
+  },
+  execSessions: {
+    title: '执行器会话',
+    desc: 'coding 执行器会话档案（事件级时间线：消息/工具/审批/状态）——architect 自持留痕',
+    list: '会话档案',
+    empty: '暂无会话留痕（执行任务后产生）',
+    noEvents: '无事件（存量会话或未过泵）',
+    live: '跟进',
+    liveOn: '跟进中',
   },
   mcp: {
     title: 'MCP 服务',

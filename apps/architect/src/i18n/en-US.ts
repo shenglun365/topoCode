@@ -55,6 +55,7 @@ export default {
       flat: {
         overview: 'Overview',
         sessions: 'Sessions',
+      execSessions: 'Executor Sessions',
         spec: 'Spec',
         assetMap: 'Asset Map',
         mcp: 'MCP',
@@ -232,6 +233,15 @@ export default {
     back: 'Back',
     readonly: 'Read-only preview, not editable',
     loadFailed: 'Load failed',
+  },
+  execSessions: {
+    title: 'Executor Sessions',
+    desc: 'Coding executor session archive (event-level timeline: messages/tools/approvals/status) — architect-owned',
+    list: 'Sessions',
+    empty: 'No session records yet (created when tasks run)',
+    noEvents: 'No events (legacy session or unpumped)',
+    live: 'Live',
+    liveOn: 'Live on',
   },
   mcp: {
     title: 'MCP Service',

@@ -45,6 +45,15 @@ async def ws_connect(base: str, job_id: str, since: int,
         return None
 
 
+def _persist(job_id: str, ev: dict) -> None:
+    """B1 事件留痕(architect 自持): 会话浏览器/审计数据源, 失败不阻塞。"""
+    try:
+        from ...store import exec_events
+        exec_events.record_event(job_id, ev)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def run_event_pump(*, base: str, job_id: str,
                          runner,                       # callable(path, payload, timeout) → dict|None
                          on_event: OnEvent,
@@ -83,6 +92,7 @@ async def run_event_pump(*, base: str, job_id: str,
                     if int(ev.get("seq") or 0) <= last_seq:
                         continue
                     last_seq = int(ev.get("seq") or 0)
+                    _persist(job_id, ev)
                     on_event(ev)
                     if on_terminal(ev.get("kind") or ""):
                         return
@@ -116,6 +126,7 @@ async def run_event_pump(*, base: str, job_id: str,
                 if int(ev.get("seq") or 0) <= last_seq:
                     continue
                 last_seq = max(last_seq, int(ev.get("seq") or 0))
+                _persist(job_id, ev)
                 on_event(ev)
             status = snap.get("status") or ""
             if status in ("done", "failed", "stopped"):

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  GlobeAltIcon, ChatBubbleLeftRightIcon, ShieldCheckIcon, MapIcon,
+  GlobeAltIcon, ChatBubbleLeftRightIcon, CommandLineIcon, ShieldCheckIcon, MapIcon,
   Squares2X2Icon, Cog6ToothIcon,
   ChevronDoubleLeftIcon, ChevronDoubleRightIcon,
 } from '@heroicons/vue/24/outline'
@@ -41,7 +41,8 @@ const items = computed(() => ([
   { key: 'overview', path: '/workbench/', icon: GlobeAltIcon, color: 'text-ctp-mauve', exact: true, chip: '' },
   { key: 'spec', path: '/workbench/assets', icon: ShieldCheckIcon, color: 'text-ctp-peach', chip: '' },
   { key: 'assetMap', path: '/workbench/asset-mgmt', icon: MapIcon, color: 'text-ctp-mauve', chip: '' },
-  { key: 'sessions', path: '/workbench/sessions', icon: ChatBubbleLeftRightIcon, color: 'text-ctp-sky', chip: '' },
+  { key: 'sessions', path: '/workbench/sessions', icon: ChatBubbleLeftRightIcon, CommandLineIcon, color: 'text-ctp-sky', chip: '' },
+  { key: 'execSessions', path: '/workbench/exec-sessions', icon: CommandLineIcon, color: 'text-ctp-green', chip: '' },
   { key: 'mcp', path: '/workbench/mcp', icon: Squares2X2Icon, color: 'text-ctp-sky', chip: String(mcp.calls.length || '') },
   { key: 'config', path: '/workbench/config', icon: Cog6ToothIcon, color: 'text-ctp-lavender', chip: '' },
 ]))

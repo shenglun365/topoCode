@@ -74,6 +74,18 @@ ARCH_MAIN_TABLES_SQL = """
         time INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS arch_exec_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        text TEXT DEFAULT '',               -- 截断 2000(防大行)
+        extra TEXT,                         -- JSON: 其余事件字段
+        ts INTEGER NOT NULL,
+        UNIQUE(job_id, seq)                 -- 泵 seq 去重双保险
+    );
+    CREATE INDEX IF NOT EXISTS idx_exec_events_job ON arch_exec_events(job_id, seq);
+
     CREATE TABLE IF NOT EXISTS arch_interactions (
         id TEXT PRIMARY KEY,
         prompt TEXT DEFAULT '',

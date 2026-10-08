@@ -80,6 +80,12 @@ const routes: RouteRecordRaw[] = [
         meta: { workbench: true, title: '系统管理' },
       },
       {
+        path: 'exec-sessions',
+        name: 'ExecSessions',
+        component: () => import('@/pages/ExecSessionsPage.vue'),
+        meta: { workbench: true, title: '执行器会话' },
+      },
+      {
         path: 'mcp',
         name: 'Mcp',
         component: () => import('@/pages/McpPage.vue'),
