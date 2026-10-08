@@ -204,7 +204,7 @@ W6 skills(2~2.5d)：D-1 已裁决解除阻塞，与 W2~W5 无强依赖，可并�
 - [x] 基线 tag（`topo-b1-start`）+ 行数登记（[b1/baseline.md](b1/baseline.md)）
 - [ ] W1-1 golden 再生成命令入 README/CONV-03（开发者须知）
 
-### 执行进度（2026-10-10）
+### 执行进度（2026-10-10，批次收口）
 
 | 组 | 状态 | 提交 |
 |---|---|---|
@@ -213,7 +213,8 @@ W6 skills(2~2.5d)：D-1 已裁决解除阻塞，与 W2~W5 无强依赖，可并�
 | W3 交接单模板 | ✅ | `fb80fedc` |
 | W4 规则链+K2 | ✅ | `146cb632`（指纹定界/规则追加/手改问询/tests 段） |
 | W2 图邻域供给 | 🔶 核心已落 | `117e4a35`（graph_neighborhood + context_pack 注入）；**余 W2-④ mandate 违规回执增强**（随 P2-T4 勾稽链下轮） |
-| W5 单测建议层 | ⬜ | 依赖已就绪（W2 图查询 + W4 K2 段） |
-| W6 skills 化 | ⬜ | 无阻塞，可并行 |
+| W5 单测建议层 | ✅ | `ec2c2076`（缺口建议面板/轻事实层/对账挂账/approval 位） |
+| W6 skills 化 | ✅ | `b337631c`（arch_assets 表为真相源/目录强制路由/test.advice+test.strategy） |
 
-门禁基线推移：pytest 1364 → **1393**；vitest 80 → **83**；tsc 0；行数棘轮绿。
+门禁基线推移：pytest 1364 → **1403**（+39）；vitest 80 → **86**；tsc 0；行数棘轮全程绿。
+遗留（下轮）：W2-④ mandate 违规回执（挂 P2-T4）；asset 管理 UI（REST 先行，C1 先例）；W5 组件域乘数（components 目录接入后）。
