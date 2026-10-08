@@ -79,3 +79,74 @@ def test_put_duplicate_model_name_is_400_not_500(client):
     oc2 = next(e for e in saved if e["id"] == "opencode")
     assert [m["model"] for m in oc2["config"]["models"]] == [
         "dashscope/qwen3.8-flash", "qwen/qwen3.8-flash"]
+
+
+# ── 直连客户端偏好回退(35B 残留根因修复, 2610-10-08) ─────────────────
+
+def test_extract_model_falls_back_to_preference(arch_env, monkeypatch):
+    """角色空 → architect 偏好(llm.modelId); 不再直落 KB is_default。"""
+    from topoone_app_architect.arch_routes import asset_extract as ae
+    from topoone_app_architect.agent.cognition import llm as llm_mod
+    monkeypatch.setattr(llm_mod, "get_model_preference",
+                        lambda: "qwen3.5-9b-mtp")
+    captured = {}
+
+    class FakeLLM:
+        def __init__(self, gateway, model_id: str = "", session_id: str = "x"):
+            captured["model"] = model_id
+        async def chat(self, messages, **kw):
+            raise RuntimeError("stop")
+
+    import topoone_app_architect.arch_routes.tagent_se as tse
+    monkeypatch.setattr(tse, "KbGatewayLLMClient", FakeLLM)
+    ae._batch_name_enrich("/nonexistent", "", "f.py", "entity",
+                          [{"node": {"name": "A", "start_line": 1}}], None)
+    assert captured["model"] == "qwen3.5-9b-mtp"
+
+
+def test_extract_model_explicit_wins(arch_env, monkeypatch):
+    from topoone_app_architect.arch_routes import asset_extract as ae
+    from topoone_app_architect.agent.cognition import llm as llm_mod
+    monkeypatch.setattr(llm_mod, "get_model_preference",
+                        lambda: "qwen3.5-9b-mtp")
+    captured = {}
+
+    class FakeLLM:
+        def __init__(self, gateway, model_id: str = "", session_id: str = "x"):
+            captured["model"] = model_id
+        async def chat(self, messages, **kw):
+            raise RuntimeError("stop")
+
+    import topoone_app_architect.arch_routes.tagent_se as tse
+    monkeypatch.setattr(tse, "KbGatewayLLMClient", FakeLLM)
+    ae._batch_name_enrich("/nonexistent", "", "f.py", "entity",
+                          [{"node": {"name": "A", "start_line": 1}}],
+                          "explicit-model")
+    assert captured["model"] == "explicit-model"
+
+
+def test_utgen_model_falls_back_to_preference(arch_env, monkeypatch):
+    from topoone_app_architect.arch_routes import tagent_utgen as ut
+    from topoone_app_architect.agent.cognition import llm as llm_mod
+    from topoone_app_architect import kb_gateway as kg
+    monkeypatch.setattr(llm_mod, "get_model_preference",
+                        lambda: "qwen3.5-9b-mtp")
+    monkeypatch.setattr(kg, "get_gateway", lambda: object())
+    captured = {}
+
+    class FakeLLM:
+        def __init__(self, gateway, model_id: str = "", session_id: str = "x"):
+            captured["model"] = model_id
+
+    monkeypatch.setattr(ut, "KbGatewayLLMClient", FakeLLM)
+    monkeypatch.setattr(ut, "_run_gen_async",
+                        lambda *a, **k: _async_none())
+    ut.generate_unit_tests(scope="s", root="/r", project="", model_id="")
+    assert captured["model"] == "qwen3.5-9b-mtp"
+
+
+def _async_none():
+    import asyncio
+    async def _n(*a, **k):
+        return None
+    return _n()

@@ -103,3 +103,41 @@ def test_bad_json_not_clobbered(tmp_path):
     r = apply_access("opencode", "project", root, URL)
     assert r.get("error")
     assert open(cfg, encoding="utf-8").read() == "{not-json"
+
+
+# ── 技能管理面: /arch/skills 分类分组 ────────────────────────────────
+
+def test_skills_groups(tmp_path):
+    import asyncio
+    from topoone_app_architect.arch_routes import assets_api
+    root = str(tmp_path / "repo-skill")
+    os.makedirs(root)
+    pid = "proj-skills1"
+    from topoone_app_architect import store
+    store.ProjectsStore.create({"id": pid, "name": "s", "root_path": root,
+                                "active": 1})
+    # 表技能: 覆盖内置 + 纯自定义 + 禁用行
+    store.ArchAssetsStore.upsert({"name": "req.assess", "kind": "skill",
+                                  "description": "覆盖版", "enabled": True,
+                                  "payload": {"route_hint": "评估时"}})
+    store.ArchAssetsStore.upsert({"name": "my.skill", "kind": "skill",
+                                  "description": "自定义", "enabled": True,
+                                  "payload": {"route_hint": "自定场景"}})
+    store.ArchAssetsStore.upsert({"name": "off.skill", "kind": "skill",
+                                  "description": "停用", "enabled": False,
+                                  "payload": {"route_hint": "x"}})
+    # 开发类资产不入技能面
+    store.ArchAssetsStore.upsert({"name": "req-x", "kind": "requirement",
+                                  "description": "需求", "enabled": True,
+                                  "payload": {}})
+
+    r = asyncio.run(assets_api.list_skills(project=pid))["data"]
+    cats = {g["category"]: g for g in r}
+    assert "requirement-analysis" in cats and "quality" in cats
+    assess = next(s for s in cats["requirement-analysis"]["skills"]
+                  if s["name"] == "req.assess")
+    assert assess["source"] == "asset" and assess["route_hint"] == "评估时"
+    custom = {s["name"] for s in cats["custom"]["skills"]}
+    assert custom == {"my.skill", "off.skill"}           # 需求类不入
+    off = next(s for s in cats["custom"]["skills"] if s["name"] == "off.skill")
+    assert off["enabled"] is False                       # 管理视角含禁用行

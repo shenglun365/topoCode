@@ -225,9 +225,11 @@ def _batch_name_enrich(root: str, project: Optional[str], file_: str, kind: str,
     """
     from ..kb_gateway import get_gateway
     from .tagent_se import KbGatewayLLMClient
+    from ..agent.cognition.llm import resolve_with_preference
     from topocode_agent.core.utils import extract_json_object
 
-    llm = KbGatewayLLMClient(get_gateway(), model_id=model_id or "")
+    llm = KbGatewayLLMClient(get_gateway(),
+                             model_id=resolve_with_preference(model_id))
     out: Dict[str, dict] = {}
     for i in range(0, len(cands), _NAME_CHUNK):
         chunk = cands[i:i + _NAME_CHUNK]
@@ -270,9 +272,12 @@ def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
                    rc: Optional["RuleContext"] = None) -> List[dict]:
     """单 (文件×类型) 组：名称批量解析 + 种子地板(确定性，无多轮/修复轮)。"""
     from .agent_roles import resolve_role_model
+    from ..agent.cognition.llm import resolve_with_preference
 
     # 角色模型路由(§9/B1)：名称解析走 extract 角色；显式传入优先。
-    model_id = resolve_role_model("extract", model_id)
+    # 角色空 → architect 全局偏好(llm.modelId)——直落网关会吃 KB is_default
+    # (35B 残留根因, 2610-10-08 实证), 不经偏好。
+    model_id = resolve_with_preference(resolve_role_model("extract", model_id))
 
     cands = cands[:_GROUP_CAP]
     enrich: Dict[str, dict] = {}

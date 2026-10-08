@@ -81,6 +81,12 @@ def resolve_call_model(explicit: Optional[str]) -> str:
     return m
 
 
+def resolve_with_preference(model_id: Optional[str]) -> str:
+    """直连客户端回退链: 显式 > architect 全局偏好(空串=两级均未配置)。
+    角色解析返回 None 时必须经此落偏好——空串直传网关会吃 KB is_default。"""
+    return (model_id or "").strip() or get_model_preference()
+
+
 def set_model_preference(model_id: str) -> None:
     from ... import store
     store.CollabConfigStore.set(_MODEL_KEY, model_id)

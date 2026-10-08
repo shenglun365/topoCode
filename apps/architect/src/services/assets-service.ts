@@ -37,4 +37,24 @@ export const assetsService = {
   async remove(id: string): Promise<boolean> {
     return (await apiDelete<{ deleted: boolean }>(`/arch/assets/${id}`)).deleted
   },
+  /** 技能能力配置目录(分类分组): 内置(category)∪表技能, 含禁用行 */
+  async skillsGroups(project = ''): Promise<SkillGroup[]> {
+    return apiGet<SkillGroup[]>(
+      `/arch/skills?project=${encodeURIComponent(project)}`)
+  },
+}
+
+export interface SkillEntry {
+  name: string
+  description: string
+  route_hint: string
+  child_registry: string[]
+  source: 'builtin' | 'asset'
+  enabled: boolean
+  assetId: string
+}
+
+export interface SkillGroup {
+  category: string
+  skills: SkillEntry[]
 }

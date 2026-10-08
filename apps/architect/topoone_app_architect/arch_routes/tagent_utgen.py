@@ -58,7 +58,9 @@ def generate_unit_tests(*, scope: str, root: Optional[str], project: Optional[st
     gateway = get_gateway()
     if gateway is None:
         return None
-    llm = KbGatewayLLMClient(gateway, model_id=model_id or "")
+    from ..agent.cognition.llm import resolve_with_preference
+    model_id = resolve_with_preference(model_id)   # 显式 > 偏好 > 空=网关默认
+    llm = KbGatewayLLMClient(gateway, model_id=model_id)
     tools = _extraction_registry(root, project)
     messages = [
         {"role": "system", "content": GEN_SYSTEM},
