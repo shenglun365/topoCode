@@ -24,7 +24,7 @@ TOOLS = [
      "args": {"project": "项目 id（多项目时必填，可先 project.list）"}},
     {"name": "map.component", "desc": "组件档案：文件清单/语义资产/依赖出入", "args": {"name": "组件名或 id", "project": "项目 id"}},
     {"name": "map.assets", "desc": "语义资产检索（kind/level/关键词）", "args": {"query": "关键词", "kind": "类别", "level": "粒度(business/implementation/logic)", "limit": "条数", "project": "项目 id"}},
-    {"name": "map.rules", "desc": "规约全集：编码规约(自管)+词汇表+项目规则(.topo/rules)（编码必须遵守）", "args": {"project": "项目 id"}},
+    {"name": "map.rules", "desc": "规约全集=AGENTS.md 全文(唯一真相源; 未建时回退缓存并提示 init)", "args": {"project": "项目 id"}},
     {"name": "map.graph", "desc": "关系图（mermaid）：component=组件依赖图 / semantic=语义关系图", "args": {"kind": "component|semantic", "project": "项目 id"}},
     {"name": "ctx.search", "desc": "跨会话检索历史上下文（单元/消息/备案文档；讨论关联结论先查这里）", "args": {"query": "关键词", "type": "单元类型", "conversation": "限定会话 id", "limit": "条数", "project": "项目 id"}},
     {"name": "ctx.get", "desc": "会话上下文包：摘要+关键单元+备案文档", "args": {"conversation": "会话 id", "project": "项目 id"}},
@@ -196,11 +196,21 @@ def tool_assets(query: str = "", kind: str = "", level: str = "", limit: int = 3
 
 
 def tool_rules(project: Optional[str] = None) -> str:
+    """规约全集: AGENTS.md 文件优先(唯一真相源, 纯文件模式 2610); 缓存回退。"""
+    import os as _os
     proj = _resolve_project_entry(project)
     if not proj:
         return "# 规约\n\n无法唯一定位项目，请传 project 参数。"
     pid = _pid_of(proj)
-    out = [_md_header("规约全集", proj), "编码前必读；冲突时以人工覆盖层 > 用户显式 > 派生约束。\n"]
+    path = _os.path.join(str(proj.get("rootPath") or ""), "AGENTS.md")
+    if _os.path.isfile(path):
+        from .rules_file import ensure_rules_synced
+        ensure_rules_synced(str(proj.get("rootPath") or ""), pid)
+        content = open(path, encoding="utf-8").read()
+        return (content[:16000] + "\n…(超长截断, 见完整文件)"
+                if len(content) > 16000 else content)
+    out = [_md_header("规约全集(缓存, AGENTS.md 未建——可 agents.md.init)", proj),
+           "编码前必读。\n"]
 
     out.append("## 编码规约（自管，architect 独立维护）\n")
     try:

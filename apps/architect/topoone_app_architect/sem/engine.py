@@ -2716,6 +2716,13 @@ def _line_note_context(pid: str) -> Tuple[str, str]:
     """术语表 + 生效规约文本(注入逐行解读 prompt；为空返回空串)。"""
     terms_txt, conv_txt = "", ""
     try:
+        from .rules_file import ensure_rules_synced
+        root = str((store.ProjectsStore.get(pid) or {}).get("rootPath") or "")
+        if root:
+            ensure_rules_synced(root, pid)
+    except Exception:  # noqa: BLE001 — 同步失败照旧读缓存
+        pass
+    try:
         rows = []
         for t in (store.GlossaryStore.list(pid, limit=30) or [])[:30]:
             alias = " / ".join(t.get("alias") or [])

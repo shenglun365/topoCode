@@ -1,179 +1,239 @@
-"""项目级 AGENTS.md 生成/维护(用户需求 2026-09-26)特征测试。
+"""AGENTS.md 纯文件模式(2610 定型修订)——真相源/解析/缓存同步/读写/ init。
 
-- 内容源=既有能力单源(tool_rules 规约全集 + SemanticAssetsStore 统计);
-- sync 幂等: 内容无变化不动文件; 显式触发(不扩大化)。
+对齐 Codex/Claude Code/opencode 三家共同模式: 人治 markdown 单文件为真相,
+store 为引擎缓存(章节解析回填, 坏行容错), init 初稿不盲改。
 """
 from __future__ import annotations
 
+import asyncio
+import json as _j
 import os
 
 import pytest
 
 from topoone_app_architect import store
-from topoone_app_architect.arch_routes.agents_md import tool_agents_md_sync
 from topoone_app_architect.arch_routes.agents_md import (
-    build_project_agents_md, sync_agents_md)
+    init_agents_md, tool_agents_md_init)
+from topoone_app_architect.sem import map_tools
+from topoone_app_architect.sem.rules_file import (
+    append_convention, ensure_rules_synced, parse_agents_md, read_agents_md,
+    write_agents_md)
+
+SAMPLE = """# AGENTS.md — demo
+
+> 人治规约。
+
+## 命名规约
+
+- [naming] 服务以 XxxService 结尾
+- 禁止拼音命名
+
+## 术语表
+
+| 术语 | 别名 | 含义 |
+|---|---|---|
+| 场景 | Scene, 剧本 | 一次可播放的动画编排 |
+| 需求 | — | 用户价值诉求 |
+
+## 架构约束
+
+- 分层单向依赖
+"""
 
 
 @pytest.fixture()
-def proj_with_rules(arch_env, tmp_path):
+def proj(arch_env, tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
-    pid = "proj-agents1"
+    pid = "proj-file1"
     store.ProjectsStore.create({
-        "id": pid, "name": "agents-fixture",
+        "id": pid, "name": "file-fixture",
         "root_path": str(root), "active": 1})
-    store.NamingConventionStore.create(
-        pid, "动词开头小驼峰，禁止拼音", scenarios=["general"])
-    store.GlossaryStore.create(pid, "场景",
-                               definition="Scene——一次可播放的动画编排")
     return {"root": str(root), "pid": pid}
 
 
-def test_build_contains_rules_and_glossary(proj_with_rules):
-    md = build_project_agents_md(proj_with_rules["root"], proj_with_rules["pid"])
-    assert "# AGENTS.md — agents-fixture" in md
-    assert "动词开头小驼峰" in md
-    assert "Scene——一次可播放的动画编排" in md
-    # 规约定型(2610): AGENTS.md 只含约束性信息, 资产概览(参考性质)已裁
-    assert "资产概览" not in md
-    assert "本地语义资产为空" not in md
+# ── 解析契约 ──────────────────────────────────────────────────────────
+
+def test_parse_sections_and_badrows():
+    r = parse_agents_md(SAMPLE)
+    assert r["conventions"] == [
+        {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"]},
+        {"ruleText": "禁止拼音命名", "scenarios": ["general"]}]
+    g = {x["term"]: x for x in r["glossary"]}
+    assert g["场景"]["alias"] == ["Scene", "剧本"]
+    assert g["场景"]["definition"] == "一次可播放的动画编排"
+    assert g["需求"]["alias"] == []
+    assert r["skipped"] == 0
+    # 坏行容错
+    bad = "## 命名规约\n\n正常一条\n- [x] 好的\n垃圾行"
+    assert parse_agents_md(bad)["skipped"] >= 2
 
 
-def test_sync_writes_and_idempotent(proj_with_rules):
-    root, pid = proj_with_rules["root"], proj_with_rules["pid"]
-    r1 = sync_agents_md(root, pid)
-    assert r1["ok"] and r1["changed"] is True
-    path = os.path.join(root, "AGENTS.md")
-    assert os.path.isfile(path)
-    r2 = sync_agents_md(root, pid)
-    assert r2["changed"] is False          # 幂等: 内容无变化不动文件
-    # 规约更新 → 再 sync 内容变化
-    store.NamingConventionStore.create(
-        pid, "PascalCase 且带域前缀", scenarios=["general"])
-    r3 = sync_agents_md(root, pid)
-    assert r3["changed"] is True
+# ── 读写 + 乐观锁 ────────────────────────────────────────────────────
+
+def test_write_and_conflict(proj):
+    r = write_agents_md(proj["root"], SAMPLE)
+    assert r["ok"] and r["hash"]
+    got = read_agents_md(proj["root"])
+    assert got["exists"] and got["hash"] == r["hash"]
+    # 乐观锁: 错误 base_hash → 冲突
+    c = write_agents_md(proj["root"], "# 改", base_hash="deadbeef")
+    assert c["conflict"] is True
+    # 正确 base_hash → 成功
+    w = write_agents_md(proj["root"], "# 改\n", base_hash=r["hash"])
+    assert w["ok"] and read_agents_md(proj["root"])["content"].startswith("# 改")
 
 
-def test_tool_registered_and_invocable(proj_with_rules):
+# ── 文件→缓存全量重建 ────────────────────────────────────────────────
+
+def test_sync_rebuilds_cache(proj):
+    # 预置遗留数据(不在文件中 → 应被清)
+    store.NamingConventionStore.create(proj["pid"], "遗留旧规约",
+                                       scenarios=["general"], source="manual")
+    store.GlossaryStore.create(proj["pid"], "旧术语", definition="x")
+    # 预置 pending 提案(应保留)
+    store.NamingConventionStore.create(proj["pid"], "待审提案",
+                                       scenarios=["general"], status="pending")
+    write_agents_md(proj["root"], SAMPLE)
+
+    r = ensure_rules_synced(proj["root"], proj["pid"], force=True)
+    assert r["synced"] is True and r["conventions"] == 2 and r["glossary"] == 2
+    rules = [c["ruleText"] for c in store.NamingConventionStore.list(proj["pid"])]
+    assert "服务以 XxxService 结尾" in rules and "禁止拼音命名" in rules
+    assert "遗留旧规约" not in rules                      # 文件为真相
+    pend = store.NamingConventionStore.list(proj["pid"], status="pending")
+    assert [p["ruleText"] for p in pend] == ["待审提案"]    # 提案不动
+    terms = {g["term"]: g for g in store.GlossaryStore.list(proj["pid"])}
+    assert "场景" in terms and "旧术语" not in terms
+    assert terms["场景"]["alias"] == ["Scene", "剧本"]
+    # 惰性: 无变化不重建
+    r2 = ensure_rules_synced(proj["root"], proj["pid"])
+    assert r2["synced"] is False
+    # 无文件 → no-op
+    ensure_rules_synced("/nonexistent", proj["pid"])
+
+
+# ── init(/init 模式: 无文件生成初稿+迁移, 有文件只建议) ───────────────
+
+def test_init_creates_draft_with_migration(proj):
+    # 预置缓存 + .topo/rules 迁移源
+    store.NamingConventionStore.create(proj["pid"], "服务 XxxService 结尾",
+                                       scenarios=["naming"])
+    store.GlossaryStore.create(proj["pid"], "场景", alias=["Scene"],
+                               definition="动画编排")
+    rules_dir = os.path.join(proj["root"], ".topo", "rules")
+    os.makedirs(rules_dir)
+    open(os.path.join(rules_dir, "a-style.md"), "w", encoding="utf-8").write("A 规则内容")
+
+    r = init_agents_md(proj["root"], proj["pid"])
+    assert r["ok"] and r["created"] is True
+    md = open(os.path.join(proj["root"], "AGENTS.md"), encoding="utf-8").read()
+    assert "## 命名规约" in md and "服务 XxxService 结尾" in md   # 缓存并入
+    assert "| 场景 | Scene | 动画编排 |" in md                    # 术语表格
+    assert "## 项目规则·a-style" in md and "A 规则内容" in md    # 迁移
+    assert "## 架构约束" in md                                    # 模板段
+    # init 后缓存与文件一致
+    assert "服务 XxxService 结尾" in [c["ruleText"] for c in
+                                     store.NamingConventionStore.list(proj["pid"])]
+
+    # 已有文件 → 只建议不盲改
+    md_before = md
+    r2 = init_agents_md(proj["root"], proj["pid"])
+    assert r2["ok"] and r2["created"] is False
+    assert r2["conventions"] == 1 and r2["suggestions"]
+    assert open(os.path.join(proj["root"], "AGENTS.md"),
+                encoding="utf-8").read() == md_before             # 未被改
+    # root 不可用
+    assert init_agents_md("/nonexistent", "")["ok"] is False
+
+
+# ── 采纳 append ──────────────────────────────────────────────────────
+
+def test_append_convention(proj):
+    assert append_convention(proj["root"], proj["pid"], "新规约")["written"] is False
+    write_agents_md(proj["root"], SAMPLE)
+    r = append_convention(proj["root"], proj["pid"], "新规约", ["naming"])
+    assert r["written"] is True
+    md = open(os.path.join(proj["root"], "AGENTS.md"), encoding="utf-8").read()
+    assert "- [naming] 新规约" in md
+    assert "新规约" in [c["ruleText"] for c in
+                      store.NamingConventionStore.list(proj["pid"])]  # 缓存已刷
+    # 章节缺失 → 自动建节
+    write_agents_md(proj["root"], "# 无节\n")
+    r2 = append_convention(proj["root"], proj["pid"], "另一条")
+    assert r2["written"] is True
+    assert "## 命名规约" in open(os.path.join(proj["root"], "AGENTS.md"),
+                                 encoding="utf-8").read()
+
+
+# ── REST(读/写/冲突 409) + 工具注册 ─────────────────────────────────
+
+class _Req:
+    def __init__(self, body): self._b = body
+    async def json(self): return self._b
+
+
+def test_rest_and_tool(proj):
+    from topoone_app_architect.arch_routes import agents_md as am
+    put = asyncio.run(am.api_agents_md_put(_Req(
+        {"root": proj["root"], "content": SAMPLE, "baseHash": "",
+         "project": proj["pid"]})))
+    assert put["data"]["ok"]
+    got = asyncio.run(am.api_agents_md_get(root=proj["root"], project=proj["pid"]))
+    assert got["data"]["exists"] and "命名规约" in got["data"]["content"]
+    # 乐观锁 409
+    conflict = asyncio.run(am.api_agents_md_put(_Req(
+        {"root": proj["root"], "content": "# x\n", "baseHash": "bad",
+         "project": proj["pid"]})))
+    assert conflict.status_code == 409
+    # init REST
+    r = asyncio.run(am.api_agents_md_init(_Req(
+        {"root": proj["root"], "project": proj["pid"]})))
+    assert r["data"]["created"] is False
+    # 工具: agents.md.init 注册可调; 旧 agents.md.sync 已退役
     from topoone_app_architect.agent.tools.registry import architect_tools
     names = [t["name"] for t in architect_tools()]
-    assert "agents.md.sync" in names
-    res = tool_agents_md_sync(proj_with_rules["root"], proj_with_rules["pid"])
-    assert res["ok"] and res["changed"] is True
+    assert "agents.md.init" in names and "agents.md.sync" not in names
+    assert tool_agents_md_init(proj["root"], proj["pid"])["ok"] is True
 
 
-def test_sync_refuses_missing_root(arch_env):
-    res = sync_agents_md("/nonexistent/xyz", "")
-    assert res["ok"] is False and "root" in res["error"]
+# ── map.rules 文件优先/缓存回退 ──────────────────────────────────────
+
+def test_tool_rules_file_first(proj):
+    write_agents_md(proj["root"], SAMPLE)
+    out = map_tools.tool_rules(proj["pid"])
+    assert "分层单向依赖" in out                     # 文件全文(含自由章节)
+    out2 = map_tools.tool_rules("proj-nope")
+    assert "无法唯一定位项目" in out2
 
 
-# ── W4 规则链(D-2 方案 A, 2610-B1): 定界/规则追加/手改保护 ─────────────
+# ── 采纳流落文件(mining accept + naming PUT 确认) ────────────────────
 
-def _read(path):
-    return open(path, encoding="utf-8").read()
-
-
-def test_rules_dir_appended_sorted(proj_with_rules, tmp_path):
-    import topoone_app_architect.arch_routes.agents_md_chain as chain
-    root = proj_with_rules["root"]
-    rules = tmp_path / "repo" / ".topo" / "rules"
-    rules.mkdir(parents=True)
-    (rules / "b-style.md").write_text("B 规则", encoding="utf-8")
-    (rules / "a-naming.md").write_text("A 规则", encoding="utf-8")
-    (rules / "cache.log").write_text("应被过滤", encoding="utf-8")
-    r = sync_agents_md(root, proj_with_rules["pid"])
-    assert r["ok"] and r["changed"] is True
-    md = _read(r["path"])
-    assert "topo:generated-begin:" in md and "<!-- topo:generated-end -->" in md
-    assert md.index("### a-naming.md") < md.index("### b-style.md")   # 按名排序
-    assert "A 规则" in md and "B 规则" in md and "应被过滤" not in md
-    assert md.index("topo:generated-end") < md.index("## 项目规则")    # 生成段在前
+def test_mining_accept_appends_file(proj):
+    from topoone_app_architect.agent.reflection import mining
+    write_agents_md(proj["root"], SAMPLE)
+    p = store.CapabilityProposalStore.create(
+        proj["pid"], "convention", "服务后缀规约", "服务以 Impl 结尾",
+        scenarios=["naming"])
+    r = mining.decide_proposal(proj["pid"], p["id"], "accept")
+    assert r["ok"] and "AGENTS.md" in r["applied"]
+    md = open(os.path.join(proj["root"], "AGENTS.md"), encoding="utf-8").read()
+    assert "- [naming] 服务以 Impl 结尾" in md
 
 
-def test_regenerate_clean_when_fingerprint_intact(proj_with_rules):
-    """规约更新 → 数据驱动再生成: 指纹校验通过, 照常覆盖(非冲突)。"""
-    root, pid = proj_with_rules["root"], proj_with_rules["pid"]
-    assert sync_agents_md(root, pid)["changed"] is True
-    store.NamingConventionStore.create(pid, "新规约条目", scenarios=["general"])
-    r = sync_agents_md(root, pid)
-    assert r["changed"] is True and "status" not in r        # 非冲突
-    assert "新规约条目" in _read(r["path"])
-
-
-def test_manual_edit_conflict_not_silently_overwritten(proj_with_rules):
-    root, pid = proj_with_rules["root"], proj_with_rules["pid"]
-    path = sync_agents_md(root, pid)["path"]
-    md = _read(path)
-    hand = md.replace("# AGENTS.md", "# AGENTS.md(手改标题)", 1)
-    open(path, "w", encoding="utf-8").write(hand)
-    r = sync_agents_md(root, pid)
-    assert r["status"] == "manual_edit_conflict" and r["changed"] is False
-    assert r["options"] == ["force_overwrite", "cancel"]
-    assert "(手改标题)" in _read(path)                        # 未被覆盖
-    r2 = sync_agents_md(root, pid, force=True)
-    assert r2["changed"] is True
-    assert "(手改标题)" not in _read(path)                    # force 后重建
-
-
-def test_legacy_undelimited_file_conflicts(proj_with_rules):
-    """无定界旧文件(手写/旧版生成) → 冲突; force 一次入定界形态。"""
-    root, pid = proj_with_rules["root"], proj_with_rules["pid"]
-    path = f"{root}/AGENTS.md"
-    open(path, "w", encoding="utf-8").write("# 手写 AGENTS.md\n内容")
-    r = sync_agents_md(root, pid)
-    assert r["status"] == "manual_edit_conflict"
-    assert sync_agents_md(root, pid, force=True)["changed"] is True
-    assert "topo:generated-begin:" in _read(path)
-
-
-# ── P2 规约统一编辑器(2610 定型): rules-files REST + 预览 ─────────────
-
-def _rules_api():
-    from topoone_app_architect.arch_routes import agents_md as am
+def test_naming_confirm_appends_file(proj):
     import asyncio
-    async def call(fn, *a, **kw):
-        return await fn(*a, **kw)
-    return am, call
+    from topoone_app_architect.arch_routes import naming as nm
+    write_agents_md(proj["root"], SAMPLE)
+    row = store.NamingConventionStore.create(
+        proj["pid"], "服务以 Repo 结尾", scenarios=["naming"], status="pending")
 
-
-def test_rules_files_crud_and_path_escape(proj_with_rules):
-    import asyncio
-    am, _ = _rules_api()
-    root = proj_with_rules["root"]
-    # 写
-    r = asyncio.run(am.api_rules_files_write.__wrapped__(None)) if False else None
     class _Req:
-        def __init__(self, body): self._b = body
+        def __init__(self, b): self._b = b
         async def json(self): return self._b
-    w = asyncio.run(am.api_rules_files_write(_Req(
-        {"root": root, "name": "arch-style.md", "content": "# 架构约束\n分层单向"})))
-    assert w["data"]["name"] == "arch-style.md"
-    # 读
-    g = asyncio.run(am.api_rules_files_get("arch-style.md", root=root))
-    assert "分层单向" in g["data"]["content"]
-    # 列表
-    lst = asyncio.run(am.api_rules_files_list(root=root))
-    assert any(x["name"] == "arch-style.md" for x in lst["data"])
-    # 路径穿越钳制
-    import json as _j
-    bad = asyncio.run(am.api_rules_files_write(_Req(
-        {"root": root, "name": "../escape.md", "content": "x"})))
-    body = _j.loads(bad.body)
-    assert body["code"] != 0 and "非法" in body["message"]  # 路径穿越钳制
-    # 删除
-    d = asyncio.run(am.api_rules_files_delete("arch-style.md", root=root))
-    assert d["data"]["deleted"] is True
-    g2 = asyncio.run(am.api_rules_files_get("arch-style.md", root=root))
-    assert g2.status_code == 404                              # 删除后 404
-
-
-def test_agents_md_preview_contains_rules_dir(proj_with_rules):
-    import asyncio
-    am, _ = _rules_api()
-    root = proj_with_rules["root"]
-    p = asyncio.run(am.api_agents_md_preview(root=root,
-                                             project=proj_with_rules["pid"]))
-    md = p["data"]["content"]
-    assert "topo:generated-begin:" in md
-    assert "动词开头小驼峰" in md                    # 生成段(命名规约投影)
+    r = asyncio.run(nm.api_conventions_update(
+        row["id"], _Req({"root": proj["root"], "project": proj["pid"],
+                            "status": "active"})))
+    md = open(os.path.join(proj["root"], "AGENTS.md"), encoding="utf-8").read()
+    assert "- [naming] 服务以 Repo 结尾" in md
+    assert r["data"]["status"] == "active"

@@ -258,7 +258,21 @@ async def api_conventions_update(row_id: str, request: Request):
         if st not in _CONVENTION_STATUSES:
             return err(400, f"status 无效（可选: {'/'.join(_CONVENTION_STATUSES)}）")
         # pending → active = 设计者确认归纳提议（其余状态迁移自由）
+        # 纯文件模式(2610): 确认即落 AGENTS.md(人审显式动作); 文件存在时
+        # 缓存由 sync 全量重建, 此处 store 写入仅为无文件项目的兼容路径。
         patch["status"] = st
+        if st == "active" and row.get("status") == "pending" and pid:
+            try:
+                from ..sem.rules_file import append_convention
+                from .. import store as _store
+                root = str((_store.ProjectsStore.get(pid) or {}).get("rootPath") or "")
+                if root:
+                    append_convention(root, pid, patch.get("ruleText")
+                                      or row.get("ruleText") or "",
+                                      (patch.get("scenarios")
+                                       or row.get("scenarios") or []))
+            except Exception:  # noqa: BLE001 — 落文件失败不阻塞确认(缓存仍在)
+                pass
     if not patch:
         return err(400, "无可更新字段")
     return ok(NamingConventionStore.update(row_id, patch) or row)

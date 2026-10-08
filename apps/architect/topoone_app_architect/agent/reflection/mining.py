@@ -205,6 +205,19 @@ def decide_proposal(project_id: str, proposal_id: str, action: str) -> Dict[str,
                 scenarios=row.get("scenarios") or ["naming"],
                 source="mined", author="capability.mine")
             applied = "已入命名规约库(active)"
+            # 纯文件模式(2610): AGENTS.md 存在 → 采纳同步落文件(人审后的显式动作)
+            try:
+                from ...sem.rules_file import append_convention
+                proj_row = store.ProjectsStore.get(project_id) or {}
+                root = str(proj_row.get("rootPath") or "")
+                if root:
+                    w = append_convention(root, project_id,
+                                          row.get("content", ""),
+                                          row.get("scenarios") or ["naming"])
+                    if w.get("written"):
+                        applied += " 并已追加至 AGENTS.md"
+            except Exception as e:  # noqa: BLE001 — 落文件失败不回滚采纳
+                applied += f"(落文件失败: {e})"
         else:
             applied = f"已采纳({row.get('type')})——skill_docs 按场景标签注入"
     store.CapabilityProposalStore.update(proposal_id, {"status": "accept" if action == "accept" else "ignored"})

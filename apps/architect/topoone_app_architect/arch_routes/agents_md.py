@@ -1,14 +1,10 @@
-"""项目级 AGENTS.md 生成/维护(用户需求 2026-09-26: architect 主 agent 具备
-生成、更新、维护 AGENTS.md 的能力)。
+"""AGENTS.md 规约文件面 REST/工具(纯文件模式, 2610 定型修订)。
 
-- 内容源全部复用既有能力单源: 规约全集(sem.map_tools.tool_rules——自管编码
-  规约+词汇表) + .topo/rules 人工段。不新建知识管道。
-- 规约定型(2610): AGENTS.md = 唯一对外规约产物, 只含约束性信息(资产概览已裁);
-  统一编辑器经 rules-files REST 读写 .topo/rules/*.md(人工段), 生成段只读。
-- 语义: 用户/主 agent 显式触发(问什么答什么——不自动写仓库); 幂等 sync
-  (内容无变化不动文件)。
-- 执行器侧读取能力已内建(任务下发按 caps 映射 AGENTS.md/规则目录——见
-  exec_bridge._build_workspace_files); 本模块补的是 repo 根常驻文件的生成/刷新。
+真相源与缓存同步见 sem/rules_file(章节解析契约/惰性同步/采纳 append);
+本模块: 读/写(乐观锁) REST + agents.md.init 初稿工具(/init 模式——
+Codex/Claude Code/opencode 三家共同语义: 无文件生成初稿, 已有文件给
+改进建议不盲改)。指纹定界/rules 目录合并链(agents_md_chain)已随
+纯文件模式退役; 旧 .topo/rules 内容经 init 一次性迁移并入。
 """
 from __future__ import annotations
 
@@ -25,188 +21,142 @@ logger = logging.getLogger("arch_routes.agents_md")
 
 router = APIRouter()
 
-
-def build_project_agents_md(root: str, project: Optional[str] = None) -> str:
-    """组装项目级 AGENTS.md(规约全集约束段)。纯组装, 不落盘。"""
-    from ..sem.map_tools import tool_overview, tool_rules
-    from .. import store as _store
-
-    proj = None
-    try:
-        rows = _store.ProjectsStore.all() or []
-        for r in rows:
-            if project and r.get("id") == project:
-                proj = r
-                break
-            if not project and os.path.normpath(str(r.get("root_path") or "")) \
-                    == os.path.normpath(root):
-                proj = r
-                break
-    except Exception:  # noqa: BLE001
-        proj = None
-    pid = (proj or {}).get("id") or project or ""
-
-    name = (proj or {}).get("name") or os.path.basename(root or "") or "project"
-    out = [f"# AGENTS.md — {name}",
-           "",
-           "> 本文件由 architect 维护(源: 自管编码规约/词汇表 + .topo/rules 项目规则)。"
-           "编码代理开工前必读；本文件只含约束性信息，参考/概览性内容不进入"
-           "(规约定型 2610)；冲突时以人工规则 > 用户显式 > 派生约束。",
-           ""]
-
-    rules = ""
-    try:
-        rules = tool_rules(project or None) or ""
-        # 去掉 tool_rules 自身 H1, 标题并入本文档结构
-        lines = rules.split("\n")
-        if lines and lines[0].startswith("# "):
-            lines = lines[1:]
-        rules = "\n".join(lines).strip()
-    except Exception as e:  # noqa: BLE001
-        rules = f"(规约集合不可用: {e})"
-    out.append(rules)
-    return "\n".join(out).rstrip() + "\n"
+_DRAFT_HEADER = (
+    "# AGENTS.md — {name}\n\n"
+    "> 项目规约唯一真相源(人治 markdown, git 版本化)。编码代理开工前必读。\n"
+    "> 建议保持精简(<200 行): 约束性信息优先, 参考/概览性内容不进。\n")
 
 
-def sync_agents_md(root: str, project: Optional[str] = None,
-                   force: bool = False) -> Dict[str, Any]:
-    """幂等落盘 repo 根 AGENTS.md。返回 {path, changed, bytes}。
+def _proj_of(root: str, project: Optional[str]) -> dict:
+    from .. import store
+    rows = store.ProjectsStore.all() or []
+    for r in rows:
+        if project and r.get("id") == project:
+            return r
+        if not project and os.path.normpath(str(r.get("root_path") or "")) \
+                == os.path.normpath(root or ""):
+            return r
+    return {}
 
-    W4(D-2 方案 A): 生成段指纹定界 + .topo/rules/ 追加; 定界段被手改 →
-    manual_edit_conflict(不静默覆盖, force=True 才覆盖)——见 agents_md_chain。
-    """
+
+def init_agents_md(root: str, project: Optional[str] = None) -> Dict[str, Any]:
+    """/init 模式: 无文件→初稿落盘(store 缓存+.topo/rules 迁移); 有→建议。"""
+    from ..sem.rules_file import agents_md_path, ensure_rules_synced, parse_agents_md
     if not root or not os.path.isdir(root):
         return {"ok": False, "error": f"root 不可用: {root!r}"}
-    from .agents_md_chain import detect_manual_edit, merge_agents_md
-    md = merge_agents_md(build_project_agents_md(root, project), root)
-    path = os.path.join(root, "AGENTS.md")
-    try:
-        old = open(path, "r", encoding="utf-8").read() if os.path.exists(path) else None
-    except Exception:
-        old = None
-    if old == md:
-        return {"ok": True, "path": path, "changed": False,
-                "bytes": len(md.encode("utf-8"))}
-    chk = detect_manual_edit(old, md)
-    if chk["status"] == "conflict" and not force:
-        return {"ok": True, "path": path, "changed": False,
-                "status": "manual_edit_conflict",
-                "manual_excerpt": chk.get("manual_excerpt"),
-                "options": ["force_overwrite", "cancel"]}
+    path = agents_md_path(root)
+    proj = _proj_of(root, project)
+    pid = proj.get("id") or project or ""
+
+    if os.path.isfile(path):
+        content = open(path, encoding="utf-8").read()
+        parsed = parse_agents_md(content)
+        suggestions = []
+        if "## 命名规约" not in content:
+            suggestions.append("缺 `## 命名规约` 章节(引擎消费契约位)")
+        if "## 术语表" not in content:
+            suggestions.append("缺 `## 术语表` 章节(引擎消费契约位)")
+        n_lines = len(content.splitlines())
+        if n_lines > 200:
+            suggestions.append(f"当前 {n_lines} 行, 超过 200 行建议精简"
+                               "(长文件降低遵从度——Claude Code 同款建议)")
+        if parsed.get("skipped"):
+            suggestions.append(f"{parsed['skipped']} 行不可解析(命名规约须行式"
+                               " `- [场景] 规则`, 术语表须三列表格)")
+        ensure_rules_synced(root, pid)
+        return {"ok": True, "created": False, "lines": n_lines,
+                "conventions": len(parsed["conventions"]),
+                "glossary": len(parsed["glossary"]),
+                "suggestions": suggestions or ["结构完好, 无必改项"]}
+
+    from .. import store
+    parts = [_DRAFT_HEADER.format(name=proj.get("name") or os.path.basename(root))]
+    convs = store.NamingConventionStore.list(pid, limit=200) if pid else []
+    parts.append("## 命名规约\n"
+                 + ("\n".join(f"- [{' '.join(c.get('scenarios') or [])}] "
+                              f"{c.get('ruleText')}" for c in convs)
+                    or "- (待补充: 一行一条, `- [场景] 规则文本`)"))
+    glos = store.GlossaryStore.list(pid, limit=200) if pid else []
+    parts.append("## 术语表\n\n| 术语 | 别名 | 含义 |\n|---|---|---|\n"
+                 + ("\n".join(f"| {g.get('term')} | "
+                              f"{'，'.join(g.get('alias') or []) or '—'} | "
+                              f"{g.get('definition') or ''} |" for g in glos)
+                    or "| (待补充) | — | |"))
+    parts.append("## 架构约束\n\n- (待补充: 分层/依赖方向/组件边界等人治约束)")
+    # 一次性迁移: .topo/rules/*.md 并入(旧统一编辑器规则目录, 纯文件模式退役面)
+    rules_dir = os.path.join(root, ".topo", "rules")
+    if os.path.isdir(rules_dir):
+        for name in sorted(os.listdir(rules_dir)):
+            if name.endswith(".md"):
+                body = open(os.path.join(rules_dir, name),
+                            encoding="utf-8").read().strip()
+                if body:
+                    parts.append(f"## 项目规则·{name[:-3]}\n\n{body}")
+    content = "\n\n".join(parts).rstrip() + "\n"
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(md)
-    return {"ok": True, "path": path, "changed": True,
-            "bytes": len(md.encode("utf-8"))}
+        fh.write(content)
+    ensure_rules_synced(root, pid, force=True)
+    return {"ok": True, "created": True, "lines": len(content.splitlines()),
+            "conventions": len(convs), "glossary": len(glos),
+            "suggestions": ["初稿已生成, 请人工审阅后提交 git"]}
 
 
-@router.post("/arch/agents-md/sync")
-async def api_sync_agents_md(request: Request):
-    """生成/刷新 repo 根 AGENTS.md(显式触发; 幂等; force 处置手改冲突)。"""
-    try:
-        body = await request.json() or {}
-    except Exception:  # noqa: BLE001
-        body = {}
+@router.get("/arch/agents-md")
+async def api_agents_md_get(root: str = "", project: str = ""):
+    """读 AGENTS.md(顺带惰性同步引擎缓存)。"""
+    if not root or not os.path.isdir(root):
+        return err(400, "root 不可用")
+    from ..sem.rules_file import ensure_rules_synced, read_agents_md
+    r = read_agents_md(root)
+    if r["exists"]:
+        ensure_rules_synced(root, project or _proj_of(root, project or None).get("id") or "")
+    return ok(r)
+
+
+@router.put("/arch/agents-md")
+async def api_agents_md_put(request: Request):
+    """写 AGENTS.md {root, content, baseHash, project}(乐观锁; 写后强制同步)。"""
+    body = await request.json() or {}
     root = str(body.get("root") or "")
-    project = str(body.get("project") or "")
-    force = bool(body.get("force"))
-    res = sync_agents_md(root, project or None, force=force)
-    if not res.get("ok"):
-        return err(res.get("error") or "sync failed")
+    content = str(body.get("content") or "")
+    if not root or not os.path.isdir(root):
+        return err(400, "root 不可用")
+    if not content.strip():
+        return err(400, "内容为空")
+    from ..sem.rules_file import ensure_rules_synced, write_agents_md
+    res = write_agents_md(root, content, str(body.get("baseHash") or ""))
+    if res.get("conflict"):
+        return JSONResponse(status_code=409, content={
+            "code": 409, "message": "文件已被外部修改, 请重读合并",
+            "data": {"currentHash": res.get("current_hash")}})
+    pid = str(body.get("project") or "") or _proj_of(root, None).get("id") or ""
+    ensure_rules_synced(root, pid, force=True)
     return ok(res)
 
+
+@router.post("/arch/agents-md/init")
+async def api_agents_md_init(request: Request):
+    """初稿生成/改进建议(/init 模式)。"""
+    body = await request.json() or {}
+    res = init_agents_md(str(body.get("root") or ""),
+                         str(body.get("project") or "") or None)
+    if not res.get("ok"):
+        return err(res.get("error") or "init failed")
+    return ok(res)
+
+
+from fastapi.responses import JSONResponse  # noqa: E402
 
 from ..agent.tools.req_agent import register_architect_tool  # noqa: E402
 
 
 @register_architect_tool(
-    "agents.md.sync",
-    "生成/刷新项目根 AGENTS.md(自管编码规约+词汇表+项目规则目录, 幂等)。"
-    "用户要求 维护/更新/生成 AGENTS.md 或「把规约固化给执行器」时调用。"
-    "写用户仓库属显式动作——仅用户表达该意图时调用。"
-    "返回 manual_edit_conflict=生成段被手改: 询问用户是否覆盖, 确认后带 force=true 重调。",
+    "agents.md.init",
+    "AGENTS.md 初稿生成/体检(/init 模式): 无文件→从命名规约/术语表缓存+.topo/rules"
+    " 生成初稿落盘; 已有文件→只给改进建议(缺失章节/超长/坏行), 绝不盲改。"
+    "用户要求 初始化/生成 AGENTS.md 或「建立项目规约」时调用。"
+    "AGENTS.md 是项目规约唯一真相源(纯人治 markdown)——修改内容应引导用户直接编辑。",
 )
-def tool_agents_md_sync(root: Optional[str] = None,
-                        project: Optional[str] = None,
-                        force: bool = False) -> Dict[str, Any]:
-    return sync_agents_md(root or "", project or None, force=force)
-
-
-# ── P2 规约统一编辑器(2610 定型): .topo/rules 文件管理 + AGENTS.md 预览 ──
-
-_SAFE_NAME = __import__("re").compile(r"^[\w.-]+\.md$")
-
-
-def _rules_dir(root: str) -> str:
-    return os.path.join(root or "", ".topo", "rules")
-
-
-def _require_root(root: str) -> Optional[str]:
-    if not root or not os.path.isdir(root):
-        return None
-    return root
-
-
-@router.get("/arch/rules-files")
-async def api_rules_files_list(root: str = ""):
-    """列出 .topo/rules/*.md(统一编辑器左栏)。"""
-    root = _require_root(root) or ""
-    if not root:
-        return err(400, "root 不可用")
-    from .agents_md_chain import load_project_rules
-    return ok([{"name": n, "bytes": len(c.encode("utf-8"))}
-               for n, c in load_project_rules(root)])
-
-
-@router.get("/arch/rules-files/{name}")
-async def api_rules_files_get(name: str, root: str = ""):
-    """读单个规则文件。"""
-    root = _require_root(root) or ""
-    if not root or not _SAFE_NAME.match(name or ""):
-        return err(400, "参数非法")
-    path = os.path.join(_rules_dir(root), name)
-    if not os.path.isfile(path):
-        return err(404, f"规则文件不存在: {name}")
-    return ok({"name": name, "content": open(path, encoding="utf-8").read()})
-
-
-@router.post("/arch/rules-files")
-async def api_rules_files_write(request: Request):
-    """写/新建规则文件 {root, name, content}。名称钳制 *.md 无路径分隔,
-    防穿越; 内容经 merge_agents_md 于下次 sync 投影进 AGENTS.md。"""
-    body = await request.json() or {}
-    root = _require_root(str(body.get("root") or "")) or ""
-    name = str(body.get("name") or "")
-    content = str(body.get("content") or "").strip()
-    if not root or not _SAFE_NAME.match(name):
-        return err(400, "root 或 name 非法(须为 *.md 文件名, 不含路径)")
-    if not content:
-        return err(400, "内容为空(删除请用 DELETE)")
-    d = _rules_dir(root)
-    os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, name)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(content.rstrip() + "\n")
-    return ok({"name": name, "bytes": len(content.encode("utf-8"))})
-
-
-@router.delete("/arch/rules-files/{name}")
-async def api_rules_files_delete(name: str, root: str = ""):
-    root = _require_root(root) or ""
-    if not root or not _SAFE_NAME.match(name or ""):
-        return err(400, "参数非法")
-    path = os.path.join(_rules_dir(root), name)
-    if not os.path.isfile(path):
-        return err(404, "规则文件不存在")
-    os.remove(path)
-    return ok({"deleted": True})
-
-
-@router.get("/arch/agents-md/preview")
-async def api_agents_md_preview(root: str = "", project: str = ""):
-    """AGENTS.md 最终内容预览(生成段+规则段, 不落盘)。"""
-    root = _require_root(root) or ""
-    if not root:
-        return err(400, "root 不可用")
-    from .agents_md_chain import merge_agents_md
-    return ok({"content": merge_agents_md(
-        build_project_agents_md(root, project or None), root)})
+def tool_agents_md_init(root: Optional[str] = None,
+                        project: Optional[str] = None) -> Dict[str, Any]:
+    return init_agents_md(root or "", project or None)

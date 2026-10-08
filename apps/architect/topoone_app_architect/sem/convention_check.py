@@ -81,6 +81,12 @@ def _gather_symbols(root: Optional[str], project: Optional[str],
 def convention_check(root: Optional[str], project: Optional[str],
                      base: str = "", files: Optional[List[str]] = None) -> dict:
     """开发规约违约检查主入口(路由转 400 on error)。"""
+    from .rules_file import ensure_rules_synced
+    if root:
+        try:
+            ensure_rules_synced(root, project or "")
+        except Exception:  # noqa: BLE001 — 同步失败不阻塞检查(缓存照旧)
+            pass
     from ..store import NamingConventionStore
     from .paths import project_id_for
 
