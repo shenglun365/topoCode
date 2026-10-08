@@ -10,6 +10,7 @@ import { backendUp } from '@/services/backend'
 import { useAppDialog } from '@/composables/useAppDialog'
 import { semanticAssetService, type CodegraphStatus } from '@/services/semantic-asset-service'
 import AgentExecutorsCard from '@/components/config/AgentExecutorsCard.vue'
+import AssetsCard from '@/components/config/AssetsCard.vue'
 import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t, te } = useI18n()
@@ -20,6 +21,7 @@ const TABS = [
   { key: 'instance', label: 'config.tabs.instance' },
   { key: 'executors', label: 'config.tabs.executors' },
   { key: 'roleModels', label: 'config.tabs.roleModels' },
+  { key: 'assets', label: 'config.tabs.assets' },
   { key: 'other', label: 'config.tabs.other' },
 ] as const
 const activeTab = ref<string>('instance')
@@ -1014,6 +1016,11 @@ onMounted(() => { void loadCgStatus() })
     </div>
 
 
+
+    <!-- ═══ tab: L-2 资产/技能管理(arch_assets, 2610-B1 deferred) ═══ -->
+    <div v-show="activeTab === 'assets'" class="space-y-4">
+      <AssetsCard />
+    </div>
 
     <!-- ═══ tab: 资产助理(数据资产·语义分析) + 轻任务模型(编排侧) ═══ -->
     <div v-show="activeTab === 'roleModels'">
