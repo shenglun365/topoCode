@@ -36,6 +36,10 @@ const resizing = ref(false)
 let resizeStart = { x: 0, w: 0 }
 
 function beginDrag(e: PointerEvent) {
+  if (e.button !== 0) return
+  // 交互元素(关闭钮等)不启动拖拽——否则 setPointerCapture 把 click 重定向到
+  // 头部, 按钮 @click 永不触发(关不掉)且卡片切 absolute 定位(宽度跳变)
+  if ((e.target as HTMLElement).closest("button, a, input, textarea, select")) return
   dragging.value = true
   // 指针捕获: 拖出元素仍持续收到 move/up——否则松开在元素外时 up 丢失, dragging 卡死
   try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ignore */ }
