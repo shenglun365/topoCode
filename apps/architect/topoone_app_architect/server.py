@@ -82,6 +82,9 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
 
     app = FastAPI(title="TopoOne Architect")
     app.add_middleware(ProjectContextMiddleware)
+    # 口令入口保护(2610 执行器会话拓展): 本机豁免, /api/**+WS 校验
+    from topoone_app_architect.arch_routes.security import TokenAuthMiddleware
+    app.add_middleware(TokenAuthMiddleware)
     # GZip 压缩(≥1KB 才压): 静态主包 ~2.2MB → ~700KB 传输, API JSON 同收益
     from fastapi.middleware.gzip import GZipMiddleware
     app.add_middleware(GZipMiddleware, minimum_size=1024)

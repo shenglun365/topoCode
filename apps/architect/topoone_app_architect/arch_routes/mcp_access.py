@@ -169,6 +169,11 @@ def apply_access(key: str, scope: str, root: str, url: str) -> Dict[str, Any]:
     u = (url or "").strip()
     if not u.startswith(("http://", "https://")):
         return {"error": "url 须为 http(s) 地址"}
+    try:  # A4: 远程部署时 URL 附口令(本机豁免下为 no-op)
+        from .security import append_token
+        u = append_token(u)
+    except Exception:  # noqa: BLE001 — 注入失败不阻塞接入
+        pass
     targets = _targets(root)
     if key not in targets:
         return {"error": f"未知执行器: {key}"}
