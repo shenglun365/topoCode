@@ -80,10 +80,9 @@ const routes: RouteRecordRaw[] = [
         meta: { workbench: true, title: '系统管理' },
       },
       {
+        // 深链会话页(2026-10): /workbench/exec-sessions 并入顶层全屏会话视图
         path: 'exec-sessions',
-        name: 'ExecSessions',
-        component: () => import('@/pages/ExecSessionsPage.vue'),
-        meta: { workbench: true, title: '执行器会话' },
+        redirect: (to) => ({ path: '/exec-session-view', query: to.query }),
       },
       {
         path: 'mcp',
@@ -92,6 +91,13 @@ const routes: RouteRecordRaw[] = [
         meta: { workbench: true, title: '外部调用' },
       },
     ],
+  },
+  {
+    // 执行器会话深链页(2026-10): 全屏消息流(无工作台框架), ?job= 定位
+    path: '/exec-session-view',
+    name: 'ExecSessionView',
+    component: () => import('@/pages/ExecSessionsPage.vue'),
+    meta: { workbench: false, title: '执行器会话' },
   },
   { path: '/:pathMatch(.*)*', redirect: '/overview' },
 ]

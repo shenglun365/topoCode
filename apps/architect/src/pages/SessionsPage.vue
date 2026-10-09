@@ -233,7 +233,7 @@ function openExecNewTab(jobId: string) {
   // hash 路由: router.resolve 生成 #/…?job= 深链; project 经 route.query 继承
   const query: Record<string, string> = { job: jobId }
   if (route.query.project) query.project = String(route.query.project)
-  window.open(router.resolve({ path: '/workbench/exec-sessions', query }).href, '_blank')
+  window.open(router.resolve({ path: '/exec-session-view', query }).href, '_blank')
 }
 function newConversation() {
   conv.newConversation()

@@ -67,7 +67,7 @@ function rowClick(s: SessionRow) {
 
 function openNewTab(s: SessionRow) {
   // hash 路由: router.resolve 生成 #/…?job= 深链(new URL path 风格会 404)
-  window.open(router.resolve({ path: '/workbench/exec-sessions', query: { job: s.jobId } }).href, '_blank')
+  window.open(router.resolve({ path: '/exec-session-view', query: { job: s.jobId } }).href, '_blank')
 }
 
 onMounted(() => {

@@ -247,6 +247,17 @@ export default {
     noConvHint: 'no linked conversation',
     centerHint: 'Chat/approval/acceptance live in the conversation — this page is the event archive; direct chat via quick mode',
   },
+  execSessionView: {
+    project: 'Project',
+    mainConv: 'Main session',
+    running: 'Running',
+    openCenter: 'Open in Sessions',
+    noJob: 'No executor session specified — enter via the Executor Sessions tab in Sessions.',
+    noMessages: 'No messages yet — the conversation stream appears here once started.',
+    timelineFallback: 'Job not linked to a conversation stream (direct run) — event timeline archive below.',
+    readonlyHint: 'Read-only view — run conversations/approvals in Sessions or the main session.',
+    executor: 'Executor',
+  },
   mcp: {
     title: 'MCP Service',
     desc: 'architect asset-map service: external AI coding agents (Claude Code/Cursor/Cline/opencode) query architecture assets via MCP; all tools return Markdown.',
@@ -536,7 +547,7 @@ export default {
     noSummary: 'No summary yet — click ✨ to generate',
     summary: 'Summary',
     outline: { title: 'Outline', empty: 'No turns yet — send a message', noPrompt: '(no prompt)', close: 'Close', resize: 'Drag to resize' },
-    tabs: { list: 'Sessions', assets: 'Requirement Tracking', exec: 'Executor Sessions', switch: 'Switch view' },
+    tabs: { sessions: 'Main Session', assets: 'Requirement Tracking', exec: 'Executor Sessions', switch: 'Switch view' },
     tracking: {
       title: 'Requirement Tracking',
       convAll: 'All sessions',

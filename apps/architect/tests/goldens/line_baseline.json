@@ -174,5 +174,6 @@
  "store/states.py": 84,
  "store/tasks.py": 172,
  "store/tracking.py": 352,
- "arch_routes/llm_catalog.py": 347
+ "arch_routes/llm_catalog.py": 347,
+ "src/pages/ExecSessionsPage.vue": 235
 }

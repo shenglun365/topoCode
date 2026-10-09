@@ -245,6 +245,17 @@ export default {
     noConvHint: '无关联会话',
     centerHint: '对话/审批/验收在会话流进行——本页为事件档案；直通对话经会话 quick 挡',
   },
+  execSessionView: {
+    project: '项目',
+    mainConv: '主会话',
+    running: '运行中',
+    openCenter: '会话中心打开',
+    noJob: '未指定执行器会话——从会话中心「执行器会话」标签进入。',
+    noMessages: '暂无消息——会话开始后此处显示对话流。',
+    timelineFallback: '该作业未落会话流（直通执行）——以下为事件时间线档案。',
+    readonlyHint: '本页为只读视图——对话/审批/验收请回会话中心或主会话进行。',
+    executor: '执行器',
+  },
   mcp: {
     title: 'MCP 服务',
     desc: 'architect 对外 MCP 服务：serve 执行器/外部 TUI 经此与 architect 交互——两端(取执行契约/提交回执)+资产地图与历史上下文按需取用，全部返回 Markdown。',
@@ -536,7 +547,7 @@ export default {
     noSummary: '暂无摘要，可点击 ✨ 生成',
     summary: '会话摘要',
     outline: { title: '会话大纲', empty: '暂无回合——发首条消息生成', noPrompt: '(无提示)', close: '关闭', resize: '拖拽调整大小' },
-    tabs: { list: '会话列表', assets: '需求跟踪', exec: '执行器会话', switch: '切换视图' },
+    tabs: { sessions: '主会话', assets: '需求跟踪', exec: '执行器会话', switch: '切换视图' },
     tracking: {
       title: '需求跟踪',
       convAll: '全部会话',

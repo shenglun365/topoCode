@@ -436,7 +436,22 @@ async def session_messages(conv_id: str):
                 m["item"] = it_
     except Exception:  # noqa: BLE001 — 投影失败降级为原始消息(不影响读取)
         pass
-    return ok({"id": conv_id, "messages": msgs})
+    # 深链会话页(2026-10): 头信息一次取齐——子会话 meta + 主会话标题
+    parent_id = conv.get("parentConvId") or ""
+    parent_row = store.ConversationsStore.get(parent_id) if parent_id else None
+    return ok({
+        "id": conv_id,
+        "conv": {
+            "title": conv.get("title") or "",
+            "kind": conv.get("kind") or "generic",
+            "executorId": conv.get("executorId") or "",
+            "parentConvId": parent_id,
+            "projectId": conv.get("projectId") or "",
+        },
+        "parent": ({"id": parent_id, "title": (parent_row or {}).get("title") or ""}
+                   if parent_id else None),
+        "messages": msgs,
+    })
 
 
 @router.get("/sessions/{conv_id}/items")
