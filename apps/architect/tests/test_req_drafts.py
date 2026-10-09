@@ -308,3 +308,78 @@ def test_sessions_picker():
     # 关键字超限截断(6 个取前 5)
     out = _body(asyncio.run(sapi.list_sessions_picker(project=PID, kw="a b c d e f")))
     assert len(out["data"]["keywords"]) == 5
+
+
+def test_skills_registry_and_endpoint():
+    """B1 技能注册表: 首批三技能(自 _PRESETS 等价迁移) + GET /skills。"""
+    from topoone_app_architect.agent import skills
+    from topoone_app_architect.arch_routes import req_drafts as api
+
+    assert skills.get_skill("generate") is not None
+    assert "补齐背景/场景/功能点/约束/验收标准" in skills.get_skill("generate").instruction
+    assert skills.get_skill("nonexist") is None
+    # 只读白名单单源: 注册表工具 = 原 _AI_TOOLS 全集
+    assert "asset.semantic.search" in skills.SKILL_TOOLS_READONLY
+    assert skills.get_skill("review").tools == skills.SKILL_TOOLS_READONLY
+    # 端点: 域过滤 + 卡片字段(指令全文不列)
+    out = _body(asyncio.run(api.api_skills_list("draft")))
+    ids = [x["id"] for x in out["data"]["skills"]]
+    assert {"generate", "review", "relate"} <= set(ids)
+    assert all("instruction" not in x for x in out["data"]["skills"])
+
+
+def test_topo_skill_fence_resolution():
+    """B1 topo-skill 围栏: 回调命中注入技能指令+附加; 未命中按自由指令。"""
+    from topoone_app_architect.agent import skills
+    from topoone_app_architect.arch_routes.req_drafts import split_agent_blocks
+
+    md = "正文\n\n```topo-skill: review\n额外关注性能\n```\n"
+    clean, emb = split_agent_blocks(md, resolve_skill=skills.get_skill)
+    assert "topo-skill" not in clean and "正文" in clean
+    assert len(emb) == 1
+    assert "需求审核" in emb[0] and "额外关注性能" in emb[0]
+    # 未注册技能 id: 附加文本按自由指令(不虚构)
+    _, emb2 = split_agent_blocks("```topo-skill: nope\n做点什么\n```",
+                                 resolve_skill=skills.get_skill)
+    assert emb2 == ["做点什么"]
+    # 不传回调(存量调用形态): 行为等同未命中
+    _, emb3 = split_agent_blocks("```topo-skill: review\n做点什么\n```")
+    assert emb3 == ["做点什么"]
+
+
+def test_skill_run_job_equivalence(monkeypatch):
+    """skill_run 作业: skill 字段与存量 preset 等价; custom 仅指令也可跑。"""
+    import topoone_app_architect.arch_routes.req_drafts as api
+    from topoone_app_architect.store import ReqDraftsStore
+
+    d = ReqDraftsStore.create(PID, "S", "# 原\n正文")
+
+    def _fake_loop(msgs, **kw):
+        return {"content": "# 技能新版"}
+
+    from topoone_app_architect.agent.tools import req_agent as _ra
+    monkeypatch.setattr(_ra, "run_tools_loop", _fake_loop)
+
+    class _Req:
+        def __init__(self, payload):
+            self._p = payload
+
+        async def json(self):
+            return self._p
+
+    from topoone_app_architect.sem import job_runner as _jr
+    out = _body(asyncio.run(api.api_req_drafts_ai(
+        d["id"], _Req({"project": PID, "skill": "review"}))))
+    r = out["data"]
+    assert r.get("started") is True and r["job"]["kind"] == "skill_run"
+    import time as _t
+    from topoone_app_architect.store import SemanticJobsStore
+    for _ in range(50):
+        row = SemanticJobsStore.get(r["job"]["id"])
+        if row and row["state"] in ("done", "failed"):
+            break
+        _t.sleep(0.1)
+    assert row["state"] == "done", row.get("result")
+    assert ReqDraftsStore.get(d["id"])["lastProposedMd"] == "# 技能新版"
+    # scope 携带 skillId+preset(双字段, 存量幂等键兼容)
+    assert row["scope"]["skillId"] == "review" and row["scope"]["preset"] == ""
