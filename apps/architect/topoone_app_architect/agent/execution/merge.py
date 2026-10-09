@@ -203,6 +203,15 @@ def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
         # 就地任务: 变更已生效——直接记 merged 终态(无 git 动作)
         if "融合模式" in str(pre.get("advice") or ""):
             import time as _t
+            # E4 认知回写: 就地变更同样排队基线刷新(幂等/失败静默)
+            try:
+                from ...sem import job_runner as _jr
+                _pid = str(task.get("projectId") or "")
+                if _pid:
+                    _jr.start_job(_pid, "baseline_refresh",
+                                  {"trigger": f"merge-inplace:{task_id}"}, llm=True)
+            except Exception:  # noqa: BLE001
+                pass
             return store.TasksStore.update(task_id, {
                 "mergedAt": int(_t.time() * 1000),
                 "mergedHead": str(task.get("runnerJobId") or "inplace")}) or {
@@ -244,6 +253,22 @@ def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
     store.TasksStore.update(task_id, {"mergedAt": _ts(), "mergedHead": head})
     # 生命周期闭环(用户裁决): 合并同意 = 过程产物清理同意(worktree/分支)
     cleanup_note = _post_merge_cleanup(task, root)
+    # E4 认知回写(二期上行线): 合并成功 → 排队基线刷新(语义图谱纳入本次
+    # 变更, 采集缓存命中增量成本)——幂等(同项目活跃即并入)/失败静默不阻塞
+    refresh_note = ""
+    try:
+        from ...sem import job_runner as _jr
+        pid = str(task.get("projectId") or "")
+        if pid:
+            rr = _jr.start_job(pid, "baseline_refresh",
+                               {"trigger": f"merge:{task_id}"}, llm=True)
+            if rr.get("started"):
+                refresh_note = "已排队语义基线刷新(认知回写——完成后资产图谱含本次变更)"
+            elif rr.get("reason") == "already_running":
+                refresh_note = "语义基线刷新已在进行(并入本次变更)"
+    except Exception as e:  # noqa: BLE001 — 回写排队失败不阻塞合并回执
+        refresh_note = f"语义基线刷新排队失败({str(e)[:60]})——可手动「更新基线」"
     return {"ok": True, "mergedHead": head, "mode": mode,
             "advice": (f"已合并 {branch} → 主目录({head[:12]})。"
-                       + (f"清理: {cleanup_note}。" if cleanup_note else ""))}
+                       + (f"清理: {cleanup_note}。" if cleanup_note else "")
+                       + (f" {refresh_note}。" if refresh_note else ""))}

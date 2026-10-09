@@ -135,3 +135,42 @@ def test_merge_precheck_route(arch_env, tmp_path, monkeypatch, client, git_proje
     assert r.status_code == 200 and r.json()["data"]["ok"] is True
     r = client.get("/api/architect/tasks/task-nope/merge-precheck")
     assert r.status_code == 404
+
+
+def test_merge_queues_baseline_refresh(monkeypatch, tmp_path):
+    """E4 认知回写: 合并成功(分支/就地两径)排队 baseline_refresh; 排队失败静默。"""
+    from topoone_app_architect.agent.execution import merge as mg
+    from topoone_app_architect import store
+
+    started = []
+
+    def _fake_start(pid, kind, scope=None, **kw):
+        started.append((pid, kind, scope))
+        return {"started": True}
+
+    from topoone_app_architect.sem import job_runner as _jr
+    monkeypatch.setattr(_jr, "start_job", _fake_start)
+
+    conv = store.ConversationsStore.create({
+        "projectId": "p-e4", "title": "m", "meta": {"root": str(tmp_path)}})
+    t = store.TasksStore.create({
+        "conversationId": conv["id"], "projectId": "p-e4", "title": "合并",
+        "instruction": "x", "status": "done", "branch": "task/x",
+        "runnerJobId": "j1", "workspace": "inplace"})
+
+    # 就地路径: precheck 不可检 + 融合模式文案 → 排队回写
+    monkeypatch.setattr(mg, "merge_precheck",
+                        lambda tid: {"ok": True, "checkable": False,
+                                     "advice": "融合模式(直接写入项目目录)"})
+    res = mg.merge_branch(t["id"])
+    assert res.get("mergedAt") or res.get("ok") or res.get("merged")
+    assert started and started[-1][1] == "baseline_refresh"
+    assert str(started[-1][2].get("trigger", "")).startswith("merge-inplace:")
+
+    # 排队异常 → 合并不受影响(静默)
+    def _boom(*a, **k):
+        raise RuntimeError("queue down")
+    monkeypatch.setattr(_jr, "start_job", _boom)
+    store.TasksStore.update(t["id"], {"mergedAt": 0, "mergedHead": ""})
+    res2 = mg.merge_branch(t["id"])
+    assert res2.get("mergedAt") or res2.get("ok") or res2.get("merged")
