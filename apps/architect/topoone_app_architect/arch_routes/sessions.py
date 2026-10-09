@@ -883,7 +883,8 @@ async def list_coding_sessions(conv_id: str):
 
 @router.post("/sessions/{conv_id}/coding-sessions")
 async def create_coding_session(conv_id: str, request: Request):
-    """新建 coding 子会话(清空 coding 自持上下文的新执行环境)。"""
+    """新建 coding 子会话。body: {title?, executorId?}——缺省继承主绑定
+    (主会话可挂多执行器, 每执行器可建多个子会话)。"""
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
@@ -895,13 +896,38 @@ async def create_coding_session(conv_id: str, request: Request):
         "kind": "coding", "projectId": conv.get("projectId") or "",
         "reqId": conv.get("reqId") or "",
         "title": str(data.get("title") or "").strip() or "coding 子会话",
-        "executorId": conv.get("executorId") or "",
+        "executorId": str(data.get("executorId") or "").strip()
+                      or conv.get("executorId") or "",
         "parentConvId": conv_id,
         "roles": ["architect"],
         "meta": {"createdFrom": conv_id, "createdAtTs": _ts()},
     })
     _set_active_coding_session(conv_id, sub["id"])
     return ok(_conv_api(store.ConversationsStore.get(sub["id"]) or sub))
+
+
+@router.post("/sessions/{sub_id}/executor")
+async def switch_sub_executor(sub_id: str, request: Request):
+    """子会话换执行器(类比换模型: 下回合生效, 对话连续)——上下文真相源=
+    子会话消息流, 换绑只清 sessionRef; 直通作业在跑时拒绝(先停止)。"""
+    sub = store.ConversationsStore.get(sub_id)
+    if not sub:
+        return err(404, "子会话不存在")
+    if (sub.get("kind") or "") != "coding":
+        return err(400, "仅 coding 子会话可换绑执行器")
+    body = await request.json() or {}
+    eid = str(body.get("executorId") or "").strip()
+    if not eid:
+        return err(400, "executorId 必填")
+    from .agent_executors import load_executors
+    if not any(e.get("id") == eid for e in load_executors() or []):
+        return err(400, f"执行器不存在或未启用: {eid}")
+    from ..agent.execution.proxy import proxy_state
+    running = proxy_state(sub_id)
+    if running.get("active"):
+        return err(400, "该子会话执行器会话进行中——请先停止再换绑执行器")
+    store.ConversationsStore.update(sub_id, {"executorId": eid, "sessionRef": ""})
+    return ok({"subId": sub_id, "executorId": eid, "sessionRef": ""})
 
 
 @router.post("/sessions/{conv_id}/coding-sessions/{sub_id}/activate")

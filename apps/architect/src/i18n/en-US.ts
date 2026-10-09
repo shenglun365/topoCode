@@ -243,6 +243,8 @@ export default {
     live: 'Live',
     liveOn: 'Live on',
     openConv: 'chat',
+    newTab: 'Open in new tab (timeline)',
+    noConvHint: 'no linked conversation',
     centerHint: 'Chat/approval/acceptance live in the conversation — this page is the event archive; direct chat via quick mode',
   },
   mcp: {
@@ -480,6 +482,10 @@ export default {
       active: 'Active',
       view: 'Open stream',
       empty: 'No sub-sessions yet — auto-created on /执行, or create below.',
+      switchExec: 'Switch executor',
+      newExecDefault: 'New executor (default = session bound)',
+      lockTaken: 'This sub-session is open in another window ({tab}) — takeover risks concurrent edits.',
+      lockTakeover: 'Take over',
       feedHint: 'Feed to coding (filtered into sub-session & job)',
       feedSummaryHint: 'Summarized feed (LLM-compressed conclusion only)',
     },
@@ -530,7 +536,7 @@ export default {
     noSummary: 'No summary yet — click ✨ to generate',
     summary: 'Summary',
     outline: { title: 'Outline', empty: 'No turns yet — send a message', noPrompt: '(no prompt)', close: 'Close', resize: 'Drag to resize' },
-    tabs: { list: 'Sessions', assets: 'Requirement Tracking', switch: 'Switch view' },
+    tabs: { list: 'Sessions', assets: 'Requirement Tracking', exec: 'Executor Sessions', switch: 'Switch view' },
     tracking: {
       title: 'Requirement Tracking',
       convAll: 'All sessions',

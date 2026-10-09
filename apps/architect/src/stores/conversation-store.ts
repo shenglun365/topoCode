@@ -563,6 +563,11 @@ export const useConversationStore = defineStore('archConversation', () => {
       case 'conv-message':
       case 'items':
         markDirty(ev.conversationId)
+        // 执行器子会话输出感知(2026-10): 广播给 dock 弹层(闪动+池刷新)
+        try {
+          window.dispatchEvent(new CustomEvent('arch:conv-message', {
+            detail: { conversationId: ev.conversationId } }))
+        } catch { /* 非 DOM 环境 */ }
         return
       case 'turnEnd':
         scheduleRefresh()

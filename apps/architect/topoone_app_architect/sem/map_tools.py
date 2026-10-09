@@ -30,6 +30,8 @@ TOOLS = [
     {"name": "ctx.get", "desc": "会话上下文包：摘要+关键单元+备案文档", "args": {"conversation": "会话 id", "project": "项目 id"}},
     {"name": "task.mandate", "desc": "开工前取执行契约: 规约/允许范围/约束/验收判据+项目规约全集(task_id 或 req_id)", "args": {"task_id": "任务 id", "req_id": "需求 id(无任务卡时)", "project": "项目 id"}},
     {"name": "task.receipt", "desc": "完工后提交回执: architect 越界检测(L-1① 自纠正)+验收对照+改动分布——评估性返回不改任务状态", "args": {"task_id": "任务 id", "changed_files": "改动文件相对路径清单", "summary": "执行摘要(可选)"}},
+    {"name": "coding.sessions", "desc": "列主会话的执行器子会话池(活跃标记/执行器/消息数)", "args": {"conversation": "主会话 id(缺省=当前会话)"}},
+    {"name": "coding.feed", "desc": "向活跃执行器子会话投递文本(转发给执行器继续/新开执行)", "args": {"conversation": "主会话 id(缺省=当前会话)", "text": "投递文本"}},
     {"name": "ctx.summarize", "desc": "生成/刷新会话摘要（标题+结论/决策/待办）", "args": {"conversation": "会话 id"}},
 ]
 
@@ -292,6 +294,10 @@ def run_tool(name: str, args: dict) -> str:
         from .task_tools import run_task_tool
         _record(name, f"{name} {args}")
         return run_task_tool(name, args)
+    if name.startswith("coding."):
+        from .coding_tools import run_coding_tool
+        _record(name, f"{name} {args}")
+        return run_coding_tool(name, args)
     if name.startswith("ctx."):
         from ..agent.memory import units as context_registry
         _record(name, f"{name} {args}")

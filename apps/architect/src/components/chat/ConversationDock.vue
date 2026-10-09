@@ -4,6 +4,7 @@
  * 会话引擎在 conversation-store；本组件只做外观与会话切换。
  */
 import { useAppDialog } from '@/composables/useAppDialog'
+import { useConvWindowLock } from '@/composables/useConvWindowLock'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -242,16 +243,47 @@ async function openSubs() {
   await loadSubs()
   subsOpen.value = true
 }
-async function newSub() {
+async function newSub(executorId = '') {
   if (!conv.activeId || subsBusy.value) return
   subsBusy.value = true
   try {
-    await apiPost(`/sessions/${conv.activeId}/coding-sessions`, {})
+    await apiPost(`/sessions/${conv.activeId}/coding-sessions`,
+                  executorId ? { executorId } : {})
     await loadSubs()
     await syncRunningState(true)
   } catch (e: any) {
     subsMsg.value = e?.message || String(e)
   } finally { subsBusy.value = false }
+}
+
+// ── 执行器会话选定(2026-10 子会话模型): 按执行器分组 + 换绑 ──
+const subExecutorGroups = computed(() => {
+  const m = new Map<string, SubSession[]>()
+  for (const s of codingSubs.value) {
+    const k = s.executorId || 'default'
+    if (!m.has(k)) m.set(k, [])
+    m.get(k)!.push(s)
+  }
+  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+})
+const executorLabel = (id: string) =>
+  executorList.value.find((e) => e.id === id)?.type || id || 'default'
+const newSubExecutor = ref('')
+async function newSubPicked() {
+  await newSub(newSubExecutor.value)
+  newSubExecutor.value = ''
+}
+const subSwitchBusy = ref('')
+async function switchSubExecutor(subId: string, executorId: string) {
+  if (!executorId || subSwitchBusy.value) return
+  subSwitchBusy.value = subId
+  try {
+    await apiPost(`/sessions/${subId}/executor`, { executorId })
+    await loadSubs()
+    conv.pushLocalHint('✓ 子会话执行器已切换——下回合生效')
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally { subSwitchBusy.value = '' }
 }
 async function activateSub(id: string) {
   if (!conv.activeId || subsBusy.value) return
@@ -263,7 +295,16 @@ async function activateSub(id: string) {
     subsMsg.value = e?.message || String(e)
   } finally { subsBusy.value = false }
 }
-function viewSub(id: string) {
+const convLock = useConvWindowLock()
+async function viewSub(id: string) {
+  // 子会话窗口唯一性(2026-10): 同会话已在别的 tab 打开 → 接管确认
+  const r = await convLock.claim(id)
+  if (!r.claimed) {
+    const ok = await dialog.confirm(t('session.subs.lockTaken', { tab: r.owner || '?' }), {
+      confirmText: t('session.subs.lockTakeover'), danger: false })
+    if (!ok) return
+    convLock.takeover(id)
+  }
   subsOpen.value = false
   listOpen.value = false
   void conv.openConversation({ id } as ConversationMeta)
@@ -296,6 +337,25 @@ const boundExecutorId = computed(
   () => ((conv.activeMeta as any)?.executorId as string) || '')
 // ── 生命周期重构: 工作相位 + 角色集声明 + 作业控制 ──
 watch(() => conv.activeId, () => { void loadSubs() })
+
+// 执行器子会话输出实时感知(2026-10): SSE conv-message 命中子会话 → 刷新池+闪动
+const flashSubs = ref<Set<string>>(new Set())
+function onConvMsgEv(e: Event) {
+  const d = (e as CustomEvent).detail || {}
+  const cid = String(d.conversationId || '')
+  if (!cid) return
+  if (codingSubs.value.some((x) => x.id === cid)) {
+    flashSubs.value = new Set([...flashSubs.value, cid])
+    void loadSubs()
+    setTimeout(() => {
+      const next = new Set(flashSubs.value)
+      next.delete(cid)
+      flashSubs.value = next
+    }, 2000)
+  }
+}
+onMounted(() => window.addEventListener('arch:conv-message', onConvMsgEv))
+onUnmounted(() => window.removeEventListener('arch:conv-message', onConvMsgEv))
 
 async function loadExecutors() {
   try {
@@ -723,45 +783,70 @@ async function pollRunningState() {
           <div class="p-3 space-y-2">
             <p class="text-[11px] text-ctp-subtext0">{{ t('session.subs.hint') }}</p>
             <p v-if="subsMsg" class="text-[11px] text-ctp-yellow break-all">{{ subsMsg }}</p>
-            <div
-              v-for="s in codingSubs"
-              :key="s.id"
-              role="button"
-              tabindex="0"
-              class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer"
-              :class="s.active ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40'"
-              @click="activateSub(s.id)"
-              @keydown.enter.prevent="activateSub(s.id)"
-            >
-              <span
-                class="h-2 w-2 shrink-0 rounded-full"
-                :class="s.runningRole?.role === 'coding'
-                  ? (s.runningRole.status === 'waiting_input' ? 'bg-ctp-yellow' : 'bg-ctp-peach animate-pulse')
-                  : (s.active ? 'bg-ctp-blue' : 'bg-ctp-overlay1')"
-              />
-              <span class="min-w-0 flex-1">
-                <span class="block text-xs text-ctp-text truncate">{{ s.title }}</span>
-                <span class="block text-[10px] text-ctp-subtext0">
-                  {{ s.hasSessionRef ? '● 有执行器会话(可复活)' : '○ 新上下文' }}
-                  · {{ s.msgCount || 0 }} 条
-                  <template v-if="s.runningRole?.role === 'coding'">· {{ s.runningRole.status }}</template>
+            <template v-for="[eid, subs] in subExecutorGroups" :key="eid">
+              <div class="flex items-center gap-1.5 pt-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">
+                <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0">{{ executorLabel(eid) }}</span>
+                <span class="opacity-70">× {{ subs.length }}</span>
+              </div>
+              <div
+                v-for="s in subs"
+                :key="s.id"
+                role="button"
+                tabindex="0"
+                class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer"
+                :class="[s.active ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40',
+                         flashSubs.has(s.id) ? 'ring-2 ring-ctp-peach/60' : '']"
+                @click="activateSub(s.id)"
+                @keydown.enter.prevent="activateSub(s.id)"
+              >
+                <span
+                  class="h-2 w-2 shrink-0 rounded-full"
+                  :class="s.runningRole?.role === 'coding'
+                    ? (s.runningRole.status === 'waiting_input' ? 'bg-ctp-yellow' : 'bg-ctp-peach animate-pulse')
+                    : (s.active ? 'bg-ctp-blue' : 'bg-ctp-overlay1')"
+                />
+                <span class="min-w-0 flex-1">
+                  <span class="block text-xs text-ctp-text truncate">{{ s.title }}</span>
+                  <span class="block text-[10px] text-ctp-subtext0">
+                    {{ s.hasSessionRef ? '● 有执行器会话(可复活)' : '○ 新上下文' }}
+                    · {{ s.msgCount || 0 }} 条
+                    <template v-if="s.runningRole?.role === 'coding'">· {{ s.runningRole.status }}</template>
+                  </span>
                 </span>
-              </span>
-              <span v-if="s.active" class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue">{{ t('session.subs.active') }}</span>
-              <button
-                class="btn btn-xs btn-ghost shrink-0"
-                :title="t('session.subs.view')"
-                @click.stop="viewSub(s.id)"
-              >↗</button>
-            </div>
+                <span v-if="s.active" class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue">{{ t('session.subs.active') }}</span>
+                <select
+                  class="input !w-auto !py-0.5 !text-[10px] shrink-0"
+                  :value="s.executorId || ''"
+                  :title="t('session.subs.switchExec')"
+                  @click.stop
+                  @change="switchSubExecutor(s.id, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="" disabled>{{ t('session.subs.switchExec') }}</option>
+                  <option v-for="e in executorList" :key="e.id" :value="e.id">
+                    {{ e.type || e.id }}
+                  </option>
+                </select>
+                <button
+                  class="btn btn-xs btn-ghost shrink-0"
+                  :title="t('session.subs.view')"
+                  @click.stop="viewSub(s.id)"
+                >↗</button>
+              </div>
+            </template>
             <p v-if="!codingSubs.length" class="text-[11px] text-ctp-overlay1">
               {{ t('session.subs.empty') }}
             </p>
-            <button
-              class="btn btn-primary w-full !py-1.5 text-xs"
-              :disabled="subsBusy"
-              @click="newSub"
-            >{{ subsBusy ? '…' : t('session.subs.new') }}</button>
+            <div class="flex items-center gap-2">
+              <select v-model="newSubExecutor" class="input !w-auto !py-1 flex-1 text-xs">
+                <option value="">{{ t('session.subs.newExecDefault') }}</option>
+                <option v-for="e in executorList" :key="e.id" :value="e.id">{{ e.type || e.id }}</option>
+              </select>
+              <button
+                class="btn btn-primary flex-1 !py-1.5 text-xs"
+                :disabled="subsBusy"
+                @click="newSubPicked"
+              >{{ subsBusy ? '…' : t('session.subs.new') }}</button>
+            </div>
           </div>
         </div>
       </div>
@@ -868,11 +953,11 @@ async function pollRunningState() {
         <!-- 内联按钮: 子会话池(多子会话管理; 单子会话时 Coding 入口即全部) -->
         <template #header-inline>
           <button
-            v-if="isMainSession && codingSubs.length > 1"
+            v-if="isMainSession"
             class="btn !py-0 !px-2 !text-[10px]"
             :title="t('session.subs.title')"
             @click="openSubs"
-          >{{ t('session.subs.manage') }}({{ codingSubs.length }})</button>
+          >⌨ {{ t('session.subs.manage') }}({{ codingSubs.length }})</button>
         </template>
         <template #header-extra>
           <div v-if="conv.activeId" class="flex shrink-0 items-center gap-1.5">

@@ -241,6 +241,8 @@ export default {
     live: '跟进',
     liveOn: '跟进中',
     openConv: '会话流',
+    newTab: '新标签页打开(时间线)',
+    noConvHint: '无关联会话',
     centerHint: '对话/审批/验收在会话流进行——本页为事件档案；直通对话经会话 quick 挡',
   },
   mcp: {
@@ -480,6 +482,10 @@ export default {
       active: '活跃',
       view: '查看消息流',
       empty: '暂无子会话——/执行 时自动创建，或点下方新建。',
+      switchExec: '换执行器',
+      newExecDefault: '新建执行器(缺省=主会话绑定)',
+      lockTaken: '该子会话已在另一个窗口打开({tab})——接管后原窗口将并发编辑风险自负。',
+      lockTakeover: '接管',
       feedHint: '转达给 coding(过滤后进入子会话与作业)',
       feedSummaryHint: '摘要转达(LLM 压缩为结论段后进入)',
     },
@@ -530,7 +536,7 @@ export default {
     noSummary: '暂无摘要，可点击 ✨ 生成',
     summary: '会话摘要',
     outline: { title: '会话大纲', empty: '暂无回合——发首条消息生成', noPrompt: '(无提示)', close: '关闭', resize: '拖拽调整大小' },
-    tabs: { list: '会话列表', assets: '需求跟踪', switch: '切换视图' },
+    tabs: { list: '会话列表', assets: '需求跟踪', exec: '执行器会话', switch: '切换视图' },
     tracking: {
       title: '需求跟踪',
       convAll: '全部会话',

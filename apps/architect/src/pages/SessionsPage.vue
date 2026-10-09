@@ -19,13 +19,14 @@ import { useConversationStore } from '@/stores/conversation-store'
 import { useAppDialog } from '@/composables/useAppDialog'
 import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
 import { trackingService, type TrackingVocab } from '@/services/tracking-service'
-import { apiPost } from '@/services/api-client'
+import { apiGet, apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
 import { useArchProjectStore } from '@/stores/project-store'
 import { copyText } from '@/utils/clipboard'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
 import SessionTrackingPanel from '@/components/sessions/SessionTrackingPanel.vue'
+import ExecSessionListPanel from '@/components/sessions/ExecSessionListPanel.vue'
 
 const { t, te } = useI18n()
 const route = useRoute()
@@ -37,7 +38,7 @@ const projectStore = useArchProjectStore()
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 50, min: 40, max: 78 })
 
 /** 左栏标签页: 会话列表 / 需求跟踪(单按钮切换)。 */
-const leftTab = ref<'sessions' | 'assets'>('sessions')
+const leftTab = ref<'sessions' | 'assets' | 'exec'>('sessions')
 
 // ── 需求跟踪筛选(顶栏持有, 面板 props 透传) ──
 const trackingCategory = ref('')
@@ -58,7 +59,7 @@ function trackingRoleLabel(r: string): string {
   const label = t(key)
   return label === key ? r : label
 }
-const toolbarBusy = computed(() => (leftTab.value === 'assets' ? trackingLoading.value : loading.value))
+const toolbarBusy = computed(() => (leftTab.value === 'assets' ? trackingLoading.value : leftTab.value === 'sessions' ? loading.value : false))
 
 const list = ref<ConversationMeta[]>([])
 const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
@@ -212,6 +213,29 @@ const grouped = computed<{ key: string; items: ConversationMeta[] }[]>(() => {
 function openInDock(c: ConversationMeta) {
   void conv.openConversation(c)
 }
+
+// ── 执行器会话标签(2026-10 并入) ──
+const execCount = ref(0)
+async function loadExecCount() {
+  try {
+    const rows = await apiGet<{ id: string }[]>('/arch/exec-sessions?limit=100')
+    execCount.value = rows.length
+  } catch { /* 后端未就绪 */ }
+}
+onMounted(loadExecCount)
+
+/** 面板点行 → 右侧 dock 打开关联会话(对话流); 无关联 → 新 tab 时间线 */
+function openExecConv(conversationId: string, _jobId: string) {
+  const meta = list.value.find((c) => c.id === conversationId)
+  void conv.openConversation((meta || { id: conversationId }) as ConversationMeta)
+}
+function openExecNewTab(jobId: string) {
+  const u = new URL('/workbench/exec-sessions', window.location.origin)
+  u.searchParams.set('job', jobId)
+  const q = new URLSearchParams(window.location.search)
+  if (q.get('project')) u.searchParams.set('project', q.get('project') || '')
+  window.open(u.toString(), '_blank')
+}
 function newConversation() {
   conv.newConversation()
 }
@@ -303,16 +327,17 @@ function flowLabel(p?: string): string {
   <div class="flex h-full min-h-0 flex-col">
     <!-- 顶栏: 标签页切换 + 上下文筛选/操作(会话列表/知识资产 共用一条工具栏) -->
     <div class="flex shrink-0 flex-wrap items-center gap-2 px-5 pt-5">
-      <!-- 标签页: 会话列表 / 需求跟踪(单按钮切换, 节约工具栏空间) -->
+      <!-- 标签页: 会话列表 / 需求跟踪 / 执行器会话(2026-10 并入) -->
       <button
+        v-for="tb in (['sessions', 'assets', 'exec'] as const)" :key="tb"
         class="btn btn-sm"
-        :class="leftTab === 'sessions' ? 'btn-blue' : 'btn-primary'"
-        :title="t('session.tabs.switch')"
-        @click="leftTab = leftTab === 'sessions' ? 'assets' : 'sessions'"
+        :class="leftTab === tb ? 'btn-blue' : 'btn-primary'"
+        @click="leftTab = tb"
       >
-        <ArrowsRightLeftIcon class="h-3.5 w-3.5 shrink-0" />
-        {{ leftTab === 'sessions' ? t('session.tabs.list') : t('session.tabs.assets') }}
-        <span class="ml-0.5 font-mono opacity-70">{{ leftTab === 'sessions' ? filtered.length : trackingCount }}</span>
+        {{ t(`session.tabs.${tb}`) }}
+        <span class="ml-0.5 font-mono opacity-70">{{
+          tb === 'sessions' ? filtered.length : tb === 'assets' ? trackingCount : execCount
+        }}</span>
       </button>
 
       <!-- 会话列表筛选(标签页上下文) -->
@@ -396,6 +421,12 @@ function flowLabel(p?: string): string {
       <div class="flex h-full min-h-0">
         <!-- 左: 信息区(标签页内容: 会话列表 / 知识资产; 标签页开关在顶栏工具条) -->
         <div class="flex h-full min-h-0 min-w-0 flex-col" :style="{ width: splitPct + '%' }">
+          <!-- 左: 执行器会话(2026-10 并入; 点行右侧打开关联会话, ↗ 新 tab 时间线) -->
+          <section v-if="leftTab === 'exec'" class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div class="panel flex min-h-0 flex-1 flex-col p-2">
+              <ExecSessionListPanel mode="panel" @chat="openExecConv" @job="openExecNewTab" />
+            </div>
+          </section>
           <!-- 左: 会话列表 -->
           <section v-if="leftTab === 'sessions'" class="flex min-h-0 min-w-0 flex-1 flex-col">
             <div class="min-h-0 flex-1 overflow-auto panel">

@@ -28,6 +28,19 @@ from .proxy_ctx import (  # noqa: E402
 # conv_id -> {job_id, executor_type}（活跃直通会话; 进程级, 与 _TASK_PUMPS 同策略）
 _PROXY_JOBS: Dict[str, Dict[str, str]] = {}
 
+
+def _conv_row(conv_id: str) -> Optional[dict]:
+    """排队续跑重建会话行(scheduler relaunch 入口)。"""
+    try:
+        from ... import store as _st
+        return _st.ConversationsStore.get(conv_id) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+async def _noop_send(_payload: dict) -> None:
+    """排队续跑无活 WS——收口帧丢弃(产出经 pump 落库+SSE 呈现)。"""
+
 # runner 作业终态(snapshot.status 口径, 与 pumps.run_event_pump 一致)
 _JOB_TERMINAL = ("done", "failed", "stopped")
 
@@ -69,6 +82,10 @@ def proxy_stop(conv_id: str) -> Dict[str, Any]:
                 "job_id": job_id}
     # cv-283 JobCard 状态回写: abort=暂停(idle, 会话保留)/finish=结束(ended)
     _set_job_card_state(conv_id, "idle" if action == "abort" else "ended")
+    # 统筹调度: 用户主动停止 → 释放槽位且**不**自动续跑排队项(人为干预优先)
+    if action == "finish":
+        from . import executor_scheduler as _sched
+        _sched.stop_conv("", conv_id)   # root 未知 → 全 root 扫(按 convId 匹配)
     return {"ok": True, "job_id": job_id, "action": action,
             "summary": ("已暂停——会话保留，发消息即恢复" if running
                         else "已结束直通会话——下条消息将开启全新会话")}
@@ -253,6 +270,11 @@ def _start_pump(conv_id: str, job_id: str, etype: str) -> None:
             entry = _PROXY_JOBS.get(conv_id)
             if entry and entry.get("job_id") == job_id:
                 _PROXY_JOBS.pop(conv_id, None)
+        finally:
+            # 统筹调度(2026-10): 终态释放槽位 → 队首排队会话自动续跑
+            from . import executor_scheduler as _sched
+            if root:
+                _sched.release(root, conv_id=conv_id, job_id=job_id)
 
     try:
         loop = asyncio.get_running_loop()
@@ -383,6 +405,47 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         dirty_warn = ("\n⚠️ 工作区有未提交变更（可能来自其它开发进程）——"
                       "执行器被要求不动无关变更；如需完全隔离，请开启会话隔离开关。")
 
+    # ── 统筹调度仲裁(2026-10): isolated 并行 / inplace 同 root 排队 ──
+    from . import executor_scheduler as _sched
+    _sched.bind_loop(asyncio.get_running_loop())
+    verdict = _sched.admit(root or "", conv_id, str(ex.get("id") or etype),
+                           isolated=worktree, executor_cfg=ecfg)
+    if verdict["action"] == "reject":
+        row = eb._append(conv_id, "assistant",
+                         f"⚠️ {verdict['reason']}——请先停止进行中的执行器会话。",
+                         msg_meta={"kind": "proxy"})
+        await _send_done(row)
+        return True
+    if verdict["action"] == "queue":
+        # 排队: 回合先收束(提示位次); 前序终态 → scheduler 调 relaunch 自动续跑
+        # (结果经 pump 落库+SSE, 不依赖发起回合的 WS 存活)
+        pos = verdict.get("position") or 1
+
+        async def _relaunch(entry: dict) -> None:
+            _c = _conv_row(entry.get("convId") or "")
+            if not _c:
+                return
+            await proxy_turn({"digest": entry.get("digest") or ""},
+                             {"conv_id": entry["convId"], "conv": _c,
+                              "question": entry.get("text") or "",
+                              "last_user_msg_id": ""},
+                             _noop_send, root=entry.get("root") or "",
+                             project=entry.get("project") or "",
+                             executor=entry.get("executor") or {})
+
+        _sched.enqueue(root or "", {"convId": conv_id, "text": text,
+                                    "digest": str(data.get("digest") or ""),
+                                    "root": root, "project": project,
+                                    "executor": ex, "isolated": worktree},
+                       relaunch=_relaunch)
+        row = eb._append(conv_id, "assistant",
+                         f"⏳ 已排队(第 {pos} 位)——同一工作区有执行器会话进行中"
+                         f"({'已开启隔离可并行' if worktree else '融合模式串行'})，"
+                         "轮到后自动开始，产出将出现在本会话信息流。",
+                         msg_meta={"kind": "proxy", "queued": pos})
+        await _send_done(row)
+        return True
+
     from .context_pack import build_context_pack, render_context_pack_md
     pack = build_context_pack({}, conv, root)
     # cv-266: 历史脉络默认注入(确定性拼接, 容量执行器 config 可调, 0=关)
@@ -456,6 +519,10 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         return True
 
     _PROXY_JOBS[conv_id] = {"job_id": sr.job_id, "executor_type": etype}
+    # 统筹调度(2026-10): 启动成功登记 running 槽(终态由 pump finally 释放)
+    from . import executor_scheduler as _sched
+    _sched.register(root or "", conv_id, str(ex.get("id") or etype),
+                    job_id=sr.job_id, executor_cfg=ecfg)
     _start_pump(conv_id, sr.job_id, etype)
     # cv-283 JobCard: 直通作业以任务卡同族卡呈现——meta 携作业快照键
     # (jobCard/jobState/executorType/mode) + fingerprint(状态回写原位更新)
