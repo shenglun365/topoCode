@@ -433,15 +433,16 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="serveMsg" class="mx-auto mt-1 max-w-3xl text-[10px] text-ctp-overlay0">{{ serveMsg }}</p>
       </footer>
-    </template>
 
-    <!-- serve 大纲浮窗(Teleport): 检索 + 滚动定位回合 -->
-    <ServeOutlineWindow
-      v-if="outlineOpen && jobId && !convId"
-      :items="outlineItems"
-      @close="outlineOpen = false"
-      @goto="gotoAgg"
-    />
+      <!-- serve 大纲浮窗(Teleport): 检索 + 滚动定位回合(须在条件链分支内,
+           独立 v-if 兄弟会打断 v-else-if/v-else 链 → AnalysisChat 错配渲染) -->
+      <ServeOutlineWindow
+        v-if="outlineOpen"
+        :items="outlineItems"
+        @close="outlineOpen = false"
+        @goto="gotoAgg"
+      />
+    </template>
 
     <!-- agent 会话模式: 复用 dock 对话栈(回合折叠/伸缩/任务卡/输入直发/SSE) -->
     <div v-else class="min-h-0 flex-1">
