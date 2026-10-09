@@ -12,6 +12,7 @@ import {
   XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
   ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
   PencilSquareIcon, SparklesIcon, BookOpenIcon, ArchiveBoxIcon, CubeTransparentIcon,
+  ClipboardDocumentCheckIcon,
   DocumentTextIcon, ListBulletIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
@@ -46,6 +47,23 @@ const conv = useConversationStore()
 
 const recent = ref<ConversationMeta[]>([])
 const listOpen = ref(false)
+
+// ── E1 会话域技能(两线暴露收口): 绑规约会话可用, 产物落草稿(文档态续加工) ──
+const skillBusy = ref('')
+async function runSessionSkill(skillId: 'skeleton' | 'acceptance'): Promise<void> {
+  const cid = conv.activeId
+  if (!cid || skillBusy.value) return
+  skillBusy.value = skillId
+  try {
+    await apiPost(`/sessions/${encodeURIComponent(cid)}/skill-run`,
+      { skill: skillId })
+    conv.pushLocalHint('已提交技能作业——产物将以草稿形式出现在资产页(可继续加工后发布会话)')
+  } catch (e) {
+    conv.pushLocalHint(e instanceof Error ? e.message : '技能作业提交失败')
+  } finally {
+    skillBusy.value = ''
+  }
+}
 
 // ── C3 规约缺口建议 chip(gap_matrix 单源): 有缺口才显示, hover 明细; 提示不拦截 ──
 const specGaps = ref<string[]>([])
@@ -1028,6 +1046,21 @@ async function pollRunningState() {
             :title="t('session.specGapHint') + '\n' + specGaps.join('\n')"
             @click="void loadSpecGaps()"
           >{{ t('session.specGap') }} {{ specGaps.length }}</span>
+          <!-- E1 会话域技能: 方案骨架/验收提炼(产物落草稿) -->
+          <button
+            v-if="(conv.activeMeta as any)?.reqId"
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="skillBusy !== ''"
+            :title="t('session.skillSkeleton')"
+            @click="runSessionSkill('skeleton')"
+          ><CubeTransparentIcon class="w-3.5 h-3.5" :class="skillBusy === 'skeleton' ? 'animate-pulse' : ''" /></button>
+          <button
+            v-if="(conv.activeMeta as any)?.reqId"
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="skillBusy !== ''"
+            :title="t('session.skillAcceptance')"
+            @click="runSessionSkill('acceptance')"
+          ><ClipboardDocumentCheckIcon class="w-3.5 h-3.5" :class="skillBusy === 'acceptance' ? 'animate-pulse' : ''" /></button>
           <!-- 会话大纲浮窗开关(会话中心启用): 开合两态均缩略为此按钮 -->
           <button
             v-if="props.outline"

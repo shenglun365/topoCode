@@ -152,40 +152,93 @@ def split_agent_blocks(content_md: str, resolve_skill=None) -> tuple:
 from ..agent import skills as _skills
 
 
-def _job_skill_run(ctx) -> dict:
-    """skill_run 作业执行体(统一 Skill Runner, B1)。
+def _session_assemble(sc: dict) -> tuple:
+    """会话域上下文装配(E1): 规约快照 + 可选指定回合 → (parts 正文, system, error)。
 
-    scope = {draftId, skillId?, preset?, instruction?, root, project}——
+    上下文=需求意图(requirementMd) + 方案(designMd) + 验收 + 允许范围 +
+    指定回合内容(turnId); 无规约且无 turnId → 报错(不虚构上下文)。
+    """
+    from .. import store
+    conv = store.ConversationsStore.get(sc.get("convId") or "")
+    if not conv:
+        return [], "", "会话不存在"
+    rid = str(conv.get("reqId") or "")
+    ctx_parts = []
+    if rid:
+        active = store.RequirementsStore.spec_active(rid) or {}
+        snap = active.get("snapshot") or {}
+        for label, val in (("需求（用户意图）", snap.get("requirementMd") or snap.get("desc")),
+                           ("方案（架构师推断）", snap.get("designMd")),
+                           ("验收标准", "\n".join(f"- {a}" for a in (snap.get("acceptance") or [])[:12]) or ""),
+                           ("允许范围（语义别名）", "、".join(snap.get("allowedScope") or []) or "")):
+            if str(val or "").strip():
+                ctx_parts.append(f"### {label}\n{str(val).strip()}")
+    turn_id = str(sc.get("turnId") or "")
+    if turn_id:
+        for m in store.ConversationsStore.messages(conv["id"]):
+            if m.get("id") == turn_id:
+                ctx_parts.append(f"### 指定回合内容（{m.get('role') or ''}）\n"
+                                 + str(m.get("content") or "")[:6000])
+                break
+    if not ctx_parts:
+        return [], "", "会话无可装配上下文（未绑定需求规约且未指定回合）"
+    body = "\n\n".join(ctx_parts)[:12000]
+    return ([f"会话上下文如下（语义资产名为导航线索，与代码冲突以代码为准）：\n\n{body}"],
+            "", "")
+
+
+def _job_skill_run(ctx) -> dict:
+    """skill_run 作业执行体(统一 Skill Runner, B1; 会话域装配 E1)。
+
+    scope = {draftId | convId(+turnId?), skillId?, preset?, instruction?,
+             root, project}——草稿域(draftId): 草稿全文上下文, 产物写
+    last_proposed_md(用户比对采纳); 会话域(convId, E1): 规约快照+可选回合
+    装配, 产物落为**新草稿**(sourceKind=spec, 文档态续加工/发布会话)。
     skillId 缺省回落 preset(存量兼容); 二者皆空 = 纯自定义指令。
-    单轮对话+多轮只读工具(run_tools_loop)；产物写 last_proposed_md。
     """
     from ..agent.tools.req_agent import run_tools_loop
     from ..store import ReqDraftsStore
     sc = ctx.scope or {}
-    draft = ReqDraftsStore.get(sc.get("draftId") or "")
-    if not draft:
-        return {"error": "草稿不存在"}
-    if (draft.get("status") or "editing") == "archived":
-        return {"error": "草稿已归档（只读）"}
+    session_mode = bool(sc.get("convId")) and not sc.get("draftId")
+    draft = None
+    if not session_mode:
+        draft = ReqDraftsStore.get(sc.get("draftId") or "")
+        if not draft:
+            return {"error": "草稿不存在"}
+        if (draft.get("status") or "editing") == "archived":
+            return {"error": "草稿已归档（只读）"}
     spec = _skills.get_skill(str(sc.get("skillId") or sc.get("preset") or ""))
-    content_clean, embedded = split_agent_blocks(
-        draft.get("contentMd") or "",
-        resolve_skill=_skills.get_skill)
+    if session_mode and (spec is not None and "session" not in spec.domains):
+        return {"error": f"技能 {spec.id} 不支持会话域调用"}
     parts = []
+    system_prompt = spec.system if spec else _skills.SKILL_SYSTEM_DRAFT
+    content_clean = ""
+    if session_mode:
+        ctx_parts, _sys, err = _session_assemble(sc)
+        if err:
+            return {"error": err}
+        parts.extend(ctx_parts)
+        if spec is None:
+            system_prompt = _skills.SKILL_SYSTEM_SESSION
+    else:
+        content_clean, embedded = split_agent_blocks(
+            draft.get("contentMd") or "",
+            resolve_skill=_skills.get_skill)
+        if embedded:
+            parts.append("正文标记块指令：\n" + "\n---\n".join(embedded))
     if spec is not None:
         parts.append(spec.instruction)
     instr = (sc.get("instruction") or "").strip()
     if instr:
         parts.append("用户指令：" + instr)
-    if embedded:
-        parts.append("正文标记块指令：\n" + "\n---\n".join(embedded))
-    if not parts:
-        return {"error": "缺少处理指令（技能/自定义指令/标记块至少其一）"}
+    if not parts or (session_mode and spec is None and not instr):
+        return {"error": "缺少处理指令（技能/自定义指令至少其一）"}
     ctx.progress(total=1, done=0, current="技能处理中")
+    tail = ("--- 草稿全文（处理后完整输出） ---\n" + (content_clean or "(空草稿)")
+            if not session_mode else "请基于以上上下文输出完整文档。")
     msgs = [
-        {"role": "system", "content": spec.system if spec else _skills.SKILL_SYSTEM_DRAFT},
-        {"role": "user", "content": "\n\n".join(parts)
-         + "\n\n--- 草稿全文（处理后完整输出） ---\n" + (content_clean or "(空草稿)")},
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "\n\n".join(parts) + "\n\n" + tail},
     ]
     tools_used: set = set()
 
@@ -205,6 +258,17 @@ def _job_skill_run(ctx) -> dict:
     content = (res.get("content") or "").strip()
     if not content:
         return {"error": "AI 未返回内容" + (f"（{res.get('error')}）" if res.get("error") else "")}
+    if session_mode:
+        from .. import store as _st
+        conv = _st.ConversationsStore.get(sc.get("convId") or "") or {}
+        title = f"{spec.title if spec else '会话技能'}·{(conv.get('title') or '')[:24]}"
+        nd = _st.ReqDraftsStore.create(
+            str(conv.get("projectId") or sc.get("project") or ""),
+            title[:80], content,
+            source_conv_id=str(conv.get("id") or "")[:64], source_kind="spec")
+        return {"saved": 1, "draftId": nd.get("id"),
+                "summary": f"会话技能完成（{spec.id if spec else 'custom'}）——产物已存为草稿",
+                "toolCalls": sorted(tools_used)}
     ReqDraftsStore.update(draft["id"], {
         "lastProposedMd": content,
         "lastProposedAt": int(__import__("time").time() * 1000)})
@@ -406,6 +470,43 @@ async def api_session_spec_gaps(conv_id: str):
     active = store.RequirementsStore.spec_active(rid) or {}
     return ok({"gaps": gap_matrix(active.get("snapshot") or {}),
                "reqId": rid})
+
+
+@router.post("/sessions/{conv_id}/skill-run")
+async def api_session_skill_run(conv_id: str, request: Request = None):
+    """会话域技能调用(E1, 两线暴露收口): body {skill, instruction?, turnId?,
+    root?, project?}。上下文=规约快照+可选回合; 产物落新草稿(sourceKind=spec)
+    ——文档态续加工后可发布会话闭环。skill 须支持 session 域。"""
+    from .. import store
+    from ..sem import job_runner
+    body = await request.json() if request else {}
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    if (conv.get("status") or "active") == "archived":
+        return err(409, "归档会话只读")
+    spec = _skills.get_skill(str(body.get("skill") or ""))
+    if spec is None:
+        return err(400, "缺少或未注册的 skill")
+    if "session" not in spec.domains:
+        return err(400, f"技能 {spec.id} 不支持会话域调用")
+    if not (str(conv.get("reqId") or "") or str(body.get("turnId") or "")):
+        return err(400, "会话未绑定需求规约且未指定回合——无可装配上下文")
+    pid = project_id_for(body.get("root"), body.get("project")) or conv.get("projectId") or ""
+    if not pid:
+        return err(400, "缺少项目")
+    r = await asyncio.to_thread(
+        job_runner.start_job, pid, "skill_run",
+        {"convId": conv_id, "skillId": spec.id,
+         "instruction": body.get("instruction") or "",
+         "turnId": body.get("turnId") or "",
+         "root": body.get("root") or "", "project": body.get("project") or ""},
+        llm=True)
+    if not r.get("started") and r.get("reason") == "already_running":
+        return ok(r)
+    if not r.get("started"):
+        return err(400, f"作业提交失败: {r.get('reason')}")
+    return ok(r)
 
 
 @router.post("/req-drafts/{draft_id}/ai")

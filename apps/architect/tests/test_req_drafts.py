@@ -448,3 +448,79 @@ def test_draft_gaps_and_session_spec_gaps():
     out = _body(asyncio.run(api.api_session_spec_gaps(conv["id"])))
     gaps = out["data"]["gaps"]
     assert any("验收" in g for g in gaps) and any("方案" in g for g in gaps)
+
+
+def test_skill_family_and_session_domain(monkeypatch):
+    """E1/E2: 双域技能注册 + 会话域装配作业(规约快照上下文→产物落新草稿)。"""
+    from topoone_app_architect.agent import skills
+    from topoone_app_architect.arch_routes import req_drafts as api
+    from topoone_app_architect.store import (ConversationsStore, ProjectsStore,
+                                             ReqDraftsStore, RequirementsStore,
+                                             SemanticJobsStore)
+
+    # 注册: skeleton/acceptance 双域; 原三技能仍草稿域
+    assert "session" in skills.get_skill("skeleton").domains
+    assert "session" in skills.get_skill("acceptance").domains
+    assert "session" not in skills.get_skill("generate").domains
+    assert skills.get_skill("skeleton").system is skills.SKILL_SYSTEM_SESSION
+
+    # 会话+规约
+    conv = ConversationsStore.create({
+        "kind": "requirement", "projectId": PID, "title": "支付对账",
+        "status": "active", "roles": ["architect"],
+        "tags": {"modules": [], "groups": []}, "reqId": "RQ-sess"})
+    RequirementsStore.create({
+        "id": "RQ-sess", "projectId": PID, "title": "对账", "status": "ready",
+        "activeVer": 1, "specVersions": [
+            {"ver": 1, "state": "confirmed",
+             "snapshot": {"requirementMd": "重建对账任务", "designMd": "",
+                           "acceptance": ["对账差异数为 0"], "allowedScope": ["src/bill/"]},
+             "source": {}, "reason": "", "createdAt": 0}]})
+
+    seen = {}
+
+    def _fake_loop(msgs, **kw):
+        seen["user"] = msgs[-1]["content"]
+        seen["system"] = msgs[0]["content"]
+        return {"content": "# 方案骨架\n- 改动 src/bill/recon.ts(待核实)"}
+
+    from topoone_app_architect.agent.tools import req_agent as _ra
+    monkeypatch.setattr(_ra, "run_tools_loop", _fake_loop)
+
+    class _Req:
+        async def json(self):
+            return {"skill": "skeleton", "project": PID}
+
+    out = _body(asyncio.run(api.api_session_skill_run(conv["id"], _Req())))
+    r = out["data"]
+    assert r.get("started") is True
+    import time as _t
+    for _ in range(50):
+        row = SemanticJobsStore.get(r["job"]["id"])
+        if row and row["state"] in ("done", "failed"):
+            break
+        _t.sleep(0.1)
+    assert row["state"] == "done", row.get("result")
+    # 上下文装配: 规约意图+验收+范围入 user; 产物落新草稿(sourceKind=spec)
+    assert "重建对账任务" in seen["user"] and "对账差异数为 0" in seen["user"]
+    assert "导航线索" in seen["user"]                     # 冲突约定随装配
+    assert "会话辅助" in seen["system"]                   # 会话域系统提示
+    nd = ReqDraftsStore.get(row["result"]["draftId"])
+    assert nd and nd["contentMd"].startswith("# 方案骨架")
+    assert nd["sourceConvId"] == conv["id"] and nd["sourceKind"] == "spec"
+    assert "方案骨架" in nd["title"]
+
+    # 草稿域技能不支持会话域调用
+    class _Req2:
+        async def json(self):
+            return {"skill": "generate", "project": PID}
+    out = _body(asyncio.run(api.api_session_skill_run(conv["id"], _Req2())))
+    assert out.get("code") == 400 and "会话域" in out.get("message", "")
+
+    # 无上下文(未绑规约+无回合)拒绝
+    conv2 = ConversationsStore.create({
+        "kind": "requirement", "projectId": PID, "title": "空",
+        "status": "active", "roles": ["architect"],
+        "tags": {"modules": [], "groups": []}})
+    out = _body(asyncio.run(api.api_session_skill_run(conv2["id"], _Req())))
+    assert out.get("code") == 400 and "上下文" in out.get("message", "")

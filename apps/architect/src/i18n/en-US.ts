@@ -555,6 +555,8 @@ export default {
     openInDock: 'Open in dock',
     noSummary: 'No summary yet — click ✨ to generate',
     summary: 'Summary',
+    skillSkeleton: 'Design skeleton — generate tech skeleton from spec (lands as draft)',
+    skillAcceptance: 'Acceptance — distill verifiable acceptance list (lands as draft)',
     specGap: 'Spec gaps',
     specGapHint: 'Spec element gaps — continue the conversation (auto-clarify) or save turns as drafts:',
     outline: { title: 'Outline', empty: 'No turns yet — send a message', noPrompt: '(no prompt)', close: 'Close', resize: 'Drag to resize' },

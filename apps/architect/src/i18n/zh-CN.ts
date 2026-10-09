@@ -555,6 +555,8 @@ export default {
     openInDock: '在会话栏打开',
     noSummary: '暂无摘要，可点击 ✨ 生成',
     summary: '会话摘要',
+    skillSkeleton: '方案骨架——基于规约生成技术方案骨架(产物落草稿, 可加工后发布会话)',
+    skillAcceptance: '验收提炼——基于规约提炼可核验验收清单(标注核验方式, 产物落草稿)',
     specGap: '规约缺口',
     specGapHint: '规约要素缺口——继续对话补全(自动澄清联动), 或将相关回合另存草稿加工：',
     outline: { title: '会话大纲', empty: '暂无回合——发首条消息生成', noPrompt: '(无提示)', close: '关闭', resize: '拖拽调整大小' },
