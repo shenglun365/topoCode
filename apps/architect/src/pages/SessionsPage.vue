@@ -230,11 +230,10 @@ function openExecConv(conversationId: string, _jobId: string) {
   void conv.openConversation((meta || { id: conversationId }) as ConversationMeta)
 }
 function openExecNewTab(jobId: string) {
-  const u = new URL('/workbench/exec-sessions', window.location.origin)
-  u.searchParams.set('job', jobId)
-  const q = new URLSearchParams(window.location.search)
-  if (q.get('project')) u.searchParams.set('project', q.get('project') || '')
-  window.open(u.toString(), '_blank')
+  // hash 路由: router.resolve 生成 #/…?job= 深链; project 经 route.query 继承
+  const query: Record<string, string> = { job: jobId }
+  if (route.query.project) query.project = String(route.query.project)
+  window.open(router.resolve({ path: '/workbench/exec-sessions', query }).href, '_blank')
 }
 function newConversation() {
   conv.newConversation()

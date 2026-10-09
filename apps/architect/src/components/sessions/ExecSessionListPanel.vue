@@ -8,6 +8,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { ArrowPathIcon, CommandLineIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import { apiGet } from '@/services/api-client'
 
@@ -24,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const router = useRouter()
 
 interface SessionRow {
   jobId: string; eventCount: number; firstTs: number; lastTs: number
@@ -64,9 +66,8 @@ function rowClick(s: SessionRow) {
 }
 
 function openNewTab(s: SessionRow) {
-  const u = new URL('/workbench/exec-sessions', window.location.origin)
-  u.searchParams.set('job', s.jobId)
-  window.open(u.toString(), '_blank')
+  // hash 路由: router.resolve 生成 #/…?job= 深链(new URL path 风格会 404)
+  window.open(router.resolve({ path: '/workbench/exec-sessions', query: { job: s.jobId } }).href, '_blank')
 }
 
 onMounted(() => {
