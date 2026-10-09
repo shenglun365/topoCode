@@ -143,7 +143,7 @@ const importing = ref(false)
 const importMsg = ref('')
 const importError = ref('')
 const showAddManual = ref(false)
-const manualForm = reactive({ name: '', provider: '', model: '', url: '' })
+const manualForm = reactive({ name: '', provider: '', model: '', url: '', apiKey: '' })
 const addingManual = ref(false)
 // 编辑手动模型条目: 就地在条目位置切换编辑框(不跳顶部表单)
 const editingManualId = ref('')
@@ -154,6 +154,8 @@ function startEditManual(m: ArchLlmModel) {
   manualForm.provider = m.provider || ''
   manualForm.model = m.model
   manualForm.url = m.url || ''
+  // GET 已打码: manual+hasApiKey → "******"(不动=保留旧值); imported 无字段
+  manualForm.apiKey = m.apiKey || ''
 }
 function toggleAddManual() {
   showAddManual.value = !showAddManual.value
@@ -165,6 +167,7 @@ function resetManualForm() {
   manualForm.provider = ''
   manualForm.model = ''
   manualForm.url = ''
+  manualForm.apiKey = ''
 }
 
 async function loadLlm() {
@@ -216,6 +219,7 @@ async function addManual() {
           provider: manualForm.provider.trim() || 'custom',
           model: manualForm.model.trim(),
           url: manualForm.url.trim(),
+          apiKey: manualForm.apiKey.trim(),
         })
         const i = llmModels.value.findIndex((x) => x.id === editingManualId.value)
         if (i >= 0) llmModels.value[i] = row
@@ -241,6 +245,7 @@ async function addManual() {
         provider: manualForm.provider.trim() || 'custom',
         model: manualForm.model.trim(),
         url: manualForm.url.trim(),
+        apiKey: manualForm.apiKey.trim(),
       })
       llmModels.value = [row, ...llmModels.value]
     } else {
@@ -754,6 +759,16 @@ onMounted(() => { void loadCgStatus() })
               <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualUrl') }}</span>
               <input v-model="manualForm.url" class="input !py-1 !text-xs">
             </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualKey') }}</span>
+              <input
+                v-model="manualForm.apiKey"
+                type="password"
+                autocomplete="off"
+                class="input !py-1 !text-xs font-mono"
+                :placeholder="t('config.llm.manualKeyPh')"
+              >
+            </label>
           </div>
           <div class="flex justify-end gap-2">
             <button
@@ -830,6 +845,7 @@ onMounted(() => { void loadCgStatus() })
                   :class="m.source === 'manual' ? 'bg-ctp-yellow/15 text-ctp-yellow' : 'bg-ctp-blue/15 text-ctp-blue'"
                 >{{ t(`config.llm.source.${m.source}`) }}</span>
                 <span v-if="m.isDefault" class="chip bg-ctp-green/15 text-ctp-green">default</span>
+                <span v-if="m.hasApiKey" class="chip bg-ctp-mauve/15 text-ctp-mauve" :title="t('config.llm.hasKeyTip')">🔑</span>
               </div>
               <div class="text-[11px] text-ctp-subtext0 truncate">
                 <span class="font-mono text-ctp-overlay1">{{ m.provider }}</span>

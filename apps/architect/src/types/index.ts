@@ -595,6 +595,8 @@ export interface ArchLlmModel {
   url: string
   type?: string
   isDefault?: boolean
+  /** 出站掩码值(******)或空——真值永不回传 FE */
+  apiKey?: string
   hasApiKey?: boolean
   updatedAt?: number
 }

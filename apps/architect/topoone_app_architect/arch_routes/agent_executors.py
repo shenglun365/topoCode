@@ -95,11 +95,26 @@ def _norm_models(raw) -> list:
     return out
 
 
+# 目录 provider → cline SDK providerId 保守映射: 仅直映同名已知云厂商,
+# 其余(ollama/lm-studio/custom 等)留空 = runner/sidecar 默认解析路径不变。
+_PROVIDER_TO_CLINE = {"deepseek": "deepseek", "openrouter": "openrouter"}
+
+
+def _cline_provider_id(provider: str, url: str) -> str:
+    p = (provider or "").strip().lower()
+    if p in _PROVIDER_TO_CLINE:
+        return _PROVIDER_TO_CLINE[p]
+    # https 外部端点 + key 面向云 API 的通用兜底(cline 通用 OpenAI 兼容 provider)
+    return "openai-compatible" if p in ("custom-cloud", "custom") and str(url or "").startswith("https://") else ""
+
+
 def _builtin_cline_models() -> list[dict]:
     """内置 cline 模型面 = architect 实例模型实时投影(免白名单存储、免同步)。
 
     执行器只选定默认模型(model_id); 全量列表/端点/密钥随实例模型存取——
-    白名单勾选与 provider/base_url/api_key 重复配置面退役(2026-09-19 裁决)。"""
+    白名单勾选与 provider/base_url/api_key 重复配置面退役(2026-09-19 裁决)。
+    apiKey 随目录(外部云 API 支持, 2026-10 裁决: 明文 kv + API 层掩码)——
+    本投影读原始条目(真值), 供 runner 透传 sidecar startSession。"""
     try:
         from .mcp_collab import get_llm_models
         out = []
@@ -110,6 +125,7 @@ def _builtin_cline_models() -> list[dict]:
             out.append({"id": str(m.get("id") or name), "name": name, "model": model,
                         "url": str(m.get("url") or ""),
                         "apiKey": str(m.get("apiKey") or ""),
+                        "providerId": _cline_provider_id(str(m.get("provider") or ""), str(m.get("url") or "")),
                         "maxTokens": int(m.get("maxTokens") or 0)})
         return out
     except Exception:  # noqa: BLE001
