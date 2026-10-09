@@ -107,7 +107,7 @@ function aggregate(evs: Ev[]): AggTurn[] {
     if (k === 'text') {
       const last = turns.at(-1)
       if (last?.kind === 'assistant' && ev.ts - last.ts <= GAP_MS) {
-        last.text = `${last.text || ''}\n${ev.text || ''}`.trim()
+        last.text = `${last.text || ''}${ev.text || ''}`   // 流式分片直接连接
         last.ts = ev.ts
       } else {
         turns.push({ kind: 'assistant', ts: ev.ts, text: ev.text || '' })
@@ -129,9 +129,9 @@ const toolSpan = (t: AggTurn) => {
   return dur >= 1000 ? `${Math.round(dur / 1000)}s` : ''
 }
 const expandedTools = ref<Set<number>>(new Set())
-function toggleTools(i: number) {
+function toggleTools(key: number) {
   const s = new Set(expandedTools.value)
-  s.has(i) ? s.delete(i) : s.add(i)
+  s.has(key) ? s.delete(key) : s.add(key)
   expandedTools.value = s
 }
 
@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
             <!-- 执行器回合: 左气泡(markdown) -->
             <div v-else-if="tn.kind === 'assistant'" class="flex min-w-0 flex-col items-start">
               <span class="mb-0.5 shrink-0 text-[10px] font-medium uppercase tracking-wider text-ctp-peach">{{ t('execSessionView.executor') }}</span>
-              <div class="max-w-[92%] min-w-0 break-words rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">
+              <div class="w-full min-w-0 break-words rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">
                 <ChatMessageBlocks :content="tn.text || ''" />
               </div>
               <span class="mt-0.5 shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
@@ -327,13 +327,13 @@ onBeforeUnmount(() => {
 
             <!-- 工具轨迹: 折叠块(默认收起) -->
             <div v-else-if="tn.kind === 'tools'" class="rounded-md border border-ctp-surface0 bg-ctp-crust/40">
-              <button class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-ctp-subtext0 hover:bg-ctp-surface0/40" @click="toggleTools(i)">
+              <button class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-ctp-subtext0 hover:bg-ctp-surface0/40" @click="toggleTools(tn.ts)">
                 <ChevronRightIcon class="w-3 h-3 transition-transform" :class="expandedTools.has(i) ? 'rotate-90' : ''" />
                 <span class="font-mono text-ctp-sapphire">🔧 {{ t('execSessionView.toolsN', { n: toolCount(tn) }) }}</span>
                 <span class="min-w-0 flex-1 truncate text-left text-ctp-overlay0">{{ [...new Set(tn.tools?.map((x) => x.name) || [])].join(' · ') }}</span>
                 <span v-if="toolSpan(tn)" class="ml-auto text-ctp-overlay0">{{ toolSpan(tn) }}</span>
               </button>
-              <div v-if="expandedTools.has(i)" class="space-y-1 border-t border-ctp-surface0 px-2.5 py-2">
+              <div v-if="expandedTools.has(tn.ts)" class="space-y-1 border-t border-ctp-surface0 px-2.5 py-2">
                 <div v-for="(tc, j) in tn.tools" :key="j" class="flex items-start gap-2 text-[11px] leading-relaxed">
                   <span class="w-14 shrink-0 text-right font-mono text-ctp-overlay0">{{ fmt(tc.startTs) }}</span>
                   <span class="shrink-0 font-mono" :class="tc.ok ? 'text-ctp-green' : 'text-ctp-yellow'">{{ tc.ok ? '✓' : '▶' }}</span>
