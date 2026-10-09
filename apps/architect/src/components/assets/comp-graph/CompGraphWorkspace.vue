@@ -79,13 +79,6 @@ async function loadComp() {
   try {
     compData.value = (await semanticAssetService.compGraph(base.value, target.value)) ?? null
     compIdMap.value = compMermaid.value.idMap
-    console.info('[comp-graph] comp-graph API', {
-      base: base.value || '(baseline)', target: target.value,
-      nodes: compData.value?.nodes.length ?? 0, edges: compData.value?.edges.length ?? 0,
-      noChanges: compData.value?.noChanges, compareError: compData.value?.compareError || '',
-      changes: (compData.value?.nodes ?? []).filter((n) => n.change.added || n.change.modified || n.change.deleted)
-        .map((n) => `${n.name}: +${n.change.added} ~${n.change.modified} -${n.change.deleted}`),
-    })
   } catch (e: any) {
     error.value = e?.message || 'failed'
   } finally {
@@ -99,13 +92,6 @@ async function loadFile() {
   try {
     fileData.value = (await semanticAssetService.fileGraph(scopeIds.value, base.value, target.value)) ?? null
     fileIdMap.value = fileMermaid.value.idMap
-    console.info('[comp-graph] file-graph API', {
-      scope: scopeIds.value, base: base.value || '(baseline)', target: target.value,
-      nodes: fileData.value?.nodes.length ?? 0, edges: fileData.value?.edges.length ?? 0,
-      truncated: fileData.value?.truncated,
-      changes: (fileData.value?.nodes ?? []).filter((n) => n.change)
-        .map((n) => `${n.path}: ${n.change}`),
-    })
   } catch (e: any) {
     error.value = e?.message || 'failed'
   } finally {
@@ -124,7 +110,6 @@ function scanRenderedNodes(tag: string) {
     }))
     const dist: Record<string, number> = {}
     for (const r of rows) dist[r.cls + '→' + r.fill] = (dist[r.cls + '→' + r.fill] || 0) + 1
-    console.info(`[comp-graph] rendered ${tag}`, { total: nodes.length, sample: rows, dist })
   }, 300))
 }
 

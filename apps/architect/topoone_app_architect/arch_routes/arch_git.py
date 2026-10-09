@@ -16,6 +16,9 @@ from typing import Optional
 from ..common import _ts
 from .. import store
 
+# repo_status 2s TTL 缓存(root 绝对路径 → (快照, monotonic))
+_status_cache: dict = {}
+
 # 顶层跳过目录(与 dirs.py _SKIP 一致)。
 _SKIP = {".git", ".hg", ".svn", ".idea", ".vscode", "__pycache__", ".DS_Store",
          "node_modules", "dist", "build"}
@@ -70,20 +73,51 @@ def ensure_git_repo(root: str) -> dict:
 
 
 def repo_status(root: str) -> dict:
-    """root 仓库状态(真实)。返回 { branch, commit, dirty, ahead, behind }。"""
-    branch = _git(["branch", "--show-current"], cwd=root) or ""
+    """root 仓库状态(真实)。返回 { branch, commit, dirty, ahead, behind }。
+
+    热路径治理: 此前 4 次串行 git spawn(branch/rev-parse/status/rev-list),
+    挂载探针(/git/status)双窗口并发时同步冻结事件循环——
+    ① 合并为 1-2 次(status -b --porcelain 首行含 branch+ahead/behind);
+    ② 进程级 2s TTL 缓存(状态徽标允许 2s 陈旧)。"""
+    import time as _t
+    key = os.path.abspath(root or "") if root else ""
+    if not key:
+        return {"branch": "", "commit": "", "dirty": False, "ahead": 0, "behind": 0}
+    now = _t.monotonic()
+    hit = _status_cache.get(key)
+    if hit and now - hit[1] < 2.0:
+        return hit[0]
+
+    def _parse_ab(note: str) -> tuple:
+        ahead = behind = 0
+        for part in note.replace("[", "").replace("]", "").split(","):
+            p = part.strip().split()
+            if len(p) == 2 and p[1].isdigit():
+                if p[0] == "ahead":
+                    ahead = int(p[1])
+                elif p[0] == "behind":
+                    behind = int(p[1])
+        return ahead, behind
+
+    raw = _git(["status", "-b", "--porcelain"], cwd=root)
+    branch, ahead, behind, dirty = "", 0, 0, False
+    if raw is None:
+        return {"branch": branch, "commit": "", "dirty": True, "ahead": ahead, "behind": behind}
+    lines = raw.split("\n")
+    head = (lines[0] if lines else "").strip()
+    if head.startswith("## "):
+        info = head[3:]
+        # "## dev-1...origin/dev-1 [ahead 1, behind 2]" / "## No commits yet on main"
+        name_part = info.split("...")[0].split(" ")[0].strip("[]")
+        if name_part.lower() != "head":
+            branch = name_part
+        if "[" in info and "]" in info:
+            ahead, behind = _parse_ab(info[info.index("[") + 1:info.index("]")])
+    dirty = bool("".join(lines[1:]).strip())
     commit = _git(["rev-parse", "HEAD"], cwd=root) or ""
-    dirty = _git(["status", "--porcelain"], cwd=root)
-    if dirty is None:
-        return {"branch": branch, "commit": commit, "dirty": True, "ahead": 0, "behind": 0}
-    changed = bool(dirty.strip())
-    ahead = behind = 0
-    line = _git(["rev-list", "--left-right", "--count", "@{upstream}"], cwd=root)
-    if line:
-        parts = line.split()
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            behind, ahead = int(parts[0]), int(parts[1])
-    return {"branch": branch, "commit": commit, "dirty": changed, "ahead": ahead, "behind": behind}
+    out = {"branch": branch, "commit": commit, "dirty": dirty, "ahead": ahead, "behind": behind}
+    _status_cache[key] = (out, now)
+    return out
 
 
 def remote_url(root: str) -> str:

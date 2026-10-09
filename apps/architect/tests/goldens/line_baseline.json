@@ -99,7 +99,7 @@
  "arch_routes/agent_executors.py": 864,
  "arch_routes/agent_roles.py": 91,
  "arch_routes/arch_change.py": 410,
- "arch_routes/arch_git.py": 329,
+ "arch_routes/arch_git.py": 379,
  "arch_routes/asset_diagram.py": 174,
  "arch_routes/asset_extract.py": 377,
  "arch_routes/asset_framework.py": 390,

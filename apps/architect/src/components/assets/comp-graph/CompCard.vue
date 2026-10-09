@@ -42,7 +42,6 @@ function beginDrag(e: PointerEvent) {
   const r = el.getBoundingClientRect()
   dragOff = { dx: e.clientX - r.left, dy: e.clientY - r.top }
   dragPos.value = { x: r.left, y: r.top }
-  console.debug('[comp-graph] comp-card drag begin (captured pid=%s)', e.pointerId)
 }
 function onDrag(e: PointerEvent) {
   if (!dragging.value) return
@@ -52,7 +51,6 @@ function endDrag(e: PointerEvent) {
   if (!dragging.value) return
   dragging.value = false
   try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ignore */ }
-  console.debug('[comp-graph] comp-card drag end')
 }
 
 const deps = computed(() =>

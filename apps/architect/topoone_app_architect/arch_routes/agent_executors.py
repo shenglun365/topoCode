@@ -306,6 +306,21 @@ def _get_runner(path: str, timeout: float = 5.0) -> Optional[dict]:
         return None
 
 
+# runner 运行态短缓存: async 路由禁同步 urllib(冻结事件循环, 双窗口并发时
+# 串行放大)——to_thread + 2s TTL(运行态徽标允许 2s 陈旧)
+_runner_health_cache: dict = {"data": None, "ts": 0.0}
+
+
+async def _runner_health() -> Optional[dict]:
+    import time as _t
+    now = _t.monotonic()
+    if now - _runner_health_cache["ts"] < 2.0:
+        return _runner_health_cache["data"]
+    data = await asyncio.to_thread(_get_runner, "/health", 2.0)
+    _runner_health_cache.update(data=data, ts=now)
+    return data
+
+
 # ── 路由 ──
 
 @router.get("/agent/executors")
@@ -317,7 +332,7 @@ async def list_executors():
             live = _builtin_cline_models()
             if live:
                 e.setdefault("config", {})["models"] = live
-    runtime = _get_runner("/health")
+    runtime = await _runner_health()
     return ok({
         "executors": _mask(entries),
         "runtime": {"reachable": bool(runtime)} if runtime else {"reachable": False},
@@ -512,16 +527,23 @@ async def probe_executor(request: Request):
 
 
 def _bin_version(bin_name: str, args: tuple = ("--version",)) -> str:
-    """二进制存在则取版本(截断), 不存在返回空串。"""
+    """二进制存在则取版本(截断), 不存在返回空串。
+
+    timeout 5s: --version 不应超过 5s(此前 15s——node CLI 冷启动慢时三次
+    spawn 同步串行, 曾把事件循环冻结到双窗口全页卡死)。"""
     path = shutil.which(bin_name)
     if not path:
         return ""
     try:
-        out = subprocess.run([path, *args], capture_output=True, text=True, timeout=15)
+        out = subprocess.run([path, *args], capture_output=True, text=True, timeout=5)
         return (out.stdout or out.stderr).strip().splitlines()[0][:80] if (out.stdout or out.stderr) else path
     except Exception:  # noqa: BLE001
         return path
 
+
+# 环境检测结果缓存(挂载路径高频; 手动检测 force 绕过)
+_ENV_CACHE: dict = {"data": None, "ts": 0.0}
+_ENV_TTL = 300.0
 
 INSTALL_CMDS = {
     "opencode": "npm install -g opencode-ai",
@@ -560,9 +582,19 @@ def _env_detect() -> dict:
 
 
 @router.get("/agent/executors/env")
-async def executors_env():
-    """环境检测: 当前安装了哪些已适配 coding agent。"""
-    return ok(_env_detect())
+async def executors_env(force: bool = False):
+    """环境检测: 当前安装了哪些已适配 coding agent。
+
+    _env_detect 内含 3 次 subprocess spawn(node/opencode/codex --version),
+    同步执行会冻结事件循环(实测 0.5s+/次, 双窗口并发完美串行)——
+    to_thread + 进程级 TTL 300s 缓存(版本探测结果稳定);
+    force=true(手动"重新检测")绕过缓存。"""
+    import time as _t
+    if not force and _ENV_CACHE["data"] is not None and _t.monotonic() - _ENV_CACHE["ts"] < _ENV_TTL:
+        return ok(_ENV_CACHE["data"])
+    data = await asyncio.to_thread(_env_detect)
+    _ENV_CACHE.update(data=data, ts=_t.monotonic())
+    return ok(data)
 
 
 @router.post("/agent/executors/install")

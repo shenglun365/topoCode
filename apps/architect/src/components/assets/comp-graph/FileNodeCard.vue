@@ -47,7 +47,6 @@ function beginDrag(e: PointerEvent) {
   const r = el.getBoundingClientRect()
   dragOff = { dx: e.clientX - r.left, dy: e.clientY - r.top }
   dragPos.value = { x: r.left, y: r.top }
-  console.debug('[comp-graph] file-card drag begin (captured pid=%s)', e.pointerId)
 }
 function onDrag(e: PointerEvent) {
   if (!dragging.value) return
@@ -57,7 +56,6 @@ function endDrag(e: PointerEvent) {
   if (!dragging.value) return
   dragging.value = false
   try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ignore */ }
-  console.debug('[comp-graph] file-card drag end')
 }
 function beginResize(e: PointerEvent) {
   resizing.value = true
@@ -65,7 +63,6 @@ function beginResize(e: PointerEvent) {
   // 此后悬停扫过细条即误触发 onResize → 宽度失控跳动
   try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ignore */ }
   resizeStart = { x: e.clientX, w: cardW.value || (cardEl.value?.getBoundingClientRect().width || 680) }
-  console.debug('[comp-graph] file-card resize begin (captured pid=%s, startW=%s)', e.pointerId, resizeStart.w)
 }
 function onResize(e: PointerEvent) {
   if (!resizing.value) return
@@ -75,7 +72,6 @@ function endResize(e: PointerEvent) {
   if (!resizing.value) return
   resizing.value = false
   try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ignore */ }
-  console.debug('[comp-graph] file-card resize end, w=%s', cardW.value)
 }
 
 const cardEl = ref<HTMLElement | null>(null)

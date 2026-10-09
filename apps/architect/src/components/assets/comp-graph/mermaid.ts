@@ -100,11 +100,6 @@ export function compGraphMermaid(nodes: CompMermaidNode[],
     `  classDef deleted fill:${P.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.text}`,
   )
   const code = [...lines, ...classLines].join('\n')
-  console.info('[comp-graph] compGraphMermaid', {
-    nodes: nodes.length, edges: edges.length, classed: classLines.length,
-    changeDist: nodes.reduce((m, n) => { const k = changeClass(n.change) || 'none'; m[k] = (m[k] || 0) + 1; return m }, {} as Record<string, number>),
-  })
-  console.info('[comp-graph] comp mermaid code:\n' + code)
   return { code, idMap }
 }
 
@@ -137,10 +132,5 @@ export function fileGraphMermaid(nodes: {
     `  classDef deleted fill:${P2.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P2.text}`,
   )
   const code = [...lines, ...classLines].join('\n')
-  console.info('[comp-graph] fileGraphMermaid', {
-    nodes: nodes.length, edges: edges.length, classed: classLines.length,
-    changeDist: nodes.reduce((m, n) => { const k = n.change || 'none'; m[k] = (m[k] || 0) + 1; return m }, {} as Record<string, number>),
-  })
-  console.info('[comp-graph] file mermaid code:\n' + code)
   return { code, idMap }
 }

@@ -5,6 +5,7 @@
 - /git/log: 资产工作区 diff 对比选择器(gitService.commitLog)
 仓库不可用/无绑定项目 → 降级返回(不中断 UI)。
 """
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, Request
 from ..common import ok
@@ -26,7 +27,9 @@ async def git_status(request: Request):
     if not proj or not proj.get("rootPath"):
         return ok({"branch": "main", "ahead": 0, "behind": 0, "dirty": False,
                    "uncommitted": [], "staged": [], "baseline": ""})
-    return ok(arch_git.status({"rootPath": proj.get("rootPath")}))
+    # git spawn 同步执行会冻结事件循环(挂载探针高频)——to_thread
+    status = await asyncio.to_thread(arch_git.status, {"rootPath": proj.get("rootPath")})
+    return ok(status)
 
 
 @router.get("/git/log")

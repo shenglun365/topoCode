@@ -4663,11 +4663,14 @@ async def api_purge_semantic(request: Request):
 # ── 动态路由置底注册（A1-T2：避免 {asset_id} 遮蔽静态路径）──
 @router.get("/kb/semantic/codegraph")
 async def api_codegraph_status(root: Optional[str] = None, project: Optional[str] = None):
+    import asyncio
     from .. import ctx
     from .codegraph import codegraph_status, effective_mode, kv_mode, cg_index_stats
     from .symbols import symbol_source_state, resolve_live_core_pid
     mode = effective_mode()
-    st = codegraph_status()
+    # git spawn + sqlite 打开 + 进程扫描为同步 IO——async 路由内 to_thread,
+    # 防事件循环冻结(挂载高频端点, 双窗口并发放大)
+    st = await asyncio.to_thread(codegraph_status)
     # root 解析：显式参数 > 请求上下文(注册项目 rootPath)
     _root = (root or '').strip()
     if not _root:
@@ -4675,11 +4678,11 @@ async def api_codegraph_status(root: Optional[str] = None, project: Optional[str
         _root = (store.ProjectsStore.get(_pid_ctx) or {}).get('rootPath', '') if _pid_ctx else ''
     _root = _root or ''
     # native = codegraph CLI 索引计数(用户裁决, 非 KB 图谱); corePid/state 供 KB 行
-    st['nativeNodes'], st['nativeEdges'] = cg_index_stats(_root)
-    _core_pid = resolve_live_core_pid(_root)
+    st['nativeNodes'], st['nativeEdges'] = await asyncio.to_thread(cg_index_stats, _root)
+    _core_pid = await asyncio.to_thread(resolve_live_core_pid, _root)
     if _core_pid:
         st['corePid'] = _core_pid
-    ns = symbol_source_state(_root, project or ctx.get_project())
+    ns = await asyncio.to_thread(symbol_source_state, _root, project or ctx.get_project())
     return ok({"mode": mode, "env": os.environ.get("ARCH_CODEGRAPH", "").strip().lower(),
                "cli": st["cli"], "cliPath": st["cliPath"],
                "kv": kv_mode(), "source": "env" if os.environ.get("ARCH_CODEGRAPH") else ("kv" if kv_mode() else "default"),

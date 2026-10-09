@@ -82,6 +82,21 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
 
     app = FastAPI(title="TopoOne Architect")
     app.add_middleware(ProjectContextMiddleware)
+    # 慢调用审计(>300ms): 同步 IO 混入 async 路由会冻结事件循环(双窗口
+    # 并发串行放大事故, 2026-10)——此日志为回归观测面, 不落库
+    import time as _perf_time
+
+    @app.middleware("http")
+    async def _slow_api_audit(request, call_next):
+        _t0 = _perf_time.monotonic()
+        try:
+            return await call_next(request)
+        finally:
+            _ms = (_perf_time.monotonic() - _t0) * 1000
+            if _ms > 300:
+                logging.getLogger("arch.perf").warning(
+                    "[slow-api] %s %s %.0fms", request.method, request.url.path, _ms)
+
     # 口令入口保护(2610 执行器会话拓展): 本机豁免, /api/**+WS 校验
     from topoone_app_architect.arch_routes.security import TokenAuthMiddleware
     app.add_middleware(TokenAuthMiddleware)

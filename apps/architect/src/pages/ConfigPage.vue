@@ -26,6 +26,11 @@ const TABS = [
   { key: 'other', label: 'config.tabs.other' },
 ] as const
 const activeTab = ref<string>('instance')
+// tab 惰性挂载: 首次激活才渲染子面板(每 tab 挂载即发起 API 请求,
+// v-show 全量挂载曾致 config 页一次打出 ~13 个请求且含阻塞端点);
+// 已访问的 tab 保持挂载(v-show)避免切回重复请求
+const visitedTabs = reactive<Record<string, boolean>>({ instance: true })
+watch(activeTab, (t) => { visitedTabs[t] = true })
 
 const project = useArchProjectStore()
 
@@ -631,7 +636,7 @@ onMounted(() => { void loadCgStatus() })
     </div>
 
     <!-- ═══ tab: 其他配置(其他 + 资产锁 + CodeGraph 同属此 tab, 分散两处 v-show) ═══ -->
-    <div v-show="activeTab === 'other'" class="space-y-4">
+    <div v-if="visitedTabs['other']" v-show="activeTab === 'other'" class="space-y-4">
       <div class="panel overflow-hidden">
         <div class="panel-header">
           <span class="flex items-center gap-2">
@@ -679,7 +684,7 @@ onMounted(() => { void loadCgStatus() })
     </div>
 
     <!-- ═══ tab: Architect 实例设置(模型) ═══ -->
-    <div v-show="activeTab === 'instance'">
+    <div v-if="visitedTabs['instance']" v-show="activeTab === 'instance'">
     <div class="panel overflow-hidden">
       <div class="panel-header">
         <span class="flex items-center gap-2">
@@ -1017,7 +1022,7 @@ onMounted(() => { void loadCgStatus() })
     </div>
 
     <!-- ═══ tab: Coding Agent 执行器 ═══ -->
-    <div v-show="activeTab === 'executors'" class="space-y-4">
+    <div v-if="visitedTabs['executors']" v-show="activeTab === 'executors'" class="space-y-4">
       <AgentExecutorsCard />
 
     </div>
@@ -1025,17 +1030,17 @@ onMounted(() => { void loadCgStatus() })
 
 
     <!-- ═══ tab: L-2 技能管理(arch_assets kind=skill, 2610) ═══ -->
-    <div v-show="activeTab === 'assets'" class="space-y-4">
+    <div v-if="visitedTabs['assets']" v-show="activeTab === 'assets'" class="space-y-4">
       <AssetsCard />
     </div>
 
     <!-- ═══ tab: 工具能力(原生注册表快照, 2610) ═══ -->
-    <div v-show="activeTab === 'tools'" class="space-y-4">
+    <div v-if="visitedTabs['tools']" v-show="activeTab === 'tools'" class="space-y-4">
       <ToolsCard />
     </div>
 
     <!-- ═══ tab: 资产助理(数据资产·语义分析) + 轻任务模型(编排侧) ═══ -->
-    <div v-show="activeTab === 'roleModels'">
+    <div v-if="visitedTabs['roleModels']" v-show="activeTab === 'roleModels'">
     <div class="panel overflow-hidden">
       <div class="panel-header">
         <span class="flex items-center gap-2">
@@ -1121,7 +1126,7 @@ onMounted(() => { void loadCgStatus() })
     </div>
 
     <!-- ═══ tab: 其他配置(续)——符号源 ═══ -->
-    <div v-show="activeTab === 'other'" class="space-y-4">
+    <div v-if="visitedTabs['other']" v-show="activeTab === 'other'" class="space-y-4">
 
       <!-- 符号源(CodeGraph)开关：语义提取的符号数据来源 -->
       <div class="panel overflow-hidden">
