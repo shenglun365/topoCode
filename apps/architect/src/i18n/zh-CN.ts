@@ -1139,6 +1139,7 @@ export default {
       executors: 'Coding Agent 执行器',
       roleModels: '模型分派（资产助理/轻任务）',
       assets: '技能管理',
+      tools: '工具能力',
       other: '其他配置',
     },
     skills: {

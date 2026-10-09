@@ -1130,6 +1130,7 @@ export default {
       executors: 'Coding Agent Executors',
       roleModels: 'Model Assignment (Assistants / Light Tasks)',
       assets: 'Skills',
+      tools: 'Tools',
       other: 'General',
     },
     skills: {
