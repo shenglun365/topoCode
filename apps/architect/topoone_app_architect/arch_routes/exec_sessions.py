@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from ..common import err, ok
 
@@ -56,3 +56,30 @@ async def list_events(job_id: str, since: int = 0, limit: int = 2000):
         # 无留痕(存量会话/未过泵) — 明确空态而非 404(浏览器区分显示)
         return ok({"events": [], "empty": True})
     return ok({"events": evs, "empty": False})
+
+
+@router.post("/arch/exec-sessions/{job_id}/input")
+async def send_input(job_id: str, request: Request):
+    """serve 直通作业输入转发(深链会话页输入框)——runner user_input/steer。
+
+    delivery: steered(running 中即时插入) | queued(回合排队) | started。
+    """
+    from ..agent.execution import exec_bridge as eb
+    data = await request.json() if request else {}
+    text = str(data.get("text") or "").strip()
+    if not text:
+        return err(400, "text 为空")
+    r = eb._client().input(job_id, text, steer=bool(data.get("steer")))
+    if not r.ok:
+        return err(400, r.error or "输入失败(作业已结束或 runner 不可达)")
+    return ok({"delivery": r.delivery, "queued": r.queued, "reason": r.reason})
+
+
+@router.post("/arch/exec-sessions/{job_id}/stop")
+async def stop_job(job_id: str):
+    """serve 直通作业中止转发(深链会话页「停止」)。"""
+    from ..agent.execution import exec_bridge as eb
+    r = eb._client().abort(job_id)
+    if not r.get("ok"):
+        return err(400, str(r.get("error") or "停止失败(作业已结束或 runner 不可达)"))
+    return ok({"stopped": True})

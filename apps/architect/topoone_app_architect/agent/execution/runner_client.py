@@ -126,6 +126,10 @@ class RunnerClient:
         return self._t(f"/api/implement/{job_id}/finish",
                                {"keepWorktree": keep_worktree}, timeout) or {}
 
+    def abort(self, job_id: str, timeout: float = 15.0) -> Dict[str, Any]:
+        """中止作业(深链会话页「停止」转发面)。"""
+        return self._t(f"/api/implement/{job_id}/abort", {}, timeout) or {}
+
     def running(self, timeout: float = 8.0) -> Dict[str, Any]:
         return self._t("/api/implement/running", None, timeout) or {}
 

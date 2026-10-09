@@ -257,6 +257,11 @@ export default {
     timelineFallback: 'Job not linked to a conversation stream (direct run) — event timeline archive below.',
     readonlyHint: 'Read-only view — run conversations/approvals in Sessions or the main session.',
     executor: 'Executor',
+    toolsN: 'tool calls ×{n}',
+    inputPlaceholder: 'Reply directly to this executor job (Enter to send)',
+    jobEnded: 'Job ended — input disabled',
+    steered: 'Injected into the running turn (steer)',
+    stopping: 'Stop requested…',
   },
   mcp: {
     title: 'MCP Service',

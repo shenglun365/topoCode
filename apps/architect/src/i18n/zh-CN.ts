@@ -255,6 +255,11 @@ export default {
     timelineFallback: '该作业未落会话流（直通执行）——以下为事件时间线档案。',
     readonlyHint: '本页为只读视图——对话/审批/验收请回会话中心或主会话进行。',
     executor: '执行器',
+    toolsN: '工具调用 ×{n}',
+    inputPlaceholder: '直接回复该执行器作业(Enter 发送)',
+    jobEnded: '作业已结束——输入不可用',
+    steered: '已插入当前回合(steer)',
+    stopping: '已请求停止…',
   },
   mcp: {
     title: 'MCP 服务',

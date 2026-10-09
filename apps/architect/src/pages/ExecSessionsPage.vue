@@ -1,18 +1,23 @@
 <script setup lang="ts">
 /**
- * 执行器会话深链页（2026-10 v3）——完整 agent 会话模式。
+ * 执行器会话深链页（2026-10 v4）——完整 agent 会话模式。
  *
  * 全屏无工作台框架(顶层路由 /exec-session-view)；?job= 定位：
  * - 有关联会话 → 复用 dock 对话栈(conversation-store + AnalysisChat)：
  *   回合折叠/展开/伸缩、任务卡、输入框直发(执行器直通)、SSE 实时、窗口锁
- * - 无关联会话 → 降级事件时间线(留痕档案)
+ * - 无关联会话(serve 直通作业) → 事件聚合会话视图：user/assistant 回合 +
+ *   折叠工具块(USAGE/progress 丢弃——细节收敛) + 状态分隔条 + 输入框直发
+ *   (POST /arch/exec-sessions/{job}/input → runner user_input/steer) + 停止
  * 头信息: 项目 chip + 主会话标题 + 子会话标题 + 执行器 + 运行状态。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { BoltIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
-import { apiGet } from '@/services/api-client'
+import {
+  BoltIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon,
+  PaperAirplaneIcon, StopIcon, ChevronRightIcon,
+} from '@heroicons/vue/24/outline'
+import { apiGet, apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useConvWindowLock } from '@/composables/useConvWindowLock'
@@ -34,34 +39,113 @@ const parentTitle = ref('')
 const projectName = ref('')
 const loading = ref(false)
 
-/* ── 降级形态: 无关联会话 → 事件时间线 ── */
+/* ── serve 直通形态: 事件 → 回合聚合会话视图 ── */
 const events = ref<Ev[]>([])
 const live = ref(false)
 let evTimer: number | undefined
+const feedEl = ref<HTMLElement | null>(null)
 
-const KIND_META: Record<string, { color: string; tag: string }> = {
-  session_ready: { color: 'text-ctp-green', tag: 'READY' },
-  user_input: { color: 'text-ctp-sky', tag: 'IN' },
-  input_required: { color: 'text-ctp-yellow', tag: 'WAIT' },
-  text: { color: 'text-ctp-subtext1', tag: 'TXT' },
-  tool: { color: 'text-ctp-sapphire', tag: 'TOOL' },
-  usage: { color: 'text-ctp-overlay0', tag: 'USAGE' },
-  notice: { color: 'text-ctp-peach', tag: 'NOTICE' },
-  approval_request: { color: 'text-ctp-red', tag: 'AUTH' },
-  team: { color: 'text-ctp-mauve', tag: 'TEAM' },
-  mcp: { color: 'text-ctp-teal', tag: 'MCP' },
-  verify: { color: 'text-ctp-lavender', tag: 'VERIFY' },
-  turn_outcome: { color: 'text-ctp-overlay1', tag: 'TURN' },
-  turn_done: { color: 'text-ctp-overlay1', tag: 'TURN' },
-  progress: { color: 'text-ctp-overlay0', tag: 'PROG' },
-  done: { color: 'text-ctp-green', tag: 'DONE' },
-  failed: { color: 'text-ctp-red', tag: 'FAIL' },
-  aborted: { color: 'text-ctp-yellow', tag: 'STOP' },
-  finished: { color: 'text-ctp-overlay1', tag: 'FIN' },
+interface ToolCall { name: string; ok: boolean; startTs: number; endTs: number; text: string }
+interface AggTurn {
+  kind: 'user' | 'assistant' | 'tools' | 'status'
+  ts: number
+  text?: string
+  tools?: ToolCall[]
+  status?: { tag: string; color: string; text: string }
 }
-const kindMeta = (k: string) => KIND_META[k] || { color: 'text-ctp-overlay0', tag: k.slice(0, 6).toUpperCase() }
+
+const STATUS_META: Record<string, { tag: string; color: string }> = {
+  session_ready: { tag: 'READY', color: 'text-ctp-green' },
+  input_required: { tag: 'WAIT', color: 'text-ctp-yellow' },
+  notice: { tag: 'NOTICE', color: 'text-ctp-peach' },
+  approval_request: { tag: 'AUTH', color: 'text-ctp-red' },
+  team: { tag: 'TEAM', color: 'text-ctp-mauve' },
+  mcp: { tag: 'MCP', color: 'text-ctp-teal' },
+  verify: { tag: 'VERIFY', color: 'text-ctp-lavender' },
+  done: { tag: 'DONE', color: 'text-ctp-green' },
+  failed: { tag: 'FAIL', color: 'text-ctp-red' },
+  aborted: { tag: 'STOP', color: 'text-ctp-yellow' },
+  finished: { tag: 'FIN', color: 'text-ctp-overlay1' },
+}
+
+/** 细节收敛聚合: USAGE/progress/turn_outcome 丢弃; text 合并回合; TOOL 配对折叠。 */
+function aggregate(evs: Ev[]): AggTurn[] {
+  const turns: AggTurn[] = []
+  const pending = new Map<string, ToolCall>()     // ▶ 未配对的工具(跨回合收口)
+  const GAP_MS = 120_000
+  const flushTools = (ts: number) => {
+    if (!pending.size) return
+    turns.push({ kind: 'tools', ts, tools: [...pending.values()] })
+    pending.clear()
+  }
+  for (const ev of evs) {
+    const k = ev.kind || ''
+    if (k === 'usage' || k === 'progress' || k === 'turn_outcome' || k === 'turn_done') continue
+    if (k === 'tool') {
+      const name = ev.toolName || String((ev as any).tool || '') || '?'
+      if (!ev.text || !ev.text.startsWith('✓')) {
+        pending.set(`${name}#${ev.seq}`, { name, ok: false, startTs: ev.ts, endTs: ev.ts, text: ev.text || '' })
+      } else {
+        // ✓ 完成事件配对最近的同名 ▶(无则独立成块)
+        let matched = false
+        for (const [key, tc] of [...pending.entries()].reverse()) {
+          if (tc.name === name && !tc.ok) {
+            tc.ok = true; tc.endTs = ev.ts; tc.text = ev.text
+            pending.set(key, tc); matched = true; break
+          }
+        }
+        if (!matched) pending.set(`${name}#${ev.seq}`, { name, ok: true, startTs: ev.ts, endTs: ev.ts, text: ev.text })
+      }
+      continue
+    }
+    flushTools(ev.ts)                              // 非 tool 事件收口工具块
+    if (k === 'user_input') {
+      turns.push({ kind: 'user', ts: ev.ts, text: ev.text })
+      continue
+    }
+    if (k === 'text') {
+      const last = turns.at(-1)
+      if (last?.kind === 'assistant' && ev.ts - last.ts <= GAP_MS) {
+        last.text = `${last.text || ''}\n${ev.text || ''}`.trim()
+        last.ts = ev.ts
+      } else {
+        turns.push({ kind: 'assistant', ts: ev.ts, text: ev.text || '' })
+      }
+      continue
+    }
+    const meta = STATUS_META[k]
+    if (meta) turns.push({ kind: 'status', ts: ev.ts, status: { tag: meta.tag, color: meta.color, text: ev.text || '' } })
+  }
+  flushTools(evs.at(-1)?.ts || 0)
+  return turns
+}
+
+const aggTurns = computed(() => aggregate(events.value))
+const toolCount = (t: AggTurn) => t.tools?.length || 0
+const toolSpan = (t: AggTurn) => {
+  if (!t.tools?.length) return ''
+  const dur = Math.max(0, (t.tools.at(-1)!.endTs - t.tools[0].startTs))
+  return dur >= 1000 ? `${Math.round(dur / 1000)}s` : ''
+}
+const expandedTools = ref<Set<number>>(new Set())
+function toggleTools(i: number) {
+  const s = new Set(expandedTools.value)
+  s.has(i) ? s.delete(i) : s.add(i)
+  expandedTools.value = s
+}
+
+/** 轻量 markdown: 转义 + 代码块/行内码/粗体/换行 */
+function renderMd(text: string): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return esc(text || '')
+    .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _l, c) => `<pre class="rounded bg-ctp-mantle p-2 my-1 overflow-x-auto text-[11px]"><code>${c}</code></pre>`)
+    .replace(/`([^`\n]+)`/g, '<code class="rounded bg-ctp-surface0 px-1 py-0.5 text-[11px] font-mono">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>')
+}
 
 const fmt = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTimeString() : ''
+const fmtFull = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleString() : ''
 
 const heading = computed(() => (conv.activeMeta as any)?.title || jobRow.value?.title || jobId.value)
 const isRunning = computed(() => !jobRow.value?.lastStatus && jobRow.value?.taskStatus !== 'done')
@@ -69,6 +153,49 @@ const isArchived = computed(() => (conv.activeMeta as any)?.status === 'archived
 const jobState = computed(() => (isRunning.value
   ? { role: 'coding', executorId: jobRow.value?.executorType || (conv.activeMeta as any)?.executorId, status: 'running' }
   : null))
+const serveActive = computed(() => !convId.value && jobId.value && isRunning.value)
+
+/* ── serve 输入框(直发 runner) ── */
+const serveInput = ref('')
+const sending = ref(false)
+const serveMsg = ref('')
+const inputEl = ref<HTMLTextAreaElement | null>(null)
+
+function autoResize() {
+  const el = inputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+}
+
+async function sendServe() {
+  const text = serveInput.value.trim()
+  if (!text || sending.value) return
+  sending.value = true
+  serveMsg.value = ''
+  try {
+    const r = await apiPost<{ delivery?: string }>(
+      `/arch/exec-sessions/${encodeURIComponent(jobId.value)}/input`, { text })
+    serveInput.value = ''
+    if (inputEl.value) inputEl.value.style.height = 'auto'
+    serveMsg.value = r.delivery === 'steered' ? t('execSessionView.steered') : ''
+    if (!live.value) toggleLive()                  // 输入后自动跟进回流
+    void fetchEvents(true)
+  } catch (e) {
+    serveMsg.value = e instanceof Error ? e.message : String(e)
+  } finally { sending.value = false }
+}
+
+async function stopServe() {
+  if (!jobId.value) return
+  try {
+    await apiPost(`/arch/exec-sessions/${encodeURIComponent(jobId.value)}/stop`, {})
+    serveMsg.value = t('execSessionView.stopping')
+    void fetchEvents(true)
+  } catch (e) {
+    serveMsg.value = e instanceof Error ? e.message : String(e)
+  }
+}
 
 async function loadJob() {
   const rows = await apiGet<Array<Record<string, unknown>>>('/arch/exec-sessions?limit=200')
@@ -76,7 +203,7 @@ async function loadJob() {
   if (!row) return
   jobRow.value = row as typeof jobRow.value
   const cid = String(row.conversationId || '')
-  if (!cid) { await fetchEvents(false); return }
+  if (!cid) { await fetchEvents(false); if (isRunning.value) toggleLive(); return }
   convId.value = cid
   await openConversation(cid)
 }
@@ -119,13 +246,16 @@ function onSend(p: { text: string }) {
   conv.send(p.text)
 }
 
-/* ── 事件时间线(降级) ── */
+/* ── serve 事件流(增量轮询) ── */
 async function fetchEvents(incr: boolean) {
   if (!jobId.value) return
   const since = incr ? events.value.at(-1)?.seq ?? 0 : 0
   const r = await apiGet<{ events: Ev[]; empty: boolean }>(
     `/arch/exec-sessions/${encodeURIComponent(jobId.value)}/events?since=${since}`)
-  if (r.events.length) events.value = incr ? [...events.value, ...r.events] : r.events
+  if (r.events.length) {
+    events.value = incr ? [...events.value, ...r.events] : r.events
+    nextTick(() => { if (feedEl.value) feedEl.value.scrollTop = feedEl.value.scrollHeight })
+  }
 }
 
 function toggleLive() {
@@ -167,6 +297,9 @@ onBeforeUnmount(() => {
       <span v-if="(conv.activeMeta as any)?.executorId || jobRow?.executorType" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">⌨ {{ (conv.activeMeta as any)?.executorId || jobRow?.executorType }}</span>
       <span v-if="isRunning" class="chip shrink-0 animate-pulse bg-ctp-green/15 text-ctp-green">● {{ t('execSessionView.running') }}</span>
       <span v-else-if="jobRow?.lastStatus" class="chip shrink-0 bg-ctp-surface0 text-ctp-overlay0">{{ jobRow.lastStatus }}</span>
+      <button class="btn btn-xs shrink-0" :class="live ? 'btn-green' : ''" :title="t('execSessions.live')" @click="toggleLive">
+        <ArrowPathIcon class="w-3 h-3" />{{ live ? t('execSessions.liveOn') : t('execSessions.live') }}
+      </button>
       <button v-if="convId" class="btn btn-xs shrink-0" :title="t('execSessionView.openCenter')" @click="openInCenter">
         <ArrowTopRightOnSquareIcon class="w-3 h-3" />{{ t('execSessionView.openCenter') }}
       </button>
@@ -177,28 +310,78 @@ onBeforeUnmount(() => {
       {{ t('execSessionView.noJob') }}
     </div>
 
-    <!-- 降级: 无关联会话 → 事件时间线 -->
+    <!-- serve 直通: 事件聚合会话视图 + 输入框直发 -->
     <template v-else-if="!convId">
-      <div class="flex min-h-0 flex-1 flex-col p-4">
-        <div class="flex items-center gap-2 pb-2 text-[11px] text-ctp-overlay0">
-          <span>{{ t('execSessionView.timelineFallback') }}</span>
-          <button class="btn btn-xs ml-auto" :class="live ? 'btn-green' : ''" @click="toggleLive">
-            <ArrowPathIcon class="w-3 h-3" />{{ live ? t('execSessions.liveOn') : t('execSessions.live') }}
-          </button>
-        </div>
-        <div class="overflow-auto min-h-0 flex-1 rounded-lg border border-ctp-surface0 p-3">
-          <div v-if="!events.length" class="py-10 text-center text-xs text-ctp-overlay0">{{ t('execSessions.noEvents') }}</div>
-          <div v-for="ev in events" :key="ev.seq" class="flex items-start gap-2 text-[11px] leading-relaxed">
-            <span class="w-14 shrink-0 text-right font-mono text-ctp-overlay0">{{ fmt(ev.ts) }}</span>
-            <span class="w-14 shrink-0 font-mono" :class="kindMeta(ev.kind).color">{{ kindMeta(ev.kind).tag }}</span>
-            <span class="min-w-0 flex-1 break-all whitespace-pre-wrap"
-                  :class="ev.kind === 'text' ? 'text-ctp-subtext1' : 'text-ctp-text'">
-              {{ (ev.text || '').slice(0, 500) }}
-              <span v-if="ev.toolName" class="font-mono text-ctp-sapphire"> [{{ ev.toolName }}]</span>
-            </span>
+      <div ref="feedEl" class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div class="mx-auto max-w-3xl space-y-3">
+          <div v-if="!aggTurns.length && !loading" class="py-16 text-center text-xs text-ctp-overlay0">
+            {{ t('execSessions.noEvents') }}
           </div>
+
+          <template v-for="(tn, i) in aggTurns" :key="i">
+            <!-- 用户回合: 右蓝泡 -->
+            <div v-if="tn.kind === 'user'" class="flex flex-col items-end">
+              <div class="max-w-[85%] rounded-lg rounded-br-sm bg-ctp-blue/15 px-3 py-2 text-xs leading-relaxed text-ctp-text whitespace-pre-wrap break-words">{{ tn.text }}</div>
+              <span class="mt-0.5 text-[10px] text-ctp-overlay0">{{ fmtFull(tn.ts) }}</span>
+            </div>
+
+            <!-- 执行器回合: 左气泡(markdown) -->
+            <div v-else-if="tn.kind === 'assistant'" class="flex flex-col items-start">
+              <span class="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-ctp-peach">{{ t('execSessionView.executor') }}</span>
+              <div class="max-w-[92%] rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text" v-html="renderMd(tn.text || '')" />
+              <span class="mt-0.5 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
+            </div>
+
+            <!-- 工具轨迹: 折叠块(默认收起) -->
+            <div v-else-if="tn.kind === 'tools'" class="rounded-md border border-ctp-surface0 bg-ctp-crust/40">
+              <button class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-ctp-subtext0 hover:bg-ctp-surface0/40" @click="toggleTools(i)">
+                <ChevronRightIcon class="w-3 h-3 transition-transform" :class="expandedTools.has(i) ? 'rotate-90' : ''" />
+                <span class="font-mono text-ctp-sapphire">🔧 {{ t('execSessionView.toolsN', { n: toolCount(tn) }) }}</span>
+                <span class="text-ctp-overlay0">{{ [...new Set(tn.tools?.map((x) => x.name) || [])].join(' · ') }}</span>
+                <span v-if="toolSpan(tn)" class="ml-auto text-ctp-overlay0">{{ toolSpan(tn) }}</span>
+              </button>
+              <div v-if="expandedTools.has(i)" class="space-y-1 border-t border-ctp-surface0 px-2.5 py-2">
+                <div v-for="(tc, j) in tn.tools" :key="j" class="flex items-start gap-2 text-[11px] leading-relaxed">
+                  <span class="w-14 shrink-0 text-right font-mono text-ctp-overlay0">{{ fmt(tc.startTs) }}</span>
+                  <span class="shrink-0 font-mono" :class="tc.ok ? 'text-ctp-green' : 'text-ctp-yellow'">{{ tc.ok ? '✓' : '▶' }}</span>
+                  <span class="min-w-0 flex-1 break-all font-mono text-ctp-subtext1">{{ tc.name }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 状态分隔条 -->
+            <div v-else-if="tn.status" class="flex items-center gap-2 py-0.5 text-[10px]">
+              <span class="h-px flex-1 bg-ctp-surface0" />
+              <span class="font-mono" :class="tn.status.color">{{ tn.status.tag }}</span>
+              <span v-if="tn.status.text" class="max-w-[60%] truncate text-ctp-overlay0" :title="tn.status.text">{{ tn.status.text }}</span>
+              <span class="h-px flex-1 bg-ctp-surface0" />
+            </div>
+          </template>
         </div>
       </div>
+
+      <!-- serve 输入框: 直发 runner(steer/排队) -->
+      <footer class="shrink-0 border-t border-ctp-surface0 bg-ctp-mantle px-4 py-2.5">
+        <div class="mx-auto flex max-w-3xl items-end gap-2">
+          <textarea
+            ref="inputEl"
+            v-model="serveInput"
+            rows="1"
+            class="input min-w-0 flex-1 resize-none !py-2 text-xs"
+            :disabled="!serveActive"
+            :placeholder="serveActive ? t('execSessionView.inputPlaceholder') : t('execSessionView.jobEnded')"
+            @input="autoResize"
+            @keydown.enter.exact.prevent="sendServe"
+          />
+          <button v-if="serveActive" class="btn btn-primary shrink-0 !py-2" :disabled="!serveInput.trim() || sending" @click="sendServe">
+            <PaperAirplaneIcon class="w-4 h-4" />{{ t('common.send') }}
+          </button>
+          <button v-if="serveActive" class="btn btn-red shrink-0 !py-2" @click="stopServe">
+            <StopIcon class="w-4 h-4" />{{ t('common.stop') }}
+          </button>
+        </div>
+        <p v-if="serveMsg" class="mx-auto mt-1 max-w-3xl text-[10px] text-ctp-overlay0">{{ serveMsg }}</p>
+      </footer>
     </template>
 
     <!-- agent 会话模式: 复用 dock 对话栈(回合折叠/伸缩/任务卡/输入直发/SSE) -->

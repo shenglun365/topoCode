@@ -89,3 +89,91 @@ def test_sessions_rest_enrich(arch_env):
     assert r2["events"][0]["kind"] == "session_ready" and not r2["empty"]
     r3 = asyncio.run(es.list_events("job-none"))["data"]
     assert r3["empty"] is True
+
+
+class _Req:
+    def __init__(self, body=None):
+        self._b = body or {}
+
+    async def json(self):
+        return self._b
+
+
+class _FakeClient:
+    """runner 转发桩: input/abort 可编程应答。"""
+
+    def __init__(self, input_result=None, abort_result=None):
+        from dataclasses import dataclass
+        self._in = input_result or {"ok": True, "queued": False,
+                                    "delivery": "steered", "reason": ""}
+        self._ab = abort_result or {"ok": True}
+
+    def input(self, job_id, text, steer=False, timeout=15.0):
+        return type("R", (), self._in)() if isinstance(self._in, dict) else self._in
+
+    def abort(self, job_id, timeout=15.0):
+        return self._ab
+
+
+def test_serve_input_forward(arch_env, monkeypatch):
+    """深链会话页输入转发: 空 text 400 / 成功透传 delivery / runner 失败 400。"""
+    import asyncio
+    from dataclasses import dataclass
+    from topoone_app_architect.arch_routes import exec_sessions as es
+    from topoone_app_architect.agent.execution import exec_bridge as eb
+
+    @dataclass
+    class _In:
+        ok: bool = True
+        queued: bool = False
+        delivery: str = "steered"
+        error: str = ""
+        reason: str = ""
+
+    calls = []
+
+    class C:
+        def input(self, job_id, text, steer=False, timeout=15.0):
+            calls.append((job_id, text, steer))
+            return _In()
+
+        def abort(self, job_id, timeout=15.0):
+            calls.append(("abort", job_id))
+            return {"ok": True}
+
+    monkeypatch.setattr(eb, "_client", lambda: C())
+
+    # 空 text → 400
+    r = asyncio.run(es.send_input("job-x", _Req({"text": "  "})))
+    assert r.status_code == 400
+    # 成功 → delivery 透传
+    r = asyncio.run(es.send_input("job-x", _Req({"text": "继续", "steer": True})))
+    assert r["data"]["delivery"] == "steered"
+    assert calls == [("job-x", "继续", True)]
+    # 停止转发
+    r = asyncio.run(es.stop_job("job-x"))
+    assert r["data"]["stopped"] is True
+
+
+def test_serve_input_runner_down(arch_env, monkeypatch):
+    """runner 不可达/作业结束 → 400(错误文案透出)。"""
+    import asyncio
+    from dataclasses import dataclass
+    from topoone_app_architect.arch_routes import exec_sessions as es
+    from topoone_app_architect.agent.execution import exec_bridge as eb
+
+    @dataclass
+    class _In:
+        ok: bool = False
+        queued: bool = False
+        delivery: str = ""
+        error: str = "作业不存在"
+        reason: str = ""
+
+    class C:
+        def input(self, job_id, text, steer=False, timeout=15.0):
+            return _In()
+
+    monkeypatch.setattr(eb, "_client", lambda: C())
+    r = asyncio.run(es.send_input("job-y", _Req({"text": "hi"})))
+    assert r.status_code == 400 and "作业不存在" in r.body.decode()
