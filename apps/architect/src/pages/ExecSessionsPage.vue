@@ -23,6 +23,7 @@ import { useConversationStore } from '@/stores/conversation-store'
 import { useConvWindowLock } from '@/composables/useConvWindowLock'
 import { useAppDialog } from '@/composables/useAppDialog'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
+import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -132,16 +133,6 @@ function toggleTools(i: number) {
   const s = new Set(expandedTools.value)
   s.has(i) ? s.delete(i) : s.add(i)
   expandedTools.value = s
-}
-
-/** 轻量 markdown: 转义 + 代码块/行内码/粗体/换行 */
-function renderMd(text: string): string {
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  return esc(text || '')
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _l, c) => `<pre class="rounded bg-ctp-mantle p-2 my-1 overflow-x-auto text-[11px]"><code>${c}</code></pre>`)
-    .replace(/`([^`\n]+)`/g, '<code class="rounded bg-ctp-surface0 px-1 py-0.5 text-[11px] font-mono">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>')
 }
 
 const fmt = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTimeString() : ''
@@ -312,7 +303,7 @@ onBeforeUnmount(() => {
 
     <!-- serve 直通: 事件聚合会话视图 + 输入框直发 -->
     <template v-else-if="!convId">
-      <div ref="feedEl" class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref="feedEl" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         <div class="mx-auto max-w-3xl space-y-3">
           <div v-if="!aggTurns.length && !loading" class="py-16 text-center text-xs text-ctp-overlay0">
             {{ t('execSessions.noEvents') }}
@@ -320,16 +311,18 @@ onBeforeUnmount(() => {
 
           <template v-for="(tn, i) in aggTurns" :key="i">
             <!-- 用户回合: 右蓝泡 -->
-            <div v-if="tn.kind === 'user'" class="flex flex-col items-end">
-              <div class="max-w-[85%] rounded-lg rounded-br-sm bg-ctp-blue/15 px-3 py-2 text-xs leading-relaxed text-ctp-text whitespace-pre-wrap break-words">{{ tn.text }}</div>
+            <div v-if="tn.kind === 'user'" class="flex min-w-0 flex-col items-end">
+              <div class="max-w-[85%] min-w-0 rounded-lg rounded-br-sm bg-ctp-blue/15 px-3 py-2 text-xs leading-relaxed text-ctp-text whitespace-pre-wrap break-words">{{ tn.text }}</div>
               <span class="mt-0.5 text-[10px] text-ctp-overlay0">{{ fmtFull(tn.ts) }}</span>
             </div>
 
             <!-- 执行器回合: 左气泡(markdown) -->
-            <div v-else-if="tn.kind === 'assistant'" class="flex flex-col items-start">
-              <span class="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-ctp-peach">{{ t('execSessionView.executor') }}</span>
-              <div class="max-w-[92%] rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text" v-html="renderMd(tn.text || '')" />
-              <span class="mt-0.5 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
+            <div v-else-if="tn.kind === 'assistant'" class="flex min-w-0 flex-col items-start">
+              <span class="mb-0.5 shrink-0 text-[10px] font-medium uppercase tracking-wider text-ctp-peach">{{ t('execSessionView.executor') }}</span>
+              <div class="max-w-[92%] min-w-0 break-words rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">
+                <ChatMessageBlocks :content="tn.text || ''" />
+              </div>
+              <span class="mt-0.5 shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
             </div>
 
             <!-- 工具轨迹: 折叠块(默认收起) -->
@@ -337,7 +330,7 @@ onBeforeUnmount(() => {
               <button class="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-ctp-subtext0 hover:bg-ctp-surface0/40" @click="toggleTools(i)">
                 <ChevronRightIcon class="w-3 h-3 transition-transform" :class="expandedTools.has(i) ? 'rotate-90' : ''" />
                 <span class="font-mono text-ctp-sapphire">🔧 {{ t('execSessionView.toolsN', { n: toolCount(tn) }) }}</span>
-                <span class="text-ctp-overlay0">{{ [...new Set(tn.tools?.map((x) => x.name) || [])].join(' · ') }}</span>
+                <span class="min-w-0 flex-1 truncate text-left text-ctp-overlay0">{{ [...new Set(tn.tools?.map((x) => x.name) || [])].join(' · ') }}</span>
                 <span v-if="toolSpan(tn)" class="ml-auto text-ctp-overlay0">{{ toolSpan(tn) }}</span>
               </button>
               <div v-if="expandedTools.has(i)" class="space-y-1 border-t border-ctp-surface0 px-2.5 py-2">
