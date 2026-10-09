@@ -47,6 +47,19 @@ const conv = useConversationStore()
 const recent = ref<ConversationMeta[]>([])
 const listOpen = ref(false)
 
+// ── C3 规约缺口建议 chip(gap_matrix 单源): 有缺口才显示, hover 明细; 提示不拦截 ──
+const specGaps = ref<string[]>([])
+async function loadSpecGaps(): Promise<void> {
+  const cid = conv.activeId
+  if (!cid || !(conv.activeMeta as any)?.reqId) { specGaps.value = []; return }
+  try {
+    const r = await apiGet<{ gaps: string[] }>(
+      `/sessions/${encodeURIComponent(cid)}/spec-gaps`)
+    specGaps.value = (r?.gaps ?? [])
+  } catch { specGaps.value = [] }
+}
+watch(() => conv.activeId, () => { specGaps.value = []; void loadSpecGaps() })
+
 // ── 会话大纲浮窗(按钮在 #toolbar-extra; 浮窗 Teleport 到 body) ──
 const outlineOpen = ref(false)
 
@@ -1008,6 +1021,13 @@ async function pollRunningState() {
           </div>
         </template>
         <template #toolbar-extra>
+          <!-- C3 规约缺口建议: 继续对话补全(自动澄清挡位联动)或回合另存草稿加工 -->
+          <span
+            v-if="specGaps.length"
+            class="chip !px-1.5 !text-[9px] cursor-help border border-ctp-yellow/30 bg-ctp-yellow/10 text-ctp-yellow shrink-0"
+            :title="t('session.specGapHint') + '\n' + specGaps.join('\n')"
+            @click="void loadSpecGaps()"
+          >{{ t('session.specGap') }} {{ specGaps.length }}</span>
           <!-- 会话大纲浮窗开关(会话中心启用): 开合两态均缩略为此按钮 -->
           <button
             v-if="props.outline"

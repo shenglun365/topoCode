@@ -413,3 +413,38 @@ def test_draft_source_conv_roundtrip():
     ReqDraftsStore.update(d["id"], {"status": "archived"})
     cp = ReqDraftsStore.copy(d["id"])
     assert cp["sourceConvId"] == "cv-x1" and cp["sourceKind"] == "turn"
+
+
+def test_draft_gaps_and_session_spec_gaps():
+    """C3 缺口检测: 草稿规则判据(短/缺验收/未关联) + 会话规约 gap_matrix 单源。"""
+    from topoone_app_architect.arch_routes import req_drafts as api
+    from topoone_app_architect.store import ReqDraftsStore, ConversationsStore
+
+    # 短草稿 → generate; 无验收 → review
+    d = ReqDraftsStore.create(PID, "G", "很短")
+    out = _body(asyncio.run(api.api_req_drafts_gaps(d["id"])))
+    skills = {g["skill"] for g in out["data"]["gaps"]}
+    assert "generate" in skills and "review" in skills
+    # 长且含验收+关联分析 → 无缺口
+    ok_md = ("背景…\n\n## 功能点\n" + "x" * 600 + "\n\n## 验收标准\n- a\n"
+             "\n## 关联分析\n- b\n")
+    d2 = ReqDraftsStore.create(PID, "G2", ok_md)
+    out = _body(asyncio.run(api.api_req_drafts_gaps(d2["id"])))
+    assert out["data"]["gaps"] == []
+    # 会话无绑定 → 空; 有规约 → gap_matrix 判据
+    conv = ConversStore = ConversationsStore.create({
+        "kind": "requirement", "projectId": PID, "title": "sg",
+        "status": "active", "roles": ["architect"],
+        "tags": {"modules": [], "groups": []}})
+    out = _body(asyncio.run(api.api_session_spec_gaps(conv["id"])))
+    assert out["data"]["gaps"] == [] and out["data"]["reqId"] == ""
+    from topoone_app_architect.store import RequirementsStore
+    ConversationsStore.update(conv["id"], {"reqId": "RQ-gaps"})
+    RequirementsStore.create({
+        "id": "RQ-gaps", "projectId": PID, "title": "缺口", "status": "ready",
+        "activeVer": 1, "specVersions": [
+            {"ver": 1, "state": "confirmed", "snapshot": {}, "source": {},
+             "reason": "", "createdAt": 0}]})
+    out = _body(asyncio.run(api.api_session_spec_gaps(conv["id"])))
+    gaps = out["data"]["gaps"]
+    assert any("验收" in g for g in gaps) and any("方案" in g for g in gaps)

@@ -369,6 +369,45 @@ async def api_req_drafts_adopt(draft_id: str):
     return ok(updated)
 
 
+@router.get("/req-drafts/{draft_id}/gaps")
+async def api_req_drafts_gaps(draft_id: str):
+    """草稿缺口检测(C3 规则版, 上下文感知建议): 缺什么→建议调哪个技能。
+
+    判据: 过短/无结构/缺验收/未关联资产; 提示不拦截(与透明降级原则一致)。
+    """
+    from ..store import ReqDraftsStore
+    draft = ReqDraftsStore.get(draft_id)
+    if not draft:
+        return err(404, "草稿不存在")
+    md = (draft.get("contentMd") or "").strip()
+    plain = md.replace("`", "").replace("#", "").strip()
+    gaps = []
+    if len(plain) < 200:
+        gaps.append({"skill": "generate", "reason": "草稿过短(<200 字)——建议补全背景/功能点/验收"})
+    if md and ("验收" not in md and "接受标准" not in md):
+        gaps.append({"skill": "review", "reason": "未见验收标准——建议审核补齐(可测判据)"})
+    if len(plain) >= 500 and "关联分析" not in md:
+        gaps.append({"skill": "relate", "reason": "篇幅较长但未做资产关联分析——建议结合图谱补「改哪里」"})
+    return ok({"gaps": gaps[:3]})
+
+
+@router.get("/sessions/{conv_id}/spec-gaps")
+async def api_session_spec_gaps(conv_id: str):
+    """会话规约缺口(C3 建议 chips 数据源): 复用 clarify.gap_matrix 单源,
+    只读判定不改挡位——建议继续对话补全或转草稿文档态加工。"""
+    from .. import store
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    rid = str(conv.get("reqId") or "")
+    if not rid:
+        return ok({"gaps": [], "reqId": ""})
+    from ..agent.requirements.clarify import gap_matrix
+    active = store.RequirementsStore.spec_active(rid) or {}
+    return ok({"gaps": gap_matrix(active.get("snapshot") or {}),
+               "reqId": rid})
+
+
 @router.post("/req-drafts/{draft_id}/ai")
 async def api_req_drafts_ai(draft_id: str, request: Request = None):
     """提交技能处理作业：{skill | preset, instruction?, root?, project?}。

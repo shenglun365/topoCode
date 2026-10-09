@@ -555,6 +555,8 @@ export default {
     openInDock: 'Open in dock',
     noSummary: 'No summary yet — click ✨ to generate',
     summary: 'Summary',
+    specGap: 'Spec gaps',
+    specGapHint: 'Spec element gaps — continue the conversation (auto-clarify) or save turns as drafts:',
     outline: { title: 'Outline', empty: 'No turns yet — send a message', noPrompt: '(no prompt)', close: 'Close', resize: 'Drag to resize' },
     tabs: { sessions: 'Main Session', assets: 'Requirement Tracking', exec: 'Executor Sessions', switch: 'Switch view' },
     tracking: {
@@ -2394,6 +2396,7 @@ renderingMore: 'Rendered {done}/{total} · scroll for more',
 
   draft: {
     untitled: 'Untitled draft',
+    gapHint: 'Suggest:',
     fromSession: 'From session',
     srcKind: { turn: 'Turn', spec: 'Spec', receipt: 'Receipt' },
     tab: { edit: 'Draft', preview: 'MD Preview' },

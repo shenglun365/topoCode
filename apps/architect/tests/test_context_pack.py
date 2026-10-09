@@ -125,3 +125,26 @@ def test_confirm_payload_carries_pack(arch_env, tmp_path, monkeypatch):
     pack = payloads[-1]["contextPack"]
     assert "禁止新写扫描器" in (pack.get("specMd") or "")
     assert "## 上下文包(执行契约)" in (payloads[-1].get("instruction") or "")
+
+
+def test_render_three_channel_grounding():
+    """C3 三通道分层: 意图/推断分节+头注, 语义别名/代码坐标措辞, 冲突约定总则。"""
+    pack = {"reqId": "RQ",
+            "specMd": "方案要点…", "reqMd": "用户需求原文", "designMd": "架构师方案",
+            "assetRefs": {"allowedScope": ["资产A"], "boundaryFiles": ["src/a.ts"]},
+            "constraints": [], "acceptance": ["x"],
+            "graphNeighborhood": {"outline": "邻域摘要", "baselineStale": True}}
+    md = render_context_pack_md(pack)
+    assert "### 需求（用户意图）" in md and "用户需求原文" in md
+    assert "### 方案（架构师推断——以代码为准）" in md and "架构师方案" in md
+    assert "语义别名" in md and "代码坐标" in md
+    assert "以代码为准" in md and "解读环节" in md        # 冲突约定总则
+    assert "架构师推断, 以代码为准" in md                  # 图邻域头注(含过期标注)
+
+
+def test_render_slim_carries_conflict_rule():
+    from topoone_app_architect.agent.execution.context_pack import (
+        render_context_pack_slim)
+    md = render_context_pack_slim(
+        {"acceptance": ["a"], "constraints": [], "assetRefs": {}}, ".topo/docs/x")
+    assert "事实优先约定" in md or "以代码为准" in md

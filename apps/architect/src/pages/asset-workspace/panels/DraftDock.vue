@@ -17,6 +17,7 @@ import {
   TagIcon, ChatBubbleLeftRightIcon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
+import { apiGet } from '@/services/api-client'
 import MarkdownView from '@/components/MarkdownView.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { parseMessageBlocks } from '@/services/parse-message-blocks'
@@ -213,6 +214,7 @@ async function openDraft(d: ReqDraft): Promise<void> {
     }
     tabs.value = ['edit']   // 预览不自动开；需经工具栏按钮
     activeTab.value = 'edit'
+    void loadGaps()
   } finally {
     loading.value = false
   }
@@ -505,6 +507,17 @@ function onCollapsedClick(): void {
 // ══════════ AI 处理（指令=正文 topo-cmd 块；无专用输入框） ══════════
 const aiBusy = ref(false)
 const aiStatus = ref('')
+// C3 缺口建议(上下文感知): 打开草稿时拉取, 提示不拦截; chips 一键调技能
+const gaps = ref<{ skill: string; reason: string }[]>([])
+const gapsDismissedFor = ref('')
+async function loadGaps(): Promise<void> {
+  if (!current.value || current.value.status === 'archived') { gaps.value = []; return }
+  try {
+    const r = await apiGet<{ gaps: { skill: string; reason: string }[] }>(
+      `/req-drafts/${encodeURIComponent(current.value.id)}/gaps`)
+    gaps.value = r?.gaps ?? []
+  } catch { gaps.value = [] }
+}
 let aiJobTimer: ReturnType<typeof setInterval> | null = null
 
 function hasCmdBlock(): boolean {
@@ -893,6 +906,24 @@ onBeforeUnmount(() => {
               :title="t('draft.toolbar.drag')"
               @pointerdown.stop="onToolbarDown"
             ><Bars3Icon class="h-3.5 w-3.5" /></span>
+            <!-- C3 缺口建议条: 上下文感知(过短/缺验收/未关联), chips 一键调技能; 可关闭 -->
+            <div
+              v-if="gaps.length && gapsDismissedFor !== current?.id"
+              class="flex min-w-0 items-center gap-1 rounded border border-ctp-yellow/25 bg-ctp-yellow/8 px-1.5 py-0.5"
+            >
+              <span class="shrink-0 text-[9px] text-ctp-yellow">{{ t('draft.gapHint') }}</span>
+              <button
+                v-for="g in gaps" :key="g.skill"
+                class="max-w-[130px] shrink-0 truncate rounded bg-ctp-surface0/80 px-1 text-[9px] text-ctp-subtext1 hover:text-ctp-text"
+                :title="g.reason"
+                :disabled="aiBusy"
+                @click="runAi(g.skill as any)"
+              >{{ g.skill === 'generate' ? t('draft.ai.generate') : g.skill === 'review' ? t('draft.ai.review') : t('draft.ai.relate') }}</button>
+              <button
+                class="shrink-0 text-ctp-overlay0 hover:text-ctp-text"
+                :title="t('common.close')" @click="gapsDismissedFor = current?.id || ''"
+              ><XMarkIcon class="h-2.5 w-2.5" /></button>
+            </div>
             <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.generate')" @click="runAi('generate')"><SparklesIcon class="h-3.5 w-3.5" /></button>
             <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.review')" @click="runAi('review')"><CheckBadgeIcon class="h-3.5 w-3.5" /></button>
             <button class="tb-btn" :disabled="aiBusy" :title="t('draft.ai.relate')" @click="runAi('relate')"><LinkIcon class="h-3.5 w-3.5" /></button>

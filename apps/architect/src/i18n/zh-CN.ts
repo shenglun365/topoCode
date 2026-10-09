@@ -555,6 +555,8 @@ export default {
     openInDock: '在会话栏打开',
     noSummary: '暂无摘要，可点击 ✨ 生成',
     summary: '会话摘要',
+    specGap: '规约缺口',
+    specGapHint: '规约要素缺口——继续对话补全(自动澄清联动), 或将相关回合另存草稿加工：',
     outline: { title: '会话大纲', empty: '暂无回合——发首条消息生成', noPrompt: '(无提示)', close: '关闭', resize: '拖拽调整大小' },
     tabs: { sessions: '主会话', assets: '需求跟踪', exec: '执行器会话', switch: '切换视图' },
     tracking: {
@@ -2402,6 +2404,7 @@ renderingMore: '已渲染 {done}/{total} · 滚动加载更多',
 
   draft: {
     untitled: '未命名草稿',
+    gapHint: '建议：',
     fromSession: '来自会话',
     srcKind: { turn: '回合', spec: '规约', receipt: '执行回执' },
     tab: { edit: '草稿文档', preview: 'MD 预览' },
