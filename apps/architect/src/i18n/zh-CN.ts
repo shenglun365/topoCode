@@ -260,6 +260,9 @@ export default {
     jobEnded: '作业已结束——输入不可用',
     steered: '已插入当前回合(steer)',
     stopping: '已请求停止…',
+    outlineSearch: '检索对话回合(摘要)',
+    charsN: '{n} 字',
+    toggleTurn: '展开/收起该回合',
   },
   mcp: {
     title: 'MCP 服务',

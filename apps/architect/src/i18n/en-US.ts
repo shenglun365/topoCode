@@ -262,6 +262,9 @@ export default {
     jobEnded: 'Job ended — input disabled',
     steered: 'Injected into the running turn (steer)',
     stopping: 'Stop requested…',
+    outlineSearch: 'Search turns (summary)',
+    charsN: '{n} chars',
+    toggleTurn: 'Expand/collapse this turn',
   },
   mcp: {
     title: 'MCP Service',

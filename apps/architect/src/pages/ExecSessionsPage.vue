@@ -15,7 +15,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import {
   BoltIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon,
-  PaperAirplaneIcon, StopIcon, ChevronRightIcon,
+  PaperAirplaneIcon, StopIcon, ChevronRightIcon, ListBulletIcon,
 } from '@heroicons/vue/24/outline'
 import { apiGet, apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
@@ -24,6 +24,7 @@ import { useConvWindowLock } from '@/composables/useConvWindowLock'
 import { useAppDialog } from '@/composables/useAppDialog'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
+import ServeOutlineWindow from '@/components/sessions/ServeOutlineWindow.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -133,6 +134,44 @@ function toggleTools(key: number) {
   const s = new Set(expandedTools.value)
   s.has(key) ? s.delete(key) : s.add(key)
   expandedTools.value = s
+}
+
+/* ── 执行器回合折叠: 长文(>阈值)默认收起, 头部行可点开合(同工具块交互) ── */
+const FOLD_THRESHOLD = 300
+const unfolded = ref<Set<number>>(new Set())
+const shouldFold = (tn: AggTurn) => (tn.text || '').length > FOLD_THRESHOLD
+const isUnfolded = (tn: AggTurn) => !shouldFold(tn) || unfolded.value.has(tn.ts)
+function toggleFold(tn: AggTurn) {
+  if (!shouldFold(tn)) return
+  const s = new Set(unfolded.value)
+  s.has(tn.ts) ? s.delete(tn.ts) : s.add(tn.ts)
+  unfolded.value = s
+}
+/** 回合摘要: 剥 md 常见记号取首段截断(折叠态/大纲条目共用) */
+function turnSummary(tn: AggTurn): string {
+  const raw = (tn.text || '').replace(/[#*`|>\[\]_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return raw.slice(0, 80)
+}
+
+/* ── 对话索引(大纲): 检索过滤 + 点击滚动定位/高亮; 定位到收起回合自动展开 ── */
+const outlineOpen = ref(false)
+const flashTs = ref(0)
+const outlineItems = computed(() => {
+  let idx = 0
+  return aggTurns.value
+    .filter((tn) => tn.kind === 'user' || tn.kind === 'assistant')
+    .map((tn) => ({ key: tn.ts, kind: tn.kind as 'user' | 'assistant', ts: tn.ts,
+                    summary: turnSummary(tn), chars: (tn.text || '').length, idx: idx++ }))
+})
+function gotoAgg(ts: number) {
+  const tn = aggTurns.value.find((x) => x.ts === ts)
+  if (tn && !isUnfolded(tn)) toggleFold(tn)
+  const el = document.getElementById(`agg-${ts}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    flashTs.value = ts
+    setTimeout(() => { if (flashTs.value === ts) flashTs.value = 0 }, 1600)
+  }
 }
 
 const fmt = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTimeString() : ''
@@ -288,6 +327,9 @@ onBeforeUnmount(() => {
       <span v-if="(conv.activeMeta as any)?.executorId || jobRow?.executorType" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">⌨ {{ (conv.activeMeta as any)?.executorId || jobRow?.executorType }}</span>
       <span v-if="isRunning" class="chip shrink-0 animate-pulse bg-ctp-green/15 text-ctp-green">● {{ t('execSessionView.running') }}</span>
       <span v-else-if="jobRow?.lastStatus" class="chip shrink-0 bg-ctp-surface0 text-ctp-overlay0">{{ jobRow.lastStatus }}</span>
+      <button v-if="jobId && !convId" class="btn btn-xs shrink-0" :title="t('session.outline.title')" @click="outlineOpen = !outlineOpen">
+        <ListBulletIcon class="w-3 h-3" />
+      </button>
       <button class="btn btn-xs shrink-0" :class="live ? 'btn-green' : ''" :title="t('execSessions.live')" @click="toggleLive">
         <ArrowPathIcon class="w-3 h-3" />{{ live ? t('execSessions.liveOn') : t('execSessions.live') }}
       </button>
@@ -311,18 +353,34 @@ onBeforeUnmount(() => {
 
           <template v-for="(tn, i) in aggTurns" :key="i">
             <!-- 用户回合: 右蓝泡 -->
-            <div v-if="tn.kind === 'user'" class="flex min-w-0 flex-col items-end">
+            <div v-if="tn.kind === 'user'" :id="`agg-${tn.ts}`" class="flex min-w-0 flex-col items-end rounded-lg transition-shadow" :class="flashTs === tn.ts ? 'ring-2 ring-ctp-blue/50' : ''">
               <div class="max-w-[85%] min-w-0 rounded-lg rounded-br-sm bg-ctp-blue/15 px-3 py-2 text-xs leading-relaxed text-ctp-text whitespace-pre-wrap break-words">{{ tn.text }}</div>
               <span class="mt-0.5 text-[10px] text-ctp-overlay0">{{ fmtFull(tn.ts) }}</span>
             </div>
 
-            <!-- 执行器回合: 左气泡(markdown) -->
-            <div v-else-if="tn.kind === 'assistant'" class="flex min-w-0 flex-col items-start">
-              <span class="mb-0.5 shrink-0 text-[10px] font-medium uppercase tracking-wider text-ctp-peach">{{ t('execSessionView.executor') }}</span>
-              <div class="w-full min-w-0 break-words rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">
+            <!-- 执行器回合: 可折叠头行 + markdown 全文(长文默认收起) -->
+            <div
+              v-else-if="tn.kind === 'assistant'"
+              :id="`agg-${tn.ts}`"
+              class="flex min-w-0 w-full flex-col items-start rounded-lg transition-shadow"
+              :class="flashTs === tn.ts ? 'ring-2 ring-ctp-blue/50' : ''"
+            >
+              <button
+                class="mb-0.5 flex w-full items-center gap-1.5 rounded px-0.5 py-0.5 text-left hover:bg-ctp-surface0/40"
+                :title="shouldFold(tn) ? t('execSessionView.toggleTurn') : ''"
+                @click="toggleFold(tn)"
+              >
+                <ChevronRightIcon v-if="shouldFold(tn)" class="w-3 h-3 shrink-0 text-ctp-overlay1 transition-transform" :class="isUnfolded(tn) ? 'rotate-90' : ''" />
+                <span v-else class="w-3 shrink-0" />
+                <span class="shrink-0 text-[10px] font-medium uppercase tracking-wider text-ctp-peach">{{ t('execSessionView.executor') }}</span>
+                <span v-if="!isUnfolded(tn)" class="min-w-0 flex-1 truncate text-[10px] text-ctp-overlay0">{{ turnSummary(tn) }}</span>
+                <span v-else class="flex-1" />
+                <span v-if="shouldFold(tn)" class="shrink-0 font-mono text-[9px] text-ctp-overlay0">{{ t('execSessionView.charsN', { n: (tn.text || '').length }) }}</span>
+                <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
+              </button>
+              <div v-show="isUnfolded(tn)" class="w-full min-w-0 break-words rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">
                 <ChatMessageBlocks :content="tn.text || ''" />
               </div>
-              <span class="mt-0.5 shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
             </div>
 
             <!-- 工具轨迹: 折叠块(默认收起) -->
@@ -376,6 +434,14 @@ onBeforeUnmount(() => {
         <p v-if="serveMsg" class="mx-auto mt-1 max-w-3xl text-[10px] text-ctp-overlay0">{{ serveMsg }}</p>
       </footer>
     </template>
+
+    <!-- serve 大纲浮窗(Teleport): 检索 + 滚动定位回合 -->
+    <ServeOutlineWindow
+      v-if="outlineOpen && jobId && !convId"
+      :items="outlineItems"
+      @close="outlineOpen = false"
+      @goto="gotoAgg"
+    />
 
     <!-- agent 会话模式: 复用 dock 对话栈(回合折叠/伸缩/任务卡/输入直发/SSE) -->
     <div v-else class="min-h-0 flex-1">
