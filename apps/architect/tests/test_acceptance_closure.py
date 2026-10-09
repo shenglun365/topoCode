@@ -118,3 +118,41 @@ def test_nearest_scope_longest_shared_segments():
                           ["src/", "src/auth/", "scripts/"]) == "src/auth/"
     assert _nearest_scope("docs/x.md", ["src/", "scripts/"]) == ""   # 零共享=无相近
     assert _nearest_scope("x.py", []) == ""
+
+
+# ── 二期E3 变更回执语义化: 验收逐条信号 + 结论评估(建议, 人工裁决) ──────────
+
+def test_receipt_acceptance_signals_and_verdict(arch_env):
+    """验收条目信号(◐呼应/○无呼应) + 结论三档(符合/部分/偏离, verifyOverall 合成)。"""
+    from topoone_app_architect.agent.execution.exec_bridge import _acceptance_brief
+    from topoone_app_architect.store.core import RequirementsStore
+    orig = RequirementsStore.spec_active
+    RequirementsStore.spec_active = classmethod(
+        lambda cls, rid: {"snapshot": {
+            "allowedScope": ["src/auth/"],
+            "acceptance": ["登录 src/auth/login.ts 重定向", "无关条目 xyzabc"]}})
+    try:
+        # 全符合 + 全呼应 + 自动验收过 → 建议: 符合
+        brief = _acceptance_brief("c1", "rq-1",
+                                  ["src/auth/login.ts"], "A")
+        assert "◐ 登录 src/auth/login.ts 重定向（改动有呼应）" in brief
+        assert "○ 无关条目 xyzabc" in brief and "人工重点核验" in brief
+        assert "部分符合/信号不足" in brief            # 一条无呼应 → 部分符合
+        # 无呼应清零 + verify A → 符合
+        RequirementsStore.spec_active = classmethod(
+            lambda cls, rid: {"snapshot": {
+                "allowedScope": ["src/auth/"],
+                "acceptance": ["登录 src/auth/login.ts 重定向"]}})
+        brief2 = _acceptance_brief("c1", "rq-1", ["src/auth/login.ts"], "A")
+        assert "建议评估：符合" in brief2
+        # verify FAIL → 偏离(最高优先)
+        brief3 = _acceptance_brief("c1", "rq-1", ["src/auth/login.ts"], "FAIL")
+        assert "建议评估：偏离" in brief3
+        # 越界 → 部分符合且理由含越界
+        RequirementsStore.spec_active = classmethod(
+            lambda cls, rid: {"snapshot": {
+                "allowedScope": ["src/auth/"], "acceptance": ["条目"]}})
+        brief4 = _acceptance_brief("c1", "rq-1", ["lib/x.py"], "")
+        assert "越界改动" in brief4 and "部分符合/信号不足" in brief4
+    finally:
+        RequirementsStore.spec_active = orig

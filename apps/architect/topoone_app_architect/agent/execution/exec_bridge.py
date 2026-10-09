@@ -210,18 +210,25 @@ def _nearest_scope(file: str, prefixes: List[str]) -> str:
     return best if best_n > 0 else ""
 
 
-def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
-    """验收简报: 改动 vs 规约边界 + 验收标准对照(完成与否由用户判定, 裁决#3)。
+def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str],
+                      verify_overall: str = "") -> str:
+    """验收简报: 改动 vs 规约边界 + 验收逐条信号对照 + 结论评估(建议, 人工裁决)。
+
+    裁决#3 + 二期E3(变更回执语义化): 验收条目做改动呼应信号(条目关键词过半
+    出现在改动文件清单→◐ 有呼应, 否则 ○ 无呼应人工重点核验)——静态清单升级
+    为信号清单; 结论=规则建议(边界/呼应/verifyOverall 三源合成), 不代人工裁决。
     L-1①: 越界回执=自纠正信息(允许集全集+最近前缀建议, 一轮修正)。"""
     from ..tools.req_agent import parse_scope_files
     active = store.RequirementsStore.spec_active(rid or "") or {}
     snap = active.get("snapshot") or {}
     scope_files = parse_scope_files(snap.get("allowedScope") or [])
+    boundary_ok = True
     out_lines = []
     if scope_files:
         overrun = [f for f in changed_files
                    if not any(f.startswith(p) for p in scope_files)]
         if overrun:
+            boundary_ok = False
             lines = ["**⚠️ 越界改动**(超出规约允许范围，请核查)："]
             for f in overrun[:15]:
                 near = _nearest_scope(f, scope_files)
@@ -234,10 +241,47 @@ def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str]) -> str:
             out_lines.append(f"✅ 边界符合：{len(changed_files)} 个改动文件均在允许范围内")
     else:
         out_lines.append("ℹ️ 规约未声明可解析边界，无法做越界检测")
+    # 验收逐条信号(粗规则): 强信号=条目点名的路径在改动清单内; 弱信号=关键词过半
     acc = snap.get("acceptance") or []
+    unresponded = 0
     if acc:
-        out_lines.append("**验收标准对照**(静态，逐条人工确认)：\n"
-                         + "\n".join(f"- [ ] {a}" for a in acc[:12]))
+        from .readback import _extract_paths, _tokens
+        changed_set = {str(f).lower() for f in changed_files}
+        changed_tokens = _tokens(" ".join(changed_files))
+        acc_lines = []
+        for a in acc[:12]:
+            a = str(a)
+            named = [p.lower() for p in _extract_paths(a)]
+            toks = list(dict.fromkeys(_tokens(a)))[:8]
+            hit = sum(1 for t in toks if t in changed_tokens) if toks else 0
+            if (named and any(p in changed_set for p in named)) or (
+                    toks and hit * 2 >= len(toks)):
+                acc_lines.append(f"- ◐ {a}（改动有呼应）")
+            else:
+                unresponded += 1
+                acc_lines.append(f"- ○ {a}（无改动呼应信号——人工重点核验）")
+        out_lines.append("**验收标准对照**（信号为粗规则建议，逐条人工确认）：\n"
+                         + "\n".join(acc_lines))
+    # 结论评估(三源合成: 边界/验收呼应/自动验收; 建议非裁决)
+    verdict_ok = (boundary_ok and unresponded == 0
+                  and verify_overall not in ("FAIL",))
+    if verify_overall == "FAIL":
+        v_line = "❌ **建议评估：偏离**——自动验收未过(FAIL)，请核查后再合并。"
+    elif verdict_ok:
+        v_line = ("✅ **建议评估：符合**——边界符合、验收条目均有呼应"
+                  + ("、自动验收通过" if verify_overall in ("A", "B", "PASS_WITH_KNOWN") else "")
+                  + "。以人工复核为准。")
+    else:
+        why = []
+        if not boundary_ok:
+            why.append("存在越界改动")
+        if unresponded:
+            why.append(f"{unresponded} 条验收无呼应信号")
+        if not verify_overall:
+            why.append("无自动验收结果")
+        v_line = (f"⚠️ **建议评估：部分符合/信号不足**（{ '；'.join(why) }）"
+                  "——请人工核验后裁决。")
+    out_lines.append(v_line)
     return "\n\n".join(out_lines)
 
 
@@ -705,7 +749,9 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             clean = ("⚠️ 执行器未附规范完成摘要(完成消息混入计划/待输入正文)——"
                      "以变更文件与验收简报为准。")
         changed = ev.get("changedFiles") or []
-        brief = _acceptance_brief(conv_id, ctx["rid"], changed)
+        _prog = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        brief = _acceptance_brief(conv_id, ctx["rid"], changed,
+                                  str(_prog.get("verifyOverall") or ""))
         # 复制实现检测(验证有效性): 测试对象须是真实生产代码
         _trow = store.TasksStore.get(task_id) or {}
         _wt = _trow.get("worktree") or ""

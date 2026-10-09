@@ -30,7 +30,7 @@
   "agent/execution/capabilities.py": 62,
   "agent/execution/context_pack.py": 184,
   "agent/execution/dispatch.py": 986,
-  "agent/execution/exec_bridge.py": 1115,
+  "agent/execution/exec_bridge.py": 1161,
   "agent/execution/gate_ask.py": 90,
   "agent/execution/items.py": 287,
   "agent/execution/merge.py": 249,
