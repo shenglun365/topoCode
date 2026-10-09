@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * 执行器会话深链页（2026-10 重构）——常规 agent 会话页模式。
+ * 执行器会话深链页（2026-10 v3）——完整 agent 会话模式。
  *
  * 全屏无工作台框架(顶层路由 /exec-session-view)；?job= 定位：
- * - 有关联会话 → 渲染该会话消息流(项目/主会话头信息 + 气泡对话 + 10s 轮询)
+ * - 有关联会话 → 复用 dock 对话栈(conversation-store + AnalysisChat)：
+ *   回合折叠/展开/伸缩、任务卡、输入框直发(执行器直通)、SSE 实时、窗口锁
  * - 无关联会话 → 降级事件时间线(留痕档案)
- * 入口：会话中心 exec 标签(点行/↗)；旧 /workbench/exec-sessions 重定向至此。
+ * 头信息: 项目 chip + 主会话标题 + 子会话标题 + 执行器 + 运行状态。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -13,23 +14,25 @@ import { useRoute } from 'vue-router'
 import { BoltIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import { apiGet } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
+import { useConversationStore } from '@/stores/conversation-store'
+import { useConvWindowLock } from '@/composables/useConvWindowLock'
+import { useAppDialog } from '@/composables/useAppDialog'
+import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 
 const { t } = useI18n()
 const route = useRoute()
+const conv = useConversationStore()
+const convLock = useConvWindowLock()
+const dialog = useAppDialog()
 
 interface Ev { seq: number; kind: string; text: string; ts: number; toolName?: string; [k: string]: unknown }
-interface Msg { id?: string; role?: string; content: string; time?: number; item?: { kind?: string; title?: string } | null }
-interface ConvHead { title: string; kind: string; executorId: string; parentConvId: string; projectId: string }
 
 const jobId = ref('')
 const jobRow = ref<{ title?: string; executorType?: string; lastStatus?: string; taskStatus?: string } | null>(null)
 const convId = ref('')
-const conv = ref<ConvHead | null>(null)
 const parentTitle = ref('')
 const projectName = ref('')
-const messages = ref<Msg[]>([])
 const loading = ref(false)
-let poll: number | undefined
 
 /* ── 降级形态: 无关联会话 → 事件时间线 ── */
 const events = ref<Ev[]>([])
@@ -59,21 +62,13 @@ const KIND_META: Record<string, { color: string; tag: string }> = {
 const kindMeta = (k: string) => KIND_META[k] || { color: 'text-ctp-overlay0', tag: k.slice(0, 6).toUpperCase() }
 
 const fmt = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTimeString() : ''
-const fmtFull = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleString() : ''
 
-const heading = computed(() => conv.value?.title || jobRow.value?.title || jobId.value)
+const heading = computed(() => (conv.activeMeta as any)?.title || jobRow.value?.title || jobId.value)
 const isRunning = computed(() => !jobRow.value?.lastStatus && jobRow.value?.taskStatus !== 'done')
-
-/** 轻量渲染: 转义 + 换行/代码块/粗体(常规 agent 页文案观感, 不引重库) */
-function renderText(text: string): string {
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const body = esc(text || '')
-  return body
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => `<pre class="rounded bg-ctp-mantle p-2 my-1 overflow-x-auto text-[11px] leading-relaxed"><code>${code}</code></pre>`)
-    .replace(/`([^`\n]+)`/g, '<code class="rounded bg-ctp-surface0 px-1 py-0.5 text-[11px] font-mono">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>')
-}
+const isArchived = computed(() => (conv.activeMeta as any)?.status === 'archived')
+const jobState = computed(() => (isRunning.value
+  ? { role: 'coding', executorId: jobRow.value?.executorType || (conv.activeMeta as any)?.executorId, status: 'running' }
+  : null))
 
 async function loadJob() {
   const rows = await apiGet<Array<Record<string, unknown>>>('/arch/exec-sessions?limit=200')
@@ -83,39 +78,45 @@ async function loadJob() {
   const cid = String(row.conversationId || '')
   if (!cid) { await fetchEvents(false); return }
   convId.value = cid
-  await loadMessages()
-  if (isRunning.value) poll = window.setInterval(loadMessages, 10000)
+  await openConversation(cid)
 }
 
-async function loadMessages() {
-  if (!convId.value) return
+/** 打开会话(store 全栈: turns/任务/busy/SSE) + 头信息(主会话标题/项目) */
+async function openConversation(cid: string) {
   loading.value = true
   try {
-    const r = await apiGet<{ conv?: ConvHead; parent?: { title?: string } | null; messages: Msg[] }>(
-      `/arch/sessions/${encodeURIComponent(convId.value)}/messages`)
-    conv.value = r.conv || null
-    parentTitle.value = r.parent?.title || ''
-    messages.value = r.messages || []
-    void ensureProjectName()
-    scrollToBottom()
+    // 头信息一次取齐(BE: messages 接口带 conv/parent 头)
+    try {
+      const h = await apiGet<{ conv?: { projectId?: string }; parent?: { title?: string } | null }>(
+        `/arch/sessions/${encodeURIComponent(cid)}/messages?limit=1`)
+      parentTitle.value = h.parent?.title || ''
+      void ensureProjectName(h.conv?.projectId)
+    } catch { /* 头信息失败不阻断会话打开 */ }
+    // 窗口唯一性: 同子会话已在别的窗口打开 → 接管确认
+    const lk = await convLock.claim(cid)
+    if (!lk.claimed) {
+      const ok = await dialog.confirm(t('session.subs.lockTaken', { tab: lk.owner || '?' }), {
+        confirmText: t('session.subs.lockTakeover'), danger: false })
+      if (!ok) { window.close(); return }
+      convLock.takeover(cid)
+    }
+    await conv.openConversation({ id: cid } as any)
+    conv.connectEvents()
   } finally { loading.value = false }
 }
 
-async function ensureProjectName() {
-  if (projectName.value) return
-  const pid = conv.value?.projectId || String(route.query.project || '')
-  if (!pid) return
+async function ensureProjectName(pid?: string) {
+  const id = pid || String(route.query.project || '')
+  if (!id || projectName.value) return
   try {
     const ps = await projectService.listProjects()
-    projectName.value = String(ps.find((p) => p.id === pid)?.name || pid)
-  } catch { projectName.value = pid }
+    projectName.value = String(ps.find((p) => p.id === id)?.name || id)
+  } catch { projectName.value = id }
 }
 
-function scrollToBottom() {
-  requestAnimationFrame(() => {
-    const el = document.getElementById('esv-feed')
-    if (el) el.scrollTop = el.scrollHeight
-  })
+/** 输入框直发: coding 子会话 → 执行器直通(store send 继承 activeMeta.kind) */
+function onSend(p: { text: string }) {
+  conv.send(p.text)
 }
 
 /* ── 事件时间线(降级) ── */
@@ -147,8 +148,8 @@ onMounted(async () => {
   await loadJob()
 })
 onBeforeUnmount(() => {
-  if (poll) window.clearInterval(poll)
   if (evTimer) window.clearInterval(evTimer)
+  if (convId.value) convLock.release(convId.value)
 })
 </script>
 
@@ -163,9 +164,9 @@ onBeforeUnmount(() => {
         <span class="mx-1.5 text-ctp-surface2">/</span>
       </span>
       <span class="min-w-0 flex-1 truncate text-sm font-medium text-ctp-text" :title="heading">{{ heading }}</span>
-      <span v-if="conv?.executorId || jobRow?.executorType" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">⌨ {{ conv?.executorId || jobRow?.executorType }}</span>
+      <span v-if="(conv.activeMeta as any)?.executorId || jobRow?.executorType" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">⌨ {{ (conv.activeMeta as any)?.executorId || jobRow?.executorType }}</span>
       <span v-if="isRunning" class="chip shrink-0 animate-pulse bg-ctp-green/15 text-ctp-green">● {{ t('execSessionView.running') }}</span>
-      <span v-if="jobRow?.lastStatus" class="chip shrink-0 bg-ctp-surface0 text-ctp-overlay0">{{ jobRow.lastStatus }}</span>
+      <span v-else-if="jobRow?.lastStatus" class="chip shrink-0 bg-ctp-surface0 text-ctp-overlay0">{{ jobRow.lastStatus }}</span>
       <button v-if="convId" class="btn btn-xs shrink-0" :title="t('execSessionView.openCenter')" @click="openInCenter">
         <ArrowTopRightOnSquareIcon class="w-3 h-3" />{{ t('execSessionView.openCenter') }}
       </button>
@@ -200,39 +201,33 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <!-- 常规 agent 会话页: 消息流 -->
-    <template v-else>
-      <div id="esv-feed" class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div class="mx-auto max-w-3xl space-y-3">
-          <div v-if="!messages.length && !loading" class="py-16 text-center text-xs text-ctp-overlay0">
-            {{ t('execSessionView.noMessages') }}
-          </div>
-          <div v-for="(m, i) in messages" :key="m.id || i" class="flex flex-col">
-            <!-- 用户输入: 右对齐蓝泡 -->
-            <div v-if="m.role === 'user'" class="flex flex-col items-end">
-              <div class="max-w-[85%] rounded-lg rounded-br-sm bg-ctp-blue/15 px-3 py-2 text-xs leading-relaxed text-ctp-text"
-                   v-html="renderText(m.content)" />
-              <span class="mt-0.5 text-[10px] text-ctp-overlay0">{{ fmtFull(m.time) }}</span>
-            </div>
-            <!-- 执行器输出: 左对齐, role 头 + 内容 -->
-            <div v-else class="flex flex-col items-start">
-              <span class="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-ctp-peach">{{ t('execSessionView.executor') }}</span>
-              <div class="max-w-[92%] rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">
-                <div v-if="m.item" class="mb-1 flex items-center gap-1.5">
-                  <span class="chip bg-ctp-teal/15 text-ctp-teal !text-[9px]">{{ m.item.kind || 'item' }}</span>
-                  <span v-if="m.item.title" class="text-[11px] font-medium text-ctp-subtext1">{{ m.item.title }}</span>
-                </div>
-                <div v-html="renderText(m.content)" />
-              </div>
-              <span class="mt-0.5 text-[10px] text-ctp-overlay0">{{ fmtFull(m.time) }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- 底部只读提示 -->
-      <footer class="shrink-0 border-t border-ctp-surface0 bg-ctp-mantle px-4 py-1.5 text-center text-[10px] text-ctp-overlay0">
-        {{ t('execSessionView.readonlyHint') }}
-      </footer>
-    </template>
+    <!-- agent 会话模式: 复用 dock 对话栈(回合折叠/伸缩/任务卡/输入直发/SSE) -->
+    <div v-else class="min-h-0 flex-1">
+      <AnalysisChat
+        class="h-full"
+        :turns="conv.turns"
+        :busy="conv.busy"
+        :busy-label="conv.busyLabel"
+        :tool-trail="conv.toolTrail"
+        :title="heading"
+        :editable="!!conv.activeId && !conv.busy"
+        :read-only="isArchived"
+        :show-assets-panel="false"
+        :job-state="jobState"
+        :bound-executor-id="(conv.activeMeta as any)?.executorId || ''"
+        :has-session="!!conv.activeId"
+        :conv-id="conv.activeId || undefined"
+        :tasks="conv.tasks"
+        :ctx-usage="((conv.activeMeta as any)?.meta?.ctxUsage) ?? null"
+        @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
+        @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
+        @task-ignore="(id: string) => void conv.taskAction(id, 'ignore')"
+        @send="onSend"
+        @answers="(a: any) => void conv.sendAnswers(a)"
+        @delete-turn="conv.deleteTurn"
+        @rollback-to="conv.rollbackTo"
+        @stop="conv.stop"
+      />
+    </div>
   </div>
 </template>
