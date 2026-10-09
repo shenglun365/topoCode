@@ -575,6 +575,17 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
     return unit
 
 
+def _conv_root_pair(conv_id: str):
+    """会话 → (root, project)(解读校验边界解析用; 失败回 ("", ""))。"""
+    try:
+        from ...arch_routes.execution import conv_root_project
+        conv = store.ConversationsStore.get(conv_id) or {}
+        r, p = conv_root_project(conv)
+        return (r or "", p or "")
+    except Exception:  # noqa: BLE001
+        return ("", "")
+
+
 def _handle_task_event(ev: dict, ctx: dict) -> None:
     """v2: runner 事件 → 任务生命周期 + 统一流消息(agent=executor)。
 
@@ -629,12 +640,6 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                        f"{f'，新增 {merged} 项' if merged else ''}"
                        f"{f'，边界共 {boundary_n} 文件' if boundary_n else ''}）\n{shown}"
                        + verify_line)
-        _append(conv_id, "assistant",
-                f"⏸ **{agent} 需要你的输入**（任务「{title}」）\n\n{clean}"
-                + ms_note +
-                "\n\n直接回复即转达; 也可 @architect 讨论。",
-                msg_meta={"kind": "task_input", "taskId": task_id},
-                project_id=pid, agent=agent)
         if ms_files:
             # 知识沉淀(存储归一): 里程碑报告 → analysis 单元
             try:
@@ -650,6 +655,37 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
             except Exception as e:  # noqa: BLE001
                 logger.warning("[exec-bridge] 里程碑沉淀失败 task=%s: %s",
                                task_id, e)
+        # D4 解读回环校验: 开启任务的首个 input_required(解读正文) →
+        # 规则校验(坐标对账/验收覆盖), 建议附注落卡; 一次循环不往复
+        # (progress.readbackDone 标记, 后续问询不再校验); 偏差人工终裁。
+        rb_note = ""
+        _t = store.TasksStore.get(task_id) or {}
+        try:
+            from .readback import readback_enabled, verdict_of, render_verdict
+            _prog = _t.get("progress") or {}
+            if readback_enabled(_t) and not _prog.get("readbackDone"):
+                boundary = []
+                acceptance = []
+                if ctx.get("rid"):
+                    _snap = (store.RequirementsStore.spec_active(ctx["rid"])
+                             or {}).get("snapshot") or {}
+                    acceptance = [str(x) for x in (_snap.get("acceptance") or [])]
+                boundary = _resolve_boundary_files(ctx.get("rid") or "",
+                                                   *(lambda rp: (rp[0] or "", rp[1] or ""))(
+                                                       _conv_root_pair(conv_id))) or []
+                v = verdict_of(clean, boundary, acceptance)
+                rb_note = render_verdict(v)
+                store.TasksStore.set_progress(task_id, {
+                    **_prog, "readbackDone": True,
+                    "readbackPass": bool(v.get("pass"))})
+        except Exception as e:  # noqa: BLE001 — 校验失败不阻塞问询主链
+            logger.warning("[exec-bridge] 解读校验失败 task=%s: %s", task_id, e)
+        _append(conv_id, "assistant",
+                f"⏸ **{agent} 需要你的输入**（任务「{title}」）\n\n{clean}"
+                + ms_note + rb_note +
+                "\n\n直接回复即转达; 也可 @architect 讨论。",
+                msg_meta={"kind": "task_input", "taskId": task_id},
+                project_id=pid, agent=agent)
         store.TasksStore.update(task_id, {"status": ST.TASK_WAITING_INPUT})
         _publish_task(conv_id, store.TasksStore.get(task_id) or {})
         task_status_card(conv_id, task_id, "waiting", agent=agent, pid=pid)

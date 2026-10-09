@@ -44,6 +44,13 @@
       </span>
       <!-- 默认保存: saved → 开始执行/忽略; 存量 pending_confirm → 确认/取消 -->
       <template v-if="task.status === 'saved'">
+        <!-- D4 解读回环开关: 开=执行器先输出「我的理解」经校验后开工; 默认按挡位(high-stakes 开) -->
+        <button
+          class="btn-mini transition-colors"
+          :class="readbackOn ? 'bg-ctp-sky/20 text-ctp-sky' : 'bg-ctp-surface0/60 text-ctp-overlay0 hover:text-ctp-subtext1'"
+          title="解读回环——执行器先输出「我的理解」(目标复述/代码坐标/计划/冲突点), 经规则校验+你确认后再开工; 默认高风险任务开启"
+          @click="toggleReadback"
+        >{{ readbackOn ? '🔍 解读回环 开' : '🔍 解读回环 关' }}</button>
         <button
           class="btn-mini bg-ctp-green/20 text-ctp-green hover:bg-ctp-green/30 disabled:opacity-40"
           :disabled="acted"
@@ -233,6 +240,30 @@ import ExecutorProcessStrip from './ExecutorProcessStrip.vue'
 
 const props = defineProps<{ task: Record<string, any>; convId?: string }>()
 const emit = defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
+
+// D4 解读回环开关: task.readback 显式值(on/off)优先, 空回退挡位默认(high-stakes 开)
+const readbackBusy = ref(false)
+const readbackOn = computed(() => {
+  const flag = String(props.task.readback || '').toLowerCase()
+  if (flag === 'on') return true
+  if (flag === 'off') return false
+  return String(props.task.safetyClass || '') === 'high-stakes'
+})
+async function toggleReadback(): Promise<void> {
+  if (readbackBusy.value) return
+  readbackBusy.value = true
+  const prev = props.task.readback
+  props.task.readback = readbackOn.value ? 'off' : 'on'   // 乐观翻转
+  try {
+    const { apiPost } = await import('@/services/api-client')
+    await apiPost(`/tasks/${encodeURIComponent(props.task.id)}/readback`,
+      { on: readbackOn.value })
+  } catch {
+    props.task.readback = prev   // 失败还原(下次渲染刷新)
+  } finally {
+    readbackBusy.value = false
+  }
+}
 
 // cv-285 执行详情窗(组件内自持挂载, 零宿主胶水——消息流/会话中心同卡同入口)
 const showDetail = ref(false)

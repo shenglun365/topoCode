@@ -613,6 +613,12 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
                                                probe_score=(hint.get("executorConfig") or {})
                                                .get("probeScore")) \
         + probe_note + missing_note
+    # D4 解读回环(挡位默认: high-stakes 开, task.readback 显式覆盖):
+    # 指令附「先解读后开工」段——执行器首回合输出理解并等待确认
+    from .readback import (READBACK_INSTRUCTION, _READBACK_ON, _READBACK_OFF,
+                         readback_enabled)
+    if readback_enabled(task):
+        payload["instruction"] += READBACK_INSTRUCTION
     # hint 已含注册表默认兜底(上方选定单源)——此处不得按空 executorId 重查覆盖
     for k in ("model", "basePort", "autoStart", "baseUrl"):
         v = hint.get(k)
@@ -771,6 +777,18 @@ def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
     if not is_valid_type(etype):        # B1 单源: 替代散落元组成员判断
         return None
     return store.TasksStore.update(task_id, {"executor_type": etype})
+
+
+def task_set_readback(task_id: str, on: bool) -> Optional[dict]:
+    """设定解读回环开关(D4): 仅 saved|pending_confirm 可改——运行中指令已固化。
+    显式值覆盖挡位默认(high-stakes 开/其余关)。"""
+    from .readback import _READBACK_ON, _READBACK_OFF
+    task = store.TasksStore.get(task_id)
+    if not task or (task.get("status") or "") not in (ST.TASK_SAVED,
+                                                      ST.TASK_PENDING_CONFIRM):
+        return None
+    return store.TasksStore.update(task_id, {
+        "readback": _READBACK_ON if on else _READBACK_OFF})
 
 
 def task_input(task_id: str, text: str, echo: bool = True) -> Dict[str, Any]:

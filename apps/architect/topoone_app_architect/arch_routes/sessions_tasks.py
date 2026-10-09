@@ -150,6 +150,22 @@ async def task_dismiss(task_id: str):
     return ok({"task": res.get("task")})
 
 
+@router.post("/tasks/{task_id}/readback")
+async def task_set_readback(task_id: str, request: Request):
+    """设定解读回环开关(D4): body {on: bool}; 仅未开始任务可改。
+
+    显式值覆盖挡位默认(high-stakes 开/其余关); 运行中指令已固化不可改。"""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return err(400, "invalid-json")
+    from ..agent.execution.dispatch import task_set_readback as _set
+    task = await asyncio.to_thread(_set, task_id, bool((body or {}).get("on")))
+    if not task:
+        return err(404, "任务不存在或已开始(仅未开始任务可改解读回环开关)")
+    return ok({"task": task})
+
+
 @router.post("/tasks/{task_id}/executor")
 async def task_set_executor(task_id: str, request: Request):
     """设定任务执行器(待确认态切换; cline/opencode/codex)。"""
