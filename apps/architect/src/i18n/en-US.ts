@@ -506,7 +506,8 @@ export default {
       lockTaken: 'This sub-session is open in another window ({tab}) — takeover risks concurrent edits.',
       lockTakeover: 'Take over',
       feedHint: 'Feed to coding (filtered into sub-session & job)',
-      feedSummaryHint: 'Summarized feed (LLM-compressed conclusion only)',
+      saveDraftHint: 'Save as draft — refine in doc mode (publish back to session)',
+    feedSummaryHint: 'Summarized feed (LLM-compressed conclusion only)',
     },
     target: {
       modelHint: 'Pick executor model (applies to next run; running jobs keep theirs)',
@@ -2393,6 +2394,8 @@ renderingMore: 'Rendered {done}/{total} · scroll for more',
 
   draft: {
     untitled: 'Untitled draft',
+    fromSession: 'From session',
+    srcKind: { turn: 'Turn', spec: 'Spec', receipt: 'Receipt' },
     tab: { edit: 'Draft', preview: 'MD Preview' },
     emptyTabs: 'No draft open',
     emptyTabsBody: 'Pick or create a draft from the list to start',

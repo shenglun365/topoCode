@@ -49,7 +49,8 @@ class ReqDraftsStore:
 
     @classmethod
     def create(cls, project_id: str, title: str = "", content_md: str = "",
-               tags: Optional[List[str]] = None) -> dict:
+               tags: Optional[List[str]] = None,
+               source_conv_id: str = "", source_kind: str = "") -> dict:
         now = _now()
         row = {
             "id": next_id("rd"), "projectId": project_id,
@@ -58,6 +59,7 @@ class ReqDraftsStore:
             "status": "editing", "parentId": "",
             "publishedConvId": "", "publishedReqId": "",
             "tags": _dump_tags(tags),
+            "sourceConvId": source_conv_id or "", "sourceKind": source_kind or "",
             "createdAt": now, "updatedAt": now,
         }
         _insert(TABLE, row)
@@ -93,7 +95,8 @@ class ReqDraftsStore:
     def update(cls, draft_id: str, data: dict) -> Optional[dict]:
         payload = {k: v for k, v in data.items() if k in (
             "title", "contentMd", "lastProposedMd", "lastProposedAt",
-            "status", "publishedConvId", "publishedReqId", "tags")}
+            "status", "publishedConvId", "publishedReqId", "tags",
+            "sourceConvId", "sourceKind")}
         if "tags" in payload:
             payload["tags"] = _dump_tags(payload["tags"])
         if not payload:
@@ -130,6 +133,8 @@ class ReqDraftsStore:
             "status": "editing", "parentId": draft_id,
             "publishedConvId": "", "publishedReqId": "",
             "tags": _dump_tags(src.get("tags")),
+            "sourceConvId": src.get("sourceConvId") or "",
+            "sourceKind": src.get("sourceKind") or "",
             "createdAt": now, "updatedAt": now,
         }
         _insert(TABLE, row)

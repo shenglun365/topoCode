@@ -19,6 +19,10 @@ export interface ReqDraft {
   publishedReqId: string
   /** 用户自定义标签(概念泛化后分类用; ≤20 个/个 ≤64B)。 */
   tags?: string[]
+  /** 来源会话(会话→草稿回流); 空串=无来源。 */
+  sourceConvId?: string
+  /** 来源形态: turn(回合)|spec(规约)|receipt(执行回执)。 */
+  sourceKind?: string
   createdAt: number
   updatedAt: number
   /** 列表项摘要（不带正文）。 */
@@ -40,7 +44,8 @@ export const reqDraftService = {
     return r?.drafts ?? []
   },
 
-  async create(payload?: { title?: string; contentMd?: string }): Promise<ReqDraft> {
+  async create(payload?: { title?: string; contentMd?: string;
+                           sourceConvId?: string; sourceKind?: string }): Promise<ReqDraft> {
     const { root, project } = currentProjectParams()
     return apiPost<ReqDraft>('/req-drafts', { root, project, ...payload })
   },

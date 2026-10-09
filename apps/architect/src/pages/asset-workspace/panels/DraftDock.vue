@@ -14,7 +14,7 @@ import {
   DocumentTextIcon, PlusIcon, TrashIcon, EyeIcon, XMarkIcon,
   PencilSquareIcon, ArchiveBoxIcon, SparklesIcon, ChevronRightIcon, CheckIcon,
   PaperAirplaneIcon, PlayCircleIcon, LinkIcon, CheckBadgeIcon, WrenchScrewdriverIcon, Bars3Icon,
-  TagIcon,
+  TagIcon, ChatBubbleLeftRightIcon,
 } from '@heroicons/vue/24/outline'
 import { useAppDialog } from '@/composables/useAppDialog'
 import MarkdownView from '@/components/MarkdownView.vue'
@@ -1002,6 +1002,15 @@ onBeforeUnmount(() => {
                 ><TrashIcon class="h-3 w-3" /></button>
               </div>
               <div class="truncate text-[9px] text-ctp-overlay0" :title="d.excerpt">{{ d.excerpt || '—' }}</div>
+              <!-- A2 来源标记: 会话回流草稿(回合/规约/执行回执), 悬停见会话 id -->
+              <div v-if="d.sourceConvId" class="flex items-center gap-0.5">
+                <span
+                  class="inline-flex items-center gap-0.5 rounded bg-ctp-mauve/15 px-1 text-[8px] leading-3 text-ctp-mauve"
+                  :title="`${t('draft.fromSession')} · ${d.sourceConvId}`"
+                >
+                  <ChatBubbleLeftRightIcon class="h-2 w-2" />{{ t(`draft.srcKind.${d.sourceKind || 'turn'}`) }}
+                </span>
+              </div>
               <!-- 标签: 前 3 个直显(超宽 CSS 截断+title 全名), 更多收进 +N 徽标悬停看全部; 点击按 tag 查找 -->
               <div
                 v-if="d.tags?.length"

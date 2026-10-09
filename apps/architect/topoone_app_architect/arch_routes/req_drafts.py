@@ -38,14 +38,20 @@ async def api_req_drafts_list(root: Optional[str] = None, project: Optional[str]
 
 @router.post("/req-drafts")
 async def api_req_drafts_create(request: Request = None):
-    """新建草稿：{title?, contentMd?, root?, project?}。"""
+    """新建草稿：{title?, contentMd?, root?, project?, sourceConvId?, sourceKind?}。
+
+    sourceConvId/sourceKind(A2 会话→草稿回流): 来源会话与形态
+    (turn 回合|spec 规约|receipt 执行回执)——溯源展示, 不改变草稿行为。
+    """
     from ..store import ReqDraftsStore
     body = await request.json() if request else {}
     pid = project_id_for(body.get("root"), body.get("project"))
     if not pid:
         return err(400, "缺少项目")
     draft = ReqDraftsStore.create(pid, body.get("title") or "", body.get("contentMd") or "",
-                                  tags=body.get("tags"))
+                                  tags=body.get("tags"),
+                                  source_conv_id=str(body.get("sourceConvId") or "")[:64],
+                                  source_kind=str(body.get("sourceKind") or "")[:24])
     return ok(draft)
 
 

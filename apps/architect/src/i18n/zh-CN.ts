@@ -506,7 +506,8 @@ export default {
       lockTaken: '该子会话已在另一个窗口打开({tab})——接管后原窗口将并发编辑风险自负。',
       lockTakeover: '接管',
       feedHint: '转达给 coding(过滤后进入子会话与作业)',
-      feedSummaryHint: '摘要转达(LLM 压缩为结论段后进入)',
+      saveDraftHint: '另存为草稿——转文档态继续加工(资产页技能处理后可发布会话)',
+    feedSummaryHint: '摘要转达(LLM 压缩为结论段后进入)',
     },
     target: {
       modelHint: '选择执行器模型(下次执行生效; 进行中作业不受影响)',
@@ -2401,6 +2402,8 @@ renderingMore: '已渲染 {done}/{total} · 滚动加载更多',
 
   draft: {
     untitled: '未命名草稿',
+    fromSession: '来自会话',
+    srcKind: { turn: '回合', spec: '规约', receipt: '执行回执' },
     tab: { edit: '草稿文档', preview: 'MD 预览' },
     emptyTabs: '未打开草稿',
     emptyTabsBody: '从右侧选择或新建一个草稿开始',

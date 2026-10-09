@@ -383,3 +383,33 @@ def test_skill_run_job_equivalence(monkeypatch):
     assert ReqDraftsStore.get(d["id"])["lastProposedMd"] == "# 技能新版"
     # scope 携带 skillId+preset(双字段, 存量幂等键兼容)
     assert row["scope"]["skillId"] == "review" and row["scope"]["preset"] == ""
+
+
+def test_draft_source_conv_roundtrip():
+    """A2 会话→草稿回流: 来源字段落列/API 透传/续写副本继承。"""
+    from topoone_app_architect.arch_routes import req_drafts as api
+    from topoone_app_architect.store import ReqDraftsStore
+
+    class _Req:
+        def __init__(self, payload):
+            self._p = payload
+
+        async def json(self):
+            return self._p
+
+    out = _body(asyncio.run(api.api_req_drafts_create(_Req({
+        "project": PID, "title": "来自会话", "contentMd": "# 方案骨架\n…",
+        "sourceConvId": "cv-x1", "sourceKind": "turn"}))))
+    d = out["data"]
+    assert d["sourceConvId"] == "cv-x1" and d["sourceKind"] == "turn"
+    # 列表携带来源(pop 只摘正文两列)
+    rows = _body(asyncio.run(api.api_req_drafts_list(project=PID)))["data"]["drafts"]
+    row = next(r for r in rows if r["id"] == d["id"])
+    assert row["sourceConvId"] == "cv-x1"
+    # 无来源(存量形态): 空串
+    d2 = ReqDraftsStore.create(PID, "普通")
+    assert d2["sourceConvId"] == "" and d2["sourceKind"] == ""
+    # 续写副本继承溯源
+    ReqDraftsStore.update(d["id"], {"status": "archived"})
+    cp = ReqDraftsStore.copy(d["id"])
+    assert cp["sourceConvId"] == "cv-x1" and cp["sourceKind"] == "turn"

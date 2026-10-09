@@ -3,7 +3,7 @@
 /** MS6-W3-S2 自 AnalysisChat 模板整块迁出(逐行未动)；状态经 WS_KEY 注入。 */
 
 import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
-import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon, CpuChipIcon } from '@heroicons/vue/24/outline'
+import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, PencilSquareIcon, SparklesIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon, WrenchScrewdriverIcon, XMarkIcon, ExclamationCircleIcon, AtSymbolIcon, CpuChipIcon, DocumentArrowDownIcon } from '@heroicons/vue/24/outline'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
 import JobCard from '@/components/chat/JobCard.vue'
@@ -140,6 +140,30 @@ function openSpecEdit(m: any) {
     desc: String(s.desc || ''),
   }
 }
+// A2 会话→草稿回流: 回合内容另存为需求草稿(文档态继续加工, 可再发布会话)
+const saveDraftBusyIdx = ref(-1)
+const savedDraftIdx = ref(-1)
+async function saveDraftFromTurn(m: any, i: number) {
+  if (saveDraftBusyIdx.value !== -1) return
+  const content = String(m.content || '').trim()
+  if (!content) return
+  saveDraftBusyIdx.value = i
+  try {
+    const { reqDraftService } = await import('@/services/req-draft-service')
+    const convTitle = String(_convStore.activeTitle || '')
+    await reqDraftService.create({
+      title: (convTitle ? convTitle.slice(0, 40) + ' · ' : '')
+        + (m.role === 'user' ? '回合(用户)' : '回合(AI)'),
+      contentMd: content,
+      sourceConvId: String(props.convId || ''),
+      sourceKind: 'turn',
+    })
+    savedDraftIdx.value = i
+    setTimeout(() => { if (savedDraftIdx.value === i) savedDraftIdx.value = -1 }, 1800)
+  } catch { /* 创建失败静默(按钮恢复可重试) */ } finally {
+    saveDraftBusyIdx.value = -1
+  }
+}
 // cv-281 立即执行: 免任务计划——需求最新版直接创建单任务并立即执行
 const execNowId = ref('')
 async function execNow(m: any) {
@@ -217,6 +241,7 @@ const emit = defineEmits<{
   'task-dismiss': [id: string]
   'task-executor': [p: { taskId: string; executorType: string }]
   'feed-turn': [p: { index: number; id?: string; summarize?: boolean }]
+  'save-draft': [p: { index: number; content: string; role: string }]
   'rollback-to': [index: number]
   send: [p: { text: string }]
   'confirm-draft': []
@@ -435,6 +460,15 @@ const emit = defineEmits<{
               @click="emit('feed-turn', { index: i, id: (m as any).id, summarize: true })"
             >
               <SparklesIcon class="w-3 h-3" />
+            </button>
+            <button
+              class="text-ctp-overlay0 hover:text-ctp-green transition-colors p-0.5"
+              :title="t('session.subs.saveDraftHint')"
+              :disabled="saveDraftBusyIdx === i"
+              @click="saveDraftFromTurn(m, i)"
+            >
+              <CheckIcon v-if="savedDraftIdx === i" class="w-3 h-3 text-ctp-green" />
+              <DocumentArrowDownIcon v-else class="w-3 h-3" :class="saveDraftBusyIdx === i ? 'animate-pulse' : ''" />
             </button>
             <button
               class="text-ctp-overlay0 hover:text-ctp-red transition-colors p-0.5"
