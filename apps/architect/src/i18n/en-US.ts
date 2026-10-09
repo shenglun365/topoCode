@@ -355,7 +355,6 @@ export default {
       check: 'Health check',
       initDone: 'Draft created ({lines} lines)',
       initCheck: 'Health report ({lines} lines)',
-      placeholder: '# AGENTS.md\n\n## Naming Conventions\n\n- [scenario] rule text\n\n## Glossary\n\n| Term | Alias | Meaning |\n',
       contract: 'Engine contract: ## 命名规约 (line rules) and ## 术语表 (3-col table) sections are parsed into cache',
       emptyHint: 'No AGENTS.md yet — generate a draft from naming/glossary cache (migrates .topo/rules), then review and commit.',
     },

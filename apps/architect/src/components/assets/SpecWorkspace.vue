@@ -23,6 +23,22 @@ import { currentProjectParams } from '@/services/project-service'
 const { t } = useI18n()
 const dialog = useAppDialog()
 
+// 空文件占位 = AGENTS.md 初稿骨架。不进 i18n: vue-i18n 消息格式把 `|`
+// 当复数分隔符, markdown 表格行会编译报错(Plural must have messages)。
+const SCAFFOLD = [
+  '# AGENTS.md',
+  '',
+  '## 命名规约',
+  '',
+  '- [场景] 规则文本',
+  '',
+  '## 术语表',
+  '',
+  '| 术语 | 别名 | 含义 |',
+  '| --- | --- | --- |',
+  '',
+].join('\n')
+
 const content = ref('')
 const baseHash = ref('')
 const exists = ref(false)
@@ -147,7 +163,7 @@ const tooLong = computed(() => lineCount.value > 200)
         v-else-if="mode === 'edit'"
         v-model="content"
         class="w-full min-h-[34rem] p-4 text-xs font-mono bg-transparent outline-none resize-y"
-        :placeholder="t('spec.editor.placeholder')"
+        :placeholder="SCAFFOLD"
         @input="dirty = true"
       />
       <div v-else class="p-4 max-h-[34rem] overflow-auto text-xs">

@@ -33,10 +33,21 @@ def _proj_of(root: str, project: Optional[str]) -> dict:
     for r in rows:
         if project and r.get("id") == project:
             return r
-        if not project and os.path.normpath(str(r.get("root_path") or "")) \
-                == os.path.normpath(root or ""):
-            return r
+        if not project:
+            # ProjectsStore 行是 camelCase(rootPath); 容忍 snake_case 旧形
+            rp = str(r.get("rootPath") or r.get("root_path") or "")
+            if rp and os.path.normpath(rp) == os.path.normpath(root or ""):
+                return r
     return {}
+
+
+def _resolve_root(root: str, project: Optional[str]) -> str:
+    """root 解析: 显式 > 注册项目反查(规约页 URL 可只带 ?project=, 无 ?root=)。"""
+    root = (root or "").strip()
+    if root:
+        return root
+    row = _proj_of("", project or None)
+    return str(row.get("rootPath") or row.get("root_path") or "")
 
 
 def init_agents_md(root: str, project: Optional[str] = None) -> Dict[str, Any]:
@@ -103,7 +114,8 @@ def init_agents_md(root: str, project: Optional[str] = None) -> Dict[str, Any]:
 
 @router.get("/arch/agents-md")
 async def api_agents_md_get(root: str = "", project: str = ""):
-    """读 AGENTS.md(顺带惰性同步引擎缓存)。"""
+    """读 AGENTS.md(顺带惰性同步引擎缓存)。root 缺省按 project 反查 rootPath。"""
+    root = _resolve_root(root, project or None)
     if not root or not os.path.isdir(root):
         return err(400, "root 不可用")
     from ..sem.rules_file import ensure_rules_synced, read_agents_md
@@ -117,7 +129,7 @@ async def api_agents_md_get(root: str = "", project: str = ""):
 async def api_agents_md_put(request: Request):
     """写 AGENTS.md {root, content, baseHash, project}(乐观锁; 写后强制同步)。"""
     body = await request.json() or {}
-    root = str(body.get("root") or "")
+    root = _resolve_root(str(body.get("root") or ""), str(body.get("project") or "") or None)
     content = str(body.get("content") or "")
     if not root or not os.path.isdir(root):
         return err(400, "root 不可用")
@@ -136,10 +148,11 @@ async def api_agents_md_put(request: Request):
 
 @router.post("/arch/agents-md/init")
 async def api_agents_md_init(request: Request):
-    """初稿生成/改进建议(/init 模式)。"""
+    """初稿生成/改进建议(/init 模式)。root 缺省按 project 反查 rootPath。"""
     body = await request.json() or {}
-    res = init_agents_md(str(body.get("root") or ""),
-                         str(body.get("project") or "") or None)
+    res = init_agents_md(
+        _resolve_root(str(body.get("root") or ""), str(body.get("project") or "") or None),
+        str(body.get("project") or "") or None)
     if not res.get("ok"):
         return err(res.get("error") or "init failed")
     return ok(res)

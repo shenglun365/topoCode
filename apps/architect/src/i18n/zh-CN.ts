@@ -354,7 +354,6 @@ export default {
       check: '体检建议',
       initDone: '初稿已生成（{lines} 行）',
       initCheck: '文件体检（{lines} 行）',
-      placeholder: '# AGENTS.md\n\n## 命名规约\n\n- [场景] 规则文本\n\n## 术语表\n\n| 术语 | 别名 | 含义 |\n',
       contract: '引擎契约：## 命名规约（行式）与 ## 术语表（三列表格）章节会被解析为缓存',
       emptyHint: '项目还没有 AGENTS.md——可从命名规约/术语表缓存生成初稿（含 .topo/rules 迁移），生成后请人工审阅并提交 git。',
     },

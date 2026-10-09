@@ -237,3 +237,34 @@ def test_naming_confirm_appends_file(proj):
     md = open(os.path.join(proj["root"], "AGENTS.md"), encoding="utf-8").read()
     assert "- [naming] 服务以 Repo 结尾" in md
     assert r["data"]["status"] == "active"
+
+
+# ── 仅 project 无 root 的页面路径(规约页 URL 只带 ?project=) ─────────
+
+class _Req:
+    def __init__(self, body):
+        self._b = body
+
+    async def json(self):
+        return self._b
+
+
+def test_get_with_project_only(proj):
+    from topoone_app_architect.arch_routes.agents_md import api_agents_md_get
+    write_agents_md(proj["root"], SAMPLE)
+    r = asyncio.run(api_agents_md_get(root="", project=proj["pid"]))
+    assert r["code"] == 0 and r["data"]["exists"] is True
+    assert "## 命名规约" in r["data"]["content"]
+    # 未知 project 且无 root → 仍 400(err() 返回 JSONResponse)
+    r2 = asyncio.run(api_agents_md_get(root="", project="proj-none"))
+    assert getattr(r2, "status_code", 0) == 400
+
+
+def test_put_and_init_with_project_only(proj):
+    from topoone_app_architect.arch_routes.agents_md import (
+        api_agents_md_init, api_agents_md_put)
+    w = asyncio.run(api_agents_md_put(_Req({
+        "root": "", "project": proj["pid"], "content": SAMPLE, "baseHash": ""})))
+    assert w["code"] == 0
+    r = asyncio.run(api_agents_md_init(_Req({"root": "", "project": proj["pid"]})))
+    assert r["code"] == 0 and r["data"]["ok"] is True   # /init 模式: 已有文件给建议
