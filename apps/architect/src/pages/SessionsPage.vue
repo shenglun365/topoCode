@@ -428,7 +428,7 @@ function flowLabel(p?: string): string {
             </div>
           </section>
           <!-- 左: 会话列表 -->
-          <section v-if="leftTab === 'sessions'" class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <section v-else-if="leftTab === 'sessions'" class="flex min-h-0 min-w-0 flex-1 flex-col">
             <div class="min-h-0 flex-1 overflow-auto panel">
         <template v-for="g in grouped" :key="g.key || 'flat'">
           <div v-if="g.key" class="sticky top-0 z-10 flex items-center gap-1.5 bg-ctp-mantle/95 px-3 py-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1 backdrop-blur">
