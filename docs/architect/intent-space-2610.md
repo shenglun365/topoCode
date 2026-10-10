@@ -112,8 +112,8 @@ L0→L1 与 L2→L3 建设已有积累；本期补两个衔接断点：
 |---|---|---|
 | 1 | 解读校验 LLM 增强 | ✅ `cc268c0a`（readback_review 作业，回调注入接线 catalog） |
 | 2 | 任务卡关键节点回执 | ✅ `64923bce`（标记协议+进度可视，展示型） |
-| 3 | 资产级增量重析 | 待做（collect_graph 写入语义升级 + file→assets 反查解锁受影响资产清单） |
-| 4 | 边界圈定技能（scope） | 待做（图邻域建议 allowedScope/scopeOut） |
+| 3 | 资产级增量重析 | ✅ `91a48398`（GraphStore.merge_files 按文件合入 + assets_of_files 反查 + E4 增量优先） |
+| 4 | 边界圈定技能（scope） | ✅ `1512477c`（双线域技能 + dock 入口；随附 receipt 另存/技能通知/gaps 时机/预览过滤次级清偿） |
 
 ## 6. 验收对照
 
