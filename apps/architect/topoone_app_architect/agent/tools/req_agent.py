@@ -1183,12 +1183,12 @@ _CAPABILITY_DOC = (
     '- asset.semantic.split: {"assetId": "sa-xxx", "parts": [{"name": "…", "anchorKeys": ["file:symbol"], "desc"?: "…"}]}\n'
     '- convention.propose: {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}\n'
     '- contract.propose: {"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)\n'
-    '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
+    '- mcp.call 已退役(2610 MCP 定型)\n'
     '- req.propose: {"title": "标题", "requirementMd": "需求目标", '
     '"designMd": "方案", "priority": "P1", "acceptanceMd": "验收"}\n'
     '- req.amend: {"requirementMd": "修订后目标", "designMd": "修订后方案", '
     '"acceptance": [...], "reasoning": "原因"} 只传要调整的字段; 标题用 {"title": …}\n'
-    '- capability.evaluate: {"target": "plan|execution", "execId"?: "ex-…(execution 时必填)}\n'
+    '- capability.evaluate: {"target": "plan|execution"}\n'
     '- capability.mine: {"conversation"?: "cv-…(缺省当前会话)}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
     "若无需检索即可直接回答，就不要调用工具。\n\n"

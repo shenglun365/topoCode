@@ -29,11 +29,8 @@ def _register_fixture():
         return {"ok": True, "payload": payload}
 
 
-_register_fixture()
-
-
 def _entry(name="_test_echo"):
-    _register_fixture()      # 按需重注册(防 autouse 清理后失效)
+    _register_fixture()      # 按需注册(import 期注册会污染 prompt golden 全量序)
     return _ARCH_TOOLS[name]
 
 
