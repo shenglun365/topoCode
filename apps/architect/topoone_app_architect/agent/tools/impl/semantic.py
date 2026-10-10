@@ -13,6 +13,8 @@ logger = logging.getLogger("arch_routes.req_agent")
     "asset.semantic.stats",
     "语义资产统计：总量/按六类(kind)/按粒度(level)/状态(active/stale/deleted/needsUpdate)。"
     "「有多少资产」「各类数量」等统计类提问用",
+brief='语义资产统计(总量/按类别/按粒度/状态)',
+params_doc='{}',
 )
 def tool_semantic_stats(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
     from ....sem.engine import (SEMANTIC_KINDS, SEMANTIC_LEVELS, _lazy_reconcile,
@@ -43,6 +45,8 @@ def tool_semantic_stats(root: Optional[str], project: Optional[str]) -> Dict[str
     "检索当前项目已提取的语义数据资产(六类 entity/contract/state/rule/process/decision)，"
     "支持 kind 类别 + level 粒度(business/implementation/logic) + scopes 组件范围过滤与关键词命中。"
     "返回资产(含 AST 锚点)。",
+brief='检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点；支持 kind/level 过滤；includeGlobal=true 时合并主库全局层通用资产)',
+params_doc='{"text": "关键词", "kind": "entity|contract|state|rule|process|decision(可选)", "level": "business|implementation|logic(可选)", "limit": 20, "offset": 0, "scopes": ["comm-…(可选)"]}',
 )
 def tool_semantic_search(root: Optional[str], project: Optional[str],
                          text: str = "", kind: str = "", level: str = "",
@@ -85,6 +89,8 @@ def tool_semantic_search(root: Optional[str], project: Optional[str],
     "参数 scope={type: comm|files|symbols|project, key?, files?, symbols?}，"
     "comm 时 key 为**组件ID**(comm-…，权威范围)；kinds 可选[六类]。"
     "返回紧凑摘要 {count, byKind, degraded, source[, error, candidates, reason]}。",
+brief='按指令从最新代码提取语义数据资产并落库(指令化唯一入口：comm 时 key=组件ID 为权威范围，确定执行)',
+params_doc='{"scope": {"type": "comm|files|symbols|project", "key"?, "files"?, "symbols"?}, "kinds"?}(工作流见 extract 技能)',
 )
 def tool_semantic_extract(root: Optional[str], project: Optional[str],
                           scope: Dict[str, Any] = None,
@@ -122,6 +128,8 @@ def tool_semantic_extract(root: Optional[str], project: Optional[str],
 @register_architect_tool(
     "asset.semantic.detail",
     "读取单个语义数据资产的完整信息(描述/结构化细节/AST 锚点)，供需求/设计引用确认。",
+brief='读取单个语义资产的完整描述/结构化细节/AST 锚点',
+params_doc='{"asset_id": "sa-xxx"}',
 )
 def tool_semantic_detail(asset_id: str, root: Optional[str] = None,
                          project: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -132,6 +140,8 @@ def tool_semantic_detail(asset_id: str, root: Optional[str] = None,
 @register_architect_tool(
     "asset.semantic.mappings",
     "查询语义数据资产对应的代码映射(文件/行号/符号)，锁定「改哪里」的精确位置。",
+brief='查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」',
+params_doc='{"asset_ids": ["sa-xxx"]}',
 )
 def tool_semantic_mappings(asset_ids: List[str], root: Optional[str] = None,
                            project: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -145,6 +155,8 @@ def tool_semantic_mappings(asset_ids: List[str], root: Optional[str] = None,
 @register_architect_tool(
     "asset.semantic.reconcile",
     "校验语义数据资产新鲜度(git/文件哈希比对)：标记因文件变更或新增文件影响而过期的资产为「需更新后使用」。返回失效清单。",
+brief='校验资产新鲜度，标记因文件变更/新增文件影响而过期的资产(需更新后使用)',
+params_doc='{}',
 )
 def tool_semantic_reconcile(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
     from ....arch_routes import semantic_assets as S
@@ -154,6 +166,8 @@ def tool_semantic_reconcile(root: Optional[str], project: Optional[str]) -> Dict
 @register_architect_tool(
     "asset.semantic.refresh",
     "更新单个过期(需更新)的语义数据资产：增量重提其所属范围；失败则软删并离线重新生成。返回新状态。",
+brief='更新过期资产(增量重提；失败软删并重新生成)',
+params_doc='{"asset_id": "sa-xxx"}',
 )
 def tool_semantic_refresh(asset_id: str, root: Optional[str] = None,
                           project: Optional[str] = None) -> Dict[str, Any]:
@@ -167,6 +181,8 @@ def tool_semantic_refresh(asset_id: str, root: Optional[str] = None,
     "code.read_symbols",
     "读取项目源码片段(按文件/符号/行号)，对话式提取前先看真实代码。"
     '参数 {"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行}。',
+brief='读取项目源码片段(按文件/符号)，对话式提取前先看真实代码',
+params_doc='{"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行}',
 )
 def tool_code_read_symbols(root: Optional[str] = None, project: Optional[str] = None,
                            file: str = "", symbol: str = "",

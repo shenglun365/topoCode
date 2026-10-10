@@ -43,6 +43,8 @@ def _project_degraded(root: Optional[str], project: Optional[str]) -> bool:
 @register_architect_tool(
     "kb.asset.search",
     "全文检索知识库架构资产(组件/ER/实体/流程)，按关键词命中并按相关度排序",
+brief='全文检索知识库架构资产(组件/ER/实体/流程)，按关键词命中并按相关度排序',
+params_doc='{"text": "检索关键词", "preferred": ["资产ID(可选)"]}',
 )
 def tool_kb_asset_search(root: Optional[str], project: Optional[str],
                          text: str, preferred: Optional[List[str]] = None) -> List[Dict[str, Any]]:
@@ -78,6 +80,8 @@ def tool_kb_asset_search(root: Optional[str], project: Optional[str],
 @register_architect_tool(
     "kb.code_mappings",
     "查询资产对应的代码映射(文件/行号)，锁定「改哪里」的精确位置",
+brief='查询资产对应的代码映射(文件/行号)，锁定「改哪里」',
+params_doc='{"asset_ids": ["资产ID"]}',
 )
 def tool_kb_code_mappings(asset_ids: List[str],
                           root: Optional[str] = None, project: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -88,6 +92,8 @@ def tool_kb_code_mappings(asset_ids: List[str],
 @register_architect_tool(
     "kb.baseline",
     "读取当前项目 KB 基线信息(git 表示：分支/提交/基线版本)，用于需求影响范围判断",
+brief='读取当前项目 KB 基线(git 表示：分支/提交/基线版本)',
+params_doc='{}',
 )
 def tool_kb_baseline(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
     if _project_degraded(root, project):
@@ -107,6 +113,8 @@ def tool_kb_baseline(root: Optional[str], project: Optional[str]) -> Dict[str, A
 @register_architect_tool(
     "kb.graph",
     "遍历组件依赖图(依赖/被调用)，判断需求改动的影响链路(基于 KB 真实架构模型的组件 dependsOn 与跨社区边)",
+brief='遍历组件依赖图(依赖/被调用)，判断需求改动的影响链路',
+params_doc='{"comp_ids": ["组件ID"]}',
 )
 def tool_kb_graph(root: Optional[str], project: Optional[str],
                   comp_ids: List[str]) -> List[Dict[str, Any]]:
@@ -161,6 +169,7 @@ def tool_kb_graph(root: Optional[str], project: Optional[str],
     "project.ctx",
     "读取项目上下文(项目名/分支/基线 id/降级状态 + 任务执行统计 + 代码解析概貌)"
     "——完成情况/进度/项目现状类提问先看",
+params_doc='{}',
 )
 def tool_project_ctx(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
     """项目处境画像(KB 域 + architect 本域执行/解析信号)。

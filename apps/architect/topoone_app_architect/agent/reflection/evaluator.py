@@ -278,6 +278,8 @@ def register_evaluator_tools() -> None:
         "capability.evaluate",
         "图文评估: 评估会话最新方案(变更足迹×语义资产影响面+关系子图)。"
         "报告内资产卡可点击联动资产地图。方案确认前调用",
+    brief='图文评估——target=plan 评估会话最新方案(变更足迹×语义资产影响面+关系子图图)；target=execution 评估执行结果(实际 diff 足迹 + 与方案的偏差集)。报告内资产卡可点击联动资产地图。方案确认前/执行完成后调用',
+    params_doc='{"target": "plan|execution"}',
     )
     def _capability_evaluate(project: Optional[str] = None,
                              root: Optional[str] = None,

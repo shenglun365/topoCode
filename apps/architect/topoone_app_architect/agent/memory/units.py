@@ -34,14 +34,6 @@ def _arch_ts():
     return _arch_ts()
 
 
-# 会话 agent 可见的能力文档段落(注入 req_agent._CAPABILITY_DOC)
-CTX_CAPABILITY_LINES = (
-    "- ctx.search：跨会话检索历史上下文(工具轨迹/产物/决策/摘要/执行回执/消息)，"
-    "构造答复或任务上下文前先检索关联结论，避免重复讨论\n"
-    "- ctx.get：读取指定会话的上下文包(摘要+关键单元+备案文档清单)\n"
-    "- ctx.summarize：生成/刷新会话摘要(标题+结论/决策/待办)\n"
-)
-
 # MCP 工具描述(asset_map_tools.TOOLS 同形)
 TOOLS = [
     {"name": "ctx.search", "desc": "跨会话检索历史上下文(单元+消息+备案文档；返回 Markdown 命中列表)",

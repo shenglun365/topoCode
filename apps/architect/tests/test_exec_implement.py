@@ -220,14 +220,12 @@ def test_chat_system_prompt_no_reject_boundary():
 
 
 def test_chat_system_prompt_registry_equivalence(monkeypatch):
-    """registry 回退通道(single_source=false 覆盖)可用性。
+    """registry 单源渲染(MS-B3: legacy 回退通道退役)。
 
-    (批丁裁决 2026-09-22: 原「与旧拼接逐字节一致」断言退役——legacy 冻结
-    字面量与注册表渲染早已结构性漂移(新工具只入注册表), 字节等价守卫的
-    是 B4 迁移窗口; 迁移完成后双源字节对齐即负债(违反单源纪律)。
-    本测试改为守卫回退通道本身可用: 渲染非空且含关键段。)
-    (cv-189: 降级项目提示词有 KB 硬门, legacy 静态文档无——口径以
-    非降级上下文为准, monkeypatch kb_degraded=False。)
+    (批丁裁决 2026-09-22: 字节等价断言退役; MS-B3 裁决: single_source=false
+    覆盖与 _CAPABILITY_DOC 回退一并退役——覆盖键不再切源, 渲染恒走注册表。)
+    (cv-189: 降级项目提示词有 KB 硬门——口径以非降级上下文为准,
+    monkeypatch kb_degraded=False。)
     """
     import topoone_app_architect.arch_routes.project as _proj_mod
     monkeypatch.setattr(_proj_mod, "kb_degraded",
@@ -238,8 +236,9 @@ def test_chat_system_prompt_registry_equivalence(monkeypatch):
     try:
         for kw in ({}, {"diagram_skill": True}, {"skill_scenarios": ["plan"]}):
             s = req_agent.chat_system_prompt(None, None, **kw)
-            assert s.strip(), f"回退通道渲染为空: {kw}"
-            assert "职责边界" in s and "防编造" in s, f"回退通道缺关键段: {kw}"
+            assert s.strip(), f"单源渲染为空: {kw}"
+            assert "职责边界" in s and "防编造" in s, f"单源渲染缺关键段: {kw}"
+            assert "conv.read：" in s, f"退役覆盖键不应切走注册表渲染: {kw}"
     finally:
         prompt_registry.set_overrides({})
     # 单源模式: 注册表渲染能力文档(含协议+全部工具名)

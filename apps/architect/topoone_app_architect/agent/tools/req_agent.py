@@ -446,6 +446,8 @@ def _body_placeholder_error(text: str, label: str, min_len: int = 0) -> str:
     "allowedScopeMd/forbiddenScopeMd(允许增删改/一定不能动的模块·文件·目录，每行一项，可空)、"
     "acceptanceMd(验收标准，每行一条)、assessmentMd(评估)、estMin(分钟)、priority、"
     "newRequirement(默认 false=更新绑定需求)。",
+brief='需求提案(新建或幂等更新)——**开发类需求**(要写代码/改代码/交付组件)时调用，创建需求卡即 ready(designMd=选型与结构)；分析/问答类请求不要产卡。用户要求 编写脚本/工具/程序 时**必须先调本工具**，由 /执行 链路产出代码——**严禁直接输出成品代码**(python/bash 等)替代需求收敛',
+params_doc='{"title": "需求标题(必填)", "requirementMd": "需求目标(全文)", "designMd": "选型与结构方案", "priority": "P1", "estMin": 30, "acceptanceMd": "验收条目(md)", "newRequirement": false(同会话已建卡时强制新建才传)} —— reqId 勿传',
 )
 
 
@@ -575,6 +577,7 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
                '"allowedScope": ["目录"], "forbiddenScope": ["目录"], '
                '"reasoning": "修订原因"} —— 只传要调整的字段; '
                '标题修订用 {"title": "新标题"}',
+brief='需求修订(通用)——用户对既有需求 补充/完善/调整 时调用，追加新 draft 版本(append-only)。reqId 勿传(系统自动取会话绑定需求)',
 )
 def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
                    allowedScope: Optional[List[str]] = None,

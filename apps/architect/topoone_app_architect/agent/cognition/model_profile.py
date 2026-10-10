@@ -238,14 +238,20 @@ def clear_profile(model_id: str) -> bool:
 def _probe_tools() -> List[Dict[str, str]]:
     """探针工具用例取真实注册工具(裁决: 测系统实际能力, 不用玩具用例)。
 
-    从 B4 单源迁移表取 name+参数形状; 目录异常时退化为 req.propose 最小形状。
+    MS-B3: 迁移表退役后直读注册表条目(params_doc 注册点声明 → 签名生成兜底);
+    目录异常时退化为 req.propose 最小形状。
     """
     try:
-        from ..cognition import prompt as _prompt
-        docs = _prompt.TOOL_PARAM_DOCS
+        from ..tools.registry import _ARCH_TOOLS, derive_params_doc
         names = [n for n in ("req.propose", "kb.asset.search", "map.overview")
-                 if n in docs]
-        return [{"name": n, "params_hint": docs[n]} for n in names]
+                 if n in _ARCH_TOOLS]
+        out = []
+        for n in names:
+            entry = _ARCH_TOOLS[n]
+            hint = (entry.get("params_doc") or "").strip() \
+                or derive_params_doc(entry["handler"])
+            out.append({"name": n, "params_hint": hint})
+        return out
     except Exception:  # noqa: BLE001
         return [{"name": "req.propose", "params_hint":
                  '{"title", "requirementMd", "designMd"}'}]

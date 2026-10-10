@@ -233,6 +233,8 @@ def register_mining_tools() -> None:
         "能力提炼: 扫描指定会话(消息+方案/回执单元)提炼 规约/流程/技巧/skill 提案, "
         "落入待审队列(pending), 设计者采纳后生效(规约入规约库/skill 文档注入能力文档)。"
         "会话出现可复用模式(有效做法/踩坑经验/命名规律)时主动提议",
+    brief='能力提炼——扫描会话(消息+方案/回执单元)提炼 规约/流程/技巧/skill 提案入待审队列, 设计者采纳后生效(规约入规约库/skill 文档注入能力文档)。会话出现可复用模式时主动提议',
+    params_doc='{"conversation"?: "cv-…(缺省当前会话)}',
     )
     def _capability_mine(conversation: str = "", project: Optional[str] = None,
                          root: Optional[str] = None) -> dict:

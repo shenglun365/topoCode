@@ -63,15 +63,16 @@ def test_capability_doc_covers_all_registered_tools():
         assert f"- {name}：" in doc, f"工具 {name} 未出现在单源能力清单"
 
 
-def test_capability_doc_params_from_registry_tables():
-    """参数段来自注册表迁移表——非空且含代表性条目。"""
+def test_capability_doc_params_from_registry():
+    """参数段来自注册点声明(MS-B3 表退役)——非空且含代表性条目。"""
     doc = disc.capability_doc_from_tools()
     assert "各工具的参数：" in doc
     assert "- kb.asset.search:" in doc
     assert '"text": "检索关键词"' in doc
-    # 迁移表抽查: brief 与原文逐字对齐
-    assert disc.TOOL_BRIEFS["kb.baseline"] in doc
-    assert disc.TOOL_PARAM_DOCS["kb.graph"] in doc
+    # 注册点抽查: brief 与迁移文本逐字落位
+    from topoone_app_architect.agent.tools.registry import _ARCH_TOOLS
+    assert _ARCH_TOOLS["kb.baseline"]["brief"] in doc
+    assert _ARCH_TOOLS["kb.graph"]["params_doc"] in doc
 
 
 def test_capability_doc_structure_complete():
@@ -84,14 +85,14 @@ def test_capability_doc_structure_complete():
 
 
 def test_capability_default_is_single_source():
-    """默认单源: 渲染结果含「不在等价模式手写清单内」的注册工具(conv.read)。"""
+    """单源唯一模式(MS-B3): 渲染含注册工具(conv.read); single_source 覆盖键
+    已随 legacy 回退通道退役——设置它不再切换渲染源。"""
     doc = req_agent.chat_system_prompt(None, None)
-    assert "conv.read：" in doc, "默认应走单源渲染(含存量迁移未覆盖的注册工具)"
-    # 覆盖回退: single_source=false → 等价模式(无 conv.read 行)
+    assert "conv.read：" in doc, "应走单源渲染(含全部注册工具)"
     try:
         disc.set_overrides({"single_source": False})
-        legacy = req_agent.chat_system_prompt(None, None)
-        assert "conv.read：" not in legacy
+        still = req_agent.chat_system_prompt(None, None)
+        assert "conv.read：" in still, "回退通道已退役, 覆盖键不再切源"
     finally:
         disc.set_overrides({})
 

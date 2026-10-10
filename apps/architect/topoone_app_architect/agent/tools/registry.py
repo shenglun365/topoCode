@@ -39,6 +39,44 @@ def architect_skills() -> List[Dict[str, Any]]:
 _ARCH_TOOLS: Dict[str, Dict[str, Any]] = {}
 
 
+def derive_params_doc(fn: Callable) -> str:
+    """从 handler 签名自动生成 params_doc 兜底(MS-B1: 签名是唯一真相源)。
+
+    无默认值位置参数标 (必填); root/project(系统自动注入)与 *args/**kwargs
+    不入文档; Optional[X] 剥壳取 X。产物只有形状无语义——语义说明仍应手写
+    在注册点 params_doc, 本函数仅消灭「零参数教育」的生存空间(cv-3 类事故)。
+    """
+    import inspect
+    import typing as _t
+    try:
+        sig = inspect.signature(fn)
+        hints = _t.get_type_hints(fn)
+    except Exception:  # noqa: BLE001
+        return ""
+    parts = []
+    for pname, p in sig.parameters.items():
+        if pname in ("root", "project") \
+                or p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
+            continue
+        hint = hints.get(pname)
+        tn = ""
+        if hint is not None:
+            if _t.get_origin(hint) is _t.Union:
+                inner = [a for a in _t.get_args(hint) if a is not type(None)]
+                if len(inner) == 1:
+                    hint = inner[0]
+            origin = _t.get_origin(hint)
+            if origin is None:
+                tn = getattr(hint, "__name__", str(hint))
+            elif origin in (list, dict):
+                tn = "list" if origin is list else "dict"
+            else:
+                tn = str(hint).replace("typing.", "")
+        has_default = p.default is not inspect.Parameter.empty
+        parts.append(f'"{pname}": {tn or "值"}{"" if has_default else "(必填)"}')
+    return "{" + ", ".join(parts) + "}"
+
+
 def register_architect_tool(name: str, description: str = "",
                             params_doc: str = "", brief: str = "",
                             arg_aliases: Optional[Dict[str, str]] = None,
@@ -131,10 +169,18 @@ def architect_tools() -> List[Dict[str, str]]:
 
 
 def architect_tools_full() -> List[Dict[str, str]]:
-    """全量元数据(含 brief/params_doc)——能力展示面(工具管理页)单源。"""
-    return [{"name": t["name"], "description": t.get("description") or "",
-             "brief": t.get("brief") or "", "params_doc": t.get("params_doc") or ""}
-            for t in _ARCH_TOOLS.values()]
+    """全量元数据(含 brief/params_doc)——能力展示面(工具管理页)单源。
+
+    MS-B1: params_doc 空时以签名自动生成兜底(形状级), 管理页不再出现
+    「无文档」条目; 手写语义文档仍在注册点。
+    """
+    out = []
+    for t in _ARCH_TOOLS.values():
+        pd = (t.get("params_doc") or "").strip() \
+            or derive_params_doc(t["handler"])
+        out.append({"name": t["name"], "description": t.get("description") or "",
+                    "brief": t.get("brief") or "", "params_doc": pd})
+    return out
 
 
 

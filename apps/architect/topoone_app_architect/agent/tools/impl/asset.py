@@ -14,6 +14,8 @@ logger = logging.getLogger("arch_routes.req_agent")
     "资产形态 {name, kind: entity|contract|state|rule|process|decision, level?, desc?, detail?, "
     "astRefs:[{file,symbol,startLine,endLine}]}。实现层资产必须带 astRefs 锚点；"
     "canonicalKey 命中既有资产时旧名优先，LLM 提议名以 proposedNames 返回供设计者定夺。",
+brief='对话式提取落库(按规约产出资产 → 框架值域校验/名称继承/墓碑承接)',
+params_doc='{"assets": [{"name", "kind", "level"?, "desc"?, "detail"?, "astRefs"[{file,symbol,startLine,endLine}]}]}',
 )
 def tool_asset_semantic_save(root: Optional[str] = None,
                              project: Optional[str] = None,
@@ -27,6 +29,8 @@ def tool_asset_semantic_save(root: Optional[str] = None,
     "认知层编辑既有语义资产(仅改名/描述，overlay 审计)：patch={name? 新名(旧名自动入历史), desc? 新描述}。"
     "与 asset.semantic.save(新建)互补——已提取资产的措辞修正用本工具，勿重复 save。"
     "主库关联项目会拒绝(应在主库界面编辑)，错误信息含深链。",
+brief='认知层编辑既有资产(改名/描述；旧名自动入历史，overlay 留痕)',
+params_doc='{"assetId": "sa-xxx", "patch": {"name"?: "新名", "desc"?: "新描述"}}',
 )
 def tool_asset_semantic_update(root: Optional[str] = None,
                                project: Optional[str] = None,
@@ -55,6 +59,8 @@ def tool_asset_semantic_update(root: Optional[str] = None,
     "asset.semantic.merge",
     "合并语义资产：目标资产(intoId)吸收 targetIds 的锚点(并集)，目标行标记 mergedInto 留痕。"
     "用于设计者判定多个资产实为同一概念时。targetName 可选(合并后改名)。",
+brief='合并资产(intoId 吸收 targetIds 锚点；目标留痕 mergedInto)',
+params_doc='{"intoId": "sa-xxx", "targetIds": ["sa-yyy"], "targetName"?: "合并后名称"}',
 )
 def tool_asset_semantic_merge(root: Optional[str] = None,
                               project: Optional[str] = None,
@@ -73,6 +79,8 @@ def tool_asset_semantic_merge(root: Optional[str] = None,
     "asset.semantic.split",
     "拆分语义资产：按锚点组拆出新资产。parts=[{name, anchorKeys:[\"file:symbol\"], desc?}]，"
     "anchorKeys 必须取自原资产 astRefs 的 file:symbol；原资产标记 splitInto 留痕。",
+brief='拆分资产(按 anchorKeys 锚点组拆出新资产；原资产留痕 splitInto)',
+params_doc='{"assetId": "sa-xxx", "parts": [{"name": "…", "anchorKeys": ["file:symbol"], "desc"?: "…"}]}',
 )
 def tool_asset_semantic_split(root: Optional[str] = None,
                               project: Optional[str] = None,
@@ -92,6 +100,8 @@ def tool_asset_semantic_split(root: Optional[str] = None,
     "过程用动宾结构)时调用。ruleText 要具体可判定(如『服务以 XxxService 结尾』)；"
     "scenarios 用适用场景(命名=naming/提取=extract/验收=accept/通用=general)。"
     "设计者在界面点『确认』才生效(active)，点『忽略』则删除——你只提议不生效。",
+brief='把观察到的命名重复模式固化为命名规约提案(pending，待设计者确认/忽略)',
+params_doc='{"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}',
 )
 def tool_convention_propose(root: Optional[str] = None,
                             project: Optional[str] = None,
@@ -121,6 +131,8 @@ def tool_convention_propose(root: Optional[str] = None,
     "acceptance?: {mode?: auto|assisted|manual, criteria?, linkedTests?}, "
     "origin: {quote: 设计者原话引用(必填证据), messageId?}, reqId?}]。"
     "kind/level 必须在当前框架值域内；target 无 file 且无 symbol 会自动标为意图级。",
+brief='把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)',
+params_doc='{"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)',
 )
 def tool_contract_propose(root: Optional[str] = None,
                           project: Optional[str] = None,

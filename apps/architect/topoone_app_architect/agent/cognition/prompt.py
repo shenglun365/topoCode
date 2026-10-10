@@ -4,11 +4,13 @@
 - 块 = {id, render(ctx), priority, required}; required 块(角色/边界/能力协议)
   永不裁剪, 条件块按 priority 升序淘汰
 - 预算 = f(tier) 字符数(t0 宽松 → t4 极简), 由模型能力档案驱动
-- 单源化(B4 默认): capability 块由 _ARCH_TOOLS 注册表 brief+params_doc 渲染
-  (存量迁移表 TOOL_BRIEFS/TOOL_PARAM_DOCS 承载原文); 配置 `single_source: false`
-  可回退等价模式(_CAPABILITY_DOC 原文, 行为等价基线)
+- 单源化(B4, MS-B3 起唯一模式): capability 块由 _ARCH_TOOLS 注册表渲染
+  (brief/params_doc 注册点自声明; 缺省以 derive_params_doc 签名生成兜底)。
+  存量迁移表 TOOL_BRIEFS/TOOL_PARAM_DOCS 与 legacy 等价回退通道(_CAPABILITY_DOC)
+  已退役——教育面回到注册表单源(契约单源架构, 见
+  docs/architect/tool-contract-single-source-2610.md)
 - 覆盖通道: arch_collab_config 键 `prompt.overrides`
-    {"blocks": {"<id>": "替换文本"}, "single_source": true, "budget": {"2": 12000}}
+    {"blocks": {"<id>": "替换文本"}, "budget": {"2": 12000}}
 """
 from __future__ import annotations
 
@@ -126,17 +128,13 @@ def posture_text() -> str:
     return _POSTURE_TEXT
 
 
-def _r_capability(ctx: Dict[str, Any]) -> str:
-    # B4 单源化默认开(双轨漂移消灭); `single_source: false` 覆盖可回退等价模式
-    if _overrides().get("single_source", True):
-        doc = capability_doc_from_tools(
-            tool_surface=ctx.get("tool_surface") or "full",
-            kb_enabled=ctx.get("kb_enabled", True),
-            allowed=ctx.get("gu_allowed"),
-            slim=bool(ctx.get("prompt_slim")))
-        if doc:
-            return doc
-    return _legacy_capability_doc()
+def _r_capability(ctx: Dict[str, Any]):
+    # B4 单源化(MS-B3 起唯一模式): legacy 等价回退通道已退役。
+    return capability_doc_from_tools(
+        tool_surface=ctx.get("tool_surface") or "full",
+        kb_enabled=ctx.get("kb_enabled", True),
+        allowed=ctx.get("gu_allowed"),
+        slim=bool(ctx.get("prompt_slim")))
 
 
 # R3.4: 工具面按挡裁剪(toolsurface 消费落地; kb=False → 检索工具同裁)
@@ -171,11 +169,6 @@ def _filter_tools(entries, tool_surface: str, kb_enabled: bool):
             continue
         out.append((name, entry))
     return out
-
-
-def _legacy_capability_doc() -> str:
-    from ...agent.tools import req_agent as _req2
-    return _req2._CAPABILITY_DOC
 
 
 def _r_ir_schema(_ctx: Dict[str, Any]) -> str:
@@ -264,121 +257,6 @@ def render_system(ctx: Dict[str, Any]) -> str:
 
 
 
-# ── B4 工具文档迁移表(与 _CAPABILITY_DOC 逐字对齐; 单源渲染的存量数据源) ──
-# brief: 能力清单行(`- name：brief`); params_doc: 参数形状行(`- name: {…}`)。
-# 属提示词内容故归本模块(层序: cognition 不得反向依赖 tools);
-# 新增工具优先在注册装饰器直接传 params_doc/brief, 本表只承载存量迁移。
-
-TOOL_BRIEFS: Dict[str, str] = {
-    "kb.asset.search":
-        "全文检索知识库架构资产(组件/ER/实体/流程)，按关键词命中并按相关度排序",
-    "kb.code_mappings": "查询资产对应的代码映射(文件/行号)，锁定「改哪里」",
-    "kb.baseline": "读取当前项目 KB 基线(git 表示：分支/提交/基线版本)",
-    "kb.graph": "遍历组件依赖图(依赖/被调用)，判断需求改动的影响链路",
-    "map.overview":
-        "资产地图总览——组件目录(含图层级 L0/L1/文件数/依赖)+资产统计；穷举/统计/层级类提问先看",
-    "map.component": "组件档案——单组件的层级/文件/依赖出入/组件内语义资产",
-    "map.assets":
-        "语义资产表列检索——kind/level 过滤+关键词，Markdown 表格浏览清单",
-    "map.rules": "项目规约全集(架构+编码+命名规约+词汇表，编码/评估必须遵守)",
-    "map.graph": "关系图(mermaid)——component 组件依赖图 / semantic 语义关系图",
-    "asset.semantic.search":
-        "检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点；"
-        "支持 kind/level 过滤；includeGlobal=true 时合并主库全局层通用资产)",
-    "asset.semantic.stats": "语义资产统计(总量/按类别/按粒度/状态)",
-    "asset.semantic.extract":
-        "按指令从最新代码提取语义数据资产并落库(指令化唯一入口：comm 时 key=组件ID 为权威范围，确定执行)",
-    "asset.semantic.detail": "读取单个语义资产的完整描述/结构化细节/AST 锚点",
-    "asset.semantic.mappings": "查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」",
-    "asset.semantic.reconcile": "校验资产新鲜度，标记因文件变更/新增文件影响而过期的资产(需更新后使用)",
-    "asset.semantic.refresh": "更新过期资产(增量重提；失败软删并重新生成)",
-    "code.read_symbols": "读取项目源码片段(按文件/符号)，对话式提取前先看真实代码",
-    "asset.semantic.save":
-        "对话式提取落库(按规约产出资产 → 框架值域校验/名称继承/墓碑承接)",
-    "asset.semantic.update":
-        "认知层编辑既有资产(改名/描述；旧名自动入历史，overlay 留痕)",
-    "asset.semantic.merge":
-        "合并资产(intoId 吸收 targetIds 锚点；目标留痕 mergedInto)",
-    "asset.semantic.split":
-        "拆分资产(按 anchorKeys 锚点组拆出新资产；原资产留痕 splitInto)",
-    "convention.propose":
-        "把观察到的命名重复模式固化为命名规约提案(pending，待设计者确认/忽略)",
-    "contract.propose":
-        "把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)",
-    "req.propose":
-        "需求提案(新建或幂等更新)——**开发类需求**(要写代码/改代码/交付组件)时调用，"
-        "创建需求卡即 ready(designMd=选型与结构)；分析/问答类请求不要产卡。"
-        "用户要求 编写脚本/工具/程序 时**必须先调本工具**，由 /执行 链路产出代码——"
-        "**严禁直接输出成品代码**(python/bash 等)替代需求收敛",
-    "req.amend":
-        "需求修订(通用)——用户对既有需求 补充/完善/调整 时调用，追加新 draft "
-        "版本(append-only)。reqId 勿传(系统自动取会话绑定需求)",
-    "ctx.search":
-        "跨会话检索历史上下文(单元/消息/备案文档)——回答涉及历史讨论/已有结论时先检索，避免重复讨论",
-    "ctx.get": "读取指定会话的上下文包(摘要+关键单元+备案文档清单)",
-    "ctx.summarize": "生成/刷新会话摘要",
-    "probe.run":
-        "方案草图(probe)——调 coding agent 在代码快照上产出改动思路与伪 diff，供用户预览确认后再正式执行",
-    "capability.evaluate":
-        "图文评估——target=plan 评估会话最新方案(变更足迹×语义资产影响面+关系子图图)；"
-        "target=execution 评估执行结果(实际 diff 足迹 + 与方案的偏差集)。"
-        "报告内资产卡可点击联动资产地图。方案确认前/执行完成后调用",
-    "capability.mine":
-        "能力提炼——扫描会话(消息+方案/回执单元)提炼 规约/流程/技巧/skill 提案入待审队列, "
-        "设计者采纳后生效(规约入规约库/skill 文档注入能力文档)。会话出现可复用模式时主动提议",
-}
-
-TOOL_PARAM_DOCS: Dict[str, str] = {
-    "kb.asset.search": '{"text": "检索关键词", "preferred": ["资产ID(可选)"]}',
-    "kb.code_mappings": '{"asset_ids": ["资产ID"]}',
-    "kb.baseline": "{}",
-    "kb.graph": '{"comp_ids": ["组件ID"]}',
-    "project.ctx": "{}",
-    "asset.semantic.search":
-        '{"text": "关键词", "kind": "entity|contract|state|rule|process|decision(可选)", '
-        '"level": "business|implementation|logic(可选)", "limit": 20, "offset": 0, '
-        '"scopes": ["comm-…(可选)"]}',
-    "map.overview": "{}",
-    "map.component": '{"name": "组件名或id"}',
-    "map.assets": '{"query": "关键词", "kind": "类别(可选)", "level": "粒度(可选)", "limit": 30}',
-    "map.rules": "{}",
-    "map.graph": '{"kind": "component|semantic"}',
-    "asset.semantic.stats": "{}",
-    "asset.semantic.extract":
-        '{"scope": {"type": "comm|files|symbols|project", "key"?, "files"?, "symbols"?}, "kinds"?}'
-        "(工作流见 extract 技能)",
-    "asset.semantic.detail": '{"asset_id": "sa-xxx"}',
-    "asset.semantic.mappings": '{"asset_ids": ["sa-xxx"]}',
-    "asset.semantic.reconcile": "{}",
-    "asset.semantic.refresh": '{"asset_id": "sa-xxx"}',
-    "code.read_symbols":
-        '{"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行}',
-    "asset.semantic.save":
-        '{"assets": [{"name", "kind", "level"?, "desc"?, "detail"?, '
-        '"astRefs"[{file,symbol,startLine,endLine}]}]}',
-    "asset.semantic.update": '{"assetId": "sa-xxx", "patch": {"name"?: "新名", "desc"?: "新描述"}}',
-    "asset.semantic.merge":
-        '{"intoId": "sa-xxx", "targetIds": ["sa-yyy"], "targetName"?: "合并后名称"}',
-    "asset.semantic.split":
-        '{"assetId": "sa-xxx", "parts": [{"name": "…", "anchorKeys": ["file:symbol"], "desc"?: "…"}]}',
-    "convention.propose":
-        '{"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}',
-    "contract.propose":
-        '{"items": [{kind, level?, target{file?,symbol?}, behavior{steps,branches?}, zAxis?, '
-        "acceptance?, origin{quote 必填}, reqId?}]}(构造纪律见 contract 技能, 🧾)",
-    "req.propose":
-        '{"title": "需求标题(必填)", "requirementMd": "需求目标(全文)", '
-        '"designMd": "选型与结构方案", "priority": "P1", "estMin": 30, '
-        '"acceptanceMd": "验收条目(md)", "newRequirement": false(同会话已建卡时'
-        '强制新建才传)} —— reqId 勿传',  # noqa: E501
-    "req.amend": '{"requirementMd": "修订后需求目标(全文, 可选)", '
-                 '"designMd": "修订后方案(可选)", '
-                 '"acceptance": ["验收条目"], "allowedScope": ["目录"], '
-                 '"forbiddenScope": ["目录"], "reasoning": "原因"} —— 只传要调整的'
-                 '字段; 标题修订用 {"title": "新标题"}(reqId 勿传, 自动取会话绑定)',  # noqa: E501
-    "capability.evaluate": '{"target": "plan|execution"}',
-    "capability.mine": '{"conversation"?: "cv-…(缺省当前会话)}',
-}
 
 # ── 单源渲染: 工具注册表 → 能力文档 ────────────────────────────────────
 
@@ -402,9 +280,8 @@ _DIAGRAM_OUTPUT_DOC = (
 
 
 def _tool_brief(name: str, entry: Dict[str, Any]) -> str:
-    """能力清单一行简介: 注册点 brief → 迁移表 → 描述首句兜底。"""
-    brief = (entry.get("brief") or "").strip() \
-        or TOOL_BRIEFS.get(name, "")
+    """能力清单一行简介: 注册点 brief → 描述首句兜底(MS-B3 表退役后单源)。"""
+    brief = (entry.get("brief") or "").strip()
     if brief:
         return brief
     desc = (entry.get("description") or "").strip()
@@ -412,8 +289,12 @@ def _tool_brief(name: str, entry: Dict[str, Any]) -> str:
 
 
 def _tool_params_doc(name: str, entry: Dict[str, Any]) -> str:
-    return (entry.get("params_doc") or "").strip() \
-        or TOOL_PARAM_DOCS.get(name, "")
+    """参数形状: 注册点 params_doc → 签名自动生成兜底(MS-B1/B3)。"""
+    pd = (entry.get("params_doc") or "").strip()
+    if pd:
+        return pd
+    from ...agent.tools.registry import derive_params_doc
+    return derive_params_doc(entry.get("handler"))
 
 
 def capability_doc_from_tools(tool_surface: str = "full",
