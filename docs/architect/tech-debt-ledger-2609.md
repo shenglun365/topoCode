@@ -4,6 +4,7 @@
 > 规则: 偿还一项勾一项; 新挂账必须附理由与归属轨道(禁止无主挂账)。
 > 更新: 2026-09-22(架构采纳轨道待决策清单入账; 两份已消费计划文档残余转移+清理)。
 > 更新: 2026-10-10(对标增强轨道待决策清单入账, 来源 benchmark-adoption-assessment-2610.md §四)。
+> 更新: 2026-10-10(全库死代码清理收口入账: 见 §「死代码清理 2026-10-10」)。
 
 ## D4 · 行数棘轮抬升的偿还(未做, 绑定重构轨道)
 
@@ -129,6 +130,19 @@
 | task.propose tasks 列表折叠 | cv-188 遗留 | 可读参数错误已能让模型一轮自纠; 多卡连发折叠未做 | 审计表再现高频 `tasks` 误传时加 |
 | KB 关联口径放宽评估 | cv-187 注意点 | 判定单源 = kb_degraded(无项目或无 baselineId); 「仅看 kbProjectId 关联」未采纳 | 出现「已关联未建基线却需 kb 检索」的真实用例时评估(影响全插件 KB API 口径) |
 | 提示级/执行级执法边界收窄 | 审计 B1 | 澄清指令仍是提示级(挡位引擎 §14.7 声明); KB 面与落卡收尾已执法级 | 澄清误触发率可测后, 评估 propose 前置确定性门 |
+
+## 死代码清理 2026-10-10(已执行, 遗留入账)
+
+> 5 批 commit(aa8b1496/77fcde94/bc65bb57/ffdc351e/246ffec7), 净删 ≈ −4,476 行。
+> 已还: 前端死码 7 文件+21 死类型 / 失效脚本 6 / git 产物 untrack 31 / 断链 import ×3 /
+> unowned_job+frameworks 接线修复 / test:py 接入三套孤儿测试。
+
+| 项 | 现状 | 触发/验收 |
+|---|---|---|
+| EventKind `turn_done` 漂移 | `test_event_kind_constants_consistent` 红(EventKind 常量与 _KINDS 不一致; 系 execution 域在途改动引入, 清理时经 stash 复核非清理所致) | turn_done 事件落地者补 _KINDS + runner-events 基线后转绿 |
+| tagent 双轨对拍漂移 ×3 | `test_start_pipeline_ab_analysis`/`_ab_all_skipped`(weighted_done 口径 legacy=60/tagent=180)、`test_tagent_host::test_list_batch_files`(L0 社区调用 0≠2)已标 xfail(strict=False) | 管线 owner 裁决双轨口径后摘 xfail |
+| arch_routes `/tags` 端点疑似孤儿 | 前端 tag-store 已删(docstring 自述「承载前端 tag-store 持久化」)——端点与内置分类法是否仍被 KB 链路消费未核证, 故未删 | KB 面板接入 tags API 时核证; 无消费者则随下次 MS 删除 |
+| ESLint 存量 9736 | 较清理前 9741 净减; MS1 豁免备案口径不变 | MS6/MS7 顺带偿还 |
 
 ## 已偿还(索引)
 
