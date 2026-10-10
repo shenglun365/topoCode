@@ -68,6 +68,7 @@ from ...agent.tools.registry import (  # noqa: F401,E402
     architect_tools,
     register_architect_skill,
     register_architect_tool,
+    resolve_arg_aliases,
 )
 
 # ── Skills/Tools 注册表与工具协议: 实现迁至 agent.tools(P1) ──
@@ -276,7 +277,19 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
         except Exception:  # noqa: BLE001
             pass
     fn = entry["handler"]
-    kwargs = _coerce_args(fn, dict(arguments or {}))
+    # 别名归一(注册声明驱动, 先于类型收敛——归一后的目标键才能按注解收敛)
+    kwargs, alias_mapped = resolve_arg_aliases(entry, dict(arguments or {}))
+    kwargs = _coerce_args(fn, kwargs)
+    if alias_mapped:
+        try:
+            from ...agent.reflection import dataset as _lds_alias
+            _lds_alias.record("arg_alias", tool=name,
+                              items=[{"alias": a, "target": t}
+                                     for a, t in alias_mapped])
+        except Exception:  # noqa: BLE001 — 遥测不碍主链
+            pass
+        logger.info("[arg-alias] %s: %s", name,
+                    ", ".join(f"{a}>{t}" for a, t in alias_mapped))
     params = inspect.signature(fn).parameters
     if "root" in params and "root" not in kwargs:
         kwargs["root"] = root
@@ -1324,6 +1337,14 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
 @register_architect_tool(
     "task.propose",
     "创建 coding subagent 实施任务卡(轻门禁: 用户确认后执行)。方案成熟/用户要求实施时调用。",
+    params_doc='{"title": "任务短标题(必填)", "instruction": "任务全文: 需求目标+方案要点+验收(必填)", '
+               '"executorType": "可选执行器类型(cline/opencode 等)", "safetyClass": "可选: readonly|mutating(默认)|high-stakes", '
+               '"workTags": "可选工作类型标签数组, 如 [\\"analysis\\",\\"docs\\"]"}',
+    brief="任务卡创建(title+instruction 全文)",
+    arg_aliases={"requirementMd": "instruction", "designMd": "instruction",
+                 "acceptanceMd": "instruction"},
+    arg_alias_sections={"requirementMd": "需求目标", "designMd": "实现方案",
+                        "acceptanceMd": "验收标准"},
 )
 def tool_task_propose(title: str, instruction: str,
                       executorType: Optional[str] = None,

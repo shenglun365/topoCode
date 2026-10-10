@@ -6,7 +6,7 @@ P1 自 req_agent.py 迁入(注册表数据结构 + 装饰器 + 策略常量)。
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 # ── Skills 注册表(architect 专属) ──────────────────────────────────────
 
@@ -40,17 +40,90 @@ _ARCH_TOOLS: Dict[str, Dict[str, Any]] = {}
 
 
 def register_architect_tool(name: str, description: str = "",
-                            params_doc: str = "", brief: str = "") -> Callable:
+                            params_doc: str = "", brief: str = "",
+                            arg_aliases: Optional[Dict[str, str]] = None,
+                            arg_alias_sections: Optional[Dict[str, str]] = None,
+                            ) -> Callable:
     """注册工具。B4 单源: brief(能力清单一行简介)/params_doc(参数形状)为
     能力文档渲染元数据, 注册点直接传参(优先于 prompt.py 迁移表)。
+    arg_aliases: 参数别名声明(机制与契约分离——执行环统一折叠, 工具自声明
+    兼容面)。{别名参数: 目标参数}: 模型误传别名时确定性改名续执行, 与
+    _coerce_args 类型收敛同族, 是 cv-188 报错兜底的前置防线。注册时
+    fail-fast: 目标参数必须存在于 handler 签名(防契约漂移)。
+    arg_alias_sections: {别名参数: 节标题}——多别名汇同一目标时按声明序以
+    '## {节标题}' 分节拼接; 单别名直填不带节。
     注: 存量迁移表(TOOL_BRIEFS/TOOL_PARAM_DOCS)在 cognition/prompt.py——
     它们是提示词内容而非执行元数据, 放 cognition 层避免反向依赖本模块。"""
     def decorator(fn):
+        aliases = dict(arg_aliases or {})
+        if aliases:
+            import inspect as _inspect
+            sig_params = set(_inspect.signature(fn).parameters)
+            bad = {a: t for a, t in aliases.items() if t not in sig_params}
+            if bad:
+                raise ValueError(
+                    f"工具 {name} 的 arg_aliases 目标参数不存在于签名: {bad}"
+                    f"(签名参数: {sorted(sig_params)})")
         _ARCH_TOOLS[name] = {"name": name, "description": description,
                              "handler": fn,
-                             "params_doc": params_doc, "brief": brief}
+                             "params_doc": params_doc, "brief": brief,
+                             "arg_aliases": aliases,
+                             "arg_alias_sections": dict(arg_alias_sections or {})}
         return fn
     return decorator
+
+
+def resolve_arg_aliases(entry: Dict[str, Any],
+                        kwargs: Dict[str, Any]) -> tuple:
+    """通用别名归一(纯函数, 零工具名/参数名字面量): 按注册声明折叠别名参数。
+
+    语义(与 _coerce_args 同层的确定性兜底, 非语义修复):
+    - 别名键始终弹出(否则 fn(**kwargs) 必 TypeError);
+    - 显式参数优先: 目标已给出且非空 → 别名丢弃;
+    - 目标缺省 → 别名填充: 单别名原值直填(类型交 _coerce_args 收敛);
+      多别名汇同一目标按声明序以 arg_alias_sections 分节拼接(缺省裸值
+      空行拼接)。
+    返回 (新 kwargs, [(别名, 目标), ...] 命中清单)——调用方记遥测。
+    """
+    aliases: Dict[str, str] = entry.get("arg_aliases") or {}
+    if not aliases or not kwargs:
+        return kwargs, []
+    hit = [a for a in aliases if a in kwargs]
+    if not hit:
+        return kwargs, []
+    sections: Dict[str, str] = entry.get("arg_alias_sections") or {}
+    order = {a: i for i, a in enumerate(aliases)}
+    out = dict(kwargs)
+    mapped: List[tuple] = []
+    by_target: Dict[str, List[str]] = {}
+    for a in hit:
+        by_target.setdefault(aliases[a], []).append(a)
+    for target, alias_list in by_target.items():
+        alias_list.sort(key=lambda a: order[a])
+        explicit = out.get(target)
+        if isinstance(explicit, str):
+            explicit = explicit.strip()
+        vals: List[tuple] = []
+        for a in alias_list:
+            v = out.pop(a)
+            if explicit:
+                continue            # 显式参数优先, 别名丢弃
+            if isinstance(v, str):
+                v = v.strip()
+            if v in (None, "", [], {}):
+                continue
+            vals.append((a, v))
+            mapped.append((a, target))
+        if vals and not explicit:
+            if len(vals) == 1:
+                out[target] = vals[0][1]
+            else:
+                parts = []
+                for a, v in vals:
+                    title = sections.get(a)
+                    parts.append(f"## {title}\n{v}" if title else str(v))
+                out[target] = "\n\n".join(parts)
+    return out, mapped
 
 
 def architect_tools() -> List[Dict[str, str]]:
