@@ -145,3 +145,20 @@ def test_no_phantom_names_in_refactor_hotspots(tmp_path, monkeypatch):
     assert "def repair_fabricated_claim" not in src   # 守卫修复外循环已拆除(cv-175)
     assert "_srow_to_api" not in inspect.getsource(mining)
     assert hasattr(dossier, "logger")
+
+
+def test_tool_err_brief_keeps_supported_params_list():
+    """cv-188 自纠闭环(3a): 错误串截断保「支持的参数」清单全量——
+    原 160 字符截断恰好砍掉参数清单, 模型失去自纠所需信息(cv-3 实证)。"""
+    from topoone_app_architect.agent.turns.chat import _tool_err_brief
+
+    long_err = ("task.propose 参数 requirementMd 不受支持"
+                + "x" * 200 + "。支持的参数: title, instruction, executorType, "
+                "root, project, safetyClass, workTags（root/project 自动注入, 无需传）")
+    brief = _tool_err_brief(long_err)
+    assert "title, instruction, executorType" in brief      # 清单全量保留
+    assert brief.index("支持的参数") < brief.index("title")
+    assert len(brief) < len(long_err)                        # 头部详情被截
+
+    plain = "某工具连接超时" + "y" * 300
+    assert _tool_err_brief(plain) == plain[:160]             # 无清单维持原截断

@@ -16,6 +16,17 @@ from .base import (_MAX_TOOL_ROUNDS, _MIN_CHAT_MAX_TOKENS, _STREAM_IDLE_TIMEOUT_
 
 from ..cognition.prompt import TOOL_FEED_PREFIX as _TOOL_FEED_PREFIX
 from ..governance.flow_policy import CLARIFY_ACTION
+
+_SUPPORTED_PARAMS_MARK = "。支持的参数: "
+
+
+def _tool_err_brief(err: str, head_limit: int = 80) -> str:
+    """工具错误串结构化截断(cv-188 自纠闭环): 含「支持的参数」清单时保清单
+    全量(自纠所需)、截头部详情; 其余维持 160 字符截断。"""
+    if _SUPPORTED_PARAMS_MARK in err:
+        head, _, params = err.partition(_SUPPORTED_PARAMS_MARK)
+        return head[:head_limit] + _SUPPORTED_PARAMS_MARK + params
+    return err[:160]
 logger = logging.getLogger(__name__)
 
 
@@ -244,7 +255,7 @@ async def _chat_land(io: "_TurnIO", msgs: list, gate: dict, conv: dict,
         detail = "LLM 未返回内容"
         if tool_errors:
             detail += "；工具失败: " + "; ".join(
-                f"{k}: {str(v)[:160]}" for k, v in list(tool_errors.items())[:3])
+                f"{k}: {_tool_err_brief(str(v))}" for k, v in list(tool_errors.items())[:3])
         if loop_fell_back:
             detail += "（流式通道中断，已走同步降级通道仍未产出）"
         elif int(loop.get("tool_round") or 0) >= _MAX_TOOL_ROUNDS:
