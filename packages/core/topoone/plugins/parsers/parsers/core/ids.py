@@ -9,7 +9,7 @@
   该局限为设计内行为。
 - edge_id = sha256("{source}->{target}:{kind}")[:16] —— 节点稳定则边稳定。
 
-本模块是全仓唯一的 ID 生成点(walker/emitter/db_adapter 统一引用)，
+本模块是全仓唯一的 ID 生成点(walker/emitter 统一引用)，
 禁止在他处内联哈希实现。
 """
 from __future__ import annotations

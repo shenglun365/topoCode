@@ -55,3 +55,8 @@ def run_all(tables: list[FileSymbolTable]) -> list[Edge]:
         except Exception:
             pass
     return all_edges
+
+
+# 解析器以 import 副作用自注册（analyst_runner 仅 import 本包——不在此导入则注册永不触发）
+from . import web_frameworks as _web_frameworks  # noqa: E402,F401
+from . import extra_frameworks as _extra_frameworks  # noqa: E402,F401

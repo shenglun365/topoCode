@@ -76,7 +76,3 @@ def _extract_job_loop(ctx) -> dict:
 
 from . import job_runner as _job_runner
 _job_runner.register("extract_unowned", _extract_job_loop)
-
-
-from . import job_runner as _job_runner
-_job_runner.register("extract_unowned", _extract_job_loop)

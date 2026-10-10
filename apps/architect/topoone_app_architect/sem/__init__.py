@@ -9,7 +9,8 @@ router = APIRouter()
 
 # 作业子系统(批1-3/1-4/2-4)：统一调度器注册执行体 + jobs API 路由。
 from . import sync_extract as _sync_extract  # noqa: E402,F401  (注册 extract_delta)
-from . import unowned as _unowned  # noqa: E402,F401  (注册 extract_unowned)
+from . import unowned as _unowned  # noqa: E402,F401  (清单/上限单源)
+from . import unowned_job as _unowned_job  # noqa: E402,F401  (注册 extract_unowned)
 from . import structural_extract as _structural_extract  # noqa: E402,F401  (注册 extract_impl)
 from . import logic_extract as _logic_extract  # noqa: E402,F401  (注册 extract_logic)
 from . import component_view as _component_view  # noqa: E402,F401  (注册 gen_component_view)
