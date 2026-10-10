@@ -511,77 +511,8 @@ export interface AgentMessage {
 }
 
 
-export interface Snapshot {
-  id: string
-  name: string
-  version: string
-  createdAt: number
-  model: ArchitectureModel
-}
-
-/** 演化帧(B2+ 真数据): ref 点上的组件图谱推演快照。 */
-/** 统一图 JSON（canonical + 存在性投影）——动画机制重裁后的演化帧数据。 */
-export interface EvolutionGraphNode {
-  key: string
-  label: string
-  container?: string
-}
-
-export interface EvolutionGraphEdge {
-  key?: string
-  from: string
-  to: string
-}
-
-export interface EvolutionGraphFrame {
-  id: string
-  ref: string
-  label: string
-  /** 该帧存在的节点/边 key（边存在 = 两端节点均在场） */
-  nodes: string[]
-  edges: string[]
-  /** 该帧 change=modified 的节点 key（播放层高亮脉冲） */
-  modified: string[]
-}
-
-export interface EvolutionFrames {
-  base: string
-  head: string
-  /** 帧粒度: component(组件依赖) | file(变更文件) */
-  layer?: 'component' | 'file'
-  canonical: {
-    nodes: EvolutionGraphNode[]
-    edges: EvolutionGraphEdge[]
-    containers: { key: string; label: string }[]
-  }
-  frames: EvolutionGraphFrame[]
-}
 
 
-
-
-
-
-
-
-export interface ArchitectureSpec {
-  version: string
-  overrides: SpecOverride[]
-  explicitRules: SpecRule[]
-  derivedRules: SpecRule[]
-  changelog: SpecChangeEntry[]
-}
-
-
-
-export interface StagingModel {
-  scope: { filesChanged: string[]; added: number; modified: number; deleted: number; deletedHighRisk: boolean }
-  grade: DiffGrade
-  gradeBasis: string
-  gradeAction: string
-  affectedComponents: string[]
-  layers: StagingLayerStatus
-}
 
 // ============ 系统管理：LLM 模型配置 ============
 
@@ -613,30 +544,6 @@ export interface ArchLlmImportResult {
   added: number
   preserved: number
 }
-
-export interface IncrementalLogEntry {
-  id: string
-  time: number
-  scope: string
-  grade: DiffGrade
-  files: string[]
-  edgesChanged: number
-  reExplained: string[]
-  boundaryChanged: string[]
-}
-
-
-export interface ComplianceCheck {
-  id: string
-  name: string
-  kind: ComplianceKind
-  pass: boolean
-  level: 'blocker' | 'major' | 'minor'
-  detail: string
-  scope: string
-}
-
-export type GateKey = 'codeMerge' | 'specChange' | 'baselineCreate'
 
 export interface Rebaseline {
   status: RebaselineStatus
@@ -834,63 +741,6 @@ export interface CodeMapping {
   note: string
 }
 
-// ============ 系统基线：概要信息 ============
-
-/** 系统基线概要信息(顶部可折叠信息栏)。 */
-export interface BaselineInfo {
-  gitTag: string
-  branch: string
-  gitDate: number
-  analyzedAt: number
-  archVersion: string
-  commit: string
-  desc: string
-}
-
-// ============ 系统基线：知识库复合查询 ============
-
-
-
-
-
-// ============ Greenfield：架构蓝图 ============
-
-export interface Blueprint {
-  id: string
-  title: string
-  description: string
-  model: ArchitectureModel
-  designTreeRootId?: string
-  source: 'agent-draft' | 'user' | 'agent+user'
-  status: 'draft' | 'confirmed'
-  createdAt: number
-  confirmedAt?: number
-}
-
-// ============ Greenfield：DesignTree 递归细化 ============
-
-
-
-// ============ Greenfield：脚手架 ============
-
-
-export interface ScaffoldFile {
-  path: string
-  action: 'create' | 'modify' | 'skip'
-  summary: string
-}
-
-export interface ScaffoldResult {
-  token: string
-  files: ScaffoldFile[]
-  validation: { build: boolean; vet: boolean; test: boolean }
-}
-
-
-// ============ Greenfield：抽取（knowledge base bootstrap） ============
-
-
-
 // ============ Greenfield：引导工作流 ============
 
 export type MissionKey =
@@ -1009,20 +859,7 @@ export interface DataStream {
   change: ChangeType
 }
 
-export interface StagingLayerStatus {
-  file: { reParsed: number; reusedByHash: number; edgesChanged: number }
-  community: { refined: number; dirty: number; action: string }
-  semantic: { reExplained: number; dirty: number; inherited: number }
-}
-
 export type AgentMsgRole = 'user' | 'assistant' | 'tool'
-
-export interface SpecRule {
-  id: string
-  text: string
-  level: 'blocker' | 'major' | 'minor'
-  source: SpecLayerKind
-}
 
 export interface SemanticAssetField {
   name: string
@@ -1038,13 +875,6 @@ export interface ChangeItem {
 }
 
 export type UnitTestStatus = 'idle' | 'running' | 'passed' | 'failed' | 'error' | 'skipped'
-
-export interface SpecOverride {
-  file: string
-  communityKey: string
-  pinned: boolean
-  note: string
-}
 
 export interface EntityMethod {
   name: string
@@ -1087,16 +917,7 @@ export interface ConversationMessage {
 
 /** 会话历史摘要(历史导入列表条目)。 */
 
-export type ComplianceKind = 'boundary' | 'spec' | 'critical' | 'direction'
-
 export type EntityClassKind = 'class' | 'struct' | 'value-object' | 'dto'
-
-export interface SpecChangeEntry {
-  version: string
-  date: number
-  note: string
-  confirmedBy: string
-}
 
 export interface SemanticAssetTransition {
   from?: string
@@ -1105,8 +926,6 @@ export interface SemanticAssetTransition {
   condition?: string
   action?: string
 }
-
-export type DiffGrade = 'S' | 'M' | 'L'
 
 export type ExternalCallStatus = 'ok' | 'pending' | 'blocked'
 
@@ -1267,8 +1086,6 @@ export interface DesignStep {
   estMin?: number
   context?: string[]
 }
-
-export type SpecLayerKind = 'override' | 'explicit' | 'derived'
 
 export type AgentToolType = 'write-file' | 'run-command' | 'run-test'
 
