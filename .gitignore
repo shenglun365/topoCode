@@ -32,6 +32,13 @@ npm-debug.log*
 # python
 *.pyc
 __pycache__/
+*.egg-info/
+
+# Vite dev server temp files
+*.timestamp-*.mjs
+
+# pip marker
+build/.pip-cache-installed
 
 # Build artifacts
 build/render-worker-bundled.js
