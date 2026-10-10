@@ -712,8 +712,9 @@ def tool_req_amend(reqId: str = "", designMd: str = "", requirementMd: str = "",
 @register_architect_tool(
     "conv.read",
     "读取会话(含归档)用于回顾/提炼/引用到新会话: 返回标题/状态/角色/最近消息。"
-    "归档会话只读——历史回顾、交接引用、提炼总结用本工具, 不能向其发送消息。"
-    "参数：convId(会话 id)、limit?(消息条数, 默认 20)。",
+    "归档会话只读——历史回顾、交接引用、提炼总结用本工具, 不能向其发送消息。",
+    params_doc='{"convId": "会话 id(必填)", "limit": "消息条数(可选, 默认20, 上限100)"}',
+    brief="读取会话历史(convId)",
 )
 def tool_conv_read(convId: str = "", limit: int = 20) -> Dict[str, Any]:
     from ... import store as _store
@@ -1387,6 +1388,10 @@ def tool_help_lookup(query: str = "", topic: str = "") -> Dict[str, Any]:
     "沉淀/更新会话知识单元(artifact 类型: 结论、约定、待办、可复用片段等分析性知识)。"
     "任务回执与里程碑报告系统已自动沉淀(execution_report/analysis), "
     "本工具用于补充人工/分析性知识。",
+    params_doc='{"title": "单元标题(必填)", "content": "单元正文(必填)", '
+               '"unitId": "已有单元 id(更新模式; 缺省=新建)", '
+               '"conversationId": "可选(缺省=当前会话)", "reqId": "可选关联需求"}',
+    brief="沉淀/更新会话知识单元(title+content)",
 )
 def tool_asset_upsert(title: str, content: str,
                       unitId: Optional[str] = None,
@@ -1433,7 +1438,10 @@ def tool_asset_list(type: Optional[str] = None, q: Optional[str] = None,
 
 @register_architect_tool(
     "asset.delete",
-    "删除会话知识单元(误沉淀/过期知识清理)。",
+    "删除会话知识单元(误沉淀/过期知识清理)。**破坏性操作**: 删除不可恢复, "
+    "仅对确认误沉淀的单元使用。",
+    params_doc='{"unitId": "待删除单元 id(必填)"}',
+    brief="删除会话知识单元(破坏性)",
 )
 def tool_asset_delete(unitId: str) -> Dict[str, Any]:
     from ...store import ContextUnitsStore

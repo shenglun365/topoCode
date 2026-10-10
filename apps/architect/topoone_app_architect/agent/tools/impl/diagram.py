@@ -15,6 +15,7 @@ logger = logging.getLogger("arch_routes.req_agent")
     "从结构化中间表示(IR)生成语法正确的 Mermaid/PlantUML 图代码。"
     "LLM 只描述图的结构(节点/边/分组/方向)，由本工具生成精确代码，"
     "避免小参数模型直接输出 mermaid/plantuml 源码时的语法错误。",
+    params_doc='{"ir": "图 IR 对象(必填: nodes/edges/分组/方向等结构描述)"}',
 )
 def tool_diagram_build(ir: Dict[str, Any]) -> Dict[str, Any]:
     from ....arch_routes import diagram as _diagram
@@ -25,6 +26,7 @@ def tool_diagram_build(ir: Dict[str, Any]) -> Dict[str, Any]:
     "diagram.validate",
     "校验 Mermaid/PlantUML 代码语法。返回 {valid, errors, warnings}。"
     "生成图后建议校验一次，语法有问题时修正 IR 重新调用 diagram.build。",
+    params_doc='{"code": "图代码文本(必填)", "lang": "可选: mermaid(默认)|plantuml"}',
 )
 def tool_diagram_validate(code: str, lang: str = "mermaid") -> Dict[str, Any]:
     from ....arch_routes import diagram as _diagram

@@ -87,7 +87,7 @@
   "agent/tools/impl/map.py": 67,
   "agent/tools/impl/semantic.py": 217,
   "agent/tools/protocol.py": 181,
-  "agent/tools/registry.py": 72,
+  "agent/tools/registry.py": 152,
   "agent/tools/req_agent.py": 1466,
   "agent/turns/__init__.py": 9,
   "agent/turns/base.py": 62,

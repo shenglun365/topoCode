@@ -385,18 +385,25 @@ def register_chat_tools() -> None:
     """注册 ctx.* 为会话 agent 工具(幂等)。"""
     from ...agent.tools.req_agent import register_architect_tool
 
-    @register_architect_tool("ctx.search", "跨会话检索历史上下文(单元/消息/备案文档)")
+    @register_architect_tool(
+        "ctx.search", "跨会话检索历史上下文(单元/消息/备案文档)",
+        params_doc='{"query": "检索关键词(必填)", "type": "可选过滤: unit|message|doc", '
+                   '"conversation": "可选限定会话 id", "limit": "可选(默认20)"}')
     def _ctx_search(query: str, type: str = "", conversation: str = "",  # noqa: A002
                     limit: int = 20, project: Optional[str] = None, root: Optional[str] = None) -> dict:
         return {"markdown": ctx_search(query, type_=type, conversation_id=conversation,
                                        project_id=project or "", limit=limit)}
 
-    @register_architect_tool("ctx.get", "读取会话上下文包(摘要+关键单元+备案文档)")
+    @register_architect_tool(
+        "ctx.get", "读取会话上下文包(摘要+关键单元+备案文档)",
+        params_doc='{"conversation": "会话 id(必填)"}')
     def _ctx_get(conversation: str, project: Optional[str] = None,
                  root: Optional[str] = None) -> dict:
         return {"markdown": ctx_get(conversation)}
 
-    @register_architect_tool("ctx.summarize", "生成/刷新会话摘要")
+    @register_architect_tool(
+        "ctx.summarize", "生成/刷新会话摘要",
+        params_doc='{"conversation": "会话 id(必填)"}')
     def _ctx_summarize(conversation: str, project: Optional[str] = None,
                        root: Optional[str] = None) -> dict:
         return {"markdown": ctx_summarize(conversation)}
@@ -461,7 +468,10 @@ def register_probe_tool() -> None:
     @register_architect_tool(
         "probe.run",
         "方案草图(probe): 调 coding agent 在 git worktree 快照上产出改动思路与伪 diff；"
-        "讨论方案可行性/让用户预览改动时使用；不产生真实分支/提交")
+        "讨论方案可行性/让用户预览改动时使用；不产生真实分支/提交",
+        params_doc='{"instruction": "方案草图任务描述(必填: 目标+涉及文件+期望产出)", '
+                   '"files": "可选逗号/换行分隔的相关文件清单", '
+                   '"executorId": "可选执行器 id", "timeoutS": "可选超时秒数(默认600)"}')
     def _probe_run(instruction: str, files: str = "", executorId: str = "",
                    timeoutS: int = 600, project: Optional[str] = None,
                    root: Optional[str] = None) -> dict:

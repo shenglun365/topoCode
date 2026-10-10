@@ -446,6 +446,9 @@ def register_promote_tools() -> None:
         "提升到主库: 把项目内验证成熟的 认知产出(语义资产/命名规约/已采纳能力提案) "
         "提升到主库全局桶, 供跨项目检索复用。冲突时报告双方差异, 由设计者裁决"
         "(merge 并入/force 并存)。项目产出经反复验证、具跨项目通用性时用",
+        params_doc='{"kind": "必填: asset|convention|capability(产出类型)", '
+                   '"id": "必填: 待提升产出 id", "decision": "冲突裁决: merge|force(可选)"}',
+        brief="认知产出提升主库(kind+id)",
     )
     def _capability_promote(kind: str, id: str, decision: str = "",
                             project: Optional[str] = None,

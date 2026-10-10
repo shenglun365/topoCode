@@ -105,8 +105,9 @@ def _read_source(root: Optional[str], rel: str, start: int, end: int,
 
 @register_architect_tool(
     "asset.read_source",
-    "读取某符号的源码切片(类体/函数体)。补齐 entity 字段时使用。"
-    "参数: file(相对路径), symbol(符号名), max_lines(可选,默认120)",
+    "读取某符号的源码切片(类体/函数体)。补齐 entity 字段时使用。",
+    params_doc='{"file": "文件相对路径(必填)", "symbol": "符号名(必填)", '
+               '"max_lines": "可选(默认120)"}',
 )
 def tool_asset_read_source(root: Optional[str], project: Optional[str],
                            file: str, symbol: str,
@@ -125,7 +126,8 @@ def tool_asset_read_source(root: Optional[str], project: Optional[str],
 
 @register_architect_tool(
     "asset.query_constants",
-    "查询某文件的常量值清单(name=value+行号)。补齐 rule 约束时使用。参数: file",
+    "查询某文件的常量值清单(name=value+行号)。补齐 rule 约束时使用。",
+    params_doc='{"file": "文件相对路径(必填)"}',
 )
 def tool_asset_query_constants(root: Optional[str], project: Optional[str],
                                file: str) -> Dict[str, Any]:
@@ -136,8 +138,8 @@ def tool_asset_query_constants(root: Optional[str], project: Optional[str],
 
 @register_architect_tool(
     "asset.query_calls",
-    "查询某符号的行序直接调用链(被调符号名+行号)。补齐 process steps 时使用。"
-    "参数: file, symbol",
+    "查询某符号的行序直接调用链(被调符号名+行号)。补齐 process steps 时使用。",
+    params_doc='{"file": "文件相对路径(必填)", "symbol": "符号名(必填)"}',
 )
 def tool_asset_query_calls(root: Optional[str], project: Optional[str],
                            file: str, symbol: str) -> Dict[str, Any]:
@@ -161,7 +163,8 @@ def tool_asset_query_calls(root: Optional[str], project: Optional[str],
 @register_architect_tool(
     "asset.query_routes",
     "查询某文件的框架 API 路由清单(path/methods/handler/line/framework)。"
-    "补齐 contract relations 时使用。参数: file",
+    "补齐 contract relations 时使用。",
+    params_doc='{"file": "文件相对路径(必填)"}',
 )
 def tool_asset_query_routes(root: Optional[str], project: Optional[str],
                             file: str) -> Dict[str, Any]:
@@ -172,7 +175,8 @@ def tool_asset_query_routes(root: Optional[str], project: Optional[str],
 
 @register_architect_tool(
     "asset.query_symbol",
-    "查询符号的 AST 信息(kind/签名/docstring/返回类型/行号)。参数: file, symbol",
+    "查询符号的 AST 信息(kind/签名/docstring/返回类型/行号)。",
+    params_doc='{"file": "文件相对路径(必填)", "symbol": "符号名(必填)"}',
 )
 def tool_asset_query_symbol(root: Optional[str], project: Optional[str],
                             file: str, symbol: str) -> Dict[str, Any]:

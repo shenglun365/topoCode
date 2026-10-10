@@ -181,7 +181,8 @@ DEFAULT_FLOW_POLICY: Dict[str, Any] = {
                 "既有需求({reqId})的补充调整走 req.amend 新版本"),
             "propose-task": (
                 "【目标理解(本回合)】判定为一次性工具操作——task.propose 单卡"
-                "直达(默认保存)，勿绕需求流程"),
+                "直达(title+instruction，instruction=目标+方案要点+验收全文)，"
+                "勿绕需求流程、勿用 requirementMd 参数"),
             "continue": (
                 "【目标理解(本回合)】续接既有需求({reqId})——补充/调整按 "
                 "req.amend 收敛为新版本；用户提问直接回答"),
