@@ -556,6 +556,7 @@ export default {
     noSummary: 'No summary yet — click ✨ to generate',
     summary: 'Summary',
     skillSkeleton: 'Design skeleton — generate tech skeleton from spec (lands as draft)',
+    skillScope: 'Scope — suggest allowed/scope-out via asset mappings (lands as draft)',
     skillAcceptance: 'Acceptance — distill verifiable acceptance list (lands as draft)',
     specGap: 'Spec gaps',
     specGapHint: 'Spec element gaps — continue the conversation (auto-clarify) or save turns as drafts:',

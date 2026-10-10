@@ -111,6 +111,14 @@ register_skill(SkillSpec(
     "细节留给执行者发挥；不确定的代码位置标注「待核实」而非虚构。",
     domains=_DOMAINS_BOTH, system=SKILL_SYSTEM_SESSION))
 register_skill(SkillSpec(
+    "scope", "边界圈定",
+    "边界圈定：基于给定的需求上下文，检索语义资产映射与代码结构，产出一份"
+    "「修改边界建议」文档——包含：允许范围（allowedScope：文件/目录前缀清单，"
+    "每项标注依据——资产映射/目录归属/历史边界）、明确不做（scopeOut：建议排除"
+    "的范围与理由）、存疑范围（无法确定归属的，标注待人工裁决）。"
+    "范围以真实存在的文件路径为准（工具核实），不虚构路径。",
+    domains=_DOMAINS_BOTH, system=SKILL_SYSTEM_SESSION))
+register_skill(SkillSpec(
     "acceptance", "验收提炼",
     "验收提炼：基于给定的需求/方案上下文，提炼一份可核验的验收标准清单——"
     "每条尽量可判，并标注每条的核验方式（build/test/asset/manual）；"

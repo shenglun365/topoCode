@@ -12,7 +12,7 @@ import {
   XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
   ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
   PencilSquareIcon, SparklesIcon, BookOpenIcon, ArchiveBoxIcon, CubeTransparentIcon,
-  ClipboardDocumentCheckIcon,
+  ClipboardDocumentCheckIcon, AdjustmentsHorizontalIcon,
   DocumentTextIcon, ListBulletIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
@@ -50,14 +50,38 @@ const listOpen = ref(false)
 
 // ── E1 会话域技能(两线暴露收口): 绑规约会话可用, 产物落草稿(文档态续加工) ──
 const skillBusy = ref('')
-async function runSessionSkill(skillId: 'skeleton' | 'acceptance'): Promise<void> {
+let skillPollTimer: ReturnType<typeof setInterval> | null = null
+onUnmounted(() => { if (skillPollTimer) clearInterval(skillPollTimer) })
+async function runSessionSkill(skillId: 'skeleton' | 'acceptance' | 'scope'): Promise<void> {
   const cid = conv.activeId
   if (!cid || skillBusy.value) return
   skillBusy.value = skillId
   try {
-    await apiPost(`/sessions/${encodeURIComponent(cid)}/skill-run`,
-      { skill: skillId })
+    const r = await apiPost<{ started?: boolean; job?: { id?: string }; reason?: string }>(
+      `/sessions/${encodeURIComponent(cid)}/skill-run`, { skill: skillId })
     conv.pushLocalHint('已提交技能作业——产物将以草稿形式出现在资产页(可继续加工后发布会话)')
+    // 完成通知(轻轮询, 30s 上限; 作业 LLM 串行可能排队, 超时静默)
+    const jobId = r?.job?.id
+    if (r?.started && jobId) {
+      const t0 = Date.now()
+      skillPollTimer = setInterval(async () => {
+        if (Date.now() - t0 > 30_000 || !skillPollTimer) {
+          if (skillPollTimer) clearInterval(skillPollTimer)
+          skillPollTimer = null
+          return
+        }
+        try {
+          const j = await apiGet<{ state?: string }>(`/kb/semantic/jobs/${encodeURIComponent(String(jobId))}`)
+          if (j?.state === 'done' || j?.state === 'failed') {
+            clearInterval(skillPollTimer!)
+            skillPollTimer = null
+            conv.pushLocalHint(j.state === 'done'
+              ? '技能作业完成——产物已存为草稿(资产页查看)'
+              : '技能作业失败(任务中心查看详情)')
+          }
+        } catch { /* 轮询失败静默 */ }
+      }, 2500)
+    }
   } catch (e) {
     conv.pushLocalHint(e instanceof Error ? e.message : '技能作业提交失败')
   } finally {
@@ -1061,6 +1085,13 @@ async function pollRunningState() {
             :title="t('session.skillAcceptance')"
             @click="runSessionSkill('acceptance')"
           ><ClipboardDocumentCheckIcon class="w-3.5 h-3.5" :class="skillBusy === 'acceptance' ? 'animate-pulse' : ''" /></button>
+          <button
+            v-if="(conv.activeMeta as any)?.reqId"
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="skillBusy !== ''"
+            :title="t('session.skillScope')"
+            @click="runSessionSkill('scope')"
+          ><AdjustmentsHorizontalIcon class="w-3.5 h-3.5" :class="skillBusy === 'scope' ? 'animate-pulse' : ''" /></button>
           <!-- 会话大纲浮窗开关(会话中心启用): 开合两态均缩略为此按钮 -->
           <button
             v-if="props.outline"

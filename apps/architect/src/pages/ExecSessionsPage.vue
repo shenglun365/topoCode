@@ -16,6 +16,7 @@ import { useRoute } from 'vue-router'
 import {
   BoltIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon,
   PaperAirplaneIcon, StopIcon, ChevronRightIcon, ListBulletIcon,
+  DocumentArrowDownIcon,
 } from '@heroicons/vue/24/outline'
 import { apiGet, apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
@@ -147,6 +148,25 @@ function toggleFold(tn: AggTurn) {
   s.has(tn.ts) ? s.delete(tn.ts) : s.add(tn.ts)
   unfolded.value = s
 }
+/* ── 遗留次级: serve 执行回执另存草稿(sourceKind=receipt, 文档态续加工) ── */
+const savedReceiptTs = ref(0)
+async function saveReceiptDraft(tn: AggTurn): Promise<void> {
+  const content = (tn.text || '').trim()
+  if (!content || savedReceiptTs.value) return
+  savedReceiptTs.value = tn.ts
+  try {
+    const { reqDraftService } = await import('@/services/req-draft-service')
+    await reqDraftService.create({
+      title: `执行回执·${(projectName.value || '会话').slice(0, 24)}`,
+      contentMd: content,
+      sourceConvId: jobId.value,
+      sourceKind: 'receipt',
+    })
+  } catch { /* 失败按钮恢复可重试 */ } finally {
+    setTimeout(() => { if (savedReceiptTs.value === tn.ts) savedReceiptTs.value = 0 }, 1800)
+  }
+}
+
 /** 回合摘要: 剥 md 常见记号取首段截断(折叠态/大纲条目共用) */
 function turnSummary(tn: AggTurn): string {
   const raw = (tn.text || '').replace(/[#*`|>\[\]_-]+/g, ' ').replace(/\s+/g, ' ').trim()
@@ -376,6 +396,11 @@ onBeforeUnmount(() => {
                 <span v-if="!isUnfolded(tn)" class="min-w-0 flex-1 truncate text-[10px] text-ctp-overlay0">{{ turnSummary(tn) }}</span>
                 <span v-else class="flex-1" />
                 <span v-if="shouldFold(tn)" class="shrink-0 font-mono text-[9px] text-ctp-overlay0">{{ t('execSessionView.charsN', { n: (tn.text || '').length }) }}</span>
+                <button
+                  class="shrink-0 rounded p-0.5 text-ctp-overlay0 hover:text-ctp-green transition-colors"
+                  :title="t('session.subs.saveDraftHint')"
+                  @click.stop="saveReceiptDraft(tn)"
+                ><DocumentArrowDownIcon class="w-3 h-3" :class="savedReceiptTs === tn.ts ? 'animate-pulse' : ''" /></button>
                 <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
               </button>
               <div v-show="isUnfolded(tn)" class="w-full min-w-0 break-words rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">

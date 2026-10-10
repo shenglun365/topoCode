@@ -78,7 +78,7 @@
   "agent/requirements/harness.py": 308,
   "agent/sessions/__init__.py": 1,
   "agent/sessions/coding.py": 48,
-  "agent/skills.py": 119,
+  "agent/skills.py": 127,
   "agent/tools/__init__.py": 0,
   "agent/tools/impl/__init__.py": 2,
   "agent/tools/impl/asset.py": 152,

@@ -461,6 +461,10 @@ def test_skill_family_and_session_domain(monkeypatch):
     # 注册: skeleton/acceptance 双域; 原三技能仍草稿域
     assert "session" in skills.get_skill("skeleton").domains
     assert "session" in skills.get_skill("acceptance").domains
+    # 遗留#4 边界圈定(双线域): 范围以真实路径为准/含存疑待裁决段
+    assert "session" in skills.get_skill("scope").domains
+    assert "不虚构路径" in skills.get_skill("scope").instruction
+    assert "存疑范围" in skills.get_skill("scope").instruction
     assert "session" not in skills.get_skill("generate").domains
     assert skills.get_skill("skeleton").system is skills.SKILL_SYSTEM_SESSION
 

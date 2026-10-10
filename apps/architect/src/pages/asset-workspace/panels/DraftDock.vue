@@ -269,6 +269,7 @@ async function commitRename(): Promise<void> {
   const updated = await reqDraftService.update(id, { title })
   if (current.value?.id === id) {
     current.value = updated
+    void loadGaps()
     titleDraft.value = updated.title
     baseTitle = updated.title
   }
@@ -588,6 +589,7 @@ async function runAi(preset: 'generate' | 'review' | 'relate' | 'custom'): Promi
     aiStatus.value = current.value.lastProposedMd ? t('draft.ai.done') : t('draft.ai.failed')
     // 产物就绪 → 自动展开比对区(默认收起曾致「无结果」感知——用户需显式发现折叠条)
     if (current.value.lastProposedMd) proposedOpen.value = true
+    void loadGaps()   // 产物采纳前后缺口可能变化
   } catch (e) {
     aiStatus.value = e instanceof Error && e.message ? e.message : t('draft.ai.submitFailed')
   } finally {
@@ -617,6 +619,7 @@ async function adoptProposal(): Promise<void> {
     pending.value = false
     lsClear(current.value.id)
     syncListRow()
+    void loadGaps()
   } finally {
     adopting.value = false
   }
@@ -707,7 +710,7 @@ interface PreviewBlock {
   text?: string
   code?: string
 }
-const CMD_FENCE_RE = /```topo-cmd[ \t]*\r?\n[\s\S]*?```/g
+const CMD_FENCE_RE = /```(?:topo-cmd|topo-skill:[^\n]*)[ \t]*\r?\n[\s\S]*?```/g
 /** 预览源：正文剥离 topo-cmd 指令块（MD 预览过滤不解析）。 */
 const previewSource = computed(() => (contentDraft.value || '').replace(CMD_FENCE_RE, ''))
 const previewBlocks = computed<PreviewBlock[]>(() => {
