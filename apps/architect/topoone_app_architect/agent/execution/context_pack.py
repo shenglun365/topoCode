@@ -37,6 +37,7 @@ def build_context_pack(task: dict, conv: Optional[dict], root: str,
     allowed_scope: List[str] = []
     scope_out = ""
     acceptance_items: List[str] = []
+    milestones_items: List[Dict[str, str]] = []
     if rid:
         try:
             from ...store.core import RequirementsStore
@@ -50,6 +51,13 @@ def build_context_pack(task: dict, conv: Optional[dict], root: str,
             acc = snap.get("acceptance")
             if isinstance(acc, list):
                 acceptance_items = [str(x) for x in acc[:12]]
+            ms = snap.get("milestones")
+            if isinstance(ms, list):
+                milestones_items = [
+                    {"id": str(m.get("id") or ""), "title": str(m.get("title") or ""),
+                     "doneWhen": str(m.get("doneWhen") or "")}
+                    for m in ms[:12] if isinstance(m, dict)
+                    and m.get("id") and m.get("title")]
         except Exception as e:  # noqa: BLE001
             logger.warning("[context-pack] 规约读取失败 rid=%s: %s", rid, e)
     if not spec_md:
@@ -77,6 +85,7 @@ def build_context_pack(task: dict, conv: Optional[dict], root: str,
         "acceptance": (acceptance_items
                        or ["交付后进行资产比对验收(规约声明资产 vs 交付资产)；"
                            "构建/单测由执行器侧自查"]),
+        "milestones": milestones_items,
     }
     if missing:
         pack["incomplete"] = True
@@ -149,6 +158,13 @@ def render_context_pack_md(pack: Dict[str, Any]) -> str:
     acc = pack.get("acceptance") or []
     if acc:
         lines.append("### 验收判据\n" + "\n".join(f"- [ ] {a}" for a in acc))
+    ms = pack.get("milestones") or []
+    if ms:
+        lines.append("### 关键节点(到达时输出 [[MILESTONE:id 标题]] 标记行)\n"
+                     + "\n".join(f"- {m.get('id')}: {m.get('title')}"
+                                  + (f"（判据: {m.get('doneWhen')}）"
+                                     if m.get("doneWhen") else "")
+                                  for m in ms))
     nb = pack.get("graphNeighborhood") or {}
     if nb.get("outline"):
         stale = "（⚠️ 基线可能过期：工作区 HEAD 已前移）" if nb.get("baselineStale") else ""

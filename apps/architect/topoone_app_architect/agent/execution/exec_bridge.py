@@ -619,6 +619,36 @@ def _sediment_task_receipt(conv_id: str, task_id: str, rid: str, status: str,
     return unit
 
 
+def _milestone_note(conv_id: str, task_id: str, full_text: str) -> str:
+    """遗留#2: 完整文本解析 [[MILESTONE:id]] → progress 命中态 + 回执附注行。
+
+    节点集=任务行(或规约快照)归一; 未声明的标记 id 忽略(不虚构节点)。
+    """
+    try:
+        from .milestones import (merge_progress_milestones, normalize_milestones,
+                                 parse_milestone_tags)
+        task = store.TasksStore.get(task_id) or {}
+        ms = normalize_milestones(task.get("milestones"))
+        rid = str(task.get("reqId") or "")
+        if not ms and rid:
+            _s = (store.RequirementsStore.spec_active(rid) or {}).get("snapshot") or {}
+            ms = normalize_milestones(_s.get("milestones"))
+        hits = [m for m in parse_milestone_tags(full_text or "")
+                if any(x["id"] == m for x in ms)]
+        if not hits:
+            return ""
+        prog = task.get("progress") or {}
+        merged = merge_progress_milestones(ms, prog, hits, _ts())
+        store.TasksStore.set_progress(task_id, {**prog, "milestones": merged})
+        done_n = sum(1 for v in merged.values() if v.get("done"))
+        names = [next(x["title"] for x in ms if x["id"] == h) for h in hits]
+        return (f"\n\n🏁 **关键节点达成**：{ '、'.join(names) }"
+                f"（{done_n}/{len(ms)}）")
+    except Exception as e:  # noqa: BLE001 — 节点解析失败不阻塞主链
+        logger.info("[exec-bridge] 节点回执解析失败 task=%s: %s", task_id, e)
+        return ""
+
+
 def _conv_root_pair(conv_id: str):
     """会话 → (root, project)(解读校验边界解析用; 失败回 ("", ""))。"""
     try:
@@ -737,9 +767,10 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                     logger.info("[exec-bridge] 语义评估排队失败: %s", e)
         except Exception as e:  # noqa: BLE001 — 校验失败不阻塞问询主链
             logger.warning("[exec-bridge] 解读校验失败 task=%s: %s", task_id, e)
+        ms_note2 = _milestone_note(conv_id, task_id, clean)
         _append(conv_id, "assistant",
                 f"⏸ **{agent} 需要你的输入**（任务「{title}」）\n\n{clean}"
-                + ms_note + rb_note +
+                + ms_note + rb_note + ms_note2 +
                 "\n\n直接回复即转达; 也可 @architect 讨论。",
                 msg_meta={"kind": "task_input", "taskId": task_id},
                 project_id=pid, agent=agent)
@@ -765,6 +796,7 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         _prog = (store.TasksStore.get(task_id) or {}).get("progress") or {}
         brief = _acceptance_brief(conv_id, ctx["rid"], changed,
                                   str(_prog.get("verifyOverall") or ""))
+        brief += _milestone_note(conv_id, task_id, clean)
         # 复制实现检测(验证有效性): 测试对象须是真实生产代码
         _trow = store.TasksStore.get(task_id) or {}
         _wt = _trow.get("worktree") or ""

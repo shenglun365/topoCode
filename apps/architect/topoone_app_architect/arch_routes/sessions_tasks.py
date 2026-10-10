@@ -150,6 +150,22 @@ async def task_dismiss(task_id: str):
     return ok({"task": res.get("task")})
 
 
+@router.post("/tasks/{task_id}/milestones")
+async def task_set_milestones(task_id: str, request: Request):
+    """设定关键节点(遗留#2): body {milestones: [{id,title,doneWhen?}]};
+    仅未开始任务可改(运行中指令已固化)。任务行优先于规约快照同名声明。"""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return err(400, "invalid-json")
+    from ..agent.execution.dispatch import task_set_milestones as _set
+    task = await asyncio.to_thread(_set, task_id,
+                                   (body or {}).get("milestones"))
+    if not task:
+        return err(404, "任务不存在或已开始(仅未开始任务可改关键节点)")
+    return ok({"task": task})
+
+
 @router.post("/tasks/{task_id}/readback")
 async def task_set_readback(task_id: str, request: Request):
     """设定解读回环开关(D4): body {on: bool}; 仅未开始任务可改。

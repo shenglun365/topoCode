@@ -619,6 +619,16 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
                          readback_enabled)
     if readback_enabled(task):
         payload["instruction"] += READBACK_INSTRUCTION
+    # 遗留#2 关键节点回执(展示型): 任务行节点优先, 规约快照节点兜底;
+    # 存在即附「节点回执约定」(标记行协议, 零 runner 改动)
+    from .milestones import milestones_instruction, normalize_milestones
+    _ms = normalize_milestones(task.get("milestones"))
+    if not _ms and rid:
+        _snap_ms = ((store.RequirementsStore.spec_active(rid) or {})
+                    .get("snapshot") or {}).get("milestones")
+        _ms = normalize_milestones(_snap_ms)
+    if _ms:
+        payload["instruction"] += milestones_instruction(_ms)
     # hint 已含注册表默认兜底(上方选定单源)——此处不得按空 executorId 重查覆盖
     for k in ("model", "basePort", "autoStart", "baseUrl"):
         v = hint.get(k)
@@ -777,6 +787,19 @@ def task_set_executor(task_id: str, executor_type: str) -> Optional[dict]:
     if not is_valid_type(etype):        # B1 单源: 替代散落元组成员判断
         return None
     return store.TasksStore.update(task_id, {"executor_type": etype})
+
+
+def task_set_milestones(task_id: str, milestones) -> Optional[dict]:
+    """设定关键节点(遗留#2): 仅 saved|pending_confirm 可改; 归一后 JSON 落行。"""
+    import json as _json
+    from .milestones import normalize_milestones
+    task = store.TasksStore.get(task_id)
+    if not task or (task.get("status") or "") not in (ST.TASK_SAVED,
+                                                      ST.TASK_PENDING_CONFIRM):
+        return None
+    ms = normalize_milestones(milestones)
+    return store.TasksStore.update(task_id, {
+        "milestones": _json.dumps(ms, ensure_ascii=False) if ms else ""})
 
 
 def task_set_readback(task_id: str, on: bool) -> Optional[dict]:

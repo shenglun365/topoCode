@@ -276,6 +276,7 @@ ARCH_PROJECT_TABLES_SQL = """
         result_md TEXT DEFAULT '',          -- 终态产出摘要(done 时)
         safety_class TEXT DEFAULT 'mutating', -- 安全等级: readonly|mutating|high-stakes(互斥/worktree/门禁)
         readback TEXT DEFAULT '',             -- 解读回环开关(D4): on|off|空=按挡位(high-stakes 开)
+        milestones TEXT DEFAULT '',           -- 关键节点 JSON(遗留#2): [{id,title,doneWhen}]
         work_tags TEXT,                     -- JSON: 开放工作类型标签(不设枚举, 仅影响提示)
         dismissed_at INTEGER DEFAULT 0,     -- 回执已阅(reviewing 消化出口, 0=未处理)
         created_at INTEGER DEFAULT 0,
@@ -811,6 +812,7 @@ def _main_migrations(db) -> None:
     _add_cols(db, "arch_tasks", [
         ("safety_class", "TEXT DEFAULT 'mutating'"),
         ("readback", "TEXT DEFAULT ''"),
+        ("milestones", "TEXT DEFAULT ''"),
         ("work_tags", "TEXT"),
         ("dismissed_at", "INTEGER DEFAULT 0"),
     ])
@@ -1075,6 +1077,7 @@ def _project_migrations(db) -> None:
         # 任务安全等级三值轴(互斥/worktree/门禁) + 开放工作类型标签 + 回执已阅
         ("safety_class", "TEXT DEFAULT 'mutating'"),
         ("readback", "TEXT DEFAULT ''"),
+        ("milestones", "TEXT DEFAULT ''"),
         ("work_tags", "TEXT"),
         ("dismissed_at", "INTEGER DEFAULT 0"),
     ])

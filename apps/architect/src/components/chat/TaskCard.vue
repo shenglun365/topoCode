@@ -16,6 +16,14 @@
         title="本任务绑定需求规约(建卡时固化), 执行指令含方案/边界/验收"
       >规约 v{{ task.specVer }}</span>
       <span class="chip !text-[10px]" :class="statusChip">{{ statusText }}</span>
+      <!-- 遗留#2 关键节点进度(达成/总数 + hover 明细) -->
+      <span
+        v-if="milestoneRows.length"
+        class="chip !text-[9px] font-mono shrink-0"
+        :class="milestoneDone === milestoneRows.length
+          ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-surface0/70 text-ctp-subtext1'"
+        :title="milestoneRows.map(m => `${m.done ? '✓' : '○'} ${m.title}${m.doneWhen ? `（${m.doneWhen}）` : ''}`).join('\n')"
+      >🏁 {{ milestoneDone }}/{{ milestoneRows.length }}</span>
       <span
         v-if="progress && task.status === 'running'"
         class="font-mono text-ctp-subtext0 animate-pulse"
@@ -240,6 +248,13 @@ import ExecutorProcessStrip from './ExecutorProcessStrip.vue'
 
 const props = defineProps<{ task: Record<string, any>; convId?: string }>()
 const emit = defineEmits<{ (e: 'confirm' | 'cancel' | 'ignore' | 'dismiss', taskId: string): void; (e: 'set-executor', taskId: string, executorType: string): void }>()
+
+/** 遗留#2 关键节点进度行(progress.milestones: {id: {title, doneWhen, done}})。 */
+const milestoneRows = computed(() =>
+  Object.values((props.task.progress as any)?.milestones || {}) as Array<{
+    title: string; doneWhen?: string; done?: boolean }>)
+const milestoneDone = computed(() =>
+  milestoneRows.value.filter(m => m.done).length)
 
 // D4 解读回环开关: task.readback 显式值(on/off)优先, 空回退挡位默认(high-stakes 开)
 const readbackBusy = ref(false)
