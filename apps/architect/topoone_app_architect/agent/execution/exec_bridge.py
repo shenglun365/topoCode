@@ -722,6 +722,19 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                 store.TasksStore.set_progress(task_id, {
                     **_prog, "readbackDone": True,
                     "readbackPass": bool(v.get("pass"))})
+                # 遗留#1 语义偏差评估(LLM, 异步作业): 规则之上补语义层建议,
+                # 用户终裁——失败静默不阻塞放行通道
+                try:
+                    from ...sem import job_runner as _jr
+                    if pid:
+                        _jr.start_job(pid, "readback_review", {
+                            "convId": conv_id, "taskId": task_id, "rid": ctx.get("rid") or "",
+                            "readbackMd": clean[:6000],
+                            "ruleVerdict": "规则校验通过" if v.get("pass") else "存在信号待核",
+                            "boundary": ", ".join(boundary[:10]),
+                        }, llm=True)
+                except Exception as e:  # noqa: BLE001
+                    logger.info("[exec-bridge] 语义评估排队失败: %s", e)
         except Exception as e:  # noqa: BLE001 — 校验失败不阻塞问询主链
             logger.warning("[exec-bridge] 解读校验失败 task=%s: %s", task_id, e)
         _append(conv_id, "assistant",

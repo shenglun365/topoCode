@@ -154,3 +154,100 @@ def test_input_required_runs_readback_verdict(monkeypatch):
     appended.clear()
     eb._handle_task_event({"kind": "input_required", "text": "还有疑问…"}, ctx)
     assert "解读校验" not in appended[-1][2]
+
+
+def test_readback_review_job_llm_enhanced(monkeypatch):
+    """遗留#1 语义评估作业: prompt 装配(规约+规则结论+解读) + 落卡 + progress。"""
+    import topoone_app_architect.agent.execution.readback as rb
+    from topoone_app_architect import store
+
+    conv = store.ConversationsStore.create({
+        "projectId": "p-rb", "title": "评审", "meta": {},
+        "reqId": "RQ-rb"})
+    store.RequirementsStore.create({
+        "id": "RQ-rb", "projectId": "p-rb", "title": "评审", "status": "ready",
+        "activeVer": 1, "specVersions": [
+            {"ver": 1, "state": "confirmed",
+             "snapshot": {"requirementMd": "重建对账", "designMd": "方案甲",
+                          "acceptance": ["差异为 0"], "allowedScope": ["src/bill/"]},
+             "source": {}, "reason": "", "createdAt": 0}]})
+    task = store.TasksStore.create({
+        "conversationId": conv["id"], "projectId": "p-rb", "title": "评审任务",
+        "instruction": "x", "status": "running", "reqId": "RQ-rb"})
+
+    seen = {}
+
+    def _fake_catalog(name, msgs, **kw):
+        seen["name"] = name
+        seen["user"] = msgs[-1]["content"]
+        return {"content": "结论：对齐\n- 目标理解正确(重建对账)"}
+
+    rb.set_llm_call(lambda msgs, **kw: _fake_catalog("role:evaluate", msgs))
+
+    appended = []
+    monkeypatch.setattr(rb, "_append", lambda *a, **k: appended.append(a),
+                        raising=False)
+    from topoone_app_architect.agent.execution import exec_bridge as eb
+    monkeypatch.setattr(eb, "_append", lambda *a, **k: appended.append(a))
+    monkeypatch.setattr(eb, "_publish_task", lambda *a, **k: None)
+
+    class _Ctx:
+        pid = "p-rb"
+        scope = {"convId": conv["id"], "taskId": task["id"], "rid": "RQ-rb",
+                 "readbackMd": "目标: 重建对账, 涉及 src/bill/a.ts",
+                 "ruleVerdict": "规则校验通过", "boundary": "src/bill/"}
+
+        def progress(self, **kw):
+            pass
+
+    out = rb._job_readback_review(_Ctx())
+    assert out.get("saved") == 1
+    # 评估走 evaluate 角色; prompt 含规约/规则结论/解读三段
+    assert "重建对账" in seen["user"] and "方案甲" in seen["user"]
+    rb.set_llm_call(None)   # 还原(防污染其它测试)
+    assert "规则校验通过" in seen["user"] and "src/bill/a.ts" in seen["user"]
+    # 落卡: 语义评估消息(kind=readback_review) + progress.readbackReview
+    assert appended and "解读语义评估" in appended[-1][2]
+    assert "结论：对齐" in (store.TasksStore.get(task["id"])
+                          or {}).get("progress", {}).get("readbackReview", "")
+
+
+def test_input_required_triggers_review_job(monkeypatch):
+    """触发点: 开启任务首个 input_required → readback_review 作业排队(LLM 类)。"""
+    from topoone_app_architect.agent.execution import exec_bridge as eb
+
+    started = []
+
+    import topoone_app_architect.sem.job_runner as _jr
+    monkeypatch.setattr(_jr, "start_job",
+                        lambda pid, kind, scope=None, **kw:
+                        started.append((pid, kind, scope)) or {"started": True})
+
+    progress_seen = {}
+    task = {"id": "t1", "title": "任务", "status": "running",
+            "safetyClass": "high-stakes", "progress": {}}
+    monkeypatch.setattr(eb.store.TasksStore, "get",
+                        lambda tid: dict(task, progress=progress_seen.get("p", {})))
+    monkeypatch.setattr(eb.store.TasksStore, "update", lambda tid, d: None)
+    monkeypatch.setattr(eb.store.TasksStore, "set_progress",
+                        lambda tid, p: progress_seen.update({"p": p}))
+    monkeypatch.setattr(eb, "_append", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_publish_task", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "task_status_card", lambda *a, **k: None)
+    monkeypatch.setattr(eb, "_resolve_boundary_files",
+                        lambda rid, root, project: ["src/a.ts"])
+    monkeypatch.setattr(eb, "_conv_root_pair", lambda cid: ("/r", "p1"))
+    monkeypatch.setattr(
+        eb.store.RequirementsStore, "spec_active",
+        staticmethod(lambda rid: {"snapshot": {"acceptance": ["验收甲"]}}))
+
+    ctx = {"convId": "c1", "taskId": "t1", "jobId": "j1",
+           "rid": "r1", "pid": "p1", "agent": "executor"}
+    eb._handle_task_event(
+        {"kind": "input_required", "text": "我的理解: …涉及 src/a.ts"}, ctx)
+    assert started and started[-1][1] == "readback_review"
+    assert started[-1][2]["readbackMd"] == "我的理解: …涉及 src/a.ts"
+    # 第二次问询(readbackDone 已标)不再排队
+    started.clear()
+    eb._handle_task_event({"kind": "input_required", "text": "追问"}, ctx)
+    assert started == []

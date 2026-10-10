@@ -73,3 +73,9 @@ router.include_router(capability_mining.router)
 router.include_router(diagram.router)
 router.include_router(design.router)
 router.include_router(tracking.router)
+
+# 意图空间遗留#1: 解读评估 LLM 通道注入——execution 域层序不引 turns,
+# 装配点接线补偿管线 catalog_call(作业体见 agent/execution/readback.py)
+from ..agent.execution import readback as _rb  # noqa: E402
+from ..agent.turns.catalog import catalog_call  # noqa: E402
+_rb.set_llm_call(lambda msgs, **kw: catalog_call("role:evaluate", msgs, **kw))

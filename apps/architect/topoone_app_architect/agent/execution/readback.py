@@ -131,3 +131,101 @@ def render_verdict(v: Dict[str, object]) -> str:
                  "⚠️ 存在上述信号——请核对后放行（回复确认）或纠偏（指出问题）。"
                  "语义层面的偏差以你的判断为准。")
     return "\n".join(lines)
+
+
+# ── 语义偏差评估(LLM 增强, 遗留#1): 规则校验之上, 建议仍由用户终裁 ──────────
+
+# LLM 通道钩子(装配点注入, 遗留#1): execution 域层序不引 turns——由
+# arch_routes 装配层接线 catalog_call(补偿管线); 未注入时作业诚实降级。
+_LLM_CALL = None
+
+
+def set_llm_call(fn) -> None:
+    global _LLM_CALL
+    _LLM_CALL = fn
+
+
+_REVIEW_SYSTEM = (
+    "你是架构评审助手。给定「执行器的开工解读」与「任务规约上下文」，判断解读的"
+    "语义理解是否有偏差（目标理解偏移/方案意图曲解/验收标准误读/边界误解）。\n"
+    "输出格式（Markdown，简洁）：\n"
+    "- 第一行结论：`结论：对齐` 或 `结论：疑似偏差` 或 `结论：无法判断`\n"
+    "- 随后最多 5 条要点：偏在哪/证据（引用解读与规约原文短语）/建议纠偏说法；"
+    "对齐时列出解读做对了的关键理解（最多 3 条）。\n"
+    "只基于给定材料判断，不虚构；材料不足直接「无法判断」。")
+
+
+def review_messages(readback_text: str, spec_ctx: dict) -> list:
+    """评估 prompt: 规约上下文(reqMd/designMd/acceptance/boundary) + 解读全文。"""
+    lines = ["## 任务规约上下文"]
+    for k, label in (("reqMd", "需求（用户意图）"), ("designMd", "方案（架构师推断）"),
+                     ("scopeOut", "明确不做"), ("boundary", "边界文件")):
+        v = str(spec_ctx.get(k) or "").strip()
+        if v:
+            lines.append(f"### {label}\n{v[:2000]}")
+    acc = spec_ctx.get("acceptance") or []
+    if acc:
+        lines.append("### 验收标准\n" + "\n".join(f"- {a}" for a in acc[:12]))
+    lines.append("## 规则校验结论（参考）\n" + str(spec_ctx.get("ruleVerdict") or "未提供"))
+    lines.append("## 执行器的开工解读\n" + (readback_text or "").strip()[:6000])
+    lines.append("请按系统指令输出评估。")
+    return [{"role": "system", "content": _REVIEW_SYSTEM},
+            {"role": "user", "content": "\n\n".join(lines)}]
+
+
+def _job_readback_review(ctx) -> dict:
+    """readback_review 作业体: LLM 语义偏差评估(异步, 遗留#1)。
+
+    scope = {convId, taskId, rid, readbackMd, ruleVerdict, root, project}。
+    完成落卡: 会话 assistant 消息(meta kind=readback_review) + progress
+    .readbackReview(结论首行); 评估失败静默(不阻塞放行通道)。
+    """
+    from ... import store
+    sc = ctx.scope or {}
+    conv = store.ConversationsStore.get(sc.get("convId") or "")
+    task_id = str(sc.get("taskId") or "")
+    if not conv or not task_id:
+        return {"error": "缺少会话/任务"}
+    task = store.TasksStore.get(task_id) or {}
+    rid = str(sc.get("rid") or task.get("reqId") or "")
+    spec_ctx = {"ruleVerdict": str(sc.get("ruleVerdict") or "")}
+    if rid:
+        snap = (store.RequirementsStore.spec_active(rid) or {}).get("snapshot") or {}
+        spec_ctx.update({
+            "reqMd": snap.get("requirementMd") or snap.get("desc") or "",
+            "designMd": snap.get("designMd") or "",
+            "scopeOut": snap.get("scopeOut") or "",
+            "acceptance": [str(x) for x in (snap.get("acceptance") or [])[:12]],
+        })
+    boundary = str(sc.get("boundary") or "").strip()
+    if boundary:
+        spec_ctx["boundary"] = boundary
+    ctx.progress(total=1, done=0, current="语义评估中")
+    # LLM 通道经装配点注入(层序: execution 不引 turns; 未注入→诚实降级)
+    res = _LLM_CALL(review_messages(str(sc.get("readbackMd") or ""), spec_ctx)) \
+        if _LLM_CALL else None
+    content = str((res or {}).get("content") or "").strip() if res else ""
+    if not content:
+        return {"error": "评估未返回内容(LLM 通道未注入/不可达)"}
+    head = content.splitlines()[0][:80]
+    try:
+        from . import exec_bridge as _eb
+        _eb._append(str(conv["id"]), "assistant",
+                    f"🧭 **解读语义评估**（任务「{task.get('title') or task_id}」）\n\n{content}\n\n"
+                    "（LLM 评估建议——最终是否放行由你裁决：确认无误回复「理解正确，开工」，"
+                    "有偏差请直接指出。）",
+                    msg_meta={"kind": "readback_review", "taskId": task_id},
+                    project_id=str(conv.get("projectId") or ""))
+    except Exception as e:  # noqa: BLE001 — 落卡失败不吞评估结果
+        return {"summary": content[:200], "error": f"落卡失败: {str(e)[:80]}"}
+    try:
+        prog = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        store.TasksStore.set_progress(task_id, {
+            **prog, "readbackReview": head})
+    except Exception:  # noqa: BLE001
+        pass
+    return {"saved": 1, "summary": head}
+
+
+from ...sem import job_runner as _job_runner  # noqa: E402
+_job_runner.register("readback_review", _job_readback_review)
