@@ -129,12 +129,15 @@ def posture_text() -> str:
 
 
 def _r_capability(ctx: Dict[str, Any]):
-    # B4 单源化(MS-B3 起唯一模式): legacy 等价回退通道已退役。
-    return capability_doc_from_tools(
-        tool_surface=ctx.get("tool_surface") or "full",
-        kb_enabled=ctx.get("kb_enabled", True),
-        allowed=ctx.get("gu_allowed"),
-        slim=bool(ctx.get("prompt_slim")))
+    # B4 单源化(MS-B3 起唯一模式); MS-C2: 拆两段——基础契约(本块, 恒置) +
+    # 参数文档段(capability_params 块, 可裁剪)——恢复预算防线对能力文档的效力。
+    return _render_capability_base(_capability_entries(ctx), ctx)
+
+
+def _r_capability_params(ctx: Dict[str, Any]):
+    # MS-C2: 参数文档段(独立块, priority=46 预算紧张时最先裁——弱模型拿长
+    # 参数表遵从率反降, 批丁实证; 面内工具清单保留)。
+    return _render_capability_params(_capability_entries(ctx))
 
 
 # R3.4: 工具面按挡裁剪(toolsurface 消费落地; kb=False → 检索工具同裁)
@@ -172,6 +175,11 @@ def _filter_tools(entries, tool_surface: str, kb_enabled: bool):
 
 
 def _r_ir_schema(_ctx: Dict[str, Any]) -> str:
+    # MS-C1 教育面=执行面: GU 限面不含绘图工具 → IR 结构文档不注入
+    # (answer 纯读面曾恒注入 653+ 字, 同 system 自相矛盾审计项)。
+    allowed = _ctx.get("gu_allowed")
+    if allowed is not None and not (set(allowed) & _DIAGRAM_FACE_TOOLS):
+        return ""
     from ...agent.tools import req_agent as _req3
     return _req3._ir_schema_doc()
 
@@ -187,12 +195,18 @@ def _r_skill_docs(ctx: Dict[str, Any]) -> str:
     scenarios = ctx.get("skill_scenarios") or []
     if not scenarios:
         return ""
+    # MS-C1: 技能文档仅需求分析族面装载(限面回合不教面外方法论)
+    if not _req_face_on(ctx):
+        return ""
     from ...sem.skill_docs import skill_docs
     return skill_docs(ctx.get("root"), ctx.get("project"), scenarios)
 
 
 def _r_skill_catalog(ctx: Dict[str, Any]) -> str:
-    # W6: 目录+强制路由(表为真相源覆盖内置, 清表回退); cv-189 同款门消毒 KB 话术
+    # W6: 目录+路由(表为真相源覆盖内置, 清表回退); cv-189 同款门消毒 KB 话术
+    # MS-C1: 仅需求分析族面装载(propose-task/answer 等限面回合不注入目录)
+    if not _req_face_on(ctx):
+        return ""
     try:
         from ...sem.skill_catalog import render_skill_catalog
         md = render_skill_catalog(str(ctx.get("project") or ""))
@@ -215,6 +229,7 @@ def _register_defaults() -> None:
     register_block(PromptBlock("boundary", _r_boundary, order=5, priority=5, required=True))
     register_block(PromptBlock("posture", _r_posture, order=6, priority=20, required=True))
     register_block(PromptBlock("capability", _r_capability, order=10, priority=10, required=True))
+    register_block(PromptBlock("capability_params", _r_capability_params, order=11, priority=46))
     register_block(PromptBlock("ir_schema", _r_ir_schema, order=12, priority=45))
     register_block(PromptBlock("diagram_skill", _r_diagram_skill, order=14, priority=40))
     register_block(PromptBlock("skill_catalog", _r_skill_catalog, order=17, priority=26))
@@ -288,6 +303,68 @@ def _tool_brief(name: str, entry: Dict[str, Any]) -> str:
     return desc.split("。")[0][:120] if desc else ""
 
 
+# ── GU 面工具集(MS-C1 教育面=执行面; 块条件数据驱动, 不散落工具名清单) ──
+_DIAGRAM_FACE_TOOLS = frozenset({"diagram.build", "diagram.validate"})
+_REQ_FACE_TOOLS = frozenset({"req.propose", "req.amend"})
+
+
+def _req_face_on(ctx: Dict[str, Any]) -> bool:
+    """需求分析族面判定: 未限面(True) 或 面含 req 系工具。"""
+    allowed = ctx.get("gu_allowed")
+    if allowed is None:
+        return True
+    return bool(set(allowed) & _REQ_FACE_TOOLS)
+
+
+def _capability_entries(ctx: Dict[str, Any]):
+    """面内工具条目收集(W1-1 排序; 空=无能力文档)——base/params 两段共用。"""
+    from ...agent.tools import req_agent as _req_agent_mod
+    entries = [(n, e) for n, e in _req_agent_mod._ARCH_TOOLS.items()
+               if n not in ("diagram.build", "diagram.validate")]
+    entries = _filter_tools(entries, ctx.get("tool_surface") or "full",
+                            ctx.get("kb_enabled", True))
+    allowed = ctx.get("gu_allowed")
+    if allowed is not None:
+        allowed = set(allowed)
+        entries = [(n, e) for n, e in entries if n in allowed]
+    if not entries:
+        return []
+    entries.sort(key=lambda ne: ne[0])   # 注册序随导入路径漂移, prompt 须确定
+    return entries
+
+
+def _render_capability_base(entries, ctx: Dict[str, Any]) -> str:
+    """基础契约段(恒置): 工具清单 + 协议(纪律按 req 面门) + 范围 + 图表纪律。"""
+    if not entries:
+        return ""
+    slim = bool(ctx.get("prompt_slim"))
+    req_face = _req_face_on(ctx)
+    lines = ["你可以使用以下能力(skills/tools)："]
+    for name, entry in entries:
+        brief = _tool_brief(name, entry)
+        lines.append(f"- {name}：{brief}" if brief else f"- {name}")
+        if name == "map.graph":
+            lines.append(_TIER_CONVENTION_DOC)   # 层级约定锚在地图组之后
+    lines.append("")
+    lines.append(protocol_doc(slim=slim, req_face=req_face))
+    if not slim:
+        lines.append(_SCOPE_DOC)
+    lines.append(_DIAGRAM_OUTPUT_DOC)
+    return "\n".join(lines)
+
+
+def _render_capability_params(entries) -> str:
+    """参数文档段(MS-C2 可裁剪): 面内工具 params_doc 清单。"""
+    if not entries:
+        return ""
+    params = ["各工具的参数："]
+    for name, entry in entries:
+        pd = _tool_params_doc(name, entry)
+        if pd:
+            params.append(f"- {name}: {pd}")
+    return "\n".join(params) if len(params) > 1 else ""
+
+
 def _tool_params_doc(name: str, entry: Dict[str, Any]) -> str:
     """参数形状: 注册点 params_doc → 签名自动生成兜底(MS-B1/B3)。"""
     pd = (entry.get("params_doc") or "").strip()
@@ -300,44 +377,24 @@ def _tool_params_doc(name: str, entry: Dict[str, Any]) -> str:
 def capability_doc_from_tools(tool_surface: str = "full",
                               kb_enabled: bool = True,
                               allowed=None, slim: bool = False) -> str:
-    """由 _ARCH_TOOLS 注册表渲染能力文档(单源模式, B4 默认)。
+    """由 _ARCH_TOOLS 注册表渲染能力文档(单源模式; 测试/诊断公共入口)。
 
-    结构对齐 _CAPABILITY_DOC: 工具清单(brief 单源) + 层级约定 + 工具调用协议 +
-    硬性规则(防编造) + 需求落库纪律 + 会话指令符号 + 参数表(params_doc 单源) +
-    可处理范围 + 图表输出纪律。无注册工具时返回空串(调用方回退等价模式)。
-    R3.4: tool_surface/kb_enabled 按挡裁剪工具面(缺省 full/True 行为不变)。
-    批丁: allowed(GU 路线限定, 具体名单)→工具面收敛为本轮子集; slim(简挡)→
-    省略系统面说明段(指令符号/可处理范围——挡位系统已确定性处理, 无需模型知)。
+    MS-C2 后生产渲染走块拆分(capability + capability_params 两块, 预算独立);
+    本函数保留组合语义(base+params)供既有消费面与 golden。
+    R3.4: tool_surface/kb_enabled 按挡裁剪; allowed(GU 限定)→面内子集;
+    slim(简挡)→省系统面说明段。
     """
-    from ...agent.tools import req_agent as _req_agent_mod
-    entries = [(n, e) for n, e in _req_agent_mod._ARCH_TOOLS.items()
-               if n not in ("diagram.build", "diagram.validate")]
-    entries = _filter_tools(entries, tool_surface, kb_enabled)
-    if allowed is not None:
-        allowed = set(allowed)
-        entries = [(n, e) for n, e in entries if n in allowed]
-    if not entries:
+    ctx = {"tool_surface": tool_surface, "kb_enabled": kb_enabled,
+           "gu_allowed": allowed, "prompt_slim": slim}
+    entries = _capability_entries(ctx)
+    base = _render_capability_base(entries, ctx)
+    if not base:
         return ""
-    # W1-1: 按名排序——注册序随导入路径漂移(实测), prompt 须确定(可缓存/快照)
-    entries.sort(key=lambda ne: ne[0])
-    lines = ["你可以使用以下能力(skills/tools)："]
-    params = ["各工具的参数："]
-    for name, entry in entries:
-        brief = _tool_brief(name, entry)
-        lines.append(f"- {name}：{brief}" if brief else f"- {name}")
-        if name == "map.graph":
-            lines.append(_TIER_CONVENTION_DOC)   # 层级约定锚在地图组之后(对齐原文位置)
-        pd = _tool_params_doc(name, entry)
-        if pd:
-            params.append(f"- {name}: {pd}")
-    lines.append("")
-    lines.append(protocol_doc(slim=slim))
-    if len(params) > 1:
-        lines.append("\n".join(params))
-    if not slim:
-        lines.append(_SCOPE_DOC)
-    lines.append(_DIAGRAM_OUTPUT_DOC)
-    return "\n".join(lines)
+    parts = [base]
+    params = _render_capability_params(entries)
+    if params:
+        parts.append(params)
+    return "\n".join(parts)
 
 
 # ── 工具调用纪律(单源常量) ────────────────────────────────────────────
@@ -383,12 +440,20 @@ _PROTOCOL_DOC = (
     + REQUEST_ENVELOPE_DOC + DIRECT_CMD_SYMBOLS + TOOL_TAIL
 )
 
-def protocol_doc(slim: bool = False) -> str:
-    """工具调用协议单源组装(slim=简挡省略系统面说明段; 信封纪律两态恒在)。"""
+def protocol_doc(slim: bool = False, req_face: bool = True) -> str:
+    """工具调用协议单源组装(slim=简挡省略系统面说明段; 信封纪律两态恒在)。
+
+    MS-C1: req_face=False(GU 限面不含 req 系工具)→省需求卡纪律段——同 system
+    内「教面外工具用法」的自相矛盾消除(propose-task 面不再教 req.amend)。
+    """
+    discipline = REQ_CARD_DISCIPLINE if req_face else ""
     if slim:
         return (TOOL_PROTOCOL_HEAD + ANTI_FABRICATION
-                + REQ_CARD_DISCIPLINE + REQUEST_ENVELOPE_DOC + TOOL_TAIL)
-    return _PROTOCOL_DOC
+                + discipline + REQUEST_ENVELOPE_DOC + TOOL_TAIL)
+    if req_face:
+        return _PROTOCOL_DOC
+    return (TOOL_PROTOCOL_HEAD + ANTI_FABRICATION
+            + REQUEST_ENVELOPE_DOC + DIRECT_CMD_SYMBOLS + TOOL_TAIL)
 
 _SCOPE_DOC = (
     "可处理范围：需求分析/澄清/范围收敛、资产命中与影响评估、设计实现建议、新项目引导；"

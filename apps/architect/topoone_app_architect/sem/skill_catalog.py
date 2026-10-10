@@ -39,12 +39,17 @@ def skill_catalog(project_id: str) -> List[Dict[str, Any]]:
 
 
 def render_skill_catalog(project_id: str) -> str:
-    """目录 + 强制路由指令（N 选 1 语义的 architect 化；受块预算裁剪）。"""
+    """目录 + 路线指引(MS-C3: 流程技能定位——方法论非可调用工具)。
+
+    目录条目是 _ARCH_SKILLS 流程技能(指导执行路线), 不在 _ARCH_TOOLS——
+    「不得绕过可用技能」的旧措辞会诱导模型 [TOOL_CALL] 技能名得到「未知工具」。
+    """
     catalog = skill_catalog(project_id)
     if not catalog:
         return ""
-    lines = ["## 技能目录(skills)",
-             "按任务类型从下列技能中选择执行路线（无匹配才自由作答，不得绕过可用技能）："]
+    lines = ["## 技能目录(流程技能)",
+             "以下为流程技能(方法论路线, 非可调用工具)——任务匹配时遵循其步骤执行; "
+             "无匹配才自由作答："]
     for s in catalog:
         hint = f"｜何时选: {s['route_hint']}" if s.get("route_hint") else ""
         lines.append(f"- {s['name']}：{s['description']}{hint}")

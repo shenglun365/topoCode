@@ -48,7 +48,7 @@ def test_catalog_asset_overrides_builtin(app):
     assert cat["req.clarify"]["route_hint"] == "何时选我"
     md = render_skill_catalog("p1")
     assert "覆盖版" in md and "何时选我" in md
-    assert "不得绕过可用技能" in md                       # 强制路由指令
+    assert "流程技能" in md and "非可调用工具" in md   # MS-C3 定位修正
     # 清表回退内置
     store.ArchAssetsStore.delete(cat["req.clarify"]["id"])
     cat2 = {s["name"]: s for s in skill_catalog("p1")}
@@ -58,7 +58,7 @@ def test_catalog_asset_overrides_builtin(app):
 def test_prompt_contains_skill_catalog(app):
     from topoone_app_architect.agent.cognition.prompt import render_system
     md = render_system({"root": "", "project": None, "model_id": "", "tier": 1})
-    assert "## 技能目录(skills)" in md
+    assert "## 技能目录(流程技能)" in md
     assert "test.strategy" in md                          # 首批技能(W5 封装)
 
 

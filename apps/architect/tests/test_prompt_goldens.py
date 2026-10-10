@@ -90,6 +90,44 @@ def test_prompt_golden(name, arch_env, request):
         "且必须对应模板/契约版本变更; 非意图变更 → 修复回归")
 
 
+# MS-C1/C4: GU propose-task 面的工具面(read ∪ task.propose, 对齐
+# flow_policy toolClasses.read 模式展开)
+_GU_TASK_FACE = {
+    "kb.asset.search", "kb.code_mappings", "kb.baseline", "kb.graph",
+    "map.overview", "map.component", "map.assets", "map.rules", "map.graph",
+    "ctx.search", "ctx.get", "ctx.summarize", "conv.read",
+    "code.read_symbols", "project.ctx",
+    "asset.semantic.search", "asset.semantic.detail",
+    "asset.semantic.stats", "asset.semantic.mappings",
+    "asset.semantic.reconcile", "capability.evaluate", "probe.run",
+    "help.lookup", "task.propose",
+}
+
+
+def test_prompt_gu_task_face_alignment(arch_env):
+    """MS-C1 教育面=执行面 + MS-C4 减载棘轮(GU propose-task 面)。
+
+    - 面内清单只含 allowed 工具; 需求卡纪律/ir_schema/技能目录不注入
+      (同 system 自相矛盾消除——此前该面仍教 req.amend/绘图 IR/技能目录)
+    - 棘轮: 面内渲染字数 ≤ 4100(当前上限刻度, 只许降不许升; 长期 3500)
+    """
+    md = _render({"tier": 1, "gu_allowed": _GU_TASK_FACE})
+    assert "- task.propose：" in md, "面内工具应在清单"
+    assert "- req.amend：" not in md, "面外工具不得入清单"
+    assert "严禁重复 req.propose" not in md, "需求卡纪律应按面裁剪"
+    assert "绘图 IR 结构(DiagramSchema)" not in md, "ir_schema 块应随面裁剪(面无绘图工具)"
+    assert "技能目录" not in md, "非需求分析族面不注入技能目录"
+    assert len(md) <= 4700, f"GU 面减载棘轮回吐: {len(md)} > 4700 (只许降不许升; 当前基线 4688)"
+
+
+def test_prompt_gu_answer_face_pure_read(arch_env):
+    """MS-C1: answer 纯读面(tools=[])——参数段有、方法论块全无。"""
+    md = _render({"tier": 1, "gu_allowed": _GU_TASK_FACE - {"task.propose"}})
+    assert "- task.propose：" not in md
+    assert "绘图 IR 结构(DiagramSchema)" not in md and "技能目录" not in md
+    assert "各工具的参数：" in md          # 读类工具参数仍教育(执行必需)
+
+
 def test_slim_omits_scope_doc(arch_env):
     """slim 分型省略系统面说明段(可处理范围), 但信封纪律恒在。"""
     full = _render({"tier": 1})
