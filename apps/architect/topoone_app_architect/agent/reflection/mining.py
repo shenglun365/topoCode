@@ -107,7 +107,7 @@ def run_mine(conversation_id: str, root: Optional[str] = None,
              project: Optional[str] = None, model_id: str = "") -> Dict[str, Any]:
     """提炼入口: 材料 → LLM(role=mine) → 提案(pending)。返回 {proposals, markdown}。"""
     from ... import store
-    from ...semantic_assets import project_id_for
+    from ...arch_routes.semantic_assets import project_id_for
     from ...agent.tools.req_agent import llm_sync
     from ...arch_routes.agent_roles import resolve_role_model
 

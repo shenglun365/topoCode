@@ -175,7 +175,7 @@ async def kb_baseline(request: Request):
     from .. import ctx
     from ..sem.graph_collect import record_graph_baseline
     from ..sem.paths import resolve_root
-    from .. import arch_git as _gitmod
+    from . import arch_git as _gitmod
     body = await request.json()
     proj_id = body.get("kbProjectId") or body.get("projectId") or ctx.get_project()
     commit = body.get("commit") or "HEAD"

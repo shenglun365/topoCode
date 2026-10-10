@@ -4569,7 +4569,7 @@ async def api_asset_diagram(request: Request):
     返回 {diagrams: [{assetId, name, type, mermaid}]}
     """
     body = await request.json()
-    from .. import asset_diagram
+    from ..arch_routes import asset_diagram
     ids = body.get("assetIds") or []
     if ids:
         assets = [store.SemanticAssetsStore.get(i) for i in ids[:20]]
