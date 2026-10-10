@@ -69,6 +69,7 @@ def tool_map_rules(root: Optional[str], project: Optional[str]) -> Dict[str, Any
     "关系图(mermaid)：kind=component 组件依赖图 / kind=semantic 语义关系图",
 brief='关系图(mermaid)——component 组件依赖图 / semantic 语义关系图',
 params_doc='{"kind": "component|semantic"}',
+    doc_after="tier_convention",
 )
 def tool_map_graph(root: Optional[str], project: Optional[str],
                    kind: str = "component") -> Dict[str, Any]:

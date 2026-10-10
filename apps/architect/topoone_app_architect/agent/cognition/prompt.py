@@ -283,6 +283,9 @@ _TIER_CONVENTION_DOC = (
     "(用 asset.semantic.* 的 level 过滤)。"
 )
 
+# MS-D1: 能力清单锚定文档注册表(工具 doc_after 声明 → 文档文本单源映射)
+_DOC_ANCHORS = {"tier_convention": _TIER_CONVENTION_DOC}
+
 # 图表输出纪律(与 _CAPABILITY_DOC 图表段对齐; IR 结构细节由 ir_schema 块承载)
 _DIAGRAM_OUTPUT_DOC = (
     "图表输出能力：当描述语义数据资产(数据结构/处理流程/控制逻辑)、依赖链路、"
@@ -317,10 +320,13 @@ def _req_face_on(ctx: Dict[str, Any]) -> bool:
 
 
 def _capability_entries(ctx: Dict[str, Any]):
-    """面内工具条目收集(W1-1 排序; 空=无能力文档)——base/params 两段共用。"""
+    """面内工具条目收集(W1-1 排序; 空=无能力文档)——base/params 两段共用。
+
+    MS-D1: hidden 标志位排除(原 diagram 字面量元组)/doc_after 锚定驱动。
+    """
     from ...agent.tools import req_agent as _req_agent_mod
     entries = [(n, e) for n, e in _req_agent_mod._ARCH_TOOLS.items()
-               if n not in ("diagram.build", "diagram.validate")]
+               if not e.get("flags", {}).get("hidden")]
     entries = _filter_tools(entries, ctx.get("tool_surface") or "full",
                             ctx.get("kb_enabled", True))
     allowed = ctx.get("gu_allowed")
@@ -343,8 +349,10 @@ def _render_capability_base(entries, ctx: Dict[str, Any]) -> str:
     for name, entry in entries:
         brief = _tool_brief(name, entry)
         lines.append(f"- {name}：{brief}" if brief else f"- {name}")
-        if name == "map.graph":
-            lines.append(_TIER_CONVENTION_DOC)   # 层级约定锚在地图组之后
+        # MS-D1: 锚定文档由注册 doc_after 声明驱动(原 map.graph 字面量特判)
+        anchor = _DOC_ANCHORS.get(entry.get("doc_after") or "")
+        if anchor:
+            lines.append(anchor)
     lines.append("")
     lines.append(protocol_doc(slim=slim, req_face=req_face))
     if not slim:

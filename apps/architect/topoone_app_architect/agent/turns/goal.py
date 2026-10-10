@@ -392,11 +392,14 @@ def plan_goal_directive(question: str, conv: Optional[dict],
         prof = build_goal_profile(question, conv, escalation=esc, context=ctx,
                                   focus=focus)
         res = resolve_goal_directive(prof, pol or {})
-        # 上下文感知限面(先于遥测: 记录实际生效面)——规则声明的 req.amend
-        # 依赖「会话已绑定需求」, 未绑定时必败(模型会拿它挣扎落卡), 剔除降纯读。
-        if res.get("tools") and "req.amend" in (res.get("tools") or []) \
-                and not str(prof.get("boundReq") or ""):
-            res["tools"] = [t for t in res["tools"] if t != "req.amend"]
+        # 上下文感知限面(先于遥测: 记录实际生效面)——MS-D2: 前置条件由注册
+        # requires 声明驱动(原 req.amend 字面量特判): 声明的条件未满足
+        # (如 boundReq=会话未绑定需求)时剔除该工具降纯读, 模型不再挣扎落卡。
+        if res.get("tools"):
+            from ..tools.registry import tool_requires_met
+            facts = {"boundReq": bool(str(prof.get("boundReq") or ""))}
+            res["tools"] = [t for t in (res.get("tools") or [])
+                            if tool_requires_met(t, facts)]
         try:
             from ..reflection import dataset as _ds
             # 注意: record 首参名为 kind, 判定种类改用 goalKind 键(防撞名)

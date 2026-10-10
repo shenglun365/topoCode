@@ -52,8 +52,8 @@ def extract_task_fence(text: str) -> Optional[Dict[str, Any]]:
         # 域(req_spec.extract_proposal_fence 认领)——本域不再把规约字段折叠成
         # instruction 误落任务卡(历史行为 cv-150[3] 已随「需求卡→确认→任务」
         # 标准流程退役)。
-        if any(str(d.get(k) or "").strip() for k in
-               ("requirementMd", "allowedScopeMd", "forbiddenScopeMd")):
+        from .req_spec import _SPEC_SCHEMA_KEYS   # 规约载荷认领单源(MS-D5)
+        if any(str(d.get(k) or "").strip() for k in _SPEC_SCHEMA_KEYS):
             return None
         # 图 IR 排除(diagram.build 产物形态)
         t = str(d.get("type") or "").lower()

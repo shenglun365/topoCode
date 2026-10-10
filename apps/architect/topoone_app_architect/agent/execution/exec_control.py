@@ -151,14 +151,14 @@ def control_execution(conv_id: str, action: str,
             r = eb._runner(f"/api/implement/{job_id}/abort", {}, 12.0)
             ok_ = bool(r and r.get("ok"))
             if ok_:
-                _px._set_job_card_state(conv_id, "idle")
+                _px._entry_mark(conv_id, job_id, "idle")
             return {"ok": ok_, "action": action}
         if action in ("resume", "input"):
             r = eb._runner(f"/api/implement/{job_id}/input",
                            {"text": text.strip() or "继续", "steer": True}, 12.0)
             ok_ = bool(r and r.get("ok") is not False)
             if ok_:
-                _px._set_job_card_state(conv_id, "running")
+                _px._entry_mark(conv_id, job_id, "running")
             return {"ok": ok_, "action": "input"}
         # stop: 结束直通会话(下条消息开启新会话; sessionRef 保留可复活)
         r = eb._runner(f"/api/implement/{job_id}/finish",

@@ -81,6 +81,9 @@ def register_architect_tool(name: str, description: str = "",
                             params_doc: str = "", brief: str = "",
                             arg_aliases: Optional[Dict[str, str]] = None,
                             arg_alias_sections: Optional[Dict[str, str]] = None,
+                            flags: Optional[Dict[str, bool]] = None,
+                            requires: tuple = (),
+                            doc_after: str = "",
                             ) -> Callable:
     """注册工具。B4 单源: brief(能力清单一行简介)/params_doc(参数形状)为
     能力文档渲染元数据, 注册点直接传参(优先于 prompt.py 迁移表)。
@@ -90,6 +93,13 @@ def register_architect_tool(name: str, description: str = "",
     fail-fast: 目标参数必须存在于 handler 签名(防契约漂移)。
     arg_alias_sections: {别名参数: 节标题}——多别名汇同一目标时按声明序以
     '## {节标题}' 分节拼接; 单别名直填不带节。
+    flags: 行为标志位(MS-D1, 收编散落同族工具名集合)——已定义位:
+      landing_card(落卡工具: 空收尾=卡片即产物, cv-196/203)
+      deny_archive(归档会话禁写, PR1)  artifact(自动沉淀知识单元)
+      hidden(能力文档隐藏: 不入工具清单仍可调用)
+    requires: 前置条件声明(词汇单源)——已定义: "boundReq"(会话已绑定需求,
+    GU 限面剔除未满足条件的工具, MS-D2)。
+    doc_after: 能力文档锚定 id(清单行后附加说明文档, 如层级约定)。
     注: 存量迁移表(TOOL_BRIEFS/TOOL_PARAM_DOCS)在 cognition/prompt.py——
     它们是提示词内容而非执行元数据, 放 cognition 层避免反向依赖本模块。"""
     def decorator(fn):
@@ -106,9 +116,27 @@ def register_architect_tool(name: str, description: str = "",
                              "handler": fn,
                              "params_doc": params_doc, "brief": brief,
                              "arg_aliases": aliases,
-                             "arg_alias_sections": dict(arg_alias_sections or {})}
+                             "arg_alias_sections": dict(arg_alias_sections or {}),
+                             "flags": dict(flags or {}),
+                             "requires": tuple(requires),
+                             "doc_after": str(doc_after or "")}
         return fn
     return decorator
+
+
+def tools_with_flag(flag: str) -> frozenset:
+    """按标志位取工具集(MS-D1: 同族概念单源——散落各模块的工具名集合收编)。"""
+    return frozenset(n for n, e in _ARCH_TOOLS.items()
+                     if e.get("flags", {}).get(flag))
+
+
+def tool_requires_met(name: str, facts: Dict[str, bool]) -> bool:
+    """前置条件判定(MS-D2): 注册声明的 requires 全部满足。"""
+    entry = _ARCH_TOOLS.get(name) or {}
+    for req in entry.get("requires") or ():
+        if not facts.get(req, False):
+            return False
+    return True
 
 
 def resolve_arg_aliases(entry: Dict[str, Any],
@@ -186,9 +214,8 @@ def architect_tools_full() -> List[Dict[str, str]]:
 
 
 # 归档会话上禁止的动作类工具(生成/落库/指派); 检索与读取类不在此列
-_ARCHIVED_DENY_TOOLS = {
-    "req.propose", "contract.propose", "task.propose",
-}
+# MS-D1: 由注册 flags(deny_archive) 派生——须在工具注册完成后(惰性)调用,
+# 模块级快照会捕到空集(注册晚于 registry import)。
 
 # v2 统一会话: 规约状态机工具在快捷挡退役(严格挡恢复可用, run_arch_tool 按挡放行)
 # ——快捷挡模型误调时给出引导而非静默失败(P2 物理删除注册)。

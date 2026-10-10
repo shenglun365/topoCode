@@ -808,8 +808,41 @@ def test_proxy_state_endpoint_shape(arch_env, tmp_path):
                                      "session_ref": "sess-x"}
     store.ConversationsStore.update(conv["id"], {"sessionRef": "sess-x"})
     st2 = proxy.proxy_state(conv["id"])
-    assert st2 == {"active": True, "jobId": "job-st",
+    assert st2 == {"active": True, "jobId": "job-st", "state": "running",
                    "executorType": "cline-sdk", "sessionRef": "sess-x"}
+
+
+def test_job_state_axis_turn_done_marks_idle(arch_env, tmp_path,
+                                             _isolate_proxy_state):
+    """cv-285f 状态轴: 回合完成(turn_done)=idle——句柄保活≠执行中。
+
+    FE JobCard 经 proxy_state.state 渲染, chat 回合制作业完成后
+    不再恒显「执行中」; 下一轮活动事件(text/tool)回 running。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-ax", "executor_type": "cline-sdk",
+                                     "state": "running"}
+    on_event, _snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-ax", "cline-sdk")
+    on_event({"kind": "text", "text": "执行中输出"})
+    assert proxy.proxy_state(conv["id"])["state"] == "running"
+    on_event({"kind": "turn_done"})
+    st = proxy.proxy_state(conv["id"])
+    assert st["state"] == "idle" and st["active"] is True   # 保活但非执行中
+    assert proxy.proxy_job_of(conv["id"]) is not None       # 句柄仍保留
+    on_event({"kind": "text", "text": "下一轮输出"})
+    assert proxy.proxy_state(conv["id"])["state"] == "running"
+
+
+def test_job_state_axis_input_required_marks_idle(arch_env, tmp_path,
+                                                  _isolate_proxy_state):
+    """cv-285f 状态轴: NEED_INPUT=input_required 也是 idle(等待用户)。"""
+    conv = _mk_conv(arch_env, tmp_path)
+    proxy._PROXY_JOBS[conv["id"]] = {"job_id": "job-ir2", "executor_type": "cline-sdk",
+                                     "state": "running"}
+    on_event, _snap, _lost, _flush = proxy._make_handlers(
+        conv["id"], "job-ir2", "cline-sdk")
+    on_event({"kind": "input_required"})
+    assert proxy.proxy_state(conv["id"])["state"] == "idle"
 
 
 def test_proxy_stop_dispatch_by_job_status(arch_env, tmp_path, monkeypatch):

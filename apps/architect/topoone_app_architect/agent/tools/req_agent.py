@@ -60,7 +60,6 @@ from ...agent.tools.protocol import (  # noqa: F401,E402
     tool_parse_audit,
 )
 from ...agent.tools.registry import (  # noqa: F401,E402
-    _ARCHIVED_DENY_TOOLS,
     _ARCH_SKILLS,
     _ARCH_TOOLS,
     _RETIRED_TOOLS,
@@ -69,6 +68,7 @@ from ...agent.tools.registry import (  # noqa: F401,E402
     register_architect_skill,
     register_architect_tool,
     resolve_arg_aliases,
+    tools_with_flag,
 )
 
 # ── Skills/Tools 注册表与工具协议: 实现迁至 agent.tools(P1) ──
@@ -229,8 +229,6 @@ def _coerce_args(fn: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
 # ── 分析挡位(会话级 analysisMode) → 挡位体系已迁 agent/governance/gears.py
 #    (环节十二a, T0-T4 数据驱动); 旧二值工具门禁已随流程缓解层拆除——
 #    挡位行为差异全部走提示词面(orchestrator 注入 architect_note)。
-# 规约状态机工具: v2 默认退役(模型面不可见)——strict 挡恢复启用, quick 挡保持退役
-_SPEC_TOOLS = {"req.propose", "req.amend"}
 
 
 def run_arch_tool(name: str, arguments: Dict[str, Any],
@@ -247,12 +245,10 @@ def run_arch_tool(name: str, arguments: Dict[str, Any],
             return {"error": _RETIRED_TOOLS[name]}
         return {"error": f"未知工具: {name}"}
     # 退役工具只拦模型面调用; internal=True 为系统确定性路径放行。
-    # 规约工具(req.propose/req.amend)不退役——需求卡按需出现, 挡位门禁已拆(cv-175)。
-    if name in _RETIRED_TOOLS and not internal:
-        if name not in _SPEC_TOOLS:
-            return {"error": _RETIRED_TOOLS[name]}
+    # 规约工具(req.propose/req.amend)不退役——需求卡按需出现, 挡位门禁已拆(cv-175);
+    # MS-D5: _SPEC_TOOLS 休眠豁免分支删除(_RETIRED_TOOLS 仅含 req.finalize, 永不触发)。
     # PR1 归档只读: 归档会话上拒绝动作类工具(落库/定稿/指派); 检索/读取/提炼放行
-    if name in _ARCHIVED_DENY_TOOLS:
+    if name in tools_with_flag("deny_archive"):
         try:
             from ... import ctx as _ctx
             conv_id = _ctx.get_conv()
@@ -447,6 +443,7 @@ def _body_placeholder_error(text: str, label: str, min_len: int = 0) -> str:
     "acceptanceMd(验收标准，每行一条)、assessmentMd(评估)、estMin(分钟)、priority、"
     "newRequirement(默认 false=更新绑定需求)。",
 brief='需求提案(新建或幂等更新)——**开发类需求**(要写代码/改代码/交付组件)时调用，创建需求卡即 ready(designMd=选型与结构)；分析/问答类请求不要产卡。用户要求 编写脚本/工具/程序 时**必须先调本工具**，由 /执行 链路产出代码——**严禁直接输出成品代码**(python/bash 等)替代需求收敛',
+    flags={"landing_card": True, "deny_archive": True, "artifact": True},
 params_doc='{"title": "需求标题(必填)", "requirementMd": "需求目标(全文)", "designMd": "选型与结构方案", "priority": "P1", "estMin": 30, "acceptanceMd": "验收条目(md)", "newRequirement": false(同会话已建卡时强制新建才传)} —— reqId 勿传',
 )
 
@@ -572,6 +569,8 @@ def tool_req_propose(title: str = "", requirementMd: str = "", designMd: str = "
     "参数：reqId(可选)、designMd(调整后完整方案)、allowedScope[str]、forbiddenScope[str]、"
     "acceptance[str]、functionalScope[str]、requirementMd(需求目标)、"
     "assessmentSummary(str)、reasoning(修订理由, 版本留痕)。",
+    flags={"landing_card": True},
+    requires=("boundReq",),
     params_doc='{"requirementMd": "修订后需求目标(全文, 可选)", '
                '"designMd": "修订后方案(可选)", "acceptance": ["验收条目"], '
                '"allowedScope": ["目录"], "forbiddenScope": ["目录"], '
@@ -1349,6 +1348,7 @@ def chat_system_prompt_legacy(root: Optional[str], project: Optional[str],
                  "acceptanceMd": "instruction"},
     arg_alias_sections={"requirementMd": "需求目标", "designMd": "实现方案",
                         "acceptanceMd": "验收标准"},
+    flags={"landing_card": True, "deny_archive": True},
 )
 def tool_task_propose(title: str, instruction: str,
                       executorType: Optional[str] = None,

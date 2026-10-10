@@ -16,7 +16,7 @@ import re
 import pytest
 
 from topoone_app_architect.agent.tools.registry import (
-    _ARCH_TOOLS, derive_params_doc)
+    _ARCH_TOOLS, derive_params_doc, tool_requires_met, tools_with_flag)
 
 
 @pytest.fixture(autouse=True)
@@ -161,3 +161,27 @@ def test_derive_params_doc_marks_required():
     keys = _depth1_param_names(pd)
     assert keys == {"a", "b"}
     assert "(必填)" in pd and "root" not in pd and "project" not in pd
+
+
+def test_flags_consistency_with_consuming_tables():
+    """MS-D1: 注册 flags 与消费表一致(收编后单源校验)。"""
+    from topoone_app_architect.agent.compensation.providers.builtin import (
+        CARD_ROUND_CLOSINGS)
+    landing = tools_with_flag("landing_card")
+    assert landing == frozenset(CARD_ROUND_CLOSINGS), \
+        f"落卡工具集与收尾文案键漂移: {landing ^ frozenset(CARD_ROUND_CLOSINGS)}"
+    assert "req.propose" in tools_with_flag("deny_archive")
+    assert "req.amend" not in tools_with_flag("deny_archive")   # 归档可修订历史口径不变
+    assert tools_with_flag("artifact") >= {"req.propose", "contract.propose",
+                                           "convention.propose"}
+    assert tools_with_flag("hidden") == frozenset({"diagram.build",
+                                                   "diagram.validate"})
+
+
+def test_requires_declaration_drives_goal_face():
+    """MS-D2: req.amend 声明 requires=boundReq——GU 接线按声明剔除。"""
+    entry = _ARCH_TOOLS["req.amend"]
+    assert "boundReq" in (entry.get("requires") or ())
+    assert tool_requires_met("req.amend", {"boundReq": True})
+    assert not tool_requires_met("req.amend", {"boundReq": False})
+    assert tool_requires_met("task.propose", {"boundReq": False})  # 无前置条件

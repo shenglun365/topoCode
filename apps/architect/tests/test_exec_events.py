@@ -91,6 +91,48 @@ def test_sessions_rest_enrich(arch_env):
     assert r3["empty"] is True
 
 
+def test_sessions_rest_main_conv_enrich(arch_env):
+    """主会话定位: coding 子会话沿 parent_conv_id 上溯一层; 无父回退自身。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import exec_sessions as es
+    store.ConversationsStore.create(
+        {"id": "conv-main", "projectId": "p1", "title": "主线需求"})
+    store.ConversationsStore.create(
+        {"id": "conv-sub", "projectId": "p1", "title": "执行",
+         "parentConvId": "conv-main"})
+    # 无父会话(quick 直通, 会话行缺失 → 主会话回退空)
+    store.TasksStore.create({
+        "id": "task-sub", "conversationId": "conv-sub", "projectId": "p1",
+        "title": "子会话作业", "executorType": "cline",
+        "runnerJobId": "job-sub"})
+    store.TasksStore.create({
+        "id": "task-direct", "conversationId": "conv-main", "projectId": "p1",
+        "title": "主会话直发", "executorType": "opencode",
+        "runnerJobId": "job-direct"})
+    store.TasksStore.create({
+        "id": "task-orphan", "conversationId": "conv-gone", "projectId": "p1",
+        "title": "会话已删", "executorType": "codex",
+        "runnerJobId": "job-orphan"})
+    for job in ("job-sub", "job-direct", "job-orphan"):
+        exec_events.record_event(job, _ev(1, "session_ready"))
+    # 关联会话标题/首条用户消息摘要(convTitle/convPreview)
+    store.ConversationsStore.append_message({
+        "id": store.next_id("m"), "conversationId": "conv-sub",
+        "role": "user", "time": 1, "content": "帮我实现登录功能的改造"})
+    rows = {r["jobId"]: r for r in asyncio.run(es.list_sessions(limit=10))["data"]}
+    assert rows["job-sub"]["mainConvId"] == "conv-main"
+    assert rows["job-sub"]["mainConvTitle"] == "主线需求"
+    assert rows["job-sub"]["convTitle"] == "执行"
+    assert rows["job-sub"]["convPreview"] == "帮我实现登录功能的改造"
+    assert rows["job-direct"]["mainConvId"] == "conv-main"
+    assert rows["job-direct"]["mainConvTitle"] == "主线需求"
+    assert rows["job-direct"]["convTitle"] == "主线需求"
+    assert rows["job-orphan"]["mainConvId"] == ""      # 会话不存在 → 空定位
+    assert rows["job-orphan"]["mainConvTitle"] == ""
+    assert rows["job-orphan"]["convTitle"] == ""
+    assert rows["job-orphan"]["convPreview"] == ""
+
+
 class _Req:
     def __init__(self, body=None):
         self._b = body or {}

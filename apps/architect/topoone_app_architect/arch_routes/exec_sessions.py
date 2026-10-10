@@ -13,8 +13,16 @@ router = APIRouter()
 
 
 def _enrich(rows: list) -> list:
-    """会话行 + 任务关联(内存匹配, 本地量级)。"""
-    by_job = {}
+    """会话行 + 任务关联 + 主会话定位 + 关联会话标题/首消息摘要(内存匹配, 本地量级)。
+
+    主会话定位与 tracking 同口径(store/tracking.py _resolve_main):
+    沿 conversation_id → parent_conv_id 上溯一层到主会话(coding 子会话
+    恒一层)。会话中心列表/需求跟踪按 mainConvId 分组与筛选;
+    convTitle/convPreview = 关联会话自身标题, 缺标题回退首条用户消息摘要。
+    """
+    by_job: dict = {}
+    conv_by_id: dict = {}
+    preview_by_conv: dict = {}
     try:
         from ..store.base import _db, _scan_dbs
         for db in [_db(), *_scan_dbs()]:
@@ -24,19 +32,41 @@ def _enrich(rows: list) -> list:
                 " WHERE runner_job_id IS NOT NULL AND runner_job_id != ''") or []
             for t in tr:
                 by_job.setdefault(t["runner_job_id"], t)
+            cv = db.fetchall(
+                "SELECT id, title, parent_conv_id FROM arch_conversations") or []
+            for c in cv:
+                conv_by_id.setdefault(c["id"], c)
+            # 首条用户消息摘要(独立收集: 消息与会话行可能落不同库位)
+            pv = db.fetchall(
+                "SELECT m.conversation_id, m.content FROM arch_conversation_messages m"
+                " WHERE m.role = 'user' AND m.rowid = ("
+                "  SELECT m2.rowid FROM arch_conversation_messages m2"
+                "  WHERE m2.conversation_id = m.conversation_id AND m2.role = 'user'"
+                "  ORDER BY m2.time ASC, m2.rowid ASC LIMIT 1)") or []
+            for p in pv:
+                preview_by_conv.setdefault(p["conversation_id"], str(p["content"] or ""))
     except Exception:  # noqa: BLE001
         pass
     out = []
     for r in rows:
         t = by_job.get(r["jobId"]) or {}
+        cid = t.get("conversation_id") or ""
+        conv = conv_by_id.get(cid) or {}
+        # 会话行缺失(已删/历史孤儿) → 空定位(前端归入「未关联主会话」组)
+        main_id = (str(conv.get("parent_conv_id") or "") or cid) if conv else ""
+        main_conv = conv_by_id.get(main_id) or {}
         out.append({**r,
                     "taskId": t.get("id") or "",
                     "title": t.get("title") or "",
                     "executorType": t.get("executor_type") or "",
-                    "conversationId": t.get("conversation_id") or "",
+                    "conversationId": cid,
                     "reqId": t.get("req_id") or "",
                     "sessionRef": t.get("session_ref") or "",
-                    "taskStatus": t.get("status") or ""})
+                    "taskStatus": t.get("status") or "",
+                    "mainConvId": main_id,
+                    "mainConvTitle": main_conv.get("title") or "",
+                    "convTitle": str(conv.get("title") or "")[:80],
+                    "convPreview": preview_by_conv.get(cid, "").strip()[:80]})
     return out
 
 

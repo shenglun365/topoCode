@@ -38,7 +38,12 @@ _PLACEHOLDER_ONLY_RE = _re.compile(
 # cv-196 收尾短路: 落卡工具的产物已由回执/卡片承载——整回合无可见正文且本轮
 # 全为落卡工具时, 跳过模型叙述轮(省一轮 LLM)。cv-203 裁决: 卡片是独立消息,
 # 合成收尾文案 = 与卡片重复的第二条文本 → 不再落, 以 card_closed 标记收尾。
-_CARD_LANDING_TOOLS = frozenset({"req.propose", "req.amend", "task.propose"})
+# MS-D1: 落卡工具集由注册 flags(landing_card) 派生(惰性——注册晚于本模块 import)
+
+
+def _card_landing_tools() -> frozenset:
+    from ..tools.registry import tools_with_flag
+    return tools_with_flag("landing_card")
 
 
 def _card_round_closing(results: List[Dict[str, str]]) -> bool:
@@ -407,7 +412,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             loop_fell_back = True
             await io.ensure_chat_start()
             assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds, allowed_tools=allowed_tools)
-            if not assistant_text and tools_used and tools_used <= _CARD_LANDING_TOOLS:
+            if not assistant_text and tools_used and tools_used <= _card_landing_tools():
                 card_closed = True   # cv-203: 落卡工具已产卡, 空文本≠空返回错误
             break
         request_id = rid
@@ -554,7 +559,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
             and not visible and io.budget_left() > 0):
         await io.ensure_chat_start()
         assistant_text = await _sync_with_tools(io.send, msgs, root, project, eff_model, tools_used=tools_used, max_rounds=max_rounds, allowed_tools=allowed_tools)
-        if not assistant_text and tools_used and tools_used <= _CARD_LANDING_TOOLS:
+        if not assistant_text and tools_used and tools_used <= _card_landing_tools():
             card_closed = True   # 降级通道同样以卡收尾(空文本≠错误)
 
     # 降级通道(llm.sync / 断流收尾)无逐字流 → 假流式补发；实时转发路径
@@ -606,7 +611,9 @@ async def _post_turn_land(io: "_TurnIO", conv_id: str, msgs: list,
     choices_payload, choices_marker = req_agent.resolve_choices_payload(
         final_content,
         intent_clarify=(str(gu_action or "") == CLARIFY_ACTION))
-    if choices_payload and "choices" not in tools_used:
+    if choices_payload:
+        # MS-D5: 原 `"choices" not in tools_used` 为死条件(choices 非注册工具,
+        # tools_used 无 add 点)——删除, 判定仅剩 payload 存在性。
         from ..collab import cards as _cards
         # 回合动作记账随卡归位(cv-254): 代落+空收尾后回合只有卡——
         # guAction 是焦点帧 clarify_pending 的唯一派生源
@@ -700,7 +707,7 @@ async def _sync_with_tools(send: SendFn, msgs, root, project, model_id, max_roun
     # cv-196 收尾短路(降级通道同规) + cv-203 卡片独立: 模型零可见正文且本回合
     # 全为落卡工具 → 空文本返回(卡片已落流即本回合产物; 调用方以 card_closed
     # 区分"有意空收尾"与"空返回错误")。
-    if not content.strip() and tools_used and tools_used <= _CARD_LANDING_TOOLS:
+    if not content.strip() and tools_used and tools_used <= _card_landing_tools():
         return ""
     return content
 

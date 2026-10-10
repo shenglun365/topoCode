@@ -48,14 +48,17 @@ _JOB_TERMINAL = ("done", "failed", "stopped")
 def proxy_state(conv_id: str) -> Dict[str, Any]:
     """直通会话状态(cv-275): FE 持久状态条数据源(REST 查询, 刷新安全)。
 
-    {active, jobId, sessionRef, executorType}——active=有活跃直通作业
-    (内存句柄; 后端重启后句柄清空但会话行 sessionRef 仍可复活)。"""
+    {active, jobId, sessionRef, executorType, state}——active=有活跃直通
+    作业(内存句柄; 后端重启后句柄清空但会话行 sessionRef 仍可复活);
+    state=作业状态轴 running|idle(执行器忙/等待输入, 事件泵推进——
+    FE JobCard 据此渲染, 禁止把「会话保活」误读成「执行中」)。"""
     entry = _PROXY_JOBS.get(conv_id) or {}
     from ... import store as _st
     row = _st.ConversationsStore.get(conv_id) or {}
     return {"active": bool(entry),
             "jobId": entry.get("job_id") or "",
             "executorType": entry.get("executor_type") or "",
+            "state": str(entry.get("state") or "running"),
             "sessionRef": row.get("sessionRef") or ""}
 
 
@@ -118,6 +121,20 @@ def _set_job_card_state(conv_id: str, state: str) -> None:
     except Exception:  # noqa: BLE001 — 状态回写失败不阻断主流程
         logger.warning("[proxy] JobCard 状态回写失败 conv=%s state=%s",
                        conv_id, state)
+
+
+def _entry_mark(conv_id: str, job_id: str, state: str) -> None:
+    """直通句柄状态轴推进(entry.state + JobCard 回写同源; cv-285f 修复)。
+
+    chat 回合制终态后句柄保活(waiting_input 等下一轮), 此前 FE 只看
+    active(句柄在=running)→完成的回合恒显「执行中」。状态不变零写(心跳安全)。"""
+    entry = _PROXY_JOBS.get(conv_id)
+    if not entry or entry.get("job_id") != job_id:
+        return
+    changed = entry.get("state") != state
+    entry["state"] = state
+    if changed:
+        _set_job_card_state(conv_id, state)
 
 
 # 直通正文卡节流落库间隔: 执行器流式 text 增量原位更新(单卡生长, cv-263——
@@ -188,6 +205,7 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             if now - buf["at"] >= _PROXY_FLUSH_MS:
                 buf["at"] = now
                 _persist(buf["text"])
+            _entry_mark(conv_id, job_id, "running")   # cv-285f 状态轴: 活动=执行中
         elif kind == "turn_done":
             # cv-267 对话回合制: 正常收束(非终态, 作业保活——续话直达原生会话)
             _flush("✅ 本轮回答已结束——继续对话将直接送达执行器。")
@@ -197,8 +215,10 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
             _ps.proxy_turn_done(conv_id)
             snap = _ps.proxy_fold_snapshot(conv_id)   # 含 turnCount(本轮累计)
             _ps.publish(conv_id, f"proxy:{conv_id}", snap, jobId=job_id)
+            _entry_mark(conv_id, job_id, "idle")      # cv-285f 回合完成=等待输入
         elif kind == "input_required":
             _flush("⏸ 执行器有事项需要你确认——直接回复即可。")
+            _entry_mark(conv_id, job_id, "idle")      # cv-285f 等待用户=非执行中
         elif kind in ("tool", "usage", "progress"):
             # cv-268 过程感知单源: 落内存环形(瞬态) + SSE progress
             # (conversationId 键无 taskId → FE 分流到消息区过程条)
@@ -208,8 +228,13 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
                 _ps.proxy_store(conv_id, prog)
                 _ps.publish(conv_id, f"proxy:{conv_id}", prog,
                             throttle=_ps.sse_throttle(kind), jobId=job_id)
+            if kind == "tool":
+                _entry_mark(conv_id, job_id, "running")   # cv-285f 工具活动
         elif kind == "notice":
             logger.info("[proxy] %s notice: %s", job_id, str(ev.get("text") or "")[:120])
+            # 修复回注 notice=执行器自续跑(无新 turn_done 前) → 回 running
+            if "修复回注" in str(ev.get("text") or ""):
+                _entry_mark(conv_id, job_id, "running")
         elif kind in ("done", "failed", "aborted"):
             _set_job_card_state(conv_id, "ended")   # cv-283 作业终态回写
             _flush("✅ 本轮完成。" if kind == "done"
@@ -387,6 +412,7 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
                                  msg_meta={"kind": "proxy"}, agent=_agent)
                 await _send_done(row)
             else:
+                _entry_mark(conv_id, str(job.get("job_id") or ""), "running")  # cv-285f 转达=新回合启动
                 await _send_done()   # 纯转发静默成功: 收口清占位泡, 产出经泵+SSE 呈现
             return True
 
@@ -518,7 +544,8 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         await _send_done(row)
         return True
 
-    _PROXY_JOBS[conv_id] = {"job_id": sr.job_id, "executor_type": etype}
+    _PROXY_JOBS[conv_id] = {"job_id": sr.job_id, "executor_type": etype,
+                            "state": "running"}
     # 统筹调度(2026-10): 启动成功登记 running 槽(终态由 pump finally 释放)
     from . import executor_scheduler as _sched
     _sched.register(root or "", conv_id, str(ex.get("id") or etype),

@@ -45,7 +45,12 @@ TOOLS = [
      "args": {"conversation": "会话 id"}},
 ]
 
-_ARTIFACT_TOOLS = {"req.propose", "contract.propose", "convention.propose"}
+# MS-D1: 产物沉淀工具集由注册 flags(artifact) 派生(惰性——注册晚于本模块 import)
+
+
+def _artifact_tools() -> set:
+    from ..tools.registry import tools_with_flag
+    return set(tools_with_flag("artifact"))
 
 
 # ── 写入侧 ────────────────────────────────────────────────
@@ -81,7 +86,7 @@ def record_tool_call(conv_id: str, name: str, args: Dict[str, Any],
             "content": f"参数: {json.dumps(args, ensure_ascii=False)[:600]}\n\n结果: {summary[:1200]}",
             "refs": {}, "importance": 0,
         })
-        if ok and name in _ARTIFACT_TOOLS:
+        if ok and name in _artifact_tools():
             _store().ContextUnitsStore.create({
                 "conversationId": conv_id, "projectId": project,
                 "type": "artifact",

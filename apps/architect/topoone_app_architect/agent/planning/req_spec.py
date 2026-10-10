@@ -27,8 +27,6 @@ def _ra():
 
 
 
-_GUARD_REPAIR_TOOLS = ("req.amend", "req.finalize", "req.propose")
-
 
 # ── 规约载荷确定性提取(消息流「写入需求」按钮 / 守卫前置提取共用) ──
 
