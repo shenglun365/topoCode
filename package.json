@@ -28,7 +28,7 @@
     "build:portal": "npm run build:portal -w @topo/web-core",
     "build:apps": "npm run build -w @topo/app-workbench -w @topo/app-docs -w @topo/app-architect",
     "test": "npm run test:py && npm run test:fe",
-    "test:py": "python -m pytest packages/core/tests -q && python -m pytest apps/workbench/chat_service/tests -q && python -m pytest apps/docs/tests -q && python -m pytest apps/architect/tests -q",
+    "test:py": "python -m pytest packages/core/tests packages/core/topoone/tests packages/core/topoone/plugins/parsers/tests -q && python -m pytest apps/workbench/chat_service/tests apps/workbench/tests -q && python -m pytest apps/docs/tests -q && python -m pytest apps/architect/tests -q",
     "test:fe": "npm run test -w @topo/app-workbench -w @topo/app-docs && npm run test -w @topo/web-core",
     "type-check": "npm run typecheck --workspaces --if-present",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx --ignore-path .gitignore",
