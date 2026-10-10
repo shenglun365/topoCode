@@ -214,8 +214,18 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
     files = scope.get("files") or list_code_files(root)
     if not files:
         return {"nodes": 0, "edges": 0, "files": 0, "note": "无代码文件"}
+    incremental = bool(scope.get("incremental")) and bool(scope.get("files"))
     rev = scope.get("rev") or ""
     anchor_head = (scope.get("anchorHead") or "").strip()
+    if incremental:
+        # 遗留#3 增量: 在当前基线快照上按文件合入(无基线→回落全量语义)
+        try:
+            from .graph_context import baseline_rev as _br
+            rev = _br(pid).get("rev") or ""
+        except Exception:  # noqa: BLE001
+            rev = ""
+        if not rev:
+            incremental = False
     if not rev:
         head = anchor_head or _git_head(root)
         rev = f"baseline:{head}" if head else "workspace"
@@ -223,8 +233,18 @@ def _job_collect_graph(ctx: JobCtx) -> dict:
     ctx.progress(total=3, done=0, current="语义管线(解析→符号→关系→社区)")
 
     nodes, edges, stats = collect_snapshot(root, pid, files, rev)
-    written = GraphStore.replace_rev(pid, rev, nodes, edges)
+    written = (GraphStore.merge_files(pid, rev, files, nodes, edges)
+               if incremental else GraphStore.replace_rev(pid, rev, nodes, edges))
 
+    if incremental:
+        # 增量收敛: 组件树/基线锚不动(全量刷新时重建)——受影响资产清单
+        # (assets_of_files)独立于组件树可用
+        return {"rev": rev, "files": len(files), "nodes": written["nodes"],
+                "edges": written["edges"], "incremental": True,
+                "removedNodes": written.get("removedNodes", 0),
+                "removedEdges": written.get("removedEdges", 0),
+                "parsed": stats["parsed"], "cached": stats["cached"],
+                "failed": stats["failed"], "source": stats["source"]}
     ctx.progress(total=3, done=2, current="组件树落库")
     comps, hier = [], []
     for c in stats.get("components") or []:

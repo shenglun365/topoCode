@@ -281,6 +281,23 @@ def _acceptance_brief(conv_id: str, rid: str, changed_files: List[str],
             why.append("无自动验收结果")
         v_line = (f"⚠️ **建议评估：部分符合/信号不足**（{ '；'.join(why) }）"
                   "——请人工核验后裁决。")
+    # 遗留#3 受影响资产清单(file→assets 反查): 语义层变更可视
+    if changed_files:
+        try:
+            _pid = ((store.ConversationsStore.get(conv_id) or {})
+                    .get("projectId") or "")
+            if _pid:
+                from ...store.semantic import SemanticAssetsStore
+                hits = SemanticAssetsStore.assets_of_files(_pid, changed_files)
+                if hits:
+                    shown = "、".join(f"[{h.get('kind')}] {h.get('name')}"
+                                      for h in hits[:10])
+                    more = f"（共 {len(hits)} 项）" if len(hits) >= 30 else ""
+                    out_lines.append(f"**受影响语义资产**{more}：{shown}")
+                else:
+                    out_lines.append("受影响语义资产：无命中(变更未触及已登记资产)")
+        except Exception as e:  # noqa: BLE001 — 反查失败不阻塞回执
+            logger.info("[exec-bridge] 受影响资产反查失败: %s", e)
     out_lines.append(v_line)
     return "\n\n".join(out_lines)
 
@@ -794,6 +811,12 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
                      "以变更文件与验收简报为准。")
         changed = ev.get("changedFiles") or []
         _prog = (store.TasksStore.get(task_id) or {}).get("progress") or {}
+        if changed and not _prog.get("changedFiles"):
+            try:
+                store.TasksStore.set_progress(task_id, {
+                    **_prog, "changedFiles": [str(f) for f in changed[:200]]})
+            except Exception:  # noqa: BLE001
+                pass
         brief = _acceptance_brief(conv_id, ctx["rid"], changed,
                                   str(_prog.get("verifyOverall") or ""))
         brief += _milestone_note(conv_id, task_id, clean)

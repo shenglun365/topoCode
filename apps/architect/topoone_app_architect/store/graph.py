@@ -90,6 +90,79 @@ class GraphStore:
         return {"nodes": len(n_rows), "edges": len(e_rows)}
 
     @classmethod
+    def merge_files(cls, project_id: str, rev: str, files: List[str],
+                    nodes: List[dict], edges: List[dict]) -> dict:
+        """增量合入(遗留#3): 变更文件旧 node 删除重插, 牵连边(端点命中被删
+        node id)随删; 其余文件快照保留——近似精确(他文件引用被删符号的边
+        不重析, 由下次全量收敛)。返回 {nodes, edges, removedNodes, removedEdges}。
+        """
+        files = [str(f) for f in (files or []) if f]
+        if not files:
+            return {"nodes": 0, "edges": 0, "removedNodes": 0, "removedEdges": 0}
+        db = _target_db(cls.NODE_TABLE, project_id)
+        ph = ",".join("?" * len(files))
+        gone = {r.get("id") for r in db.fetchall(
+            f"SELECT id FROM {cls.NODE_TABLE} WHERE project_id=? AND rev=? "
+            f"AND file_path IN ({ph})", (project_id, rev, *files))}
+        removed_edges = 0
+        if gone:
+            gph = ",".join("?" * len(gone))
+            cur = db.execute(
+                f"DELETE FROM {cls.EDGE_TABLE} WHERE project_id=? AND rev=? AND "
+                f"(source IN ({gph}) OR target IN ({gph}))",
+                (project_id, rev, *gone, *gone))
+            removed_edges = max(0, cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0)
+        cur = db.execute(
+            f"DELETE FROM {cls.NODE_TABLE} WHERE project_id=? AND rev=? "
+            f"AND file_path IN ({ph})", (project_id, rev, *files))
+        removed_nodes = len(gone) or max(0, cur.rowcount or 0)
+        db.commit()
+        written = cls._write_rows(db, project_id, rev, nodes, edges)
+        return {**written, "removedNodes": removed_nodes,
+                "removedEdges": removed_edges}
+
+    @classmethod
+    def _write_rows(cls, db, project_id: str, rev: str,
+                    nodes: List[dict], edges: List[dict]) -> dict:
+        """写入辅助(与 replace_rev 同口径: 节点同 id 覆盖/边三元组去重)。"""
+        now = _now()
+        row_by_id = {n["id"]: n for n in (nodes or []) if (n or {}).get("id")}
+        n_rows = []
+        for n in row_by_id.values():
+            n_rows.append((
+                project_id, rev, n["id"], n.get("kind") or "",
+                n.get("name") or "", n.get("qualified_name") or "",
+                n.get("file_path") or "", n.get("language") or "",
+                int(n.get("start_line") or 0), int(n.get("end_line") or 0),
+                int(n.get("start_column") or 0), int(n.get("end_column") or 0),
+                n.get("signature") or "", n.get("docstring") or "",
+                n.get("return_type") or "",
+                1 if n.get("is_exported") else 0, now,
+            ))
+        e_rows = []
+        seen = set()
+        for e in edges or []:
+            key = (e.get("source"), e.get("target"), e.get("kind"))
+            if not all(key) or key in seen:
+                continue
+            seen.add(key)
+            e_rows.append((project_id, rev, key[0], key[1], key[2],
+                           int(e.get("line") or 0), int(e.get("col") or 0)))
+        if n_rows:
+            db.executemany(
+                "INSERT OR REPLACE INTO arch_graph_node (project_id, rev, id, "
+                "kind, name, qualified_name, file_path, language, start_line, "
+                "end_line, start_column, end_column, signature, docstring, "
+                "return_type, is_exported, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", n_rows)
+        if e_rows:
+            db.executemany(
+                "INSERT OR REPLACE INTO arch_graph_edge (project_id, rev, "
+                "source, target, kind, line, col) VALUES (?,?,?,?,?,?,?)", e_rows)
+        db.commit()
+        return {"nodes": len(n_rows), "edges": len(e_rows)}
+
+    @classmethod
     def drop_rev(cls, project_id: str, rev: str) -> None:
         """清除整 rev 快照（rev 重建/清理用）。"""
         db = _target_db(cls.NODE_TABLE, project_id)

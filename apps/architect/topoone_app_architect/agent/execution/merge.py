@@ -203,13 +203,20 @@ def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
         # 就地任务: 变更已生效——直接记 merged 终态(无 git 动作)
         if "融合模式" in str(pre.get("advice") or ""):
             import time as _t
-            # E4 认知回写: 就地变更同样排队基线刷新(幂等/失败静默)
+            # E4+#3 认知回写: 就地变更同样排队(增量优先, 幂等/失败静默)
             try:
                 from ...sem import job_runner as _jr
                 _pid = str(task.get("projectId") or "")
                 if _pid:
-                    _jr.start_job(_pid, "baseline_refresh",
-                                  {"trigger": f"merge-inplace:{task_id}"}, llm=True)
+                    _chg = ((store.TasksStore.get(task_id) or {})
+                            .get("progress") or {}).get("changedFiles") or []
+                    if _chg:
+                        _jr.start_job(_pid, "collect_graph", {
+                            "trigger": f"merge-inplace:{task_id}",
+                            "incremental": True, "files": _chg[:200]})
+                    else:
+                        _jr.start_job(_pid, "baseline_refresh",
+                                      {"trigger": f"merge-inplace:{task_id}"}, llm=True)
             except Exception:  # noqa: BLE001
                 pass
             return store.TasksStore.update(task_id, {
@@ -260,10 +267,20 @@ def _merge_branch_locked(task_id: str, mode: str) -> Dict[str, Any]:
         from ...sem import job_runner as _jr
         pid = str(task.get("projectId") or "")
         if pid:
-            rr = _jr.start_job(pid, "baseline_refresh",
-                               {"trigger": f"merge:{task_id}"}, llm=True)
+            # 遗留#3: 变更文件已知 → 图谱增量合入(零 LLM, 秒级); 否则全量编排
+            _chg = ((store.TasksStore.get(task_id) or {}).get("progress")
+                    or {}).get("changedFiles") or []
+            if _chg:
+                rr = _jr.start_job(pid, "collect_graph",
+                                   {"trigger": f"merge:{task_id}",
+                                    "incremental": True, "files": _chg[:200]})
+                _word = "已排队图谱增量重析(变更文件)"
+            else:
+                rr = _jr.start_job(pid, "baseline_refresh",
+                                   {"trigger": f"merge:{task_id}"}, llm=True)
+                _word = "已排队语义基线刷新(认知回写——完成后资产图谱含本次变更)"
             if rr.get("started"):
-                refresh_note = "已排队语义基线刷新(认知回写——完成后资产图谱含本次变更)"
+                refresh_note = _word
             elif rr.get("reason") == "already_running":
                 refresh_note = "语义基线刷新已在进行(并入本次变更)"
     except Exception as e:  # noqa: BLE001 — 回写排队失败不阻塞合并回执

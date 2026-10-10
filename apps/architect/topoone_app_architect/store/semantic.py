@@ -61,6 +61,39 @@ class SemanticAssetsStore:
         return _get(cls.TABLE, asset_id)
 
     @classmethod
+    def assets_of_files(cls, project_id: str, files: List[str]) -> List[dict]:
+        """file→资产反查(遗留#3, 受影响资产清单数据源)。
+
+        只载元数据列(astRefs 在列); astRefs[].file 命中变更集即算受影响。
+        返回 [{id, kind, name, scopeKey}] 按名称序, 上限 30。
+        """
+        want = {str(f) for f in (files or []) if f}
+        if not want:
+            return []
+        rows, _ = _fetchall_routed(
+            cls.TABLE,
+            "SELECT id, kind, name, ast_refs, scope_key FROM "
+            f"{cls.TABLE} WHERE project_id = ? LIMIT 2000",
+            (project_id,), project_id or None)
+        out = []
+        for r in rows or []:
+            refs = r.get("astRefs") or r.get("ast_refs")
+            if isinstance(refs, str):
+                import json as _json
+                try:
+                    refs = _json.loads(refs or "[]")
+                except Exception:  # noqa: BLE001
+                    refs = []
+            for x in refs or []:
+                if isinstance(x, dict) and str(x.get("file") or "") in want:
+                    out.append({"id": r.get("id"), "kind": r.get("kind"),
+                                "name": r.get("name"),
+                                "scopeKey": r.get("scope_key") or r.get("scopeKey") or ""})
+                    break
+        out.sort(key=lambda a: str(a.get("name") or ""))
+        return out[:30]
+
+    @classmethod
     def find_by_scope(cls, project_id: str, scope_type: str, scope_key: str,
                       include_deleted: bool = False):
         status_sql = "status = 'active'" if not include_deleted else "1=1"
