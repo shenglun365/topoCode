@@ -10,6 +10,7 @@ import { semanticViewClickIds, recommendedSemanticView, semanticNodeLabelText, S
 import { useArchSettingsStore } from '@/stores/settings-store'
 
 import type { WsDeps } from './graphTypes'
+import { applyCoreHighlight } from '../coreMarks'
 import TopoDiagram from '@topo/graph-kernel/vue/TopoDiagram.vue'
 import type { DiffBucket } from './useGraphData'
 import { useI18n } from 'vue-i18n'
@@ -162,6 +163,25 @@ function centerSelectedNode() {
   })
 }
 watch(D.detail.selId, () => centerSelectedNode())
+
+/** 2610 核心资产守护: svg 后处理——核心节点黄描边+★(三层标记; 数据级 coreOnly 过滤在 data 域)。
+ *  mermaid 异步渲染, nextTick 后即刻一遍 + 400ms 兜底一遍(幂等)。 */
+function applyCoreHighlightPass() {
+  const run = () => {
+    const svg = diagRef.value?.getSvg() as SVGSVGElement | null | undefined
+    const matcher = D.data.coreMatcher?.value
+    if (!svg || !matcher) return
+    const cmap = clickIds.value
+    applyCoreHighlight(svg, (g) => {
+      const mid = g.id.match(/flowchart-(.+?)-\d+$/)?.[1] ?? g.id
+      const txt = (g.textContent ?? '').trim()
+      return cmap.get(mid) ?? cmap.get(txt) ?? ''
+    }, matcher)
+  }
+  void nextTick(run)
+  setTimeout(run, 400)
+}
+watch([() => D.data.scopedNodes?.value, () => D.data.coreMatcher?.value, cardLang], () => applyCoreHighlightPass())
 
 /** 主题跟随 data-theme(catppuccin 变量随主题切换)。 */
 const themeMode = computed<'dark' | 'light'>(() =>
@@ -777,7 +797,7 @@ function applyNodeTooltips() {
 }
 
 // ---- AI 逐行解读(逐段生成；结合术语/规约；手动触发，后端落库缓存) ----
-let iconPulseTimer: ReturnType<typeof setTimeout> | null = null
+const iconPulseTimer: ReturnType<typeof setTimeout> | null = null
 let lastShownView: SemanticGraphViewId | '' = ''
 watch(D.data.effectiveView, (_v, ov) => { lastShownView = ov ?? _v })   // 记录变更前的显示视图(供选中切换时钉住)
 watch(D.detail.sel, (n) => {

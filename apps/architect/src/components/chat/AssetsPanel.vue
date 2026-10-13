@@ -99,6 +99,7 @@ const KINDS = [
   { v: 'artifact', label: '产物' },
   { v: 'error', label: '错误' },
   { v: 'error_pattern', label: '模式' },
+  { v: 'core_assess', label: '守护' },
 ]
 
 const KIND_CLS: Record<string, string> = {
@@ -107,10 +108,11 @@ const KIND_CLS: Record<string, string> = {
   artifact: 'bg-ctp-mauve/15 text-ctp-mauve',
   error: 'bg-ctp-red/15 text-ctp-red',
   error_pattern: 'bg-ctp-yellow/15 text-ctp-yellow',
+  core_assess: 'bg-ctp-teal/15 text-ctp-teal',
 }
 const KIND_LABEL: Record<string, string> = {
   execution_report: '回执', analysis: '分析', artifact: '产物',
-  error: '错误', error_pattern: '模式',
+  error: '错误', error_pattern: '模式', core_assess: '守护',
 }
 
 function kindCls(k: string): string {

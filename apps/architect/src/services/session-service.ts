@@ -11,6 +11,43 @@ export interface SessionTags {
   groups: string[]
 }
 
+/** 删除预览: 需求完成情况 + 子会话运行状态 + 可删性(2610 裁决) */
+export interface SessionDeleteBlocker {
+  id: string
+  title: string
+  executorId: string
+  status: string
+  self?: boolean
+}
+
+export interface SessionDeletePreviewReq {
+  id: string
+  title: string
+  status: string
+  doneMark: number
+  shared: boolean
+  willDelete: boolean
+}
+
+export interface SessionDeletePreviewSub {
+  id: string
+  title: string
+  executorId: string
+  status: string
+  execution: string
+  msgCount: number
+}
+
+export interface SessionDeletePreview {
+  id: string
+  title: string
+  deletable: boolean
+  blockers: SessionDeleteBlocker[]
+  requirements: SessionDeletePreviewReq[]
+  subSessions: SessionDeletePreviewSub[]
+  trackingItemCount: number
+}
+
 export interface ConversationMeta {
   id: string
   kind: string
@@ -25,7 +62,7 @@ export interface ConversationMeta {
   /** 执行角色(默认 architect) */
   /** 工作相位: architect(常态) | running(外调作业执行中) */
   workState?: 'architect' | 'running'
-  /** 分析挡位: strict(architect 模式: 需求分析→规约→任务) | quick(coding 执行器模式: 直出任务卡)。缺省 strict。 */
+  /** legacy 分析挡位(2610 统一模型后仅读侧兼容): quick 且无绑定=直通态展示; 真相源=executorId。 */
   analysisMode?: 'strict' | 'quick'
   /** 角色集(能力声明; architect 恒在) */
   roles?: string[]
@@ -38,6 +75,10 @@ export interface ConversationMeta {
   updatedAt?: number
   /** 归属项目(scope=all 跨库列表用于能力提案等项目级操作)。 */
   projectId?: string
+  /** 生效执行器(2610 统一模型): ""=architect; legacy quick 无绑定→默认 coding 执行器。 */
+  effectiveExecutorId?: string
+  /** 父会话(子会话非空; feed-up 上投/子会话视图判定用)。 */
+  parentConvId?: string
   /** 特性状态账(后端 conv.meta 整体透传; 各特性自管键, 如 ctxUsage 上下文用量)。 */
   meta?: { ctxUsage?: CtxUsage } & Record<string, unknown>
 }
@@ -95,6 +136,21 @@ function qs(params?: Record<string, string | number | undefined>): string {
   return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
 }
 
+// 2610 S1(日志评估 cv-15): 会话列表请求合并——同一 URL 在飞共享 + 250ms
+// 合并窗(多监听者同事件扇出: SessionsPage.load/dock.loadRecent/
+// refreshActiveMeta 常同时触发)。导航风暴 21:40 实证 344 req/min。
+const _listInflight = new Map<string, Promise<ConversationMeta[]>>()
+async function listCoalesced(url: string): Promise<ConversationMeta[]> {
+  const hit = _listInflight.get(url)
+  if (hit) return hit
+  const p = (async () => {
+    await new Promise((r) => setTimeout(r, 250))   // 合并窗: 后到者搭车
+    return apiGet<ConversationMeta[]>(url)
+  })()
+  _listInflight.set(url, p.finally(() => _listInflight.delete(url)))
+  return p
+}
+
 export const sessionService = {
   /** 发布目标会话选择器（需求草稿发布）：活跃会话 + 多关键字智能匹配(AND→OR 降级) + 分页。 */
   async picker(params?: { kw?: string; limit?: number; offset?: number }): Promise<{ items: { id: string; title: string; reqId?: string; updatedAt?: number }[]; total: number; offset: number; limit: number; orFallback: boolean }> {
@@ -102,7 +158,7 @@ export const sessionService = {
   },
 
   async list(params?: { kind?: string; q?: string; limit?: number; scope?: string; project?: string }): Promise<ConversationMeta[]> {
-    return apiGet<ConversationMeta[]>(`/sessions${qs(params)}`)
+    return listCoalesced(`/sessions${qs(params)}`)
   },
   async groups(scope?: string, project?: string): Promise<SessionGroupsInfo> {
     const p = new URLSearchParams()
@@ -122,6 +178,14 @@ export const sessionService = {
   },
   async remove(id: string): Promise<void> {
     await apiDelete(`/sessions/${id}`)
+  },
+  /** 换绑会话执行器(2610 统一模型): architect=切回分析管线; 在跑拒绝; 对话连续。 */
+  async switchExecutor(id: string, executorId: string): Promise<{ executorId: string; summary?: string }> {
+    return apiPost(`/sessions/${id}/executor`, { executorId })
+  },
+  /** 删除预览: 级联清单(需求/子会话/跟踪) + 执行中阻断详情。 */
+  async deletePreview(id: string): Promise<SessionDeletePreview> {
+    return apiGet<SessionDeletePreview>(`/sessions/${id}/delete-preview`)
   },
   async messages(id: string): Promise<ConversationDetail> {
     return apiGet<ConversationDetail>(`/sessions/${id}/messages`)

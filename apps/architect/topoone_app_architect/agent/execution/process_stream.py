@@ -114,9 +114,17 @@ def proxy_turn_done(conv_id: str) -> None:
 
 
 def proxy_finish(conv_id: str, note: str = "") -> None:
-    """终态: 清过程态 + 下发 finished 帧(FE 据此撤过程条)。"""
+    """终态: 清过程态 + 下发 finished 帧(FE 据此撤过程条)。
+
+    2610 W5: workState 回落单点——直通作业终态经各终态路径统一收口于此,
+    会话聚合口径(列表/守卫)与任务链一致。"""
     proxy_clear(conv_id)
     _PROXY_TURNS.pop(conv_id, None)
+    try:
+        from ... import store as _st
+        _st.ConversationsStore.set_work_state(conv_id, "architect")
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from ...agent.collab.sse import emit
         emit("progress", conv_id, finished=True, note=note, at=_ts())

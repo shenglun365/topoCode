@@ -577,8 +577,11 @@ def test_mcp_default_wired_and_user_override(arch_env, tmp_path, monkeypatch,
                            root=str(tmp_path / "proj"), project="",
                            executor=ex))
     p = starts[0]
-    assert isinstance(p.get("mcp_servers"), list)
-    assert p["mcp_servers"][0]["name"] == "topo-architect"
+    # 2610 P3: 注入落 executorConfig.mcp_servers(runner 唯一读取面; 顶层已退役)
+    mcp_in_cfg = p["executorConfig"].get("mcp_servers")
+    assert isinstance(mcp_in_cfg, list)
+    assert mcp_in_cfg[0]["name"] == "topo-architect"
+    assert "mcp_servers" not in p
     assert "workspaceFiles" not in p or not [
         f for f in p["workspaceFiles"] if f["path"] == "TOPO-CONTEXT-TOOLS.md"
     ], "工具告知不得再落盘(cv-269: 融合模式自弄脏工作区)"
@@ -809,7 +812,8 @@ def test_proxy_state_endpoint_shape(arch_env, tmp_path):
     store.ConversationsStore.update(conv["id"], {"sessionRef": "sess-x"})
     st2 = proxy.proxy_state(conv["id"])
     assert st2 == {"active": True, "jobId": "job-st", "state": "running",
-                   "executorType": "cline-sdk", "sessionRef": "sess-x"}
+                   "executorType": "cline-sdk", "sessionRef": "sess-x",
+                   "queued": 0}   # F5b: 调度排队位次(无=0)
 
 
 def test_job_state_axis_turn_done_marks_idle(arch_env, tmp_path,
@@ -876,3 +880,144 @@ def test_proxy_stop_dispatch_by_job_status(arch_env, tmp_path, monkeypatch):
     r2 = proxy.proxy_stop(conv["id"])
     assert r2["ok"] and r2["action"] == "finish" and any(
         p.endswith("/finish") for p in calls), "空闲应走 finish(结束会话)"
+
+
+# ── 2610 统一模型: 直通判定/生效执行器单源 ─────────────────────────────
+
+def test_uses_direct_channel_matrix(arch_env, tmp_path):
+    """路由分支判定: 绑定 coding→True / architect 显式→False / legacy quick→True。"""
+    from topoone_app_architect.agent.execution.exec_bridge import (
+        effective_executor_id, uses_direct_channel)
+
+    def _c(**kw):
+        return kw
+    # 绑定 coding 执行器 → 直通, 生效 id=绑定
+    assert uses_direct_channel(_c(executorId="cline")) is True
+    assert effective_executor_id(_c(executorId="cline")) == "cline"
+    # 显式 architect(换绑落点, 粘滞) → 分析管线, 不走 legacy 回落
+    assert uses_direct_channel(_c(executorId="architect", analysisMode="quick")) is False
+    assert effective_executor_id(_c(executorId="architect")) == ""
+    # 空 + legacy quick → 直通, 生效 id=注册表默认 coding 执行器(读侧兼容)
+    assert uses_direct_channel(_c(analysisMode="quick")) is True
+    _def = effective_executor_id(_c(analysisMode="quick"))
+    assert _def and _def != "architect"
+    # 空 + 无 legacy → 分析管线
+    assert uses_direct_channel(_c()) is False
+    assert effective_executor_id(_c()) == ""
+
+
+# ── 2610 P1/P3: workState 状态轴 + MCP 注入 executorConfig ────────────
+
+def test_entry_mark_syncs_work_state(arch_env, tmp_path):
+    """P1: 直通状态轴驱动 workState——idle(回合收束)回落, running(新回合)置位。"""
+    from topoone_app_architect.agent.execution import proxy as _px
+    from topoone_app_architect import store
+    conv = _mk_conv(arch_env, tmp_path)
+    cid = conv["id"]
+    _px._PROXY_JOBS[cid] = {"job_id": "j-ws", "executor_type": "cline-sdk",
+                            "state": "running"}
+    try:
+        _px._entry_mark(cid, "j-ws", "idle")
+        assert store.ConversationsStore.get(cid)["workState"] == "architect", \
+            "回合收束(等待输入)应回落 workState"
+        _px._entry_mark(cid, "j-ws", "running")
+        assert store.ConversationsStore.get(cid)["workState"] == "running"
+        _px._entry_mark(cid, "j-ws", "running")   # 状态不变零写(幂等)
+    finally:
+        _px._PROXY_JOBS.pop(cid, None)
+
+
+def test_proxy_start_injects_mcp_into_executor_config(arch_env, tmp_path,
+                                                      monkeypatch, _isolate_proxy_state):
+    """P3: 默认 MCP 落 executorConfig.mcp_servers(runner 适配器唯一读取面;
+    原 payload 顶层字段被 implement 忽略 → cline 从未收到 topo-architect)。"""
+    from topoone_app_architect.agent.execution import exec_bridge as eb
+    monkeypatch.setattr(eb, "executor_hint_by_id", lambda eid, c=None: {
+        "executorId": "cline", "executorType": "cline-sdk",
+        "executorConfig": {"model_id": "m", "models": [
+            {"name": "m", "model": "m", "url": "http://x/v1"}]},
+        "model": "m"})
+    conv = _mk_conv(arch_env, tmp_path)
+
+    async def _go():
+        await proxy_turn({}, _gate(conv), _Send(), root=str(tmp_path / "proj"),
+                         project="", executor=EXECUTOR_FIXTURE)
+    asyncio.run(_go())
+    p = _isolate_proxy_state[0]
+    mcp = p["executorConfig"].get("mcp_servers")
+    assert isinstance(mcp, list) and any(
+        e.get("name") == "topo-architect" for e in mcp), \
+        "cline 形状(list)应含默认 topo-architect 服务"
+    assert "mcp_servers" not in p, "顶层 payload.mcp_servers 已退役(runner 不读)"
+
+
+def test_recover_sweep_resets_stale_work_state(arch_env, tmp_path):
+    """P1: 重启对账——workState=running 且无任务/无直通句柄 → 回落。"""
+    from topoone_app_architect.agent.execution import recover as _rc
+    from topoone_app_architect import store
+    conv = _mk_conv(arch_env, tmp_path)
+    cid = conv["id"]
+    store.ConversationsStore.set_work_state(cid, "running")
+    n = _rc.recover_sweep()
+    assert n >= 1
+    assert store.ConversationsStore.get(cid)["workState"] == "architect"
+
+
+def test_entry_mark_idle_releases_scheduler_slot(arch_env, tmp_path, monkeypatch):
+    """F5a 裁决A: 回合收束(idle)让坑——调度槽释放, 同 root 排队会话可续跑。"""
+    from topoone_app_architect.agent.execution import proxy as _px
+    from topoone_app_architect.agent.execution import executor_scheduler as _sched
+    conv = _mk_conv(arch_env, tmp_path)
+    cid = conv["id"]
+    _px._PROXY_JOBS[cid] = {"job_id": "j-slot", "executor_type": "cline-sdk",
+                            "state": "running"}
+    _sched.register("/w-mark", cid, "cline", "j-slot")
+    try:
+        _px._entry_mark(cid, "j-slot", "idle")
+        assert _sched.state_of_conv(cid)["state"] == "idle", \
+            "idle(等待输入)应释放调度槽(裁决A: 等待输入让坑)"
+        _px._entry_mark(cid, "j-slot", "running")   # 幂等: 无槽零动作
+    finally:
+        _px._PROXY_JOBS.pop(cid, None)
+        _sched.stop_conv("/w-mark", cid)
+
+
+def test_mcp_tools_brief_project_and_naming():
+    """2610 cv-12/14 统筹升级: brief 含 map.*/project 内联/命名形态说明。"""
+    from topoone_app_architect.agent.execution.proxy_ctx import _mcp_tools_brief
+    mcp = [{"name": "topo-architect", "url": "http://x/mcp"}]
+    b = _mcp_tools_brief("cv-x", mcp, "proj-1")
+    assert "map.overview" in b and "map.assets" in b and "ctx.get" in b
+    assert 'project="proj-1"' in b, "projectId 应内联(免执行器摸索)"
+    assert "topo-architect__" in b and "topo-architect_" in b, "命名形态说明"
+    b2 = _mcp_tools_brief("cv-x", mcp, "")
+    assert "一律传" not in b2, "无 pid 时省略 project 行"
+    assert _mcp_tools_brief("cv-x", [{"name": "other"}]) == ""
+    assert "topo-architect MCP 已接线" in _mcp_tools_brief(
+        "cv-x", {"topo-architect": {"url": "u"}}), "dict 形状(opencode)同源"
+
+
+def test_proxy_stop_mode_override(arch_env, monkeypatch, _isolate_proxy_state):
+    """2610 cv-15: mode 按钮语义显式覆盖——running 态允许直接 finish
+    (任务卡按钮跟随状态: idle 仅结束会话, running=暂停+结束)。"""
+    from topoone_app_architect.agent.execution import proxy_state as _pst
+    calls: list = []
+
+    def fake_runner(path, body, timeout):
+        calls.append(path)
+        if path.endswith("/api/implement/j-mo"):
+            return {"status": "running"}          # runner 侧真在跑
+        return {"ok": True}                       # abort/finish 调用
+    monkeypatch.setattr(_pst.eb if hasattr(_pst, "eb") else __import__(
+        "topoone_app_architect.agent.execution.exec_bridge",
+        fromlist=["_runner"]), "_runner", fake_runner)
+    _pst.PROXY_JOBS["cv-mo"] = {"job_id": "j-mo", "executor_type": "cline-sdk",
+                                "state": "running"}
+    try:
+        r = _pst.proxy_stop("cv-mo", mode="finish")   # running 但显式结束
+        assert r.get("ok") and r.get("action") == "finish"
+        assert any(p.endswith("/finish") for p in calls), "finish 应显式直达"
+        r2 = _pst.proxy_stop("cv-mo", mode="abort")   # 缺省自动分型被覆盖为 abort
+        assert r2.get("action") == "abort"
+    finally:
+        _pst.PROXY_JOBS.pop("cv-mo", None)

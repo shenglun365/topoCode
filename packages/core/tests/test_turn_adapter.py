@@ -280,6 +280,22 @@ def test_opencode_headless_config_shape():
     assert data["mcp"]["web"]["timeout"] == 60000     # 缺省补齐
 
 
+def test_opencode_mcp_shape_normalized():
+    """2610 F6: 官方 schema type 必填——缺型条目归一(缺型被 opencode 忽略)。"""
+    import json as _json
+    data = _json.loads(ta._opencode_headless_config("auto", {
+        "topo-architect": {"url": "http://127.0.0.1:3470/mcp", "timeout": 60000},
+        "localtool": {"command": ["npx", "-y", "mcp-x"]},
+        "typed": {"type": "remote", "url": "http://y", "enabled": False},
+    }))
+    a = data["mcp"]["topo-architect"]
+    assert a["type"] == "remote" and a["enabled"] is True   # url 型补齐
+    assert a["url"] == "http://127.0.0.1:3470/mcp"
+    assert data["mcp"]["localtool"]["type"] == "local"      # command 型补齐
+    assert data["mcp"]["localtool"]["enabled"] is True
+    assert data["mcp"]["typed"]["enabled"] is False         # 显式值不被覆盖
+
+
 def test_opencode_spawn_injects_config_env(monkeypatch):
     """spawn serve: OPENCODE_CONFIG_CONTENT 环境变量注入（不落 worktree）。"""
     captured = {}
@@ -507,10 +523,12 @@ def _stream_job(jid="js"):
 
 
 def test_opencode_sse_parts_stream_deltas():
-    """text part 全量重放 → 只发新增片段; tool part 首见 → emit("tool")。"""
+    """text part 全量重放 → 只发新增片段; tool part 首见 → emit("tool")。
+
+    2610 P1a: v1(message.parts 全量)与 v2(part.updated 单 part)双形状
+    统一经 _diff_part 幂等 diff——游标共享, 双路径不重复发射。"""
     a = ta.OpenCodeTurnAdapter(base_url="http://x")
     j = _stream_job()
-    msg_tools: dict = {}
 
     def msg_event(text, parts_extra=None):
         parts = [{"type": "text", "text": text}] + (parts_extra or [])
@@ -518,27 +536,120 @@ def test_opencode_sse_parts_stream_deltas():
                 "properties": {"sessionID": "s1",
                                "message": {"id": "m1", "parts": parts}}}
 
-    # 第一次: 部分 text + 工具
-    a._on_message_parts(j, "m1", [
-        {"type": "text", "text": "正在分析"},
-        {"type": "tool", "tool": "editor"},
-    ], msg_tools)
+    # 第一次: 部分 text + 工具(v1 全量形状)
+    for idx, p in enumerate(msg_event("正在分析")["properties"]["message"]["parts"]):
+        a._diff_part(j, "m1", idx, p)
+    a._diff_part(j, "m1", 1, {"type": "tool", "tool": "editor"})
     kinds = [(e["kind"], e["text"]) for e in j.emitted]
     assert ("text", "正在分析") in kinds
     assert any(e["kind"] == "tool" and e.get("toolName") == "editor"
                for e in j.emitted)
-    assert msg_tools.get("m1") == 2             # 工具计数峰值保持
 
-    # 第二次: 同 part 增长 → 只发增量
+    # 第二次: 同 part 增长 → 只发增量; 工具首见去重
     j.emitted.clear()
-    a._on_message_parts(j, "m1", [
-        {"type": "text", "text": "正在分析代码结构"},
-        {"type": "tool", "tool": "editor"},
-    ], msg_tools)
+    for idx, p in enumerate(msg_event("正在分析代码结构")["properties"]["message"]["parts"]):
+        a._diff_part(j, "m1", idx, p)
     assert [(e["kind"], e["text"]) for e in j.emitted if e["kind"] == "text"] == \
         [("text", "代码结构")]
-    # 工具不再重复上报（首见去重）
     assert not [e for e in j.emitted if e["kind"] == "tool"]
+
+
+def test_opencode_v2_part_event_stream():
+    """2610 P1a: v2 单 part 形状(properties.part, part.id 游标)——
+    cv-8 实证 v2 事件与 v1 全量解析漂移 → 全程零 text 事件的回归锁。"""
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    j = _stream_job("jv2")
+    a._diff_part(j, "mv1", 0, {"id": "prt_1", "type": "text", "text": "核查"})
+    a._diff_part(j, "mv1", 0, {"id": "prt_1", "type": "text",
+                               "text": "核查完毕。结论：能查到"})
+    assert [(e["kind"], e["text"]) for e in j.emitted if e["kind"] == "text"] == \
+        [("text", "核查"), ("text", "完毕。结论：能查到")]
+    # v2 单 part 重复投递幂等(游标按 part.id)
+    a._diff_part(j, "mv1", 0, {"id": "prt_1", "type": "text",
+                               "text": "核查完毕。结论：能查到"})
+    assert len([e for e in j.emitted if e["kind"] == "text"]) == 2
+    assert a._turn_streamed["jv2"] == len("核查完毕。结论：能查到")
+
+
+def test_opencode_run_turn_silent_flush(monkeypatch):
+    """2610 P1c: 本轮流式全哑 → 最终回答整段 emit("text")保底 + 游标推进
+    (cv-8 实证: 回答只存在 opencode 会话里, architect 侧零显示)。"""
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    j = _stream_job("jflush")
+    j.serve_url = "http://x"
+    j.session_id = "s1"
+    j.turn_timeout = 5.0
+
+    class _R:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"info": {"id": "ma"},
+                    "parts": [{"id": "pa", "type": "text",
+                               "text": "核查完毕：能查到 KB 内容"}]}
+
+    class _C:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            return _R()
+
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _C)
+    monkeypatch.setattr(ta, "_git_changed_files", lambda wt: [])
+    a._turn_busy["jflush"] = True
+    out = __import__("asyncio").run(a.run_turn(j, "hi"))
+    assert out.output == "核查完毕：能查到 KB 内容"
+    texts = [e["text"] for e in j.emitted if e["kind"] == "text"]
+    assert texts == ["核查完毕：能查到 KB 内容"], "零流式应整段保底 emit"
+    assert a._text_cursor.get("pa") == len(out.output), "游标推进防轮询重复"
+    assert a._turn_streamed["jflush"] == len(out.output)
+
+    # 轮询兜底不再重复发射(同一 part 已入游标)
+    j.emitted.clear()
+    a._diff_part(j, "ma", 0, {"id": "pa", "type": "text",
+                              "text": "核查完毕：能查到 KB 内容"})
+    assert not [e for e in j.emitted if e["kind"] == "text"]
+
+
+def test_opencode_poll_diff_stream(monkeypatch):
+    """2610 P1b: 轮内轮询 REST 快照 diff——SSE 形状漂移时流式不丢。"""
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    j = _stream_job("jpoll")
+    j.session_id = "s9"
+    a._turn_busy["jpoll"] = True
+
+    async def fake_fetch(job):
+        return [{"info": {"id": "mz"},
+                 "parts": [{"id": "pz", "type": "text", "text": "轮询兜底输出"}]}]
+
+    monkeypatch.setattr(a, "_fetch_messages", fake_fetch)
+    import asyncio as _aio
+    seen = []
+
+    real_diff = a._diff_part
+
+    def spy_diff(job, mid, idx, p):
+        real_diff(job, mid, idx, p)
+        seen.extend(e["text"] for e in job.emitted if e["kind"] == "text")
+
+    a._diff_part = spy_diff
+    msgs = _aio.run(a._fetch_messages(j))
+    for m in msgs:
+        mid = str(((m or {}).get("info") or {}).get("id") or "")
+        for idx, p in enumerate((m or {}).get("parts") or []):
+            a._diff_part(j, mid, idx, p)
+    assert "轮询兜底输出" in seen
+    assert a._turn_streamed["jpoll"] == len("轮询兜底输出")
 
 
 def test_codex_stream_items_delta_and_tools():
@@ -1309,3 +1420,76 @@ def test_cline_data_dir_isolation():
     import inspect
     src = inspect.getsource(ta._SidecarProcess._start_locked)
     assert "TOPOCODE_CLINE_DATA_DIR" in src
+
+
+def test_opencode_role_filter_user_not_echoed():
+    """2610 D1: 用户提示词不回显成执行器输出——快照入账按 role 过滤,
+    v2 单 part 未知/非助手角色一律跳过(cv-9/11 三轮实证的回显根因)。"""
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    j = _stream_job("jrole")
+    a._ingest_snapshot(j, [
+        {"info": {"id": "mu", "role": "user"},
+         "parts": [{"type": "text", "text": "继续执行，给出基线分析"}]},
+        {"info": {"id": "ma", "role": "assistant"},
+         "parts": [{"type": "text", "text": "检查结论: MCP 可查"}]},
+    ])
+    texts = [(e["kind"], e["text"]) for e in j.emitted if e["kind"] == "text"]
+    assert texts == [("text", "检查结论: MCP 可查")], "用户消息不得发射"
+    assert a._msg_roles.get("mu") == "user" and a._msg_roles.get("ma") == "assistant"
+
+    # v2 单 part: 未知角色跳过(不抢跑) → 角色校准后入账
+    j.emitted.clear()
+    a._ingest_v2_part(j, {"id": "px", "messageID": "m_new",
+                          "type": "text", "text": "未知角色文本"})
+    assert not [e for e in j.emitted if e["kind"] == "text"], "未知角色应跳过"
+    a._msg_roles["m_new"] = "assistant"
+    a._ingest_v2_part(j, {"id": "px", "messageID": "m_new",
+                          "type": "text", "text": "助手文本"})
+    assert [e["text"] for e in j.emitted if e["kind"] == "text"] == ["助手文本"]
+
+
+def test_opencode_run_turn_drain_captures_final_part(monkeypatch):
+    """2610 D2 收束扫尾: 轮询错过的最后 part 在 POST 返回后确定性补采
+    (cv-11 实证: 最终报告只留 turn_done 载荷, 卡片缺失/迟到一轮)。"""
+    a = ta.OpenCodeTurnAdapter(base_url="http://x")
+    j = _stream_job("jdrain")
+    j.serve_url = "http://x"
+    j.session_id = "s1"
+    j.turn_timeout = 5.0
+
+    class _R:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"info": {"id": "mfin", "role": "assistant"},
+                    "parts": [{"id": "pf", "type": "text",
+                               "text": "# 基线分析报告（最终结论）"}]}
+
+    class _C:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            return _R()
+
+        async def get(self, *a, **k):
+            return _R()
+
+    monkeypatch.setattr(ta.httpx, "AsyncClient", _C)
+    monkeypatch.setattr(ta, "_git_changed_files", lambda wt: [])
+    import asyncio as _aio
+    out = _aio.run(a.run_turn(j, "hi"))
+    texts = [e["text"] for e in j.emitted if e["kind"] == "text"]
+    # 扫尾 diff 捕获最终 part(经游标, 仅此一次; P1c 因流式计数>0 不重复发射)
+    assert texts == ["# 基线分析报告（最终结论）"], texts
+    assert out.output == "# 基线分析报告（最终结论）"
+    assert a._turn_streamed["jdrain"] == len(out.output)

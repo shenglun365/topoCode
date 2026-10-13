@@ -257,6 +257,50 @@ describe("ClineCoreHost 会话宿主", () => {
     server.close();
   });
 
+  it("asset_map 走 GET + query 参数（2610 P3: POST 打 GET 端点恒 405 回归锁）", async () => {
+    const cwd = newDir();
+    let sawMethod = "";
+    let sawUrl = "";
+    const server = http.createServer((req, res) => {
+      sawMethod = req.method || "";
+      sawUrl = req.url || "";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ code: 0, data: [
+        { id: "comp-gateway", name: "网关组件", fileCount: 3 },
+        { id: "comp-auth", name: "鉴权组件", fileCount: 2 },
+      ] }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address() as { port: number };
+    await host.startSession({
+      sessionId: "asset-get-1",
+      cwd,
+      model: {
+        providerId: "openai-compatible",
+        modelId: "fake-model",
+        baseUrl: "http://fake-llm.local/v1",
+      },
+      archUrl: `http://127.0.0.1:${addr.port}`,
+      archToken: "t",
+      projectId: "proj-x",
+    });
+    llm.script = [
+      { type: "tool_call", name: "topocode_asset_map", args: { query: "gateway", limit: 1 } },
+      { type: "text", text: "已核对资产地图" },
+    ];
+    const r = await host.sendTurn({ sessionId: "asset-get-1", prompt: "查 gateway" });
+    expect(sawMethod).toBe("GET");                       // 方法回归锁
+    expect(sawUrl).toContain("/api/architect/kb/assets/search");
+    expect(sawUrl).toContain("q=gateway");
+    expect(sawUrl).toContain("project=proj-x");
+    expect(r.ok).toBe(true);
+    // limit 工具侧截断: 结果只留 1 条(total 保留全量计数)
+    const toolMsg = JSON.stringify(llm.requests);
+    expect(toolMsg).toContain("comp-gateway");
+    expect(toolMsg).not.toContain("comp-auth");
+    server.close();
+  });
+
   it("steerTurn：注入转向提示（入队后自动投递执行）", async () => {
     const cwd = newDir();
     await host.startSession({

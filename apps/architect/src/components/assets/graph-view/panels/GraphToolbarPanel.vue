@@ -11,6 +11,8 @@ import { useSgvWs } from '../key'
 const props = defineProps<{ tab: GraphTabDef; diffFiles?: Set<string> }>()
 const { t } = useI18n()
 const {
+  coreCount,
+  coreOnly,
   cardLang,
   cardSrcOpen,
   clearSel,
@@ -297,6 +299,19 @@ function exportGraph(): void {
         </button>
       </template>
       <span class="flex-1" />
+      <!-- 2610 核心资产守护: 仅核心过滤 + 核心计数图例 -->
+      <button
+        class="btn btn-ghost btn-xs shrink-0"
+        :class="coreOnly ? 'btn-primary' : ''"
+        :title="t('assetMgmt.graph.coreOnlyHint')"
+        @click="coreOnly = !coreOnly"
+      >
+        <span class="text-ctp-yellow">★</span>{{ t('assetMgmt.graph.coreOnly') }}
+        <span
+          v-if="coreCount"
+          class="chip bg-ctp-yellow/15 text-ctp-yellow font-mono text-[9px]"
+        >{{ coreCount }}</span>
+      </button>
       <!-- 对比变化图例 + 仅看变化(资产级口径来自 asset-compare；无对比数据时退化为文件级 diff 徽标) -->
       <template v-if="diffKindById.size">
         <button

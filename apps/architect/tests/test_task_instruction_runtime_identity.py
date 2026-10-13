@@ -49,11 +49,14 @@ def test_runtime_partial_branch_only():
 
 
 def test_cap_note_wired_into_instruction():
-    """M1 接线: 实测封顶的 cap_note 随指令告知 subagent。"""
+    """M1 接线: cap_note 随指令告知 subagent(2610 挡位退役——封顶来源已退役,
+    手构策略行保组装器字段覆盖)。"""
+    import dataclasses
     from topoone_app_architect.agent.governance.gears import resolve_gear
-    policy = resolve_gear("strict", {"tierProbed": "T1",
-                                     "probeFlags": {"followGate": True}})
-    assert policy.tier == "T2" and policy.cap_note
+    policy = dataclasses.replace(
+        resolve_gear("strict", {}),
+        tier="T2", cap_note="指令跟随探针未过——封顶 T2(结构化 probeFlags)")
+    assert policy.cap_note
     text = assemble_task_instruction({"title": "T", "instruction": "做"},
                                      policy=policy,
                                      runtime={"branch": "exec/c1", "workspace": "worktree"})

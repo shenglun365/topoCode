@@ -93,6 +93,31 @@ async def dir_list(path: Optional[str] = None):
     })
 
 
+def project_file_paths(root: str, q: str = "", limit: int = 50) -> list:
+    """项目内文件路径清单(git ls-files 优先 / os.walk 兜底)——统一联想端点的 file 组实现。"""
+    q_lower = (q or "").strip().lower()
+    files: list = []
+    try:
+        out = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True,
+                             text=True, timeout=15)
+        if out.returncode == 0 and out.stdout.strip():
+            files = [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
+    except Exception:  # noqa: BLE001
+        files = []
+    if not files:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _SKIP and not d.startswith(".")]
+            for f in filenames:
+                if f in _SKIP or f.startswith("."):
+                    continue
+                files.append(os.path.relpath(os.path.join(dirpath, f), root))
+    if q_lower:
+        files = [f for f in files if q_lower in f.lower()]
+    files.sort()
+    return files[:max(1, min(int(limit or 50), 200))]
+
+
+
 @router.post("/dir/create")
 async def dir_create(request: Request):
     """在指定父目录下新建一个目录(需父目录写权限)。"""

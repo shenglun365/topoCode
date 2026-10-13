@@ -529,7 +529,13 @@ class ImplementJob:
         (路径,大小)清单(编译产物逐个落盘会变) + porcelain 状态行。
         纯命令重跑/编译空转(无编辑、无新产物) → 信号不变 → 连续
         _PROGRESS_TICKS 周期后判循环。探索期(从未出现文件变更)不武装。
+
+        2610 cv-12: chat 角色豁免——直通对话回合(问答/接口排查)天然无文件
+        进展, 起始即脏 worktree → 武装即成立 → 300s 误杀。真死锁由活动
+        停滞看门狗兜底; 任务链(task)语义不变。
         """
+        if self.session_role == "chat":
+            return ""
         try:
             st = _git(["status", "--porcelain"], self.wt, check=False).stdout
         except Exception:  # noqa: BLE001

@@ -78,14 +78,15 @@ def test_r25_t0_and_none_noop():
 
 
 def test_r25_assemble_injects_note(arch_env):
-    """指令组装注入同挡微调段(T2 + 弱分)。"""
+    """指令组装注入同挡微调段(步骤级策略 + 弱分)。"""
     import dataclasses
-    from topoone_app_architect.agent.governance.gears import _TIERS
+    from topoone_app_architect.agent.governance.gears import UNIFIED_POLICY
     from topoone_app_architect.agent.planning.task_plan import (
         assemble_task_instruction)
     task = {"title": "T", "instruction": "做事情"}
-    base = assemble_task_instruction(task, policy=_TIERS["T2"])
-    tuned = assemble_task_instruction(task, policy=_TIERS["T2"], probe_score=0.20)
+    policy = dataclasses.replace(UNIFIED_POLICY, pre_split="steps")
+    base = assemble_task_instruction(task, policy=policy)
+    tuned = assemble_task_instruction(task, policy=policy, probe_score=0.20)
     assert "更细粒度" in tuned and "更细粒度" not in base
 
 

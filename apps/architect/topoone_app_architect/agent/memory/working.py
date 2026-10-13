@@ -15,13 +15,14 @@ def history_window(history, cap: int = 20) -> List[dict]:
     提示(同为 user 角色)跳过——它们是系统协议消息, 非用户可控文本。
     """
     from ..cognition.prompt import TOOL_FEED_PREFIX, wrap_user_request
+    from ..tools.protocol import STRUCTURED_NUDGE_PREFIX as _STRUCTURED_NUDGE_PREFIX
     out = []
     for m in (history or [])[-cap:]:
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") \
                 and (m.get("content") or "").strip():
             c = m["content"]
             if m["role"] == "user" and not c.startswith(TOOL_FEED_PREFIX) \
-                    and not c.startswith("结构化工具调用未成功"):
+                    and not c.startswith(_STRUCTURED_NUDGE_PREFIX):
                 c = wrap_user_request(c)
             out.append({"role": m["role"], "content": c})
     return out

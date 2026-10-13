@@ -1,7 +1,7 @@
 /**
  * 语义图谱 · data 域（MS6-W2 机械迁出：域内逐行原文，跨域引用 D. 前缀重写）。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { recommendedSemanticView, supportedViewsFor, viewUnavailableReasons, SemanticGraphViewId, ViewClickEntry } from '@/utils/diagram-gen'
 import type { SemanticAssetLevel, SemanticAssetKind } from '@/types'
 import { SemanticGraphResult, semanticAssetService } from '@/services/semantic-asset-service'
@@ -10,6 +10,7 @@ export type DiffBucket = 'changed' | 'weak' | 'new' | 'removed'
 import type { WsDeps } from './graphTypes'
 import { collectAssetIds, collectSymbolNodes, collectTraceEdges } from './useGraphTrace'
 import { useI18n } from 'vue-i18n'
+import { useCoreRules } from '@/pages/asset-workspace/useCoreRules'
 
 
 
@@ -136,10 +137,21 @@ const diffTotals = computed(() => {
   }
 })
 const loading = ref(false)
+
+// ---- 2610 核心资产守护: 标记域(跨 tab 共享一次拉取) + 仅核心过滤 + 匹配器 ----
+const coreRules = useCoreRules()
+onMounted(() => { void coreRules.refresh() })
+/** 仅核心开关: 开启后节点集只剩三层标记命中的资产(焦点资产豁免)。 */
+const coreOnly = ref(false)
+/** 节点-核心匹配器(asset 层; comp/file 层标记由组件图/文件图各自匹配)。 */
+const coreMatcher = computed(() => coreRules.coreMatcher.value)
+
 /** 类型(资产类别)过滤后的节点集。 */
 const kindNodes = computed(() => (graph.value?.nodes ?? []).filter((n) =>
   !kindFilter.value || n.kind === kindFilter.value))
 
+/** 图例计数(过滤前口径, 随类型过滤联动)。 */
+const coreCount = computed(() => kindNodes.value.filter((n) => coreMatcher.value(n.id)).length)
 /** 当前(类型过滤下)实际有数据的粒度层级(业务→逻辑→实现)，避免无数据选项。 */
 const availableLevels = computed<SemanticAssetLevel[]>(() => {
   const present = new Set(kindNodes.value.map((n) => n.level).filter(Boolean))
@@ -170,6 +182,8 @@ const effectiveLevel = computed<SemanticAssetLevel | ''>(() => level.value)
 const scopedNodes = computed(() => kindNodes.value.filter((n) =>
   (!effectiveLevel.value || n.level === effectiveLevel.value) &&
   (!diffOnly.value || !diffKindById.value.size || diffKindById.value.has(n.id)
+   || (props.tab.kind === 'asset' && n.id === props.tab.assetId)) &&
+  (!coreOnly.value || coreMatcher.value(n.id)
    || (props.tab.kind === 'asset' && n.id === props.tab.assetId))))
 
 const scopedEdges = computed(() => {
@@ -369,6 +383,9 @@ watch(() => props.compareData, () => {
 // 选中变化后详情/源码异步到达 → 到位后闪烁。
 
   return {
+    coreOnly,
+    coreMatcher,
+    coreCount,
     EDGE_TYPE_COLOR,
     EDGE_TYPE_TEXT,
     FILE_BUDGET,

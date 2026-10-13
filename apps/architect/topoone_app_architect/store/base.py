@@ -181,6 +181,8 @@ PROJECT_TABLES = frozenset({
     # M0 冻结 schema（plan-C-M0.md §6）
     "arch_framework_configs",
     "arch_naming_conventions", "arch_glossary",
+    # 核心资产守护(2610 重构: 规约库+挂载; 旧 arch_asset_marks 已 DROP)
+    "arch_rule_defs", "arch_target_rules",
     "arch_capability_proposals",
     "arch_contract_items", "arch_contract_packages",
     "arch_acceptance_reports", "arch_acceptance_facts", "arch_acceptance_opinions",

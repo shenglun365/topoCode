@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Request
 
 from ..common import err, ok
@@ -23,6 +25,8 @@ def _enrich(rows: list) -> list:
     by_job: dict = {}
     conv_by_id: dict = {}
     preview_by_conv: dict = {}
+    ref_by_job: dict = {}   # 2610 F3: 直通作业回退映射(会话行 session_ref=job_id)
+    card_by_job: dict = {}  # 2610 P2: 启动卡 meta 回退(sessionRef 被原生会话 id 覆写后仍可映射)
     try:
         from ..store.base import _db, _scan_dbs
         for db in [_db(), *_scan_dbs()]:
@@ -33,9 +37,25 @@ def _enrich(rows: list) -> list:
             for t in tr:
                 by_job.setdefault(t["runner_job_id"], t)
             cv = db.fetchall(
-                "SELECT id, title, parent_conv_id FROM arch_conversations") or []
+                "SELECT id, title, parent_conv_id, session_ref, executor_id"
+                " FROM arch_conversations") or []
             for c in cv:
                 conv_by_id.setdefault(c["id"], c)
+                if c.get("session_ref"):
+                    ref_by_job.setdefault(str(c["session_ref"]), c)
+            # 直通启动卡(proxy start 落 meta.jobId+jobCard)——jobId→会话最持久
+            # 的映射(不受 sessionRef 原生覆写影响), 单次扫描内存建图
+            ck = db.fetchall(
+                "SELECT conversation_id, meta FROM arch_conversation_messages"
+                " WHERE meta LIKE '%\"jobCard\"%'") or []
+            for k in ck:
+                try:
+                    mj = json.loads(str(k["meta"] or "{}"))
+                    jid = str(mj.get("jobId") or "")
+                    if jid:
+                        card_by_job.setdefault(jid, {"id": k["conversation_id"]})
+                except Exception:  # noqa: BLE001 — meta 脏行跳过
+                    continue
             # 首条用户消息摘要(独立收集: 消息与会话行可能落不同库位)
             pv = db.fetchall(
                 "SELECT m.conversation_id, m.content FROM arch_conversation_messages m"
@@ -50,15 +70,23 @@ def _enrich(rows: list) -> list:
     out = []
     for r in rows:
         t = by_job.get(r["jobId"]) or {}
-        cid = t.get("conversation_id") or ""
-        conv = conv_by_id.get(cid) or {}
+        conv = conv_by_id.get(t.get("conversation_id") or "") or {}
+        if not conv:
+            # 2610 B1: 泵留痕锚点为单源(新事件自带); 历史行回退链——
+            # session_ref 约定 → 启动卡 meta(sessionRef 被覆写后的存证)
+            hint = str((r.get("convHint") if isinstance(r, dict) else "") or "")
+            conv = (conv_by_id.get(hint) if hint else None) \
+                or ref_by_job.get(r["jobId"]) \
+                or conv_by_id.get((card_by_job.get(r["jobId"]) or {}).get("id") or "") or {}
+        cid = str(t.get("conversation_id") or "") or str(conv.get("id") or "")
         # 会话行缺失(已删/历史孤儿) → 空定位(前端归入「未关联主会话」组)
         main_id = (str(conv.get("parent_conv_id") or "") or cid) if conv else ""
         main_conv = conv_by_id.get(main_id) or {}
         out.append({**r,
                     "taskId": t.get("id") or "",
                     "title": t.get("title") or "",
-                    "executorType": t.get("executor_type") or "",
+                    "executorType": (t.get("executor_type") or ""
+                                     or str(conv.get("executor_id") or "")),
                     "conversationId": cid,
                     "reqId": t.get("req_id") or "",
                     "sessionRef": t.get("session_ref") or "",
@@ -113,3 +141,39 @@ async def stop_job(job_id: str):
     if not r.get("ok"):
         return err(400, str(r.get("error") or "停止失败(作业已结束或 runner 不可达)"))
     return ok({"stopped": True})
+
+
+@router.delete("/arch/exec-sessions/{job_id}")
+async def delete_job_archive(job_id: str):
+    """作业档案删除(2610 统一列表裁决): 留痕档案 + 关联**终态**任务行。
+
+    - 活跃作业拒绝(无终态事件或任务非终态)——与删除守卫同口径;
+    - 删除面: arch_exec_events 留痕 + arch_tasks 任务行(runner_job_id 关联);
+      会话行/消息不动(job≠会话, 一个会话可多作业)。"""
+    from ..store import TasksStore, exec_events
+    from ..store.base import _scan_dbs
+    from ..store.tasks import TERMINAL_STATES
+    rows = exec_events.sessions(500)
+    row = next((r for r in rows if r["jobId"] == job_id), None)
+    if not row:
+        return err(404, f"作业档案不存在: {job_id}")
+    # 关联任务行定位(runner_job_id 跨库扫描)
+    task = None
+    for db in _scan_dbs():
+        t = db.fetchone("SELECT * FROM arch_tasks WHERE runner_job_id = ?", (job_id,))
+        if t:
+            task = t
+            break
+    task_status = (task or {}).get("status") or ""
+    # 2610 F3: input_required=保活等待输入(非终态)——与 FE 弹窗 isActive 同口径
+    last = str(row.get("lastStatus") or "")
+    if last in ("", "input_required") or \
+            (task_status and task_status not in TERMINAL_STATES):
+        return err(409, "作业执行中(或等待输入)——请先停止或等待完成再删除")
+    events_n = exec_events.delete_by_jobs([job_id])
+    task_n = 0
+    if task:
+        TasksStore.delete(task["id"])
+        task_n = 1
+    return ok({"deleted": True, "jobId": job_id,
+               "eventsRemoved": events_n, "tasksRemoved": task_n})

@@ -59,7 +59,7 @@ def recover_sweep() -> int:
             dbp = os.path.join(proj_root, pid, "arch.db")
             if os.path.isfile(dbp):
                 db_paths.append(dbp)
-    conv_ids: list = []
+    conv_ids, ws_conv_ids = [], []          # 后者: workState 对账候选(2610 P1)
     for dbp in db_paths:
         if not os.path.isfile(dbp):
             continue
@@ -70,6 +70,9 @@ def recover_sweep() -> int:
                     "SELECT DISTINCT conversation_id FROM arch_tasks "
                     "WHERE status IN ('running','waiting_input')").fetchall()
                 conv_ids += [r[0] for r in rows if r[0]]
+                ws_conv_ids += [r[0] for r in con.execute(
+                    "SELECT id FROM arch_conversations WHERE work_state='running'"
+                ).fetchall() if r[0]]
             finally:
                 con.close()
         except Exception:  # noqa: BLE001
@@ -89,6 +92,13 @@ def recover_sweep() -> int:
                 logger.warning("[exec-bridge] 会话 stale 置 interrupted conv=%s", conv_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("[exec-bridge] 相位自愈失败 conv=%s: %s", conv_id, e)
+    # 2610 P1: workState 残留对账(助手单源在 proxy_state——重启丢直通句柄场景)
+    from .proxy_state import reset_stale_work_state
+    for conv_id in dict.fromkeys(ws_conv_ids):
+        try:
+            total += 1 if reset_stale_work_state(conv_id) else 0
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[exec-bridge] workState 对账失败 conv=%s: %s", conv_id, e)
     return total
 
 

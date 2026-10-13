@@ -30,9 +30,10 @@ def test_scaffold_only_appends_for_t2():
 
 
 def test_retry_policy_by_tier():
-    assert retry_for("T0").max_nudges == 0
+    """2610 挡位退役: 统一策略 nudge 恒 1(dict 形状保留)。"""
+    assert retry_for("T0").max_nudges == 1
     assert retry_for("T1").max_nudges == 1
-    assert retry_for("T2").max_nudges == 2
+    assert retry_for("T2").max_nudges == 1
 
 
 def test_call_first_attempt_ok(monkeypatch):
@@ -78,8 +79,8 @@ def test_call_t0_fails_fast(monkeypatch):
 
     monkeypatch.setattr(_ra, "llm_sync", _always_none)
     r = call(Purpose.EXTRACTION, [{"role": "user", "content": "x"}],
-             tier="T0", schema={"type": "object"})
-    assert not r["ok"] and calls["n"] == 1 and not r["degraded"]
+             tier="T1", schema={"type": "object"})
+    assert not r["ok"] and calls["n"] == 2 and not r["degraded"]   # 1 原始 + 1 nudge
 
 
 def test_call_exhausted_falls_back(monkeypatch):
@@ -91,10 +92,10 @@ def test_call_exhausted_falls_back(monkeypatch):
 
     monkeypatch.setattr(_ra, "llm_sync", _always_none)
     r = call(Purpose.EXTRACTION, [{"role": "user", "content": "x"}],
-             tier="T2", schema={"type": "object"},
+             tier="T1", schema={"type": "object"},
              fallback=lambda: {"__clarify__": True})
     assert r["ok"] and r["degraded"] and r["output"] == {"__clarify__": True}
-    assert calls["n"] == 3                              # 1 次原始 + 2 次 nudge(T2)
+    assert calls["n"] == 2                              # 1 次原始 + 1 次 nudge(统一)
 
 
 def test_call_exhausted_no_fallback(monkeypatch):

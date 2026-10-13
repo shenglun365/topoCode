@@ -11,9 +11,11 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CheckIcon, ChevronDownIcon, PlusIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { useRouter } from 'vue-router'
+import { CheckIcon, ChevronDownIcon, PlusIcon, XMarkIcon, BoltIcon } from '@heroicons/vue/24/outline'
 import { trackingService, type TrackingItem, type TrackingVocab } from '@/services/tracking-service'
 import type { ConversationMeta } from '@/services/session-service'
+import { apiGet } from '@/services/api-client'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useAppDialog } from '@/composables/useAppDialog'
 
@@ -41,12 +43,41 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const dialog = useAppDialog()
 const conv = useConversationStore()
+const router = useRouter()
 
 const loading = ref(false)
 const loadError = ref(false)
 const items = ref<TrackingItem[]>([])
 /** 会话筛选(cv-204: 按会话显示需求)——'' = 本项目全部会话。 */
 const convFilter = ref('')
+
+// ── 执行器会话关联(条目级显示): 按 conversationId/mainConversationId 匹配 ──
+interface ExecRow {
+  jobId: string; title: string; executorType: string; conversationId: string
+  lastStatus: string; taskStatus: string
+}
+const execRows = ref<ExecRow[]>([])
+
+const execIsActive = (e: ExecRow) => !e.lastStatus && e.taskStatus !== 'done'
+
+/** 条目关联的执行器会话(直接子会话或主会话直发, 最多展示 3 个)。 */
+function execsOf(item: TrackingItem): ExecRow[] {
+  const ids = new Set([item.conversationId || '', item.mainConversationId || ''])
+  if (!ids.delete('')) return []
+  return execRows.value.filter((e) => ids.has(e.conversationId)).slice(0, 3)
+}
+
+function openExec(e: ExecRow) {
+  const query: Record<string, string> = { job: e.jobId }
+  if (props.projectId) query.project = props.projectId
+  window.open(router.resolve({ path: '/exec-session-view', query }).href, '_blank')
+}
+
+async function loadExec() {
+  try {
+    execRows.value = await apiGet<ExecRow[]>('/arch/exec-sessions?limit=200')
+  } catch { execRows.value = [] }
+}
 
 const STATE_CLS: Record<string, string> = {
   running: 'bg-ctp-blue/15 text-ctp-blue',
@@ -75,6 +106,23 @@ function roleLabel(r: string): string {
 const filtered = computed(() => {
   // 服务端已按筛选查询; 此处仅作 valid 过滤兜底(作废条目默认隐藏)
   return items.value
+})
+
+/** 条目主会话键: mainConversationId 优先, 回退直接会话(手动挂账挂当前会话)。 */
+function mainConvKeyOf(item: TrackingItem): string {
+  return item.mainConversationId || item.conversationId || ''
+}
+
+/** 分组渲染: 未选会话 → 按主会话分组(粘性组头); 选定会话 → 平铺。 */
+const grouped = computed<{ key: string; items: TrackingItem[] }[]>(() => {
+  if (convFilter.value) return [{ key: '', items: filtered.value }]
+  const buckets = new Map<string, TrackingItem[]>()
+  for (const it of filtered.value) {
+    const k = mainConvKeyOf(it)
+    if (!buckets.has(k)) buckets.set(k, [])
+    buckets.get(k)!.push(it)
+  }
+  return [...buckets.entries()].map(([key, bucket]) => ({ key, items: bucket }))
 })
 
 async function load() {
@@ -181,13 +229,15 @@ async function submitAdd() {
   } catch { /* 静默 */ } finally { addBusy.value = false }
 }
 
-// 会话集合变更(新会话/沉淀) → 同步刷新; 会话删除(后端级联清台账) → 重载
-function onSessionsChanged() { void load() }
-function onConversationRemoved() { void load() }
+// 会话集合变更(新会话/沉淀) → 同步刷新; 会话删除(后端级联清台账) → 重载;
+// 执行器会话关联面随同重取(作业启动/结束 → 条目 chip 状态联动)
+function onSessionsChanged() { void load(); void loadExec() }
+function onConversationRemoved() { void load(); void loadExec() }
 onMounted(() => {
   window.addEventListener('arch:sessions-changed', onSessionsChanged)
   window.addEventListener('arch:conversation-removed', onConversationRemoved)
   void load()
+  void loadExec()
 })
 onUnmounted(() => {
   window.removeEventListener('arch:sessions-changed', onSessionsChanged)
@@ -195,7 +245,7 @@ onUnmounted(() => {
 })
 
 watch(() => [props.category, props.state, props.assignee], () => { void load() })
-watch(() => props.refreshNonce, () => { void load() })
+watch(() => props.refreshNonce, () => { void load(); void loadExec() })
 
 function fmtTime(ts: unknown): string {
   const n = Number(ts)
@@ -282,84 +332,106 @@ function fmtTime(ts: unknown): string {
         v-if="!filtered.length && !loading"
         class="py-6 text-center text-[10px] text-ctp-overlay0"
       >{{ loadError ? t('session.tracking.loadFailed') : t('session.tracking.empty') }}</p>
-      <div
-        v-for="item in filtered"
-        :key="item.id"
-        class="group mb-1 rounded border px-2 py-1.5 transition-colors"
-        :class="[
-          item.valid ? 'border-ctp-surface1 bg-ctp-mantle/60' : 'border-ctp-surface0 bg-ctp-surface0/30 opacity-60',
-          item.id === busyId ? 'animate-pulse' : '',
-        ]"
-      >
-        <div class="flex items-center gap-1.5">
-          <span
-            v-if="item.category"
-            class="chip shrink-0 bg-ctp-surface1 font-mono !text-[9px] text-ctp-overlay1"
-          >{{ item.category }}</span>
-          <span
-            v-if="item.actionType"
-            class="chip shrink-0 bg-ctp-teal/15 font-mono !text-[9px] text-ctp-teal"
-          >{{ item.actionType }}</span>
-          <span
-            class="min-w-0 flex-1 cursor-pointer truncate text-[11px] text-ctp-text"
-            :title="item.title"
-            @click="openSource(item)"
-          >{{ item.title || t('session.tracking.untitled') }}</span>
-          <span class="chip shrink-0 font-mono !text-[9px]" :class="STATE_CLS[item.state] || 'bg-ctp-surface0 text-ctp-overlay0'">
-            {{ stateLabel(item.state) }}<template v-if="item.state === 'waiting' && item.waitingFor">·{{ roleLabel(item.waitingFor) }}</template>
-          </span>
-          <!-- 行内流转 -->
-          <span class="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-            <button
-              v-if="item.state !== 'done'"
-              class="rounded p-0.5 text-ctp-overlay0 hover:text-ctp-green"
-              :title="t('session.tracking.markDone')"
-              @click="markState(item, 'done', 'ok')"
-            ><CheckIcon class="h-3 w-3" /></button>
-            <button
-              class="rounded p-0.5 text-ctp-overlay0 hover:text-ctp-peach"
-              :title="item.valid ? t('session.tracking.invalid') : t('session.tracking.restore')"
-              @click="toggleValid(item)"
-            >{{ item.valid ? '🚫' : '↺' }}</button>
-            <button
-              class="rounded p-0.5 text-ctp-overlay0 hover:text-ctp-red"
-              :title="t('session.tracking.delete')"
-              @click="removeItem(item)"
-            >✕</button>
-          </span>
+      <template v-for="g in grouped" :key="g.key || '__flat__'">
+        <!-- 主会话分组头(粘性; 未选会话且确有主会话时显示; 无主会话组不渲染头) -->
+        <div
+          v-if="!convFilter && g.key"
+          class="sticky top-0 z-10 -mx-2 mb-1 flex items-center gap-1.5 bg-ctp-base/95 px-2 py-1 text-[10px] text-ctp-overlay1 backdrop-blur"
+          :title="g.key ? convTitle(g.key) : t('session.tracking.noMainConv')"
+        >
+          <span class="min-w-0 flex-1 truncate font-medium">{{ g.key ? convTitle(g.key) : t('session.tracking.noMainConv') }}</span>
+          <span class="shrink-0 text-ctp-overlay0">({{ g.items.length }})</span>
         </div>
-        <p
-          v-if="item.content"
-          class="mt-0.5 truncate text-[9px] text-ctp-overlay0"
-          :title="item.content"
-        >{{ item.content }}</p>
-        <div class="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-ctp-overlay0">
-          <span v-if="item.creatorRole" class="chip shrink-0 !text-[8px]" :class="ROLE_CLS[item.creatorRole] || 'bg-ctp-surface0 text-ctp-overlay0'">
-            {{ t('session.tracking.creator') }}: {{ roleLabel(item.creatorRole) }}<template v-if="item.creatorId">·{{ item.creatorId }}</template>
-          </span>
-          <span v-if="item.assigneeRole" class="chip shrink-0 bg-ctp-surface0 !text-[8px] text-ctp-subtext0">
-            {{ t('session.tracking.assignee') }}: {{ roleLabel(item.assigneeRole) }}<template v-if="item.assigneeId">·{{ item.assigneeId }}</template>
-          </span>
-          <span
-            v-if="item.mainConversationId"
-            class="shrink-0 cursor-pointer hover:text-ctp-sky"
-            :title="t('session.tracking.mainConv')"
-            @click="openSource(item)"
-          >{{ t('session.tracking.mainConv') }}: {{ convTitle(item.mainConversationId) }}</span>
-          <span
-            v-if="item.conversationId && item.conversationId !== item.mainConversationId"
-            class="shrink-0 truncate"
-            :title="t('session.tracking.subConv')"
-          >{{ t('session.tracking.subConv') }}: {{ convTitle(item.conversationId) }}</span>
-          <span
-            v-if="item.result"
-            class="min-w-0 flex-1 truncate"
-            :class="item.resultState === 'failed' ? 'text-ctp-red' : 'text-ctp-subtext0'"
-            :title="item.result"
-          >{{ t('session.tracking.result') }}: {{ item.result }}</span>
-          <span class="ml-auto shrink-0">{{ fmtTime(item.createdAt) }}</span>
+        <div
+          v-for="item in g.items"
+          :key="item.id"
+          class="group mb-1 rounded border px-2 py-1.5 transition-colors"
+          :class="[
+            item.valid ? 'border-ctp-surface1 bg-ctp-mantle/60' : 'border-ctp-surface0 bg-ctp-surface0/30 opacity-60',
+            item.id === busyId ? 'animate-pulse' : '',
+          ]"
+        >
+          <div class="flex items-center gap-1.5">
+            <span
+              v-if="item.category"
+              class="chip shrink-0 bg-ctp-surface1 font-mono !text-[9px] text-ctp-overlay1"
+            >{{ item.category }}</span>
+            <span
+              v-if="item.actionType"
+              class="chip shrink-0 bg-ctp-teal/15 font-mono !text-[9px] text-ctp-teal"
+            >{{ item.actionType }}</span>
+            <span
+              class="min-w-0 flex-1 cursor-pointer truncate text-[11px] text-ctp-text"
+              :title="item.title"
+              @click="openSource(item)"
+            >{{ item.title || t('session.tracking.untitled') }}</span>
+            <span class="chip shrink-0 font-mono !text-[9px]" :class="STATE_CLS[item.state] || 'bg-ctp-surface0 text-ctp-overlay0'">
+              {{ stateLabel(item.state) }}<template v-if="item.state === 'waiting' && item.waitingFor">·{{ roleLabel(item.waitingFor) }}</template>
+            </span>
+            <!-- 行内流转 -->
+            <span class="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+              <button
+                v-if="item.state !== 'done'"
+                class="rounded p-0.5 text-ctp-overlay0 hover:text-ctp-green"
+                :title="t('session.tracking.markDone')"
+                @click="markState(item, 'done', 'ok')"
+              ><CheckIcon class="h-3 w-3" /></button>
+              <button
+                class="rounded p-0.5 text-ctp-overlay0 hover:text-ctp-peach"
+                :title="item.valid ? t('session.tracking.invalid') : t('session.tracking.restore')"
+                @click="toggleValid(item)"
+              >{{ item.valid ? '🚫' : '↺' }}</button>
+              <button
+                class="rounded p-0.5 text-ctp-overlay0 hover:text-ctp-red"
+                :title="t('session.tracking.delete')"
+                @click="removeItem(item)"
+              >✕</button>
+            </span>
+          </div>
+          <p
+            v-if="item.content"
+            class="mt-0.5 truncate text-[9px] text-ctp-overlay0"
+            :title="item.content"
+          >{{ item.content }}</p>
+          <div class="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-ctp-overlay0">
+            <span v-if="item.creatorRole" class="chip shrink-0 !text-[8px]" :class="ROLE_CLS[item.creatorRole] || 'bg-ctp-surface0 text-ctp-overlay0'">
+              {{ t('session.tracking.creator') }}: {{ roleLabel(item.creatorRole) }}<template v-if="item.creatorId">·{{ item.creatorId }}</template>
+            </span>
+            <span v-if="item.assigneeRole" class="chip shrink-0 bg-ctp-surface0 !text-[8px] text-ctp-subtext0">
+              {{ t('session.tracking.assignee') }}: {{ roleLabel(item.assigneeRole) }}<template v-if="item.assigneeId">·{{ item.assigneeId }}</template>
+            </span>
+            <span
+              v-if="item.mainConversationId"
+              class="shrink-0 cursor-pointer hover:text-ctp-sky"
+              :title="t('session.tracking.mainConv')"
+              @click="openSource(item)"
+            >{{ t('session.tracking.mainConv') }}: {{ convTitle(item.mainConversationId) }}</span>
+            <span
+              v-if="item.conversationId && item.conversationId !== item.mainConversationId"
+              class="shrink-0 truncate"
+              :title="t('session.tracking.subConv')"
+            >{{ t('session.tracking.subConv') }}: {{ convTitle(item.conversationId) }}</span>
+            <!-- 关联执行器会话(已关联执行器时显示; 点击新 tab 打开时间线) -->
+            <button
+              v-for="e in execsOf(item)" :key="e.jobId"
+              class="chip shrink-0 cursor-pointer !text-[8px] transition-colors"
+              :class="execIsActive(e) ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-mauve/10 text-ctp-mauve'"
+              :title="`${t('session.tracking.execLinked')}: ${e.title || e.jobId}`"
+              @click.stop="openExec(e)"
+            >
+              <BoltIcon class="inline h-2.5 w-2.5" :class="execIsActive(e) ? 'animate-pulse' : ''" />
+              {{ e.executorType || '?' }}<template v-if="e.title">·{{ e.title }}</template>
+            </button>
+            <span
+              v-if="item.result"
+              class="min-w-0 flex-1 truncate"
+              :class="item.resultState === 'failed' ? 'text-ctp-red' : 'text-ctp-subtext0'"
+              :title="item.result"
+            >{{ t('session.tracking.result') }}: {{ item.result }}</span>
+            <span class="ml-auto shrink-0">{{ fmtTime(item.createdAt) }}</span>
+          </div>
         </div>
-      </div>
+      </template>
     </div>
   </section>
 </template>

@@ -233,17 +233,19 @@ async def handle_chat(data: dict, send: SendFn) -> None:
     io = _TurnIO(send, conv_id, gate["last_user_msg_id"])
     await io.ensure_chat_start()
 
-    # ---- ①.55 coding 直通(quick 挡=通道代理, 定位裁决 2026-09-26) ----
-    # 会话切至 coding 执行器模式(quick)后, 对话绕过需求/任务体系直达执行器——
-    # 本回合恒收束(未配置执行器也显式报错, 不回落 architect 管线)。
-    # R3 例外: root/执行器解析在编排层完成后注入(R1——execution 不引 routes)。
-    if str((conv or {}).get("analysisMode") or "") == "quick":
+    # ---- ①.55 coding 直通(执行器统一模型 2610: conv.executorId 单源) ----
+    # 会话当前执行器=coding 执行器 → 对话绕过需求/任务体系直达执行器——
+    # 本回合恒收束(执行器缺失/禁用也显式报错, 不回落 architect 管线)。
+    # 修复分裂脑: 直通执行器取**会话绑定**(原 quick 挡取注册表默认、无视绑定)。
+    # R1/R3 合规: root/执行器解析在编排层完成后注入(execution 不引 routes)。
+    from .execution import exec_bridge as _eb_direct
+    if _eb_direct.uses_direct_channel(conv):
         from ..arch_routes import agent_executors as _ae
         from ..arch_routes.execution import conv_root_project
         _root, _project = conv_root_project(conv)
-        _ex_list = [e for e in (_ae.load_executors() or []) if e.get("enabled")]
-        _ex = next((e for e in _ex_list if e.get("default")),
-                   _ex_list[0] if _ex_list else None)
+        _direct_eid = _eb_direct.effective_executor_id(conv)
+        _ex = next((e for e in (_ae.load_executors() or [])
+                    if e.get("id") == _direct_eid and e.get("enabled")), None)
         from .execution.proxy import proxy_turn
         if await proxy_turn(data, gate, send, root=_root, project=_project,
                             executor=_ex or {}):

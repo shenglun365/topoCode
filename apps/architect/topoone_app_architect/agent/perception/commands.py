@@ -136,8 +136,8 @@ def _instruction_from_snapshot(snap: Dict[str, Any]) -> str:
     sections = []
     desc = str(snap.get("desc") or "").strip()
     # 防御: 存量数据的 desc 可能已内嵌分节标题(源头已在 _spec_snapshot 剥离)
-    desc = re.sub(r"^(?:#{1,6}\s*)?(?:需求目标|目标|需求描述|需求)[:：]?\s*\n+",
-                  "", desc)
+    from ..planning.req_spec import SPEC_HEADING_STRIP_RE  # MS-D4 单源(严格版)
+    desc = re.sub(SPEC_HEADING_STRIP_RE, "", desc)
     if desc:
         sections.append(f"## 需求目标\n\n{desc}")
     if str(snap.get("designMd") or "").strip():

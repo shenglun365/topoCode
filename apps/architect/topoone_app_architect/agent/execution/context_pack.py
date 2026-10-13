@@ -92,6 +92,22 @@ def build_context_pack(task: dict, conv: Optional[dict], root: str,
         pack["missing"] = missing
         logger.warning("[context-pack] 契约不完整 task=%s missing=%s",
                        task.get("id"), missing)
+    # 2610 核心资产守护 P1(裁决: 任务链自动, 可配置关): 边界文件/允许范围 ∩
+    # 标记集 → 评估性提示段(非阻断; 无命中零噪音)
+    try:
+        from ... import store as _st_cfg
+        from ..compensation.overrides import override_enabled, read_overrides
+        from ...sem import core_guard as _cg
+        if override_enabled(read_overrides(_st_cfg.CollabConfigStore.get),
+                             _cg.CONFIG_KEY):
+            _cg_md = _cg.preflight_md(
+                str(task.get("projectId") or ""),
+                list(boundary_files or []) + allowed_scope[:0],  # 文件层=边界文件
+                scope_hints=allowed_scope)
+            if _cg_md:
+                pack["coreGuard"] = {"md": _cg_md}
+    except Exception as e:  # noqa: BLE001 — 守护评估失败不阻塞契约装配
+        logger.warning("[context-pack] 核心资产守护评估失败: %s", e)
     # W2 图邻域摘要(2610-B1): 焦点=规约 allowedScope 首符号; 开关缺省开可回退;
     # outline 字数受 budget 钳制(1200), 渲染段过 ctx_budget 统一裁剪
     try:
@@ -169,6 +185,9 @@ def render_context_pack_md(pack: Dict[str, Any]) -> str:
     if nb.get("outline"):
         stale = "（⚠️ 基线可能过期：工作区 HEAD 已前移）" if nb.get("baselineStale") else ""
         lines.append(f"### 图邻域（架构师推断, 以代码为准{stale}）\n{nb['outline']}")
+    cg = (pack.get("coreGuard") or {}).get("md") or ""
+    if cg:
+        lines.append(cg)
     lines.append(_CONFLICT_RULE)
     return "\n\n".join(lines)
 

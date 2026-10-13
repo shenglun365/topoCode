@@ -38,9 +38,9 @@ async def kb_analysis_ws(websocket: WebSocket):
 
     客户端消息:
       chat   { conversationId?, kind?, projectId?, reqId?, title?, messages:[{role,content}], modelId?,
-               attachTo?, agent?, analysisMode?, clarifyMode?, isolated? }
-              → streaming: chat_start → chunk/reasoning/status/tool_call/tool_result* → done | error
-              (挡位三字段=空白态预置, 仅会话创建时消费; 已存在会话挡位走 REST 切换)
+               attachTo?, agent?, executorId?, analysisMode?(legacy quick), clarifyMode?, isolated? }
+               → streaming: chat_start → chunk/reasoning/status/tool_call/tool_result* → done | error
+               (executorId=空白态预置, 2610 统一模型: 仅创建时消费, 换绑走 REST /sessions/{id}/executor)
       ping   → pong
 
     回合管道: agent.orchestrator.handle_chat(九层内核)。

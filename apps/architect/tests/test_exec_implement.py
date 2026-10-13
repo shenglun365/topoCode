@@ -259,28 +259,33 @@ def test_prompt_registry_budget_trim():
 
 
 def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
-    """删除会话级联清理关联条目: 停作业/递归删子会话/孤儿 draft 需求删除/
-    保留需求的 ownerConv 悬空引用清空。"""
+    """删除会话级联清理关联条目: 停作业/递归删子会话/关联需求随会话删除
+    (状态不强制校验, 用户裁决 2610)/共享需求保留+ownerConv 清空。"""
     conv, rid = _mk_fixture(tmp_path, monkeypatch)
     from topoone_app_architect.arch_routes import sessions as S
     from topoone_app_architect.agent.execution import exec_bridge
     monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
-    # draft 需求(source=本会话) → 应级联删除(级联策略按 status 判定, 与创建路径无关)
+    # draft 需求(source=本会话) → 应级联删除(级联策略不再按 status 判定)
     rid_draft = store.next_id("RQ")
     store.RequirementsStore.create({"id": rid_draft, "kind": "user-story",
                                     "status": "draft", "title": "T-孤儿", "activeVer": 1,
                                     "sourceConversationId": conv["id"],
                                     "ownerConv": conv["id"]})
-    if False:
-        r_draft = req_agent.run_arch_tool("req.propose", {"title": "T-孤儿", "requirementMd": "未定稿提案", "newRequirement": True},
-            root=None, project=None, internal=True)
-    store.RequirementsStore.get(rid_draft) or {}
-    # ready 需求(source=本会话) → 保留, ownerConv 清空
-    r_ready = req_agent.run_arch_tool("req.propose", {"title": "T-保留", "designMd": "方案", "newRequirement": True},
+    # ready 需求(source=本会话) → 随会话删除(2610 裁决: 关联需求一并删, 状态不校验)
+    r_ready = req_agent.run_arch_tool("req.propose", {"title": "T-删除", "designMd": "方案", "newRequirement": True},
         root=None, project=None, internal=True)
     rid_ready = r_ready["requirementId"]
     store.RequirementsStore.update(rid_ready, {"sourceConversationId": conv["id"],
                                                "ownerConv": conv["id"]})
+    # done 需求(source=本会话)但被其他会话(克隆链 reqId)共享 → 保留, ownerConv 清空
+    rid_shared = store.next_id("RQ")
+    store.RequirementsStore.create({"id": rid_shared, "kind": "user-story",
+                                    "status": "done", "title": "T-共享", "activeVer": 1,
+                                    "doneMark": 1,
+                                    "sourceConversationId": conv["id"],
+                                    "ownerConv": conv["id"]})
+    other_conv = store.ConversationsStore.create({"kind": "generic", "title": "克隆会话",
+                                                  "reqId": rid_shared})
     # coding 子会话 → 递归删除
     sub = store.ConversationsStore.create({"kind": "coding", "parentConvId": conv["id"],
                                            "projectId": conv["projectId"]})
@@ -292,15 +297,18 @@ def test_delete_session_cascade_related_entries(tmp_path, monkeypatch):
     assert n == 2, f"父+子应级联删 2, got {n}"
     assert not store.ConversationsStore.get(conv["id"])
     assert not store.ConversationsStore.get(sub["id"]), "子会话应递归删除"
-    assert not store.RequirementsStore.get(rid_draft), "孤儿 draft 需求应级联删除"
-    kept = store.RequirementsStore.get(rid_ready) or {}
-    assert kept.get("status") == "ready", "已定稿需求是项目资产应保留"
+    assert not store.RequirementsStore.get(rid_draft), "关联 draft 需求应级联删除"
+    assert not store.RequirementsStore.get(rid_ready), "关联 ready 需求应随会话删除(状态不校验)"
+    kept = store.RequirementsStore.get(rid_shared) or {}
+    assert kept.get("status") == "done", "被其他会话共享的需求应保留"
     assert kept.get("ownerConv", "x") in ("", None), "保留需求的 ownerConv 悬空引用应清空"
+    assert store.ConversationsStore.get(other_conv["id"]), "共享引用会话不受影响"
 
 
 def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
     """跨库级联: 会话在主库默认桶(无活跃项目写入), 需求在项目库——删除会话时
-    项目库需求同样清理(draft 删/ready 清 ownerConv), 消息同桶删净不残留。"""
+    项目库关联需求同样删除(2610 裁决: 不分 status; 共享需求保留清 ownerConv),
+    消息同桶删净不残留。"""
     from topoone_app_architect import ctx as C
     from topoone_app_architect.arch_routes import sessions as S
     from topoone_app_architect.agent.execution import exec_bridge
@@ -317,6 +325,11 @@ def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
     pdb.execute(
         "INSERT INTO arch_requirements (id, title, status, source_conversation_id, owner_conv) "
         "VALUES ('RQ-X2', 'ready跨库', 'ready', 'cv-xdb', 'cv-xdb')")
+    pdb.execute(
+        "INSERT INTO arch_requirements (id, title, status, source_conversation_id, owner_conv) "
+        "VALUES ('RQ-X3', 'done共享', 'done', 'cv-xdb', 'cv-xdb')")
+    # 共享引用: 另一会话(主库)经 reqId 指向 RQ-X3 → 删除时保留
+    store.ConversationsStore.create({"id": "cv-share", "title": "共享引用", "reqId": "RQ-X3"})
     pdb.commit()
 
     assert S._delete_session_cascade("cv-xdb") == 1
@@ -324,7 +337,121 @@ def test_delete_session_cascade_cross_db(tmp_path, monkeypatch):
         "SELECT * FROM arch_conversation_messages WHERE conversation_id='cv-xdb'") == [], "消息应删净"
     rows = {r["id"]: r for r in pdb.fetchall("SELECT * FROM arch_requirements")}
     assert "RQ-X1" not in rows, "项目库 draft 需求应跨库级联删除"
-    assert rows["RQ-X2"]["owner_conv"] == "", "项目库 ready 需求 ownerConv 应清空"
+    assert "RQ-X2" not in rows, "项目库 ready 需求应随会话删除(状态不校验)"
+    assert rows["RQ-X3"]["owner_conv"] == "", "共享需求保留, ownerConv 应清空"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 会话删除守卫 + 删除预览(2610 裁决: 执行器会话必须执行完成; 需求仅展示状态)
+# ══════════════════════════════════════════════════════════════════
+
+def _mk_guard_fixture(tmp_path, monkeypatch):
+    """守卫测试底座: 主会话(绑需求+项目) + coding 子会话。"""
+    conv, rid = _mk_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.agent.execution import exec_bridge
+    monkeypatch.setattr(exec_bridge, "stop", lambda cid, reason="": "无作业")
+    store.ConversationsStore.update(conv["id"], {"projectId": "proj-guard"})
+    conv = store.ConversationsStore.get(conv["id"])
+    sub = store.ConversationsStore.create({"kind": "coding", "parentConvId": conv["id"],
+                                           "projectId": conv["projectId"], "title": "跑批子会话"})
+    return conv, rid, sub
+
+
+def test_delete_session_guard_running(tmp_path, monkeypatch):
+    """删除守卫: 子会话任务执行中 → 主会话删除 409 且整树不删; 完成后可删。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import sessions as S
+    conv, rid, sub = _mk_guard_fixture(tmp_path, monkeypatch)
+    store.TasksStore.create({"conversationId": sub["id"], "projectId": conv["projectId"],
+                             "status": "running", "title": "T-跑", "runnerJobId": "job-run-1"})
+    res = asyncio.run(S.delete_session(conv["id"]))
+    assert res.status_code == 409, "执行中子会话应阻断主会话删除"
+    assert store.ConversationsStore.get(conv["id"]), "阻断时主会话不应被删除"
+    assert store.ConversationsStore.get(sub["id"]), "阻断时子会话不应被删除"
+    assert store.RequirementsStore.get(rid), "阻断时关联需求不应被删除"
+    # preview 口径一致: deletable=false + blockers 指明执行中子会话
+    prev = asyncio.run(S.delete_preview(conv["id"]))
+    assert prev["code"] == 0
+    d = prev["data"]
+    assert d["deletable"] is False
+    assert [b["id"] for b in d["blockers"]] == [sub["id"]]
+    assert d["blockers"][0]["status"] == "running"
+    # 任务完结 → 守卫放行, 整树删除
+    store.TasksStore.update(
+        next(iter(store.TasksStore.of_conv(sub["id"])))["id"], {"status": "done"})
+    res2 = asyncio.run(S.delete_session(conv["id"]))
+    assert res2["code"] == 0
+    assert not store.ConversationsStore.get(conv["id"])
+    assert not store.ConversationsStore.get(sub["id"])
+
+
+def test_delete_preview_lists_and_shared(tmp_path, monkeypatch):
+    """预览清单: 需求完成情况(含共享保留) + 子会话运行状态 + 跟踪条目数。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import sessions as S
+    conv, rid, sub = _mk_guard_fixture(tmp_path, monkeypatch)
+    # 子会话空闲; 关联 done 需求被其他会话共享 → willDelete=false
+    rid_shared = store.next_id("RQ")
+    store.RequirementsStore.create({"id": rid_shared, "kind": "user-story",
+                                    "status": "done", "title": "T-共享", "activeVer": 1,
+                                    "doneMark": 1, "sourceConversationId": conv["id"]})
+    store.ConversationsStore.create({"id": "cv-clone", "title": "克隆", "reqId": rid_shared})
+    store.TasksStore.create({"conversationId": sub["id"], "projectId": conv["projectId"],
+                             "status": "running", "title": "T-跑"})
+    from topoone_app_architect.store.tracking import TrackingItemsStore
+    TrackingItemsStore.create({"category": "任务", "title": "台账", "conversationId": sub["id"],
+                               "projectId": conv["projectId"]})
+    d = asyncio.run(S.delete_preview(conv["id"]))["data"]
+    assert d["deletable"] is False and len(d["blockers"]) == 1
+    subs = {s["id"]: s for s in d["subSessions"]}
+    assert subs[sub["id"]]["execution"] == "running", "子会话运行状态应标明"
+    reqs = {r["id"]: r for r in d["requirements"]}
+    assert reqs[rid_shared]["status"] == "done" and reqs[rid_shared]["doneMark"] == 1
+    assert reqs[rid_shared]["willDelete"] is False and reqs[rid_shared]["shared"] is True
+    assert reqs[rid]["willDelete"] is True
+    assert d["trackingItemCount"] >= 1, "需求跟踪条目应计数(主线口径)"
+
+
+def test_delete_session_cascades_exec_events(tmp_path, monkeypatch):
+    """执行器会话留痕(arch_exec_events)随任务 runner 作业一并清理。"""
+    conv, rid, sub = _mk_guard_fixture(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import sessions as S
+    from topoone_app_architect.store import exec_events
+    store.TasksStore.create({"conversationId": sub["id"], "projectId": conv["projectId"],
+                             "status": "done", "title": "T-完", "runnerJobId": "job-ev-1"})
+    exec_events.record_event("job-ev-1", {"seq": 1, "kind": "start", "text": "起"})
+    exec_events.record_event("job-keep", {"seq": 1, "kind": "start", "text": "他者"})
+    assert S._delete_session_cascade(conv["id"]) == 2
+    from topoone_app_architect import ctx as C
+    assert C.db().fetchall(
+        "SELECT * FROM arch_exec_events WHERE job_id='job-ev-1'") == [], "任务作业留痕应清理"
+    assert C.db().fetchall(
+        "SELECT * FROM arch_exec_events WHERE job_id='job-keep'"), "无关作业留痕不受影响"
+
+
+def test_delete_sub_session_individual(tmp_path, monkeypatch):
+    """子会话单独删除: 空闲可删(主会话活跃指针回退清空); 执行中拒绝。"""
+    import asyncio
+    from topoone_app_architect.arch_routes import sessions as S
+    conv, rid, sub = _mk_guard_fixture(tmp_path, monkeypatch)
+    # 活跃子会话指针指向 sub
+    store.ConversationsStore.update(conv["id"], {"meta": {"activeCodingSession": sub["id"]}})
+    # 执行中 → 409
+    tid = store.TasksStore.create({"conversationId": sub["id"], "projectId": conv["projectId"],
+                                   "status": "running", "title": "T-跑"})["id"]
+    res = asyncio.run(S.delete_session(sub["id"]))
+    assert res.status_code == 409, "执行中子会话不可单独删除"
+    # 完结 → 可删, 主会话保留且指针清空
+    store.TasksStore.update(tid, {"status": "done"})
+    res2 = asyncio.run(S.delete_session(sub["id"]))
+    assert res2["code"] == 0
+    assert not store.ConversationsStore.get(sub["id"]), "子会话应删除"
+    assert store.ConversationsStore.get(conv["id"]), "主会话应保留"
+    meta = store.ConversationsStore.get(conv["id"]).get("meta") or {}
+    if isinstance(meta, str):
+        import json as _j
+        meta = _j.loads(meta or "{}")
+    assert not str(meta.get("activeCodingSession") or ""), "活跃子会话指针应清空"
 
 
 

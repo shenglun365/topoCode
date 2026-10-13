@@ -1,6 +1,6 @@
-"""coding 直通通道代理(quick 挡语义升级, 用户裁决 2026-09-26)。
+"""coding 直通通道代理(2610 执行器统一模型: conv.executorId=coding 执行器)。
 
-会话切至 quick(coding 执行器模式)后，对话回合**绕过需求/任务体系**直接与
+会话当前执行器为 coding 执行器时，对话回合**绕过需求/任务体系**直接与
 执行器会话——architect 仅做通道代理 + 上下文装配(定位裁决: 主 agent 职责
 白名单之「执行编排/信息交互」，不越位做需求收敛)。
 
@@ -25,8 +25,11 @@ logger = logging.getLogger("arch_routes.exec_bridge")
 from .proxy_ctx import (  # noqa: E402
     _HISTORY_CAP_DEFAULT, _history_brief, _merge_mcp_servers, _mcp_tools_brief)
 
-# conv_id -> {job_id, executor_type}（活跃直通会话; 进程级, 与 _TASK_PUMPS 同策略）
-_PROXY_JOBS: Dict[str, Dict[str, str]] = {}
+# 状态域(2610 拆分)单源在 proxy_state.py: 句柄表/查询/停止/JobCard 回写;
+# 转发导入保消费面 import 路径不变(sessions/delete_cascade/exec_control 等)
+from .proxy_state import (  # noqa: F401
+    PROXY_JOBS as _PROXY_JOBS, _job_card_fp, proxy_enabled, proxy_state,
+    proxy_stop, set_job_card_state as _set_job_card_state)
 
 
 def _conv_row(conv_id: str) -> Optional[dict]:
@@ -45,89 +48,21 @@ async def _noop_send(_payload: dict) -> None:
 _JOB_TERMINAL = ("done", "failed", "stopped")
 
 
-def proxy_state(conv_id: str) -> Dict[str, Any]:
-    """直通会话状态(cv-275): FE 持久状态条数据源(REST 查询, 刷新安全)。
-
-    {active, jobId, sessionRef, executorType, state}——active=有活跃直通
-    作业(内存句柄; 后端重启后句柄清空但会话行 sessionRef 仍可复活);
-    state=作业状态轴 running|idle(执行器忙/等待输入, 事件泵推进——
-    FE JobCard 据此渲染, 禁止把「会话保活」误读成「执行中」)。"""
-    entry = _PROXY_JOBS.get(conv_id) or {}
-    from ... import store as _st
-    row = _st.ConversationsStore.get(conv_id) or {}
-    return {"active": bool(entry),
-            "jobId": entry.get("job_id") or "",
-            "executorType": entry.get("executor_type") or "",
-            "state": str(entry.get("state") or "running"),
-            "sessionRef": row.get("sessionRef") or ""}
-
-
-def proxy_stop(conv_id: str) -> Dict[str, Any]:
-    """停止直通执行器(cv-273/275): 按作业状态分型——
-
-    running → /abort(暂停语义: 中止本轮, 会话保留, 发消息即恢复);
-    空闲(waiting_input) → /finish(结束会话: 下条消息开启全新会话)。
-    会话行 sessionRef 恒保留(finish 亦不清——用户可随时复活续上下文)。"""
-    entry = _PROXY_JOBS.get(conv_id)
-    if not entry:
-        return {"ok": False, "error": "无进行中的直通会话"}
-    job_id = entry["job_id"]
-    from . import exec_bridge as eb
-    snap = eb._runner(f"/api/implement/{job_id}", None, 12.0) or {}
-    running = (snap.get("status") or "") not in ("waiting_input", "done",
-                                                 "failed", "stopped")
-    action = "abort" if running else "finish"
-    r = eb._runner(f"/api/implement/{job_id}/{action}", {}, 12.0)
-    if r is None:
-        return {"ok": False, "error": "runner 不可达(:3458)", "job_id": job_id}
-    if r.get("ok") is False:
-        return {"ok": False, "error": r.get("error") or f"{action} 调用失败",
-                "job_id": job_id}
-    # cv-283 JobCard 状态回写: abort=暂停(idle, 会话保留)/finish=结束(ended)
-    _set_job_card_state(conv_id, "idle" if action == "abort" else "ended")
-    # 统筹调度: 用户主动停止 → 释放槽位且**不**自动续跑排队项(人为干预优先)
-    if action == "finish":
-        from . import executor_scheduler as _sched
-        _sched.stop_conv("", conv_id)   # root 未知 → 全 root 扫(按 convId 匹配)
-    return {"ok": True, "job_id": job_id, "action": action,
-            "summary": ("已暂停——会话保留，发消息即恢复" if running
-                        else "已结束直通会话——下条消息将开启全新会话")}
-
-
-def proxy_enabled(conv: Optional[dict]) -> bool:
-    """quick 挡 = coding 执行器模式(直通对话)。"""
-    return str((conv or {}).get("analysisMode") or "") == "quick"
-
-
 def proxy_job_of(conv_id: str) -> Optional[Dict[str, str]]:
     return _PROXY_JOBS.get(conv_id)
-
-
-def _job_card_fp(conv_id: str) -> str:
-    return f"proxyjob:{conv_id}"
-
-
-def _set_job_card_state(conv_id: str, state: str) -> None:
-    """JobCard 状态回写(cv-283): fingerprint 原位更新 meta.jobState + SSE。
-    词汇=running|idle|ended(执行器作业状态轴同源, 不自造)。"""
-    from ... import store as _st
-    from ...agent.collab import cards as _cards
-    try:
-        row = _st.ConversationsStore.update_message_by_meta(
-            conv_id, {"kind": "proxy", "fingerprint": _job_card_fp(conv_id)},
-            {"meta": {"jobState": state}})
-        if row:
-            _cards.emit(conv_id, str(row.get("id") or ""), kind="proxy")
-    except Exception:  # noqa: BLE001 — 状态回写失败不阻断主流程
-        logger.warning("[proxy] JobCard 状态回写失败 conv=%s state=%s",
-                       conv_id, state)
 
 
 def _entry_mark(conv_id: str, job_id: str, state: str) -> None:
     """直通句柄状态轴推进(entry.state + JobCard 回写同源; cv-285f 修复)。
 
     chat 回合制终态后句柄保活(waiting_input 等下一轮), 此前 FE 只看
-    active(句柄在=running)→完成的回合恒显「执行中」。状态不变零写(心跳安全)。"""
+    active(句柄在=running)→完成的回合恒显「执行中」。状态不变零写(心跳安全)。
+
+    2610 P1: workState 跟随状态轴——idle(回合收束/等待输入)回落 architect,
+    running(新回合/工具活动)置位; 完全终态由 process_stream.proxy_finish 收口。
+
+    2610 F5a 裁决A: idle 让坑——turn 制保活会话回合收束即释放调度槽位,
+    同 root 排队会话立即续跑; 本会话回复时经 /input 分支重新仲裁。"""
     entry = _PROXY_JOBS.get(conv_id)
     if not entry or entry.get("job_id") != job_id:
         return
@@ -135,6 +70,18 @@ def _entry_mark(conv_id: str, job_id: str, state: str) -> None:
     entry["state"] = state
     if changed:
         _set_job_card_state(conv_id, state)
+        try:
+            from ... import store as _st
+            _st.ConversationsStore.set_work_state(
+                conv_id, "running" if state == "running" else "architect")
+        except Exception:  # noqa: BLE001 — 聚合失败不阻断状态轴
+            pass
+        if state == "idle":
+            try:
+                from . import executor_scheduler as _sched
+                _sched.release_conv(conv_id)   # 队首自动续跑(幂等: 无槽零动作)
+            except Exception:  # noqa: BLE001 — 让坑失败不阻断状态轴
+                logger.debug("[proxy] idle 让坑调度失败 conv=%s", conv_id)
 
 
 # 直通正文卡节流落库间隔: 执行器流式 text 增量原位更新(单卡生长, cv-263——
@@ -275,7 +222,8 @@ def _make_handlers(conv_id: str, job_id: str, etype: str):
     return on_event, on_snapshot, on_lost, _flush
 
 
-def _start_pump(conv_id: str, job_id: str, etype: str) -> None:
+def _start_pump(conv_id: str, job_id: str, etype: str,
+                root: str = "") -> None:
     """直通事件泵(薄壳): 回调组(_make_handlers)+事件循环挂载; 终态清句柄。"""
     from ...agent.execution import pumps as _pumps
     from . import exec_bridge as eb
@@ -286,7 +234,8 @@ def _start_pump(conv_id: str, job_id: str, etype: str) -> None:
         try:
             await _pumps.run_event_pump(
                 base=eb.RUNNER_BASE, job_id=job_id, runner=eb._runner,
-                on_event=on_event, on_snapshot=on_snapshot, on_lost=on_lost)
+                on_event=on_event, on_snapshot=on_snapshot, on_lost=on_lost,
+                conv_id=conv_id)   # 2610 B1: 事件留痕带会话锚点
         except Exception as e:  # noqa: BLE001 — 泵异常退出必须清句柄(cv-259:
             # 缺 on_snapshot 直接 TypeError, 事件全丢且死 job 永久占住直通会话)。
             # 正常返回必经终态/lost 回调(各自已清), 不在此弹出——句柄存续=活跃会话。
@@ -300,6 +249,16 @@ def _start_pump(conv_id: str, job_id: str, etype: str) -> None:
             from . import executor_scheduler as _sched
             if root:
                 _sched.release(root, conv_id=conv_id, job_id=job_id)
+            # 2610 P2: 核心资产评估落地(runner 就地 diff → 命中标记 → 评估卡+沉淀)
+            try:
+                from . import core_assess as _ca
+                from ... import store as _st
+                _pid = str((_st.ConversationsStore.get(conv_id) or {}).get("projectId") or "")
+                _ca.land_core_assessment(
+                    conv_id, _pid, _ca.files_of_job_diff(job_id),
+                    source=f"direct:{etype}")
+            except Exception:  # noqa: BLE001 — 评估失败不影响泵收尾
+                pass
 
     try:
         loop = asyncio.get_running_loop()
@@ -395,6 +354,38 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
         elif str(snap.get("status") or "") in _JOB_TERMINAL:
             _PROXY_JOBS.pop(conv_id, None)   # 终态 → 开启新的直通会话
         else:
+            # 2610 F5a 裁决A: idle 让坑后, 保活会话的回复也须仲裁——同 root
+            # 有**其它**会话真执行中 → 排队, 轮到后经 relaunch 回到本分支
+            # 转达(防工作区互踩; 明确提示, 静默丢弃=人为干预优先语义破坏)。
+            from . import executor_scheduler as _sched
+            _sched.bind_loop(asyncio.get_running_loop())
+            if _sched.busy_by_other(root or "", conv_id):
+                async def _relaunch_input(entry: dict) -> None:
+                    _c = _conv_row(entry.get("convId") or "")
+                    if not _c:
+                        return
+                    await proxy_turn({"digest": entry.get("digest") or ""},
+                                     {"conv_id": entry["convId"], "conv": _c,
+                                      "question": entry.get("text") or "",
+                                      "last_user_msg_id": ""},
+                                     _noop_send, root=entry.get("root") or "",
+                                     project=entry.get("project") or "",
+                                     executor=entry.get("executor") or {})
+
+                _pos = _sched.enqueue(
+                    root or "",
+                    {"convId": conv_id, "text": text,
+                     "digest": str(data.get("digest") or ""),
+                     "root": root, "project": project, "executor": ex,
+                     "isolated": bool((conv or {}).get("isolated"))},
+                    relaunch=_relaunch_input)
+                row = eb._append(conv_id, "assistant",
+                                 f"⏳ 已排队(第 {_pos} 位)——工作区正被其它执行器"
+                                 "会话占用，轮到后自动把这条消息转达给执行器"
+                                 "（会话保活，无需重发）。",
+                                 msg_meta={"kind": "proxy", "queued": _pos})
+                await _send_done(row)
+                return True
             # cv-266: 转达语境摘要(既有 digest 载荷)随 /input 携带, 与任务链同语义
             _digest = str(data.get("digest") or "").strip()
             _fwd = text if not _digest else (
@@ -493,8 +484,6 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     parts.append(render_context_pack_md(pack))
     instruction = "\n\n".join(p for p in parts if p.strip()).strip()
     mcp = _merge_mcp_servers(ecfg, etype)
-    if mcp is not None:
-        payload_mcp = mcp
     payload: Dict[str, Any] = {
         "root": root, "projectId": (conv or {}).get("projectId") or "",
         "branchName": f"proxy/{int(time.time() * 1000) % 10 ** 10}",
@@ -524,15 +513,32 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
     # cv-266/cv-269: MCP 工具告知并入 instruction(此前独立落盘
     # TOPO-CONTEXT-TOOLS.md 会弄脏融合模式工作区 → 脏区门禁自干扰死锁);
     # codex 无 MCP 面 → 不告知不虚报
-    tools_brief = _mcp_tools_brief(conv_id, mcp)
+    tools_brief = _mcp_tools_brief(conv_id, mcp,
+                                   str((conv or {}).get("projectId") or ""))
     if tools_brief:
         parts.insert(-1, tools_brief.strip())   # 契约段之前
         instruction = "\n\n".join(p for p in parts if p.strip()).strip()
         payload["instruction"] = instruction    # payload 已装配, 同步回写
+    # 2610 核心资产守护 P1(裁决: 直通轻量自动, 可配置关)——消息文本 ∩ 标记集
+    # → 评估性提示段(无命中且有标记时仅一行 map.core 自查指针)
+    try:
+        from ... import store as _st_cfg
+        from ...sem import core_guard as _cg
+        if _cg.guard_enabled(_st_cfg.CollabConfigStore.get):
+            _cg_md = _cg.preflight_light_md(
+                str((conv or {}).get("projectId") or ""), text)
+            if _cg_md:
+                payload["instruction"] = (
+                    str(payload.get("instruction") or "") + "\n\n" + _cg_md)
+    except Exception as e:  # noqa: BLE001 — 守护评估失败不阻塞直通
+        logger.debug("[proxy] 核心资产守护评估失败 conv=%s: %s", conv_id, e)
     if workspace_files:
         payload["workspaceFiles"] = workspace_files
     if mcp is not None:
-        payload["mcp_servers"] = payload_mcp
+        # 2610 P3 修复: MCP 注入落 **executorConfig.mcp_servers**(runner 适配器
+        # 唯一读取面)——原顶层 payload.mcp_servers 被 implement 忽略, cline 侧
+        # 从未收到 topo-architect 服务(ctx.* 检索面全链失效实证)。
+        payload["executorConfig"] = {**ecfg, "mcp_servers": mcp}
     if model:
         payload["model"] = model
 
@@ -546,11 +552,16 @@ async def proxy_turn(data: dict, gate: dict, send, *, root: str,
 
     _PROXY_JOBS[conv_id] = {"job_id": sr.job_id, "executor_type": etype,
                             "state": "running"}
+    try:
+        from ... import store as _st   # 2610 W5: 直通运行态入会话聚合口径
+        _st.ConversationsStore.set_work_state(conv_id, "running")
+    except Exception:  # noqa: BLE001
+        pass
     # 统筹调度(2026-10): 启动成功登记 running 槽(终态由 pump finally 释放)
     from . import executor_scheduler as _sched
     _sched.register(root or "", conv_id, str(ex.get("id") or etype),
                     job_id=sr.job_id, executor_cfg=ecfg)
-    _start_pump(conv_id, sr.job_id, etype)
+    _start_pump(conv_id, sr.job_id, etype, root=root or "")
     # cv-283 JobCard: 直通作业以任务卡同族卡呈现——meta 携作业快照键
     # (jobCard/jobState/executorType/mode) + fingerprint(状态回写原位更新)
     row = eb._append(conv_id, "assistant",

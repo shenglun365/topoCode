@@ -44,6 +44,7 @@ const {
   confirmDeleteTurn,
   deletePending,
   digestMode,
+  effectiveExecutorId,
   effectiveRoute,
   executorFull,
   executorLabel,
@@ -52,6 +53,7 @@ const {
   inputRef,
   isolatedOn,
   isolatedTitle,
+  isEffectiveExecutor,
   onInputKeydown,
   pickCmd,
   pickExecutor,
@@ -168,23 +170,27 @@ const {
             <span class="font-mono text-ctp-sky truncate">→ {{ taskTitleOf(activeTask.id) || '活跃任务' }}</span>
             <span class="ml-1.5 text-ctp-subtext0">转达（{{ activeTask.status === 'waiting_input' ? '等待回复' : '排队' }}）</span>
           </button>
-          <!-- 会话执行器: 绑定后新任务卡默认使用(与 /执行 直通、模型建卡同链) -->
+          <!-- 会话执行器(2610 统一模型): 换绑即改当前持球执行器(下回合生效, 对话连续) -->
           <div class="mx-1 my-0.5 border-t border-ctp-surface0" />
-          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话执行器（新任务卡默认）</div>
+          <div class="px-1.5 pt-0.5 text-[9px] uppercase tracking-wide text-ctp-overlay0">会话执行器（当前持球，可随时换绑）</div>
           <button
             v-for="e in (props.executors || [])"
             :key="e.id"
             class="w-full rounded px-2 py-1 text-left text-[11px] transition-colors hover:bg-ctp-surface0 flex items-center gap-1.5"
-            :class="e.id === props.boundExecutorId ? 'bg-ctp-teal/10' : ''"
+            :class="isEffectiveExecutor(e.id) ? 'bg-ctp-teal/10' : ''"
             @click="pickExecutor(e.id)"
           >
-            <CpuChipIcon class="w-3 h-3 shrink-0 text-ctp-teal" />
+            <CpuChipIcon
+              class="w-3 h-3 shrink-0"
+              :class="e.id === 'architect' ? 'text-ctp-blue' : 'text-ctp-teal'"
+            />
             <span class="font-mono truncate">{{ executorFull(e) }}</span>
+            <span v-if="e.id === 'architect'" class="text-[9px] text-ctp-subtext0 shrink-0">分析管线</span>
             <span class="flex-1" />
             <span
-              v-if="e.id === props.boundExecutorId"
+              v-if="isEffectiveExecutor(e.id)"
               class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0"
-            >已绑定</span>
+            >当前</span>
             <span
               v-else-if="e.default"
               class="chip !text-[9px] bg-ctp-surface0/60 text-ctp-overlay0 shrink-0"

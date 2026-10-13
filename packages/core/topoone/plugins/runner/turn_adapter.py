@@ -103,6 +103,9 @@ def _opencode_headless_config(permission: str = "",
       （worktree 隔离 + 验收越界检测兜底; opencode 无 deny 语义, readOnly
       由协作协议约束 + 验收简报把关）
     - MCP 冷启动超时: 每 server timeout 强制 >=60s
+    - MCP 形状归一(2610 F6, 官方 schema type 必填): url 型条目补
+      type:"remote"+enabled:true(缺型条目被 opencode 静默忽略);
+      command 型补 type:"local"。toolPolicies 等扩展键透传保留。
     """
     cfg: Dict[str, Any] = {
         "permission": {
@@ -119,6 +122,12 @@ def _opencode_headless_config(permission: str = "",
         for name, conf in mcp_servers.items():
             if isinstance(conf, dict):
                 entry = dict(conf)
+                if entry.get("url") and not entry.get("type"):
+                    entry["type"] = "remote"       # 官方 schema 必填(缺省=忽略)
+                    entry.setdefault("enabled", True)
+                elif entry.get("command") and not entry.get("type"):
+                    entry["type"] = "local"
+                    entry.setdefault("enabled", True)
                 try:
                     entry["timeout"] = max(int(entry.get("timeout") or 0), 60000)
                 except (TypeError, ValueError):
@@ -454,9 +463,13 @@ class OpenCodeTurnAdapter(TurnAdapter):
                                          idle_timeout_ms=idle_timeout_ms)
         self._base_url = (base_url or "").rstrip("/")
         self._sse_tasks: Dict[str, asyncio.Task] = {}   # job.id → task
-        # 流式游标（P2: 全作业共享, 以 message:part 键隔离; 上限裁剪防膨胀）
+        self._poll_tasks: Dict[str, asyncio.Task] = {}  # 2610 P1b: 轮内轮询兜底
+        # 流式游标（P2: 全作业共享, 以 part.id/(message:part) 键隔离; 上限裁剪防膨胀）
         self._text_cursor: Dict[str, int] = {}
         self._tool_seen: set = set()
+        self._turn_busy: Dict[str, bool] = {}      # 2610 P1b: 回合进行中(轮询门)
+        self._turn_streamed: Dict[str, int] = {}   # 2610 P1c: 本轮流式发射字符数
+        self._msg_roles: Dict[str, str] = {}       # 2610 D1: messageID→role(回显过滤)
 
     async def _serve_url(self, job) -> str:
         if self._base_url:
@@ -485,21 +498,91 @@ class OpenCodeTurnAdapter(TurnAdapter):
             return
         job.sse_stop = getattr(job, "sse_stop", None) or asyncio.Event()
         self._sse_tasks[job.id] = asyncio.create_task(self._sse_loop(job))
+        # 2610 P1b: 轮内轮询兜底任务(v2 事件形状漂移时流式不丢)
+        self._poll_tasks[job.id] = asyncio.create_task(self._poll_loop(job))
+
+    async def _poll_loop(self, job) -> None:
+        """轮内轮询兜底(2610 P1b): SSE 事件形状不可控(v2 已与 v1 解析漂移),
+        流式真源=REST 快照 diff——文档化形状 {info,parts}[], live 实证。
+        仅回合执行中轮询(~1s), 空闲零开销。"""
+        stop = getattr(job, "sse_stop", None)
+        while stop is None or not stop.is_set():
+            await asyncio.sleep(1.0)
+            if not self._turn_busy.get(job.id) or not job.session_id:
+                continue
+            try:
+                msgs = await self._fetch_messages(job)
+            except Exception:  # noqa: BLE001 — 轮询失败不阻断(下拍重试)
+                continue
+            self._ingest_snapshot(job, msgs)
+
+    async def _fetch_messages(self, job) -> list:
+        """会话消息快照(轮询兜底真源; 测试接缝)。"""
+        async with httpx.AsyncClient(timeout=8.0) as c:
+            r = await c.get(f"{job.serve_url}/session/{job.session_id}/message")
+            r.raise_for_status()
+            return r.json() or []
+
+    def _ingest_snapshot(self, job, msgs) -> None:
+        """REST 消息快照入账(2610 D1/D2): 记录 messageID→role(流式校验源);
+        仅助手消息参与 diff——用户提示词不回显成执行器输出(cv-9/11 实证)。"""
+        for m in msgs or []:
+            info = (m or {}).get("info") or {}
+            mid = str(info.get("id") or "")
+            role = str(info.get("role") or "")
+            if mid:
+                self._msg_roles[mid] = role
+                if len(self._msg_roles) > 4000:   # 防膨胀: 与游标同款裁剪
+                    for k in list(self._msg_roles)[:2000]:
+                        self._msg_roles.pop(k, None)
+            if role and role != "assistant":
+                continue
+            for idx, p in enumerate((m or {}).get("parts") or []):
+                self._diff_part(job, mid, idx, p)
+
+    def _ingest_v2_part(self, job, part) -> None:
+        """v2 单 part 入账: 角色经快照映射校验——未知/非助手一律跳过(2610 D1;
+        未知角色 ≤1s 后由轮询快照校准, 不抢跑)。"""
+        if not isinstance(part, dict):
+            return
+        pmid = str(part.get("messageID") or "")
+        if self._msg_roles.get(pmid) != "assistant":
+            return
+        self._diff_part(job, pmid, 0, part)
+
+    def _diff_part(self, job, mid: str, idx: int, p) -> None:
+        """单 part 幂等 diff → text 增量/tool 首见 emit。
+
+        游标键=part.id 优先(跨快照稳定), 缺 id 退化 (mid:idx)——与 v1
+        全量重放路径共用 _text_cursor/_tool_seen, 双路径不重复发射。"""
+        if not isinstance(p, dict):
+            return
+        ptype = str(p.get("type") or "")
+        key = str(p.get("id") or "") or f"{mid}:{idx}"
+        if ptype == "text":
+            full = str(p.get("text") or "")
+            seen = self._text_cursor.get(key, 0)
+            if len(full) > seen:
+                job.emit("text", full[seen:])
+                self._turn_streamed[job.id] = \
+                    self._turn_streamed.get(job.id, 0) + (len(full) - seen)
+                self._text_cursor[key] = len(full)
+        elif ptype == "tool":
+            if key not in self._tool_seen:
+                self._tool_seen.add(key)
+                name = str(p.get("tool") or p.get("toolName") or ptype)
+                job.emit("tool", f"▶ {name}".strip(), toolName=name)
 
     async def _sse_loop(self, job) -> None:
         """常驻 SSE 订阅: 任意会话事件刷新 job.last_activity_ts; 错误记 job.last_error。
 
-        执行进展(工具调用计数): message.updated 事件携带消息全量 parts——
-        按 message.id 记每条消息的工具 part 峰值, 汇总为作业级工具数;
-        30s 或新工具时 emit("progress") → 事件环 → architect 泵 → 前端进展 chip。
-        流式(P2): text part 增量 diff → emit("text"); tool part 首见 → emit("tool")。
+        流式(2610 P1a): message.* 事件 → _diff_part 幂等 diff——兼容 v1
+        (message.parts 全量重放)与 v2(message.part.updated 单 part)形状;
+        事件形状漂移时由 _poll_loop 的 REST 快照 diff 兜底, 输出不丢。
         解析防御: 字段缺失时降级为事件活动计数, 不影响看门狗。
         """
         stop: asyncio.Event = job.sse_stop
         url = job.serve_url
-        msg_tools: Dict[str, int] = {}      # message.id → 该消息工具 part 峰值
-        last_emit_ts = 0.0
-        last_tool_count = -1
         async for client in _persist_client():
             try:
                 async with client.stream(
@@ -524,20 +607,22 @@ class OpenCodeTurnAdapter(TurnAdapter):
                             job.last_error = str(props.get("error") or ptype)[:400]
                         if ptype.startswith(("message.", "session.", "permission.")):
                             job.last_activity_ts = time.time()
-                        # ── 执行进展 + 流式(P2) ──
+                        # ── 执行进展 + 流式 ──
                         if ptype.startswith("message."):
-                            msg = props.get("message") or props
-                            mid = str(msg.get("id") or "") or f"_{len(msg_tools)}"
-                            self._on_message_parts(job, mid, msg.get("parts") or [],
-                                                   msg_tools)
-                            now = time.time()
-                            total = sum(msg_tools.values())
-                            if total != last_tool_count and \
-                                    (total > last_tool_count + 4 or now - last_emit_ts > 30):
-                                last_tool_count = total
-                                last_emit_ts = now
-                                job.emit("progress", "", toolCount=total,
-                                         msgCount=len(msg_tools))
+                            job.last_activity_ts = time.time()
+                            # v1 形状: message 事件携全量 parts(重放 diff; 角色内联)
+                            msg = props.get("message") or props.get("info") or {}
+                            parts = msg.get("parts") or []
+                            if parts:
+                                mid = str(msg.get("id") or "") or "_ev"
+                                role = str(msg.get("role") or "")                                     or self._msg_roles.get(mid, "")
+                                if role != "user":   # 助手/未知入账(未知由轮询校准)
+                                    for idx, p in enumerate(parts):
+                                        self._diff_part(job, mid, idx, p)
+                            # v2 形状: message.part.updated 携单 part(2610 P1a)
+                            part = props.get("part")
+                            if isinstance(part, dict):
+                                self._ingest_v2_part(job, part)
             except asyncio.CancelledError:
                 return
             except Exception as e:  # noqa: BLE001
@@ -545,40 +630,6 @@ class OpenCodeTurnAdapter(TurnAdapter):
             if stop.is_set():
                 return
             await asyncio.sleep(_SSE_RECONNECT_SEC)
-
-    def _on_message_parts(self, job, mid: str, parts: list,
-                          msg_tools: Dict[str, int]) -> None:
-        """message parts 全量 → 工具计数 + 流式事件（text 增量/tool 首见）。
-
-        独立方法便于单测：delta 以 (message.id, part 下标) 为游标键，
-        parts 全量重放只发新增片段（幂等）。
-        """
-        for idx, p in enumerate(parts):
-            if not isinstance(p, dict):
-                continue
-            ptype = str(p.get("type") or "")
-            key = f"{mid}:{idx}"
-            if ptype == "text":
-                full = str(p.get("text") or "")
-                seen = self._text_cursor.get(key, 0)
-                if len(full) > seen:
-                    job.emit("text", full[seen:])
-                    self._text_cursor[key] = len(full)
-            elif ptype == "tool":
-                tools = msg_tools.get(mid, 0)
-                # 工具计数峰值（原 progress 面保持）
-                if idx + 1 > tools:
-                    msg_tools[mid] = idx + 1
-                if key not in self._tool_seen:
-                    self._tool_seen.add(key)
-                    name = str(p.get("tool") or p.get("toolName") or ptype)
-                    job.emit("tool", f"▶ {name}".strip(), toolName=name)
-        # 游标防膨胀：会话级键上限裁剪（保留最近）
-        if len(self._text_cursor) > 4000:
-            for k in list(self._text_cursor)[:2000]:
-                self._text_cursor.pop(k, None)
-        if len(self._tool_seen) > 4000:
-            self._tool_seen = set(list(self._tool_seen)[-2000:])
 
     async def run_turn(self, job, text: str) -> TurnOutcome:
         body: Dict[str, Any] = {"parts": [{"type": "text", "text": text}]}
@@ -593,28 +644,52 @@ class OpenCodeTurnAdapter(TurnAdapter):
         if getattr(job, "agent", ""):
             body["agent"] = job.agent
         job.last_activity_ts = time.time()
-        async with httpx.AsyncClient(
-                timeout=job.turn_timeout,
-                headers={"Content-Type": "application/json"}) as c:
-            r = await c.post(
-                f"{job.serve_url}/session/{job.session_id}/message", json=body)
-            if r.status_code == 404:
-                # 会话丢失（serve 重启/内存态清空）→ 重建 session 并重发当前指令
-                logger.warning("[opencode-adapter] %s 会话丢失(404), 重建重发",
-                               job.id)
-                job.session_id = ""
-                await self.start_session(job)
+        self._turn_busy[job.id] = True        # 2610 P1b: 轮询兜底开门
+        self._turn_streamed[job.id] = 0       # 2610 P1c: 本轮流式计数清零
+        try:
+            async with httpx.AsyncClient(
+                    timeout=job.turn_timeout,
+                    headers={"Content-Type": "application/json"}) as c:
                 r = await c.post(
                     f"{job.serve_url}/session/{job.session_id}/message", json=body)
-            r.raise_for_status()
-            data = r.json() or {}
-        job.last_activity_ts = time.time()
-        output = ""
-        for part in (data.get("parts") or [])[::-1]:
-            if part.get("type") == "text" and part.get("text"):
-                output = part["text"]
-                break
-        return TurnOutcome(output=output, changed_files=_git_changed_files(job.wt))
+                if r.status_code == 404:
+                    # 会话丢失（serve 重启/内存态清空）→ 重建 session 并重发当前指令
+                    logger.warning("[opencode-adapter] %s 会话丢失(404), 重建重发",
+                                   job.id)
+                    job.session_id = ""
+                    await self.start_session(job)
+                    r = await c.post(
+                        f"{job.serve_url}/session/{job.session_id}/message", json=body)
+                r.raise_for_status()
+                data = r.json() or {}
+            job.last_activity_ts = time.time()
+            output = ""
+            for part in (data.get("parts") or [])[::-1]:
+                if part.get("type") == "text" and part.get("text"):
+                    output = part["text"]
+                    break
+            # 2610 D2 收束扫尾: POST 返回即终态——轮询可能错过最后 <1s 落地的
+            # part(实证 cv-11: 最终报告只留在 turn_done 载荷, 卡片缺失/迟到一轮)。
+            # 同步补一次快照 diff(角色过滤), 确定性捕获; 失败由 P1c 保底承接。
+            try:
+                await self._ingest_snapshot(job, await self._fetch_messages(job))
+            except Exception:  # noqa: BLE001
+                pass
+            # 2610 P1c 保底 flush: 本轮流式全哑(v2 事件/轮询均未覆盖)时,
+            # 最终回答整段 emit——泵按 text 事件落卡, 回答不再丢失。
+            # 同步推进游标, 防轮询 diff 对同一内容重复发射。
+            if output and self._turn_streamed.get(job.id, 0) == 0:
+                job.emit("text", output)
+                mid = str((data.get("info") or {}).get("id") or "")
+                for idx, part in enumerate(data.get("parts") or []):
+                    if part.get("type") == "text" and part.get("text"):
+                        key = str(part.get("id") or "") or f"{mid}:{idx}"
+                        self._text_cursor[key] = len(str(part.get("text") or ""))
+                self._turn_streamed[job.id] = len(output)
+            return TurnOutcome(output=output,
+                               changed_files=_git_changed_files(job.wt))
+        finally:
+            self._turn_busy[job.id] = False
 
     async def probe(self, job) -> TurnProbe:
         try:
@@ -645,9 +720,13 @@ class OpenCodeTurnAdapter(TurnAdapter):
         stop = getattr(job, "sse_stop", None)
         if stop:
             stop.set()
-        t = self._sse_tasks.pop(job.id, None)
-        if t and not t.done():
-            t.cancel()
+        for reg in (self._sse_tasks, self._poll_tasks):
+            t = reg.pop(job.id, None)
+            if t and not t.done():
+                t.cancel()
+        self._turn_busy.pop(job.id, None)
+        self._turn_streamed.pop(job.id, None)
+        self._msg_roles.clear()
         try:
             self._mgr.dispose_root(job.wt)
         except Exception:  # noqa: BLE001

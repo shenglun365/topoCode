@@ -24,12 +24,13 @@ def _mk_conv(store, **kw):
 
 # ── R3.2: 图门禁(propose_task, T2 显式挡) ─────────────────────────────
 
-def test_r32_gate_rejects_missing_diagram(arch_env, monkeypatch):
+def test_r32_gate_retired_with_tiers(arch_env, monkeypatch):
+    """2610 挡位退役: T2 图门禁(logic_diagram=uml)随分叉取消——不再强制附图。"""
     from topoone_app_architect import store
     from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = _mk_conv(store, analysisMode="T2")
     r = eb.propose_task(conv, "T", "实现功能(无图)", executor_hint={"executorType": "cline-sdk"})
-    assert not r["ok"] and "逻辑图" in str(r.get("error"))
+    assert r.get("ok") is not False or "逻辑图" not in str(r.get("error"))
 
 
 def test_r32_gate_passes_with_diagram(arch_env):

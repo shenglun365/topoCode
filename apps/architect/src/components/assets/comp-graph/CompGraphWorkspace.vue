@@ -16,9 +16,10 @@ import type { AssetCompareResult } from '@/services/semantic-asset-service'
 import {
   semanticAssetService,
   type CompGraphData, type FileGraphData,
-  type CompGraphNode, type FileGraphNode,
 } from '@/services/semantic-asset-service'
 import { compGraphMermaid, fileGraphMermaid } from './mermaid'
+import { useCoreRules } from '@/pages/asset-workspace/useCoreRules'
+import { applyCoreHighlight, coreNodeMatcher } from '../coreMarks'
 import CompTreePicker from './CompTreePicker.vue'
 import CompCard from './CompCard.vue'
 import FileNodeCard from './FileNodeCard.vue'
@@ -33,6 +34,42 @@ const { t } = useI18n()
 const themeMode = computed<'dark' | 'light'>(() =>
   (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light') ? 'light' : 'dark')
 const themeVars = computed(() => themeVariablesFor(themeMode.value))
+
+// ---- 2610 核心资产守护: 标记域 + 仅核心过滤 + svg 高亮(comp/file 层标记) ----
+const coreRules = useCoreRules()
+onMounted(() => { void coreRules.refresh() })
+const coreOnly = ref(false)
+const coreMatcher = computed(() => coreRules.coreMatcher.value)
+const coreCompCount = computed(() =>
+  (compData.value?.nodes ?? []).filter((n) => coreMatcher.value(n.id)).length)
+const coreFileCount = computed(() =>
+  (fileData.value?.nodes ?? []).filter((n) => coreMatcher.value(n.id)).length)
+/** 仅核心节点集(数据级过滤, 焦点下钻组件豁免——下钻图不留空)。 */
+const compNodesCore = computed(() => {
+  const ns = compData.value?.nodes ?? []
+  if (!coreOnly.value) return ns
+  const hit = ns.filter((n) => coreMatcher.value(n.id))
+  return hit.length ? hit : ns
+})
+const compEdgesCore = computed(() => {
+  if (!coreOnly.value) return compData.value?.edges ?? []
+  const ids = new Set(compNodesCore.value.map((n) => n.id))
+  return (compData.value?.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to))
+})
+const fileNodesCore = computed(() => {
+  const ns = fileData.value?.nodes ?? []
+  if (!coreOnly.value) return ns
+  const hit = ns.filter((n) => coreMatcher.value(n.id))
+  return hit.length ? hit : ns
+})
+const fileEdgesCore = computed(() => {
+  if (!coreOnly.value) return fileData.value?.edges ?? []
+  const ids = new Set(fileNodesCore.value.map((n) => n.id))
+  return (fileData.value?.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to))
+})
+
+const compMermaid = computed(() => compGraphMermaid(compNodesCore.value, compEdgesCore.value))
+const fileMermaid = computed(() => fileGraphMermaid(fileNodesCore.value, fileEdgesCore.value))
 /** 范围选择浮层(文件模式, header 下拉)。 */
 const scopeOpen = ref(false)
 
@@ -59,8 +96,6 @@ const changedFilesBy = computed<Record<string, Record<string, string[]>>>(() => 
   return out
 })
 
-const compMermaid = computed(() => compGraphMermaid(compData.value?.nodes ?? [], compData.value?.edges ?? []))
-const fileMermaid = computed(() => fileGraphMermaid(fileData.value?.nodes ?? [], fileData.value?.edges ?? []))
 
 const statsText = computed(() => {
   if (mode.value === 'comp') {
@@ -98,6 +133,28 @@ async function loadFile() {
     loading.value = false
   }
 }
+
+/** 2610 核心资产守护: svg 后处理——comp/file 层标记命中节点黄描边+★(幂等)。
+ *  idMap 反查(mermaid 净化 id → 节点 id); mermaid 异步渲染, nextTick + 400ms 兜底。 */
+function applyCorePass() {
+  const run = () => {
+    const svg = document.querySelector('.topo-diagram svg') as SVGSVGElement | null
+    const matcher = coreMatcher.value
+    if (!svg || !matcher) return
+    const idMap = mode.value === 'comp' ? compMermaid.value.idMap : fileMermaid.value.idMap
+    const rev = new Map<string, string>()
+    for (const [mk, nid] of Object.entries(idMap)) { if (!rev.has(nid)) rev.set(nid, mk) }
+    applyCoreHighlight(svg, (g) => {
+      const mid = g.id.match(/flowchart-(.+?)-\d+$/)?.[1] ?? g.id
+      const txt = (g.textContent ?? '').trim()
+      const key = mid in idMap ? mid : (rev.get(txt) ?? '')
+      return key ? (idMap[key] ?? '') : ''
+    }, matcher)
+  }
+  void nextTick(run)
+  setTimeout(run, 400)
+}
+watch([compMermaid, fileMermaid, coreMatcher, mode], () => applyCorePass())
 
 /** 渲染完成后扫描 DOM: 实际节点 class 与背景色(对照生成侧 class 附着)。 */
 function scanRenderedNodes(tag: string) {
@@ -180,6 +237,18 @@ const scopeNames = computed(() =>
           <span class="text-ctp-text truncate max-w-[18rem]" :title="scopeNames">{{ scopeNames }}</span>
         </template>
         <span class="text-[10px] text-ctp-overlay0">{{ statsText }}</span>
+        <label
+          class="inline-flex cursor-pointer items-center gap-1 text-[10px]"
+          :class="coreOnly ? 'text-ctp-yellow' : 'text-ctp-overlay0'"
+          :title="t('assetMgmt.graph.coreOnlyHint')"
+        >
+          <input v-model="coreOnly" type="checkbox" class="accent-ctp-yellow">
+          <span class="text-ctp-yellow">★</span>{{ t('assetMgmt.graph.coreOnly') }}
+          <span
+            v-if="(mode === 'comp' ? coreCompCount : coreFileCount)"
+            class="chip bg-ctp-yellow/15 text-ctp-yellow !text-[9px] font-mono"
+          >{{ mode === 'comp' ? coreCompCount : coreFileCount }}</span>
+        </label>
         <span v-if="compareData?.base" class="text-[9px] font-mono text-ctp-overlay0 truncate"
           :title="`${base.slice(0, 10)} → ${target === 'worktree' ? t('assetMgmt.diff.worktree') : target.slice(0, 10)}`">
           {{ base.slice(0, 7) }}→{{ target === 'worktree' ? '⌂' : target.slice(0, 7) }}

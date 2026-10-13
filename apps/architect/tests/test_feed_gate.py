@@ -118,7 +118,8 @@ def test_feed_message_not_found(tmp_path, monkeypatch):
     conv, _sub = _mk_main_with_sub()
     r = client.post(f"/api/architect/sessions/{conv['id']}/feed",
                     json={"messageId": "m-ghost"}, headers=h)
-    assert r.json()["code"] == 404
+    # 2610 迁 agent/sessions/feeds: 错误统一 FeedError→400(消息不存在)
+    assert r.json()["code"] == 400
 
 
 def test_feed_empty_text_rejected(tmp_path, monkeypatch):

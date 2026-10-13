@@ -82,20 +82,35 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
 
     app = FastAPI(title="TopoOne Architect")
     app.add_middleware(ProjectContextMiddleware)
+    # 请求审计(2610 cv-15 轮询评估): 全量请求行 [req] method path?query status
+    # 耗时——uvicorn access 无常规耗时, 本层为 FE 轮询流量分析与降级观测面。
+    # 默认开启; ARCH_REQ_LOG=0 静音(仅保留 >300ms 慢调用审计)。
     # 慢调用审计(>300ms): 同步 IO 混入 async 路由会冻结事件循环(双窗口
     # 并发串行放大事故, 2026-10)——此日志为回归观测面, 不落库
     import time as _perf_time
+    import os as _os
+
+    _req_log = logging.getLogger("arch.req")
+    _req_verbose = _os.environ.get("ARCH_REQ_LOG", "1") != "0"
 
     @app.middleware("http")
-    async def _slow_api_audit(request, call_next):
+    async def _req_audit(request, call_next):
         _t0 = _perf_time.monotonic()
+        _resp = None
         try:
-            return await call_next(request)
+            _resp = await call_next(request)
+            return _resp
         finally:
             _ms = (_perf_time.monotonic() - _t0) * 1000
+            _q = request.url.query
+            _target = request.url.path + (f"?{_q}" if _q else "")
+            _status = getattr(_resp, "status_code", 500)
+            if _req_verbose and request.url.path != "/events":
+                _req_log.info("[req] %s %s %s %.0fms",
+                              request.method, _target, _status, _ms)
             if _ms > 300:
                 logging.getLogger("arch.perf").warning(
-                    "[slow-api] %s %s %.0fms", request.method, request.url.path, _ms)
+                    "[slow-api] %s %s %.0fms", request.method, _target, _ms)
 
     # 口令入口保护(2610 执行器会话拓展): 本机豁免, /api/**+WS 校验
     from topoone_app_architect.arch_routes.security import TokenAuthMiddleware
@@ -124,11 +139,15 @@ def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
     app.include_router(git_host.router)
     # MCP 服务（streamable HTTP）：资产地图对外暴露，/mcp
     # （子应用 lifespan 不随挂载执行 → 会话任务组并入宿主 lifespan）
+    # 2610 修复: mount("/mcp") 会剥前缀——FastMCP 内部路由本就是裸 /mcp,
+    # 挂载后实际端点变成 /mcp/mcp, 客户端 POST /mcp 经 307 → /mcp/ → 404
+    # (cv 系列作业 seq1 「注入失败: Error POSTing to endpoint: Not Found」)。
+    # 改为路由提升: 子应用路由并入顶层, /mcp 精确可达。
     _mcp_lifespan = None
     try:
         from topoone_app_architect.mcp import mcp_http_app
         _mcp_asgi, _mcp_lifespan = mcp_http_app()
-        app.mount("/mcp", _mcp_asgi)
+        app.router.routes.extend(_mcp_asgi.routes)
     except Exception as e:  # noqa: BLE001
         logger.warning("MCP HTTP 挂载失败（mcp 依赖缺失? pip install 'mcp<2'）: %s", e)
 

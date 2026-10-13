@@ -10,10 +10,10 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ChatBubbleOvalLeftEllipsisIcon, MagnifyingGlassIcon, PlusIcon, ArrowPathIcon,
-  DocumentArrowDownIcon, TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
-  ArrowUpTrayIcon, ArrowDownTrayIcon, BoltIcon,
+  TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
   FolderIcon, ClockIcon, XMarkIcon, ClipboardDocumentIcon, StopIcon,
-  ArrowsRightLeftIcon,
+  ChevronRightIcon, ChevronDownIcon, WrenchScrewdriverIcon,
+  ArrowTopRightOnSquareIcon,
 } from '@heroicons/vue/24/outline'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useAppDialog } from '@/composables/useAppDialog'
@@ -26,7 +26,8 @@ import { copyText } from '@/utils/clipboard'
 import { useSplitPane } from '@/composables/useSplitPane'
 import ConversationDock from '@/components/chat/ConversationDock.vue'
 import SessionTrackingPanel from '@/components/sessions/SessionTrackingPanel.vue'
-import ExecSessionListPanel from '@/components/sessions/ExecSessionListPanel.vue'
+import SessionJobsDialog from '@/components/sessions/SessionJobsDialog.vue'
+import SessionDeleteDialog from '@/components/sessions/SessionDeleteDialog.vue'
 
 const { t, te } = useI18n()
 const route = useRoute()
@@ -38,7 +39,7 @@ const projectStore = useArchProjectStore()
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 50, min: 40, max: 78 })
 
 /** 左栏标签页: 会话列表 / 需求跟踪(单按钮切换)。 */
-const leftTab = ref<'sessions' | 'assets' | 'exec'>('sessions')
+const leftTab = ref<'sessions' | 'assets'>('sessions')
 
 // ── 需求跟踪筛选(顶栏持有, 面板 props 透传) ──
 const trackingCategory = ref('')
@@ -130,6 +131,7 @@ async function load() {
       sessionService.groups(undefined, pid),
     ])
     void loadRoles()
+    void loadJobsCount()
     list.value = l
     groupsInfo.value = g
   } finally {
@@ -153,6 +155,10 @@ onMounted(async () => {
   if (sel) {
     const meta = list.value.find((c) => c.id === sel || (sel.startsWith('RQ-') && c.reqId === sel))
     if (meta) openInDock(meta)
+    else if (!sel.startsWith('RQ-')) {
+      // 2610 F3: 子会话不在主列表(防污染过滤)——深链直开(openConversation 按 id 拉详情)
+      void conv.openConversation({ id: sel } as ConversationMeta)
+    }
   }
 })
 
@@ -161,11 +167,35 @@ watch(() => route.query.select, (sel) => {
   if (typeof sel === 'string' && sel) {
     const meta = list.value.find((c) => c.id === sel || (sel.startsWith('RQ-') && c.reqId === sel))
     if (meta) openInDock(meta)
+    else if (!sel.startsWith('RQ-')) {
+      void conv.openConversation({ id: sel } as ConversationMeta)
+    }
   }
 })
 
-function onSessionsChanged() { void load() }
-onUnmounted(() => window.removeEventListener('arch:sessions-changed', onSessionsChanged))
+// 2610 S1: 事件防抖合并(日志实证: 连续 conv-message/sessions-changed 各自
+// 触发全量 load——400ms 尾沿合并; 并发由 sessionService.list 合并兜底)
+let sessionsChangedTimer: ReturnType<typeof setTimeout> | null = null
+function onSessionsChanged() {
+  if (sessionsChangedTimer) return
+  sessionsChangedTimer = setTimeout(() => { sessionsChangedTimer = null; void load() }, 400)
+}
+onUnmounted(() => {
+  window.removeEventListener('arch:sessions-changed', onSessionsChanged)
+  if (sessionsChangedTimer) clearTimeout(sessionsChangedTimer)
+  if (degradedTimer) clearInterval(degradedTimer)
+})
+
+// 2610 cv-15: SSE 降级 → 列表 10s 保底轮询(恢复推送即停)
+let degradedTimer: ReturnType<typeof setInterval> | null = null
+watch(() => conv.realtimeDegraded, (deg) => {
+  if (deg && !degradedTimer) {
+    degradedTimer = setInterval(() => { void load() }, 10000)
+  } else if (!deg && degradedTimer) {
+    clearInterval(degradedTimer)
+    degradedTimer = null
+  }
+})
 
 // ── 时间分桶 ──
 const DAY = 86400000
@@ -214,27 +244,109 @@ function openInDock(c: ConversationMeta) {
   void conv.openConversation(c)
 }
 
-// ── 执行器会话标签(2026-10 并入) ──
-const execCount = ref(0)
-async function loadExecCount() {
-  try {
-    const rows = await apiGet<{ id: string }[]>('/arch/exec-sessions?limit=100')
-    execCount.value = rows.length
-  } catch { /* 后端未就绪 */ }
+// 2610 会话窗口(F2): 沉浸式独立浏览器页(?conv= 直开; 唯一性锁防多开)
+function openSessionWindow(convId: string, projectId?: string) {
+  const q = new URLSearchParams({ conv: convId })
+  if (projectId) q.set('project', projectId)
+  window.open(router.resolve({ path: '/exec-session-view', query: Object.fromEntries(q) }).href, '_blank')
 }
-onMounted(loadExecCount)
 
-/** 面板点行 → 右侧 dock 打开关联会话(对话流); 无关联 → 新 tab 时间线 */
-function openExecConv(conversationId: string, _jobId: string) {
-  const meta = list.value.find((c) => c.id === conversationId)
-  void conv.openConversation((meta || { id: conversationId }) as ConversationMeta)
+// ── 主+子会话树(2610 统一列表): 主行展开子会话(懒加载) + 作业历史弹窗 ──
+interface SubRow {
+  id: string
+  title: string
+  executorId: string
+  execution: string
+  active: boolean
+  status: string
+  msgCount: number
 }
-function openExecNewTab(jobId: string) {
-  // hash 路由: router.resolve 生成 #/…?job= 深链; project 经 route.query 继承
-  const query: Record<string, string> = { job: jobId }
-  if (route.query.project) query.project = String(route.query.project)
-  window.open(router.resolve({ path: '/exec-session-view', query }).href, '_blank')
+const expanded = ref<Set<string>>(new Set())
+const subsOf = ref<Record<string, SubRow[]>>({})
+const subsLoading = ref('')
+
+async function toggleExpand(c: ConversationMeta) {
+  const next = new Set(expanded.value)
+  if (next.has(c.id)) {
+    next.delete(c.id)
+  } else {
+    next.add(c.id)
+    if (!subsOf.value[c.id]) await loadSubs(c.id)
+  }
+  expanded.value = next
 }
+
+async function loadSubs(mainId: string) {
+  subsLoading.value = mainId
+  try {
+    const rows = await apiGet<SubRow[]>(`/sessions/${mainId}/coding-sessions`)
+    subsOf.value = { ...subsOf.value, [mainId]: rows }
+  } catch {
+    subsOf.value = { ...subsOf.value, [mainId]: [] }
+  } finally {
+    subsLoading.value = ''
+  }
+}
+
+function execStatusLabel(st: string): string {
+  const key = `session.deleteDialog.execStatus.${st}`
+  const label = t(key)
+  return label === key ? (st || '执行中') : label
+}
+
+function openSubRow(s: SubRow) {
+  void conv.openConversation({ id: s.id } as ConversationMeta)
+}
+
+/** 子会话单删(2610): 非执行态可删(与 dock 子会话池同一守卫与确认) */
+async function deleteSubRow(s: SubRow, mainId: string) {
+  if (s.execution) return
+  const ok = await dialog.confirm(
+    t('session.subs.deleteConfirm', { title: s.title || s.id }), { danger: true })
+  if (!ok) return
+  try {
+    await sessionService.remove(s.id)
+    await loadSubs(mainId)
+    await load()
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: s.id }))
+  } catch (e: any) {
+    void dialog.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// ── 作业历史弹窗(取代原「执行器会话」标签) ──
+const jobsTarget = ref<{ id: string; title: string } | null>(null)
+function openJobs(id: string, title: string) {
+  jobsTarget.value = { id, title }
+}
+/** 作业计数(裁决1A: 行内常显 chip): /arch/exec-sessions 按 conversationId 聚合 */
+const jobsCount = ref<Record<string, number>>({})
+async function loadJobsCount() {
+  try {
+    const rows = await apiGet<{ conversationId?: string }[]>('/arch/exec-sessions?limit=200')
+    const m: Record<string, number> = {}
+    for (const r of rows || []) {
+      const cid = r.conversationId || ''
+      if (cid) m[cid] = (m[cid] || 0) + 1
+    }
+    jobsCount.value = m
+  } catch { /* 留痕面不可达 → 计数缺失, 弹窗内再报错 */ }
+}
+
+/** 运行态区分(裁决2A): 等待输入/待确认(黄, 无脉冲) vs 真执行中(▶ 脉冲) */
+function runStateChip(c: ConversationMeta): '' | 'running' | 'waiting' | 'pending' | 'queued' {
+  const st = String(((c as any).runningRole?.status) || '')
+  if (st === 'waiting_input') return 'waiting'
+  if (st === 'pending_confirm') return 'pending'
+  if (st === 'queued') return 'queued'
+  if ((c as any).workState === 'running') return 'running'
+  return ''
+}
+async function onJobsChanged() {
+  await load()
+  for (const mid of expanded.value) await loadSubs(mid)
+}
+
 function newConversation() {
   conv.newConversation()
 }
@@ -281,14 +393,18 @@ async function editTags(c: ConversationMeta) {
       .then((g) => { groupsInfo.value = g })
   }
 }
-async function removeSession(c: ConversationMeta) {
-  if (!(await dialog.confirm(t('session.actions.deleteConfirm', { title: c.title }), { danger: true }))) return
-  await sessionService.remove(c.id)
-  list.value = list.value.filter((x) => x.id !== c.id)
+// ── 删除: 预览清单 + 二次确认(2610 裁决: 执行器会话执行中则阻断) ──
+const deleteTarget = ref<ConversationMeta | null>(null)
+function removeSession(c: ConversationMeta) {
+  deleteTarget.value = c
+}
+function onSessionDeleted(id: string) {
+  deleteTarget.value = null
+  list.value = list.value.filter((x) => x.id !== id)
   // 左右联动: 通知对话栏清除该会话(若正打开)——右侧不残留已删会话;
   // sessions-changed 供 dock 切换浮层/需求跟踪面板/大纲同步刷新
-  window.dispatchEvent(new CustomEvent('arch:conversation-removed', { detail: c.id }))
-  window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: c.id }))
+  window.dispatchEvent(new CustomEvent('arch:conversation-removed', { detail: id }))
+  window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: id }))
 }
 async function newGroup() {
   const name = await dialog.prompt(t('session.actions.newGroupPrompt'))
@@ -328,14 +444,14 @@ function flowLabel(p?: string): string {
     <div class="flex shrink-0 flex-wrap items-center gap-2 px-5 pt-5">
       <!-- 标签页: 会话列表 / 需求跟踪 / 执行器会话(2026-10 并入) -->
       <button
-        v-for="tb in (['sessions', 'assets', 'exec'] as const)" :key="tb"
+        v-for="tb in (['sessions', 'assets'] as const)" :key="tb"
         class="btn btn-sm"
         :class="leftTab === tb ? 'btn-blue' : 'btn-primary'"
         @click="leftTab = tb"
       >
         {{ t(`session.tabs.${tb}`) }}
         <span class="ml-0.5 font-mono opacity-70">{{
-          tb === 'sessions' ? filtered.length : tb === 'assets' ? trackingCount : execCount
+          tb === 'sessions' ? filtered.length : trackingCount
         }}</span>
       </button>
 
@@ -420,38 +536,52 @@ function flowLabel(p?: string): string {
       <div class="flex h-full min-h-0">
         <!-- 左: 信息区(标签页内容: 会话列表 / 知识资产; 标签页开关在顶栏工具条) -->
         <div class="flex h-full min-h-0 min-w-0 flex-col" :style="{ width: splitPct + '%' }">
-          <!-- 左: 执行器会话(2026-10 并入; 点行右侧打开关联会话, ↗ 新 tab 时间线) -->
-          <section v-if="leftTab === 'exec'" class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div class="panel flex min-h-0 flex-1 flex-col p-2">
-              <ExecSessionListPanel mode="panel" @chat="openExecConv" @job="openExecNewTab" />
-            </div>
-          </section>
-          <!-- 左: 会话列表 -->
-          <section v-else-if="leftTab === 'sessions'" class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <!-- 左: 会话列表(2610 统一列表: 主行可展开子会话; 作业历史见行内按钮) -->
+          <section v-if="leftTab === 'sessions'" class="flex min-h-0 min-w-0 flex-1 flex-col">
             <div class="min-h-0 flex-1 overflow-auto panel">
         <template v-for="g in grouped" :key="g.key || 'flat'">
           <div v-if="g.key" class="sticky top-0 z-10 flex items-center gap-1.5 bg-ctp-mantle/95 px-3 py-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1 backdrop-blur">
             <ClockIcon class="h-3 w-3" />{{ t(`session.time.${g.key}`) }}
             <span class="text-ctp-overlay0">({{ g.items.length }})</span>
           </div>
+          <template v-for="c in g.items" :key="c.id">
           <div
-            v-for="c in g.items"
-            :key="c.id"
             class="group flex cursor-pointer items-center gap-2 border-b border-ctp-surface0/60 px-3 py-2 hover:bg-ctp-surface0/40"
             :class="conv.activeId === c.id ? 'bg-ctp-surface0/70' : ''"
             @click="openInDock(c)"
           >
+            <!-- 子会话展开箭头(2610 统一列表: 主行可展开子会话树) -->
+            <button
+              v-if="(c as any).subCount > 0"
+              class="shrink-0 rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-blue"
+              :title="expanded.has(c.id) ? t('session.subs.collapse') : t('session.subs.expand')"
+              @click.stop="toggleExpand(c)"
+            >
+              <ChevronDownIcon v-if="expanded.has(c.id)" class="h-3.5 w-3.5" />
+              <ChevronRightIcon v-else class="h-3.5 w-3.5" />
+            </button>
+            <span v-else class="w-[18px] shrink-0" />
             <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
             <span
-              v-if="(c as any).workState === 'running'"
+              v-if="runStateChip(c) === 'waiting' || runStateChip(c) === 'pending'"
+              class="chip shrink-0 bg-ctp-yellow/20 text-ctp-yellow"
+              :title="t('session.workState.runningHint')"
+            >⏸ {{ runStateChip(c) === 'waiting' ? t('session.workState.waiting') : t('session.workState.pending') }}</span>
+            <span
+              v-else-if="runStateChip(c) === 'queued'"
+              class="chip shrink-0 bg-ctp-overlay0/20 text-ctp-overlay1"
+              :title="t('session.workState.queuedHint')"
+            >⧗ {{ t('session.workState.queued', { n: (c as any).runningRole?.queuedPosition || 1 }) }}</span>
+            <span
+              v-else-if="runStateChip(c) === 'running'"
               class="chip shrink-0 animate-pulse bg-ctp-peach/15 text-ctp-peach"
               :title="t('session.workState.runningHint')"
             >▶ {{ t('session.workState.running') }}</span>
             <span
-              v-if="(c as any).executorId"
+              v-if="(c as any).effectiveExecutorId"
               class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve"
               :title="t('session.role.roleTitle')"
-            >⌨ {{ (c as any).executorId }}</span>
+            >⌨ {{ (c as any).effectiveExecutorId }}</span>
             <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
             <span
               v-if="(c as any).flowState && (c as any).flowState !== 'free'"
@@ -496,6 +626,12 @@ function flowLabel(p?: string): string {
                 {{ c.summary || c.preview || t('session.noSummary') }}
               </p>
             </div>
+            <button
+              v-if="jobsCount[c.id]"
+              class="chip shrink-0 bg-ctp-teal/15 text-ctp-teal hover:bg-ctp-teal/25"
+              :title="t('session.jobs.menu')"
+              @click.stop="openJobs(c.id, c.title)"
+            ><WrenchScrewdriverIcon class="h-3 w-3 inline" /> {{ jobsCount[c.id] }}</button>
             <div class="hidden shrink-0 flex-col items-end text-[10px] text-ctp-overlay0 xl:flex">
               <span>{{ c.msgCount }} {{ t('session.msgUnit') }}</span>
               <span>{{ fmt(c.updatedAt) }}</span>
@@ -522,6 +658,14 @@ function flowLabel(p?: string): string {
               <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.openInDock')" @click.stop="openInDock(c)">
                 <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />
               </button>
+              <!-- 2610 会话窗口: 沉浸式独立浏览器页(?conv= 直开, 多开带标识) -->
+              <button
+                class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-sapphire"
+                :title="t('session.openWindow')"
+                @click.stop="openSessionWindow(c.id, c.projectId || currentProjectId)"
+              >
+                <ArrowTopRightOnSquareIcon class="h-3.5 w-3.5" />
+              </button>
               <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-peach" :title="t('session.actions.editTags')" @click.stop="editTags(c)">
                 <TagIcon class="h-3.5 w-3.5" />
               </button>
@@ -530,6 +674,63 @@ function flowLabel(p?: string): string {
               </button>
             </div>
           </div>
+
+          <!-- 子会话行(2610 统一列表): 主行展开; 执行器徽标 + 运行态 + 打开/作业/删除 -->
+          <template v-if="expanded.has(c.id)">
+            <p
+              v-if="subsLoading === c.id"
+              class="border-b border-ctp-surface0/40 bg-ctp-base/30 px-3 py-1.5 pl-10 text-[10px] text-ctp-overlay0"
+            >{{ t('common.loading') }}</p>
+            <template v-else>
+              <div
+                v-for="s in (subsOf[c.id] || [])"
+                :key="s.id"
+                class="group flex cursor-pointer items-center gap-2 border-b border-ctp-surface0/40 bg-ctp-base/40 px-3 py-1.5 pl-8 hover:bg-ctp-surface0/40"
+                @click="openSubRow(s)"
+              >
+                <span
+                  class="chip shrink-0"
+                  :class="s.executorId && s.executorId !== 'architect'
+                    ? 'bg-ctp-mauve/15 text-ctp-mauve' : 'bg-ctp-blue/15 text-ctp-blue'"
+                >⌨ {{ s.executorId || 'architect' }}</span>
+                <span
+                  v-if="s.execution"
+                  class="chip shrink-0 animate-pulse bg-ctp-peach/15 text-ctp-peach"
+                >▶ {{ execStatusLabel(s.execution) }}</span>
+                <span v-if="s.active" class="chip shrink-0 bg-ctp-blue/10 text-ctp-blue">{{ t('session.subs.active') }}</span>
+                <span class="min-w-0 flex-1 truncate text-[11px] text-ctp-subtext1" :title="s.title">{{ s.title }}</span>
+                <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ s.msgCount }} {{ t('session.msgUnit') }}</span>
+                <button
+                  v-if="jobsCount[s.id]"
+                  class="chip shrink-0 bg-ctp-teal/15 text-ctp-teal hover:bg-ctp-teal/25"
+                  :title="t('session.jobs.menu')"
+                  @click.stop="openJobs(s.id, s.title)"
+                ><WrenchScrewdriverIcon class="h-3 w-3 inline" /> {{ jobsCount[s.id] }}</button>
+                <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-sapphire"
+                    :title="t('session.openWindow')"
+                    @click.stop="openSessionWindow(s.id, c.projectId || currentProjectId)"
+                  >
+                    <ArrowTopRightOnSquareIcon class="h-3 w-3" />
+                  </button>
+                  <button
+                    class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-red"
+                    :class="s.execution ? 'pointer-events-none opacity-30' : ''"
+                    :title="s.execution ? t('session.subs.cannotDeleteRunning') : t('common.delete')"
+                    @click.stop="deleteSubRow(s, c.id)"
+                  >
+                    <TrashIcon class="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+              <p
+                v-if="!(subsOf[c.id] || []).length"
+                class="border-b border-ctp-surface0/40 bg-ctp-base/30 px-3 py-1.5 pl-10 text-[10px] text-ctp-overlay0"
+              >{{ t('session.subs.emptyRow') }}</p>
+            </template>
+          </template>
+          </template>
         </template>
         <p v-if="!filtered.length" class="px-3 py-12 text-center text-xs text-ctp-overlay0">
           {{ t('common.empty') }}
@@ -581,6 +782,22 @@ function flowLabel(p?: string): string {
         </div>
       </div>
     </div>
+
+    <!-- 删除确认: 级联清单(需求完成情况/子会话运行状态) + 二次确认 -->
+    <SessionDeleteDialog
+      v-if="deleteTarget"
+      :session="deleteTarget"
+      @close="deleteTarget = null"
+      @deleted="onSessionDeleted"
+    />
+
+    <!-- 作业历史(2610 统一列表: 取代原「执行器会话」标签) -->
+    <SessionJobsDialog
+      v-if="jobsTarget"
+      :session="jobsTarget"
+      @close="jobsTarget = null"
+      @changed="onJobsChanged"
+    />
 
   </div>
 </template>

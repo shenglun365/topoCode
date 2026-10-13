@@ -202,3 +202,22 @@ def test_reset_turn_guard_per_turn(tmp_path, git_repo):
     assert job._progress_stall == 0
     loop, _ = job.loop_guard.feed("text", text="x" * 50)
     assert not loop                               # 新实例, 旧计数不带入
+
+
+def test_progress_check_chat_role_exempt(tmp_path, git_repo):
+    """2610 cv-12: chat 角色豁免——起始即脏 worktree 的只读排查回合不误杀
+    (直通对话天然无文件进展; 活动停滞看门狗另行兜底)。"""
+    job = _mk_job(tmp_path, git_repo)
+    job.session_role = "chat"
+    (git_repo / "b.txt").write_text("dirty\n")   # 起始即脏 → 若为 task 已武装
+    for _ in range(15):                          # 顶格 + 余量: 恒不判
+        assert job._progress_check() == ""
+
+
+def test_progress_check_task_role_still_triggers(tmp_path, git_repo):
+    """任务链(task)语义不变: 同样场景照旧判定循环。"""
+    job = _mk_job(tmp_path, git_repo)
+    assert job.session_role == "task"
+    (git_repo / "b.txt").write_text("work\n")
+    reasons = [job._progress_check() for _ in range(11)]
+    assert "无文件进展" in reasons[-1]

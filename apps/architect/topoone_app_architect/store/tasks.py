@@ -163,6 +163,12 @@ class TasksStore:
         db.commit()
 
     @classmethod
+    def delete(cls, task_id: str) -> bool:
+        """单任务行删除(作业档案清理用; 会话行不动)。"""
+        from .base import _delete
+        return bool(_delete(cls.TABLE, task_id))
+
+    @classmethod
     def set_progress(cls, task_id: str, prog: dict) -> None:
         cls.update(task_id, {"progress": json.dumps(prog, ensure_ascii=False)})
 

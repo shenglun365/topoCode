@@ -18,9 +18,7 @@ _HELP_HINT_RE = re.compile(
     r"(帮助|使用指南|使用手册|帮助手册|怎么用|如何使用|使用说明|操作指南|"
     r"功能介绍|新手|入门|怎么开始|如何配置|怎么配置|怎么创建|如何创建|"
     r"怎么建卡|如何建卡|文档)")
-# 构建标记排除: 「帮我写个使用手册」是开发诉求(需求路线), 不是产品咨询
-_BUILD_MARK_RE = re.compile(
-    r"(做一个|做个|写个|写一个|开发|实现|封装|新建|新增|加一个|添加|搭一个)")
+from ..perception.intent import BUILD_MARK_RE as _BUILD_MARK_RE  # MS-D4 单源
 
 
 def match_help(question: str) -> bool:

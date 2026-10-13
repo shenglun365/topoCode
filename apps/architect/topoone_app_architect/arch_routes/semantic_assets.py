@@ -111,3 +111,68 @@ async def api_asset_split(request: Request):
     return _run_cognitive_edit(
         split_asset, (body.get("assetId") or "").strip(),
         list(body.get("parts") or []), (body.get("author") or "").strip())
+
+
+# ── 手动建语义资产(2610 核心资产守护裁决 2): 适配未被提取的 ast 节点/
+#    跨节点代码段——自由锚点(文件+行区间), status=active, meta.manual=1。
+@router.post("/semantic/assets/manual")
+async def create_manual_asset(request: Request):
+    """手动创建语义资产。body: {project, name, kind?, level?, file,
+    startLine?, endLine?, symbol?, desc?, ruleIds?, ruleText?}
+    → {asset, attached: [ruleId]}(ruleIds 挂既有规约; ruleText 建规约并挂, 一站式守护接入)。"""
+    body = await request.json() if request else {}
+    if not (body.get("root") or body.get("project")):
+        return err(400, "缺少 project/root")  # 创建操作禁入幻影项目(合成哈希 id 不可见)
+    try:
+        pid = project_id_for(body.get("root"), body.get("project"))
+    except Exception as e:  # noqa: BLE001
+        return err(400, f"项目定位失败: {e}")
+    if not pid:
+        return err(400, "缺少 project")
+    name = str(body.get("name") or "").strip()
+    file = _norm_path(str(body.get("file") or "").strip())
+    if not name or not file:
+        return err(400, "name 与 file 必填")
+    kind = str(body.get("kind") or "entity")
+    if kind not in SEMANTIC_KINDS:
+        kind = "entity"
+    level = str(body.get("level") or "implementation")
+    if level not in SEMANTIC_LEVELS:
+        level = "implementation"
+    from .. import store
+    from ..sem.taxonomy import _id_prefix
+    import time as _time
+    refs: List[dict] = [{"file": file}]
+    if body.get("symbol"):
+        refs[0]["symbol"] = str(body.get("symbol"))[:120]
+    if body.get("startLine"):
+        refs[0]["startLine"] = int(body.get("startLine"))
+    if body.get("endLine"):
+        refs[0]["endLine"] = int(body.get("endLine"))
+    payload = {
+        "id": store.next_id(_id_prefix(level, kind)),
+        "projectId": pid, "kind": kind, "level": level,
+        "name": name[:120],
+        "desc": str(body.get("desc") or "")[:2000],
+        "status": "active",
+        "astRefs": refs,
+        "scopeType": "files", "scopeKey": file,
+        "meta": {"manual": True, "createdBy": "core-guard"},
+        "createdAt": int(_time.time() * 1000),
+    }
+    store.SemanticAssetsStore.create(payload)
+    # 2610 重构: 守护接入改挂载(挂载即核心, 无分级)
+    attached: List[str] = []
+    rule_text = str(body.get("ruleText") or "").strip()
+    if rule_text:
+        rd = store.RuleDefStore.create(pid, name, rule_text)
+        store.TargetRuleStore.attach(pid, "asset", payload["id"], rd["id"],
+                                     title=name)
+        attached.append(rd["id"])
+    for rid in (body.get("ruleIds") or []):
+        rid = str(rid).strip()
+        if rid and store.RuleDefStore.get(rid, pid):
+            store.TargetRuleStore.attach(pid, "asset", payload["id"], rid, title=name)
+            attached.append(rid)
+    return ok({"asset": store.SemanticAssetsStore.get(payload["id"]) or payload,
+               "attached": attached})

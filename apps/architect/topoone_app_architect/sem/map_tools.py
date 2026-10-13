@@ -24,6 +24,7 @@ TOOLS = [
      "args": {"project": "项目 id（多项目时必填，可先 project.list）"}},
     {"name": "map.component", "desc": "组件档案：文件清单/语义资产/依赖出入", "args": {"name": "组件名或 id", "project": "项目 id"}},
     {"name": "map.assets", "desc": "语义资产检索（kind/level/关键词）", "args": {"query": "关键词", "kind": "类别", "level": "粒度(business/implementation/logic)", "limit": "条数", "project": "项目 id"}},
+    {"name": "map.core", "desc": "核心资产标记清单(用户标记+绑定规约——改动相关文件前自查, 评估性)", "args": {"project": "项目 id"}},
     {"name": "map.rules", "desc": "规约全集=AGENTS.md 全文(唯一真相源; 未建时回退缓存并提示 init)", "args": {"project": "项目 id"}},
     {"name": "map.graph", "desc": "关系图（mermaid）：component=组件依赖图 / semantic=语义关系图", "args": {"kind": "component|semantic", "project": "项目 id"}},
     {"name": "ctx.search", "desc": "跨会话检索历史上下文（单元/消息/备案文档；讨论关联结论先查这里）", "args": {"query": "关键词", "type": "单元类型", "conversation": "限定会话 id", "limit": "条数", "project": "项目 id"}},
@@ -85,7 +86,7 @@ def tool_overview(project: Optional[str] = None) -> str:
         rows = [f"- {r.get('id')} {r.get('name','')}" for r in ([])
                 ] or []
         from .. import store
-        allp = [f"- `{r.get('id')}` {r.get('name','')}" for r in store.ProjectsStore.list()]
+        allp = [f"- `{r.get('id')}` {r.get('name','')}" for r in store.ProjectsStore.all()]
         return ("# 资产地图\n\n无法唯一定位项目，请传 project 参数。可用项目：\n"
                 + "\n".join(allp or ["- (无)"]))
     out = [_md_header("资产地图总览", proj)]
@@ -196,6 +197,29 @@ def tool_assets(query: str = "", kind: str = "", level: str = "", limit: int = 3
         out.append(f"| {a.get('kind')} | {a.get('level','')} | {a.get('name')} | `{f}` | {a.get('status','')} |")
     return "\n".join(out)
 
+def tool_core(project: Optional[str] = None) -> str:
+    """核心资产清单(2610 重构): 挂载规约聚合展开(挂载即核心, 无分级)。"""
+    from .. import store
+    pid = _pid_of(_resolve_project_entry(project))
+    if not pid:
+        return "# 核心资产\n\n无法唯一定位项目, 请传 project 参数。"
+    marks = store.TargetRuleStore.list_effective(pid)
+    if not marks:
+        return "# 核心资产\n\n(无标记)——用户可在资产工作区守护列表为目标挂载规约。"
+    out = [_md_header("核心资产标记(评估性守护)", {"id": pid, "name": pid})]
+    for m in marks:
+        out.append(f"## ★ · [{m.get('targetType')}] {m.get('title') or m.get('targetId')}")
+        out.append(f"- 目标: `{m.get('targetId')}`")
+        rules = [r for r in (m.get("rules") or []) if (r.get("content") or "").strip()]
+        if rules:
+            out.append("- 规约(" + str(len(rules)) + " 条):\n" + "\n\n".join(
+                f"[{r.get('title') or r.get('ruleId')}]\n{r.get('content')}" for r in rules))
+        else:
+            out.append("- 规约: (未挂——建议在守护列表挂载)")
+    out.append("> 评估性守护: 改动触及以上目标时请对照规约自检, 并在 task.receipt 中说明。")
+    return "\n".join(out)
+
+
 
 def tool_rules(project: Optional[str] = None) -> str:
     """规约全集: AGENTS.md 文件优先(唯一真相源, 纯文件模式 2610); 缓存回退。"""
@@ -236,7 +260,7 @@ def tool_rules(project: Optional[str] = None) -> str:
 
 
 def tool_graph(kind: str = "component", project: Optional[str] = None) -> str:
-    from ..common import build_architecture_model
+    from ..common import build_architecture_model, build_component_catalog
     proj = _resolve_project_entry(project)
     if not proj:
         return "# 关系图\n\n无法唯一定位项目，请传 project 参数。"
@@ -286,6 +310,7 @@ def run_tool(name: str, args: dict) -> str:
                                           args.get("level") or "",
                                           int(args.get("limit") or 30),
                                           args.get("project")),
+        "map.core": lambda: tool_core(args.get("project")),
         "map.rules": lambda: tool_rules(args.get("project")),
         "map.graph": lambda: tool_graph(args.get("kind") or "component",
                                         args.get("project")),

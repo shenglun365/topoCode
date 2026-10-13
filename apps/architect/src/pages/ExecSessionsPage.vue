@@ -10,7 +10,7 @@
  *   (POST /arch/exec-sessions/{job}/input → runner user_input/steer) + 停止
  * 头信息: 项目 chip + 主会话标题 + 子会话标题 + 执行器 + 运行状态。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import {
@@ -22,7 +22,7 @@ import { apiGet, apiPost } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
 import { useConversationStore } from '@/stores/conversation-store'
 import { useConvWindowLock } from '@/composables/useConvWindowLock'
-import { useAppDialog } from '@/composables/useAppDialog'
+import { copyText } from '@/utils/clipboard'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import ServeOutlineWindow from '@/components/sessions/ServeOutlineWindow.vue'
@@ -31,7 +31,6 @@ const { t } = useI18n()
 const route = useRoute()
 const conv = useConversationStore()
 const convLock = useConvWindowLock()
-const dialog = useAppDialog()
 
 interface Ev { seq: number; kind: string; text: string; ts: number; toolName?: string; [k: string]: unknown }
 
@@ -41,6 +40,18 @@ const convId = ref('')
 const parentTitle = ref('')
 const projectName = ref('')
 const loading = ref(false)
+// 2610 会话窗口(F1): ?conv= 直开形态——主会话/architect/coding 子会话通吃,
+// 无作业上下文(时间线/serve 输入隐藏), 纯对话栈; 头部带会话/项目强标识
+const convHead = ref<{ kind?: string; title?: string; executorId?: string; projectId?: string } | null>(null)
+const kindLabel = computed(() => convHead.value?.kind === 'coding'
+  ? t('execSessionView.subSession') : t('execSessionView.mainSession'))
+const copiedId = ref(false)
+async function copyConvId() {
+  if (await copyText(String(convId.value || jobId.value))) {
+    copiedId.value = true
+    setTimeout(() => { copiedId.value = false }, 1200)
+  }
+}
 
 /* ── serve 直通形态: 事件 → 回合聚合会话视图 ── */
 const events = ref<Ev[]>([])
@@ -169,7 +180,7 @@ async function saveReceiptDraft(tn: AggTurn): Promise<void> {
 
 /** 回合摘要: 剥 md 常见记号取首段截断(折叠态/大纲条目共用) */
 function turnSummary(tn: AggTurn): string {
-  const raw = (tn.text || '').replace(/[#*`|>\[\]_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const raw = (tn.text || '').replace(/[#*`|>[\]_-]+/g, ' ').replace(/\s+/g, ' ').trim()
   return raw.slice(0, 80)
 }
 
@@ -197,13 +208,47 @@ function gotoAgg(ts: number) {
 const fmt = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleTimeString() : ''
 const fmtFull = (ts?: number) => ts ? new Date(ts < 1e12 ? ts * 1000 : ts).toLocaleString() : ''
 
-const heading = computed(() => (conv.activeMeta as any)?.title || jobRow.value?.title || jobId.value)
-const isRunning = computed(() => !jobRow.value?.lastStatus && jobRow.value?.taskStatus !== 'done')
+const heading = computed(() => (conv.activeMeta as any)?.title || convHead.value?.title
+  || jobRow.value?.title || jobId.value || convId.value)
+// 2610 会话窗口: 执行态来源按形态分型——?conv= 读会话行(权威), ?job= 读作业行
+const isRunning = computed(() => {
+  if (convId.value && !jobId.value) {
+    return ((conv.activeMeta as any)?.workState === 'running'
+      || !!conv.optimisticRole) && (conv.activeMeta as any)?.status !== 'archived'
+  }
+  return !jobRow.value?.lastStatus && jobRow.value?.taskStatus !== 'done'
+})
 const isArchived = computed(() => (conv.activeMeta as any)?.status === 'archived')
 const jobState = computed(() => (isRunning.value
-  ? { role: 'coding', executorId: jobRow.value?.executorType || (conv.activeMeta as any)?.executorId, status: 'running' }
+  ? { role: 'coding', executorId: (conv.activeMeta as any)?.runningRole?.executorId
+      || jobRow.value?.executorType || (conv.activeMeta as any)?.executorId,
+      status: (conv.activeMeta as any)?.runningRole?.status || 'running' }
   : null))
 const serveActive = computed(() => !convId.value && jobId.value && isRunning.value)
+
+/* ── 执行器面(2610 统一模型): 注册表清单 + 会话换绑(在跑拒绝, 对话连续) ── */
+const executors = ref<Array<{ id: string; type?: string; default?: boolean }>>([])
+async function loadExecutors() {
+  try {
+    const d = await apiGet<{ executors: typeof executors.value }>('/agent/executors')
+    executors.value = d.executors || []
+  } catch { /* 空清单降级 */ }
+}
+onMounted(loadExecutors)
+async function onSwitchExecutor(executorId: string) {
+  if (!executorId) {
+    conv.pushLocalHint('⚠️ 无可用 coding 执行器——请先在「设置 → 执行器」配置')
+    return
+  }
+  if (!conv.activeId) return
+  try {
+    const r = await apiPost<{ summary?: string }>(`/sessions/${conv.activeId}/executor`, { executorId })
+    conv.pushLocalHint(String(r?.summary || '执行器已切换'))
+    await conv.refreshActiveMeta()
+  } catch (e: any) {
+    conv.pushLocalHint(`⚠️ 换绑失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 
 /* ── serve 输入框(直发 runner) ── */
 const serveInput = ref('')
@@ -259,27 +304,69 @@ async function loadJob() {
 }
 
 /** 打开会话(store 全栈: turns/任务/busy/SSE) + 头信息(主会话标题/项目) */
+/** 2610 会话窗口: 锁冲突三选(接管/跳转原窗口/取消)——独立窗口打开已持锁会话时 */
+const lockPrompt = ref<{ cid: string; owner?: string } | null>(null)
+
 async function openConversation(cid: string) {
   loading.value = true
   try {
     // 头信息一次取齐(BE: messages 接口带 conv/parent 头)
     try {
-      const h = await apiGet<{ conv?: { projectId?: string }; parent?: { title?: string } | null }>(
+      const h = await apiGet<{ conv?: { projectId?: string; title?: string; kind?: string; executorId?: string }; parent?: { title?: string } | null }>(
         `/arch/sessions/${encodeURIComponent(cid)}/messages?limit=1`)
       parentTitle.value = h.parent?.title || ''
+      convHead.value = h.conv || null
       void ensureProjectName(h.conv?.projectId)
     } catch { /* 头信息失败不阻断会话打开 */ }
-    // 窗口唯一性: 同子会话已在别的窗口打开 → 接管确认
+    // 窗口唯一性: 同会话已在别的窗口打开 → 三选(接管/跳转原窗口/取消)
     const lk = await convLock.claim(cid)
     if (!lk.claimed) {
-      const ok = await dialog.confirm(t('session.subs.lockTaken', { tab: lk.owner || '?' }), {
-        confirmText: t('session.subs.lockTakeover'), danger: false })
-      if (!ok) { window.close(); return }
-      convLock.takeover(cid)
+      lockPrompt.value = { cid, owner: lk.owner }
+      return
     }
-    await conv.openConversation({ id: cid } as any)
-    conv.connectEvents()
+    await _openLocked(cid)
   } finally { loading.value = false }
+}
+
+async function _openLocked(cid: string) {
+  await conv.openConversation({ id: cid } as any)
+  conv.connectEvents()
+}
+
+async function onLockTakeover() {
+  const cid = lockPrompt.value?.cid || ''
+  lockPrompt.value = null
+  if (!cid) return
+  convLock.takeover(cid)
+  loading.value = true
+  try { await _openLocked(cid) } finally { loading.value = false }
+}
+
+/** 取消打开并跳转原窗口: 尝试聚焦持锁窗口(opener 链), 关闭本窗;
+ *  close 被浏览器拦截(非脚本开的 tab) → 兜底导航会话中心该会话。 */
+function onLockJumpOriginal() {
+  const cid = lockPrompt.value?.cid || ''
+  lockPrompt.value = null
+  try { (window.opener as any)?.focus?.() } catch { /* 跨源/无 opener 静默 */ }
+  window.close()
+  setTimeout(() => {
+    const q = new URLSearchParams({ select: cid })
+    const pid = String(route.query.project || convHead.value?.projectId || '')
+    if (pid) q.set('project', pid)
+    window.location.href = `${window.location.pathname}#/workbench/sessions?${q.toString()}`
+  }, 400)
+}
+
+function onLockCancel() {
+  const cid = lockPrompt.value?.cid || ''
+  lockPrompt.value = null
+  window.close()
+  setTimeout(() => {
+    const q = new URLSearchParams({ select: cid })
+    const pid = String(route.query.project || convHead.value?.projectId || '')
+    if (pid) q.set('project', pid)
+    window.location.href = `${window.location.pathname}#/workbench/sessions?${q.toString()}`
+  }, 400)
 }
 
 async function ensureProjectName(pid?: string) {
@@ -323,10 +410,24 @@ function openInCenter() {
 }
 
 onMounted(async () => {
+  // 2610 会话窗口(F1): ?conv= 直开(主会话/architect/coding 子会话通吃)
+  const cv = String(route.query.conv || '')
+  if (cv) {
+    convId.value = cv
+    await openConversation(cv)
+    void ensureProjectName(String(route.query.project || '')
+      || convHead.value?.projectId || '')
+    return
+  }
   jobId.value = String(route.query.job || '')
   if (!jobId.value) return
   await loadJob()
 })
+// 2610 标识(多开防混淆): 浏览器标签标题 = 会话标题 · 项目名
+watch([heading, projectName], () => {
+  document.title = [heading.value || '会话', projectName.value, 'TopoCode']
+    .filter(Boolean).join(' · ')
+}, { immediate: true })
 onBeforeUnmount(() => {
   if (evTimer) window.clearInterval(evTimer)
   if (convId.value) convLock.release(convId.value)
@@ -343,6 +444,12 @@ onBeforeUnmount(() => {
         {{ t('execSessionView.mainConv') }}<span class="ml-1 font-medium text-ctp-subtext1">{{ parentTitle }}</span>
         <span class="mx-1.5 text-ctp-surface2">/</span>
       </span>
+      <span class="chip shrink-0 bg-ctp-overlay0/15 text-ctp-overlay1" :title="convId">{{ kindLabel }}</span>
+      <span
+        class="chip shrink-0 cursor-pointer select-none font-mono !text-[10px] bg-ctp-surface0/70 text-ctp-subtext0 hover:text-ctp-text"
+        title="点击复制会话 ID(多开防混淆)"
+        @click="copyConvId"
+      >{{ copiedId ? '✓ 已复制' : (convId || jobId) }}</span>
       <span class="min-w-0 flex-1 truncate text-sm font-medium text-ctp-text" :title="heading">{{ heading }}</span>
       <span v-if="(conv.activeMeta as any)?.executorId || jobRow?.executorType" class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve">⌨ {{ (conv.activeMeta as any)?.executorId || jobRow?.executorType }}</span>
       <span v-if="isRunning" class="chip shrink-0 animate-pulse bg-ctp-green/15 text-ctp-green">● {{ t('execSessionView.running') }}</span>
@@ -350,7 +457,7 @@ onBeforeUnmount(() => {
       <button v-if="jobId && !convId" class="btn btn-xs shrink-0" :title="t('session.outline.title')" @click="outlineOpen = !outlineOpen">
         <ListBulletIcon class="w-3 h-3" />
       </button>
-      <button class="btn btn-xs shrink-0" :class="live ? 'btn-green' : ''" :title="t('execSessions.live')" @click="toggleLive">
+      <button v-if="jobId" class="btn btn-xs shrink-0" :class="live ? 'btn-green' : ''" :title="t('execSessions.live')" @click="toggleLive">
         <ArrowPathIcon class="w-3 h-3" />{{ live ? t('execSessions.liveOn') : t('execSessions.live') }}
       </button>
       <button v-if="convId" class="btn btn-xs shrink-0" :title="t('execSessionView.openCenter')" @click="openInCenter">
@@ -358,8 +465,8 @@ onBeforeUnmount(() => {
       </button>
     </header>
 
-    <!-- 空态: 无 ?job= -->
-    <div v-if="!jobId" class="flex flex-1 items-center justify-center text-xs text-ctp-overlay0">
+    <!-- 空态: 无 ?job= 且无 ?conv= -->
+    <div v-if="!jobId && !convId" class="flex flex-1 items-center justify-center text-xs text-ctp-overlay0">
       {{ t('execSessionView.noJob') }}
     </div>
 
@@ -396,11 +503,14 @@ onBeforeUnmount(() => {
                 <span v-if="!isUnfolded(tn)" class="min-w-0 flex-1 truncate text-[10px] text-ctp-overlay0">{{ turnSummary(tn) }}</span>
                 <span v-else class="flex-1" />
                 <span v-if="shouldFold(tn)" class="shrink-0 font-mono text-[9px] text-ctp-overlay0">{{ t('execSessionView.charsN', { n: (tn.text || '').length }) }}</span>
-                <button
+                <span
+                  role="button"
+                  tabindex="0"
                   class="shrink-0 rounded p-0.5 text-ctp-overlay0 hover:text-ctp-green transition-colors"
                   :title="t('session.subs.saveDraftHint')"
                   @click.stop="saveReceiptDraft(tn)"
-                ><DocumentArrowDownIcon class="w-3 h-3" :class="savedReceiptTs === tn.ts ? 'animate-pulse' : ''" /></button>
+                  @keydown.enter.stop="saveReceiptDraft(tn)"
+                ><DocumentArrowDownIcon class="w-3 h-3" :class="savedReceiptTs === tn.ts ? 'animate-pulse' : ''" /></span>
                 <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ fmt(tn.ts) }}</span>
               </button>
               <div v-show="isUnfolded(tn)" class="w-full min-w-0 break-words rounded-lg rounded-bl-sm bg-ctp-surface0/60 px-3 py-2 text-xs leading-relaxed text-ctp-text">
@@ -483,10 +593,13 @@ onBeforeUnmount(() => {
         :show-assets-panel="false"
         :job-state="jobState"
         :bound-executor-id="(conv.activeMeta as any)?.executorId || ''"
+        :executors="executors"
+        :analysis-mode="((conv.activeMeta as any)?.analysisMode as 'strict' | 'quick' | undefined) || 'strict'"
         :has-session="!!conv.activeId"
         :conv-id="conv.activeId || undefined"
         :tasks="conv.tasks"
         :ctx-usage="((conv.activeMeta as any)?.meta?.ctxUsage) ?? null"
+        @switch-executor="onSwitchExecutor"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
         @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
         @task-ignore="(id: string) => void conv.taskAction(id, 'ignore')"
@@ -496,6 +609,23 @@ onBeforeUnmount(() => {
         @rollback-to="conv.rollbackTo"
         @stop="conv.stop"
       />
+    </div>
+
+    <!-- 锁冲突三选(2610): 接管 / 取消打开并跳转原窗口 / 取消 -->
+    <div
+      v-if="lockPrompt"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div class="w-[26rem] max-w-full rounded-xl border border-ctp-surface0 bg-ctp-mantle p-4 shadow-2xl">
+        <p class="whitespace-pre-wrap text-sm leading-relaxed text-ctp-text">{{ t('execSessionView.lockTaken', { tab: lockPrompt.owner || '?' }) }}</p>
+        <div class="mt-4 flex flex-wrap items-center justify-end gap-2">
+          <button class="btn btn-ghost text-xs" @click="onLockCancel">{{ t('execSessionView.lockCancel') }}</button>
+          <button class="btn text-xs" :title="t('execSessionView.lockJumpHint')" @click="onLockJumpOriginal">{{ t('execSessionView.lockJump') }}</button>
+          <button class="btn text-xs btn-blue" @click="onLockTakeover">{{ t('execSessionView.lockTakeover') }}</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

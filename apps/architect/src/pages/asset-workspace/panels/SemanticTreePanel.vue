@@ -2,15 +2,71 @@
 
 /** MS6-W1 自 AssetManagementWorkspace 模板整块迁出(逐行未动)；状态经 ASSET_WS_KEY 注入。 */
 
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, ArrowsRightLeftIcon, BeakerIcon, ChartBarSquareIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, PlusIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StopIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, ArrowsRightLeftIcon, BeakerIcon, ChartBarSquareIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, PlusIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StarIcon, StopIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import { useAssetWorkspaceCtx } from '..'
 import { OTHER_KEY } from '../useAssetCore'
+import { useCoreRules } from '../useCoreRules'
+import { currentProjectParams } from '@/services/project-service'
 import type { SemanticAsset } from '@/types'
 
 const { t } = useI18n()
+// ── 2610 核心资产守护(重构): 挂载即核心——★ 行内快捷 = 跳转守护列表定位; 挂载编辑在 CoreGuardPanel ──
+const emit = defineEmits<{ 'locate-core': [targetId: string] }>()
+const coreRules = useCoreRules()
+const { isCore: isCoreMark } = coreRules
+/** ★ 点击: 跳转守护列表并定位该目标(挂载编辑单一入口)。 */
+function locateCore(targetId: string) {
+  emit('locate-core', targetId)
+}
+// 仅核心开关状态提升至 AssetManagementWorkspace panel-header(props 下发)
+const props = defineProps<{ coreOnly?: boolean }>()
+onMounted(() => { void coreRules.refresh() })
+/** 仅核心过滤(行级): 资产=asset id / 组件=comp key / 文件=file path。 */
+function rowIsCore(row: { t: string; key: string; g?: { key: string }; a?: SemanticAsset; file?: string }): boolean {
+  if (row.t === 'comp' && row.g) return isCoreMark('component', row.g.key)
+  if (row.t === 'file' && row.file) return isCoreMark('file', row.file)
+  if (row.a) return isCoreMark('asset', row.a.id)
+  return true
+}
+// 手动建资产(未提取 ast 节点/跨节点代码段): 文件行 ➕ 展开内联表单
+const manualFile = ref('')
+const manualForm = ref({ name: '', kind: 'entity', startLine: '', endLine: '', symbol: '', desc: '', ruleText: '' })
+const manualBusy = ref(false)
+const manualMsg = ref('')
+const manualOk = ref(false)
+function startManual(file: string) {
+  manualFile.value = manualFile.value === file ? '' : file
+  manualForm.value = { name: '', kind: 'entity', startLine: '', endLine: '', symbol: '', desc: '', ruleText: '' }
+  manualMsg.value = ''
+}
+async function submitManual() {
+  if (manualBusy.value || !manualFile.value) return
+  if (!manualForm.value.name.trim()) { manualOk.value = false; manualMsg.value = t('session.marks.needTarget'); return }
+  manualBusy.value = true
+  try {
+    const r = await coreRules.addManualAsset({
+      name: manualForm.value.name.trim(), kind: manualForm.value.kind,
+      file: manualFile.value,
+      startLine: manualForm.value.startLine ? Number(manualForm.value.startLine) : undefined,
+      endLine: manualForm.value.endLine ? Number(manualForm.value.endLine) : undefined,
+      symbol: manualForm.value.symbol || undefined,
+      desc: manualForm.value.desc || undefined,
+      ruleText: manualForm.value.ruleText,
+    })
+    manualOk.value = true
+    manualMsg.value = t('guard.manualDone', { id: r.assetId, n: r.attached.length })
+    if (r.attached.length) {
+      manualFile.value = ''
+      manualMsg.value = ''
+    }
+  } catch (e: any) {
+    manualOk.value = false
+    manualMsg.value = String(e?.message || e)
+  } finally { manualBusy.value = false }
+}
 const {
   addedFileSet,
   askExtractComponent,
@@ -165,7 +221,8 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
               <template v-if="row.t === 'comp'">
                 <div
                   v-for="g in row.g ? [row.g] : []"
-                  :key="row.key + ':h'"
+                  :key="g.key + ':h'"
+                  v-show="!coreOnly || rowIsCore(row)"
                 >
               <div
                 class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5 tree-row"
@@ -202,6 +259,16 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
                   class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0 font-mono"
                 >{{ g.hierLevel }}</span>
                 <span class="text-[10px] font-semibold text-ctp-subtext1 truncate" :title="compMetaText(g.key) || undefined">{{ g.name }}</span>
+                <!-- 2610 核心资产守护: ★ 组件标记(component 层; 未归属组不标) -->
+                <button
+                  v-if="g.key !== OTHER_KEY"
+                  class="shrink-0 rounded p-0.5 transition-colors"
+                  :class="isCoreMark('component', g.key) ? 'text-ctp-yellow' : 'text-ctp-overlay0 opacity-40 hover:text-ctp-yellow hover:opacity-100'"
+                  :title="isCoreMark('component', g.key) ? t('session.marks.unmarkBtn') : t('session.marks.markBtn')"
+                  @click.stop="locateCore(g.key)"
+                >
+                  <StarIcon class="w-3 h-3" :class="isCoreMark('component', g.key) ? 'fill-ctp-yellow' : ''" />
+                </button>
                 <!-- KB 降级提示：组件树来自本地快照/资产 scopeKey，名称可能与 KB 目录不一致 -->
                 <span
                   v-if="!compCatalog.length && g.key !== OTHER_KEY"
@@ -307,6 +374,7 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
               </template>
               <!-- 文件节点：独有文件，折叠其下资产 -->
               <div
+                  v-show="!coreOnly || rowIsCore(row)"
                 v-else-if="row.t === 'file'"
                 class="flex items-center gap-1.5 px-1 py-0.5 tree-row"
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
@@ -334,6 +402,20 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
                   class="font-mono text-[10px] text-ctp-subtext1 truncate"
                   :title="row.file"
                 >{{ fileBase(row.file!) }}</span>
+                <!-- 2610 核心资产守护: ★ 文件标记(file 层) + ➕ 手动建语义资产 -->
+                <button
+                  class="shrink-0 rounded p-0.5 transition-colors"
+                  :class="isCoreMark('file', row.file || '') ? 'text-ctp-yellow' : 'text-ctp-overlay0 opacity-40 hover:text-ctp-yellow hover:opacity-100'"
+                  :title="isCoreMark('file', row.file || '') ? t('session.marks.unmarkBtn') : t('session.marks.markBtnFile')"
+                  @click.stop="locateCore(row.file || '')"
+                >
+                  <StarIcon class="w-3 h-3" :class="isCoreMark('file', row.file || '') ? 'fill-ctp-yellow' : ''" />
+                </button>
+                <button
+                  class="shrink-0 rounded p-0.5 text-ctp-overlay0 opacity-50 transition-colors hover:text-ctp-teal hover:opacity-100"
+                  :title="t('session.marks.manualBtn')"
+                  @click.stop="startManual(row.file || '')"
+                ><PlusIcon class="w-3 h-3" /></button>
                 <!-- 文件级语义图谱：该文件锚定的资产子图(有资产才可看) -->
                 <button
                   v-if="row.n"
@@ -417,12 +499,13 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
               <!-- 资产卡片(挂文件下/组件直属) -->
               <div
                 v-else
+                v-show="!coreOnly || rowIsCore(row)"
                 class="mt-0.5 tree-row"
                 :style="{ paddingLeft: (row.depth * 12) + 'px' }"
               >
                 <div
                   v-for="a in row.a ? [row.a] : []"
-                  :key="row.key"
+                  :key="a.id"
                   class="border border-ctp-mauve/20 hover:border-ctp-mauve/40 rounded-lg overflow-hidden"
                 >
                 <div class="flex items-center gap-1.5 px-2 py-1.5">
@@ -469,6 +552,15 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
                     <ArrowsRightLeftIcon class="w-2.5 h-2.5 inline -mt-0.5" />
                     {{ diffMarkLabel(changeMarkById.get(a.id)) }}
                   </span>
+                  <!-- 2610 核心资产守护: ★ 标记(asset 层; 已标记高亮, 点击取消) -->
+                  <button
+                    class="shrink-0 rounded p-0.5 transition-colors"
+                    :class="isCoreMark('asset', a.id) ? 'text-ctp-yellow' : 'text-ctp-overlay0 opacity-40 hover:text-ctp-yellow hover:opacity-100'"
+                    :title="isCoreMark('asset', a.id) ? t('session.marks.unmarkBtn') : t('session.marks.markBtn')"
+                    @click.stop="locateCore(a.id)"
+                  >
+                    <StarIcon class="w-3 h-3" :class="isCoreMark('asset', a.id) ? 'fill-ctp-yellow' : ''" />
+                  </button>
                   <!-- 未归属资产与组件内资产的跨组件关联：点击跳图谱聚焦，出入边即关联 -->
                   <span
                     v-if="unownedLinkByAssetId.get(a.id)"
@@ -627,7 +719,35 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
                         v-for="(st, si) in a.detail.states"
                         :key="si"
                         class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0"
-                      >{{ st.name }}<template v-if="st.initial"> · {{ t('assetMgmt.stateInitial') }}</template><template v-if="st.final"> · {{ t('assetMgmt.stateFinal') }}</template></span>
+                      >{{ st.name }}<template v-if="st.initial"> · {{ t('assetMgmt.stateInitial') }}                <!-- 2610 手动建语义资产: 文件行 ➕ 展开(未提取 ast 节点/跨节点代码段) -->
+                <div
+                  v-if="manualFile === row.file"
+                  class="ml-4 space-y-1.5 rounded-lg border border-ctp-teal/30 bg-ctp-teal/5 p-2.5 text-[11px]"
+                >
+                  <div class="flex gap-1.5">
+                    <input v-model="manualForm.name" class="input flex-1 !py-1" :placeholder="t('session.marks.namePh')" />
+                    <select v-model="manualForm.kind" class="input !w-auto !py-1">
+                      <option v-for="k in ['entity', 'contract', 'state', 'rule', 'process', 'decision']" :key="k" :value="k">{{ t(`assetMgmt.kind.${k}`) }}</option>
+                    </select>
+                  </div>
+                  <div class="flex gap-1.5 items-center">
+                    <span class="shrink-0 font-mono text-[10px] text-ctp-overlay0">{{ fileBase(manualFile) }}</span>
+                    <input v-model="manualForm.startLine" class="input !w-16 !py-1 font-mono" placeholder="起行" />
+                    <span class="text-ctp-overlay0">–</span>
+                    <input v-model="manualForm.endLine" class="input !w-16 !py-1 font-mono" placeholder="止行" />
+                    <input v-model="manualForm.symbol" class="input flex-1 !py-1 font-mono" :placeholder="t('session.marks.symbolPh')" />
+                  </div>
+                  <textarea v-model="manualForm.desc" rows="2" class="input !py-1.5" :placeholder="t('session.marks.descPh')" />
+                  <textarea v-model="manualForm.ruleText" rows="2" class="input !py-1.5" :placeholder="t('guard.ruleTextPh')" />
+                  <p v-if="manualMsg" class="text-[10px]" :class="manualOk ? 'text-ctp-teal' : 'text-ctp-red'">{{ manualMsg }}</p>
+                  <div class="flex justify-end gap-1.5">
+                    <button class="btn btn-xs btn-ghost" @click="manualFile = ''">{{ t('common.cancel') }}</button>
+                    <button class="btn btn-xs btn-teal" :disabled="manualBusy" @click="submitManual">
+                      {{ manualBusy ? '…' : t('session.marks.manualSubmit') }}
+                    </button>
+                  </div>
+                </div>
+</template><template v-if="st.final"> · {{ t('assetMgmt.stateFinal') }}</template></span>
                     </div>
                   </div>
                   <div v-if="a.detail?.transitions?.length">
@@ -722,6 +842,7 @@ function isCore(v: { coreIds: string }, mid: string): boolean {
             >
               {{ t('assetMgmt.emptySemantic') }}
             </p>
+
 </template>
 
 <style scoped>

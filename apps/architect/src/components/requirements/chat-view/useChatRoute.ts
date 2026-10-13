@@ -74,19 +74,36 @@ function pickRoute(r: RouteTarget) {
   routeMenuOpen.value = false
   routeOverride.value = r
 }
-/** 快捷挡直切开关(闪电 icon): architect 模式=关(暗, 需求分析→规约→任务完整链, 按执行器能力档位自动适配) / coding 执行器模式=开(高亮, 直通对话·不走需求/任务——architect 仅通道代理), 点击取反, 上抛宿主 REST 即时生效。挡位体系 T0-T4 见 gears.py; 细档在执行器配置标定。 */
-const quickOn = computed(() => (props.analysisMode || 'strict') === 'quick')
-/** cv-260: 空白态解锁——挡位本地预置, 首条消息创建会话时随载荷生效。 */
+/** 生效执行器(2610 统一模型): ""=architect 分析管线; coding 执行器=直通。
+    legacy: analysisMode=quick 且无绑定 → 默认 coding 执行器(读侧兼容口径)。 */
+const effectiveExecutorId = computed(() => {
+  const b = (props.boundExecutorId || '').trim()
+  if (b && b !== 'architect') return b
+  if (!b && (props.analysisMode || '') === 'quick') return '__legacy_quick__'
+  return ''
+})
+/** 默认 coding 执行器(直通开=切到它; architect 内置条目不参选)。 */
+const defaultCodingExecutor = computed(() =>
+  (props.executors || []).find((e) => e.default && e.id !== 'architect')
+  || (props.executors || []).find((e) => e.id !== 'architect') || null)
+/** 直通开关(闪电 icon): 开=coding 执行器持球(直通对话·不走需求/任务) /
+    关=architect 分析管线(需求分析→规约→任务); 点击换绑, 上抛宿主 REST。 */
+const quickOn = computed(() => !!effectiveExecutorId.value)
 const quickTitle = computed(() => {
   if (props.hasSession === false) return (quickOn.value
     ? 'coding 执行器模式(已预置) — 首条消息创建会话即以直通模式处理'
     : 'architect 模式(预置) — 首条消息创建会话后生效')
   return quickOn.value
     ? 'coding 执行器模式 — 直通对话·不走需求/任务体系，architect 仅做通道代理（点击切回 architect 模式）'
-    : 'architect 模式 — 需求分析→规约→任务，按执行器能力档位自动适配（点击切至 coding 执行器模式）'
+    : 'architect 模式 — 需求分析→规约→任务（点击切至 coding 执行器直通模式）'
 })
 function toggleQuickMode() {
-  emit('set-analysis-mode', quickOn.value ? 'strict' : 'quick')
+  const target = quickOn.value ? 'architect' : (defaultCodingExecutor.value?.id || '')
+  if (!target) {
+    emit('switch-executor', '')
+    return
+  }
+  emit('switch-executor', target)
 }
 
 /** 需求澄清挡位(cv-190): 自动=规约有缺口才集中提问 / 强制=先澄清后落卡(明确指令自动跳过)。 */
@@ -117,25 +134,29 @@ function toggleIsolated() {
   emit('set-isolated', !isolatedOn.value)
 }
 
-// ── 执行器选择(路由钮内, 靠右): 完整名称显示 + 清单选择; 绑定/克隆语义在宿主 ──
-const defaultExecutor = computed(() =>
-  (props.executors || []).find((e) => e.default) || null)
-/** 按钮完整名称: 已绑定=「id · type」; 未绑定=「默认 {id}」; 无注册表=「执行器」。 */
+// ── 执行器选择(路由钮内, 靠右): 完整名称显示 + 清单选择(统一换绑语义) ──
+function isEffectiveExecutor(id: string): boolean {
+  if (effectiveExecutorId.value) return id === effectiveExecutorId.value
+  return id === 'architect'
+}
+/** 按钮完整名称: 生效=「id · type」; legacy quick=「默认 {id}·直通」; architect=「architect」。 */
 const executorLabel = computed(() => {
-  const b = props.boundExecutorId
-  if (b) {
-    const t = (props.executors || []).find((e) => e.id === b)?.type
-    return t && t !== b ? `${b} · ${t}` : b
+  const eff = effectiveExecutorId.value
+  if (!eff) return 'architect'
+  if (eff === '__legacy_quick__') {
+    const d = defaultCodingExecutor.value
+    return d ? `默认 ${d.id}` : '执行器'
   }
-  return defaultExecutor.value ? `默认 ${defaultExecutor.value.id}` : '执行器'
+  const t = (props.executors || []).find((e) => e.id === eff)?.type
+  return t && t !== eff ? `${eff} · ${t}` : eff
 })
 function executorFull(e: { id: string; type?: string }): string {
   return e.type && e.type !== e.id ? `${e.id} · ${e.type}` : e.id
 }
 function pickExecutor(id: string) {
   routeMenuOpen.value = false
-  if (id === props.boundExecutorId) return
-  emit('bind-executor', id)
+  if (isEffectiveExecutor(id)) return
+  emit('switch-executor', id)
 }
 
   return {
@@ -143,13 +164,15 @@ function pickExecutor(id: string) {
     activeTask,
     clarifyForced,
     clarifyTitle,
-    defaultExecutor,
+    defaultCodingExecutor,
+    effectiveExecutorId,
     effectiveRoute,
     executorFull,
     executorLabel,
     inlineAgent,
     isolatedOn,
     isolatedTitle,
+    isEffectiveExecutor,
     lastAssistantAgent,
     pickExecutor,
     pickRoute,

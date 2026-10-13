@@ -41,24 +41,29 @@ def build_mcp(name: str = "topo-architect"):
 
     @mcp.tool(name="map.component")
     def map_component(name: str, project: Optional[str] = None) -> str:
-        """组件档案：文件清单/语义资产/依赖出入。name 为组件名或 id。"""
+        """组件档案：语义资产/依赖出入。name 为组件名或 id。多项目环境必须传 project。"""
         return run_tool("map.component", {"name": name, "project": project})
 
     @mcp.tool(name="map.assets")
     def map_assets(query: str = "", kind: str = "", limit: int = 30,
                    project: Optional[str] = None) -> str:
-        """语义资产检索（kind/level/关键词过滤，返回 Markdown 列表）。"""
+        """语义资产检索（kind/level/关键词过滤，返回 Markdown 列表）。多项目环境必须传 project。"""
         return run_tool("map.assets", {"query": query, "kind": kind,
                                        "limit": limit, "project": project})
 
+    @mcp.tool(name="map.core")
+    def map_core(project: Optional[str] = None) -> str:
+        """核心资产标记清单（用户标记+绑定守护规约）。改动相关文件前自查（评估性，不阻断）。多项目环境必须传 project。"""
+        return run_tool("map.core", {"project": project})
+
     @mcp.tool(name="map.rules")
     def map_rules(project: Optional[str] = None) -> str:
-        """规约全集：编码规约+命名规约+词汇表。编码必须遵守。"""
+        """规约全集：编码规约+命名规约+词汇表。编码必须遵守。多项目环境必须传 project。"""
         return run_tool("map.rules", {"project": project})
 
     @mcp.tool(name="map.graph")
     def map_graph(kind: str = "component", project: Optional[str] = None) -> str:
-        """关系图（mermaid）：component=组件依赖图 / semantic=语义关系图。"""
+        """关系图（mermaid）：component=组件依赖图 / semantic=语义关系图。多项目环境必须传 project。"""
         return run_tool("map.graph", {"kind": kind, "project": project})
 
     @mcp.tool(name="task.mandate")
@@ -79,14 +84,14 @@ def build_mcp(name: str = "topo-architect"):
     @mcp.tool(name="ctx.search")
     def ctx_search(query: str, type: str = "", conversation: str = "",  # noqa: A002
                    limit: int = 20, project: Optional[str] = None) -> str:
-        """跨会话检索历史上下文（工具轨迹/产物/决策/摘要/执行回执/消息/备案文档）。"""
+        """跨会话检索历史上下文（工具轨迹/产物/决策/摘要/执行回执/消息/备案文档）。多项目环境建议传 project。"""
         return run_tool("ctx.search", {"query": query, "type": type,
                                        "conversation": conversation, "limit": limit,
                                        "project": project})
 
     @mcp.tool(name="ctx.get")
     def ctx_get(conversation: str, project: Optional[str] = None) -> str:
-        """会话上下文包：摘要+关键单元+备案文档。"""
+        """会话上下文包：摘要+关键单元+备案文档。多项目环境建议传 project。"""
         return run_tool("ctx.get", {"conversation": conversation, "project": project})
 
     @mcp.tool(name="ctx.summarize")

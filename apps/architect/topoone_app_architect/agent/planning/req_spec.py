@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("arch.planning.req_spec")
 
+# desc 分节标题剥离(cv-181: 防模型输出混入标题 → _instruction_from_snapshot 双层包裹)
+SPEC_HEADING_STRIP_RE = r"^#{1,6}\s*(?:需求目标|目标|需求描述|需求)\s*\n+"
+
 
 # 惰性访问(P4): import 期零触发 arch_routes 初始化
 def _store():
@@ -424,7 +427,7 @@ def _spec_snapshot(title: str, desc_md: str, design_md: str, allowed: list,
     """规约版本快照(真相源结构)。"""
     # desc 是纯文本字段——剥离模型输出里混入的分节标题(否则
     # _instruction_from_snapshot 再包一层 → "## 需求目标"×2, cv-181 实证)
-    desc = re.sub(r"^#{1,6}\s*(?:需求目标|目标|需求描述|需求)\s*\n+", "",
+    desc = re.sub(SPEC_HEADING_STRIP_RE, "",
                   (desc_md or "").strip())
     return {
         "title": (title or "").strip(),

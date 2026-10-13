@@ -59,6 +59,10 @@ from ...agent.tools.protocol import (  # noqa: F401,E402
     strip_tool_blocks,
     tool_parse_audit,
 )
+from ...agent.tools.protocol import (  # noqa: F401,E402
+    PROPOSE_DUP_REPLY,
+    STRUCTURED_NUDGE_PREFIX,
+)
 from ...agent.tools.registry import (  # noqa: F401,E402
     _ARCH_SKILLS,
     _ARCH_TOOLS,
@@ -1024,7 +1028,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                 record("tool_parse_fail", surface="structured",
                        sample=sres["error"][:300])
                 work.append({"role": "user", "content":
-                             f"结构化工具调用未成功({sres['error'][:160]})。"
+                             f"{STRUCTURED_NUDGE_PREFIX}({sres['error'][:160]})。"
                              "请直接基于已有信息作答，或改用文本协议输出工具调用块。"})
                 tool_schema = None
                 continue
@@ -1054,7 +1058,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                 if name == "req.propose" and "req.propose" in _proposed:
                     # cv-174(同步降级路径同样适用): 同回合重复提案不落库
                     results.append({"name": name,
-                                    "text": "重复的 req.propose 已忽略——本次循环已创建规约(以首个为准)；如需修改请用 req.amend"})
+                                    "text": PROPOSE_DUP_REPLY})
                     continue
                 if name == "req.propose":
                     _proposed.add(name)

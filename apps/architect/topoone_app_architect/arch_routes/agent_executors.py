@@ -64,7 +64,21 @@ DEFAULT_EXECUTORS = [
     },
 ]
 
-_TYPES = {"opencode", "cline-sdk", "cli", "serve-generic", "codex-server", "remote-agent", "mock"}
+# ── architect 内置执行器(2610 执行器统一模型裁决) ─────────────────────
+# architect 与 coding 执行器概念平级(会话/子会话的"当前执行器"单源
+# conv.executorId), 但它是分析管线本体——**虚拟条目**: 读侧注入、不落盘、
+# 不下发 runner(runtime 面过滤)、不可删禁(不持久化故天然不可删)。
+ARCHITECT_EXECUTOR_ID = "architect"
+
+
+def _architect_entry() -> dict:
+    return {
+        "id": ARCHITECT_EXECUTOR_ID, "type": "architect-agent",
+        "enabled": True, "default": False, "builtin": True, "builtinProtected": True,
+        "config": {"models": []},   # 模型面=architect 实例模型(无白名单限制)
+    }
+
+_TYPES = {"opencode", "cline-sdk", "cli", "serve-generic", "codex-server", "remote-agent", "mock", "architect-agent"}
 _SECRET_KEYS = {"api_key"}
 _HOSTS = {"local", "remote"}
 
@@ -133,17 +147,20 @@ def _builtin_cline_models() -> list[dict]:
 
 
 def load_executors() -> list[dict]:
+    """执行器注册表(读侧)。architect 虚拟条目恒置首(不落盘, 见 _architect_entry)。"""
+    out: list[dict] = [_architect_entry()]
     raw = store.CollabConfigStore.get(CONFIG_KEY, "")
     if not raw:
-        return json.loads(json.dumps(DEFAULT_EXECUTORS))
+        out.extend(json.loads(json.dumps(DEFAULT_EXECUTORS)))
+        return out
     try:
         entries = json.loads(raw)
         if isinstance(entries, list):
             _norm_iterations(entries)
-            return _ensure_builtin(entries)
-        return []
+            out.extend(_ensure_builtin(entries))
+        return out
     except Exception:  # noqa: BLE001
-        return []
+        return out
 
 
 def _ensure_builtin(entries: list[dict]) -> list[dict]:
@@ -184,15 +201,20 @@ def normalize_executor_type(etype: str) -> str:
 
 
 def default_executor() -> Optional[dict]:
-    """注册表默认执行器(default=true 且 enabled)——任务链缺省选定唯一来源。
+    """注册表默认 **coding** 执行器(default=true 且 enabled)——任务链缺省选定唯一来源。
 
+    architect 虚拟条目不参选(它是分析管线, 非任务执行器)。
     无显式指定时的兜底真相源; 找不到返回 None(调用方必须显式失败, 不得
     再回落特定执行器)。"""
     try:
         for e in load_executors():
+            if e.get("id") == ARCHITECT_EXECUTOR_ID:
+                continue
             if e.get("default") and e.get("enabled", True):
                 return e
         for e in load_executors():   # 无显式 default → 首个启用项(确定性)
+            if e.get("id") == ARCHITECT_EXECUTOR_ID:
+                continue
             if e.get("enabled", True):
                 return e
     except Exception:  # noqa: BLE001
@@ -352,6 +374,8 @@ async def put_executors(request: Request, background: BackgroundTasks):
     entries = body.get("executors")
     if not isinstance(entries, list):
         return err(400, "executors 必须为列表")
+    # architect 为虚拟内置条目(读侧注入, 不落盘)——前端全量提交时剥离
+    entries = [e for e in entries if (e or {}).get("id") != ARCHITECT_EXECUTOR_ID]
     # 与已存密钥合并（前端提交 ****** 视为不变）
     _normalize(entries)
     old = {e.get("id"): e for e in load_executors()}
@@ -387,6 +411,8 @@ async def start_capability_probe(eid: str):
     entry = next((e for e in entries if e.get("id") == eid), None)
     if not entry:
         return err(404, f"执行器不存在: {eid}")
+    if eid == ARCHITECT_EXECUTOR_ID:
+        return err(400, "architect 为内置分析执行器, 无需(也不可)能力探测")
     if eid in _CAP_PROBE_RUNNING:
         return err(409, "该执行器探测进行中, 请等待完成")
     _CAP_PROBE_RUNNING.add(eid)
@@ -791,9 +817,12 @@ async def model_probe(request: Request):
 
 @router.get("/agent/executors/runtime")
 async def runtime_executors():
-    """runner 拉取面（内部）：解析后的完整注册表（不脱敏，含密钥）。"""
+    """runner 拉取面（内部）：解析后的完整注册表（不脱敏，含密钥）。
+
+    architect 虚拟条目不下发(它是 architect 进程内分析管线, 非 runner 执行器)。"""
     entries = load_executors()
-    enabled = [e for e in entries if e.get("enabled", True)]
+    enabled = [e for e in entries if e.get("enabled", True)
+               and e.get("id") != ARCHITECT_EXECUTOR_ID]
     return ok({"executors": enabled, "updatedAt": _ts()})
 
 

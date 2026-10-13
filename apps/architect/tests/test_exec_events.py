@@ -219,3 +219,112 @@ def test_serve_input_runner_down(arch_env, monkeypatch):
     monkeypatch.setattr(eb, "_client", lambda: C())
     r = asyncio.run(es.send_input("job-y", _Req({"text": "hi"})))
     assert r.status_code == 400 and "作业不存在" in r.body.decode()
+
+
+# ── 作业档案删除(2610 统一列表: 留痕 + 终态任务行, 活跃拒绝) ───────────
+
+def test_delete_job_archive_terminal_and_active(arch_env):
+    from topoone_app_architect.arch_routes import exec_sessions as ES
+    # 终态作业: done 事件 + 终态任务行 → 档案+任务一并删
+    exec_events.record_event("job-d1", _ev(1, "session_ready"))
+    exec_events.record_event("job-d1", _ev(2, "done"))
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "T",
+                                            "projectId": "proj-arch"})
+    _t = store.TasksStore.create({"conversationId": conv["id"], "projectId": "proj-arch",
+                                  "status": "done", "title": "T-完", "runnerJobId": "job-d1"})
+    r = asyncio.run(ES.delete_job_archive("job-d1"))
+    assert r["code"] == 0 and r["data"]["eventsRemoved"] == 2 and r["data"]["tasksRemoved"] == 1
+    assert exec_events.events_of("job-d1") == []
+    assert not store.TasksStore.get(_t["id"]), "关联任务行应随档案删除"
+
+    # 活跃作业(无终态事件) → 409 拒绝
+    exec_events.record_event("job-d2", _ev(1, "session_ready"))
+    r2 = asyncio.run(ES.delete_job_archive("job-d2"))
+    assert getattr(r2, "status_code", 0) == 409
+    assert exec_events.events_of("job-d2"), "拒绝时留痕不动"
+
+    # 活跃任务(有终态事件但任务 running) → 409 拒绝
+    exec_events.record_event("job-d3", _ev(1, "session_ready"))
+    exec_events.record_event("job-d3", _ev(2, "done"))
+    store.TasksStore.create({"conversationId": conv["id"], "projectId": "proj-arch",
+                             "status": "running", "title": "T-跑", "runnerJobId": "job-d3"})
+    r3 = asyncio.run(ES.delete_job_archive("job-d3"))
+    assert getattr(r3, "status_code", 0) == 409
+
+    # 不存在的作业 → 404
+    r4 = asyncio.run(ES.delete_job_archive("job-ghost"))
+    assert getattr(r4, "status_code", 0) == 404
+
+
+def test_direct_job_enrich_via_session_ref(arch_env):
+    """2610 F3: 直通作业(无任务行)经 session_ref=job_id 回退关联会话。"""
+    from topoone_app_architect.arch_routes import exec_sessions as ES
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "直通主",
+                                            "executorId": "cline-sdk",
+                                            "projectId": "proj-arch"})
+    store.ConversationsStore.update(conv["id"], {"sessionRef": "job-direct-1"})
+    exec_events.record_event("job-direct-1", _ev(1, "session_ready"))
+    exec_events.record_event("job-direct-1", _ev(2, "input_required"))
+    rows = asyncio.run(ES.list_sessions(limit=50))
+    row = next((r for r in (rows["data"] or []) if r["jobId"] == "job-direct-1"), None)
+    assert row, "直通作业应出现在档案列表"
+    assert row["conversationId"] == conv["id"], "session_ref 回退映射应命中会话"
+    assert row["executorType"] == "cline-sdk", "executorType 回退会话行"
+    assert row["lastStatus"] == "input_required", "保活状态应可见(非空态)"
+    assert row["mainConvId"] == conv["id"]
+
+
+def test_delete_guard_rejects_input_required(arch_env):
+    """2610 F3: input_required=保活非终态——删除必须 409(与弹窗 isActive 同口径)。"""
+    from topoone_app_architect.arch_routes import exec_sessions as ES
+    exec_events.record_event("job-keep", _ev(1, "session_ready"))
+    exec_events.record_event("job-keep", _ev(2, "input_required"))
+    r = asyncio.run(ES.delete_job_archive("job-keep"))
+    assert getattr(r, "status_code", 0) == 409
+    assert exec_events.events_of("job-keep"), "拒绝时留痕不动"
+    # stopped=用户中止(终态) → 可删
+    exec_events.record_event("job-stop", _ev(1, "session_ready"))
+    exec_events.record_event("job-stop", _ev(2, "stopped"))
+    r2 = asyncio.run(ES.delete_job_archive("job-stop"))
+    assert r2["code"] == 0 and r2["data"]["eventsRemoved"] == 2
+
+
+def test_direct_job_enrich_via_start_card_meta(arch_env):
+    """2610 P2: sessionRef 被原生会话 id 覆写后, 启动卡 meta.jobId 兜底映射。"""
+    from topoone_app_architect.arch_routes import exec_sessions as ES
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "覆盖场景",
+                                            "executorId": "opencode",
+                                            "projectId": "proj-arch"})
+    # 直通启动卡(proxy start 落 meta.jobId+jobCard) + sessionRef 已被覆写为原生 id
+    from topoone_app_architect.agent.execution.exec_bridge import _append as _eb_append
+    _eb_append(conv["id"], "assistant",
+               "🔗 已直通执行器 `opencode`(job `job-ovw`，融合模式)",
+               msg_meta={"kind": "proxy", "jobId": "job-ovw", "jobCard": 1,
+                         "jobState": "idle", "fingerprint": "proxyjob:ovw"},
+               project_id="proj-arch")
+    store.ConversationsStore.update(conv["id"], {"sessionRef": "ses_native_1"})
+    exec_events.record_event("job-ovw", _ev(1, "session_ready"))
+    exec_events.record_event("job-ovw", _ev(2, "turn_done"))
+    rows = asyncio.run(ES.list_sessions(limit=50))
+    row = next((r for r in (rows["data"] or []) if r["jobId"] == "job-ovw"), None)
+    assert row, "作业行应存在"
+    assert row["conversationId"] == conv["id"], \
+        "sessionRef 覆写后应经启动卡 meta 兜底映射"
+    assert row["executorType"] == "opencode"
+
+
+def test_pump_anchor_single_source_enrich(arch_env):
+    """2610 B1: 泵留痕 conversationId=job↔conv 单源——历史三层回退仅存量兜底。"""
+    from topoone_app_architect.arch_routes import exec_sessions as ES
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "锚点会话",
+                                            "executorId": "opencode",
+                                            "projectId": "proj-arch"})
+    # 场景: 无任务行; sessionRef 被原生覆写(≠job_id); 无启动卡——仅事件锚点可依
+    store.ConversationsStore.update(conv["id"], {"sessionRef": "ses_native_9"})
+    exec_events.record_event("job-anchor", _ev(1, "session_ready",
+                                               conversationId=conv["id"]))
+    rows = asyncio.run(ES.list_sessions(limit=50))
+    row = next((r for r in (rows["data"] or []) if r["jobId"] == "job-anchor"), None)
+    assert row and row["conversationId"] == conv["id"], \
+        "事件锚点应直达会话映射(不再依赖回退链)"
+    assert row["executorType"] == "opencode"

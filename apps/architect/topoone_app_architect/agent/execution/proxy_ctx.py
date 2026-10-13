@@ -66,15 +66,31 @@ def _merge_mcp_servers(ecfg: dict, etype: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _mcp_tools_brief(conv_id: str, mcp) -> str:
-    """工具可用性告知(执行器不知道工具存在就不会用)。无 MCP 面返回空。"""
+def _mcp_tools_brief(conv_id: str, mcp, project_id: str = "") -> str:
+    """工具可用性告知(执行器不知道工具存在就不会用)。无 MCP 面返回空。
+
+    2610 cv-9/11/12/14 统筹升级: 资产地图段(map.*, 一律传 project)+命名
+    形态说明+ctx.* 段; project_id 内联免摸索(多项目环境缺省无法唯一定位,
+    执行器两轮实测踩坑)。直通(proxy)与任务链(dispatch)同源注入。"""
     wired = "topo-architect" in mcp if isinstance(mcp, dict) else any(
         str(e.get("name") or "") == "topo-architect"
         for e in (mcp or []) if isinstance(e, dict))
     if not wired:
         return ""
+    proj_line = (f'\n- **一律传 `project="{project_id}"`**'
+                 "（多项目环境缺省无法唯一定位）" if project_id else "")
     return (
-        "\n## 历史上下文检索(MCP 已接线)\n"
+        "\n## topo-architect MCP 已接线\n"
+        "工具以服务名前缀注册，以你工具面实际注册名为准"
+        "（cline 形如 `topo-architect__<tool>_<hash>`，"
+        "opencode 形如 `topo-architect_<tool>`）。\n"
+        "### 资产地图（写码/架构分析前先看）\n"
+        "- `map.overview` — 组件目录/语义资产统计/KB 基线视图\n"
+        "- `map.component(name)` / `map.assets(query, kind?, limit?)`"
+        " — 组件档案 / 语义资产检索\n"
+        "- `map.rules` / `map.graph(kind)` — 规约全集 / 依赖关系图(mermaid)"
+        + proj_line + "\n"
+        "### 历史上下文\n"
         f'- `ctx.get(conversation="{conv_id}")` — 本会话上下文包(摘要+关键单元)\n'
         "- `ctx.search(query, type?, limit?)` — 跨会话检索(消息/产物/决策/回执)\n"
         f'- `ctx.summarize(conversation="{conv_id}")` — 生成/刷新本会话摘要\n'

@@ -7,6 +7,7 @@ import { DocumentTextIcon, ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRight
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import TaskCard from '@/components/chat/TaskCard.vue'
 import JobCard from '@/components/chat/JobCard.vue'
+import AssetAssessCard from '@/components/chat/AssetAssessCard.vue'
 import { useConversationStore } from '@/stores/conversation-store'
 import ChoicesCard from '@/components/chat/ChoicesCard.vue'
 import EditSpecModal from '@/components/requirements/EditSpecModal.vue'
@@ -214,20 +215,27 @@ watch(proxyProc, (p) => {
   if (p) console.info('[arch-live] 控制条渲染 conv=' + props.convId,
                       'tools:', p.toolCount, p.folded ? 'FOLDED' : 'LIVE')
 }, { immediate: true })
+// cv-285f: 回合边界(过程条折叠态翻转) → 刷新直通会话状态轴,
+// JobCard 状态即时跟随(执行中 ⇄ 空闲), 不等 busy 翻转
+watch(() => !!proxyProc.value?.folded, () => { void refreshProxySession() })
 const proxyStopping = ref(false)
-// cv-283 JobCard 活动态覆写: REST 真相源(jobId 匹配且活跃)优先于卡内快照
+// cv-283 JobCard 活动态覆写: REST 真相源(jobId 匹配)优先于卡内快照。
+// cv-285f: state=作业状态轴(running|idle)——chat 回合制作业完成后句柄
+// 保活(等待下一轮), active=true ≠ 执行中; 无 state(旧后端)退回 active 口径。
 function proxyJobLiveState(jobId?: string): string {
-  const s = proxySession.value
+  const s = proxySession.value as { active: boolean; jobId?: string;
+                                   state?: string } | null
   if (!s || !jobId || s.jobId !== jobId) return ''
-  return s.active ? 'running' : 'idle'
+  return s.state || (s.active ? 'running' : 'idle')
 }
-async function onProxyStop() {
+async function onProxyStop(mode?: 'abort' | 'finish') {
   if (!props.convId || proxyStopping.value) return
   proxyStopping.value = true
   try {
     const { apiPost } = await import('@/services/api-client')
     const r = await apiPost<{ summary?: string }>(
-      `/sessions/${props.convId}/proxy-stop`, {})
+      // 2610 cv-15: mode 跟随按钮语义(running=暂停abort/结束finish, idle=结束)
+      `/sessions/${props.convId}/proxy-stop`, mode ? { mode } : {})
     _convStore.pushLocalHint(r?.summary || '已停止')
     void refreshProxySession()
   } catch { /* 停止失败保留过程条(泵终态兜底) */ } finally {
@@ -306,6 +314,12 @@ const emit = defineEmits<{
             :conv-id="convId"
             :proc="proxyProc"
             @stop="onProxyStop"
+          />
+          <!-- 2610 P2: 核心资产评估卡(执行终态自动落地; 评估性非阻断) -->
+          <AssetAssessCard
+            v-if="m.item?.type === 'asset_assess'"
+            class="mb-2"
+            :payload="(m.item!.payload || {}) as any"
           />
           <ChoicesCard
             v-if="m.item?.type === 'choices'"

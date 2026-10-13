@@ -8,12 +8,13 @@ import { useConvWindowLock } from '@/composables/useConvWindowLock'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { ArrowTopRightOnSquareIcon, ShieldCheckIcon } from '@heroicons/vue/24/outline'
 import {
   XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
   ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
   PencilSquareIcon, SparklesIcon, BookOpenIcon, ArchiveBoxIcon, CubeTransparentIcon,
   ClipboardDocumentCheckIcon, AdjustmentsHorizontalIcon,
-  DocumentTextIcon, ListBulletIcon,
+  DocumentTextIcon, ListBulletIcon, TrashIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import SessionOutlineWindow from '@/components/chat/SessionOutlineWindow.vue'
@@ -22,7 +23,7 @@ import { useConversationStore } from '@/stores/conversation-store'
 import { sessionService, type ConversationMeta } from '@/services/session-service'
 import { currentProjectParams } from '@/services/project-service'
 import { namingService } from '@/services/naming-service'
-import { apiBaseUrl, apiGet, apiPost, getToken } from '@/services/api-client'
+import { apiBaseUrl, apiDelete, apiGet, apiPost, getToken } from '@/services/api-client'
 import { readModelPref } from '@/shell/prefs'
 
 const props = withDefaults(defineProps<{
@@ -104,6 +105,15 @@ watch(() => conv.activeId, () => { specGaps.value = []; void loadSpecGaps() })
 
 // ── 会话大纲浮窗(按钮在 #toolbar-extra; 浮窗 Teleport 到 body) ──
 const outlineOpen = ref(false)
+
+// ── 2610 核心资产守护: 标记管理弹窗(🛡 工具栏入口) ──
+/** 守护列表跳转(新窗口): /workbench/assets?tab=semantic&view=guard。 */
+function openGuardWindow() {
+  window.open(router.resolve({
+    path: '/workbench/assets',
+    query: { tab: 'semantic', view: 'guard' },
+  }).href, '_blank')
+}
 
 // ── 会话操作(工具条): 提炼报告由服务端沉淀为会话消息 ──
 const mining = ref(false)
@@ -187,14 +197,16 @@ onMounted(() => {
   void loadRecent()
   // 会话集合变更(store 广播: 新建/回合完成/归档/改名) → dock 列表同步刷新
   window.addEventListener('arch:sessions-changed', onSessionsChanged)
+  // 2610 S2(日志评估): 回合收尾事件驱动 workState 相位回落(撤销 5s 固定轮询;
+  // 执行期增量由 SSE progress/conv-message 承载, 降级期 degradedTimer 兜底)
+  window.addEventListener('arch:turn-end', onTurnEndRefresh)
   // 会话被删除(左侧列表) → 当前对话区若是该会话则清空(左右联动)
   window.addEventListener('arch:conversation-removed', onConversationRemoved)
-  syncTimer = setInterval(() => void pollRunningState(), 5000)
   conv.connectEvents()   // cv-221: SSE 连接上移 store(单例单连接, 事件入缓冲统一消费)
 })
 onUnmounted(() => {
-  if (syncTimer) clearInterval(syncTimer)
   window.removeEventListener('arch:sessions-changed', onSessionsChanged)
+  window.removeEventListener('arch:turn-end', onTurnEndRefresh)
   window.removeEventListener('arch:conversation-removed', onConversationRemoved)
 })
 function onSessionsChanged() { void loadRecent() }
@@ -211,9 +223,9 @@ async function onTaskExecutor(p: { taskId: string; executorType: string }) {
 /** 发送入口(语境路由): attachTo=转达任务卡, agent=一次性指派 subagent(后端注入指派契约), digest=语境摘要。 */
 async function onSendChat(p: { text: string; attachTo?: string; agent?: string; digest?: string; synthetic?: boolean }) {
   conv.send(p.text, {
-    // cv-260 空白态挡位预置: 会话未创建时随首条消息生效(gate._preset_fields)
+    // cv-260 空白态预置(2610 统一模型): executorId 随首条消息生效(gate 单源)
     ...(!conv.activeId ? {
-      ...(analysisMode.value !== 'strict' ? { analysisMode: analysisMode.value } : {}),
+      ...(presetExecutorId.value ? { executorId: presetExecutorId.value } : {}),
       ...(clarifyMode.value !== 'auto' ? { clarifyMode: clarifyMode.value } : {}),
       ...(isolated.value ? { isolated: true } : {}),
     } : {}),
@@ -281,7 +293,7 @@ async function onSetModel(model: string) {
 // ── S3 coding 子会话池: 新建(清空自持上下文)/切换活跃/查看 ──
 interface SubSession { id: string; title: string; executorId?: string; sessionRef?: string
   hasSessionRef?: boolean; active?: boolean; status?: string
-  runningRole?: { role: string; status?: string }; msgCount?: number }
+  runningRole?: { role: string; status?: string }; execution?: string; msgCount?: number }
 const subsOpen = ref(false)
 const subsBusy = ref(false)
 const subsMsg = ref('')
@@ -351,6 +363,14 @@ async function activateSub(id: string) {
   } finally { subsBusy.value = false }
 }
 const convLock = useConvWindowLock()
+// 2610 会话窗口(F2): 沉浸式独立浏览器页(?conv= 直开; 唯一性锁防多开)
+function openSessionWindow(convId: string, projectId?: string) {
+  const q = new URLSearchParams({ conv: convId })
+  const pid = projectId || scopePid()
+  if (pid) q.set('project', pid)
+  window.open(router.resolve({ path: '/exec-session-view', query: Object.fromEntries(q) }).href, '_blank')
+}
+
 async function viewSub(id: string) {
   // 子会话窗口唯一性(2026-10): 同会话已在别的 tab 打开 → 接管确认
   const r = await convLock.claim(id)
@@ -365,16 +385,41 @@ async function viewSub(id: string) {
   void conv.openConversation({ id } as ConversationMeta)
 }
 
-// ── S3 投喂门: 主会话消息 → 过滤 → 活跃子会话+作业 ──
+// 子会话单独删除(2610 裁决): 仅非执行态可删; 执行中须先停止
+const subDelBusy = ref('')
+async function deleteSub(s: SubSession) {
+  if (subDelBusy.value || s.execution) return   // 2610: execution=真实运行态(守卫单源)
+  const ok = await dialog.confirm(
+    t('session.subs.deleteConfirm', { title: s.title || s.id }), { danger: true })
+  if (!ok) return
+  subDelBusy.value = s.id
+  try {
+    await apiDelete(`/sessions/${s.id}`)
+    await loadSubs()
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: s.id }))
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally {
+    subDelBusy.value = ''
+  }
+}
+
+// ── S3 投喂门: 主会话消息 → 过滤 → 活跃子会话+作业;
+//    子会话视图(architect 分析子会话等) → feed-up 上投回主会话活跃执行器 ──
 const feedBusyIdx = ref(-1)
+const isSubSessionView = computed(
+  () => !!(conv.activeMeta as any)?.parentConvId)
 async function onFeedTurn(p: { index: number; id?: string; summarize?: boolean }) {
   if (feedBusyIdx.value >= 0 || !conv.activeId) return
   const m = conv.turns[p.index]
   if (!m) return
   feedBusyIdx.value = p.index
   try {
+    const path = isSubSessionView.value
+      ? `/sessions/${conv.activeId}/feed-up`     // 2610: 子会话产出上投
+      : `/sessions/${conv.activeId}/feed`
     const r = await apiPost<{ summary?: string; delivered?: boolean }>(
-      `/sessions/${conv.activeId}/feed`,
+      path,
       { messageId: m.id || '', text: m.id ? undefined : m.content,
         ...(p.summarize ? { summarize: true } : {}) })
     conv.pushLocalHint(String(r?.summary || '已投喂'))
@@ -385,7 +430,7 @@ async function onFeedTurn(p: { index: number; id?: string; summarize?: boolean }
   }
 }
 
-// ── 执行器绑定(会话模型 v3): 一次绑定不可换; 换=克隆 ──
+// ── 执行器(2610 统一模型): architect 与 coding 执行器平级, 会话可随时换绑 ──
 interface ExecutorRow { id: string; type: string; enabled?: boolean }
 const executorList = ref<ExecutorRow[]>([])
 const boundExecutorId = computed(
@@ -421,7 +466,8 @@ async function loadExecutors() {
 onMounted(() => { void loadExecutors() })
 
 const workState = computed(() => ((conv.activeMeta as any)?.workState as string) || 'architect')
-const isRunning = computed(() => workState.value === 'running'
+const isRunning = computed(() => (workState.value === 'running'
+  || !!conv.optimisticRole)
   && (conv.activeMeta as any)?.status !== 'archived')
 // 绑定需求的 architect 态会话: 「引导」按钮可见(触发词提示按需输出)
 const isExecutionConv = computed(() =>
@@ -491,15 +537,8 @@ async function onSetIsolated(on: boolean) {
   } catch { /* REST 失败保留本地值 */ }
 }
 
-async function onSetAnalysisMode(mode: 'strict' | 'quick') {
-  analysisMode.value = mode // 本地即时反馈(不等 REST)
-  if (!conv.activeId) return // cv-260 空白态预置
-  try {
-    const r = await apiPost<{ analysisMode?: 'strict' | 'quick' }>(`/sessions/${conv.activeId}/analysis-mode`, { mode })
-    if (r?.analysisMode) analysisMode.value = r.analysisMode
-    if (conv.activeMeta) (conv.activeMeta as any).analysisMode = analysisMode.value
-  } catch { /* REST 失败保留本地值(下轮打开会话时从后端真相源校正) */ }
-}
+// 分析挡位切换已退役(2610 统一模型): 执行器换绑见 onSwitchExecutor;
+// analysisMode 仅保留 legacy 读侧兼容(quick 无绑定 → 默认 coding 执行器)。
 
 /** 引导消息: 仅渲染进对话流(本地), 不发后端/不进上下文, 切换会话自然消失。 */
 const GUIDE_MD = [
@@ -544,9 +583,11 @@ async function onSpecApply(p: { index: number; payload: Record<string, unknown> 
     specApplyBusy.value = false
   }
 }
-// running 归属(S2 双收件人): 推导字段来自会话行(后端 runningRole), 不再锁定输入
+// running 归属(S2 双收件人): 推导字段来自会话行(后端 runningRole), 不再锁定输入。
+// 2610 B2: 乐观态优先(回合启动 0ms 翻转; 权威落地后自动回落 activeMeta.runningRole)
 const jobState = computed(() =>
-  ((conv.activeMeta as any)?.runningRole as { role: string; executorId?: string; status?: string } | undefined) || null)
+  (conv.optimisticRole
+    || ((conv.activeMeta as any)?.runningRole as { role: string; executorId?: string; status?: string } | undefined)) || null)
 
 // RQ 状态徽标 + 登记簿完成标记(第二入口, 裁决#3/#8)
 const reqStatus = ref<{ id: string; status?: string; activeVer?: number } | null>(null)
@@ -571,12 +612,10 @@ async function markReqDone(done: boolean) {
   }
 }
 
-// 执行器绑定/克隆对话框: 未绑定 → bind(一次); 已绑定 → clone(换执行器开新会话)
+// 执行器换绑对话框(2610 统一模型): 任意时刻可换(在跑拒绝, 对话连续); architect=切回分析管线
 const rolesOpen = ref(false)
 const rolesDraft = ref('')
-const rolesBusy = ref(false)
 const rolesMsg = ref('')
-const bindMode = computed<'bind' | 'clone'>(() => (boundExecutorId.value ? 'clone' : 'bind'))
 async function openRoles() {
   rolesMsg.value = ''
   rolesDraft.value = ''
@@ -584,54 +623,36 @@ async function openRoles() {
   rolesOpen.value = true
 }
 async function saveRoles() {
-  if (!conv.activeId || rolesBusy.value || !rolesDraft.value) return
-  rolesBusy.value = true
-  rolesMsg.value = ''
-  try {
-    if (bindMode.value === 'bind') {
-      const updated = await apiPost(`/sessions/${conv.activeId}/bind`,
-                                    { executorId: rolesDraft.value })
-      conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
-                          executorId: (updated as any)?.executorId ?? rolesDraft.value } as ConversationMeta
-      rolesOpen.value = false
-    } else {
-      const created = await apiPost(`/sessions/${conv.activeId}/clone`,
-                                    { executorId: rolesDraft.value })
-      rolesOpen.value = false
-      const newId = (created as any)?.id
-      if (newId) {
-        listOpen.value = false
-        await conv.openConversation({ id: newId } as ConversationMeta)
-      }
-    }
-  } catch (e: any) {
-    rolesMsg.value = e?.message || String(e)
-  } finally {
-    rolesBusy.value = false
-  }
+  if (!rolesDraft.value) return
+  rolesOpen.value = false
+  await onSwitchExecutor(rolesDraft.value)   // 统一换绑(2610: 一次绑定/克隆退役)
 }
 
-/** 工具栏执行器选择(与 saveRoles 同链): 未绑=bind; 已绑切换=克隆新会话(显式确认)。 */
-async function onBindExecutor(executorId: string) {
-  if (!conv.activeId || !executorId || executorId === boundExecutorId.value) return
-  if (boundExecutorId.value) {
-    const okGo = await dialog.confirm(
-      `会话已绑定「${boundExecutorId.value}」。\n切换到「${executorId}」将克隆一个新会话（绑定不可换），继续？`,
-      { danger: true })
-    if (!okGo) return
+/** 会话执行器换绑(2610 统一模型): 空白态=预置(首条消息创建时生效);
+    已有会话=REST 换绑(在跑拒绝, 对话连续, architect 可切回分析管线)。 */
+const presetExecutorId = ref('')
+watch(() => conv.activeId, () => { presetExecutorId.value = '' })
+async function onSwitchExecutor(executorId: string) {
+  if (!executorId) {
+    conv.pushLocalHint('⚠️ 无可用 coding 执行器——请先在「设置 → 执行器」配置')
+    return
+  }
+  if (!conv.activeId) {
+    presetExecutorId.value = executorId === 'architect' ? '' : executorId
+    // legacy 展示镜像: 闪电钮经 analysisMode prop 感知预置(仅显示, 真相源=executorId)
+    analysisMode.value = presetExecutorId.value ? 'quick' : 'strict'
+    conv.pushLocalHint(executorId === 'architect'
+      ? '已预置 architect 模式——首条消息创建会话后生效'
+      : `已预置执行器「${executorId}」直通模式——首条消息创建会话后生效`)
+    return
   }
   try {
-    if (!boundExecutorId.value) {
-      const updated = await apiPost(`/sessions/${conv.activeId}/bind`,
-                                    { executorId })
-      conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
-                          executorId: (updated as any)?.executorId ?? executorId } as ConversationMeta
-    } else {
-      const created = await apiPost(`/sessions/${conv.activeId}/clone`,
-                                    { executorId })
-      const newId = (created as any)?.id
-      if (newId) await conv.openConversation({ id: newId } as ConversationMeta)
-    }
+    const r = await apiPost<{ summary?: string }>(`/sessions/${conv.activeId}/executor`,
+                                                  { executorId })
+    conv.pushLocalHint(String(r?.summary || '执行器已切换'))
+    analysisMode.value = 'strict'   // legacy 字段退役: 换绑后不再驱动直通
+    await conv.refreshActiveMeta()
+    void loadSubs()
   } catch (e: any) {
     void dialog.alert(e?.message || String(e))
   }
@@ -712,12 +733,22 @@ async function onConventionIgnore(id: string) {
   try { await namingService.deleteConvention(id) } catch { /* 忽略 */ }
 }
 
-// ── running 相位轮询同步(workState/泵消息); 旧 bus 澄清通道已移除(指令符号体系) ──
-let syncTimer: ReturnType<typeof setInterval> | null = null
-async function pollRunningState() {
-  if (!conv.dockOpen) return
-  void syncRunningState()          // running 相位准实时同步(workState/泵消息)
+async function onTurnEndRefresh() {
+  void syncRunningState()          // 回合收尾: workState 相位回落+泵消息补偿拉取
 }
+
+// ── workState 同步(2610 S2: turn-end 事件驱动; 降级期 10s 轮询兜底) ──
+// 2610 cv-15: SSE 降级 → 10s 轻量轮询保底(force 绕过 isRunning 门控; 恢复推送即停)
+let degradedTimer: ReturnType<typeof setInterval> | null = null
+watch(() => conv.realtimeDegraded, (deg) => {
+  if (deg && !degradedTimer) {
+    degradedTimer = setInterval(() => { void syncRunningState(true) }, 10000)
+    void syncRunningState(true)
+  } else if (!deg && degradedTimer) {
+    clearInterval(degradedTimer)
+    degradedTimer = null
+  }
+})
 </script>
 
 <template>
@@ -738,6 +769,11 @@ async function pollRunningState() {
       ? 'relative flex h-full min-h-0 w-full flex-col bg-ctp-base'
       : 'fixed right-0 top-0 z-40 flex h-full w-[26rem] flex-col border-l border-ctp-surface0 bg-ctp-base shadow-2xl'"
   >
+    <!-- 2610 cv-15: 推送降级显式化(轮询保底提示) -->
+    <div
+      v-if="conv.realtimeDegraded"
+      class="shrink-0 bg-ctp-yellow/10 px-3 py-1 text-[10px] text-ctp-yellow"
+    >⚠ 实时推送断开 · 10s 轮询保底中</div>
     <!-- 头部: 标题 + kind + 会话切换(仅悬浮形态; inline 停靠的标题编辑在对话面板 header 内) -->
     <div v-if="!props.inline" class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
       <div class="flex items-center gap-2">
@@ -812,6 +848,16 @@ async function pollRunningState() {
             :class="c.reviewState === 'error' ? 'bg-ctp-red' : c.reviewState === 'awaiting_reply' ? 'bg-ctp-yellow' : 'bg-ctp-blue'"
           />
           <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ c.msgCount }}</span>
+          <span
+            role="button"
+            tabindex="0"
+            class="shrink-0 rounded p-0.5 text-ctp-overlay0 hover:text-ctp-sapphire"
+            :title="t('session.openWindow')"
+            @click.stop="openSessionWindow(c.id, (c as any).projectId)"
+            @keydown.enter.stop="openSessionWindow(c.id, (c as any).projectId)"
+          >
+            <ArrowTopRightOnSquareIcon class="w-3 h-3" />
+          </span>
         </button>
         <p v-if="!recent.length" class="px-2 py-3 text-center text-xs text-ctp-overlay0">
           {{ t('common.empty') }}
@@ -856,8 +902,8 @@ async function pollRunningState() {
               >
                 <span
                   class="h-2 w-2 shrink-0 rounded-full"
-                  :class="s.runningRole?.role === 'coding'
-                    ? (s.runningRole.status === 'waiting_input' ? 'bg-ctp-yellow' : 'bg-ctp-peach animate-pulse')
+                  :class="s.execution
+                    ? (s.execution === 'waiting_input' ? 'bg-ctp-yellow' : 'bg-ctp-peach animate-pulse')
                     : (s.active ? 'bg-ctp-blue' : 'bg-ctp-overlay1')"
                 />
                 <span class="min-w-0 flex-1">
@@ -865,7 +911,7 @@ async function pollRunningState() {
                   <span class="block text-[10px] text-ctp-subtext0">
                     {{ s.hasSessionRef ? '● 有执行器会话(可复活)' : '○ 新上下文' }}
                     · {{ s.msgCount || 0 }} 条
-                    <template v-if="s.runningRole?.role === 'coding'">· {{ s.runningRole.status }}</template>
+                    <template v-if="s.execution">· {{ s.execution }}</template>
                   </span>
                 </span>
                 <span v-if="s.active" class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue">{{ t('session.subs.active') }}</span>
@@ -883,9 +929,19 @@ async function pollRunningState() {
                 </select>
                 <button
                   class="btn btn-xs btn-ghost shrink-0"
-                  :title="t('session.subs.view')"
-                  @click.stop="viewSub(s.id)"
-                >↗</button>
+                  :title="t('session.openWindow')"
+                  @click.stop="openSessionWindow(s.id, scopePid())"
+                >⧉</button>
+                <button
+                  class="shrink-0 rounded p-1 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-red"
+                  :class="s.execution ? 'pointer-events-none opacity-30' : ''"
+                  :title="s.execution
+                    ? t('session.subs.cannotDeleteRunning') : t('session.subs.delete')"
+                  :disabled="subDelBusy === s.id"
+                  @click.stop="deleteSub(s)"
+                >
+                  <TrashIcon class="h-3 w-3" :class="subDelBusy === s.id ? 'animate-pulse' : ''" />
+                </button>
               </div>
             </template>
             <p v-if="!codingSubs.length" class="text-[11px] text-ctp-overlay1">
@@ -947,9 +1003,9 @@ async function pollRunningState() {
             </p>
             <button
               class="btn btn-primary w-full !py-1.5 text-xs"
-              :disabled="rolesBusy || !rolesDraft"
+              :disabled="!rolesDraft"
               @click="saveRoles"
-            >{{ rolesBusy ? t('common.saving') : (bindMode === 'bind' ? t('session.role.bind') : t('session.role.clone')) }}</button>
+            >{{ t('session.role.switch') }}</button>
           </div>
         </div>
       </div>
@@ -970,6 +1026,7 @@ async function pollRunningState() {
         :read-only="(conv.activeMeta as any)?.status === 'archived'"
         :show-assets-panel="props.assetsPanel"
         :job-state="jobState"
+        @open-window="openSessionWindow(conv.activeId, scopePid() || (conv.activeMeta as any)?.projectId)"
         :bound-executor-id="boundExecutorId"
         :executor-models="boundModelNames"
         :executors="executorList"
@@ -981,7 +1038,7 @@ async function pollRunningState() {
         :conv-id="conv.activeId || undefined"
         :tasks="conv.tasks"
         :ctx-usage="((conv.activeMeta as any)?.meta?.ctxUsage) ?? null"
-        @set-analysis-mode="onSetAnalysisMode"
+        @switch-executor="onSwitchExecutor"
         @set-clarify-mode="onSetClarifyMode"
         @set-isolated="onSetIsolated"
         @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
@@ -991,7 +1048,6 @@ async function pollRunningState() {
         @task-executor="(p: any) => void onTaskExecutor(p)"
         @local-cmd="onLocalCmd"
         @bind-coding="openRoles"
-        @bind-executor="onBindExecutor"
         @set-model="onSetModel"
         @send="onSendChat"
         @feed-turn="onFeedTurn"
@@ -1063,6 +1119,12 @@ async function pollRunningState() {
           </div>
         </template>
         <template #toolbar-extra>
+          <!-- 2610 核心资产守护: 跳转资产工作区守护列表(独立窗口, 列表模式单一编辑面) -->
+          <button
+            class="btn btn-xs btn-ghost !px-1.5 shrink-0"
+            :title="t('guard.switchHint')"
+            @click="openGuardWindow"
+          ><ShieldCheckIcon class="w-3.5 h-3.5 text-ctp-teal" /></button>
           <!-- C3 规约缺口建议: 继续对话补全(自动澄清挡位联动)或回合另存草稿加工 -->
           <span
             v-if="specGaps.length"
@@ -1137,6 +1199,7 @@ async function pollRunningState() {
       v-if="props.outline && outlineOpen"
       @close="outlineOpen = false"
     />
+
 
     <!-- cv-284 需求大窗(会话列表跟踪条入口): 全文/版本切换/关联任务/立即执行 -->
     <ReqDetailWindow

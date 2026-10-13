@@ -1,4 +1,5 @@
-"""挡位体系(环节十二a, 刻度 T0-T2)回归: 解析链 / 指令分叉 / 轮次下发 / REST。
+"""策略单源回归(2610 挡位体系退役版): 统一策略行恒定 / A·P 轴补偿保留 /
+轮次下发注册表优先 / REST 挡位端点退役。
 
 Run: cd <repo> && python -m pytest apps/architect/tests/test_gears.py -q
 """
@@ -10,72 +11,54 @@ sys.path.insert(0, _repo)
 
 from topoone_app_architect import store
 from topoone_app_architect.agent.governance.gears import (
-    GEAR_MODES, default_policy, gear_note, normalize_mode, resolve_gear)
+    UNIFIED_POLICY, default_policy, normalize_mode, resolve_gear)
 
-# ── 解析链 ───────────────────────────────────────────────────────────
+# ── 解析链(2610 裁决: 恒统一策略行) ──────────────────────────────────
 
-def test_quick_pins_t0():
-    p = resolve_gear("quick")
-    assert p.tier == "T0" and p.kb is False
+def test_all_modes_collapse_to_unified():
+    """挡位退役: quick/strict/auto/T0-T2/未知值/执行器配置 → 恒统一策略(T1 行)。"""
+    for mode in ("quick", "strict", "auto", "T0", "T1", "T2", "bogus", ""):
+        p = resolve_gear(mode)
+        assert p.tier == "T1" and p is not None
+    for cfg in ({"capability": "T2"}, {"tierProbed": "T0"}, {}):
+        p = resolve_gear("auto", cfg)
+        assert p.max_iterations == UNIFIED_POLICY.max_iterations
+        assert p.pre_split == UNIFIED_POLICY.pre_split
 
 
-def test_strict_is_auto():
-    assert resolve_gear("strict").tier == "T1"          # 无执行器配置 → 默认 T1
-    assert resolve_gear("strict", {"capability": "T2"}).tier == "T2"
+def test_unified_policy_fields():
+    """统一策略 = 原 T1 值: 任务级预拆+结构化指令+工具契约。"""
+    p = default_policy()
+    assert p.kb is True and p.pre_split == "plan" and p.cadence == "milestone"
+    assert p.max_iterations == 800
+    assert p.depends_source == "llm" and p.logic_diagram == ""
+    assert p.tool_rounds == 4 and p.structured_output is True
+    assert p.ctx_budget == 0.6
 
 
-def test_legacy_tier_values_normalized():
-    """旧刻度(T3/T4)在解析链/写侧归一为 T2。"""
-    assert resolve_gear("strict", {"capability": "T3"}).tier == "T2"
-    assert resolve_gear("T4").tier == "T2"
+def test_normalize_mode_legacy_values():
+    """legacy 值归一(T3/T4→T2)保留(gate 预置兼容路径)。"""
     assert normalize_mode("T3") == "T2" and normalize_mode("T4") == "T2"
+    assert normalize_mode("quick") == "quick" and normalize_mode("") == ""
 
 
-def test_auto_prefers_probed_over_capability():
-    cfg = {"capability": "T0", "tierProbed": "T2"}
-    assert resolve_gear("auto", cfg).tier == "T2"
-    assert resolve_gear("auto", {"capability": "T2"}).tier == "T2"
-    assert resolve_gear("auto", {}).tier == "T1"
-    assert resolve_gear("auto").tier == "T1"
+def test_a_axis_overlay_still_applies():
+    """A 轴补偿(architect 模型档案)保留: 不随挡位退役。"""
+    from unittest import mock
+    from topoone_app_architect.agent.cognition import model_profile as mp
+    with mock.patch.object(mp, "tier_of", return_value=2):
+        p = resolve_gear("strict", {}, architect_model_id="m-lite")
+    assert p.schedule_discipline == "strict_pipeline" and p.element_hints == "high"
 
 
-def test_invalid_values_fall_to_default():
-    assert resolve_gear("auto", {"capability": "T9"}).tier == "T1"
-    assert resolve_gear("bogus").tier == "T1"
-    assert resolve_gear("").tier == "T1"
+# ── 指令组装(统一策略: 无挡位分叉) ────────────────────────────────────
 
-
-def test_pinned_tier():
-    assert resolve_gear("T2").tier == "T2"
-    assert resolve_gear("T2", {"capability": "T0"}).tier == "T2"  # 钉死优先于配置
-
-
-def test_policy_fields_data_driven():
-    t2 = resolve_gear("T2")
-    assert t2.pre_split == "steps" and t2.cadence == "key_step"
-    assert t2.max_iterations == 300
-    assert t2.depends_source == "linear" and t2.logic_diagram == "uml"
-    assert resolve_gear("T0").max_iterations == 2000
-    assert resolve_gear("T1").depends_source == "llm"
-
-
-def test_gear_modes_whitelist_and_note():
-    assert set(GEAR_MODES) == {"strict", "quick", "auto", "T0", "T1", "T2"}
-    assert "T0" in gear_note("quick") and gear_note("T2").startswith("挡位 T2")
-
-
-# ── 指令按挡分叉 ─────────────────────────────────────────────────────
-
-def test_instruction_fork_by_tier():
+def test_instruction_no_tier_fork():
     from topoone_app_architect.agent.planning.task_plan import assemble_task_instruction
     task = {"title": "T", "instruction": "做"}
-    t2 = assemble_task_instruction(task, "", policy=resolve_gear("T2"))
-    assert "步骤序列" in t2 and "执行方式（按任务挡位）" in t2
-    t0 = assemble_task_instruction(task, "", policy=resolve_gear("quick"))
-    assert "自主推进" in t0
-    assert "步骤序列" not in t0
-    default = assemble_task_instruction(task, "")
-    assert default_policy().agent_note in default          # None → 默认档
+    out = assemble_task_instruction(task, "", policy=resolve_gear("T2"))
+    assert "步骤序列" not in out          # T2 步骤级编排分叉已退役
+    assert default_policy().agent_note in out
 
 
 def test_milestone_protocol_always_present():
@@ -86,9 +69,9 @@ def test_milestone_protocol_always_present():
         assert "里程碑协议" in text and "禁止未提交报告就连续跨里程碑推进" in text
 
 
-# ── confirm_task: 轮次随挡下发 + 指令分叉 ────────────────────────────
+# ── confirm_task: 轮次下发(注册表优先, 策略值兜底) ────────────────────
 
-def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2"):
+def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="strict", reg_max=2000):
     conv = store.ConversationsStore.create({
         "projectId": "proj-g", "title": "g", "meta": {"root": str(tmp_path / "p")},
         "analysisMode": mode})
@@ -100,7 +83,7 @@ def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2"):
     from topoone_app_architect.arch_routes import agent_executors as ae
     monkeypatch.setattr(ae, "load_executors", lambda: [
         {"id": "ex-g", "type": "cline-sdk", "enabled": True,
-         "config": {"max_iterations": 2000, "capability": "T2"}}])
+         "config": {"max_iterations": reg_max, "capability": "T2"}}])
     calls = {"implement": []}
 
     def _fake_runner(path, payload=None, timeout=12.0):
@@ -116,20 +99,9 @@ def _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2"):
     return conv, eb, calls
 
 
-def test_confirm_tier_iterations_injected(arch_env, tmp_path, monkeypatch):
-    """会话钉 T2 → 任务级轮次 300 覆盖注册表 2000; 指令含步骤编排段。"""
+def test_confirm_registry_iterations_preserved(arch_env, tmp_path, monkeypatch):
+    """注册表轮次(用户/护栏调优)不再被挡位封顶——2000 原样下发。"""
     conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="T2")
-    task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
-                                            "executorId": "ex-g"}, gate_diagram=False)
-    assert eb.confirm_task(task["id"])["ok"]
-    pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
-    assert pl["executorConfig"]["max_iterations"] == 300
-    assert "步骤序列" in pl["instruction"]
-
-
-def test_confirm_quick_mode_registry_iterations(arch_env, tmp_path, monkeypatch):
-    """quick(T0) → 2000; 注册表 capability=T1 不影响钉死的 quick。"""
-    conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="quick")
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
                                             "executorId": "ex-g"}, gate_diagram=False)
     assert eb.confirm_task(task["id"])["ok"]
@@ -137,42 +109,38 @@ def test_confirm_quick_mode_registry_iterations(arch_env, tmp_path, monkeypatch)
     assert pl["executorConfig"]["max_iterations"] == 2000
 
 
-def test_confirm_auto_uses_executor_capability(arch_env, tmp_path, monkeypatch):
-    """strict(=auto) + 执行器 capability=T2 → 轮次 300。"""
+def test_confirm_policy_iterations_fallback(arch_env, tmp_path, monkeypatch):
+    """注册表未设轮次 → 统一策略值兜底(800)。"""
+    conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch,
+                                  mode="strict", reg_max=0)
+    task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
+                                            "executorId": "ex-g"}, gate_diagram=False)
+    assert eb.confirm_task(task["id"])["ok"]
+    pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
+    assert pl["executorConfig"]["max_iterations"] == 800
+
+
+# ── REST 挡位端点退役 ─────────────────────────────────────────────────
+
+def test_analysis_mode_endpoint_retired(client):
+    """挡位端点已退役(2610): 换绑执行器见 /sessions/{id}/executor。"""
+    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
+    r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
+                    json={"mode": "T2"})
+    assert r.status_code in (404, 405), "挡位切换端点应已下线"
+
+
+def test_confirm_task_injects_default_mcp(arch_env, tmp_path, monkeypatch):
+    """2610 P3: 任务链默认 MCP 同落 executorConfig.mcp_servers(与直通同口径)。"""
     conv, eb, calls = _mk_fixture(arch_env, tmp_path, monkeypatch, mode="strict")
     task = eb.propose_task(conv, "T", "x", {"executorType": "cline-sdk",
                                             "executorId": "ex-g"}, gate_diagram=False)
     assert eb.confirm_task(task["id"])["ok"]
     pl = [pl for p, pl in calls["implement"] if p == "/api/implement"][0]
-    assert pl["executorConfig"]["max_iterations"] == 300
-    assert "关键步骤" in pl["instruction"]
-
-
-# ── REST 白名单 ──────────────────────────────────────────────────────
-
-def test_analysis_mode_rest_accepts_tiers_and_legacy(client):
-    conv = store.ConversationsStore.create({"kind": "generic", "title": "t"})
-    r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
-                    json={"mode": "T2"})
-    assert r.status_code == 200
-    assert store.ConversationsStore.get(conv["id"])["analysisMode"] == "T2"
-    # 旧刻度 T3/T4 归一为 T2 后接受
-    r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
-                    json={"mode": "T3"})
-    assert r.status_code == 200
-    assert store.ConversationsStore.get(conv["id"])["analysisMode"] == "T2"
-    r = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
-                    json={"mode": "bogus"})
-    assert r.status_code == 400
-
-
-def test_tool_rounds_by_tier():
-    """M4-B: chat 侧工具轮次按挡——强/中挡保持现行为 4, 弱挡更早触顶(损失有界)。"""
-    from topoone_app_architect.agent.governance.gears import _TIERS, resolve_gear
-    assert resolve_gear("quick", {}).tool_rounds == 4      # T0 现行为不变
-    assert resolve_gear("strict", {}).tool_rounds == 4     # T1 现行为不变
-    assert _TIERS["T2"].tool_rounds == 3
-    # 封顶链(replace 只改 tier 字段): T1 被封顶为 T2 时轮次保持 T1 现值(既有语义)
-    capped = resolve_gear("strict", {"tierProbed": "T1",
-                                     "probeDetail": "指令跟随探针未过——上限T3"})
-    assert capped.tier == "T2" and capped.tool_rounds == 4
+    mcp = pl["executorConfig"].get("mcp_servers")
+    assert isinstance(mcp, list) and any(
+        e.get("name") == "topo-architect" for e in mcp), \
+        "cline 任务下发应含默认 topo-architect MCP(修复: 顶层字段 runner 不读)"
+    # 2610 cv-12/14: 任务链与直通同源注入 MCP 工具指引(统筹缺口修补)
+    assert "topo-architect MCP 已接线" in pl["instruction"], \
+        "任务链 instruction 应含 MCP 工具指引 brief"

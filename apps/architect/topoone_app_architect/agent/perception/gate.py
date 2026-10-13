@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..governance.gears import GEAR_MODES, normalize_mode
+from ..governance.gears import normalize_mode
 
 
 @dataclass
@@ -28,18 +28,23 @@ class SessionBinding:
 
 
 def _create_payload(data: dict) -> dict:
-    """会话创建载荷(两处创建点单源)。cv-260 空白态挡位预置: 三挡位随首条消息
-    载荷生效(口径同 sessions 切换端点; 已存在会话不覆写, 真相源=REST)。"""
+    """会话创建载荷(两处创建点单源)。
+
+    cv-260 空白态预置(2610 统一模型): executorId 随首条消息生效; legacy
+    analysisMode=quick 保留兼容(读侧回落默认 coding 执行器)。"""
     extra: dict = {}
+    eid = str(data.get("executorId") or "").strip()
+    if eid:
+        extra["executorId"] = eid
     mode = normalize_mode(str(data.get("analysisMode") or "").strip())
-    if mode in GEAR_MODES:
-        extra["analysisMode"] = mode
+    if mode == "quick":
+        extra["analysisMode"] = mode      # legacy: 读侧回落默认 coding 执行器
     if str(data.get("clarifyMode") or "").strip() in ("auto", "forced"):
         extra["clarifyMode"] = str(data["clarifyMode"]).strip()
     if isinstance(data.get("isolated"), bool):
         extra["isolated"] = data["isolated"]
     return {
-        "kind": data.get("kind") or "chat",
+        "kind": data.get("kind") or "generic",
         "projectId": data.get("project") or "",
         "reqId": data.get("reqId") or "",
         "title": data.get("title") or "",

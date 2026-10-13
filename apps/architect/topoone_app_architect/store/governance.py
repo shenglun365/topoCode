@@ -115,6 +115,171 @@ class CapabilityProposalStore:
         return row
 
 
+class RuleDefStore:
+    """守护规约库(2610 重构): skill 式自由文本规约, 一等实体。
+
+    可复用(多目标共享)/可多挂(一目标多规约); source: manual | skill(技能库导入)。
+    """
+
+    TABLE = "arch_rule_defs"
+
+    @classmethod
+    def create(cls, project_id: str, title: str, content: str,
+               source: str = "manual") -> dict:
+        now = _now_ms()
+        data = {"id": f"rule-{now}-{abs(hash((title, project_id))) % 10 ** 6}",
+                "projectId": project_id,
+                "title": str(title or "").strip()[:120] or "未命名规约",
+                "content": str(content or "")[:8000],
+                "source": source if source in ("manual", "skill") else "manual",
+                "createdAt": now, "updatedAt": now}
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def list(cls, project_id: str, q: str = "", limit: int = 500) -> list[dict]:
+        conds, params = ["project_id = ?"], [project_id]
+        if (q or "").strip():
+            conds.append("(title LIKE ? OR content LIKE ?)")
+            like = f"%{q.strip()}%"
+            params += [like, like]
+        rows, _ = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+            f"ORDER BY updated_at DESC LIMIT ?",
+            tuple(params + [int(limit)]), project_id or None)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def get(cls, rule_id: str, project_id: Optional[str] = None) -> Optional[dict]:
+        return _get(cls.TABLE, rule_id, project_id)
+
+    @classmethod
+    def update(cls, rule_id: str, title: str = "", content: str = "") -> Optional[dict]:
+        patch: dict = {"updatedAt": _now_ms()}
+        if title.strip():
+            patch["title"] = title.strip()[:120]
+        if content or content == "":
+            patch["content"] = str(content)[:8000]
+        return _update(cls.TABLE, rule_id, patch)
+
+    @classmethod
+    def delete(cls, rule_id: str) -> bool:
+        # 级联卸载关联(规约删除即全目标卸载)——同库事务
+        db, found = _locate_db(cls.TABLE, rule_id)
+        if not db or not found:
+            return False
+        db.execute(f"DELETE FROM {TargetRuleStore.TABLE} WHERE rule_id = ?", (rule_id,))
+        db.execute(f"DELETE FROM {cls.TABLE} WHERE id = ?", (rule_id,))
+        db.commit()
+        return True
+
+
+NL2 = "\n\n"   # 规约拼接分隔(避免源内转义歧义)
+
+
+class TargetRuleStore:
+    """守护挂载关联(2610 重构): 目标(三层) ↔ 规约 多对多; 挂载即核心(无分级)。"""
+
+    TABLE = "arch_target_rules"
+    TYPES = ("asset", "component", "file")
+
+    @classmethod
+    def attach(cls, project_id: str, target_type: str, target_id: str,
+               rule_id: str, title: str = "") -> dict:
+        tt = target_type if target_type in cls.TYPES else "asset"
+        tid = str(target_id or "").strip()
+        if not tid:
+            raise ValueError("target_id 不能为空")
+        exist = cls.find(project_id, tt, tid, rule_id)
+        if exist:
+            return exist
+        data = {"id": f"tr-{_now_ms()}-{abs(hash((tt, tid, rule_id))) % 10 ** 6}",
+                "projectId": project_id, "targetType": tt, "targetId": tid,
+                "ruleId": rule_id, "title": str(title or tid)[:120],
+                "createdAt": _now_ms()}
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def find(cls, project_id: str, target_type: str, target_id: str,
+             rule_id: str) -> Optional[dict]:
+        rows, _ = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE project_id=? AND target_type=? "
+            f"AND target_id=? AND rule_id=? LIMIT 1",
+            (project_id, target_type, str(target_id or "").strip(), rule_id),
+            project_id or None)
+        return _row_to_api(rows[0]) if rows else None
+
+    @classmethod
+    def list(cls, project_id: str, target_type: str = "",
+             limit: int = 2000) -> list[dict]:
+        conds, params = ["project_id = ?"], [project_id]
+        if target_type in cls.TYPES:
+            conds.append("target_type = ?")
+            params.append(target_type)
+        rows, _ = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+            f"ORDER BY created_at ASC LIMIT ?",
+            tuple(params + [int(limit)]), project_id or None)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def detach(cls, project_id: str, target_type: str, target_id: str,
+               rule_id: str) -> bool:
+        db = _target_db(cls.TABLE, project_id=project_id)
+        cur = db.execute(
+            f"DELETE FROM {cls.TABLE} WHERE project_id=? AND target_type=? "
+            f"AND target_id=? AND rule_id=?",
+            (project_id, target_type, str(target_id or "").strip(), rule_id))
+        db.commit()
+        return cur.rowcount > 0
+
+    @classmethod
+    def list_effective(cls, project_id: str, limit: int = 500) -> list[dict]:
+        """守护消费聚合视图: 关联展开 → 旧 marks 形状(rulesMd=多规约按序拼接)。
+
+        引擎(core_guard)/MCP(map.core)/回执 全链经此单口消费, 规约增删/复用
+        对守护透明。行形状: {targetType, targetId, title, rulesMd, rules[{ruleId,title,content}]}。
+        """
+        links = cls.list(project_id, limit=limit * 5)
+        if not links:
+            return []
+        by_rule: dict = {}
+        for lk in links:
+            rid = str(lk.get("ruleId") or "")
+            if rid and rid not in by_rule:
+                rd = RuleDefStore.get(rid, project_id)
+                if rd:
+                    by_rule[rid] = rd
+        agg: dict = {}
+        order: list = []
+        for lk in links:
+            rd = by_rule.get(str(lk.get("ruleId") or ""))
+            if not rd:
+                continue
+            key = (lk["targetType"], lk["targetId"])
+            if key not in agg:
+                agg[key] = {"targetType": lk["targetType"], "targetId": lk["targetId"],
+                            "title": lk.get("title") or lk["targetId"],
+                            "rules": [], "rulesMd": ""}
+                order.append(key)
+            row = agg[key]
+            row["title"] = row["title"] or (lk.get("title") or lk["targetId"])
+            row["rules"].append({"ruleId": rd["id"], "title": rd.get("title") or "",
+                                 "content": rd.get("content") or ""})
+        out = []
+        for key in order:
+            row = agg[key]
+            row["rulesMd"] = NL2.join(
+                (f"- {r['title']}" + NL2 + r["content"]).strip() if r["title"]
+                else r["content"] for r in row["rules"])
+            out.append(row)
+        return out[:limit]
+
+
 class NamingConventionStore:
     """资产命名规约（场景标签 NOT NULL——agent 按场景加载，禁全量注入 R7）。"""
 

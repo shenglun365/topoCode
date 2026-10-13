@@ -68,6 +68,7 @@ KIND_TASK_OVERLAP = "task_overlap"    # cv-272: 并行范围重叠软警告(警�
 KIND_REQ_IGNORED = "req_ignored"      # 2026-09-20: 用户主动忽略需求卡(置灰回执)
 KIND_TASK_STATUS = "task_status"      # cv-203: 任务执行状态卡(同 taskId 单卡原位更新)
 KIND_CHOICES = "choices"              # cv-247: 结构化问询卡(可交互选项/开放题, 三源汇一)
+KIND_ASSET_ASSESS = "asset_assess"    # 2610 P2: 核心资产评估卡(执行终态自动落地, 评估性)
 KIND_PROXY = "proxy"                # 重定位: coding 直通会话回执(启动/续话/结束/错误)
 KIND_TASK_RECEIPTS = (
     "task_start", "task_input", "task_done", "task_failed",
@@ -78,7 +79,7 @@ _KNOWN_KINDS = frozenset(
     (KIND_REQUIREMENT, KIND_TASK_CARD, KIND_TASK_APPROVAL, KIND_TURN_ERROR,
      KIND_DIGEST, KIND_TASK_PLAN, KIND_TASK_PLAN_DONE, KIND_TASK_INPUT_ECHO,
      KIND_TASK_IGNORED, KIND_REQ_IGNORED, KIND_TASK_STATUS,
-     KIND_TASK_OVERLAP,
+     KIND_TASK_OVERLAP, KIND_ASSET_ASSESS,
      *KIND_TASK_RECEIPTS, KIND_CHOICES, KIND_PROXY))
 
 # ── 删除策略(cv-248 liveness): kind → 删除后状态语义(守门全覆盖) ──────
@@ -92,6 +93,7 @@ DELETE_POLICY = {
     KIND_TASK_PLAN: DELETE_REBUILDABLE,     # 进度锚: 下次刷新原位重落
     KIND_TASK_STATUS: DELETE_REBUILDABLE,   # 状态卡: 下次状态推进原位重落
     KIND_CHOICES: DELETE_REBUILDABLE,       # 问询卡: 帧源零写点派生, 跟踪条目独立
+    KIND_ASSET_ASSESS: DELETE_RECEIPT,      # 评估卡: 纯展示(units 沉淀独立)
     KIND_TASK_CARD: DELETE_RECEIPT,
     KIND_TASK_APPROVAL: DELETE_RECEIPT,
     KIND_TURN_ERROR: DELETE_RECEIPT,

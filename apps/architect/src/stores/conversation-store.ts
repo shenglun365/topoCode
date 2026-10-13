@@ -177,6 +177,18 @@ export const useConversationStore = defineStore('archConversation', () => {
     window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: convId || '' }))
   }
 
+  /** F4 节流版: 卡片状态翻转(conv-message)驱动列表 chip, 3s 合窗防过程流重拉。
+   *  2610 F1a: 同窗并入 refreshActiveMeta——回合启动 running 置位 ≤3s 达
+   *  dock 头部 chip 与状态条(S2 撤销 5s 轮询后的启动侧同步补位)。 */
+  let _sessNotifyAt = 0
+  function notifySessionsChangedThrottled(convId?: string) {
+    const now = Date.now()
+    if (now - _sessNotifyAt < 3000) return
+    _sessNotifyAt = now
+    void refreshActiveMeta()
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: convId || '' }))
+  }
+
   function applyConversation(conv: { id: string; reqId?: string; kind?: string; title?: string; messages?: { id?: string; role: 'user' | 'assistant'; content: string }[] }) {
     const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
     // 旧会话可能累积了重复的页面引导消息——相邻同文 assistant 消息折叠为一条
@@ -207,6 +219,15 @@ export const useConversationStore = defineStore('archConversation', () => {
       // 过期响应守卫: 拉取期间会话已被删除/切换 → 丢弃, 不复活旧会话到对话区
       if (activeId.value !== meta.id) return
       applyConversation({ ...detail, reqId: meta.reqId })
+      // 子会话身份捕获(2610): feed-up 上投/工具栏需要 kind/parentConvId——
+      // 子会话被 /sessions 列表过滤, activeMeta 只能从 messages 详情回填
+      const c = (detail as any).conv
+      if (c) {
+        activeMeta.value = { ...(activeMeta.value || (meta as ConversationMeta)),
+          kind: c.kind || (meta as any).kind,
+          parentConvId: c.parentConvId || '',
+          projectId: c.projectId || (meta as any).projectId } as ConversationMeta
+      }
     } catch { /* 无历史 → 空对话 */ }
     void refreshTasks()
     void rehydrateProposals(meta.id)
@@ -222,7 +243,15 @@ export const useConversationStore = defineStore('archConversation', () => {
    * 卡片原是纯前端实时挂载)——按需求的 sourceConversationId 拉回并挂到对应
    * 助手回合；确认态随需求状态(已定稿入池 → 显示「已存入待执行」)。
    */
-  async function rehydrateProposals(convId: string) {
+  async function rehydrateProposals(convId: string, msgs?: any[]) {
+    // 2610 S1(日志评估): 门控——已绑需求的会话跳过; 无 specReady 需求卡的
+    // 会话(纯聊天/直通, 占绝大多数)不拉 /requirements(cv-15 实测: 消息刷新
+    // 与 requirements 1:1 成对, 切页风暴 86 次/分钟的主力成分之一)。
+    if (activeReqId.value) return
+    const hasSpecCard = (msgs ?? []).some(
+      (m: any) => m?.meta?.kind === 'specReady' || m?.meta?.reqId
+        || (typeof m?.content === 'string' && m.content.includes('RQ-')))
+    if (!hasSpecCard) return
     try {
       const { apiGet, apiPatch } = await import('@/services/api-client')
       const rows = await apiGet<any[]>('/requirements')
@@ -301,7 +330,7 @@ export const useConversationStore = defineStore('archConversation', () => {
   }
 
   /** 发送一轮对话: 统一 WS 流式 + 默认回合处理 + 页面钩子; digest=语境摘要(转达下发, text 可空)。 */
-  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string; digest?: string; synthetic?: boolean; analysisMode?: string; clarifyMode?: string; isolated?: boolean }) {
+  async function send(text: string, opts?: { reqId?: string; skillScenarios?: string[]; kind?: string; agent?: string; attachTo?: string; digest?: string; synthetic?: boolean; executorId?: string; clarifyMode?: string; isolated?: boolean }) {
     if (busy.value || (!text.trim() && !opts?.digest)) return
     // 固定回合数组引用: 对话中途切换场景(scope)时, 流式写入仍落在原场景回合里
     const arr = turns.value
@@ -311,6 +340,15 @@ export const useConversationStore = defineStore('archConversation', () => {
     const idx = arr.push({ role: 'assistant', content: '' }) - 1
     busy.value = true
     beginProgress()
+    // 2610 B2 乐观态独立化: 执行器绑定会话(统一模型=直通通道)回合启动即翻
+    // ▶——独立 ref, **不直改 activeMeta**(权威真相源保持纯净); 权威刷新
+    // (refreshActiveMeta)落地后清除, 交给后端 _running_role_of
+    const _optEid = String((activeMeta.value as any)?.effectiveExecutorId
+      || (activeMeta.value as any)?.executorId || '')
+    if (_optEid) {
+      optimisticRole.value = { role: 'coding', executorId: _optEid,
+                               status: 'running', taskId: '' }
+    }
     const ac = new AbortController(); abortCtl.value = ac
     const hadNoConv = !activeId.value
     let convNotified = false
@@ -332,7 +370,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         agent: opts?.agent,
         attachTo: opts?.attachTo,
         digest: opts?.digest,
-        analysisMode: opts?.analysisMode,   // cv-260 空白态预置(仅创建时消费)
+        executorId: opts?.executorId,   // cv-260 空白态预置(仅创建时消费)
         clarifyMode: opts?.clarifyMode,
         isolated: opts?.isolated,
         signal: ac.signal,
@@ -375,7 +413,7 @@ export const useConversationStore = defineStore('archConversation', () => {
             sessionService.update(ev.conversationId, { reviewState: 'read' }).catch(() => { /* 无碍 */ })
           }
           notifySessionsChanged(ev.conversationId)
-          void refreshActiveMeta()
+          void refreshActiveMeta().finally(() => { optimisticRole.value = null })
         } else if (ev.type === 'tool_result') {
           const stage = stageOfTool(ev.tool)
           if (stage) arr[idx].stage = stage
@@ -389,6 +427,7 @@ export const useConversationStore = defineStore('archConversation', () => {
       arr[idx].content = (err instanceof Error ? err.message : '') || ''
     } finally {
       abortCtl.value = null
+      optimisticRole.value = null
       busy.value = false
       // cv-221: 回合收尾补偿拉取泛化到所有回合类型(原仅 cardClosed 分支
       // 300ms 强拉)——入缓冲走统一消费者, 尾沿刷新一次
@@ -458,6 +497,9 @@ export const useConversationStore = defineStore('archConversation', () => {
    * 但请求改为挂起——busy 解除后补偿刷新一次(cv-194: 回合中落流的需求卡/
    * 任务回执此前被静默丢弃, 只能刷新页面才可见)。
    */
+  /** 2610 B2: 回合启动乐观态(展示层; 权威落地即清)——activeMeta 保持纯权威。 */
+  const optimisticRole = ref<{ role: string; executorId: string; status: string;
+                               taskId: string } | null>(null)
   let pendingMsgRefresh = false
   async function refreshActiveMessages() {
     if (!activeId.value) return
@@ -471,7 +513,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         applyConversation({ ...detail, reqId: activeReqId.value, title: activeTitle.value } as any)
         // cv-196: 补偿刷新整表替换 turns 会抹掉实时挂载的提案卡——
         // 与 openConversation 同口径重挂(rehydrateProposals 现成机制)
-        void rehydrateProposals(activeId.value)
+        void rehydrateProposals(activeId.value, detail?.messages ?? [])
       }
     } catch { /* 重拉失败保持现状 */ }
   }
@@ -563,6 +605,14 @@ export const useConversationStore = defineStore('archConversation', () => {
       case 'conv-message':
       case 'items':
         markDirty(ev.conversationId)
+        // F4: 卡片落卡/状态轴翻转(等待输入/排队/执行中) → 列表 chip 同步刷新
+        // (节流 3s: 执行期过程流不触发全列表重拉)
+        notifySessionsChangedThrottled(ev.conversationId)
+        // 2610 cv-15 诊断探针(cv-274 同风格): 状态翻转帧到达证据
+        if (ev.type === 'conv-message' && ev.kind === 'proxy') {
+          console.info('[arch-live] conv-message(proxy) 到达', ev.conversationId,
+                       'msg:', ev.msgId || '')
+        }
         // 执行器子会话输出感知(2026-10): 广播给 dock 弹层(闪动+池刷新)
         try {
           window.dispatchEvent(new CustomEvent('arch:conv-message', {
@@ -572,6 +622,12 @@ export const useConversationStore = defineStore('archConversation', () => {
       case 'turnEnd':
         scheduleRefresh()
         void refreshActiveMeta()   // meta 驱动的 UI(如 ctxUsage chip)随回合刷新
+        // 2610 S2(日志评估): 广播回合收尾——dock workState 相位回落/
+        // 全量补偿拉取改事件驱动(撤销执行期 5s 轮询, 实测 24 req/min)
+        try {
+          window.dispatchEvent(new CustomEvent('arch:turn-end', {
+            detail: { conversationId: ev.conversationId } }))
+        } catch { /* 非 DOM 环境 */ }
         return
       default:
         return
@@ -627,6 +683,8 @@ export const useConversationStore = defineStore('archConversation', () => {
   // ── SSE 连接(store 单例单连接; 自 Dock 收编) ─────────────────────────
   let evtSource: EventSource | null = null
   let evtReconnect: ReturnType<typeof setTimeout> | null = null
+  // 2610 cv-15: 推送降级显式化——SSE 断连期间 true, FE 侧启动轻量轮询保底
+  const realtimeDegraded = ref(false)
 
   function connectEvents() {
     if (evtSource || typeof EventSource === 'undefined') return
@@ -634,7 +692,10 @@ export const useConversationStore = defineStore('archConversation', () => {
       const tok = getToken()
       evtSource = new EventSource(`${apiBaseUrl()}/events${tok ? `?token=${encodeURIComponent(tok)}` : ''}`)
       // 断窗补偿: 首连/重连成功即拉取活动会话(重连期间丢失的通知由此兜底)
-      evtSource.onopen = () => { void refreshActiveMessages(); void refreshActiveMeta() }
+      evtSource.onopen = () => {
+        realtimeDegraded.value = false
+        void refreshActiveMessages(); void refreshActiveMeta()
+      }
       evtSource.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data)
@@ -642,6 +703,7 @@ export const useConversationStore = defineStore('archConversation', () => {
         } catch { /* 非事件帧忽略 */ }
       }
       evtSource.onerror = () => {
+        realtimeDegraded.value = true   // 2610 cv-15: 降级显式化(轮询保底启动)
         disconnectEvents()
         evtReconnect = setTimeout(connectEvents, 5000)
       }
@@ -666,7 +728,7 @@ export const useConversationStore = defineStore('archConversation', () => {
 
   return {
     flushPendingMsgRefresh,
-    enqueueEvent, connectEvents, proxyProgressOf,
+    enqueueEvent, connectEvents, proxyProgressOf, realtimeDegraded, optimisticRole,
     dockOpen, setDockOpen, toggleDock,
     scope, setScope,
     activeId, activeTitle, activeReqId, activeMeta,

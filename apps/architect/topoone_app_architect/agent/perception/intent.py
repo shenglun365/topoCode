@@ -13,3 +13,6 @@ GENERIC_EXEC_RE = re.compile(
 
 # 推诿话术(与 GENERIC_EXEC 联合触发路由纠偏守卫, orchestrator 消费)
 DEFLECT_RE = re.compile(r"无法直接|无法凭|不能直接|无法给出|需要先(调用|检索|查询)")
+# 构建意图标记(MS-D4 单源): goal 判别与 help 咨询排除共用——「帮我写个使用手册」是开发诉求(需求路线)不是产品咨询。
+BUILD_MARK_RE = re.compile(
+    r"(做一个|做个|写个|写一个|开发|实现|封装|新建|新增|加一个|添加|搭一个)")

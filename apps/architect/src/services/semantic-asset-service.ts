@@ -753,11 +753,6 @@ export const semanticAssetService = {
   },
 
   /** 检索已提取的语义资产。 */
-  async search(query: string, kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel): Promise<SemanticAsset[]> {
-    const r = await this.searchPage(query, kind, { limit: 100, offset: 0, scope, level })
-    return r.items
-  },
-
   /** 分页检索已提取的语义资产(≤limit/页，返回总数供翻页)。 */
   async searchPage(query: string, kind?: SemanticAssetKind, opts?: { limit?: number; offset?: number; scope?: string[]; level?: SemanticAssetLevel }): Promise<{ items: SemanticAsset[]; total: number; limit: number; offset: number }> {
     const parts = [`q=${encodeURIComponent(query || '')}`]

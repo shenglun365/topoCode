@@ -17,6 +17,7 @@ from . import exec_cline
 from . import agent_roles
 from . import contracts
 from . import acceptance
+from . import core_rules
 from . import naming
 from . import req_drafts
 from . import logic_views
@@ -43,6 +44,7 @@ router.include_router(security.router)
 router.include_router(runner_proxy.router)
 router.include_router(exec_sessions.router)
 router.include_router(mcp_collab.router)
+router.include_router(core_rules.router)
 router.include_router(llm_catalog.router)
 router.include_router(unit_test.router)
 router.include_router(unit_advice.router)

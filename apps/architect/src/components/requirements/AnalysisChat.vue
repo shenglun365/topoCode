@@ -53,7 +53,7 @@ const props = defineProps<{
   /** 归档只读: 禁用输入与发送(读取/复制/提炼仍可用)。 */
   readOnly?: boolean
   /** running 归属(S2): {role:'coding', executorId, status} 有活跃作业时非空。 */
-  jobState?: { role: string; executorId?: string; status?: string; progress?: { toolCount?: number; msgCount?: number; at?: number } } | null
+  jobState?: { role: string; executorId?: string; status?: string; taskId?: string; progress?: { toolCount?: number; msgCount?: number; at?: number } } | null
   /** 已绑定执行器 id(S2/S3): 空=未绑定——Coding 切换钮首击触发分配(bind-coding)。 */
   boundExecutorId?: string
   /** 执行器注册表(启用项): 工具栏选择钮清单与完整名称显示。 */
@@ -62,7 +62,7 @@ const props = defineProps<{
   executorModels?: string[]
   /** 当前会话模型(空=默认)。 */
   executorModel?: string
-  /** v2 分析挡位(strict/quick): 快捷挡直切钮展示并可切换(上抛宿主 → REST 即时生效)。 */
+  /** legacy 分析挡位(2610 统一模型后仅读侧兼容): quick 且无绑定=直通态展示。 */
   analysisMode?: 'strict' | 'quick'
   /** 需求澄清挡位(cv-190): auto(自动, 缺口驱动) | forced(强制, 先澄清后落卡)。 */
   clarifyMode?: 'auto' | 'forced'
@@ -83,12 +83,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 发送(语境路由): text 已剥离内联 @前缀; attachTo=转达任务卡, agent=一次性指派执行器, digest=语境摘要。 */
   send: [p: { text: string; attachTo?: string; agent?: string; digest?: string; synthetic?: boolean }]
-  /** 分析挡位切换(strict/quick) → 宿主上抛 REST。 */
-  'set-analysis-mode': [mode: 'strict' | 'quick']
+  /** 会话执行器换绑(2610 统一模型): architect 内置条目=切回分析管线;
+      空白态(无会话)=预置, 首条消息创建时生效。 */
+  'switch-executor': [executorId: string]
   'set-clarify-mode': [mode: 'auto' | 'forced']
   'set-isolated': [on: boolean]
-  /** 工具栏执行器选择: 上抛宿主执行绑定(未绑=bind; 已绑切换=克隆新会话)。 */
-  'bind-executor': [executorId: string]
   'task-confirm': [taskId: string]
   'task-cancel': [taskId: string]
   'task-ignore': [taskId: string]
@@ -99,6 +98,8 @@ const emit = defineEmits<{
   'set-model': [model: string]
   rename: [title: string]
   'summarize-title': []
+  /** 2610 会话窗口: 沉浸式独立浏览器页(?conv= 直开; 唯一性锁防多开) */
+  'open-window': []
   answers: [answers: Record<string, string>]
   'confirm-draft': []
   'delete-turn': [index: number]
@@ -177,7 +178,6 @@ const {
   copiedTurn,
   copyAsset,
   copyTurn,
-  defaultExecutor,
   deletePending,
   diffSummary,
   digestAutoSend,
@@ -317,6 +317,15 @@ onUnmounted(() => {
           class="group/t flex min-w-0 items-center gap-1"
         >
           <span class="min-w-0 truncate">{{ title ?? t('requirement.chat.title') }}</span>
+          <!-- 2610 会话窗口: 常显(悬停组内发现性差——cv 反馈未见按钮) -->
+          <button
+            v-if="convId"
+            class="shrink-0 rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface0 hover:text-ctp-sapphire"
+            :title="t('session.openWindow')"
+            @click="emit('open-window')"
+          >
+            <ArrowTopRightOnSquareIcon class="h-3 w-3" />
+          </button>
           <span
             v-if="editable"
             class="hidden shrink-0 items-center gap-0.5 group-hover/t:flex"
@@ -379,7 +388,12 @@ onUnmounted(() => {
       <span v-if="(props.jobState as any).progress" class="font-mono text-ctp-subtext0">
         ⚙ 工具 ×{{ (props.jobState as any).progress.toolCount ?? 0 }} · 消息 ×{{ (props.jobState as any).progress.msgCount ?? 0 }}
       </span>
-      <span v-else class="text-ctp-overlay0">暂无进展数据(回合级事件到达时更新)</span>
+      <!-- 2610 F2: 直通会话(taskId 空)无 runningRole.progress——过程流在执行卡
+           ExecutorProcessStrip, 不再显示误导性「暂无进展数据」 -->
+      <span
+        v-else-if="props.jobState.taskId"
+        class="text-ctp-overlay0"
+      >暂无进展数据(回合级事件到达时更新)</span>
       <span class="flex-1" />
       <span v-if="(props.jobState as any).progress?.at" class="text-ctp-overlay0 font-mono">{{ new Date((props.jobState as any).progress.at).toLocaleTimeString() }}</span>
     </div>

@@ -22,7 +22,7 @@ from topoone_app_architect.agent.compensation.overrides import (
 from topoone_app_architect.agent.compensation.providers import (
     parse_json_block, validate_logic_diagram)
 from topoone_app_architect.agent.governance.gears import (
-    A_AXIS_POLICY, _TIERS, resolve_gear)
+    A_AXIS_POLICY, UNIFIED_POLICY, resolve_gear)
 from topoone_app_architect.agent.planning.scope_probe import (
     heuristic_scope_fallback)
 
@@ -30,48 +30,40 @@ _ON = {}                                  # 缺省 = 全部新行为
 _OFF = {"r2_1_axis_stack": False}
 
 
-# ── R2.1: 显式挡 A 轴叠加(quick 豁免) ─────────────────────────────────
+# ── R2.1: A 轴叠加(2610 挡位退役: 恒统一策略, A 轴照常) ────────────────
 
 def test_r2_1_explicit_tier_stacks_a_axis(arch_env, monkeypatch):
-    """显式 T1 + A 弱模型(手工档案 T2) → 调度纪律/要素提示升档。"""
+    """统一策略 + A 弱模型(手工档案 T2) → 调度纪律/要素提示升档。"""
     from topoone_app_architect.agent.cognition import model_profile as mp
     mp.set_manual_tier("m-weak", 2)
     discipline, hints = A_AXIS_POLICY[2]
     p = resolve_gear("T1", architect_model_id="m-weak", overrides=_ON)
-    assert p.tier == "T1"                       # 挡位不变, 补偿叠加
+    assert p.tier == "T1"                       # 策略行不变, 补偿叠加
     assert (p.schedule_discipline, p.element_hints) == (discipline, hints)
 
 
-def test_r2_1_quick_exempt_from_a_axis(arch_env, monkeypatch):
-    """quick 直通车豁免: 零补偿纯净直通(开关语义内写死)。"""
+def test_r2_1_quick_also_stacks_a_axis(arch_env, monkeypatch):
+    """2610 挡位退役: quick 不再豁免(直通判定移交 executorId, 解析恒统一+A 轴)。"""
     from topoone_app_architect.agent.cognition import model_profile as mp
     mp.set_manual_tier("m-weak", 2)
     p = resolve_gear("quick", architect_model_id="m-weak", overrides=_ON)
-    assert p.tier == "T0"
+    assert p.tier == "T1"
     assert (p.schedule_discipline, p.element_hints) == \
-        (_TIERS["T0"].schedule_discipline, _TIERS["T0"].element_hints)
-
-
-def test_r2_1_switch_off_reverts_short_circuit(arch_env, monkeypatch):
-    """开关关闭 → 回退旧短路: 显式挡跳过 A 轴叠加。"""
-    from topoone_app_architect.agent.cognition import model_profile as mp
-    mp.set_manual_tier("m-weak", 2)
-    p = resolve_gear("T1", architect_model_id="m-weak", overrides=_OFF)
-    assert (p.schedule_discipline, p.element_hints) == \
-        (_TIERS["T1"].schedule_discipline, _TIERS["T1"].element_hints)
+        A_AXIS_POLICY[2]
 
 
 def test_r2_1_no_a_model_keeps_neutral(arch_env):
     """无 A 轴模型 id → 字段保持中性默认(与旧行为一致)。"""
     p = resolve_gear("T1", overrides=_ON)
     assert (p.schedule_discipline, p.element_hints) == \
-        (_TIERS["T1"].schedule_discipline, _TIERS["T1"].element_hints)
+        (UNIFIED_POLICY.schedule_discipline, UNIFIED_POLICY.element_hints)
 
 
 # ── R2.4: 分目的有效档细化(只降不升) ──────────────────────────────────
 
 def test_r2_4_weak_purpose_downgrades_effective_tier():
-    gear = _TIERS["T0"]
+    import dataclasses
+    gear = dataclasses.replace(UNIFIED_POLICY, tier="T0")   # 手构强档形态(覆盖面)
     ctx = resolve_ctx(gear, Axis.S, Purpose.EXTRACTION,
                       scores=CapabilityScores(requirement=0.30))
     assert ctx.a_tier == 1                      # T0(idx0) → 有效档 T1(idx1)
@@ -79,15 +71,17 @@ def test_r2_4_weak_purpose_downgrades_effective_tier():
 
 
 def test_r2_4_good_or_missing_score_keeps_tier():
-    ctx = resolve_ctx(_TIERS["T1"], Axis.S, Purpose.EXTRACTION,
+    ctx = resolve_ctx(UNIFIED_POLICY, Axis.S, Purpose.EXTRACTION,
                       scores=CapabilityScores(requirement=0.75))
     assert ctx.a_tier == 1
-    ctx2 = resolve_ctx(_TIERS["T1"], Axis.S, Purpose.EXTRACTION)   # 未探测
+    ctx2 = resolve_ctx(UNIFIED_POLICY, Axis.S, Purpose.EXTRACTION)   # 未探测
     assert ctx2.a_tier == 1
 
 
 def test_r2_4_floor_at_t2():
-    ctx = resolve_ctx(_TIERS["T2"], Axis.S, Purpose.PROBE,
+    import dataclasses
+    weak = dataclasses.replace(UNIFIED_POLICY, tier="T2")    # 手构弱档形态
+    ctx = resolve_ctx(weak, Axis.S, Purpose.PROBE,
                       scores=CapabilityScores(module=0.10))
     assert ctx.a_tier == 2                      # 已 T2, 封底不再降
 

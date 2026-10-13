@@ -115,3 +115,34 @@ def test_blank_state_quick_preset_routes_proxy_on_first_turn(tmp_path, monkeypat
     assert any((m.get("meta") or {}).get("kind") == "proxy" for m in msgs), \
         "首回合未走直通分支(无 proxy 回执)"
     assert not any((m.get("meta") or {}).get("kind") == "turnError" for m in msgs)
+
+
+# ── 2610 统一模型: executorId 空白态预置(替代 analysisMode 预置) ────────
+
+def test_blank_state_executor_id_preset(tmp_path, monkeypatch):
+    """executorId 随首条消息生效: 会话创建即绑定, 回合走直通判定(无执行器显式报错)。"""
+    import topoone_app_architect.arch_routes.agent_executors as ae
+    monkeypatch.setattr(ae, "load_executors", lambda: [])
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            _chat(ws, None, executorId="cline")
+            ev = _recv_until(ws, "done")
+    conv_id = ev["conversationId"]
+    assert store.ConversationsStore.get(conv_id)["executorId"] == "cline"
+    # 直通分支收束(无可用执行器 → proxy 显式报错回执, 不走 architect 管线)
+    msgs = store.ConversationsStore.messages(conv_id, limit=20)
+    assert any((m.get("meta") or {}).get("kind") == "proxy" for m in msgs)
+
+
+def test_existing_session_executor_id_not_overwritten(tmp_path, monkeypatch):
+    """已存在会话: 载荷 executorId 不覆写(真相源=REST 换绑端点)。"""
+    client = _client(tmp_path, monkeypatch)
+    with client:
+        with client.websocket_connect(WS_PATH) as ws:
+            _chat(ws, None)
+            ev1 = _recv_until(ws, "done")
+            conv_id = ev1["conversationId"]
+            _chat(ws, conv_id, executorId="opencode")
+            _recv_until(ws, "done")
+    assert store.ConversationsStore.get(conv_id)["executorId"] in ("", None)

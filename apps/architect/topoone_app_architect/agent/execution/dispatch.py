@@ -636,9 +636,25 @@ def _confirm_task_locked(task_id: str, conv: dict) -> dict:
             payload[k] = v
     if hint.get("executorId"):
         payload["executorId"] = hint["executorId"]
-        payload["executorConfig"] = {**(hint.get("executorConfig") or {}),
-                                     # 任务级轮次随挡下发(挡位表单源, 覆盖注册表默认)
-                                     "max_iterations": policy.max_iterations}
+        # 轮次上限: 注册表设置优先(用户/护栏调优), 缺省回落统一策略值
+        # (2610 挡位退役: 不再按挡封顶——取消策略限制裁决)
+        _reg_max = (hint.get("executorConfig") or {}).get("max_iterations")
+        _ecfg_out = {**(hint.get("executorConfig") or {}),
+                     "max_iterations": _reg_max or policy.max_iterations}
+        # 2610 P3: 默认 MCP 接线并入 executorConfig(与直通同口径)——runner
+        # 适配器唯一读取面; 用户自配同名 server 优先, codex 无 MCP 面跳过
+        from .proxy_ctx import _merge_mcp_servers, _mcp_tools_brief
+        _mcp = _merge_mcp_servers(hint.get("executorConfig") or {}, _etype)
+        if _mcp is not None:
+            _ecfg_out["mcp_servers"] = _mcp
+            # 2610 cv-12/14: 工具指引与直通同口径(统筹单源 brief)——任务链
+            # 执行器同样需要 map.*/ctx.* 告知与 project 参数内联
+            _brief = _mcp_tools_brief(
+                str((conv or {}).get("id") or ""), _mcp,
+                str((conv or {}).get("projectId") or ""))
+            if _brief:
+                payload["instruction"] += _brief
+        payload["executorConfig"] = _ecfg_out
     if _etype:
         payload["executorType"] = _etype   # 引擎选择以 task 为准(无注册表也可指定)
     # 上下文包(重定位 P2 契约): 规约/资产引用/约束/验收判据 结构化下发——

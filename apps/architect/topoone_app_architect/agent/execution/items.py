@@ -186,6 +186,7 @@ CARD_ITEM_MAP: Dict[str, Dict[str, Any]] = {
     "specReady": {"type": "spec", "status": "ready", "payload": "meta"},
     "choices": {"type": "choices", "payload": "meta"},   # cv-247 问询卡
     "proxy": {"type": "job", "payload": "meta"},   # cv-283 直通作业卡(仅 jobCard=1 渲染 JobCard, 其余文本回执)
+    "asset_assess": {"type": "asset_assess", "payload": "meta"},  # 2610 P2 核心资产评估卡
 }
 
 

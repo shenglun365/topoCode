@@ -38,14 +38,18 @@ def test_cline_config_schema_extended(tmp_path, monkeypatch):
 
 def test_cline_builtin_self_heal(tmp_path, monkeypatch):
     """cline 内置执行器自愈: 注册表缺失(旧数据/误删) → 注入置首;
-    已有用户默认执行器时不抢 default; 幂等不重复注入。"""
+    已有用户默认执行器时不抢 default; 幂等不重复注入。
+
+    2610 统一模型: architect 虚拟条目恒置首(读侧注入, 不落盘)。"""
     from tests.conftest import isolate_arch
     isolate_arch(tmp_path, monkeypatch)
     ae.save_executors([{"id": "opencode", "type": "opencode", "enabled": True,
                         "default": True, "config": {"auto_start": True}}])
     entries = ae.load_executors()
-    assert [e["id"] for e in entries] == ["cline", "opencode"]      # 置首
-    assert [e.get("default") for e in entries] == [False, True]     # 尊重用户默认
+    ids = [e["id"] for e in entries]
+    assert ids[0] == "architect"                          # 虚拟条目置首
+    assert [i for i in ids if i != "architect"] == ["cline", "opencode"]
+    assert [e.get("default") for e in entries] == [False, False, True]  # 尊重用户默认
     assert sum(1 for e in ae.load_executors() if e["id"] == "cline") == 1
 
 

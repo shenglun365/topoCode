@@ -229,8 +229,9 @@ def test_exec_bridge_hint_injects_engine(tmp_path, monkeypatch):
     assert hint["executorConfig"]["cline_data_dir"] == "/eng/0.0.83/data"
     # 显式 sidecar_script 优先于引擎
     entries = AE.load_executors()
-    entries[0]["config"]["sidecar_script"] = "/custom/sidecar.js"
-    AE.save_executors(entries)
+    _cline = next(e for e in entries if e["id"] == "cline")   # 2610: architect 虚拟条目置首
+    _cline["config"]["sidecar_script"] = "/custom/sidecar.js"
+    AE.save_executors([e for e in entries if e["id"] != "architect"])
     hint = EB.executor_hint_by_id("cline")
     assert hint["executorConfig"]["sidecar_script"] == "/custom/sidecar.js"
     assert "cline_data_dir" not in hint["executorConfig"]
@@ -250,3 +251,47 @@ def test_env_detect_reports_engines(tmp_path, monkeypatch):
     env = AE._env_detect()["cline"]
     assert env["engines"] == ["0.0.82"]
     assert env["engineDefault"] == "0.0.82"
+
+
+def test_dist_stale_and_refresh_preserves_data(tmp_path, monkeypatch):
+    """2610 C1: dist 陈旧检测 + 原位刷新(**保留 data/**)——
+    替代手工 cp 引擎目录的补丁方式(0.0.83 外科补丁事故的流程化)。"""
+    _setup(tmp_path, monkeypatch)
+    from topoone_app_architect.arch_routes import cline_engines as CE
+    root = tmp_path / "engines"
+    src = tmp_path / "repo" / "packages" / "cline-sidecar"
+    (src / "dist").mkdir(parents=True)
+    (src / "dist" / "index.js").write_text("// built")
+    (src / "dist" / "host.js").write_text("// host v1")
+    monkeypatch.setattr(CE, "engines_root", lambda: str(root))
+    monkeypatch.setattr(CE, "sidecar_source_dir", lambda: str(src))
+    monkeypatch.setattr(CE, "_node_version", lambda: "v22.1.0")
+
+    def fake_run(cmd, **kw):
+        if "install" in cmd:
+            sdk = pathlib.Path(kw.get("cwd") or ".") / "node_modules" / "@cline" / "sdk"
+            sdk.mkdir(parents=True, exist_ok=True)
+            (sdk / "package.json").write_text(json.dumps({"version": "0.0.83"}))
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(CE, "subprocess", types.SimpleNamespace(run=fake_run))
+
+    assert CE.install_engine("0.0.83")["status"] == "ok"
+    v = CE.verify_engine("0.0.83")
+    assert v["distStale"] is False, "新装引擎应与仓库 dist 一致"
+    (root / "0.0.83" / "data" / "keep.json").write_text("{}")
+
+    # 仓库源码修复 → 引擎陈旧
+    (src / "dist" / "host.js").write_text("// host v2 (fix)")
+    assert CE.verify_engine("0.0.83")["distStale"] is True
+
+    # refresh-dist: 原位刷新, data 保留
+    r = CE.refresh_engine_dist("0.0.83")
+    assert r["status"] == "ok" and r["stale"] is False and r["dataPreserved"]
+    assert (root / "0.0.83" / "data" / "keep.json").is_file(), "会话存储必须无损"
+    assert (root / "0.0.83" / "dist" / "host.js").read_text() == "// host v2 (fix)"
+    assert CE.verify_engine("0.0.83")["distStale"] is False
+
+    # 未装引擎 → fail; 仓库 dist 缺失 → verify 无法判定(None)
+    assert CE.refresh_engine_dist("9.9.9")["status"] == "fail"
+    (src / "dist" / "host.js").unlink()
+    assert CE.verify_engine("0.0.83")["distStale"] is None

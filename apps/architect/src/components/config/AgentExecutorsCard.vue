@@ -450,8 +450,13 @@ function capTone(e: ExecEntry): string {
 }
 
 /** 内嵌执行器(architect 自主模式): 不可删除、id 锁定。 */
+/** 内置执行器: cline(coding 默认) + architect(虚拟分析执行器, 2610 统一模型)。 */
 function isBuiltinExec(e: ExecEntry): boolean {
-  return e.id === 'cline'
+  return e.id === 'cline' || e.id === 'architect'
+}
+/** architect 虚拟条目: 读侧注入不落盘——禁删/禁默认/禁启停/不可配置。 */
+function isArchitectExec(e: ExecEntry): boolean {
+  return e.id === 'architect'
 }
 
 const runnerReachable = computed(() => !!runtime.value?.executors)
@@ -603,15 +608,23 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
           <span v-if="e.default" class="chip bg-ctp-mauve/15 text-ctp-mauve">{{ t('config.executors.default') }}</span>
           <div class="flex-1" />
           <label class="flex items-center gap-1 text-[11px] text-ctp-subtext1" @click.stop>
-            <input v-model="e.enabled" type="checkbox" class="accent-ctp-blue">{{ t('config.executors.enabled') }}
+            <input
+              v-model="e.enabled" type="checkbox" class="accent-ctp-blue"
+              :disabled="isArchitectExec(e)"
+            >{{ t('config.executors.enabled') }}
           </label>
         </div>
 
         <!-- 详情(展开) -->
         <div v-if="expandedEntry === e" class="border-t border-ctp-surface0/60">
-          <!-- 身份编辑行(内置 cline 免名称/类型配置: 静态标识) -->
+          <!-- 身份编辑行(内置条目免名称/类型配置: 静态标识) -->
           <div class="flex items-center gap-2 px-2.5 py-2 bg-ctp-surface0/40">
-            <template v-if="isBuiltinExec(e)">
+            <template v-if="isArchitectExec(e)">
+              <span class="chip bg-ctp-blue/15 text-ctp-blue font-mono">architect</span>
+              <span class="chip bg-ctp-surface0 text-ctp-subtext1">内置 · 分析执行器（需求→规约→任务管线）</span>
+              <span class="text-[10px] text-ctp-overlay0">虚拟条目 · 恒可用 · 不可删禁/不可配置</span>
+            </template>
+            <template v-else-if="isBuiltinExec(e)">
               <span class="chip bg-ctp-mauve/15 text-ctp-mauve font-mono">cline</span>
               <span class="chip bg-ctp-surface0 text-ctp-subtext1">内置 · cline SDK（自主模式）</span>
               <span class="text-[10px] text-ctp-overlay0">免配置名称/类型 · 不可删除</span>
@@ -647,10 +660,15 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
               class="btn !py-0.5 !px-2 !text-[11px]"
               @click="stopServe(e)"
             >{{ t('config.executors.stopServe') }}</button>
-            <button class="btn !py-0.5 !px-2 !text-[11px]" @click="probe(e)">
+            <button
+              v-if="!isArchitectExec(e)"
+              class="btn !py-0.5 !px-2 !text-[11px]"
+              @click="probe(e)"
+            >
               {{ t('config.executors.probe') }}
             </button>
             <button
+              v-if="!isArchitectExec(e)"
               class="btn !py-0.5 !px-2 !text-[11px]"
               :class="capTone(e)"
               :disabled="capProbing[e.id]"
@@ -675,6 +693,7 @@ const typeFields: Record<string, { key: string; label: string; kind?: 'num' | 'b
                 type="radio"
                 name="exec-default"
                 :checked="e.default"
+                :disabled="isArchitectExec(e)"
                 @change="setDefault(i)"
               >{{ t('config.executors.default') }}
             </label>

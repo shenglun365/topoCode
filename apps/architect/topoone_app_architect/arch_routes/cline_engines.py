@@ -69,6 +69,46 @@ def repo_sidecar_dist() -> str:
     return os.path.join(sidecar_source_dir(), "dist", "index.js")
 
 
+def dist_stale(version: str) -> Optional[bool]:
+    """引擎 dist 是否落后于仓库 dist(2610 C1 热修债观测面)。
+
+    sha256 对比 repo dist/host.js ↔ 引擎 dist/host.js。仓库侧缺失 → None
+    (无法判定); 引擎侧缺失 → True。背景: 修复以仓库源码为准, 引擎副本
+    靠 install 拷贝——手工/历史安装的引擎会静默陈旧(cv-6 系列事故根因)。"""
+    import hashlib
+    repo = repo_sidecar_dist().replace("index.js", "host.js")
+    eng = os.path.join(engine_dir(version), "dist", "host.js")
+    if not os.path.isfile(repo):
+        return None
+    if not os.path.isfile(eng):
+        return True
+    h = hashlib.sha256()
+    digests = []
+    for p in (repo, eng):
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            h.update(f.read())
+        digests.append(h.hexdigest())
+    return digests[0] != digests[1]
+
+
+def refresh_engine_dist(version: str) -> dict:
+    """仓库 dist → 引擎 dist 原位刷新(2610 C1 热修): **保留 data/**。
+
+    与 install_engine 的区别: 不 rmtree 引擎目录(会话存储/复活链无损),
+    仅覆盖 dist/——修复仓库源码后对已装引擎热生效的标准路径。"""
+    if not _valid_version(version) or not os.path.isdir(engine_dir(version)):
+        return {"status": "fail", "detail": f"引擎未安装: {version!r}"}
+    src = os.path.join(sidecar_source_dir(), "dist")
+    if not os.path.isdir(src):
+        return {"status": "fail", "detail": f"仓库 dist 缺失: {src}(先 npm run build -w packages/cline-sidecar)"}
+    dst = os.path.join(engine_dir(version), "dist")
+    shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst)
+    return {"status": "ok", "version": version,
+            "stale": dist_stale(version), "dataPreserved": True}
+
+
 def _valid_version(v: str) -> bool:
     """版本号白名单(防路径穿越: 引擎目录名即版本名)。"""
     return bool(_VERSION_RE.match(v or ""))
@@ -86,7 +126,7 @@ def default_version() -> str:
 
 
 def verify_engine(version: str) -> dict:
-    """单引擎健康检查: dist 产物 + 锁版依赖版本一致。"""
+    """单引擎健康检查: dist 产物 + 锁版依赖版本一致 + dist 陈旧标记。"""
     d = engine_dir(version)
     missing = []
     if not os.path.isfile(os.path.join(d, "dist", "index.js")):
@@ -112,7 +152,8 @@ def verify_engine(version: str) -> dict:
     return {"version": version, "ok": not missing, "missing": missing,
             "sdkVersion": sdk_ver, "installedAt": meta.get("installedAt"),
             "node": meta.get("node"), "dataDir": os.path.join(d, "data"),
-            "script": os.path.join(d, "dist", "index.js")}
+            "script": os.path.join(d, "dist", "index.js"),
+            "distStale": dist_stale(version)}
 
 
 def list_engines() -> list[dict]:
@@ -335,6 +376,19 @@ async def install_engine_route(request: Request):
     result = install_engine(version, rebuild=body.get("rebuild") is True)
     if result.get("status") != "ok":
         return err(result.get("detail") or "install failed")
+    return ok(result)
+
+
+@router.post("/agent/executors/cline/engines/refresh-dist")
+async def refresh_engine_dist_route(request: Request):
+    """仓库 dist → 已装引擎原位刷新(2610 C1 热修, **保留 data/ 会话存储**)。
+
+    Body: {version}。修复仓库侧车源码并重建 dist 后, 对已装引擎热生效的
+    标准路径(替代手工 cp 引擎目录的补丁方式)。"""
+    body = await request.json() or {}
+    result = refresh_engine_dist(str(body.get("version") or "").strip())
+    if result.get("status") != "ok":
+        return err(result.get("detail") or "refresh failed")
     return ok(result)
 
 

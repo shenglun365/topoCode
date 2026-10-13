@@ -119,6 +119,24 @@ def _dequeue_locked(root: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _fire_relaunch(entry: Dict[str, Any]) -> None:
+    """队首续跑调度(relaunch 闭包经主循环执行; 与 release 共用)。"""
+    if entry and _LOOP is not None and callable(entry.get("relaunch")):
+        relaunch, payload = entry["relaunch"], {
+            k: v for k, v in entry.items() if k != "relaunch"}
+        try:
+            asyncio.run_coroutine_threadsafe(relaunch(payload), _LOOP)
+            logger.info("[scheduler] relaunched root=%s conv=%s",
+                        payload.get("root"), payload.get("convId"))
+        except Exception:  # noqa: BLE001
+            logger.exception("[scheduler] relaunch 调度失败 root=%s",
+                             payload.get("root"))
+        return
+    if entry:
+        logger.warning("[scheduler] 队首缺 relaunch/loop, 丢弃 root=%s",
+                       entry.get("root"))
+
+
 def release(root: str, conv_id: str = "", job_id: str = "") -> Optional[Dict[str, Any]]:
     """终态释放: 摘除槽位 → 队首满足条件则调度续跑。返回被续跑的 entry。"""
     with _LOCK:
@@ -127,16 +145,60 @@ def release(root: str, conv_id: str = "", job_id: str = "") -> Optional[Dict[str
                     if not ((conv_id and s.get("convId") == conv_id)
                             or (job_id and s.get("jobId") == job_id))]
         entry = _dequeue_locked(root)
-    if entry and _LOOP is not None and callable(entry.get("relaunch")):
-        relaunch, payload = entry["relaunch"], {
-            k: v for k, v in entry.items() if k != "relaunch"}
-        try:
-            asyncio.run_coroutine_threadsafe(relaunch(payload), _LOOP)
-            logger.info("[scheduler] relaunched root=%s conv=%s", root,
-                        payload.get("convId"))
-        except Exception:  # noqa: BLE001
-            logger.exception("[scheduler] relaunch 调度失败 root=%s", root)
-        return entry
+    if entry:
+        _fire_relaunch(entry)
+    return entry
+
+
+def release_conv(conv_id: str) -> Optional[Dict[str, Any]]:
+    """idle 让坑(2610 F5a 裁决A): 等待输入的保活会话释放槽位——
+
+    直通会话 turn 制保活(input_required)无终态事件, 此前槽位直到
+    proxy_finish 才释放 → 同 root inplace 会话永久排队无反馈。改为
+    回合收束(idle)即让坑, 队首自动续跑; 本会话下一回合重新 admit
+    (活跃会话经 /input 分支仲裁, 见 proxy.proxy_turn)。root 未知 → 全
+    root 扫描(convId 全局唯一定位, 与 stop_conv 同款兜底)。"""
+    with _LOCK:
+        for root in list(_REG.keys()):
+            slots = _REG.get(root) or []
+            if any(s.get("convId") == conv_id for s in slots):
+                slots[:] = [s for s in slots if s.get("convId") != conv_id]
+                entry = _dequeue_locked(root)
+                break
+        else:
+            return None
+    if entry:
+        _fire_relaunch(entry)
+    return entry
+
+
+def busy_by_other(root: str, conv_id: str) -> Optional[Dict[str, Any]]:
+    """同 root 是否有**其它**会话的 running 槽(占用检查, 供 /input 仲裁)。
+
+    返回占用槽 {convId, jobId, executorId} / None。"""
+    with _LOCK:
+        for s in _running(root):
+            if s.get("convId") != conv_id:
+                return dict(s)
+    return None
+
+
+def state_of_conv(conv_id: str) -> Dict[str, Any]:
+    """会话调度态(全 root 扫描): running / queued(position) / idle。"""
+    with _LOCK:
+        for root in list(_REG.keys()):
+            for s in _running(root):
+                if s.get("convId") == conv_id:
+                    return {"state": "running", "root": root,
+                            "executorId": str(s.get("executorId") or "")}
+            q = _QUEUE.get(root) or []
+            for i, e in enumerate(q):
+                if e.get("convId") == conv_id:
+                    ex = e.get("executor") or {}
+                    return {"state": "queued", "position": i + 1, "root": root,
+                            "executorId": str(ex.get("id") or "") if
+                            isinstance(ex, dict) else ""}
+    return {"state": "idle"}
     if entry:
         logger.warning("[scheduler] 队首缺 relaunch/loop, 丢弃 root=%s", root)
     return None

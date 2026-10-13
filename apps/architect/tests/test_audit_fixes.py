@@ -47,11 +47,11 @@ def test_a1_t2_execute_single_card_not_gated(arch_env, monkeypatch, tmp_path):
     assert res["task"].get("id") and res["task"]["status"] == ST.TASK_SAVED  # 默认保存
 
 
-def test_a1_chat_propose_still_gated_at_t2(arch_env):
-    """门禁仍适用于 chat task.propose 路径(有 LLM 可回炉)。"""
+def test_a1_chat_propose_gate_retired(arch_env):
+    """2610 挡位退役: T2 图门禁随档位分叉取消——chat task.propose 不再强制附图。"""
     from topoone_app_architect.agent.execution import exec_bridge as eb
     conv = store.ConversationsStore.create({"kind": "generic", "title": "T",
                                             "analysisMode": "T2"})
     r = eb.propose_task(conv, "T", "无图指令(无回车)",
                         executor_hint={"executorType": "cline-sdk"})
-    assert "error" in r and "逻辑图" in str(r.get("error"))
+    assert "error" not in r or "逻辑图" not in str(r.get("error"))

@@ -86,6 +86,16 @@ def tool_task_receipt(task_id: str, changed_files: Optional[List[str]] = None,
                   + "\n".join(f"- `{k}`: {v} 文件"
                               for k, v in sorted(dirs.items(), key=lambda x: -x[1])[:8]))
     md.append(brief or "(规约无验收要素)")
+    # 2610 核心资产守护 P1: 确定性 post-flight(changed_files ∩ 标记集)
+    try:
+        from .. import store as _st
+        from . import core_guard as _cg
+        pid = str(task.get("projectId") or "")
+        cg_md = _cg.postflight_md(pid, files) if pid else ""
+        if cg_md:
+            md.append(cg_md)
+    except Exception:  # noqa: BLE001 — 守护评估失败不阻塞回执
+        pass
     return "\n\n".join(md)
 
 

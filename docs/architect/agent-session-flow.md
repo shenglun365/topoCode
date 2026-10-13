@@ -2,6 +2,7 @@
 
 > 状态：2026-09-15 与代码对齐（cv-152~158 实证回归后）；**2026-09-22 增补**：流程相位机入图（①.5 相位硬闸 / flowState 派生缓存）——语义单源 `agent/governance/flow.py` + `agent-arch-gap-adoption-2609.md`，本图仅导航。
 > **2026-09-22 补充（实时通道架构, cv-221）**：推送=信号, 拉取=真相——WS 回合流负责交互渲染(不过缓冲)；SSE 通知统一入 store 消息缓冲(单消费者, 消费期判卫/折叠/按任务 150ms progress 折叠)；补偿拉取 4 触发点=回合收尾/SSE 重连/页面可见/切换会话。语义单源 `conversation-store.ts`(EventBuffer)。
+> **2026-10-11 增补（2610 执行器统一模型）**：见文末「执行器统一模型」节——conv.executorId 单源路由/主会话换绑解禁/quick·挡位体系退役/子会话可绑 architect。
 > 维护约定：流转变更（直通指令/执行器选定链/泵/守卫/相位闸/实时通路）须同步本图。
 
 ## 一、总览流程图
@@ -42,7 +43,7 @@ flowchart TD
 
     GU{③.5 目标理解 GU<br/>GoalProfile: L0 词表/策略库<br/>+L1 上下文(+L2 受限LLM 缺省关<br/>携带近期对话摘要+焦点事实面)<br/>→ policy.goal 决策表<br/>(8 动作含 present-options 候选菜单)} -->|回合指引注入| H
 
-    H[architect 回合<br/>能力文档+posture 判据(静态人格)<br/>+挡位指引 strict/quick+skill 文档] --> I{LLM 通道}
+    H[architect 回合<br/>能力文档+posture 判据(静态人格)<br/>+统一策略指引(2610 挡位退役)+skill 文档] --> I{LLM 通道}
     I -->|流式 llm.chat| I1[逐字 chunk]
     I -->|失败降级 llm.sync| I2[工具循环 run_tools_loop]
     I1 --> J
@@ -225,3 +226,72 @@ GU 事实面(focus.phase/focusTop)、flow_hints 帧计数、相位派生单源
 (flow.derive_flow_state 迁入 focus.derive_phase, flow.py 降级纯配置消费者)。
 命令式 push/pop 退场: 帧生灭=谓词真伪, 实体状态迁移即进出栈(崩溃自愈,
 无幽灵帧/泄漏面)。事件栈=实体时间戳近窗投影(60min/10 条), retry 指代用。
+
+## 执行器统一模型（2610，2026-10-11 裁决）
+
+> 裁决五条：① quick/strict 退役，executorId 吸收路由；② kind=coding 保留为
+> 「子会话」标记；③ T0-T2 挡位体系取消（显性设置+策略限制）；④ 主会话执行器
+> 随时换绑（在跑拒绝）；⑤ architect 入注册表与 coding 执行器平级。
+
+### 会话身份单源
+
+- **conv.executorId = 回合路由唯一决定者**：空/`"architect"` → 分析管线；
+  注册表 coding 执行器 → 直通通道。生效判定单源
+  `exec_bridge.uses_direct_channel` / `effective_executor_id`（R1 冻结缝）。
+- **①.55 直通分裂脑修复**：直通执行器取**会话绑定**（原 quick 挡取注册表
+  默认、无视绑定）；执行器缺失/禁用显式报错收束，不回落 architect 管线。
+- **legacy 兼容**：存量 `analysisMode=quick` 无绑定 → 读侧回落注册表默认
+  coding 执行器（不迁移数据）；analysisMode 列保留只读，REST /analysis-mode
+  端点退役。
+
+### 换绑（主/子会话通用）
+
+- `POST /sessions/{id}/executor`：任意注册表执行器（含 architect 内置条目
+  =切回分析管线，显式落点粘滞）；**在跑拒绝**（活跃任务/直通作业，复用
+  删除守卫 `active_execution_of`）；清 sessionRef（对话连续，cline 可复活）
+  + executorModel 重置。原「一次绑定不可换(换=克隆)」裁决退役，克隆收窄为
+  上下文分叉。
+- 空白态预置（cv-260 平移）：`executorId` 随首条消息创建时生效
+  （gate._create_payload），替代 analysisMode 预置；kind 缺省 `chat`→`generic`。
+
+### 挡位体系退役
+
+- `governance/gears.py` 收敛为**单一统一策略行**（原 T1 值：任务级预拆+
+  结构化指令+工具契约）；T0/T2 策略分叉、quick 豁免、实测封顶
+  （probe_hard_cap/apply_cap）全部退役。
+- 保留面（非挡位限制）：A 轴补偿（architect 模型档案→调度纪律/要素提示）、
+  P 轴叠加（流程相位）、模型能力测评/探测（ConfigPage/probe/tierProbed，
+  不再驱动策略选择）。
+- 任务级轮次下发：注册表 max_iterations 优先（用户/护栏调优），统一策略值
+  兜底（不再按挡封顶）。
+
+### 子会话统一
+
+- 子会话（kind=coding）可绑 **architect**（执行器主会话下挂独立分析上下文，
+  回合走分析管线）；子会话池按执行器分组（architect 组天然呈现）。
+- **feed-up 上投**：`POST /sessions/{sub_id}/feed-up` —— 子会话（如
+  architect 分析子会话）消息 → 主会话活跃执行器子会话/作业；交付核心单源
+  `agent/sessions/feeds.py`（feed / feed-up 共用，FeedError→4xx）。
+
+### 运行态/识别
+
+- 直通作业运行态纳入会话聚合：`proxy_state` 进 `_running_role_of`；
+  workState 注册置 running / 终态经 `process_stream.proxy_finish` 单点回落。
+- 会话列表新增 `effectiveExecutorId`（默认执行器解析一次防 N 次注册表读）；
+  FE 徽标按生效执行器渲染（legacy quick 无绑定也显示）。
+- roles 概念彻底清偿：roles 列僵尸化（T4 清退）后，执行器身份为唯一轴；
+  「roles 声明器」对话框更名语义=执行器换绑。
+
+### 新模块落位
+
+- `agent/execution/proxy_state.py`：直通句柄表/状态查询/停止/JobCard 回写
+  （自 proxy.py 拆分，转发导入保消费面路径不变）。
+- `agent/sessions/feeds.py`：投喂交付核心（feed/feed-up 共用）。
+- `agent/sessions/delete_cascade.py`：删除预览/执行守卫/级联（前序任务）。
+
+## 直通回合状态同步（2610，2026-10-12 增补）
+
+- **乐观→权威**：发送即 `optimisticRole`（独立 ref，activeMeta 保持纯权威）→ done 帧 `refreshActiveMeta` 落地后清除；dock 头部 chip 与状态条同源合并渲染（`optimisticRole || runningRole`）。
+- **事件驱动**：执行期增量走 SSE progress/conv-message；`syncRunningState` 由 `arch:turn-end` 驱动（执行期固定轮询已撤）；SSE 断连 → `realtimeDegraded` → 10s 轮询保底。
+- **请求合并**：`sessionService.list` 在飞共享+250ms 合并窗；SessionsPage 事件 400ms 防抖；`rehydrateProposals` 无需求卡不拉 /requirements。
+- 全量请求行日志 `[req]`（`ARCH_REQ_LOG=0` 静音）为轮询评估面。

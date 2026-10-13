@@ -293,8 +293,9 @@ def test_error_contract_shapes(tmp_path, monkeypatch):
     r = eb.propose_task(conv, "T-契约", "目标: x")
     assert r.get("ok") is True and r.get("id")
     # ③ REST err: HTTP 状态码与 body.code 一致(前端只解析 body.code, 修正透明)
-    resp = client.post(f"/api/architect/sessions/{conv['id']}/analysis-mode",
-                       json={"mode": "bogus"})
+    # (挡位端点已退役 2610, 用 PATCH 非法状态同探 400 形状)
+    resp = client.patch(f"/api/architect/sessions/{conv['id']}",
+                        json={"status": "bogus"})
     assert resp.status_code == 400 and resp.json()["code"] == 400
     resp404 = client.get("/api/architect/sessions/cv-nope/messages")
     assert resp404.status_code == 404 and resp404.json()["code"] == 404

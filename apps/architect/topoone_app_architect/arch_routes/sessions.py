@@ -119,8 +119,32 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
     rows = store.ConversationsStore.summaries(
         kind=kind or None, limit=limit, project_id=project or None,
         all_scopes=(scope == "all") or bool(project))
+    # 子会话计数(主行展开箭头依据): 过滤前从 coding 行按 parent 聚合, 零额外查询
+    _sub_counts: dict = {}
+    for c in rows:
+        if (c.get("kind") or "") == "coding":
+            pid = c.get("parentConvId") or ""
+            if pid:
+                _sub_counts[pid] = _sub_counts.get(pid, 0) + 1
     if kind != "coding":
         rows = [c for c in rows if (c.get("kind") or "") != "coding"]
+    # 生效执行器(2610 统一模型): executorId 单源; legacy quick 无绑定 → 默认
+    # coding 执行器(默认注册表解析一次, 防 400 行×注册表读)
+    _default_eid = ""
+    try:
+        from .agent_executors import default_executor
+        _default_eid = str((default_executor() or {}).get("id") or "")
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _eff_executor(c: dict) -> str:
+        eid = str(c.get("executorId") or "").strip()
+        if eid == "architect":
+            return ""
+        if eid:
+            return eid
+        return _default_eid if str(c.get("analysisMode") or "") == "quick" else ""
+
     items = []
     for c in rows:
         title = c.get("title") or ""
@@ -138,6 +162,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "flowState": c.get("flowState") or "",
             "roles": _roles_of(c),
             "executorId": c.get("executorId") or "",
+            "effectiveExecutorId": _eff_executor(c),
             "executorModel": c.get("executorModel") or "",
             "parentConvId": c.get("parentConvId") or "",
             "runningRole": _running_role_of(c),
@@ -151,6 +176,7 @@ async def list_sessions(kind: str = "", q: str = "", limit: int = 400, scope: st
             "createdAt": c.get("createdAt"),
             "updatedAt": c.get("updatedAt"),
             "projectId": c.get("projectId") or "",
+            "subCount": _sub_counts.get(c["id"], 0),
         }
         if q and q.strip():
             ql = q.strip().lower()
@@ -326,9 +352,10 @@ async def update_session(conv_id: str, request: Request):
         if rs not in REVIEW_STATES:
             return err(400, f"非法查看状态: {rs}(read|unread|awaiting_reply|error)")
         patch["reviewState"] = rs
-    # 执行器绑定不可经 PATCH 变更(一次绑定; 换=克隆)——显式拒绝防误用
+    # 执行器变更走专用换绑端点(在跑守卫/sessionRef 清理/模型重置)——PATCH 直改拒绝
     if "executorId" in data and str(data.get("executorId") or "").strip() != (conv.get("executorId") or ""):
-        return err(409, "执行器绑定不可修改(一次绑定)。请克隆会话绑定其他执行器。")
+        return err(409, "执行器变更请用换绑端点 POST /sessions/{id}/executor"
+                        "(在跑拒绝, 对话连续; architect 可切回分析管线)。")
     tags = _norm_tags(data)
     if tags is not None:
         patch["tags"] = tags
@@ -346,61 +373,41 @@ async def update_session(conv_id: str, request: Request):
     return ok(result)
 
 
+@router.get("/sessions/{conv_id}/delete-preview")
+async def delete_preview(conv_id: str):
+    """删除预览(主会话删除前置检查): 级联清单 + 可删性裁决。
+
+    语义单源在 agent/sessions/delete_cascade.py(用户裁决 2610):
+    需求完成情况仅展示不校验; 执行器会话执行中 → deletable=false + blockers;
+    共享需求(克隆链)保留。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
+    return ok(_delete_preview(conv))
+
+
 @router.delete("/sessions/{conv_id}")
 async def delete_session(conv_id: str):
-    if not store.ConversationsStore.get(conv_id):
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
         return err(404, "会话不存在")
+    # 执行器会话必须执行完成(用户裁决): 本会话或任一子孙会话执行中 → 拒绝
+    # 整树删除(含关联需求与全部子会话); 先停止/等待完成后再删。
+    blockers = _delete_blockers(conv_id)
+    if blockers:
+        names = "; ".join(f"「{b['title']}」({b['status']})" for b in blockers[:5])
+        return err(409, f"执行中的执行器会话未完成, 不能删除: {names}。请先停止或等待执行完成。")
+    parent_id = (conv.get("parentConvId") or "").strip()
     cascade = _delete_session_cascade(conv_id)
+    # 单独删除 coding 子会话后: 主会话活跃子会话指针悬空 → 清空回退默认
+    if parent_id:
+        try:
+            parent = store.ConversationsStore.get(parent_id)
+            if parent and str(_meta_of(parent).get("activeCodingSession") or "") == conv_id:
+                _set_active_coding_session(parent_id, "")
+        except Exception:  # noqa: BLE001
+            pass
     return ok({"deleted": True, "id": conv_id, "cascadeConversations": cascade})
-
-
-def _delete_session_cascade(conv_id: str) -> int:
-    """级联删除会话及其关联数据条目(左侧删除 → 库内不留孤儿):
-
-    - 停止该会话运行中作业(账本将随消息删除, 先终态化避免 runner 侧跑飞)
-    - 递归删除 coding 子会话(parent_conv_id 链)
-    - 需求: sourceConversationId=本会话且未定稿(draft/cancelled)的提案 → 删
-      (孤儿提案无演进上下文); 已定稿/完结(ready/done)是项目资产 → 保留,
-      仅清空悬空 ownerConv 引用
-    - 本体 + 消息(含 job_* 账本消息)随 ConversationsStore.delete
-
-    返回级联删除的会话数(含自身)。"""
-    from ..agent.execution import exec_bridge
-    try:
-        exec_bridge.stop(conv_id, reason="deleted")  # 无运行作业时为 no-op
-    except Exception:  # noqa: BLE001 — runner 不可达不阻断删除
-        pass
-    # v2: 活跃任务终态化(runner 侧停止) + 任务行级联删除
-    try:
-        from ..store import TasksStore
-        for t in TasksStore.of_conv(conv_id):
-            if (t.get("status") or "") in ("running", ST.TASK_WAITING_INPUT, ST.TASK_PENDING_CONFIRM):
-                if t.get("runnerJobId"):
-                    try:
-                        exec_bridge._runner(f"/api/implement/{t['runnerJobId']}/finish",
-                                            {"keepWorktree": True}, timeout=10.0)
-                    except Exception:  # noqa: BLE001
-                        pass
-        TasksStore.delete_by_conv(conv_id)
-    except Exception:  # noqa: BLE001
-        pass
-    # 需求跟踪台账: 清该会话(直接/主线)的条目——主会话删除时其子会话条目
-    # 经 main_conversation_id 一并清除; 递归子会话调用各清残留(失败不阻断)
-    try:
-        from ..store.tracking import TrackingItemsStore
-        TrackingItemsStore.delete_by_conversation(conv_id)
-    except Exception:  # noqa: BLE001
-        pass
-    n = 0
-    for sub in store.ConversationsStore.by_parent(conv_id):
-        n += _delete_session_cascade(sub["id"])
-    for r in store.RequirementsStore.all():
-        if r.get("sourceConversationId") == conv_id and (r.get("status") or "draft") in ("draft", "cancelled"):
-            store.RequirementsStore.delete(r["id"])
-        elif r.get("ownerConv") == conv_id:
-            store.RequirementsStore.update(r["id"], {"ownerConv": ""})
-    store.ConversationsStore.delete(conv_id)
-    return n + 1
 
 
 @router.get("/sessions/{conv_id}/messages")
@@ -500,15 +507,16 @@ async def session_context(conv_id: str):
 
 
 def _roles_of(conv: dict) -> list:
-    """legacy(T4 清退): 会话角色字段已僵尸化——恒回默认值保持 API 兼容。
-    实际会话身份: executor_id 绑定(工具栏) + runningRole 推导(work_state)。"""
+    """legacy(T4 清退→2610 统一模型彻底清偿): 会话角色字段已僵尸化——恒回
+    默认值保持 API 兼容。会话身份单源=conv.executorId(architect/coding 执行器)。"""
     return ["architect"]
 
 
 def _running_role_of(conv: dict) -> dict:
-    """running 归属推导(纯提示): v2 活跃任务(running|waiting_input) → coding+执行器。
+    """running 归属推导(纯提示): v2 活跃任务(running|waiting_input) → coding+执行器;
+    直通作业(执行器持球会话, 2610 W5) → coding+直通执行器。
 
-    P6 单读: 仅 arch_tasks 驱动(旧 meta.jobs 账本写路径已清退, 不再双读)。"""
+    P6 单读: 仅 arch_tasks + proxy 内存句柄驱动(旧 meta.jobs 账本写路径已清退)。"""
     try:
         from ..agent.execution import exec_bridge as _eb
         t = _eb.active_task_of(conv["id"]) if conv.get("id") else None
@@ -520,6 +528,28 @@ def _running_role_of(conv: dict) -> dict:
             if isinstance(t.get("progress"), dict):
                 out["progress"] = t["progress"]
             return out
+        from ..agent.execution.proxy import proxy_state as _ps
+        ps = _ps(conv["id"]) if conv.get("id") else {}
+        if ps.get("active"):
+            # 2610 P1: state=idle(回合收束等输入) → waiting_input 口径,
+            # FE 区分「执行中」与「等待输入」
+            return {"role": "coding",
+                    "executorId": ps.get("executorType") or "",
+                    "status": ("waiting_input"
+                               if str(ps.get("state") or "") == "idle" else "running"),
+                    "taskId": "",
+                    "jobId": ps.get("jobId") or ""}
+        # 2610 F5b: 排队中(idle 让坑后其它会话占坑 / 启动排队) → queued 口径
+        try:
+            from ..agent.execution import executor_scheduler as _sched
+            st = _sched.state_of_conv(conv["id"]) if conv.get("id") else {}
+            if st.get("state") == "queued":
+                return {"role": "coding",
+                        "executorId": str(st.get("executorId") or ""),
+                        "status": "queued", "taskId": "",
+                        "queuedPosition": int(st.get("position") or 0)}
+        except Exception:  # noqa: BLE001
+            pass
     except Exception:  # noqa: BLE001
         pass
     return {"role": "architect", "executorId": "", "status": ""}
@@ -610,17 +640,23 @@ async def distill_errors_route(conv_id: str, limit: int = 20):
 
 @router.post("/sessions/{conv_id}/bind")
 async def bind_executor(conv_id: str, request: Request):
-    """绑定 coding 执行器——一次绑定不可换(换=克隆)。architect 角色恒有, 不在绑定面。"""
+    """首次绑定 coding 执行器(architect 为缺省执行器, 无需绑定)。
+
+    已绑定 coding 执行器 → 409 引导换绑端点(2610 统一模型: 可随时更换)。"""
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
-    if (conv.get("executorId") or "").strip():
-        return err(409, f"已绑定执行器 {conv['executorId']}(一次绑定不可切换)。"
-                        "请克隆会话绑定其他执行器。")
+    from ..agent.execution.exec_bridge import effective_executor_id
+    cur = effective_executor_id(conv)
+    if cur:
+        return err(409, f"已绑定执行器 {cur}。换绑请用 POST /sessions/{conv_id}/executor"
+                        "(在跑拒绝, 对话连续)。")
     data = await request.json()
     executor_id = str(data.get("executorId") or "").strip()
     if not executor_id:
         return err(400, "executorId 必填")
+    if executor_id == "architect":
+        return err(400, "architect 为缺省执行器(无需绑定); 换绑请用 /executor 端点")
     from .agent_executors import load_executors
     ex = next((e for e in load_executors() if e.get("id") == executor_id), None)
     if not ex:
@@ -669,25 +705,9 @@ async def set_session_model(conv_id: str, request: Request):
                                   else "；下次执行生效")})
 
 
-@router.post("/sessions/{conv_id}/analysis-mode")
-async def set_analysis_mode(conv_id: str, request: Request):
-    """切换会话分析挡位(即时生效于本会话后续回合)。
-
-    body: {mode} — quick=T0 直通车 | strict/auto=按执行器能力自动 |
-    T0-T2=钉死指定档(刻度细则见 agent/governance/gears.py; 旧 T3/T4 归一)。
-    """
-    conv = store.ConversationsStore.get(conv_id)
-    if not conv:
-        return err(404, "会话不存在")
-    data = await request.json()
-    mode = str(data.get("mode") or "").strip()
-    from ..agent.governance.gears import GEAR_MODES, gear_note, normalize_mode
-    mode = normalize_mode(mode)
-    if mode not in GEAR_MODES:
-        return err(400, f"mode 须为 {'/'.join(GEAR_MODES)}")
-    store.ConversationsStore.update(conv_id, {"analysisMode": mode})
-    return ok({"conversationId": conv_id, "analysisMode": mode,
-               "summary": gear_note(mode)})
+# 分析挡位端点(POST /analysis-mode)已退役(2610 执行器统一模型):
+# quick/strict 由 conv.executorId 吸收——换绑执行器见 POST /sessions/{id}/executor。
+# analysisMode 列保留 legacy 读侧兼容(quick 无绑定 → 默认 coding 执行器)。
 
 
 @router.post("/sessions/{conv_id}/isolated")
@@ -880,6 +900,9 @@ async def list_coding_sessions(conv_id: str):
     subs = store.ConversationsStore.by_parent(conv_id)
     active = (_meta_of(conv).get("activeCodingSession") or "")
     # P6: 旧 jobs 账本写路径已清退——作业状态不再从 meta.jobs 推导(键保留, 值空)。
+    # 2610 统一模型: execution=真实运行态(删除守卫/池禁用判定同源
+    # delete_cascade.active_execution_of); runningRole 保留为兼容 stub。
+    from ..agent.sessions.delete_cascade import active_execution_of
     out = []
     for s in subs:
         out.append({"id": s["id"], "title": s.get("title") or "coding 子会话",
@@ -888,6 +911,7 @@ async def list_coding_sessions(conv_id: str):
                     "hasSessionRef": bool(s.get("sessionRef")),
                     "active": s["id"] == active,
                     "runningRole": {"role": "architect", "executorId": "", "status": ""},
+                    "execution": active_execution_of(s["id"]),
                     "jobId": "",
                     "jobStatus": "",
                     "status": s.get("status") or "active",
@@ -921,28 +945,44 @@ async def create_coding_session(conv_id: str, request: Request):
     return ok(_conv_api(store.ConversationsStore.get(sub["id"]) or sub))
 
 
-@router.post("/sessions/{sub_id}/executor")
-async def switch_sub_executor(sub_id: str, request: Request):
-    """子会话换执行器(类比换模型: 下回合生效, 对话连续)——上下文真相源=
-    子会话消息流, 换绑只清 sessionRef; 直通作业在跑时拒绝(先停止)。"""
-    sub = store.ConversationsStore.get(sub_id)
-    if not sub:
-        return err(404, "子会话不存在")
-    if (sub.get("kind") or "") != "coding":
-        return err(400, "仅 coding 子会话可换绑执行器")
+@router.post("/sessions/{conv_id}/executor")
+async def switch_executor(conv_id: str, request: Request):
+    """换绑会话执行器(主会话/子会话通用, 2610 执行器统一模型)。
+
+    - 上下文真相源=消息流: 换绑只清执行器引用(sessionRef)+模型白名单
+      重置, 对话连续(cline 类 sessionRef 可复活续上下文);
+    - body: {executorId} 注册表任意执行器, 含 architect 内置条目
+      (=切回分析管线, 显式落点粘滞);
+    - 在跑守卫: 活跃任务/直通作业执行中 → 拒绝(先停止或等待完成)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "会话不存在")
     body = await request.json() or {}
     eid = str(body.get("executorId") or "").strip()
     if not eid:
         return err(400, "executorId 必填")
-    from .agent_executors import load_executors
-    if not any(e.get("id") == eid for e in load_executors() or []):
+    from .agent_executors import load_executors, ARCHITECT_EXECUTOR_ID
+    if eid != ARCHITECT_EXECUTOR_ID and not any(
+            e.get("id") == eid and e.get("enabled", True)
+            for e in load_executors() or []):
         return err(400, f"执行器不存在或未启用: {eid}")
-    from ..agent.execution.proxy import proxy_state
-    running = proxy_state(sub_id)
-    if running.get("active"):
-        return err(400, "该子会话执行器会话进行中——请先停止再换绑执行器")
-    store.ConversationsStore.update(sub_id, {"executorId": eid, "sessionRef": ""})
-    return ok({"subId": sub_id, "executorId": eid, "sessionRef": ""})
+    from ..agent.sessions.delete_cascade import active_execution_of
+    st = active_execution_of(conv_id)
+    if st:
+        return err(400, f"该会话执行中({st})——请先停止或等待完成再换绑执行器")
+    target = eid  # architect 显式落点(粘滞, 见 effective_executor_id)
+    store.ConversationsStore.update(conv_id, {"executorId": target,
+                                              "sessionRef": "",
+                                              "executorModel": ""})
+    from ..agent.execution.exec_bridge import effective_executor_id
+    note = ("已切回 architect 分析管线" if target == ARCHITECT_EXECUTOR_ID
+            else f"执行器已切换为 {target}")
+    if effective_executor_id(conv) == ("" if target == ARCHITECT_EXECUTOR_ID else target) \
+            and (conv.get("executorId") or "").strip() == target:
+        note = "执行器未变化"
+    return ok({"conversationId": conv_id, "executorId": target,
+               "sessionRef": "", "executorModel": "",
+               "summary": note + "；下回合生效, 对话连续"})
 
 
 @router.post("/sessions/{conv_id}/coding-sessions/{sub_id}/activate")
@@ -975,76 +1015,61 @@ async def mark_sub_seen(conv_id: str):
 from ..agent.sessions.coding import (_meta_of, _set_active_coding_session,
                                      _summarize_for_coding)
 
+# 2610 删除域迁 agent/sessions/delete_cascade.py(预览/执行守卫/级联; 行为等价)
+# 下划线别名 = 既有测试接缝(test_exec_implement 直引 S._delete_session_cascade)
+from ..agent.sessions.delete_cascade import (
+    delete_blockers as _delete_blockers,
+    delete_preview as _delete_preview,
+    delete_session_cascade as _delete_session_cascade,
+)
+
+
+# 投喂域(2610 统一模型)迁 agent/sessions/feeds.py(交付核心/feed-up 解析);
+# 路由层只做 HTTP 编排, 错误经 FeedError 转译
+from ..agent.sessions.feeds import (
+    FeedError as _FeedError, deliver_feed as _deliver_feed_core,
+    feed_up_target as _feed_up_target, resolve_source_text as _resolve_src,
+    summarize_if_asked as _summarize_if_asked)
+
 
 @router.post("/sessions/{conv_id}/feed")
 async def feed_to_coding(conv_id: str, request: Request):
     """投喂门: 主会话消息 → 规则过滤 → 落活跃 coding 子会话(审计 feedFrom) → 投递活跃作业。
 
-    body: {messageId} 定向转发历史消息 | {text} 直发文本。
-    过滤规则(确定性): 剥离 hint 本地提示/工具轨迹标记, 只留正文。
+    body: {messageId} 定向转发历史消息 | {text} 直发文本; {summarize?}。
     """
-    from ..agent.execution import exec_bridge
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "会话不存在")
     body = await request.json()
-    text, src_msg_id = "", ""
-    if body.get("messageId"):
-        m = next((x for x in store.ConversationsStore.messages(conv_id, limit=200)
-                  if x.get("id") == body["messageId"]), None)
-        if not m:
-            return err(404, "消息不存在")
-        if (m.get("meta") or {}).get("kind") == "hint":
-            return err(400, "本地提示消息不可转发")
-        text = (m.get("content") or "").strip()
-        src_msg_id = m.get("id") or ""
-    else:
-        text = str(body.get("text") or "").strip()
-    if not text:
-        return err(400, "转发内容为空")
+    try:
+        text, src_msg_id = _resolve_src(conv_id, body)
+        text, summarized = await _summarize_if_asked(body, text)
+        data = await _deliver_feed_core(conv, text, src_conv_id=conv_id,
+                                        src_msg_id=src_msg_id,
+                                        summarized=summarized)
+    except _FeedError as e:
+        return err(400, str(e))
+    return ok(data)
 
-    summarized = False
-    if body.get("summarize") and text:
-        text, summarized = await _summarize_for_coding(text)
 
-    meta = _meta_of(conv)
-    active_sub = meta.get("activeCodingSession") or ""
-    delivered, queued, feed_note = False, False, ""
-    # P3: 投喂目标 = 活跃 v2 任务(running/waiting_input → task_input 转达/排队)
-    task = exec_bridge.active_task_of(conv_id)
-    if task and (task.get("status") or "") in ("running", ST.TASK_WAITING_INPUT):
-        # 投喂路径自带子会话审计落流 → echo=False 防主流双写(R4 回声)
-        res = await asyncio.to_thread(exec_bridge.task_input, task["id"], text,
-                                      echo=False)
-        if res.get("ok"):
-            delivered, queued = True, bool(res.get("queued"))
-        else:
-            e = str(res.get("error") or "")
-            if e not in ("task-not-active", "runner 不可达"):
-                return err(400, f"投递失败: {e}")
+@router.post("/sessions/{sub_id}/feed-up")
+async def feed_up_from_sub(sub_id: str, request: Request):
+    """子会话产出上投(2610 统一模型): 子会话(如 architect 分析子会话)消息 →
+    主会话活跃执行器子会话/作业——分析结论回 flow 编码执行。
 
-    # 落子会话消息流(审计: 哪些主会话信息进入了 coding 上下文)
-    if active_sub:
-        store.ConversationsStore.append_message({
-            "id": store.next_id("m"), "conversationId": active_sub,
-            "role": "user", "time": _ts(), "content": text[:12000],
-            "projectId": (conv.get("projectId") or ""),
-            "meta": {"kind": "feed", "feedFrom": {"convId": conv_id,
-                                                  "messageId": src_msg_id,
-                                                  "at": _ts(),
-                                                  "summarized": summarized,
-                                                  "delivered": delivered, "queued": queued}},
-        })
-        feed_note = f"；已记录到子会话 {active_sub}"
-    else:
-        feed_note = "；(无活跃子会话——仅投递作业)"
-    summary = ("📥 已排队转达(回合结束自动续跑)" if queued
-               else "➡️ 已转达作业" if delivered
-               else "已记录(当前无活跃作业——下次 /执行 后生效于新上下文)")
-    if summarized:
-        summary = "🧠 (摘要) " + summary
-    return ok({"delivered": delivered, "queued": queued, "summarized": summarized,
-               "activeSub": active_sub, "summary": summary + feed_note})
+    body: {messageId} 定向转发子会话消息 | {text} 直发文本; {summarize?}。"""
+    body = await request.json()
+    try:
+        _sub, main_conv = _feed_up_target(sub_id)
+        text, src_msg_id = _resolve_src(sub_id, body)
+        text, summarized = await _summarize_if_asked(body, text)
+        data = await _deliver_feed_core(main_conv, text, src_conv_id=sub_id,
+                                        src_msg_id=src_msg_id,
+                                        summarized=summarized)
+    except _FeedError as e:
+        return err(400, str(e))
+    return ok(data)
 
 
 @router.post("/sessions/{conv_id}/probe")
@@ -1283,13 +1308,22 @@ async def proxy_state_endpoint(conv_id: str):
 
 
 @router.post("/sessions/{conv_id}/proxy-stop")
-async def proxy_stop_endpoint(conv_id: str):
+async def proxy_stop_endpoint(conv_id: str, request: Request = None):
     """停止直通执行器当前回合(cv-273)。
 
     主动中断: runner /abort 中止本轮; 会话行 sessionRef 保留——发消息即复活
-    同执行器会话(暂停/恢复语义, 上下文延续)。无活跃直通会话 → 404。"""
+    同执行器会话(暂停/恢复语义, 上下文延续)。无活跃直通会话 → 404。
+    2610 cv-15: mode("abort"/"finish") 按钮语义显式覆盖——running 态允许
+    直接结束会话, 不必先暂停; 缺省按作业状态自动分型(原行为)。"""
     from ..agent.execution.proxy import proxy_stop
-    r = proxy_stop(conv_id)
+    mode = ""
+    if request is not None:
+        try:
+            data = await request.json() or {}
+            mode = str(data.get("mode") or "")
+        except Exception:  # noqa: BLE001 — 空 body/非 JSON 走自动分型
+            mode = ""
+    r = proxy_stop(conv_id, mode=mode)
     if not r.get("ok"):
         return err(404 if "无进行中" in (r.get("error") or "") else 502,
                    r.get("error") or "停止失败")

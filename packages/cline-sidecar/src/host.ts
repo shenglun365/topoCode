@@ -805,11 +805,13 @@ export class ClineCoreHost {
       tools.push(createTool({
         name: "topocode_asset_map",
         description:
-          "查询本项目的组件架构资产地图（组件目录/语义资产/归属文件）。写码前先查，确保修改符合架构边界。query 支持组件名或关键词。",
+          "查询本项目的组件架构资产地图（组件目录/语义资产/归属文件）。写码前先查，确保修改符合架构边界。" +
+          "⚠️ 组件名多为中文（如「编译核心引擎」「AI智能体服务」）：英文技术术语（engine/agent/kb 等）先译成中文再查，" +
+          "或用空 query 获取全量组件总览后按名下钻；逐条查英文原词极易全部落空。",
         inputSchema: {
           type: "object",
           properties: {
-            query: { type: "string", description: "组件名或关键词" },
+            query: { type: "string", description: "组件名或关键词（中文优先；传空字符串=全量总览）" },
             limit: { type: "number", description: "返回条数，默认 10" },
           },
           required: ["query"],
@@ -817,15 +819,13 @@ export class ClineCoreHost {
         timeoutMs: 15000,
         execute: async (input: { query: string; limit?: number }, _ctx?: { sessionId?: string }) => {
           try {
-            const resp = await fetch(`${params.archUrl}/api/architect/kb/assets/search`, {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                query: input?.query || "",
-                limit: input?.limit ?? 10,
-                projectId: params.projectId ?? "",
-              }),
-            });
+            // 2610 P3 修复: 端点为 GET /kb/assets/search?q=&project=(query 参数)——
+            // 原 POST 打 GET 端点恒 405(执行器实测三连 405 实证); limit 工具侧截断
+            const qs = new URLSearchParams({ q: input?.query || "" });
+            if (params.projectId) qs.set("project", params.projectId);
+            const resp = await fetch(
+              `${params.archUrl}/api/architect/kb/assets/search?${qs.toString()}`,
+              { method: "GET", headers: { Authorization: headers.Authorization } });
             const text = await resp.text();
             if (!resp.ok) {
               return {
@@ -834,7 +834,21 @@ export class ClineCoreHost {
                 success: false,
               };
             }
-            return { query: input?.query || "", result: text, success: true };
+            let body = text;
+            try {
+              const data = JSON.parse(text);
+              const rows = Array.isArray(data?.data) ? data.data : [];
+              const lim = Math.max(1, Number(input?.limit) || 10);
+              const clipped = rows.slice(0, lim);
+              // 2610 F2: 空结果显式引导(执行器实证: 英文关键词撞中文名全落空后
+              // 误判「整库为空」)——避免错误结论, 给出下一步动作
+              const hint = (rows.length === 0 && (input?.query || "").trim())
+                ? "（无命中——组件名多为中文，请译成中文关键词重试，或传空 query 获取全量组件总览）"
+                : "";
+              body = JSON.stringify({ ...data, data: clipped, total: rows.length,
+                                      hint });
+            } catch { /* 原样返回 */ }
+            return { query: input?.query || "", result: body, success: true };
           } catch (e) {
             return {
               query: input?.query || "",

@@ -45,10 +45,15 @@ async def ws_connect(base: str, job_id: str, since: int,
         return None
 
 
-def _persist(job_id: str, ev: dict) -> None:
-    """B1 事件留痕(architect 自持): 会话浏览器/审计数据源, 失败不阻塞。"""
+def _persist(job_id: str, ev: dict, conv_id: str = "") -> None:
+    """B1 事件留痕(architect 自持): 会话浏览器/审计数据源, 失败不阻塞。
+
+    2610 B1: conv_id 注入 extra——事件行自带会话锚点, job↔conv 映射单源
+    (此前 exec_sessions 需任务行/session_ref/启动卡三层回退推断)。"""
     try:
         from ...store import exec_events
+        if conv_id:
+            ev = {**ev, "conversationId": conv_id}
         exec_events.record_event(job_id, ev)
     except Exception:  # noqa: BLE001
         pass
@@ -62,6 +67,7 @@ async def run_event_pump(*, base: str, job_id: str,
                          on_terminal: Optional[Callable[[str], bool]] = None,
                          on_finished: Optional[Callable[[str], None]] = None,
                          poll_interval: float = POLL_INTERVAL,
+                         conv_id: str = "",
                          ) -> None:
     """泵主循环(订阅优先 + 校准兜底), 终态返回。
 
@@ -92,7 +98,7 @@ async def run_event_pump(*, base: str, job_id: str,
                     if int(ev.get("seq") or 0) <= last_seq:
                         continue
                     last_seq = int(ev.get("seq") or 0)
-                    _persist(job_id, ev)
+                    _persist(job_id, ev, conv_id)
                     on_event(ev)
                     if on_terminal(ev.get("kind") or ""):
                         return
@@ -126,7 +132,7 @@ async def run_event_pump(*, base: str, job_id: str,
                 if int(ev.get("seq") or 0) <= last_seq:
                     continue
                 last_seq = max(last_seq, int(ev.get("seq") or 0))
-                _persist(job_id, ev)
+                _persist(job_id, ev, conv_id)
                 on_event(ev)
             status = snap.get("status") or ""
             if status in ("done", "failed", "stopped"):

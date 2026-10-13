@@ -21,7 +21,7 @@ const props = defineProps<{
            outputTokens?: number; turnCount?: number; folded?: boolean } | null
 }>()
 
-const emit = defineEmits<{ stop: [] }>()
+const emit = defineEmits<{ stop: [mode?: 'abort' | 'finish'] }>()
 
 const state = computed(() => props.liveState || props.payload.jobState || 'running')
 const stateView = computed(() => ({
@@ -65,13 +65,24 @@ const showDetail = ref(false)
       >
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" /></svg>
       </button>
+      <!-- 2610 cv-15: 按钮跟随状态——running=暂停+结束(可后续会话恢复);
+           idle=仅结束会话(暂停无意义, 发消息即继续); ended=无按钮 -->
       <button
-        v-if="alive"
+        v-if="state === 'running'"
         class="btn btn-xs btn-ghost shrink-0"
         :disabled="stopping"
         title="暂停本轮执行——会话保留，发消息即恢复"
-        @click="emit('stop')"
-      >{{ stopping ? '处理中…' : '⏸ 暂停 / ⏹ 结束' }}</button>
+        @click="emit('stop', 'abort')"
+      >⏸ 暂停</button>
+      <button
+        v-if="state === 'running' || state === 'idle'"
+        class="btn btn-xs btn-ghost shrink-0"
+        :disabled="stopping"
+        :title="state === 'idle'
+          ? '结束直通会话——下条消息将开启全新会话'
+          : '结束本轮与会话'"
+        @click="emit('stop', 'finish')"
+      >{{ stopping ? '处理中…' : state === 'idle' ? '⏹ 结束会话' : '⏹ 结束' }}</button>
     </div>
     <!-- cv-285e: 过程条并入任务卡(轨迹/turnCount/文本尾, SSE 实时)——feed 底部独立条已撤 -->
     <ExecutorProcessStrip

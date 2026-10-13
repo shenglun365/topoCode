@@ -172,8 +172,8 @@ def test_routing_segment_retired(arch_env):
                                        [], [], "", None)
     systems = [m["content"] for m in msgs if m["role"] == "system"]
     assert not any("工作模式(通用 agent 路由)" in s for s in systems)
-    # A 轴挡位文案仍在(挡位挡名 + req.propose 指引为 gear note 特征)
-    assert any("挡" in s and "req.propose" in s for s in systems)
+    # 统一策略文案仍在(策略注含 req.propose 指引; 2610 挡位退役)
+    assert any("req.propose" in s for s in systems)
 
 
 # ── GU-4/5 批乙: forced 可配置 / 策略库配置化 / L2 ────────────────────

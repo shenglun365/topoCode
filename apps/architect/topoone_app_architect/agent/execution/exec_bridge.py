@@ -19,6 +19,15 @@ import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
 
+from ..tools.protocol import (
+    DECLARED_REPLICATION_MARK,
+    IMPLEMENT_DONE_MARK,
+    NEED_INPUT_MARK,
+)
+
+# runner 执行器工具回声清洗(协议正则单源; 原同文件两处字面重复)
+_RUNNER_ECHO_RE = r'\{"result"\s*:\s*"outcome recorded[^}]*\}'
+
 from ... import store
 from ...store import states as ST
 from ...agent.execution.runner_client import RunnerClient
@@ -154,7 +163,7 @@ def _copy_impl_flag(worktree: str, changed_files: List[str],
                   or f.lower().startswith(("tests/", "test/"))][:10]
     if not test_files:
         return ""
-    declared = "复制实现" in (turn_text or "")
+    declared = DECLARED_REPLICATION_MARK in (turn_text or "")
     flagged = []
     for rel in test_files:
         path = os.path.join(worktree, rel)
@@ -695,9 +704,9 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
     task = store.TasksStore.get(task_id) or {}
     title = task.get("title") or "任务"
     if kind == "input_required":
-        clean = text.replace("[[NEED_INPUT]]", "").strip() or "(等待你的输入)"
+        clean = text.replace(NEED_INPUT_MARK, "").strip() or "(等待你的输入)"
         # cv-203 P4: 执行器工具回声 JSON 不入正文(实证: outcome recorded 泄漏)
-        clean = re.sub(r'\{"result"\s*:\s*"outcome recorded[^}]*\}', "", clean)
+        clean = re.sub(_RUNNER_ECHO_RE, "", clean)
         clean = clean.strip() or "(等待你的输入)"
         # 里程碑报告识别(环节十一): R3.3 双轨——JSON 块契约优先, 固定三行文本
         # 兼容降级(architect 侧解析层, D4 不动 runner); 改动文件并回需求边界
@@ -801,12 +810,12 @@ def _handle_task_event(ev: dict, ctx: dict) -> None:
         if (store.TasksStore.get(task_id) or {}).get("status") in (
                 "cancelled", "ignored"):
             return
-        clean = text.replace("[[IMPLEMENT_DONE]]", "").strip()
-        clean = re.sub(r'\{"result"\s*:\s*"outcome recorded[^}]*\}', "", clean).strip()
+        clean = text.replace(IMPLEMENT_DONE_MARK, "").strip()
+        clean = re.sub(_RUNNER_ECHO_RE, "", clean).strip()
         # cv-203 P2: 摘要质量降级——计划重印/空摘要(与上轮待输入正文同文或
         # 混入 [[NEED_INPUT]])不作为完成正文展示, 以变更文件与验收为准
         if (str(ev.get("summaryQuality") or "") == "suspect"
-                or "[[NEED_INPUT]]" in clean):
+                or NEED_INPUT_MARK in clean):
             clean = ("⚠️ 执行器未附规范完成摘要(完成消息混入计划/待输入正文)——"
                      "以变更文件与验收简报为准。")
         changed = ev.get("changedFiles") or []
@@ -1040,12 +1049,21 @@ async def _task_pump(conv_id: str, task_id: str, job_id: str, rid: str,
             store.TasksStore.finish(
                 task_id, "cancelled" if status == "stopped" else status)
             _publish_task(conv_id, store.TasksStore.get(task_id) or {})
+        # 2610 P2: 核心资产评估落地(runner diff → 评估卡+units 沉淀; 门控同键)
+        try:
+            from .core_assess import files_of_job_diff, land_core_assessment
+            land_core_assessment(
+                conv_id, str(t.get("projectId") or ""),
+                files_of_job_diff(job_id), source=f"task:{task_id}")
+        except Exception:  # noqa: BLE001 — 评估失败不影响终态收口
+            pass
 
     try:
         await _pumps.run_event_pump(
             base=RUNNER_BASE, job_id=job_id, runner=_runner,
             on_event=on_event, on_snapshot=on_snapshot,
-            on_lost=on_lost, on_finished=on_finished)
+            on_lost=on_lost, on_finished=on_finished,
+            conv_id=conv_id)   # 2610 B1: 事件留痕带会话锚点
     except Exception as e:  # noqa: BLE001 — 泵核重抛(cv-264): 记因后吞,
         # 防 create_task unretrieved 噪音; 句柄清理由 finally 统一收口
         logger.warning("[task-pump] conv=%s job=%s 崩溃退出: %s",
@@ -1134,6 +1152,47 @@ def _task_chain_brief(conv_id: str, current_task_id: str) -> str:
 
 
 
+ARCHITECT_EXECUTOR_ID = "architect"
+
+
+def effective_executor_id(conv: Optional[dict]) -> str:
+    """会话当前执行器 id(""=architect)——回合路由单源(2610 执行器统一模型)。
+
+    conv.executorId 为唯一真相源: 空/"architect" → architect 分析管线;
+    注册表 coding 执行器 → 直通通道。legacy 兼容: analysisMode=quick 且
+    无绑定的存量会话 → 读侧回落注册表默认 coding 执行器(不迁移数据)。
+
+    conv 为 None/缺失时恒回 ""(architect)。
+
+    R1 合规: 本模块为冻结缝(可引 arch_routes); execution 层其他模块与
+    orchestrator 经本函数取值, 不直引注册表。
+    """
+    eid = str(((conv or {}).get("executorId")) or "").strip()
+    if eid == ARCHITECT_EXECUTOR_ID:
+        return ""          # 显式 architect(换绑落点): 粘滞, 不走 legacy 回落
+    if eid:
+        return eid
+    if str((conv or {}).get("analysisMode") or "") == "quick":
+        try:
+            from ...arch_routes.agent_executors import default_executor
+            return str((default_executor() or {}).get("id") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+    return ""
+
+
+def uses_direct_channel(conv: Optional[dict]) -> bool:
+    """会话是否直通(coding 执行器持球)——路由分支判定(2610 统一模型)。
+
+    绑定 coding 执行器 → True; 显式 architect(换绑落点) → False(粘滞,
+    不走 legacy 回落); 空绑定 + legacy analysisMode=quick → True(直通分支
+    对缺失执行器显式报错收束, 不回落 architect 管线)。"""
+    eid = str(((conv or {}).get("executorId")) or "").strip()
+    if eid:
+        return eid != ARCHITECT_EXECUTOR_ID
+    return str((conv or {}).get("analysisMode") or "") == "quick"
+
+
 def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Optional[dict]:
     """执行器 id → 注册表配置提示(model/端口/超时等)——v2 任务模型用。
 
@@ -1142,6 +1201,9 @@ def executor_hint_by_id(executor_id: str, conv: Optional[dict] = None) -> Option
     """
     eid = (executor_id or "").strip()
     if not eid:
+        return None
+    # architect=分析管线本体, 非任务执行器(无 runner 下发面) → 无 coding hint
+    if eid == "architect":
         return None
     conv_model = ((conv or {}).get("executorModel") or "").strip()
     try:

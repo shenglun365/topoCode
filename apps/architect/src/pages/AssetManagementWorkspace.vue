@@ -4,7 +4,7 @@
  * 本文件仅保留：视图辅助(kindIcon/copyAsset) + setup 生命周期接线(窗口事件/
  * 会话钩子注册/轮询接管/初始加载) + 模板。模板逐行未动。
  */
-import { onMounted, onUnmounted, provide } from 'vue'
+import { onMounted, onUnmounted, provide, ref } from 'vue'
 import { onAssetsInvalidated, type Listener } from './asset-workspace/invalidate-bus'
 import { useI18n } from 'vue-i18n'
 import {
@@ -12,8 +12,9 @@ import {
   CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon,
   ArrowsRightLeftIcon, ClipboardDocumentListIcon, DocumentTextIcon,
   ChevronDownIcon, ChevronRightIcon,
-  SparklesIcon, TrashIcon, XMarkIcon,
+  SparklesIcon, TrashIcon, XMarkIcon, StarIcon, ShieldCheckIcon,
 } from '@heroicons/vue/24/outline'
+import CoreGuardPanel from './asset-workspace/panels/CoreGuardPanel.vue'
 import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
 import CompGraphWorkspace from '@/components/assets/comp-graph/CompGraphWorkspace.vue'
 import FileSourceCard from '@/components/assets/FileSourceCard.vue'
@@ -40,6 +41,20 @@ const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = 
 
 const ws = useAssetWorkspace()
 provide(ASSET_WS_KEY, ws)
+
+// ── 2610 核心资产守护: 仅核心开关 + semantic 内视图切换(资产树 ⇄ 核心守护) ──
+const coreOnly = ref(false)
+const guardView = ref(false)
+const guardLocate = ref('')
+function openGuardView(target?: string) {
+  guardLocate.value = target || ''
+  guardView.value = true
+}
+// 路由 query 直开守护视图(dock 🛡 跳转入口: /workbench/assets?tab=semantic&view=guard)
+if (new URLSearchParams(window.location.search).get('view') === 'guard') {
+  guardView.value = true
+  guardLocate.value = new URLSearchParams(window.location.search).get('target') || ''
+}
 const {
   tab, kind, level, q, items, loading, statusCounts, expanded, overviewStats, purging,
   kinds, levels, statusText, logicViewCreateOpen, loadLogicViews,
@@ -210,6 +225,19 @@ onUnmounted(() => {
               <ArrowPathIcon class="w-3 h-3" :class="extractingPending ? 'animate-spin' : ''" />
               {{ t('assetMgmt.scopeModal.fullUpdate') }}
             </button>
+            <!-- 2610 核心资产守护: 仅核心开关(与树面板/图谱过滤同状态口径) + 标记管理 -->
+            <button
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center gap-1 h-[calc(1.5rem+2px)]"
+              :class="coreOnly ? '!border-ctp-yellow text-ctp-yellow' : ''"
+              :title="t('session.marks.coreOnlyHint')"
+              @click="coreOnly = !coreOnly"
+            ><StarIcon class="w-3 h-3" />{{ t('session.marks.coreOnly') }}</button>
+            <button
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center gap-1 h-[calc(1.5rem+2px)]"
+              :class="guardView ? '!border-ctp-teal text-ctp-teal' : 'text-ctp-teal hover:!border-ctp-teal'"
+              :title="t('guard.switchHint')"
+              @click="guardView ? (guardView = false) : openGuardView()"
+            ><ShieldCheckIcon class="w-3 h-3" />{{ t('guard.manage') }}</button>
 
             <!-- 点击浮层：批量清除(物理删除 选定组件范围) -->
             <div
@@ -475,7 +503,23 @@ onUnmounted(() => {
           <OverviewPanel v-if="tab === 'overview'" />
 
           <!-- 语义资产：按组件树文件树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
-          <SemanticTreePanel v-if="tab === 'semantic'" />
+          <!-- v-show 须落在真实元素上(面板为多根 fragment, 运行时指令不可作用于组件) -->
+          <div
+            v-show="tab === 'semantic' && !guardView"
+            class="flex min-h-0 flex-1 flex-col"
+          >
+            <SemanticTreePanel
+              v-if="tab === 'semantic'"
+              :core-only="coreOnly"
+              @locate-core="openGuardView($event)"
+            />
+          </div>
+          <div
+            v-if="tab === 'semantic' && guardView"
+            class="flex min-h-0 flex-1 flex-col"
+          >
+            <CoreGuardPanel :locate="guardLocate" />
+          </div>
 
           <!-- 组件资产：按 KB 组件树文件目录树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
         </div>

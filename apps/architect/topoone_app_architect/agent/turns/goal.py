@@ -36,8 +36,7 @@ _KIND_CANDIDATES = [
 
 # 构建标记(弱撞菜单的第三判据): 「写个脚本统计文件数」(构建意图)出菜单,
 # 「帮我跑个脚本看看」(纯执行框架)维持操作单判——防菜单滥用回归僵硬。
-_BUILD_MARK_RE = re.compile(
-    r"(做一个|做个|写个|写一个|开发|实现|封装|新建|新增|加一个|添加|搭一个)")
+from ..perception.intent import BUILD_MARK_RE as _BUILD_MARK_RE  # MS-D4 单源
 # 显式建卡请求(cv-242 对偶面): 字面要求创建需求卡 → requirement 面(propose 权)
 _CARD_ASK_RE = re.compile(r"(建需求卡|创建需求卡|生成需求卡)")
 # 显式委托执行(cv-246 同款纪律): 把活交给 coding/执行器 → operation 面(task.propose 权)

@@ -630,6 +630,34 @@ ARCH_PROJECT_TABLES_SQL = """
 
 
     -- 资产命名规约（项目规约页·资产命名规约区块；scenarios NOT NULL 防全量注入 R7）
+    
+    -- 核心资产守护(2610 重构): 规约库 + 挂载关联(挂载即核心, 无分级; architect 整体通用)
+    CREATE TABLE IF NOT EXISTS arch_rule_defs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        source TEXT DEFAULT 'manual',
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_rule_defs_proj
+        ON arch_rule_defs(project_id);
+    CREATE TABLE IF NOT EXISTS arch_target_rules (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        target_type TEXT DEFAULT 'asset',
+        target_id TEXT DEFAULT '',
+        rule_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        UNIQUE(project_id, target_type, target_id, rule_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_target_rules_proj
+        ON arch_target_rules(project_id, target_type);
+
+
+    -- 资产命名规约（项目规约页·资产命名规约区块；scenarios NOT NULL 防全量注入 R7）
     CREATE TABLE IF NOT EXISTS arch_naming_conventions (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -829,7 +857,8 @@ def _main_migrations(db) -> None:
 
 # 已退役表(重整裁决: 清除旧数据, 不做兼容)
 _DROPPED_TABLES = ("arch_bus_messages", "arch_session_roles",
-                   "arch_name_tombstones", "arch_user_overlays")   # 批6 裁决删除(墓碑死池/overlay 假重放机制)
+                   "arch_name_tombstones", "arch_user_overlays",
+                   "arch_asset_marks")   # 批6 墓碑/overlay + 2610 守护重构: 内联规约模型退役(→ rule_defs + target_rules), 旧数据按裁决删除
 
 
 def _drop_retired_tables(db) -> None:

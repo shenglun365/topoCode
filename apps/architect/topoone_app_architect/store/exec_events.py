@@ -62,23 +62,52 @@ def events_of(job_id: str, since_seq: int = 0,
 
 
 def sessions(limit: int = 100) -> List[dict]:
-    """会话档案聚合(job 维度: 事件数/起止/终态)。"""
+    """会话档案聚合(job 维度: 事件数/起止/终态)。
+
+    2610 F3: last_status 纳入 input_required/stopped——chat 回合制作业
+    停在 input_required 保活, 只认 done/failed/finished 时行几乎恒空态。
+    2610 B1: conv_hint = 泵留痕 extra.conversationId(单源锚点, 2610 起
+    新事件自带; 历史行 NULL → _enrich 走回退链)。"""
     db = _db()
     rows = db.fetchall(
         "SELECT job_id, COUNT(*) n, MIN(ts) first_ts, MAX(ts) last_ts,"
         " (SELECT kind FROM arch_exec_events e2 WHERE e2.job_id=e1.job_id"
-        "   AND e2.kind IN ('done','failed','finished')"
-        "   ORDER BY seq DESC LIMIT 1) last_status"
+        "   AND e2.kind IN ('done','failed','finished','input_required','stopped')"
+        "   ORDER BY seq DESC LIMIT 1) last_status,"
+        " (SELECT json_extract(extra,'$.conversationId') FROM arch_exec_events e3"
+        "   WHERE e3.job_id=e1.job_id AND extra LIKE '%conversationId%'"
+        "   ORDER BY seq DESC LIMIT 1) conv_hint"
         " FROM arch_exec_events e1 GROUP BY job_id"
         " ORDER BY first_ts DESC LIMIT ?", (int(limit),))
-    return [{"jobId": r["job_id"], "eventCount": r["n"],
-             "firstTs": r["first_ts"], "lastTs": r["last_ts"],
-             "lastStatus": r["last_status"] or ""} for r in rows or []]
+    out = []
+    for r in rows or []:
+        hint = ""
+        try:
+            hint = str(r["conv_hint"] or "")
+        except Exception:  # noqa: BLE001 — json1 不可用/脏行 → 无 hint
+            hint = ""
+        out.append({"jobId": r["job_id"], "eventCount": r["n"],
+                    "firstTs": r["first_ts"], "lastTs": r["last_ts"],
+                    "lastStatus": r["last_status"] or "",
+                    "convHint": hint})
+    return out
 
 
 def delete_before(ts: int) -> int:
     """清理钩子: 删除 ts 之前的事件(保留策略由调用方定)。"""
     db = _db()
     cur = db.execute("DELETE FROM arch_exec_events WHERE ts < ?", (int(ts),))
+    db.commit()
+    return cur.rowcount or 0
+
+
+def delete_by_jobs(job_ids: list) -> int:
+    """按作业清单删除留痕(会话级联删除时清执行器会话档案, 防孤儿行)。"""
+    ids = [str(j).strip() for j in (job_ids or []) if str(j).strip()]
+    if not ids:
+        return 0
+    db = _db()
+    ph = ",".join("?" * len(ids))
+    cur = db.execute(f"DELETE FROM arch_exec_events WHERE job_id IN ({ph})", ids)
     db.commit()
     return cur.rowcount or 0
