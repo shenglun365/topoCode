@@ -1,0 +1,83 @@
+"""Architect API routes — 独立服务(plugins/architect)。
+
+所有路由挂 `/api/architect/*` 前缀。数据经 `ctx`(architect.db + KbGateway)，
+不再触碰 reports 全局。由 `plugins/architect/server.py` 提供服务。
+"""
+
+from fastapi import APIRouter
+
+from . import project, knowledge, requirements, execution, arch_change, mcp_collab, llm_catalog, unit_test, unit_advice, websocket, assets_api, git, greenfield, tags, overview, dirs, docs, semantic_assets, diagram, design, agents_md, mcp_access, tools_api, security, runner_proxy, exec_sessions
+from . import sessions, sessions_tasks, execution_control
+from . import session_docs
+from . import dev_digest
+from . import asset_framework
+from . import agent_executors
+from . import cline_engines
+from . import exec_cline
+from . import agent_roles
+from . import contracts
+from . import acceptance
+from . import core_rules
+from . import naming
+from . import req_drafts
+from . import logic_views
+from . import mainkb
+from . import sem_trace
+from ..agent.reflection import dataset as llm_dataset, mining as capability_mining
+from . import flow_policy
+from . import tracking_api as tracking
+
+router = APIRouter(prefix="/api/architect")
+router.include_router(project.router)
+router.include_router(knowledge.router)
+router.include_router(requirements.router)
+router.include_router(sessions.router)
+router.include_router(sessions_tasks.router)
+router.include_router(execution_control.router)
+router.include_router(session_docs.router)
+router.include_router(dev_digest.router)
+router.include_router(arch_change.router)
+router.include_router(agents_md.router)
+router.include_router(mcp_access.router)
+router.include_router(tools_api.router)
+router.include_router(security.router)
+router.include_router(runner_proxy.router)
+router.include_router(exec_sessions.router)
+router.include_router(mcp_collab.router)
+router.include_router(core_rules.router)
+router.include_router(llm_catalog.router)
+router.include_router(unit_test.router)
+router.include_router(unit_advice.router)
+router.include_router(assets_api.router)
+router.include_router(websocket.router)
+router.include_router(git.router)
+router.include_router(greenfield.router)
+router.include_router(tags.router)
+router.include_router(overview.router)
+router.include_router(llm_dataset.router)
+router.include_router(flow_policy.router)
+router.include_router(dirs.router)
+router.include_router(docs.router)
+router.include_router(logic_views.router)
+router.include_router(sem_trace.router)
+router.include_router(semantic_assets.router)
+router.include_router(agent_executors.router)
+router.include_router(cline_engines.router)
+router.include_router(exec_cline.router)
+router.include_router(asset_framework.router)
+router.include_router(agent_roles.router)
+router.include_router(contracts.router)
+router.include_router(acceptance.router)
+router.include_router(naming.router)
+router.include_router(req_drafts.router)
+router.include_router(mainkb.router)
+router.include_router(capability_mining.router)
+router.include_router(diagram.router)
+router.include_router(design.router)
+router.include_router(tracking.router)
+
+# 意图空间遗留#1: 解读评估 LLM 通道注入——execution 域层序不引 turns,
+# 装配点接线补偿管线 catalog_call(作业体见 agent/execution/readback.py)
+from ..agent.execution import readback as _rb  # noqa: E402
+from ..agent.turns.catalog import catalog_call  # noqa: E402
+_rb.set_llm_call(lambda msgs, **kw: catalog_call("role:evaluate", msgs, **kw))

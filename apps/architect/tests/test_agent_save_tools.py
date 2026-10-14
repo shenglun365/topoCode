@@ -1,0 +1,153 @@
+"""对话式提取工具测试：asset.semantic.save（归一化管线）+ code.read_symbols。
+
+Run: cd <repo> && PYTHONPATH=apps/architect python -m pytest apps/architect/tests/test_agent_save_tools.py -q
+"""
+import os
+import sys
+
+_repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+sys.path.insert(0, _repo)
+
+import topoone_app_architect.ctx as C
+_SEM_MODULE_NAMES = ("taxonomy", "paths", "codegraph", "scope", "incremental", "context", "anchors", "engine")
+
+
+def _patch_all(monkeypatch, name, value):
+    """A1 拆分后名字可能绑定在 facade 或任一 sem 模块 —— 全部绑定位统一 patch。"""
+    import importlib
+    import topoone_app_architect.arch_routes.semantic_assets as _sa
+    if hasattr(_sa, name):
+        monkeypatch.setattr(_sa, name, value)
+    for _mn in _SEM_MODULE_NAMES:
+        _mod = importlib.import_module(f"topoone_app_architect.sem.{_mn}")
+        if hasattr(_mod, name):
+            monkeypatch.setattr(_mod, name, value)
+
+
+from topoone_app_architect.arch_routes import semantic_assets as S
+from topoone_app_architect.sem import context as _sem_context
+from topoone_app_architect.arch_routes import asset_framework as F
+from topoone_app_architect.agent.tools.req_agent import (
+    tool_asset_semantic_save, tool_code_read_symbols)
+from topoone_app_architect.store import (
+    SemanticAssetsStore)
+
+
+def _custom_tier_no_state_no_z(pid):
+    """自建档(x 无 state、z 空)——替代已下线的 low 档构造同场景。"""
+    cfg = F.build_preset("mid")
+    cfg["activeTier"] = "custom"
+    cfg["tiers"]["custom"] = {
+        "x": [k for k in cfg["tiers"]["mid"]["x"] if k != "state"],
+        "y": ["implementation"], "z": [],
+        "acceptanceDefault": cfg["tiers"]["mid"]["acceptanceDefault"],
+        "directivesDepth": "full",
+    }
+    return F.load_custom(pid, cfg)
+
+def _ctx_setup(tmp_path, monkeypatch):
+    data = str(tmp_path / "arch")
+    monkeypatch.setenv("ARCH_DATA_DIR", data)
+    C._db = None
+    C._kb = None
+    C._data_dir = None
+    C._project_dbs.clear()
+    C.reset_project(C._project_var.set(None))
+    C.setup(data_dir=data)
+
+
+def _node(nid, kind, name, file_path="m.py", s=1, e=10, sig=""):
+    return {"id": nid, "kind": kind, "name": name, "qualified_name": name,
+            "file_path": file_path, "start_line": s, "end_line": e,
+            "signature": sig, "docstring": "", "return_type": ""}
+
+
+def _fake_collect(monkeypatch, root):
+    """合成 collect_context（避免依赖 codegraph/KB/live 扫描）。"""
+
+    def _collect(r, project, scope_type, scope_key, files, symbols):
+        return {"root": root, "project": project, "files": files or [],
+                "symbols": symbols or [], "nodes": [],
+                "table": {"create_order": _node("n1", "func", "create_order",
+                                                sig="def create_order():")},
+                "edges": [], "text": "", "srcHash": "h1", "source": "live",
+                "implDetails": {}, "calleeNames": {}}
+
+    _patch_all(monkeypatch, "collect_context", _collect)
+
+
+def _asset(name="创建订单", kind="process", symbol="create_order"):
+    return {"name": name, "kind": kind, "level": "implementation",
+            "desc": "创建订单过程",
+            "astRefs": [{"file": "m.py", "symbol": symbol,
+                         "startLine": 1, "endLine": 10}]}
+
+
+# ── asset.semantic.save（归一化管线） ──────────────────────────
+
+class TestSaveAgentAssets:
+    def test_happy_path_saves_asset(self, tmp_path, monkeypatch):
+        _ctx_setup(tmp_path, monkeypatch)
+        _fake_collect(monkeypatch, str(tmp_path))
+        res = S.save_agent_assets(str(tmp_path), None, [_asset()])
+        assert res["count"] == 1 and not res["rejected"]
+        saved = SemanticAssetsStore.all(res["saved"][0]["projectId"])
+        assert any(a["name"] == "创建订单" and a["kind"] == "process" for a in saved)
+
+    def test_kind_out_of_framework_domain_rejected(self, tmp_path, monkeypatch):
+        _ctx_setup(tmp_path, monkeypatch)
+        _fake_collect(monkeypatch, str(tmp_path))
+        _custom_tier_no_state_no_z(S.project_id_for(str(tmp_path), None))  # 自建档无 state
+        res = S.save_agent_assets(str(tmp_path), None, [_asset("订单状态", kind="state")])
+        assert res["count"] == 0
+        assert res["rejected"] and "值域" in res["rejected"][0]["reason"]
+
+    def test_existing_canonical_key_keeps_old_name(self, tmp_path, monkeypatch):
+        _ctx_setup(tmp_path, monkeypatch)
+        _fake_collect(monkeypatch, str(tmp_path))
+        S.save_agent_assets(str(tmp_path), None, [_asset("创建订单")])
+        # 同锚点再提，LLM 提议新名 → 旧名优先，提议进 proposedNames
+        res = S.save_agent_assets(str(tmp_path), None, [_asset("下单流程")])
+        assert res["count"] == 1
+        assert res["proposedNames"], "提议名应返回供设计者定夺"
+        p = res["proposedNames"][0]
+        assert p["proposedName"] == "下单流程" and p["keptName"] == "创建订单"
+        saved = SemanticAssetsStore.all(S.project_id_for(str(tmp_path), None))
+        assert [a["name"] for a in saved if a["kind"] == "process"] == ["创建订单"]
+
+    def test_missing_ast_refs_rejected(self, tmp_path, monkeypatch):
+        _ctx_setup(tmp_path, monkeypatch)
+        res = S.save_agent_assets(str(tmp_path), None,
+                                  [{"name": "无锚点", "kind": "process", "level": "implementation"}])
+        assert res["count"] == 0
+        assert "astRefs" in res["rejected"][0]["reason"]
+
+
+# ── code.read_symbols ─────────────────────────────────────────
+
+class TestCodeReadSymbols:
+    def _mk_file(self, tmp_path):
+        root = tmp_path / "proj"
+        root.mkdir(exist_ok=True)
+        (root / "m.py").write_text(
+            "\n".join(f"line {i}" for i in range(1, 11)), encoding="utf-8")
+        return str(root)
+
+    def test_read_line_range(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ARCH_DATA_DIR", str(tmp_path / "arch"))
+        root = self._mk_file(tmp_path)
+        res = tool_code_read_symbols(root=root, file="m.py", startLine=3, endLine=5)
+        assert res["range"] == [3, 5]
+        assert "line 3" in res["code"] and "line 4" in res["code"] and "line 6" not in res["code"]
+
+    def test_path_traversal_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ARCH_DATA_DIR", str(tmp_path / "arch"))
+        root = self._mk_file(tmp_path)
+        res = tool_code_read_symbols(root=root, file="../outside.py")
+        assert "越界" in res["error"]
+
+    def test_missing_file_error(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ARCH_DATA_DIR", str(tmp_path / "arch"))
+        root = self._mk_file(tmp_path)
+        res = tool_code_read_symbols(root=root, file="nope.py")
+        assert "不存在" in res["error"]

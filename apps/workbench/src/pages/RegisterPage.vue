@@ -1,0 +1,246 @@
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth-store'
+import { authService } from '@/services/auth-service'
+
+const { t } = useI18n()
+const router = useRouter()
+const auth = useAuthStore()
+
+const account = ref('')
+const code = ref('')
+const loading = ref(false)
+const errorMsg = ref('')
+const codeSending = ref(false)
+const codeSent = ref(false)
+const codeCountdown = ref(0)
+
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+const isEmail = computed(() => /@/.test(account.value))
+
+function startCountdown() {
+  codeCountdown.value = 60
+  codeSent.value = true
+  if (countdownTimer) clearInterval(countdownTimer)
+  countdownTimer = setInterval(() => {
+    codeCountdown.value--
+    if (codeCountdown.value <= 0) {
+      if (countdownTimer) clearInterval(countdownTimer)
+      codeSent.value = false
+    }
+  }, 1000)
+}
+
+async function sendCode() {
+  if (!account.value) { errorMsg.value = t('auth.validation.requireAccount'); return }
+  codeSending.value = true
+  errorMsg.value = ''
+  try {
+    await authService.sendCode(account.value)
+    startCountdown()
+  } catch (e: any) {
+    errorMsg.value = e.message || t('common.sendFailed')
+  } finally {
+    codeSending.value = false
+  }
+}
+
+const canSubmit = computed(() => {
+  return !!account.value && !!code.value
+})
+
+async function handleRegister() {
+  if (!canSubmit.value) return
+  loading.value = true
+  errorMsg.value = ''
+  const username = account.value.split('@')[0] || `user_${Date.now()}`
+  const tempPassword = Math.random().toString(36).slice(2, 10)
+  const ok = await auth.register(
+    username,
+    isEmail.value ? account.value : '',
+    tempPassword,
+    isEmail.value ? code.value : '',
+    isEmail.value ? undefined : account.value,
+    isEmail.value ? undefined : code.value,
+    undefined,
+  )
+  loading.value = false
+  if (ok) {
+    router.push('/user')
+  } else {
+    errorMsg.value = auth.error || t('auth.error.registrationFailed')
+  }
+}
+
+function close() {
+  router.push('/login')
+}
+</script>
+
+<template>
+  <div class="auth-page">
+    <div class="auth-card">
+      <button
+        class="close-btn"
+        @click="close"
+      >
+        ✕
+      </button>
+      <div class="auth-logo">
+        ◆
+      </div>
+      <h1 class="auth-title">
+        {{ t('auth.register') }}
+      </h1>
+
+      <form @submit.prevent="handleRegister">
+        <div class="field">
+          <div class="code-row">
+            <input
+              v-model="account"
+              class="input flex-1"
+              :placeholder="t('auth.placeholder.account')"
+              autocomplete="username"
+            >
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost code-btn"
+              :disabled="codeSending || codeSent"
+              @click="sendCode"
+            >
+              {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : t('auth.sendCode') }}
+            </button>
+          </div>
+        </div>
+
+        <div class="field">
+          <input
+            v-model="code"
+            class="input"
+            :placeholder="t('auth.placeholder.verificationCode')"
+            maxlength="6"
+            autocomplete="one-time-code"
+          >
+        </div>
+
+        <div
+          v-if="errorMsg"
+          class="error"
+        >
+          {{ errorMsg }}
+        </div>
+        <button
+          type="submit"
+          class="btn btn-primary btn-full"
+          :disabled="loading || !canSubmit"
+        >
+          {{ loading ? t('auth.registering') : t('auth.registerBtn') }}
+        </button>
+      </form>
+
+      <div class="auth-links">
+        <router-link to="/login">
+          {{ t('auth.hasAccountGoLogin') }}
+        </router-link>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.auth-page {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+}
+.auth-card {
+  position: relative;
+  width: calc(400px * var(--ui-scale, 1));
+  padding: calc(40px * var(--ui-scale, 1)) calc(32px * var(--ui-scale, 1));
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: calc(12px * var(--ui-scale, 1));
+  text-align: center;
+}
+.close-btn {
+  position: absolute;
+  top: calc(12px * var(--ui-scale, 1));
+  right: calc(16px * var(--ui-scale, 1));
+  background: none;
+  border: none;
+  font-size: calc(18px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  border-radius: calc(4px * var(--ui-scale, 1));
+  line-height: 1;
+}
+.close-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+.auth-logo {
+  font-size: calc(32px * var(--ui-scale, 1));
+  color: var(--accent);
+  margin-bottom: calc(8px * var(--ui-scale, 1));
+}
+.auth-title {
+  font-size: calc(18px * var(--ui-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: calc(20px * var(--ui-scale, 1));
+}
+.field {
+  margin-bottom: calc(10px * var(--ui-scale, 1));
+}
+.input {
+  width: 100%;
+  padding: calc(10px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  border: 1px solid var(--border);
+  border-radius: calc(6px * var(--ui-scale, 1));
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: calc(13px * var(--ui-scale, 1));
+  outline: none;
+  box-sizing: border-box;
+}
+.input:focus {
+  border-color: var(--accent);
+}
+.flex-1 {
+  flex: 1;
+}
+.code-row {
+  display: flex;
+  gap: calc(6px * var(--ui-scale, 1));
+  align-items: center;
+}
+.code-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: calc(11px * var(--ui-scale, 1));
+}
+.error {
+  color: var(--error);
+  font-size: calc(12px * var(--ui-scale, 1));
+  margin-bottom: calc(12px * var(--ui-scale, 1));
+}
+.btn-full {
+  width: 100%;
+  padding: calc(10px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
+}
+.auth-links {
+  margin-top: calc(16px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
+}
+.auth-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+</style>

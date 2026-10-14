@@ -1,0 +1,178 @@
+"""v2 统一会话: coding subagent 任务存储(arch_tasks)。
+
+替代 conv.meta.jobs 账本——生命周期一等公民(轻门禁 pending_confirm →
+running → waiting_input → 终态), 回执消息(agent=executor_type)落统一流。
+"""
+from __future__ import annotations
+
+import json
+import time
+
+from .base import _all, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _update, next_id
+
+TERMINAL_STATES = ("done", "failed", "cancelled")
+from .states import ACTIVE_STATES, TASK_PENDING_CONFIRM  # 规范化环节五: 词汇表单源
+
+
+def _now() -> int:
+    return int(time.time() * 1000)
+
+
+def _loads(v):
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except Exception:  # noqa: BLE001
+            return {}
+    return v if isinstance(v, dict) else {}
+
+
+class TasksStore:
+    TABLE = "arch_tasks"
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        payload = {
+            "id": data.get("id") or next_id("task"),
+            "conversation_id": data["conversationId"],
+            "project_id": data.get("projectId") or "",
+            "req_id": data.get("reqId") or "",
+            "title": data.get("title") or "",
+            "instruction": data.get("instruction") or "",
+            "status": data.get("status") or TASK_PENDING_CONFIRM,
+            # 执行器选定单源(P5): 落库不兜底——空=未选定, 由 confirm_task 按注册表默认
+            # 解析并显式失败; 此处的字面 "opencode" 曾导致 cv-153 静默降级链路
+            "executor_type": data.get("executorType") or "",
+            "executor_id": data.get("executorId") or "",
+            "spec_ver": int(data.get("specVer") or 0),
+            "runner_job_id": data.get("runnerJobId") or "",
+            "session_ref": data.get("sessionRef") or "",
+            "worktree": data.get("worktree") or "",
+            "branch": data.get("branch") or "",
+            # 环节十一: 任务分支基点 commit(交接边界快照)
+            "base_commit": data.get("baseCommit") or "",
+            "progress": json.dumps(data.get("progress") or {}, ensure_ascii=False),
+            "result_md": data.get("resultMd") or "",
+            # 安全等级三值轴 + 开放工作类型标签(governance/flow.py 词汇单源)
+            "safety_class": (data.get("safetyClass") or "").strip().lower()
+                            or "mutating",
+            "work_tags": json.dumps(data.get("workTags") or [], ensure_ascii=False)
+                         if data.get("workTags") else None,
+            "dismissed_at": data.get("dismissedAt") or 0,
+            "verify_config": json.dumps(data.get("verifyConfig") or {},
+                                        ensure_ascii=False)
+            if data.get("verifyConfig") else None,
+            "created_at": data.get("createdAt") or _now(),
+            "updated_at": _now(),
+            "finished_at": 0,
+        }
+        # 任务与会话同库(规范化环节五衍生排查): 调用方漏传 projectId 时
+        # 从会话行推导——否则写主库/读项目库分裂, of_conv/互斥/恢复全部失明
+        # (cv-178 排查实证: 潜伏缺陷, 生产暂未触发但一触即失效)。
+        if not payload["project_id"]:
+            try:
+                from .conv import ConversationsStore
+                payload["project_id"] = ((ConversationsStore.get(
+                    payload["conversation_id"]) or {}).get("projectId") or "")
+            except Exception:  # noqa: BLE001
+                pass
+        _insert(cls.TABLE, payload)
+        row = _row_to_api(payload)
+        # 需求跟踪台账: 任务创建即挂账(等待确认/执行中), 失败不阻断主流程
+        try:
+            from .tracking import sync_task
+            sync_task(row)
+        except Exception:  # noqa: BLE001
+            pass
+        return row
+
+    @classmethod
+    def get(cls, task_id: str):
+        row = _get(cls.TABLE, task_id)
+        return _row_to_api(row) if row else None
+
+    @classmethod
+    def update(cls, task_id: str, data: dict) -> dict:
+        data = dict(data)
+        # 需求跟踪台账: 状态机变化单向同步(取旧状态供 决议回填/等待角色 判定)
+        prev_status = ""
+        if "status" in data:
+            prev_status = ((cls.get(task_id) or {}).get("status") or "")
+        data["updated_at"] = _now()
+        row = _update(cls.TABLE, task_id, data)
+        out = _row_to_api(row) if isinstance(row, dict) else (row or {})
+        if prev_status and "status" in data and (out.get("status") or "") != prev_status:
+            try:
+                from .tracking import sync_task
+                sync_task(out, prev_status=prev_status)
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    @classmethod
+    def of_conv(cls, conv_id: str) -> list[dict]:
+        """会话任务清单。库定位: 任务与会话同库——经会话行的项目路由
+        (任务行 id ≠ conv_id, 不能用 _locate_db(conv_id) 直查)。"""
+        from .base import _target_db
+        from .conv import ConversationsStore
+        conv = ConversationsStore.get(conv_id) or {}
+        pid = conv.get("projectId") or ""
+        try:
+            db = _target_db(cls.TABLE, project_id=pid or None)
+        except Exception:  # noqa: BLE001
+            from .base import _db
+            db = _db()
+        rows = db.fetchall(
+            f"SELECT * FROM {cls.TABLE} WHERE conversation_id = ? "
+            "ORDER BY created_at ASC, rowid ASC",
+            (conv_id,))
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def of_project(cls, project_id: str, limit: int = 200) -> list[dict]:
+        """项目任务清单(最近更新倒序, limit 截断)——项目画像/完成度聚合用。
+        路由经 _fetchall_routed(项目库直查; 无定位时全库扫描仍按 project_id 过滤)。"""
+        rows, _mode = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE project_id = ? "
+            "ORDER BY updated_at DESC, rowid DESC LIMIT ?",
+            (project_id, limit),
+            project_id=project_id)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def active_of_conv(cls, conv_id: str):
+        """最新活跃任务(pending_confirm/running/waiting_input); 无则 None。"""
+        for t in reversed(cls.of_conv(conv_id)):
+            if (t.get("status") or "") in ACTIVE_STATES:
+                return t
+        return None
+
+    @classmethod
+    def delete_by_conv(cls, conv_id: str) -> None:
+        """会话级联删除: 清该会话全部任务行(与会话同库)。"""
+        from .base import _db, _target_db
+        from .conv import ConversationsStore
+        conv = ConversationsStore.get(conv_id) or {}
+        pid = conv.get("projectId") or ""
+        try:
+            db = _target_db(cls.TABLE, project_id=pid or None)
+        except Exception:  # noqa: BLE001
+            db = _db()
+        db.execute(f"DELETE FROM {cls.TABLE} WHERE conversation_id = ?", (conv_id,))
+        db.commit()
+
+    @classmethod
+    def delete(cls, task_id: str) -> bool:
+        """单任务行删除(作业档案清理用; 会话行不动)。"""
+        from .base import _delete
+        return bool(_delete(cls.TABLE, task_id))
+
+    @classmethod
+    def set_progress(cls, task_id: str, prog: dict) -> None:
+        cls.update(task_id, {"progress": json.dumps(prog, ensure_ascii=False)})
+
+    @classmethod
+    def finish(cls, task_id: str, status: str, result_md: str = "") -> dict:
+        return cls.update(task_id, {"status": status, "result_md": result_md,
+                                    "finished_at": _now()})

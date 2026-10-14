@@ -1,0 +1,479 @@
+"""ResolutionEngine — 两阶段跨文件名称解析引擎
+
+Phase 2: 解析阶段
+  1. 建立全局索引 (name → nodes, qualifiedName → node, export map)
+  2. 对每个 unresolved reference 尝试解析:
+     a. 文件内 local scope 链查找
+     b. import 跨文件解析 (从 export 表匹配)
+     c. qualified name 全限定名匹配
+  3. 输出 resolved Edge 列表 (calls, imports, extends, implements, ...)
+
+优化说明 (Phase D):
+  - _suffix_index: 路径后缀倒排索引，将 _find_file_for_import() 从 O(N_files) 降至 O(1)
+  - _file_node_index: file_path → name → [Node]，消除 O(N_nodes) 全表扫描
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import time
+from collections import defaultdict
+from typing import Optional
+
+from .node_types import NodeKind, EdgeKind, Provenance
+from .symbol_model import Node, Edge, UnresolvedReference, FileSymbolTable
+from ..languages import same_language_family
+
+logger = logging.getLogger(__name__)
+
+
+class ResolutionEngine:
+    """跨文件引用解析引擎"""
+
+    def __init__(self):
+        # 全局索引
+        self._name_index: dict[str, list[Node]] = defaultdict(list)       # name → [Node]
+        self._qualified_index: dict[str, Node] = {}                       # qualifiedName → Node
+        self._export_index: dict[str, set[str]] = defaultdict(set)        # file → exported names
+        self._node_by_id: dict[str, Node] = {}
+        self._var_type_cache: dict[str, dict[str, Optional[Node]]] = {}   # file → {var名: 类型节点}
+
+        # 优化索引 (Phase D): 加速跨文件查找
+        self._suffix_index: dict[str, str] = {}      # 路径去扩展名后缀 → file_path (O(1) 查找)
+        self._file_node_index: dict[str, dict[str, list[Node]]] = defaultdict(lambda: defaultdict(list))
+                                                      # file_path → name → [Node]
+
+    def build_index(self, tables: list[FileSymbolTable], progress_callback=None,
+                    stop_check=None):
+        """从所有文件的提取结果构建全局索引"""
+        total_files = len(tables)
+        logger.info("[resolve] build_index: building index from %d files", total_files)
+        _t0 = time.perf_counter()
+        _last_report = 0
+        for i, table in enumerate(tables):
+            if stop_check and stop_check():
+                logger.info("[resolve] build_index: stopped at file %d/%d", i + 1, total_files)
+                return False
+
+            fp = table.file_path
+            for node in table.nodes:
+                self._name_index[node.name].append(node)
+                self._qualified_index[node.qualified_name] = node
+                self._node_by_id[node.id] = node
+                self._file_node_index[fp][node.name].append(node)
+
+                if node.is_exported:
+                    self._export_index[fp].add(node.name)
+
+            # 顶层节点也视为可导出
+            for node in table.top_level_nodes():
+                self._export_index[fp].add(node.name)
+
+            # 构建路径后缀索引: 去扩展名后的路径及其所有后缀
+            fp_noext, _ = os.path.splitext(fp)
+            self._suffix_index.setdefault(fp_noext, fp)
+            parts = fp_noext.split("/")
+            for i in range(len(parts)):
+                key = "/".join(parts[i:])
+                self._suffix_index.setdefault(key, fp)
+
+            if (i + 1) % 500 == 0:
+                _elapsed = time.perf_counter() - _t0
+                logger.info("[resolve] build_index: %d/%d files (%.1fs)", i + 1, total_files, _elapsed)
+                if progress_callback:
+                    progress_callback(i + 1, total_files)
+
+        _elapsed = time.perf_counter() - _t0
+        if progress_callback:
+            progress_callback(total_files, total_files)
+        logger.info("[resolve] build_index: done %d files in %.1fs (nodes=%d, exports=%d)",
+                    total_files, _elapsed,
+                    sum(len(t.nodes) for t in tables),
+                    sum(len(e) for e in self._export_index.values()))
+        return True
+
+    def resolve(self, tables: list[FileSymbolTable],
+                progress_callback=None, stop_check=None,
+                edge_callback=None) -> list[Edge]:
+        """解析所有未解析引用，生成 edges
+
+        Args:
+            tables: 所有文件的 FileSymbolTable 列表
+            progress_callback: 可选进度回调 fn(current, total)，
+                               在 build_index 和 resolve 阶段均会调用
+            stop_check: 可选停止检查回调 fn() → bool，
+                        返回 True 时立即中断
+            edge_callback: 可选边批次回调 fn(batch: list[Edge])，
+                           每 EDGE_BATCH_SIZE 条边调用一次（流式写入）
+
+        Returns:
+            resolved Edge 列表
+        """
+        _t0 = time.perf_counter()
+        if not self.build_index(tables, progress_callback=progress_callback,
+                                stop_check=stop_check):
+            logger.info("[resolve] resolve: stopped during build_index, returning partial results")
+            return []
+        _total_refs = sum(len(t.unresolved_refs) for t in tables)
+        _total_files = len(tables)
+        logger.info("[resolve] resolve: starting %d refs across %d files", _total_refs, _total_files)
+
+        if progress_callback:
+            progress_callback(0, _total_refs)
+
+        # P0: Pre-compute import→target_file mapping per file (eliminates _find_file_for_import per ref)
+        _import_cache: dict[str, dict[str, str]] = {}
+        for table in tables:
+            fp = table.file_path
+            cache: dict[str, str] = {}
+            for imp in table.imports:
+                target = self._find_file_for_import(imp, fp)
+                if target:
+                    cache[imp] = target
+            _import_cache[fp] = cache
+        logger.info("[resolve] built import cache for %d files", len(_import_cache))
+
+        # P1: Set of all exported names — refs not in this set skip Strategy 2 entirely
+        _all_exported: set[str] = set()
+        for exports in self._export_index.values():
+            _all_exported.update(exports)
+        logger.info("[resolve] all_exported_names=%d", len(_all_exported))
+
+        # P3: batch edge write
+        EDGE_BATCH_SIZE = 10000
+        edges: list[Edge] = []
+        _total_edges_written = 0
+
+        def _flush_edges():
+            nonlocal _total_edges_written
+            if edges:
+                if edge_callback:
+                    edge_callback(edges)
+                _total_edges_written += len(edges)
+                edges.clear()
+
+        _ref_count = 0
+        _last_report = 0
+
+        for table in tables:
+            if stop_check and stop_check():
+                logger.info("[resolve] resolve: stopped at table %s, %d/%d refs processed",
+                            table.file_path, _ref_count, _total_refs)
+                break
+
+            file_cache = _import_cache.get(table.file_path, {})
+
+            for ref in table.unresolved_refs:
+                if stop_check and stop_check():
+                    logger.info("[resolve] resolve: stopped at ref %d/%d",
+                                _ref_count, _total_refs)
+                    break
+
+                target = None
+                method = "unresolved"
+
+                # 策略 1: 文件内 local scope 链查找
+                target = self._resolve_local(ref, table)
+                if target:
+                    method = "local"
+
+                # 策略 2: import 跨文件解析 (P0: use cached file lookup; P1: skip if name not exported anywhere)
+                # 组合名 (pkg.Func / Cls.method) 也放行 —— 由 _resolve_via_import 的点分分支处理
+                if not target and (ref.reference_name in _all_exported or "." in ref.reference_name):
+                    result = self._resolve_via_import(ref, table, file_cache)
+                    if result:
+                        target = result
+                        method = "import"
+
+                # 策略 2.5: 实例方法推断 — `recv.method()` / `this.method()` →
+                # receiver 类型作用域内的方法(对齐 codegraph instance-method 策略族)。
+                # 此前 member 调用只能整串 qualified/name 匹配，TS 前端大量
+                # `adapter.build()` 形态全部 unresolved(实测 calls 解析率 4%)。
+                if not target and "." in ref.reference_name:
+                    result = self._resolve_instance_method(ref, table)
+                    if result:
+                        target = result
+                        method = "instance_method"
+
+                # 策略 3: qualified name 匹配
+                if not target:
+                    target = self._qualified_index.get(ref.reference_name)
+                    if target:
+                        method = "qualified_name"
+
+                # 策略 4: name 匹配 (project-wide, 低置信度)
+                if not target:
+                    candidates = self._name_index.get(ref.reference_name, [])
+                    if len(candidates) == 1:
+                        target = candidates[0]
+                        method = "name_match"
+
+                if target:
+                    # 语言族校验: 跨族调用无意义 (e.g. Java → Python)
+                    src_lang = ref.language or ""
+                    tgt_lang = target.language or ""
+                    if src_lang and tgt_lang and not same_language_family(src_lang, tgt_lang):
+                        method = "cross_language_rejected"
+
+                    if method != "cross_language_rejected":
+                        edges.append(Edge(
+                            source=ref.from_node_id,
+                            target=target.id,
+                            kind=ref.reference_kind,
+                            line=ref.line,
+                            col=ref.col,
+                            file_path=ref.file_path,
+                            provenance=Provenance.RESOLUTION,
+                            metadata={"method": method},
+                        ))
+                    else:
+                        edges.append(Edge(
+                            source=ref.from_node_id,
+                            target="",
+                            kind=ref.reference_kind,
+                            line=ref.line,
+                            col=ref.col,
+                            file_path=ref.file_path,
+                            provenance=Provenance.RESOLUTION,
+                            metadata={"method": "cross_language_rejected"},
+                        ))
+                else:
+                    edges.append(Edge(
+                        source=ref.from_node_id,
+                        target="",
+                        kind=ref.reference_kind,
+                        line=ref.line,
+                        col=ref.col,
+                        file_path=ref.file_path,
+                        provenance=Provenance.RESOLUTION,
+                        metadata={"method": "unresolved"},
+                    ))
+
+                _ref_count += 1
+                if _ref_count - _last_report >= 5000:
+                    _last_report = _ref_count
+                    _elapsed = time.perf_counter() - _t0
+                    logger.info("[resolve] resolve: %d/%d refs processed (%.1fs, edges=%d)",
+                                _ref_count, _total_refs, _elapsed, _total_edges_written + len(edges))
+                    if progress_callback:
+                        progress_callback(_ref_count, _total_refs)
+                    if stop_check and stop_check():
+                        logger.info("[resolve] resolve: stopped at ref %d/%d",
+                                    _ref_count, _total_refs)
+                        break
+
+                # P3: flush batch
+                if len(edges) >= EDGE_BATCH_SIZE:
+                    _flush_edges()
+
+            else:
+                continue
+            break
+
+        # Flush remaining edges
+        _flush_edges()
+
+        if progress_callback:
+            progress_callback(_ref_count, _total_refs)
+
+        _elapsed = time.perf_counter() - _t0
+        logger.info("[resolve] resolve: done %d refs in %.1fs → %d edges (resolved=%d, unresolved=%d)",
+                    _total_refs, _elapsed, _total_edges_written,
+                    sum(1 for e in edges if e.target) if edges else 0,
+                    sum(1 for e in edges if not e.target) if edges else 0)
+        # Return remaining (already flushed — empty unless edge_callback was None)
+        return edges
+
+    # ── 策略实现 ─────────────────────────────────────────
+
+    def _resolve_instance_method(self, ref: UnresolvedReference,
+                                 table: FileSymbolTable) -> Optional[Node]:
+        """实例方法推断：`recv.method` → receiver 类型作用域内的 method/property。
+
+        - this/self/cls/super：caller 的类 scope 链（qualified_name 前缀）内匹配
+        - 变量 receiver：本文件同名 variable/constant 发出的 type_of/returns
+          类型引用 → 类型节点 → 其 scope 内方法匹配
+
+        返回 None = 无法推断（调用方继续后续策略/落 unresolved）。
+        """
+        name = ref.reference_name
+        recv, meth = name.rsplit(".", 1)
+        if recv.startswith("this."):
+            recv = recv[len("this."):]
+        caller = self._node_by_id.get(ref.from_node_id)
+        if not caller:
+            return None
+
+        type_node: Optional[Node] = None
+        if recv in ("this", "self", "cls", "super"):
+            # caller 的 qualified_name 前缀即类链：Cls → Cls::method。取最近的类层。
+            parts = caller.qualified_name.split("::")
+            for i in range(len(parts) - 1, 0, -1):
+                cls_name = parts[i - 1]
+                for n in self._file_node_index.get(table.file_path, {}).get(cls_name, []):
+                    if n.kind.value in ("class", "interface", "struct"):
+                        type_node = n
+                        break
+                if type_node:
+                    break
+        else:
+            # 本文件 receiver 变量 → 其 type_of/returns 类型引用 → 类型节点
+            var_ids = {n.id for n in self._file_node_index.get(table.file_path, {}).get(recv, [])
+                       if n.kind.value in ("variable", "constant", "property")}
+            if var_ids:
+                # 缓存：文件 → {var名: 类型节点}（同文件多 ref 复用，免重复扫描）
+                cache = self._var_type_cache.setdefault(table.file_path, {})
+                type_node = cache.get(recv)
+                if type_node is None and recv not in cache:
+                    for t in table.unresolved_refs:
+                        if t.from_node_id in var_ids and \
+                                t.reference_kind.value in ("type_of", "returns"):
+                            tname = t.reference_name.split(".")[-1]
+                            for n in (self._file_node_index.get(table.file_path, {}).get(tname, [])
+                                      + self._name_index.get(tname, [])):
+                                if n.kind.value in ("class", "interface", "struct"):
+                                    type_node = n
+                                    break
+                        if type_node:
+                            break
+                    cache[recv] = type_node  # None 也缓存(负缓存)，避免重复扫描
+
+        if type_node is None:
+            # 静态类调用: `Cls.meth()` — recv 为项目内 class/interface/enum/struct 名
+            if recv and recv[0].isupper():
+                cls_like = ("class", "interface", "struct", "enum")
+                local = [n for n in self._file_node_index.get(table.file_path, {}).get(recv, [])
+                         if n.kind.value in cls_like]
+                if not local:
+                    local = [n for n in self._name_index.get(recv, [])
+                             if n.kind.value in cls_like]
+                if local:
+                    type_node = local[0]
+        if type_node is None:
+            return None
+
+        # 类型作用域内匹配方法：qualified 前缀 `Cls::` 下同名 method/function/property
+        prefix = type_node.qualified_name + "::"
+        for n in (self._file_node_index.get(type_node.file_path, {}).get(meth, [])
+                  + self._name_index.get(meth, [])):
+            if n.kind.value in ("method", "function", "property") and \
+                    (n.qualified_name == prefix + meth or n.qualified_name.startswith(prefix)):
+                return n
+        return None
+
+    def _resolve_local(self, ref: UnresolvedReference, table: FileSymbolTable) -> Optional[Node]:
+        """文件内按 scope 链向上查找（使用 _file_node_index O(1) 查找）"""
+        name = ref.reference_name
+        caller = self._node_by_id.get(ref.from_node_id)
+        if not caller:
+            return None
+
+        # 使用 _file_node_index 直接获取当前文件下同名节点列表
+        candidates = self._file_node_index.get(table.file_path, {}).get(name, [])
+
+        # 获取 caller 的 scope 链
+        scopes = self._scope_chain(caller.qualified_name)
+        for scope in scopes:
+            for node in candidates:
+                if node.qualified_name.startswith(scope):
+                    return node
+
+        # 文件内任意匹配（返回第一个同名节点）
+        if candidates:
+            return candidates[0]
+
+        return None
+
+    def _resolve_via_import(self, ref: UnresolvedReference, table: FileSymbolTable,
+                            import_cache: dict[str, str]) -> Optional[Node]:
+        """通过 import 关系跨文件查找（使用预计算的 import_cache，替代 _find_file_for_import 逐 ref 调用）"""
+        name = ref.reference_name
+        src_lang = ref.language or ""
+
+        # 先检查 name 是否完整匹配某个 import 中的导出符号
+        for imp, target_file in import_cache.items():
+            exports = self._export_index.get(target_file, set())
+            if name in exports:
+                nodes = self._file_node_index.get(target_file, {}).get(name, [])
+                if nodes:
+                    return nodes[0]
+
+        # 包限定调用 "pkg.Func" → 分割后通过 import 匹配
+        if "." in name and src_lang in ("go", "python", "typescript", "javascript", "java",
+                                        "kotlin", "csharp", "scala"):
+            pkg_part, func_part = name.rsplit(".", 1)
+            for imp, target_file in import_cache.items():
+                imp_pkg = imp.split("/")[-1].split(".")[-1]
+                if imp_pkg == pkg_part or imp.endswith(pkg_part):
+                    # 1) 顶层导出函数 (Go pkg.Func / Python module.func)
+                    exports = self._export_index.get(target_file, set())
+                    if func_part in exports:
+                        nodes = self._file_node_index.get(target_file, {}).get(func_part, [])
+                        if nodes:
+                            return nodes[0]
+                    # 2) 类静态/实例方法 (Java/Kotlin/C# `Cls.method()`)
+                    for cls in self._file_node_index.get(target_file, {}).get(pkg_part, []):
+                        if cls.kind.value in ("class", "interface", "struct", "enum"):
+                            prefix = cls.qualified_name + "::"
+                            for n in (self._file_node_index.get(target_file, {}).get(func_part, [])
+                                      + self._name_index.get(func_part, [])):
+                                if n.kind.value in ("method", "function", "property") and \
+                                        (n.qualified_name == prefix + func_part
+                                         or n.qualified_name.startswith(prefix)):
+                                    return n
+
+        return None
+
+    def _find_file_for_import(self, module_name: str, current_file: str) -> Optional[str]:
+        """根据 import 模块名找到目标文件路径（使用 _suffix_index O(1) 查找）"""
+        # 0. 点分模块名归一化 (Java/Kotlin/C#: a.b.C → a/b/C)，使命名空间导入可命中路径后缀索引
+        if "." in module_name and "/" not in module_name:
+            module_name = module_name.replace(".", "/")
+
+        # 1. 精确后缀匹配（去扩展名）
+        target = self._suffix_index.get(module_name)
+        if target:
+            return target
+
+        # 2. 无扩展名形式匹配
+        mod_noext, _ = os.path.splitext(module_name)
+        if mod_noext != module_name:
+            target = self._suffix_index.get(mod_noext)
+            if target:
+                return target
+
+        # 3. 逐段缩短后缀匹配
+        mod_parts = mod_noext.split("/")
+        for i in range(1, len(mod_parts)):
+            suffix = "/".join(mod_parts[i:])
+            if suffix:
+                target = self._suffix_index.get(suffix)
+                if target:
+                    return target
+
+        # 4. 回退: 当前文件所在目录作为前缀匹配
+        cur_dir = "/".join(current_file.split("/")[:-1]) if "/" in current_file else ""
+        if cur_dir:
+            candidate = f"{cur_dir}/{module_name}"
+            target = self._suffix_index.get(candidate)
+            if not target:
+                candidate_noext, _ = os.path.splitext(candidate)
+                target = self._suffix_index.get(candidate_noext)
+            if target:
+                return target
+
+        # 5. 最终回退: 子串扫描（原 O(N) 逻辑，极少命中）
+        for fp in self._export_index:
+            if module_name in fp or fp.endswith(module_name):
+                return fp
+
+        return None
+
+    def _scope_chain(self, qualified_name: str) -> list[str]:
+        """从当前 qualified name 向上到 file 层的作用域链"""
+        parts = qualified_name.split("::")
+        chain = []
+        for i in range(len(parts)):
+            chain.append("::".join(parts[:i + 1]))
+        return list(reversed(chain))

@@ -1,0 +1,184 @@
+// @ts-nocheck — M11 迁移：既有代码（web/ 历史未严格类型门禁），保行为先跳过类型检查，清理留后续。
+import { ref, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
+import * as api from '@topo/web-core/services/api'
+import type { CommunityChild } from '@topo/web-core/types/domain'
+
+export function useDocState(taskId: ReturnType<typeof ref<string>>) {
+  console.log('[useDocState] init')
+  const { t } = useI18n()
+
+  const docId = ref(new URLSearchParams(location.search).get('docId') || '')
+  const originalDocId = docId.value
+  const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
+  const urlEt = new URLSearchParams(location.search).get('edgeType') || 'UNIFIED'
+
+  const docCommId = ref(urlCid)
+  const docEdgeType = ref(urlEt)
+  const docBreadcrumb = ref<{ label: string; cid: string; et: string }[]>([])
+  const doc = ref<{ title: string; content: string; projectId?: string; projectName?: string } | null>(null)
+  const loading = ref(true)
+  const children = ref<CommunityChild[]>([])
+  const docContentRef = ref<HTMLDivElement>()
+
+  // TOC state（UNIFIED 单套组件）
+  const tocVisible = ref(false)
+  const tocChildren = ref<CommunityChild[]>([])
+  const tocLoading = ref(false)
+
+  // File list state
+  const files = ref<any[]>([])
+  const filePage = ref(1)
+  const fileSearch = ref('')
+  const filePreview = ref<any>(null)
+  const fileSummary = ref<any>(null)
+  const pageMode = ref<'doc' | 'file-summary'>('doc')
+  const filteredFiles = ref<any[]>([])
+
+  function pushDocBc(item: { label: string; cid: string; et: string }) {
+    const last = docBreadcrumb.value[docBreadcrumb.value.length - 1]
+    if (last?.cid === item.cid) return
+    docBreadcrumb.value.push(item)
+  }
+
+  async function loadDoc(afterRender?: () => void) {
+    if (!taskId.value) return; loading.value = true
+    _syncUrl()
+    try {
+      if (docCommId.value) {
+        const d = await api.getCommunityDoc(taskId.value, docCommId.value, docEdgeType.value)
+        console.log('[useDocState] community doc loaded:', d?.title, 'content length:', d?.content?.length)
+        doc.value = { title: d.title, content: d.content, projectId: d.projectId, projectName: d.projectName }
+        if (docBreadcrumb.value.length) {
+          const last = docBreadcrumb.value[docBreadcrumb.value.length - 1]
+          last.label = d.title
+        }
+      } else if (docId.value) {
+        const d: any = await api.get('/api/docs/' + docId.value)
+        doc.value = { title: d.title || t('doc.defaultTitle'), content: d.content || '', projectId: d.projectId, projectName: d.projectName }
+      } else {
+        doc.value = { title: taskId.value, content: t('doc.selectChildHint') }
+        docBreadcrumb.value = []
+      }
+      await loadChildren()
+      loadFiles()
+    } catch (e: any) {
+      console.error('[useDocState] loadDoc error:', e?.message || e)
+    } finally {
+      loading.value = false
+      nextTick(() => { if (afterRender) afterRender() })
+    }
+  }
+
+  /** 把当前 doc 状态同步到 URL（replaceState，不触发整页刷新），保证刷新/分享不丢上下文 */
+  function _syncUrl() {
+    try {
+      const u = new URLSearchParams(location.search)
+      if (docCommId.value) u.set('communityId', docCommId.value); else u.delete('communityId')
+      if (docEdgeType.value) u.set('edgeType', docEdgeType.value)
+      history.replaceState(null, '', `${location.pathname}?${u.toString()}${location.hash}`)
+    } catch (_) {}
+  }
+
+  async function loadChildren() {
+    try {
+      const kids = await api.getCommunityChildren(taskId.value, docCommId.value || undefined, docEdgeType.value)
+      children.value = kids
+    } catch (_) { children.value = [] }
+  }
+
+  function navigateTo(cid: string, et?: string) {
+    docId.value = ''
+    docCommId.value = cid; if (et) docEdgeType.value = et
+    pushDocBc({ label: cid.slice(0, 16), cid, et: et || docEdgeType.value })
+    loadDoc()
+  }
+
+  function navBack(idx: number) {
+    if (idx < 0 || !docBreadcrumb.value[idx]) {
+      docId.value = originalDocId; docCommId.value = ''; docEdgeType.value = 'UNIFIED'; docBreadcrumb.value = []; loadDoc(); return
+    }
+    const target = docBreadcrumb.value[idx]
+    if (target?.cid) { docCommId.value = target.cid; docEdgeType.value = target.et || 'UNIFIED'; docBreadcrumb.value = docBreadcrumb.value.slice(0, idx + 1); loadDoc() }
+  }
+
+  // ── File list ──
+  const sourceLoading = ref(false)
+
+  async function loadFiles() {
+    if (!docCommId.value) {
+      // 根视图(overall)无社区文件列表，清空陈旧数据
+      files.value = []; filteredFiles.value = []
+      return
+    }
+    try {
+      const data = await api.get('/api/community-files', { task_id: taskId.value, community_id: docCommId.value, edge_type: docEdgeType.value })
+      files.value = data.files || []
+      filteredFiles.value = data.files || []
+    } catch (_) { files.value = []; filteredFiles.value = [] }
+  }
+
+  function filterFiles() {
+    const q = fileSearch.value.toLowerCase()
+    filteredFiles.value = files.value.filter((f: any) => f.path.toLowerCase().includes(q))
+  }
+
+  function openFilePreview(fp: string) {
+    filePreview.value = fp; pageMode.value = 'file-summary'
+    if (taskId.value) {
+      api.get('/api/file-summary', { task_id: taskId.value, file_path: fp }).then(d => { fileSummary.value = d }).catch(() => { fileSummary.value = null })
+    }
+  }
+
+  /** 源码浏览：拉取文件源码并全屏展示（旧版 /code 入口的 SPA 版替代） */
+  async function viewSource() {
+    const pid = doc.value?.projectId
+    if (!pid || !filePreview.value || sourceLoading.value) return
+    sourceLoading.value = true
+    try {
+      const d = await api.get('/api/file', { project_id: pid, path: filePreview.value })
+      const { codeFullscreen } = await import('@topo/web-core/services/render')
+      codeFullscreen((d.content || '') + ((d.truncated ? '\n… ' + t('viewer.truncated') : '')))
+    } catch (_) {
+      // 拉取失败保持现状
+    } finally { sourceLoading.value = false }
+  }
+
+  // ── TOC ──
+  async function toggleToc() {
+    tocVisible.value = !tocVisible.value
+    if (tocVisible.value) await loadTocData()
+  }
+
+  async function loadTocData() {
+    tocLoading.value = true
+    tocChildren.value = []
+    try {
+      const kids = await api.getCommunityChildren(taskId.value, docCommId.value || undefined, 'UNIFIED')
+      tocChildren.value = kids || []
+    } catch (_) {
+      tocChildren.value = []
+    } finally { tocLoading.value = false }
+  }
+
+  function tocNavigate(c: CommunityChild) {
+    tocVisible.value = false
+    docId.value = ''
+    docCommId.value = c.commId
+    docEdgeType.value = c.edgeType || docEdgeType.value
+    pushDocBc({ label: c.name || c.commId, cid: c.commId, et: c.edgeType || docEdgeType.value })
+    loadDoc()
+  }
+
+  return {
+    docId, originalDocId,
+    docCommId, docEdgeType, docBreadcrumb, doc, loading, children,
+    docContentRef,
+    tocVisible, tocChildren, tocLoading,
+    files, filePage, fileSearch, filePreview, fileSummary, pageMode, filteredFiles,
+    sourceLoading,
+    pushDocBc, loadDoc, loadChildren, navigateTo, navBack,
+    loadFiles, filterFiles, openFilePreview, viewSource,
+    toggleToc, loadTocData, tocNavigate,
+  }
+}

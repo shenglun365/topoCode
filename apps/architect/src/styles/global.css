@@ -1,0 +1,217 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   Catppuccin 双主题（RGB 三元组，配合 tailwind rgb(var(--ctp-x) / <alpha-value>)）
+   :root = 暗色 Mocha（默认）；[data-theme="light"] = 亮色 Latte
+   ======================================== */
+:root {
+  --ctp-base: 30 30 46;        /* #1e1e2e */
+  --ctp-mantle: 24 24 37;      /* #181825 */
+  --ctp-crust: 17 17 27;       /* #11111b */
+  --ctp-surface0: 49 50 68;    /* #313244 */
+  --ctp-surface1: 69 71 90;    /* #45475a */
+  --ctp-surface2: 88 91 112;   /* #585b70 */
+  --ctp-overlay0: 108 112 134; /* #6c7086 */
+  --ctp-overlay1: 127 132 156; /* #7f849c */
+  --ctp-overlay2: 147 153 178; /* #9399b2 */
+  --ctp-subtext0: 166 173 200; /* #a6adc8 */
+  --ctp-subtext1: 186 194 222; /* #bac2de */
+  --ctp-text: 205 214 244;     /* #cdd6f4 */
+  --ctp-rosewater: 245 224 220;/* #f5e0dc */
+  --ctp-flamingo: 242 205 205; /* #f2cdcd */
+  --ctp-pink: 245 194 231;     /* #f5c2e7 */
+  --ctp-mauve: 203 166 247;    /* #cba6f7 */
+  --ctp-red: 243 139 168;      /* #f38ba8 */
+  --ctp-maroon: 235 160 172;   /* #eba0ac */
+  --ctp-peach: 250 179 135;    /* #fab387 */
+  --ctp-yellow: 249 226 175;   /* #f9e2af */
+  --ctp-green: 166 227 161;    /* #a6e3a1 */
+  --ctp-teal: 148 226 213;     /* #94e2d5 */
+  --ctp-sky: 137 220 235;      /* #89dceb */
+  --ctp-sapphire: 116 199 236; /* #74c7ec */
+  --ctp-blue: 137 180 250;     /* #89b4fa */
+  --ctp-lavender: 180 190 254; /* #b4befe */
+}
+
+[data-theme="light"] {
+  --ctp-base: 239 241 245;     /* #eff1f5 */
+  --ctp-mantle: 230 233 239;   /* #e6e9ef */
+  --ctp-crust: 220 224 232;    /* #dce0e8 */
+  --ctp-surface0: 204 208 218; /* #ccd0da */
+  --ctp-surface1: 188 192 204; /* #bcc0cc */
+  --ctp-surface2: 172 176 190; /* #acb0be */
+  --ctp-overlay0: 108 112 134; /* #6c7086 */
+  --ctp-overlay1: 127 132 156; /* #7f849c */
+  --ctp-overlay2: 147 153 178; /* #9399b2 */
+  --ctp-subtext0: 92 95 119;   /* #5c5f77 */
+  --ctp-subtext1: 76 79 105;   /* #4c4f69 */
+  --ctp-text: 76 79 105;       /* #4c4f69 */
+  --ctp-rosewater: 220 138 120;/* #dc8a78 */
+  --ctp-flamingo: 221 120 120; /* #dd7878 */
+  --ctp-pink: 234 118 203;     /* #ea76cb */
+  --ctp-mauve: 136 57 239;     /* #8839ef */
+  --ctp-red: 210 15 57;        /* #d20f39 */
+  --ctp-maroon: 230 69 83;     /* #e64553 */
+  --ctp-peach: 254 100 11;     /* #fe640b */
+  --ctp-yellow: 223 142 29;    /* #df8e1d */
+  --ctp-green: 64 160 43;      /* #40a02b */
+  --ctp-teal: 23 146 153;      /* #179299 */
+  --ctp-sky: 4 165 229;        /* #04a5e5 */
+  --ctp-sapphire: 32 159 181;  /* #209fb5 */
+  --ctp-blue: 30 102 245;      /* #1e66f5 */
+  --ctp-lavender: 114 135 253; /* #7287fd */
+}
+
+/* 共享工具栏/壳变量别名（P4）：映射 web-core 变量到 ctp 双主题，随 data-theme 联动 */
+:root {
+  --bg-primary: rgb(var(--ctp-base));
+  --bg-secondary: rgb(var(--ctp-mantle));
+  --bg-tertiary: rgb(var(--ctp-surface0));
+  --bg-hover: rgb(var(--ctp-surface1));
+  --bg-active: rgb(var(--ctp-surface2));
+  --text-primary: rgb(var(--ctp-text));
+  --text-secondary: rgb(var(--ctp-subtext0));
+  --text-muted: rgb(var(--ctp-overlay0));
+  --accent: rgb(var(--ctp-blue));
+  --accent-hover: rgb(var(--ctp-sapphire));
+  --success: rgb(var(--ctp-green));
+  --warning: rgb(var(--ctp-yellow));
+  --error: rgb(var(--ctp-red));
+  --border: rgb(var(--ctp-surface1));
+  --border-light: rgb(var(--ctp-surface2));
+  --bg: var(--bg-primary);
+  --bg-card: var(--bg-secondary);
+  --bg-side: var(--bg-secondary);
+  --bg-code: var(--bg-tertiary);
+  --bg-chip: var(--bg-tertiary);
+  --text: var(--text-primary);
+  --code-text: var(--text-primary);
+  --accent-light: rgba(137, 180, 250, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --font-sans: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-ctp-base text-ctp-text font-sans;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ctp-surface1 rounded-full;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ctp-surface2;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-ctp-mantle border border-ctp-surface0 rounded-lg;
+  }
+  .panel-header {
+    @apply flex items-center justify-between px-4 py-2.5 border-b border-ctp-surface0 text-sm font-medium text-ctp-subtext1;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all cursor-pointer select-none
+      bg-ctp-surface0 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-text
+      active:scale-[0.98] active:brightness-95
+      disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+  .btn-primary {
+    @apply btn bg-ctp-blue text-ctp-crust hover:bg-ctp-sapphire active:brightness-90;
+  }
+  .btn-ghost {
+    @apply btn text-ctp-subtext1 hover:bg-ctp-surface0 hover:text-ctp-text active:brightness-95;
+  }
+  .btn-green {
+    @apply btn bg-ctp-green text-ctp-crust hover:brightness-110 active:brightness-90;
+  }
+  .btn-mauve {
+    @apply btn bg-ctp-mauve text-ctp-crust hover:brightness-110 active:brightness-90;
+  }
+  .btn-teal {
+    @apply btn bg-ctp-teal text-ctp-crust hover:brightness-110 active:brightness-90;
+  }
+  .btn-red {
+    @apply btn bg-ctp-red text-ctp-crust hover:brightness-110 active:brightness-90;
+  }
+  .btn-blue {
+    @apply btn bg-ctp-blue text-ctp-crust hover:brightness-110 active:brightness-90;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+  .btn-xs {
+    @apply px-2 py-0.5 text-[11px];
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .input {
+    @apply w-full rounded-md bg-ctp-crust border border-ctp-surface1 px-3 py-1.5 text-sm text-ctp-text placeholder-ctp-overlay0 focus:border-ctp-blue focus:ring-1 focus:ring-ctp-blue outline-none;
+  }
+  .md-body {
+    @apply prose prose-sm prose-invert max-w-none;
+    --tw-prose-body: rgb(var(--ctp-text));
+    --tw-prose-headings: rgb(var(--ctp-text));
+    --tw-prose-links: rgb(var(--ctp-blue));
+    --tw-prose-bold: rgb(var(--ctp-subtext1));
+    --tw-prose-quotes: rgb(var(--ctp-subtext0));
+    --tw-prose-code: rgb(var(--ctp-pink));
+    --tw-prose-pre-bg: rgb(var(--ctp-crust));
+    --tw-prose-pre-code: rgb(var(--ctp-text));
+    --tw-prose-bullets: rgb(var(--ctp-overlay0));
+    --tw-prose-hr: rgb(var(--ctp-surface1));
+    --tw-prose-th-borders: rgb(var(--ctp-surface1));
+    --tw-prose-td-borders: rgb(var(--ctp-surface1));
+  }
+  .md-body pre {
+    @apply bg-ctp-crust border border-ctp-surface0;
+    color: rgb(var(--ctp-text)); /* prose-invert 固定白字——显式跟随主题(亮色底配深字) */
+  }
+  .md-body code:not(pre code) {
+    @apply bg-ctp-surface0 px-1 py-0.5 rounded text-[0.85em];
+  }
+}
+
+@keyframes topo-flow {
+  0% { offset-distance: 0%; }
+  100% { offset-distance: 100%; }
+}
+@keyframes topo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up {
+  animation: fade-up 0.25s ease-out both;
+}
+
+/* ========================================
+   字号联动（P4 补充）：固定 px 的 text-[Xpx] 工具类随全局字号等比缩放。
+   --ui-scale = 全局字号 / 16（由 setFontSize 落在 <html>，默认 16 → 1）。
+   覆盖普通与 !important 两个变体；置于 @tailwind utilities 之后(未分层)确保胜出。
+   资产卡代码字号走独立 codeFontSize(内联)，不受此处影响。
+   ======================================== */
+.text-\[8px\],  .\!text-\[8px\]  { font-size: calc(8px  * var(--ui-scale, 1)) !important; }
+.text-\[9px\],  .\!text-\[9px\]  { font-size: calc(9px  * var(--ui-scale, 1)) !important; }
+.text-\[10px\], .\!text-\[10px\] { font-size: calc(10px * var(--ui-scale, 1)) !important; }
+.text-\[11px\], .\!text-\[11px\] { font-size: calc(11px * var(--ui-scale, 1)) !important; }

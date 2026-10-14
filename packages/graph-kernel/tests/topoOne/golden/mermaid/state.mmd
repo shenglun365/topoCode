@@ -1,0 +1,8 @@
+stateDiagram-v2
+new: New
+running: Running
+done: Done
+[*] --> new
+done --> [*]
+new --> running : start
+running --> done : finish [exitCode == 0]

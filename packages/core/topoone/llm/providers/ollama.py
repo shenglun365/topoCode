@@ -1,0 +1,181 @@
+"""Ollama LLM Provider — BaseLLMProvider implementation
+
+Ollama native API: POST /api/chat
+"""
+
+import json as _json
+import logging
+
+import requests
+
+from .base import BaseLLMProvider
+
+logger = logging.getLogger(__name__)
+
+
+class OllamaProvider(BaseLLMProvider):
+    """Ollama API (custom) chat completion"""
+
+    supports_tools = True
+
+    def chat_stream(
+        self,
+        model_config,
+        messages,
+        chunk_queue,
+        tools=None,
+        mode='chat',
+        max_tokens=None,
+    ):
+        base_url = model_config['url'].rstrip('/')
+        if base_url.endswith('/v1'):
+            base_url = base_url[:-3]
+        payload = {
+            'model': model_config['model'],
+            'messages': messages,
+            'stream': True,
+            'options': {},
+        }
+        if model_config.get('temperature') is not None:
+            payload['options']['temperature'] = model_config['temperature']
+        mt = max_tokens if max_tokens is not None else model_config.get('max_tokens')
+        if mt is not None:
+            payload['options']['num_predict'] = mt
+        if mode == 'tools' and tools:
+            payload['tools'] = tools
+
+        token_info = {}
+        from .base import llm_request_timeout
+        timeout = llm_request_timeout(model_config)
+
+        _log_payload = {
+            'provider': 'ollama',
+            'url': base_url + '/api/chat',
+            'model': payload['model'],
+            'mode': mode,
+            'temperature': payload.get('options', {}).get('temperature'),
+            'num_predict': payload.get('options', {}).get('num_predict'),
+            'messages': [
+                {'role': m.get('role', ''), 'content_len': len(m.get('content') or ''), 'content_preview': (m.get('content') or '')[:3000]}
+                for m in payload.get('messages', [])
+            ],
+        }
+        logger.info(f"[LLM_REQ] Ollama request: {_json.dumps(_log_payload, ensure_ascii=False)}")
+
+        try:
+            resp = requests.post(f'{base_url}/api/chat', json=payload, stream=True, timeout=timeout)
+            if resp.status_code != 200:
+                chunk_queue.put({'type': 'error', 'message': f'Ollama API error {resp.status_code}'})
+                return token_info
+
+            full_content = ""
+            for line_bytes in resp.iter_lines():
+                if not line_bytes:
+                    continue
+                line = line_bytes.decode('utf-8')
+                try:
+                    data = _json.loads(line)
+                    if data.get('done'):
+                        eval_count = data.get('eval_count')
+                        prompt_eval_count = data.get('prompt_eval_count')
+                        if eval_count is not None or prompt_eval_count is not None:
+                            token_info = {
+                                'prompt_tokens': prompt_eval_count,
+                                'completion_tokens': eval_count,
+                                'total_tokens': (prompt_eval_count or 0) + (eval_count or 0),
+                            }
+                        chunk_queue.put({'type': 'done', 'content': full_content})
+                        break
+                    chunk = data.get('message', {}).get('content', '')
+                    if chunk:
+                        full_content += chunk
+                        chunk_queue.put(chunk)
+                except _json.JSONDecodeError:
+                    continue
+        except Exception as e:
+            chunk_queue.put({'type': 'error', 'message': str(e)})
+        finally:
+            chunk_queue.put({'type': 'done', 'content': ''})
+        return token_info
+
+    def chat_sync(
+        self,
+        model_config,
+        messages,
+        mode,
+        tools=None,
+        output_schema=None,
+        max_tokens=None,
+    ):
+        payload = {
+            'model': model_config['model'],
+            'messages': messages,
+            'stream': False,
+            'options': {},
+        }
+        if model_config.get('temperature') is not None:
+            payload['options']['temperature'] = model_config['temperature']
+        mt = max_tokens if max_tokens is not None else model_config.get('max_tokens')
+        if mt is not None:
+            payload['options']['num_predict'] = mt
+        if mode == 'tools' and tools:
+            payload['tools'] = tools
+        # M4-A 受限生成: structured 模式透传 json_schema 约束解码(Ollama /api/chat
+        # 原生 format 字段)。老版本/异常网关拒收(4xx)时降级重试一次不带 format
+        # ——约束解码失败回提示词约束基线, 不让 A 的可用性依赖 provider 版本。
+        use_format = mode == 'structured' and isinstance(output_schema, dict)
+        if use_format:
+            payload['format'] = output_schema
+        from .base import llm_request_timeout
+        resp = requests.post(
+            f"{model_config['url'].rstrip('/')}/api/chat",
+            json=payload,
+            timeout=llm_request_timeout(model_config),
+        )
+        if use_format and resp.status_code >= 400:
+            logger.warning("[ollama-provider] format 透传被拒(%s) → 降级提示词约束",
+                           resp.status_code)
+            payload.pop('format', None)
+            resp = requests.post(
+                f"{model_config['url'].rstrip('/')}/api/chat",
+                json=payload,
+                timeout=llm_request_timeout(model_config),
+            )
+        data = resp.json()
+        msg = data.get('message', {})
+        content = msg.get('content', '')
+        eval_count = data.get('eval_count')
+        prompt_eval_count = data.get('prompt_eval_count')
+        usage = {}
+        if eval_count is not None or prompt_eval_count is not None:
+            usage = {
+                'prompt_tokens': prompt_eval_count,
+                'completion_tokens': eval_count,
+                'total_tokens': (prompt_eval_count or 0) + (eval_count or 0),
+            }
+
+        # Parse Ollama native tool_calls format
+        raw_calls = msg.get('tool_calls', [])
+        tool_calls = []
+        for tc in raw_calls:
+            fn = tc.get('function', {})
+            name = fn.get('name', '')
+            args_raw = fn.get('arguments', {})
+            # Ollama arguments is a dict, OpenAI's is a JSON string; unify to string
+            arguments_str = _json.dumps(args_raw) if isinstance(args_raw, dict) else str(args_raw)
+            tool_calls.append({
+                "id": tc.get("id", ""),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": arguments_str,
+                },
+            })
+
+        return {
+            'content': content,
+            'usage': usage,
+            'tool_calls': tool_calls,
+            'finish_reason': 'tool_calls' if tool_calls else 'stop',
+            'reasoning_content': msg.get('reasoning_content', ''),
+        }

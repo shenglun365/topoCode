@@ -1,0 +1,1212 @@
+<script setup lang="ts">
+/**
+ * 全局会话栏(右侧 dock) —— architect 唯一对话入口(P1 决策2)。
+ * 会话引擎在 conversation-store；本组件只做外观与会话切换。
+ */
+import { useAppDialog } from '@/composables/useAppDialog'
+import { useConvWindowLock } from '@/composables/useConvWindowLock'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+import { ArrowTopRightOnSquareIcon, ShieldCheckIcon } from '@heroicons/vue/24/outline'
+import {
+  XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, ChevronDownIcon,
+  ExclamationCircleIcon, PaperAirplaneIcon, ChatBubbleOvalLeftEllipsisIcon,
+  PencilSquareIcon, SparklesIcon, BookOpenIcon, ArchiveBoxIcon, CubeTransparentIcon,
+  ClipboardDocumentCheckIcon, AdjustmentsHorizontalIcon,
+  DocumentTextIcon, ListBulletIcon, TrashIcon,
+} from '@heroicons/vue/24/outline'
+import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
+import SessionOutlineWindow from '@/components/chat/SessionOutlineWindow.vue'
+import ReqDetailWindow from '@/components/requirements/ReqDetailWindow.vue'
+import { useConversationStore } from '@/stores/conversation-store'
+import { sessionService, type ConversationMeta } from '@/services/session-service'
+import { currentProjectParams } from '@/services/project-service'
+import { namingService } from '@/services/naming-service'
+import { apiBaseUrl, apiDelete, apiGet, apiPost, getToken } from '@/services/api-client'
+import { readModelPref } from '@/shell/prefs'
+
+const props = withDefaults(defineProps<{
+  /** inline=停靠形态(页面右栏内嵌)；缺省=全局右侧悬浮 dock。 */
+  inline?: boolean
+  /** 新建会话的默认类型(资产地图页传 asset, 会话中心传 requirement)——首条消息创建会话时落库。 */
+  defaultKind?: string
+  /** 页面级技能场景(如资产地图=['extract'])：随发送注入。 */
+  skillScenarios?: string[]
+  /** 场景标识(sessions=会话中心 / asset=资产管理)：对话状态按场景隔离互不影响。 */
+  scope?: string
+  /** 知识资产面板(输入框上方): 缺省显示; 会话中心移至左栏后传 false。 */
+  assetsPanel?: boolean
+  /** 会话大纲按钮+浮窗(输入框上侧工具栏): 缺省关闭, 会话中心开启。 */
+  outline?: boolean
+}>(), { inline: false })
+
+const { t } = useI18n()
+const dialog = useAppDialog()
+const router = useRouter()
+const conv = useConversationStore()
+
+const recent = ref<ConversationMeta[]>([])
+const listOpen = ref(false)
+
+// ── E1 会话域技能(两线暴露收口): 绑规约会话可用, 产物落草稿(文档态续加工) ──
+const skillBusy = ref('')
+let skillPollTimer: ReturnType<typeof setInterval> | null = null
+onUnmounted(() => { if (skillPollTimer) clearInterval(skillPollTimer) })
+async function runSessionSkill(skillId: 'skeleton' | 'acceptance' | 'scope'): Promise<void> {
+  const cid = conv.activeId
+  if (!cid || skillBusy.value) return
+  skillBusy.value = skillId
+  try {
+    const r = await apiPost<{ started?: boolean; job?: { id?: string }; reason?: string }>(
+      `/sessions/${encodeURIComponent(cid)}/skill-run`, { skill: skillId })
+    conv.pushLocalHint('已提交技能作业——产物将以草稿形式出现在资产页(可继续加工后发布会话)')
+    // 完成通知(轻轮询, 30s 上限; 作业 LLM 串行可能排队, 超时静默)
+    const jobId = r?.job?.id
+    if (r?.started && jobId) {
+      const t0 = Date.now()
+      skillPollTimer = setInterval(async () => {
+        if (Date.now() - t0 > 30_000 || !skillPollTimer) {
+          if (skillPollTimer) clearInterval(skillPollTimer)
+          skillPollTimer = null
+          return
+        }
+        try {
+          const j = await apiGet<{ state?: string }>(`/kb/semantic/jobs/${encodeURIComponent(String(jobId))}`)
+          if (j?.state === 'done' || j?.state === 'failed') {
+            clearInterval(skillPollTimer!)
+            skillPollTimer = null
+            conv.pushLocalHint(j.state === 'done'
+              ? '技能作业完成——产物已存为草稿(资产页查看)'
+              : '技能作业失败(任务中心查看详情)')
+          }
+        } catch { /* 轮询失败静默 */ }
+      }, 2500)
+    }
+  } catch (e) {
+    conv.pushLocalHint(e instanceof Error ? e.message : '技能作业提交失败')
+  } finally {
+    skillBusy.value = ''
+  }
+}
+
+// ── C3 规约缺口建议 chip(gap_matrix 单源): 有缺口才显示, hover 明细; 提示不拦截 ──
+const specGaps = ref<string[]>([])
+async function loadSpecGaps(): Promise<void> {
+  const cid = conv.activeId
+  if (!cid || !(conv.activeMeta as any)?.reqId) { specGaps.value = []; return }
+  try {
+    const r = await apiGet<{ gaps: string[] }>(
+      `/sessions/${encodeURIComponent(cid)}/spec-gaps`)
+    specGaps.value = (r?.gaps ?? [])
+  } catch { specGaps.value = [] }
+}
+watch(() => conv.activeId, () => { specGaps.value = []; void loadSpecGaps() })
+
+// ── 会话大纲浮窗(按钮在 #toolbar-extra; 浮窗 Teleport 到 body) ──
+const outlineOpen = ref(false)
+
+// ── 2610 核心资产守护: 标记管理弹窗(🛡 工具栏入口) ──
+/** 守护列表跳转(新窗口): /workbench/assets?tab=semantic&view=guard。 */
+function openGuardWindow() {
+  window.open(router.resolve({
+    path: '/workbench/assets',
+    query: { tab: 'semantic', view: 'guard' },
+  }).href, '_blank')
+}
+
+// ── 会话操作(工具条): 提炼报告由服务端沉淀为会话消息 ──
+const mining = ref(false)
+function activeProject(): string {
+  return ((conv.activeMeta as any)?.projectId || '') as string
+}
+/** 项目作用域(cv-204 硬隔离): 活动会话项目 → URL 项目; 皆无 → ''(空态, 不发全局查询)。 */
+function scopePid(): string {
+  return activeProject() || currentProjectParams().project || ''
+}
+async function mineActive() {
+  const pid = activeProject()
+  if (!conv.activeId || !pid || mining.value) return
+  mining.value = true
+  try {
+    // 提炼报告由服务端沉淀为会话消息(统一时间线)
+    await apiPost('/capabilities/mine', { conversationId: conv.activeId, project: pid })
+  } catch (e) {
+    await dialog.alert(e instanceof Error ? e.message : String(e))
+  } finally { mining.value = false }
+}
+async function archiveActive() {
+  if (!conv.activeId || (conv.activeMeta as any)?.status === 'archived') return
+  try {
+    const r = await sessionService.update(conv.activeId, { status: 'archived' } as any)
+    ;(conv.activeMeta as any).status = 'archived'
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: conv.activeId }))
+    if ((r as any)?.mineableHint && activeProject()) {
+      if (await dialog.confirm(t('session.mineOnEnd'))) await mineActive()
+    }
+  } catch { /* 保持 */ }
+}
+
+async function loadRecent() {
+  try {
+    // cv-205 项目硬隔离: 只拉当前项目会话(无项目上下文 → 空列表, 不发 scope=all)
+    const pid = scopePid()
+    if (!pid) { recent.value = []; return }
+    recent.value = await sessionService.list({ limit: 30, project: pid })
+  } catch { /* 列表失败保持旧值 */ }
+}
+
+// ── 会话标题: 悬停 → 手动修改(行内输入框) / 自动摘要 ──
+const editingTitle = ref(false)
+const titleDraft = ref('')
+const titleSummarizing = ref(false)
+function startTitleEdit() {
+  titleDraft.value = conv.activeTitle || ''
+  editingTitle.value = true
+}
+async function saveTitle() {
+  if (!editingTitle.value) return
+  editingTitle.value = false
+  await commitTitle(titleDraft.value)
+}
+async function onRenameTitle(t: string) {
+  await commitTitle(t)
+}
+async function commitTitle(title: string) {
+  title = (title || '').trim()
+  if (!title || title === conv.activeTitle) return
+  conv.activeTitle = title
+  if (conv.activeId) {
+    try { await sessionService.update(conv.activeId, { title }) } catch { /* 保存失败保持本地 */ }
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: conv.activeId }))
+  }
+}
+async function summarizeTitle() {
+  if (!conv.activeId || titleSummarizing.value) return
+  titleSummarizing.value = true
+  try {
+    const updated = await sessionService.summarize(conv.activeId, true)
+    conv.activeTitle = updated.title || conv.activeTitle
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: conv.activeId }))
+  } catch { /* 摘要失败静默 */ } finally {
+    titleSummarizing.value = false
+  }
+}
+onMounted(() => {
+  if (props.scope) conv.setScope(props.scope)
+  void loadRecent()
+  // 会话集合变更(store 广播: 新建/回合完成/归档/改名) → dock 列表同步刷新
+  window.addEventListener('arch:sessions-changed', onSessionsChanged)
+  // 2610 S2(日志评估): 回合收尾事件驱动 workState 相位回落(撤销 5s 固定轮询;
+  // 执行期增量由 SSE progress/conv-message 承载, 降级期 degradedTimer 兜底)
+  window.addEventListener('arch:turn-end', onTurnEndRefresh)
+  // 会话被删除(左侧列表) → 当前对话区若是该会话则清空(左右联动)
+  window.addEventListener('arch:conversation-removed', onConversationRemoved)
+  conv.connectEvents()   // cv-221: SSE 连接上移 store(单例单连接, 事件入缓冲统一消费)
+})
+onUnmounted(() => {
+  window.removeEventListener('arch:sessions-changed', onSessionsChanged)
+  window.removeEventListener('arch:turn-end', onTurnEndRefresh)
+  window.removeEventListener('arch:conversation-removed', onConversationRemoved)
+})
+function onSessionsChanged() { void loadRecent() }
+watch(() => conv.activeId, () => { if (conv.activeId) void maybeHintWeakModel() })
+
+/** 任务执行器切换(待确认态): PATCH /tasks/{id}/executor。 */
+async function onTaskExecutor(p: { taskId: string; executorType: string }) {
+  try {
+    await apiPost(`/tasks/${p.taskId}/executor`, { executorType: p.executorType })
+    await conv.refreshTasks()
+  } catch { conv.pushLocalHint('执行器切换失败(稍后重试)') }
+}
+
+/** 发送入口(语境路由): attachTo=转达任务卡, agent=一次性指派 subagent(后端注入指派契约), digest=语境摘要。 */
+async function onSendChat(p: { text: string; attachTo?: string; agent?: string; digest?: string; synthetic?: boolean }) {
+  conv.send(p.text, {
+    // cv-260 空白态预置(2610 统一模型): executorId 随首条消息生效(gate 单源)
+    ...(!conv.activeId ? {
+      ...(presetExecutorId.value ? { executorId: presetExecutorId.value } : {}),
+      ...(clarifyMode.value !== 'auto' ? { clarifyMode: clarifyMode.value } : {}),
+      ...(isolated.value ? { isolated: true } : {}),
+    } : {}),
+    ...(props.skillScenarios?.length ? { skillScenarios: props.skillScenarios } : {}),
+    ...(props.defaultKind ? { kind: props.defaultKind } : {}),
+    ...(p.attachTo ? { attachTo: p.attachTo } : {}),
+    ...(p.agent ? { agent: p.agent } : {}),
+    ...(p.digest ? { digest: p.digest } : {}),
+    ...(p.synthetic ? { synthetic: true } : {}),
+  })
+  onSent()
+}
+
+/** 本地命令(/摘要 /提炼 /归档 /引导): 与工具条按钮同动作。 */
+function onLocalCmd(name: string) {
+  if (name === '摘要') { void summarizeTitle() }
+  else if (name === '提炼') { void mineActive() }
+  else if (name === '归档') { void archiveActive() }
+}
+function onConversationRemoved(e: Event) {
+  const id = (e as CustomEvent).detail as string
+  if (id) conv.dropConversation(id)
+  void loadRecent()   // 会话切换浮层清单同步(删除后不残留)
+}
+
+function switchTo(meta: ConversationMeta) {
+  listOpen.value = false
+  void conv.openConversation(meta)
+  void loadRecent()
+}
+function newChat() {
+  listOpen.value = false
+  conv.newConversation()
+  void loadRecent()
+}
+function onSent() { void loadRecent() }
+
+/** dock 内「刷新资产」卡事件 → 资产地图页监听的全局事件。 */
+function emitRefreshAsset(id: string) {
+  window.dispatchEvent(new CustomEvent('arch:refresh-asset', { detail: id }))
+}
+
+// ── 会话级执行器模型(随选随生效于下次执行; running 作业模型已固化) ──
+const boundModelNames = computed<string[]>(() => {
+  if (!boundExecutorId.value) return []
+  const ex = executorList.value.find((e) => e.id === boundExecutorId.value) as any
+  return ((ex?.config?.models) || [])
+    .map((m: any) => m?.name || m?.model || '').filter(Boolean)
+})
+const currentExecutorModel = computed(
+  () => ((conv.activeMeta as any)?.executorModel as string) || '')
+async function onSetModel(model: string) {
+  if (!conv.activeId) return
+  try {
+    const r = await apiPost<{ summary?: string }>(`/sessions/${conv.activeId}/model`,
+                                                  { model })
+    conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
+                        executorModel: model } as ConversationMeta
+    conv.pushLocalHint(String(r?.summary || '模型已切换'))
+  } catch (e: any) {
+    conv.pushLocalHint(`⚠️ 模型切换失败：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+// ── S3 coding 子会话池: 新建(清空自持上下文)/切换活跃/查看 ──
+interface SubSession { id: string; title: string; executorId?: string; sessionRef?: string
+  hasSessionRef?: boolean; active?: boolean; status?: string
+  runningRole?: { role: string; status?: string }; execution?: string; msgCount?: number }
+const subsOpen = ref(false)
+const subsBusy = ref(false)
+const subsMsg = ref('')
+const codingSubs = ref<SubSession[]>([])
+const isMainSession = computed(() => (conv.activeMeta as any)?.kind !== 'coding')
+async function loadSubs() {
+  if (!conv.activeId || !isMainSession.value) return
+  try {
+    codingSubs.value = await apiGet<SubSession[]>(`/sessions/${conv.activeId}/coding-sessions`)
+  } catch { codingSubs.value = [] }
+}
+async function openSubs() {
+  subsMsg.value = ''
+  await loadSubs()
+  subsOpen.value = true
+}
+async function newSub(executorId = '') {
+  if (!conv.activeId || subsBusy.value) return
+  subsBusy.value = true
+  try {
+    await apiPost(`/sessions/${conv.activeId}/coding-sessions`,
+                  executorId ? { executorId } : {})
+    await loadSubs()
+    await syncRunningState(true)
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally { subsBusy.value = false }
+}
+
+// ── 执行器会话选定(2026-10 子会话模型): 按执行器分组 + 换绑 ──
+const subExecutorGroups = computed(() => {
+  const m = new Map<string, SubSession[]>()
+  for (const s of codingSubs.value) {
+    const k = s.executorId || 'default'
+    if (!m.has(k)) m.set(k, [])
+    m.get(k)!.push(s)
+  }
+  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+})
+const executorLabel = (id: string) =>
+  executorList.value.find((e) => e.id === id)?.type || id || 'default'
+const newSubExecutor = ref('')
+async function newSubPicked() {
+  await newSub(newSubExecutor.value)
+  newSubExecutor.value = ''
+}
+const subSwitchBusy = ref('')
+async function switchSubExecutor(subId: string, executorId: string) {
+  if (!executorId || subSwitchBusy.value) return
+  subSwitchBusy.value = subId
+  try {
+    await apiPost(`/sessions/${subId}/executor`, { executorId })
+    await loadSubs()
+    conv.pushLocalHint('✓ 子会话执行器已切换——下回合生效')
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally { subSwitchBusy.value = '' }
+}
+async function activateSub(id: string) {
+  if (!conv.activeId || subsBusy.value) return
+  subsBusy.value = true
+  try {
+    await apiPost(`/sessions/${conv.activeId}/coding-sessions/${id}/activate`, {})
+    await loadSubs()
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally { subsBusy.value = false }
+}
+const convLock = useConvWindowLock()
+// 2610 会话窗口(F2): 沉浸式独立浏览器页(?conv= 直开; 唯一性锁防多开)
+function openSessionWindow(convId: string, projectId?: string) {
+  const q = new URLSearchParams({ conv: convId })
+  const pid = projectId || scopePid()
+  if (pid) q.set('project', pid)
+  window.open(router.resolve({ path: '/exec-session-view', query: Object.fromEntries(q) }).href, '_blank')
+}
+
+async function viewSub(id: string) {
+  // 子会话窗口唯一性(2026-10): 同会话已在别的 tab 打开 → 接管确认
+  const r = await convLock.claim(id)
+  if (!r.claimed) {
+    const ok = await dialog.confirm(t('session.subs.lockTaken', { tab: r.owner || '?' }), {
+      confirmText: t('session.subs.lockTakeover'), danger: false })
+    if (!ok) return
+    convLock.takeover(id)
+  }
+  subsOpen.value = false
+  listOpen.value = false
+  void conv.openConversation({ id } as ConversationMeta)
+}
+
+// 子会话单独删除(2610 裁决): 仅非执行态可删; 执行中须先停止
+const subDelBusy = ref('')
+async function deleteSub(s: SubSession) {
+  if (subDelBusy.value || s.execution) return   // 2610: execution=真实运行态(守卫单源)
+  const ok = await dialog.confirm(
+    t('session.subs.deleteConfirm', { title: s.title || s.id }), { danger: true })
+  if (!ok) return
+  subDelBusy.value = s.id
+  try {
+    await apiDelete(`/sessions/${s.id}`)
+    await loadSubs()
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: s.id }))
+  } catch (e: any) {
+    subsMsg.value = e?.message || String(e)
+  } finally {
+    subDelBusy.value = ''
+  }
+}
+
+// ── S3 投喂门: 主会话消息 → 过滤 → 活跃子会话+作业;
+//    子会话视图(architect 分析子会话等) → feed-up 上投回主会话活跃执行器 ──
+const feedBusyIdx = ref(-1)
+const isSubSessionView = computed(
+  () => !!(conv.activeMeta as any)?.parentConvId)
+async function onFeedTurn(p: { index: number; id?: string; summarize?: boolean }) {
+  if (feedBusyIdx.value >= 0 || !conv.activeId) return
+  const m = conv.turns[p.index]
+  if (!m) return
+  feedBusyIdx.value = p.index
+  try {
+    const path = isSubSessionView.value
+      ? `/sessions/${conv.activeId}/feed-up`     // 2610: 子会话产出上投
+      : `/sessions/${conv.activeId}/feed`
+    const r = await apiPost<{ summary?: string; delivered?: boolean }>(
+      path,
+      { messageId: m.id || '', text: m.id ? undefined : m.content,
+        ...(p.summarize ? { summarize: true } : {}) })
+    conv.pushLocalHint(String(r?.summary || '已投喂'))
+  } catch (e: any) {
+    conv.pushLocalHint(`⚠️ 转达失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    setTimeout(() => { feedBusyIdx.value = -1 }, 600)
+  }
+}
+
+// ── 执行器(2610 统一模型): architect 与 coding 执行器平级, 会话可随时换绑 ──
+interface ExecutorRow { id: string; type: string; enabled?: boolean }
+const executorList = ref<ExecutorRow[]>([])
+const boundExecutorId = computed(
+  () => ((conv.activeMeta as any)?.executorId as string) || '')
+// ── 生命周期重构: 工作相位 + 角色集声明 + 作业控制 ──
+watch(() => conv.activeId, () => { void loadSubs() })
+
+// 执行器子会话输出实时感知(2026-10): SSE conv-message 命中子会话 → 刷新池+闪动
+const flashSubs = ref<Set<string>>(new Set())
+function onConvMsgEv(e: Event) {
+  const d = (e as CustomEvent).detail || {}
+  const cid = String(d.conversationId || '')
+  if (!cid) return
+  if (codingSubs.value.some((x) => x.id === cid)) {
+    flashSubs.value = new Set([...flashSubs.value, cid])
+    void loadSubs()
+    setTimeout(() => {
+      const next = new Set(flashSubs.value)
+      next.delete(cid)
+      flashSubs.value = next
+    }, 2000)
+  }
+}
+onMounted(() => window.addEventListener('arch:conv-message', onConvMsgEv))
+onUnmounted(() => window.removeEventListener('arch:conv-message', onConvMsgEv))
+
+async function loadExecutors() {
+  try {
+    const r = await apiGet<{ executors: ExecutorRow[] }>('/agent/executors')
+    executorList.value = (r?.executors || []).filter((e) => e.enabled !== false)
+  } catch { /* 绑定器降级为空列表 */ }
+}
+onMounted(() => { void loadExecutors() })
+
+const workState = computed(() => ((conv.activeMeta as any)?.workState as string) || 'architect')
+const isRunning = computed(() => (workState.value === 'running'
+  || !!conv.optimisticRole)
+  && (conv.activeMeta as any)?.status !== 'archived')
+// 绑定需求的 architect 态会话: 「引导」按钮可见(触发词提示按需输出)
+const isExecutionConv = computed(() =>
+  !!(conv.activeReqId) && (conv.activeMeta as any)?.status !== 'archived'
+  && !isRunning.value)
+
+/** 模型准入提示(三维矩阵): 会话模型测评 T2(弱, 全面补偿档)时提示换更强模型——
+ * 刻度细则见 agent/governance/gears.py; 提示不拦截(可按 T2 最低档运行)。
+ * 每次会话打开提示一次(不弹窗不打断, 本地消息)。 */
+const t2Hinted = new Set<string>()
+let capProfilesCache: Record<string, any> | null = null
+async function maybeHintWeakModel() {
+  const mid = readModelPref('architect') || ''
+  if (!mid || t2Hinted.has(conv.activeId) || t2Hinted.has(mid)) return
+  try {
+    if (!capProfilesCache) {
+      const d = await apiGet<{ profiles: any[] }>('/llm/model-profiles')
+      capProfilesCache = Object.fromEntries((d.profiles ?? []).map((p: any) => [p.modelId, p]))
+    }
+    const p = capProfilesCache[mid]
+    if (p && Number(p.tier) === 2) {
+      t2Hinted.add(conv.activeId); t2Hinted.add(mid)
+      conv.pushLocalHint('💡 模型准入提示: 当前会话模型测评较弱(T2 档, <6B 级)。系统将按全面补偿模式运行(结构化指令+核心逻辑图+步骤编排), 但产出质量与速度受限——建议在模型设置中切换 T0/T1 档模型。')
+    }
+  } catch { /* profiles 不可得 → 不提示 */ }
+}
+
+/** 分析挡位(会话级 strict/quick): 本地镜像(即时反馈) + 切换会话时从 activeMeta 同步; 变更上抛 REST 即时生效。 */
+const analysisMode = ref<'strict' | 'quick'>('strict')
+/** 需求澄清挡位(cv-190): auto | forced——随会话打开从真相源同步。 */
+const clarifyMode = ref<'auto' | 'forced'>('auto')
+/** worktree 隔离模式(cv-202): 缺省融合模式。 */
+const isolated = ref(false)
+// cv-265: 首条消息创建会话时 activeId 先变而 activeMeta 未加载(done 后
+// refreshActiveMeta 才回填)——旧 watcher 此刻把三挡重置为默认, 预置的
+// quick 挡"自动退回 architect"。改为 meta 就绪才同步, 逐字段校验(未加载
+// 不动本地值: 空白态预置/本地即时反馈均不被冲掉)。
+watch([() => conv.activeId, () => conv.activeMeta], () => {
+  if (!conv.activeId) return
+  const m = conv.activeMeta as any
+  if (!m) return
+  if (m.analysisMode === 'strict' || m.analysisMode === 'quick') {
+    analysisMode.value = m.analysisMode
+  }
+  if (m.clarifyMode === 'auto' || m.clarifyMode === 'forced') {
+    clarifyMode.value = m.clarifyMode
+  }
+  if (typeof m.isolated === 'boolean') isolated.value = m.isolated
+})
+async function onSetClarifyMode(mode: 'auto' | 'forced') {
+  clarifyMode.value = mode // 本地即时反馈(不等 REST)
+  if (!conv.activeId) return // cv-260 空白态预置: 首条消息创建会话时随载荷生效
+  try {
+    const r = await apiPost<{ clarifyMode?: 'auto' | 'forced' }>(`/sessions/${conv.activeId}/clarify-mode`, { mode })
+    if (r?.clarifyMode) clarifyMode.value = r.clarifyMode
+    if (conv.activeMeta) (conv.activeMeta as any).clarifyMode = clarifyMode.value
+  } catch { /* REST 失败保留本地值(下轮打开会话时从后端真相源校正) */ }
+}
+
+async function onSetIsolated(on: boolean) {
+  isolated.value = on
+  if (!conv.activeId) return // cv-260 空白态预置
+  try {
+    const r = await apiPost<{ isolated?: boolean }>(`/sessions/${conv.activeId}/isolated`, { on })
+    if (typeof r?.isolated === 'boolean') isolated.value = r.isolated
+    if (conv.activeMeta) (conv.activeMeta as any).isolated = isolated.value
+  } catch { /* REST 失败保留本地值 */ }
+}
+
+// 分析挡位切换已退役(2610 统一模型): 执行器换绑见 onSwitchExecutor;
+// analysisMode 仅保留 legacy 读侧兼容(quick 无绑定 → 默认 coding 执行器)。
+
+/** 引导消息: 仅渲染进对话流(本地), 不发后端/不进上下文, 切换会话自然消失。 */
+const GUIDE_MD = [
+  '⚡ **会话引导**（仅本地提示，不进入对话上下文）',
+  '',
+  '- 直接对话: architect 外循环帮你分析/设计方案',
+  '- 方案成熟时 architect 会出**任务卡**——确认后 coding subagent 开始执行',
+  '- 也可用输入框 @ 选择器直接指派 `@cline`',
+  '- subagent 提问(⏸)/完成(✅)/失败(❌)都落本会话流; 回复即转达',
+  '- 顶部 tab(全部/architect/coding)过滤查看两类消息',
+].join('\n')
+const guideBusy = ref(false)
+async function showGuide() {
+  if (!isExecutionConv.value || guideBusy.value) return
+  guideBusy.value = true
+  try {
+    // agent 建议: 后端按会话状态(RQ 版本链/作业账本/最近消息)生成, 旁路不进上下文
+    const r = conv.activeId
+      ? await sessionService.guide(conv.activeId).catch(() => ({ text: '', fallback: true }))
+      : { text: '', fallback: true }
+    conv.pushLocalHint((r?.text || '').trim() || GUIDE_MD)
+  } finally {
+    guideBusy.value = false
+  }
+}
+
+// ── 「写入需求」按钮: 规约 JSON 确定性落库(零 LLM), 结果本地消息 ──
+const specApplyBusy = ref(false)
+async function onSpecApply(p: { index: number; payload: Record<string, unknown> }) {
+  if (specApplyBusy.value || !conv.activeId) return
+  specApplyBusy.value = true
+  try {
+    const r = await apiPost<Record<string, any>>(`/sessions/${conv.activeId}/spec-apply`, {
+      payload: p.payload,
+    })
+    conv.pushLocalHint(
+      String(r?.summary || '落库未产出结果')
+      + (r?.ok ? '；可继续对话让 architect 发起任务。' : ''))
+  } catch (e) {
+    conv.pushLocalHint(`⚠️ 写入需求失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    specApplyBusy.value = false
+  }
+}
+// running 归属(S2 双收件人): 推导字段来自会话行(后端 runningRole), 不再锁定输入。
+// 2610 B2: 乐观态优先(回合启动 0ms 翻转; 权威落地后自动回落 activeMeta.runningRole)
+const jobState = computed(() =>
+  (conv.optimisticRole
+    || ((conv.activeMeta as any)?.runningRole as { role: string; executorId?: string; status?: string } | undefined)) || null)
+
+// RQ 状态徽标 + 登记簿完成标记(第二入口, 裁决#3/#8)
+const reqStatus = ref<{ id: string; status?: string; activeVer?: number } | null>(null)
+// cv-284 需求大窗(会话列表跟踪条点击入口; 共享组件双入口之二)
+const reqDetail = ref<{ requirementId: string; convId: string } | null>(null)
+const markDoneBusy = ref(false)
+async function refreshReqStatus() {
+  if (!conv.activeReqId) { reqStatus.value = null; return }
+  try {
+    reqStatus.value = await apiGet(`/requirements/${conv.activeReqId}`)
+  } catch { reqStatus.value = null }
+}
+watch(() => conv.activeReqId, () => { void refreshReqStatus() }, { immediate: true })
+async function markReqDone(done: boolean) {
+  if (!conv.activeReqId || markDoneBusy.value) return
+  markDoneBusy.value = true
+  try {
+    await apiPost(`/requirements/${conv.activeReqId}/done`, { done })
+    await refreshReqStatus()
+  } catch { /* 无碍 */ } finally {
+    markDoneBusy.value = false
+  }
+}
+
+// 执行器换绑对话框(2610 统一模型): 任意时刻可换(在跑拒绝, 对话连续); architect=切回分析管线
+const rolesOpen = ref(false)
+const rolesDraft = ref('')
+const rolesMsg = ref('')
+async function openRoles() {
+  rolesMsg.value = ''
+  rolesDraft.value = ''
+  if (!executorList.value.length) await loadExecutors()
+  rolesOpen.value = true
+}
+async function saveRoles() {
+  if (!rolesDraft.value) return
+  rolesOpen.value = false
+  await onSwitchExecutor(rolesDraft.value)   // 统一换绑(2610: 一次绑定/克隆退役)
+}
+
+/** 会话执行器换绑(2610 统一模型): 空白态=预置(首条消息创建时生效);
+    已有会话=REST 换绑(在跑拒绝, 对话连续, architect 可切回分析管线)。 */
+const presetExecutorId = ref('')
+watch(() => conv.activeId, () => { presetExecutorId.value = '' })
+async function onSwitchExecutor(executorId: string) {
+  if (!executorId) {
+    conv.pushLocalHint('⚠️ 无可用 coding 执行器——请先在「设置 → 执行器」配置')
+    return
+  }
+  if (!conv.activeId) {
+    presetExecutorId.value = executorId === 'architect' ? '' : executorId
+    // legacy 展示镜像: 闪电钮经 analysisMode prop 感知预置(仅显示, 真相源=executorId)
+    analysisMode.value = presetExecutorId.value ? 'quick' : 'strict'
+    conv.pushLocalHint(executorId === 'architect'
+      ? '已预置 architect 模式——首条消息创建会话后生效'
+      : `已预置执行器「${executorId}」直通模式——首条消息创建会话后生效`)
+    return
+  }
+  try {
+    const r = await apiPost<{ summary?: string }>(`/sessions/${conv.activeId}/executor`,
+                                                  { executorId })
+    conv.pushLocalHint(String(r?.summary || '执行器已切换'))
+    analysisMode.value = 'strict'   // legacy 字段退役: 换绑后不再驱动直通
+    await conv.refreshActiveMeta()
+    void loadSubs()
+  } catch (e: any) {
+    void dialog.alert(e?.message || String(e))
+  }
+}
+
+// 作业控制: 停止(仅 UI, 裁决#5) / 继续执行(增量回合)
+const stopBusy = ref(false)
+async function stopExec() {
+  if (!conv.activeId || stopBusy.value) return
+  stopBusy.value = true
+  try {
+    await apiPost(`/sessions/${conv.activeId}/stop-exec`, {})
+    await syncRunningState(true)
+  } catch { /* 提示随对账刷新 */ } finally {
+    stopBusy.value = false
+  }
+}
+
+// 流程相位(会话状态机): 徽章展示 + interrupted 恢复动作(governance/flow.py)
+const flowPhase = computed(() => String((conv.activeMeta as any)?.flowState || ''))
+function flowLabel(p: string): string {
+  const k = `session.flow.${p}`
+  return t(k) === k ? p : t(k)
+}
+const flowRecoverBusy = ref(false)
+async function recoverFlow() {
+  if (!conv.activeId || flowRecoverBusy.value) return
+  flowRecoverBusy.value = true
+  try {
+    await apiPost(`/sessions/${conv.activeId}/recover`, {})
+    await conv.refreshActiveMeta()
+    void conv.refreshActiveMessages()
+  } catch { /* 状态随对账刷新 */ } finally {
+    flowRecoverBusy.value = false
+  }
+}
+
+// 回执已阅(reviewing 消化出口): dismiss → 相位重算(合并/建下张卡之外的显式消化)
+async function onTaskDismiss(id: string) {
+  try {
+    await apiPost(`/tasks/${id}/dismiss`, {})
+    void conv.refreshTasks()
+    void conv.refreshActiveMeta()
+    void conv.refreshActiveMessages()
+  } catch { /* 状态随对账刷新 */ }
+}
+// running 态准实时同步: 复用 5s 轮询——刷新 workState + 增量消息(泵产物)
+async function syncRunningState(force = false) {
+  if (!conv.activeId) return
+  if (!force && !isRunning.value) return
+  if (!scopePid()) return   // cv-205: 无项目上下文不查询(硬隔离)
+  try {
+    // cv-205: 活动会话必属当前项目——按项目查(不发 scope=all)
+    const list = await sessionService.list({ limit: 400, project: scopePid() })
+    const meta = list.find((c) => c.id === conv.activeId)
+    if (meta) {
+      const prev = workState.value
+      conv.activeMeta = { ...(conv.activeMeta as ConversationMeta),
+                          workState: (meta as any).workState } as ConversationMeta
+      if ((meta as any).workState === 'running') {
+        // 执行中轮询兜底: SSE progress 丢帧/断连时, 过程面板仍按库中 progress(0.5s 节流落库)刷新
+        void conv.refreshTasks()
+      }
+      if (prev === 'running' && (meta as any).workState !== 'running') {
+        // 相位回落(回合结束/终态) → 全量拉一次消息(泵期间的增量可见)
+        const detail = await sessionService.messages(conv.activeId)
+        conv.applyConversation({ ...detail, reqId: conv.activeReqId })
+      }
+    }
+  } catch { /* 列表失败无碍 */ }
+}
+
+// 命名规约提议卡(资产对话): 确认固化 / 忽略(原资产页逻辑迁至 dock)
+async function onConventionConfirm(id: string) {
+  try { await namingService.updateConvention(id, { status: 'active' }) } catch { /* 忽略 */ }
+}
+async function onConventionIgnore(id: string) {
+  try { await namingService.deleteConvention(id) } catch { /* 忽略 */ }
+}
+
+async function onTurnEndRefresh() {
+  void syncRunningState()          // 回合收尾: workState 相位回落+泵消息补偿拉取
+}
+
+// ── workState 同步(2610 S2: turn-end 事件驱动; 降级期 10s 轮询兜底) ──
+// 2610 cv-15: SSE 降级 → 10s 轻量轮询保底(force 绕过 isRunning 门控; 恢复推送即停)
+let degradedTimer: ReturnType<typeof setInterval> | null = null
+watch(() => conv.realtimeDegraded, (deg) => {
+  if (deg && !degradedTimer) {
+    degradedTimer = setInterval(() => { void syncRunningState(true) }, 10000)
+    void syncRunningState(true)
+  } else if (!deg && degradedTimer) {
+    clearInterval(degradedTimer)
+    degradedTimer = null
+  }
+})
+</script>
+
+<template>
+  <!-- 收起态: 右缘浮标(仅全局悬浮形态) -->
+  <button
+    v-if="!props.inline && !conv.dockOpen"
+    class="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-xl border border-r-0 border-ctp-surface1 bg-ctp-mantle px-1.5 py-4 text-ctp-subtext0 shadow-lg hover:text-ctp-text"
+    :title="t('session.dock.open')"
+    @click="conv.setDockOpen(true)"
+  >
+    <ChatBubbleOvalLeftEllipsisIcon class="h-5 w-5" />
+  </button>
+
+  <!-- 展开态: 全局悬浮(右缘 overlay) / inline(页面右栏停靠) -->
+  <aside
+    v-else-if="props.inline || conv.dockOpen"
+    :class="props.inline
+      ? 'relative flex h-full min-h-0 w-full flex-col bg-ctp-base'
+      : 'fixed right-0 top-0 z-40 flex h-full w-[26rem] flex-col border-l border-ctp-surface0 bg-ctp-base shadow-2xl'"
+  >
+    <!-- 2610 cv-15: 推送降级显式化(轮询保底提示) -->
+    <div
+      v-if="conv.realtimeDegraded"
+      class="shrink-0 bg-ctp-yellow/10 px-3 py-1 text-[10px] text-ctp-yellow"
+    >⚠ 实时推送断开 · 10s 轮询保底中</div>
+    <!-- 头部: 标题 + kind + 会话切换(仅悬浮形态; inline 停靠的标题编辑在对话面板 header 内) -->
+    <div v-if="!props.inline" class="relative shrink-0 border-b border-ctp-surface0 px-3 py-2">
+      <div class="flex items-center gap-2">
+        <span class="group/t flex min-w-0 flex-1 items-center gap-1">
+          <input
+            v-if="editingTitle"
+            v-model="titleDraft"
+            class="input w-full min-w-0 !px-1.5 !py-0.5 text-xs"
+            @click.stop
+            @keydown.enter.prevent="saveTitle"
+            @keydown.esc="editingTitle = false"
+            @blur="saveTitle"
+          >
+          <template v-else>
+            <span class="min-w-0 truncate text-xs font-medium text-ctp-text">
+              {{ conv.activeTitle || t('session.dock.untitled') }}
+            </span>
+            <span
+              v-if="conv.activeId"
+              class="hidden shrink-0 items-center gap-0.5 group-hover/t:flex"
+            >
+              <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface0 hover:text-ctp-blue" :title="t('session.actions.rename')" @click.stop="startTitleEdit">
+                <PencilSquareIcon class="h-3 w-3" />
+              </button>
+              <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface0 hover:text-ctp-blue" :title="t('session.actions.summarize')" @click.stop="summarizeTitle">
+                <SparklesIcon class="h-3 w-3" :class="titleSummarizing ? 'animate-pulse' : ''" />
+              </button>
+            </span>
+          </template>
+        </span>
+        <template v-if="!props.inline">
+          <button
+            class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
+            :title="t('session.dock.newChat')"
+            @click="newChat"
+          >
+            <PlusIcon class="h-4 w-4" />
+          </button>
+          <button
+            class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
+            :title="t('session.dock.switch')"
+            @click="listOpen = !listOpen"
+          >
+            <ChevronDownIcon class="h-4 w-4" />
+          </button>
+          <button
+            class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text"
+            :title="t('common.close')"
+            @click="conv.setDockOpen(false)"
+          >
+            <XMarkIcon class="h-4 w-4" />
+          </button>
+        </template>
+      </div>
+
+      <!-- 会话切换浮层 -->
+      <div
+        v-if="listOpen"
+        class="absolute left-2 right-2 top-full z-50 max-h-80 overflow-auto rounded-lg border border-ctp-surface1 bg-ctp-mantle p-1 shadow-xl"
+      >
+        <button
+          v-for="c in recent"
+          :key="c.id"
+          class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-ctp-surface0"
+          :class="c.id === conv.activeId ? 'bg-ctp-surface0' : ''"
+          @click="switchTo(c)"
+        >
+          <span class="min-w-0 flex-1 truncate text-ctp-text">{{ c.title }}</span>
+          <span
+            v-if="c.reviewState && c.reviewState !== 'read'"
+            class="h-1.5 w-1.5 shrink-0 rounded-full"
+            :class="c.reviewState === 'error' ? 'bg-ctp-red' : c.reviewState === 'awaiting_reply' ? 'bg-ctp-yellow' : 'bg-ctp-blue'"
+          />
+          <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ c.msgCount }}</span>
+          <span
+            role="button"
+            tabindex="0"
+            class="shrink-0 rounded p-0.5 text-ctp-overlay0 hover:text-ctp-sapphire"
+            :title="t('session.openWindow')"
+            @click.stop="openSessionWindow(c.id, (c as any).projectId)"
+            @keydown.enter.stop="openSessionWindow(c.id, (c as any).projectId)"
+          >
+            <ArrowTopRightOnSquareIcon class="w-3 h-3" />
+          </span>
+        </button>
+        <p v-if="!recent.length" class="px-2 py-3 text-center text-xs text-ctp-overlay0">
+          {{ t('common.empty') }}
+        </p>
+      </div>
+    </div>
+
+    <!-- 会话信息面板(可折叠): 待执行方案 / 操作 / 待审提案 / 关联执行 -->
+    <!-- 对话主体 -->
+    <div class="min-h-0 flex-1">
+      <!-- coding 子会话池(S3): 新建/切换/查看 -->
+      <div
+        v-if="subsOpen"
+        class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
+        @click.self="subsOpen = false"
+      >
+        <div class="panel w-full max-w-sm">
+          <div class="panel-header">
+            <span>{{ t('session.subs.title') }}</span>
+            <button class="btn btn-xs btn-ghost" @click="subsOpen = false">
+              <XMarkIcon class="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div class="p-3 space-y-2">
+            <p class="text-[11px] text-ctp-subtext0">{{ t('session.subs.hint') }}</p>
+            <p v-if="subsMsg" class="text-[11px] text-ctp-yellow break-all">{{ subsMsg }}</p>
+            <template v-for="[eid, subs] in subExecutorGroups" :key="eid">
+              <div class="flex items-center gap-1.5 pt-1 text-[10px] uppercase tracking-wider text-ctp-overlay1">
+                <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0">{{ executorLabel(eid) }}</span>
+                <span class="opacity-70">× {{ subs.length }}</span>
+              </div>
+              <div
+                v-for="s in subs"
+                :key="s.id"
+                role="button"
+                tabindex="0"
+                class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer"
+                :class="[s.active ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40',
+                         flashSubs.has(s.id) ? 'ring-2 ring-ctp-peach/60' : '']"
+                @click="activateSub(s.id)"
+                @keydown.enter.prevent="activateSub(s.id)"
+              >
+                <span
+                  class="h-2 w-2 shrink-0 rounded-full"
+                  :class="s.execution
+                    ? (s.execution === 'waiting_input' ? 'bg-ctp-yellow' : 'bg-ctp-peach animate-pulse')
+                    : (s.active ? 'bg-ctp-blue' : 'bg-ctp-overlay1')"
+                />
+                <span class="min-w-0 flex-1">
+                  <span class="block text-xs text-ctp-text truncate">{{ s.title }}</span>
+                  <span class="block text-[10px] text-ctp-subtext0">
+                    {{ s.hasSessionRef ? '● 有执行器会话(可复活)' : '○ 新上下文' }}
+                    · {{ s.msgCount || 0 }} 条
+                    <template v-if="s.execution">· {{ s.execution }}</template>
+                  </span>
+                </span>
+                <span v-if="s.active" class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue">{{ t('session.subs.active') }}</span>
+                <select
+                  class="input !w-auto !py-0.5 !text-[10px] shrink-0"
+                  :value="s.executorId || ''"
+                  :title="t('session.subs.switchExec')"
+                  @click.stop
+                  @change="switchSubExecutor(s.id, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="" disabled>{{ t('session.subs.switchExec') }}</option>
+                  <option v-for="e in executorList" :key="e.id" :value="e.id">
+                    {{ e.type || e.id }}
+                  </option>
+                </select>
+                <button
+                  class="btn btn-xs btn-ghost shrink-0"
+                  :title="t('session.openWindow')"
+                  @click.stop="openSessionWindow(s.id, scopePid())"
+                >⧉</button>
+                <button
+                  class="shrink-0 rounded p-1 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-red"
+                  :class="s.execution ? 'pointer-events-none opacity-30' : ''"
+                  :title="s.execution
+                    ? t('session.subs.cannotDeleteRunning') : t('session.subs.delete')"
+                  :disabled="subDelBusy === s.id"
+                  @click.stop="deleteSub(s)"
+                >
+                  <TrashIcon class="h-3 w-3" :class="subDelBusy === s.id ? 'animate-pulse' : ''" />
+                </button>
+              </div>
+            </template>
+            <p v-if="!codingSubs.length" class="text-[11px] text-ctp-overlay1">
+              {{ t('session.subs.empty') }}
+            </p>
+            <div class="flex items-center gap-2">
+              <select v-model="newSubExecutor" class="input !w-auto !py-1 flex-1 text-xs">
+                <option value="">{{ t('session.subs.newExecDefault') }}</option>
+                <option v-for="e in executorList" :key="e.id" :value="e.id">{{ e.type || e.id }}</option>
+              </select>
+              <button
+                class="btn btn-primary flex-1 !py-1.5 text-xs"
+                :disabled="subsBusy"
+                @click="newSubPicked"
+              >{{ subsBusy ? '…' : t('session.subs.new') }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- roles 声明器(能力声明即用, 不锁定) -->
+      <div
+        v-if="rolesOpen"
+        class="absolute inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
+        @click.self="rolesOpen = false"
+      >
+        <div class="panel w-full max-w-sm">
+          <div class="panel-header">
+            <span>{{ t('session.role.manageTitle') }}</span>
+            <button class="btn btn-xs btn-ghost" @click="rolesOpen = false">
+              <XMarkIcon class="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div class="p-3 space-y-2">
+            <p class="text-[11px] text-ctp-subtext0">{{ t('session.role.manageHint') }}</p>
+            <p v-if="boundExecutorId" class="text-[11px] text-ctp-blue break-all">
+              {{ t('session.role.bound') }}: {{ boundExecutorId }}
+            </p>
+            <p v-if="rolesMsg" class="text-[11px] text-ctp-yellow break-all">{{ rolesMsg }}</p>
+            <button
+              v-for="e in executorList"
+              :key="e.id"
+              class="w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors"
+              :class="rolesDraft === e.id ? 'border-ctp-blue/50 bg-ctp-blue/5' : 'border-ctp-surface1 hover:border-ctp-blue/40'"
+              @click="rolesDraft = e.id"
+            >
+              <span
+                class="h-3 w-3 shrink-0 rounded-full border"
+                :class="rolesDraft === e.id ? 'bg-ctp-blue border-ctp-blue' : 'border-ctp-overlay1'"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block text-xs text-ctp-text">{{ e.id }}</span>
+                <span class="block text-[10px] text-ctp-subtext0">{{ t('session.role.executorOf') }}: {{ e.type || '—' }}</span>
+              </span>
+              <span v-if="e.id === boundExecutorId" class="chip !text-[9px] bg-ctp-surface0/60">{{ t('session.role.bound') }}</span>
+            </button>
+            <p v-if="!executorList.length" class="text-[11px] text-ctp-overlay1">
+              {{ t('session.role.noExecutors') }}
+            </p>
+            <button
+              class="btn btn-primary w-full !py-1.5 text-xs"
+              :disabled="!rolesDraft"
+              @click="saveRoles"
+            >{{ t('session.role.switch') }}</button>
+          </div>
+        </div>
+      </div>
+
+      <AnalysisChat
+        class="h-full"
+        :turns="conv.turns"
+        :busy="conv.busy"
+        :busy-label="conv.busyLabel"
+        :tool-trail="conv.toolTrail"
+        :insert-draft="conv.insertDraft"
+        :title="conv.activeTitle || t('session.dock.untitled')"
+        :editable="!!conv.activeId && !conv.busy"
+        :title-summarizing="titleSummarizing"
+        @rename="onRenameTitle"
+        @summarize-title="summarizeTitle"
+        :diagram-skill="conv.diagramSkill"
+        :read-only="(conv.activeMeta as any)?.status === 'archived'"
+        :show-assets-panel="props.assetsPanel"
+        :job-state="jobState"
+        @open-window="openSessionWindow(conv.activeId, scopePid() || (conv.activeMeta as any)?.projectId)"
+        :bound-executor-id="boundExecutorId"
+        :executor-models="boundModelNames"
+        :executors="executorList"
+        :executor-model="currentExecutorModel"
+        :analysis-mode="analysisMode"
+        :clarify-mode="clarifyMode"
+        :isolated="isolated"
+        :has-session="!!conv.activeId"
+        :conv-id="conv.activeId || undefined"
+        :tasks="conv.tasks"
+        :ctx-usage="((conv.activeMeta as any)?.meta?.ctxUsage) ?? null"
+        @switch-executor="onSwitchExecutor"
+        @set-clarify-mode="onSetClarifyMode"
+        @set-isolated="onSetIsolated"
+        @task-confirm="(id: string) => void conv.taskAction(id, 'confirm')"
+        @task-cancel="(id: string) => void conv.taskAction(id, 'cancel')"
+        @task-ignore="(id: string) => void conv.taskAction(id, 'ignore')"
+        @task-dismiss="(id: string) => void onTaskDismiss(id)"
+        @task-executor="(p: any) => void onTaskExecutor(p)"
+        @local-cmd="onLocalCmd"
+        @bind-coding="openRoles"
+        @set-model="onSetModel"
+        @send="onSendChat"
+        @feed-turn="onFeedTurn"
+        @spec-apply="onSpecApply"
+        @answers="(a) => { conv.sendAnswers(a); onSent() }"
+        @delete-turn="conv.deleteTurn"
+        @rollback-to="conv.rollbackTo"
+        @toggle-diagram-skill="conv.toggleDiagramSkill"
+        @convention-confirm="onConventionConfirm"
+        @convention-ignore="onConventionIgnore"
+        @refresh-asset="emitRefreshAsset"
+        @stop="conv.stop"
+      >
+        <!-- 内联按钮: 子会话池(多子会话管理; 单子会话时 Coding 入口即全部) -->
+        <template #header-inline>
+          <button
+            v-if="isMainSession"
+            class="btn !py-0 !px-2 !text-[10px]"
+            :title="t('session.subs.title')"
+            @click="openSubs"
+          >⌨ {{ t('session.subs.manage') }}({{ codingSubs.length }})</button>
+        </template>
+        <template #header-extra>
+          <div v-if="conv.activeId" class="flex shrink-0 items-center gap-1.5">
+            <span
+              v-if="flowPhase && flowPhase !== 'free'"
+              class="chip !text-[10px]"
+              :class="flowPhase === 'interrupted' ? 'bg-ctp-red/15 text-ctp-red'
+                : flowPhase === 'executing' ? 'bg-ctp-blue/15 text-ctp-blue'
+                : 'bg-ctp-surface0/60 text-ctp-subtext1'"
+              :title="t('session.flow.title')"
+            >◈ {{ flowLabel(flowPhase) }}</span>
+            <button
+              v-if="flowPhase === 'interrupted'"
+              class="btn !py-0 !px-1.5 !text-[10px]"
+              :disabled="flowRecoverBusy"
+              :title="t('session.flow.recoverHint')"
+              @click="recoverFlow"
+            >{{ t('session.flow.recover') }}</button>
+            <button
+              v-if="reqStatus && (conv.activeMeta as any)?.status !== 'archived'"
+              class="chip !text-[10px] cursor-pointer"
+              :class="reqStatus.status === 'ready' ? 'bg-ctp-green/15 text-ctp-green'
+                : reqStatus.status === 'done' ? 'bg-ctp-overlay0/20 text-ctp-overlay1' : 'bg-ctp-surface0/60 text-ctp-subtext1'"
+              :title="`${t('session.reqState.title')} — 点击放大查看需求(全文/版本/关联任务)`"
+              @click="reqDetail = { requirementId: String(conv.activeReqId), convId: conv.activeId }"
+            >{{ conv.activeReqId }} · {{ t(`req.status.${reqStatus.status || 'raw'}`) }}<template v-if="reqStatus.activeVer"> v{{ reqStatus.activeVer }}</template></button>
+            <button
+              v-if="reqStatus?.status === 'ready' || reqStatus?.status === 'done'"
+              class="btn !py-0 !px-1.5 !text-[10px]"
+              :class="reqStatus.status === 'done' ? 'btn-ghost' : ''"
+              :disabled="markDoneBusy"
+              :title="reqStatus.status === 'done' ? t('session.reqState.title') : t('session.job.acceptHint')"
+              @click="markReqDone(reqStatus.status !== 'done')"
+            >{{ reqStatus.status === 'done' ? t('session.reqState.undoDone') : t('session.reqState.markDone') }}</button>
+            <span
+              v-if="isRunning"
+              class="chip !text-[10px] animate-pulse inline-flex items-center gap-1"
+              :class="jobState?.role === 'coding' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-blue/15 text-ctp-blue'"
+              :title="`${t('session.workState.runningHint')}${(jobState as any)?.progress ? `\\n工具调用 ×${(jobState as any).progress.toolCount} · 消息 ×${(jobState as any).progress.msgCount} · ${new Date((jobState as any).progress.at || 0).toLocaleTimeString()}` : ''}`"
+            >▶ {{ jobState?.role === 'coding'
+              ? `coding·${jobState.executorId || '?'}${jobState.status === 'waiting_input' ? ' · 等待回复' : (jobState as any)?.progress ? ` · ⚙×${(jobState as any).progress.toolCount}` : ''}`
+              : t('session.workState.running') }}<button
+                class="ml-0.5 rounded px-1 text-ctp-red hover:bg-ctp-red/15"
+                :disabled="stopBusy"
+                :title="t('session.job.stop')"
+                @click.stop="stopExec"
+              >⏹</button></span>
+          </div>
+        </template>
+        <template #toolbar-extra>
+          <!-- 2610 核心资产守护: 跳转资产工作区守护列表(独立窗口, 列表模式单一编辑面) -->
+          <button
+            class="btn btn-xs btn-ghost !px-1.5 shrink-0"
+            :title="t('guard.switchHint')"
+            @click="openGuardWindow"
+          ><ShieldCheckIcon class="w-3.5 h-3.5 text-ctp-teal" /></button>
+          <!-- C3 规约缺口建议: 继续对话补全(自动澄清挡位联动)或回合另存草稿加工 -->
+          <span
+            v-if="specGaps.length"
+            class="chip !px-1.5 !text-[9px] cursor-help border border-ctp-yellow/30 bg-ctp-yellow/10 text-ctp-yellow shrink-0"
+            :title="t('session.specGapHint') + '\n' + specGaps.join('\n')"
+            @click="void loadSpecGaps()"
+          >{{ t('session.specGap') }} {{ specGaps.length }}</span>
+          <!-- E1 会话域技能: 方案骨架/验收提炼(产物落草稿) -->
+          <button
+            v-if="(conv.activeMeta as any)?.reqId"
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="skillBusy !== ''"
+            :title="t('session.skillSkeleton')"
+            @click="runSessionSkill('skeleton')"
+          ><CubeTransparentIcon class="w-3.5 h-3.5" :class="skillBusy === 'skeleton' ? 'animate-pulse' : ''" /></button>
+          <button
+            v-if="(conv.activeMeta as any)?.reqId"
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="skillBusy !== ''"
+            :title="t('session.skillAcceptance')"
+            @click="runSessionSkill('acceptance')"
+          ><ClipboardDocumentCheckIcon class="w-3.5 h-3.5" :class="skillBusy === 'acceptance' ? 'animate-pulse' : ''" /></button>
+          <button
+            v-if="(conv.activeMeta as any)?.reqId"
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="skillBusy !== ''"
+            :title="t('session.skillScope')"
+            @click="runSessionSkill('scope')"
+          ><AdjustmentsHorizontalIcon class="w-3.5 h-3.5" :class="skillBusy === 'scope' ? 'animate-pulse' : ''" /></button>
+          <!-- 会话大纲浮窗开关(会话中心启用): 开合两态均缩略为此按钮 -->
+          <button
+            v-if="props.outline"
+            class="btn btn-xs !px-1.5"
+            :class="outlineOpen ? 'btn-blue' : 'btn-ghost'"
+            :disabled="!conv.activeId"
+            :title="t('session.outline.title')"
+            @click="outlineOpen = !outlineOpen"
+          ><ListBulletIcon class="w-3.5 h-3.5" /></button>
+          <!-- 纯 icon 工具条(title 提示); 动作均可用 /命令 触达(引导/摘要/提炼/归档) -->
+          <button
+            v-if="isExecutionConv"
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="guideBusy"
+            :title="`${t('session.actions.guide')} — /引导`"
+            @click="showGuide"
+          ><BookOpenIcon class="w-3.5 h-3.5" :class="guideBusy ? 'animate-pulse' : ''" /></button>
+          <button
+            class="btn btn-xs !px-1.5"
+            :class="titleSummarizing ? 'btn-blue' : 'btn-ghost'"
+            :disabled="titleSummarizing || !conv.activeId"
+            :title="`${t('session.actions.summarize')} — /摘要`"
+            @click="summarizeTitle"
+          ><DocumentTextIcon class="w-3.5 h-3.5" :class="titleSummarizing ? 'animate-pulse' : ''" /></button>
+          <button
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="mining || !activeProject()"
+            :title="`${t('session.mine')} — /提炼`"
+            @click="mineActive"
+          ><CubeTransparentIcon class="w-3.5 h-3.5" :class="mining ? 'animate-pulse' : ''" /></button>
+          <button
+            class="btn btn-xs btn-ghost !px-1.5"
+            :disabled="!conv.activeId || (conv.activeMeta as any)?.status === 'archived'"
+            :title="`${t('session.archive')} — /归档`"
+            @click="archiveActive"
+          ><ArchiveBoxIcon class="w-3.5 h-3.5" /></button>
+        </template>
+      </AnalysisChat>
+    </div>
+
+    <!-- 会话大纲浮窗(Teleport body): 关闭/最小化缩回工具栏大纲按钮 -->
+    <SessionOutlineWindow
+      v-if="props.outline && outlineOpen"
+      @close="outlineOpen = false"
+    />
+
+
+    <!-- cv-284 需求大窗(会话列表跟踪条入口): 全文/版本切换/关联任务/立即执行 -->
+    <ReqDetailWindow
+      v-if="reqDetail"
+      :requirement-id="reqDetail.requirementId"
+      :conv-id="reqDetail.convId"
+      @close="reqDetail = null"
+    />
+  </aside>
+</template>

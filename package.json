@@ -4,55 +4,41 @@
   "private": true,
   "type": "module",
   "description": "TopoCode - 源码架构分析与学习工具",
-  "main": "./dist-electron/main.js",
+  "workspaces": [
+    "packages/web-core",
+    "packages/cline-sidecar",
+    "packages/graph-kernel",
+    "apps/workbench",
+    "apps/docs",
+    "apps/architect"
+  ],
   "author": {
     "name": "TopoCodeProj Team",
     "email": "topocode@163.com"
   },
   "license": "Apache-2.0",
   "scripts": {
-    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
-    "dev:debug": "TOPCODE_UI_DEBUG=1 concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
-    "dev:vite": "vite",
-    "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && node -p \"JSON.stringify({type:'commonjs'})\" > dist-electron/package.json && electron . --no-sandbox",
-    "build": "npm run build:worker && npm run build:plugins && npm run build:module && npm run build:electron && npm run build:vite",
-    "build:plugins": "node build/bundle-plugin.mjs",
-    "build:module": "node build/bundle-module.mjs",
-    "build:module-registry": "node build/bundle-module.mjs --registry",
-    "build:worker": "node build/bundle-worker.mjs",
-    "build:electron": "tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json",
-    "build:vite": "vite build",
-    "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit",
-    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
-    "package": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:linux": "npm run build && electron-builder --linux",
-    "dist:win": "npm run build && electron-builder --win --config electron-builder-win.json",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:all": "npm run build && electron-builder --linux --win --mac"
-  },
-  "dependencies": {
-    "@heroicons/vue": "2.2.0",
-    "d3": "7.9.0",
-    "electron-updater": "^6.3.9",
-    "highlight.js": "11.11.1",
-    "markdown-it": "14.1.1",
-    "mermaid": "11.14.0",
-    "pinia": "3.0.3",
-    "pinia-plugin-persistedstate": "4.7.1",
-    "pixi.js": "8.18.1",
-    "plantuml-encoder": "1.4.0",
-    "qrcode": "^1.5.4",
-    "vue": "3.5.13",
-    "vue-i18n": "9.14.5",
-    "vue-router": "4.5.1",
-    "zeromq": "6.5.0"
+    "dev": "concurrently --kill-others -n core,workbench,docs,architect \"npm run serve:core\" \"npm run dev:workbench\" \"npm run dev:docs\" \"npm run dev:architect\"",
+    "serve:core": "bash scripts/serve.sh foreground",
+    "dev:workbench": "bash scripts/dev-watch.sh workbench",
+    "dev:docs": "bash scripts/dev-watch.sh docs",
+    "dev:architect": "bash scripts/dev-watch.sh architect",
+    "build": "npm run build:core && npm run build:portal && npm run build:apps",
+    "build:core": "node build/bundle-plugin.mjs && node build/bundle-module.mjs && npm run build:topoone-browser -w @topo/web-core",
+    "build:portal": "npm run build:portal -w @topo/web-core",
+    "build:apps": "npm run build -w @topo/app-workbench -w @topo/app-docs -w @topo/app-architect",
+    "test": "npm run test:py && npm run test:fe",
+    "test:py": "python -m pytest packages/core/tests packages/core/topoone/tests packages/core/topoone/plugins/parsers/tests -q && python -m pytest apps/workbench/chat_service/tests apps/workbench/tests -q && python -m pytest apps/docs/tests -q && python -m pytest apps/architect/tests -q",
+    "test:fe": "npm run test -w @topo/app-workbench -w @topo/app-docs && npm run test -w @topo/web-core",
+    "type-check": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx --ignore-path .gitignore",
+    "setup": "bash scripts/setup.sh",
+    "status": "python -m topoone.supervisor.cli status",
+    "serve": "bash scripts/serve.sh"
   },
   "devDependencies": {
     "@tailwindcss/forms": "0.5.11",
     "@tailwindcss/typography": "0.5.19",
-    "@types/d3": "7.4.3",
     "@types/markdown-it": "14.1.2",
     "@types/node": "22.19.17",
     "@types/qrcode": "^1.5.6",
@@ -62,8 +48,6 @@
     "@vitejs/plugin-vue-jsx": "4.2.0",
     "autoprefixer": "10.5.0",
     "concurrently": "9.2.1",
-    "electron": "33.4.11",
-    "electron-builder": "25.1.8",
     "esbuild": "0.21.5",
     "eslint": "8.57.1",
     "eslint-plugin-vue": "9.33.0",
@@ -88,9 +72,7 @@
     "code-analysis",
     "smart-programming",
     "ai-assisted-development",
-    "electron",
-    "desktop",
-    "animation",
+    "web",
     "visualization",
     "data-structures",
     "algorithms"
@@ -102,119 +84,5 @@
   "bugs": {
     "url": "https://github.com/topocode/topoone-ui/issues"
   },
-  "homepage": "https://github.com/topocode/topoone-ui#readme",
-  "build": {
-    "appId": "com.topocode.ui",
-    "productName": "TopoCode",
-    "copyright": "Copyright © 2026 TopoCodeProj Team",
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "backend-core/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "backend-core",
-        "to": "backend-core",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "dist-plugins",
-        "to": "plugins",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "dist-modules",
-        "to": "modules",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "extraMetadata": {
-      "main": "dist-electron/main.js"
-    },
-    "afterPack": "./build/afterPack.cjs",
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "icon": "build/icon.icns",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ]
-    },
-    "dmg": {
-      "title": "TopoCode UI",
-      "icon": "build/icon.icns",
-      "background": "build/dmg-bg.png"
-    },
-    "win": {
-      "icon": null,
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": null,
-      "uninstallerIcon": null,
-      "installerHeaderIcon": null,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "TopoCode UI"
-    },
-    "linux": {
-      "icon": "build/icon.png",
-      "category": "Development",
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "rpm",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "npmRebuild": false,
-    "publish": null,
-    "electronDist": "node_modules/electron/dist"
-  }
+  "homepage": "https://github.com/topocode/topoone-ui#readme"
 }

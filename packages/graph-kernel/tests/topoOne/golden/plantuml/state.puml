@@ -1,0 +1,9 @@
+@startuml
+state "New" as new
+state "Running" as running
+state "Done" as done
+[*] --> new
+done --> [*]
+new --> running : start
+running --> done : finish [exitCode == 0]
+@enduml

@@ -1,0 +1,186 @@
+"""
+Tree-sitter 语言包加载器
+
+使用独立语言包方案（tree_sitter_c, tree_sitter_cpp 等），
+支持 tree-sitter 0.23.x。不使用 tree_sitter_languages（已停止维护）。
+"""
+import logging
+import re
+from typing import Dict, Optional
+from tree_sitter import Language, Parser
+
+logger = logging.getLogger(__name__)
+
+# .h 头文件 C++ 特征(行首 namespace/template/class — C 语法无这些关键字)
+_CPP_HINT = re.compile(r"^\s*namespace\s+\w|^\s*template\s*<|^\s*class\s+\w", re.M)
+
+# ==================== 导入独立语言包 ====================
+_ts_modules = {}
+
+try:
+    import tree_sitter_c as tsc
+    _ts_modules['c'] = ('tsc', getattr(tsc, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_cpp as tscpp
+    _ts_modules['cpp'] = ('tscpp', getattr(tscpp, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_python as tspy
+    _ts_modules['python'] = ('tspy', getattr(tspy, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_javascript as tsjs
+    _ts_modules['javascript'] = ('tsjs', getattr(tsjs, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_typescript as tsts
+    _ts_modules['typescript'] = ('tsts', getattr(tsts, 'language_typescript', None))
+    _ts_modules['tsx'] = ('tsts_tsx', getattr(tsts, 'language_tsx', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_go as tsgo
+    _ts_modules['go'] = ('tsgo', getattr(tsgo, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_java as tsjava
+    _ts_modules['java'] = ('tsjava', getattr(tsjava, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_rust as tsrust
+    _ts_modules['rust'] = ('tsrust', getattr(tsrust, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_c_sharp as tscs
+    _ts_modules['c_sharp'] = ('tscs', getattr(tscs, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_swift as tssw
+    _ts_modules['swift'] = ('tssw', getattr(tssw, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_ruby as tsrb
+    _ts_modules['ruby'] = ('tsrb', getattr(tsrb, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_kotlin as tskt
+    _ts_modules['kotlin'] = ('tskt', getattr(tskt, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_php as tsphp
+    _ts_modules['php'] = ('tsphp', getattr(tsphp, 'language_php', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_dart_orchard as tsdart
+    _ts_modules['dart'] = ('tsdart', getattr(tsdart, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_scala as tsscala
+    _ts_modules['scala'] = ('tsscala', getattr(tsscala, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_lua as tslua
+    _ts_modules['lua'] = ('tslua', getattr(tslua, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_luau as tsluau
+    _ts_modules['luau'] = ('tsluau', getattr(tsluau, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_objc as tsobjc
+    _ts_modules['objc'] = ('tsobjc', getattr(tsobjc, 'language', None))
+except ImportError:
+    pass
+
+# ==================== 构建语言映射 ====================
+LANGUAGES: Dict[str, Language] = {}
+_PARSER_CACHE: Dict[str, Parser] = {}
+
+for _lang_name, (_mod_name, _lang_fn) in _ts_modules.items():
+    if _lang_fn:
+        try:
+            LANGUAGES[_lang_name] = Language(_lang_fn())
+        except Exception as e:
+            logger.warning(f"Failed to load {_lang_name} language: {e}")
+
+logger.info(f"Loaded {len(LANGUAGES)} tree-sitter languages: {list(LANGUAGES.keys())}")
+
+
+def get_language(lang_name: str) -> Optional[Language]:
+    """获取 tree-sitter Language 对象"""
+    return LANGUAGES.get(lang_name)
+
+
+def get_parser(lang_name: str) -> Optional[Parser]:
+    """
+    获取指定语言的解析器（带缓存）
+
+    Returns:
+        Parser 实例，如果语言不支持则返回 None
+    """
+    if lang_name in _PARSER_CACHE:
+        return _PARSER_CACHE[lang_name]
+
+    # 语言别名: vue → typescript（.vue 文件的 script 块用 TS 解析）
+    if lang_name == "vue":
+        lang_name = "typescript"
+
+    lang = LANGUAGES.get(lang_name)
+    if lang is None:
+        logger.debug(f"Language '{lang_name}' not available in tree-sitter")
+        return None
+
+    parser = Parser(lang)
+    _PARSER_CACHE[lang_name] = parser
+    logger.info(f"Created parser for language: {lang_name}")
+    return parser
+
+
+def get_available_languages() -> list:
+    """获取所有可用的 tree-sitter 语言列表"""
+    return list(LANGUAGES.keys())
+
+
+def detect_header_language(src_bytes: bytes) -> str:
+    """.h 头文件语言嗅探: 含 C++ 特征 → cpp, 否则 c。
+
+    C++ 项目的 .h 以 namespace/template/class 起始定义, 用纯 C parser
+    解析会因语法 ERROR 丢失全部符号(xgboost/v8 实测 struct/enum 漏抓)。
+    仅看头部 8KB, 足以覆盖 include guard + 首个类型定义。
+    """
+    head = src_bytes[:8192].decode("utf-8", errors="replace")
+    return "cpp" if _CPP_HINT.search(head) else "c"

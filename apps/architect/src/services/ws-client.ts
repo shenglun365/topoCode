@@ -1,0 +1,117 @@
+/** Shared WebSocket client for architect streaming endpoints.
+ *
+ * 走 Vite `/api` 代理(ws:true)到后端；独立服务时经 VITE_ARCH_API_BASE 指向 3470。
+ * 消息形如 { type, ...payload }。
+ * 提供按 type 订阅 + 一次性等待 + 发送；无请求/响应耦合，适合流式协议。
+ */
+
+function buildWsBase(): string {
+  const configured = import.meta.env.VITE_ARCH_API_BASE as string | undefined
+  if (configured) {
+    // http(s)://host[:port]/api/architect → ws(s)://host[:port]/api/architect
+    return configured.replace(/^http/, 'ws').replace(/\/+$/, '')
+  }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${proto}://${location.host}/api/architect`
+}
+
+const WS_BASE = buildWsBase()
+
+// 鉴权：WS 经网关需携带 `?token=`（与 api-client 同源 localStorage `topocode:token`）。
+function tokenQuery(): string {
+  try {
+    const tok = localStorage.getItem('topocode:token') || ''
+    return tok ? `?token=${tok}` : ''
+  } catch {
+    return ''
+  }
+}
+
+type Handler = (msg: any) => void
+
+export class ArchWs {
+  private ws: WebSocket
+  private readyPromise: Promise<void>
+  private anyHandlers = new Set<Handler>()
+  private onType = new Map<string, Set<Handler>>()
+  private closeHandlers = new Set<() => void>()
+  /** W1-3: 连接级事件序号(后端注入); 迟到/乱序事件丢弃。 */
+  private _lastSeq = 0
+  private _dropped = 0
+
+  constructor(path: string) {
+    this.ws = new WebSocket(`${WS_BASE}/${path}${tokenQuery()}`)
+    this.readyPromise = new Promise((resolve, reject) => {
+      this.ws.onopen = () => resolve()
+      this.ws.onerror = () => reject(new Error(`WebSocket connect failed: ${path}`))
+    })
+    this.ws.onclose = () => this.closeHandlers.forEach((h) => h())
+    this.ws.onmessage = (e) => {
+      let msg: any
+      try {
+        msg = JSON.parse(e.data)
+      } catch {
+        return
+      }
+      if (typeof msg?.seq === 'number') {
+        if (msg.seq <= this._lastSeq) {
+          this._dropped += 1
+          return
+        }
+        this._lastSeq = msg.seq
+      }
+      this.anyHandlers.forEach((h) => h(msg))
+      this.onType.get(msg?.type)?.forEach((h) => h(msg))
+    }
+  }
+
+  /** 已处理的最新事件序号(0=未见带 seq 的事件)。 */
+  get lastSeq(): number { return this._lastSeq }
+
+  /** 被丢弃的迟到/乱序事件数(遥测/测试用)。 */
+  get droppedStale(): number { return this._dropped }
+
+  async ready(): Promise<void> {
+    await this.readyPromise
+  }
+
+  send(type: string, payload: Record<string, unknown> = {}): void {
+    this.ws.send(JSON.stringify({ type, ...payload }))
+  }
+
+  on(type: string, handler: Handler): () => void {
+    const set = this.onType.get(type) ?? new Set<Handler>()
+    set.add(handler)
+    this.onType.set(type, set)
+    return () => set.delete(handler)
+  }
+
+  onAny(handler: Handler): () => void {
+    this.anyHandlers.add(handler)
+    return () => this.anyHandlers.delete(handler)
+  }
+
+  /** 连接关闭(对端关闭/断线)时回调。 */
+  onClose(handler: () => void): () => void {
+    this.closeHandlers.add(handler)
+    return () => this.closeHandlers.delete(handler)
+  }
+
+  /** 等到第一个 type 事件解析。不自动关闭。 */
+  once<T = any>(type: string, timeoutMs = 15000): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const off = this.on(type, (msg) => {
+        off()
+        resolve(msg as T)
+      })
+      setTimeout(() => {
+        off()
+        reject(new Error(`WS timeout waiting for '${type}'`))
+      }, timeoutMs)
+    })
+  }
+
+  close(): void {
+    this.ws.close()
+  }
+}

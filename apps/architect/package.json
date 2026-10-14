@@ -1,0 +1,38 @@
+{
+  "name": "@topo/app-architect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TopoCode 子项目 4：Architect 工作台（需求驱动 + 架构驱动 Coding Agent）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@heroicons/vue": "2.2.0",
+    "@topo/graph-kernel": "*",
+    "markdown-it": "14.1.1",
+    "pinia": "3.0.3",
+    "pinia-plugin-persistedstate": "4.7.1",
+    "vue": "3.5.13",
+    "vue-i18n": "9.14.5",
+    "vue-router": "4.5.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "0.5.11",
+    "@tailwindcss/typography": "0.5.19",
+    "@vitejs/plugin-vue": "5.2.4",
+    "@vitejs/plugin-vue-jsx": "4.2.0",
+    "autoprefixer": "10.5.0",
+    "jsdom": "^29.1.1",
+    "postcss": "8.5.14",
+    "tailwindcss": "3.4.19",
+    "typescript": "5.9.3",
+    "vite": "5.4.21",
+    "vitest": "4.1.5",
+    "vue-tsc": "2.2.12"
+  }
+}

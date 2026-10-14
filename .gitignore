@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 dist-electron/
+dist-topoone/
 release/
 
 # Editor
@@ -31,6 +32,13 @@ npm-debug.log*
 # python
 *.pyc
 __pycache__/
+*.egg-info/
+
+# Vite dev server temp files
+*.timestamp-*.mjs
+
+# pip marker
+build/.pip-cache-installed
 
 # Build artifacts
 build/render-worker-bundled.js
@@ -38,6 +46,9 @@ build/*-bundled*
 dist-plugins/
 dist-modules/
 tmp-module-build/
+
+# opencode
+.opencode/
 
 # topocode project analysis cache
 .topocode/
@@ -51,7 +62,28 @@ tmp-module-build/
 # Vendored Python dependencies (~82MB)
 plugins/community/.deps/
 
+# Monorepo build artifacts (docs/plan/split)
+apps/*/dist/
+apps/architect/topoone_app_architect/static/
+apps/workbench/src/workers/*-bundled.js
+packages/web-core/dist-portal/
+.pytest_cache/
+node_modules/.vite-*/
+
 # doc
 
 # Landing page / marketing site (not served by app)
 website/
+
+# Vite web build artifacts (auto-generated, ~100+ hashed files)
+plugins/reports/static/web/
+plugins/reports/static/web-root.html
+plugins/reports/static/viewer.html
+plugins/reports/static/chat.html
+plugins/reports/static/code.html
+plugins/reports/static/api/
+plugins/reports/static/chat/
+plugins/reports/static/viewer/
+plugins/reports/static/web-root/
+plugins/architect/static/web/architect/assets/
+

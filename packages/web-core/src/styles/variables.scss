@@ -1,0 +1,105 @@
+/* ========================================
+   Catppuccin Mocha 主题变量
+   ======================================== */
+
+:root {
+  /* --- 暗色主题 (默认 - Catppuccin Mocha) --- */
+  --bg-primary:    #1e1e2e;  /* base */
+  --bg-secondary:  #181825;  /* mantle */
+  --bg-tertiary:   #313244;  /* surface0 */
+  --bg-hover:      #45475a;  /* surface1 */
+  --bg-active:     #585b70;  /* surface2 */
+
+  --text-primary:   #cdd6f4;  /* text */
+  --text-secondary: #a6adc8;  /* subtext0 */
+  --text-muted:     #6c7086;  /* overlay0 */
+
+  --accent:         #89b4fa;  /* blue */
+  --accent-hover:   #74c7ec;  /* sapphire */
+  --success:        #a6e3a1;  /* green */
+  --warning:        #f9e2af;  /* yellow */
+  --error:          #f38ba8;  /* red */
+
+  --border:         #45475a;  /* surface1 */
+  --border-light:   #585b70;  /* surface2 */
+
+  /* 尺寸（随 --ui-scale 等比缩放） */
+  --activity-bar-width: calc(48px * var(--ui-scale, 1));
+  --tab-bar-height:    calc(36px * var(--ui-scale, 1));
+  --status-bar-height: calc(24px * var(--ui-scale, 1));
+  --panel-left-width:  calc(240px * var(--ui-scale, 1));
+  --panel-right-width: calc(280px * var(--ui-scale, 1));
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* 字体 (含中文支持) */
+  --font-sans:    'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', system-ui, -apple-system, sans-serif;
+  --font-mono:    'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Noto Sans Mono CJK SC', Consolas, monospace;
+
+  /* 别名层（docs/chat/portal 沿用旧变量名的兼容映射，统一指向 Catppuccin 暗色值） */
+  --bg:            var(--bg-primary);
+  --bg-card:       var(--bg-secondary);
+  --bg-side:       var(--bg-secondary);
+  --bg-code:       var(--bg-tertiary);
+  --bg-chip:       var(--bg-tertiary);
+  --bubble-ai:     var(--bg-tertiary);
+  --bubble-user:   var(--bg-hover);
+  --text:          var(--text-primary);
+  --code-text:     var(--text-primary);
+  --accent-light:  rgba(137, 180, 250, 0.12);
+  --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md:     0 4px 16px rgba(0, 0, 0, 0.3);
+  --radius-full:   9999px;
+  --transition:    0.2s ease;
+  /* 内容字号基线：FontSizeSelect 写入 <html>；--ui-scale 为相对 16px 基线的比例，
+     供门户/共享控件按字号等比缩放宽高（字号档位 13~32px） */
+  --content-font-size: 16px;
+  --ui-scale: calc(var(--content-font-size) / 16px);
+  --ui-font-size:  14px;
+}
+
+/* 亮色主题 - Catppuccin Latte */
+[data-theme="light"] {
+  --bg-primary:    #eff1f5;
+  --bg-secondary:  #e6e9ef;
+  --bg-tertiary:   #ccd0da;
+  --bg-hover:      #bcc0cc;
+  --bg-active:     #acb0be;
+
+  --text-primary:   #4c4f69;
+  --text-secondary: #5c5f77;
+  --text-muted:     #8c8fa1;
+
+  --accent:         #1e66f5;
+  --accent-hover:   #2a6ef5;
+  --success:        #40a02b;
+  --warning:        #df8e1d;
+  --error:          #d20f39;
+
+  --border:         #acb0be;
+  --border-light:   #9ca0b0;
+
+  /* 别名层（亮色） */
+  --bg:            var(--bg-primary);
+  --bg-card:       var(--bg-secondary);
+  --bg-side:       var(--bg-secondary);
+  --bg-code:       var(--bg-tertiary);
+  --bg-chip:       var(--bg-tertiary);
+  --bubble-ai:     var(--bg-tertiary);
+  --bubble-user:   var(--bg-hover);
+  --text:          var(--text-primary);
+  --code-text:     var(--text-primary);
+  --accent-light:  rgba(30, 102, 245, 0.08);
+  --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md:     0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+/* 基础重置：消除浏览器默认 body 边距 + 白底（门户等未引入 global.scss 的入口） */
+html,
+body {
+  margin: 0;
+  background: var(--bg-primary);
+}

@@ -1,0 +1,6 @@
+flowchart LR
+admin(["Admin"])
+login("Login")
+auth("Authenticate")
+admin --> login
+login -.->|<<include>>| auth

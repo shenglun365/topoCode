@@ -1,0 +1,8 @@
+@startuml
+rectangle "Start" as a
+rectangle "Check" as b
+rectangle "Done" as c #e8f5e9
+a -> b
+b -> c : ok
+b --> a : retry
+@enduml

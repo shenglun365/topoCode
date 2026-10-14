@@ -1,0 +1,150 @@
+import { defineStore } from 'pinia'
+import type { GranularityConfig, ProductForm, ProjectInfo, ProjectMode, ProjectScaffold, RepoStatus, } from '@/types'
+import { projectService, currentProjectParams } from '@/services/project-service'
+import router from '@/router'
+
+/** 当前 URL 项目选择的标识(project/root 任一变化 → 视为切换到另一项目)。 */
+function projectKey(): string {
+  const { project, root } = currentProjectParams()
+  return `${project ?? ''}|${root ?? ''}`
+}
+
+/** 项目选择持久化在 URL 内(?root=<path> / ?project=<arch行id>)，多页签各处理不同项目。 */
+async function setProjectQuery(query: Record<string, string>): Promise<void> {
+  const cur = router.currentRoute.value
+  const merged: Record<string, string> = { ...(cur.query as Record<string, string>), ...query }
+  await router.replace({ path: cur.path, query: merged })
+}
+
+async function clearProjectQuery(): Promise<void> {
+  const cur = router.currentRoute.value
+  await router.replace({ path: cur.path })
+}
+
+export const useArchProjectStore = defineStore('arch-project', {
+  state: () => ({
+    loaded: false,
+    loading: false,
+    /** 上次 load 对应的 URL 项目键(project|root)。URL 切换项目后据此触发重载。 */
+    loadedKey: '',
+    project: null as ProjectInfo | null,
+    status: null as RepoStatus | null,
+  }),
+  getters: {
+    mode(): ProjectMode { return this.project?.mode ?? 'existing' },
+    isGreenfield(): boolean { return this.mode === 'greenfield' },
+    scaffold(): ProjectScaffold | undefined { return this.project?.scaffold },
+    productForm(): ProductForm | undefined { return this.project?.productForm },
+    hasBaseline(): boolean { return !!this.project?.baselineId },
+  },
+  actions: {
+    async load(force = false) {
+      const key = projectKey()
+      if (this.loaded && !force && key === this.loadedKey) return
+      this.loading = true
+      try {
+        const [project, status] = await Promise.all([
+          projectService.getBound(),
+          projectService.status(),
+        ])
+        this.project = project
+        this.status = status
+      } catch {
+        this.project = null
+        this.status = null
+      }
+      this.loaded = true
+      this.loadedKey = key
+      this.loading = false
+    },
+    /** 打开工作目录并关联 KB：校验通过后写 ?root=execRoot(选择持久化在 URL)。 */
+    async bindKbProject(kbProjectId: string, execRoot: string, name?: string): Promise<ProjectInfo> {
+      const project = await projectService.bindKbProject(kbProjectId, execRoot, name)
+      await setProjectQuery({ project: project.id, root: execRoot })
+      await this.load(true)
+      return project
+    },
+    async bindWorkingDir(execRoot: string, name?: string): Promise<ProjectInfo> {
+      const project = await projectService.bindWorkingDir(execRoot, name)
+      await setProjectQuery({ project: project.id, root: execRoot })
+      await this.load(true)
+      return project
+    },
+    /** 项目页后补关联 KB(同源校验由后端执行)。 */
+    async linkKb(kbProjectId: string): Promise<void> {
+      const current = router.currentRoute.value.query
+      const root =
+        this.project?.rootPath
+        ?? (typeof current.root === 'string' ? current.root : undefined)
+        ?? (import.meta.env.VITE_BOUND_ROOT || undefined)
+      const project = this.project?.id ?? (typeof current.project === 'string' ? current.project : undefined)
+      await projectService.linkKb({ kbProjectId, execRoot: root, project })
+      await this.load(true)
+    },
+    /** 解除 KB 关联(项目保留，回到降级)。 */
+    async unlinkKb(): Promise<void> {
+      const current = router.currentRoute.value.query
+      const root =
+        this.project?.rootPath
+        ?? (typeof current.root === 'string' ? current.root : undefined)
+        ?? (import.meta.env.VITE_BOUND_ROOT || undefined)
+      const project = this.project?.id ?? (typeof current.project === 'string' ? current.project : undefined)
+      await projectService.unlinkKb({ root, project })
+      await this.load(true)
+    },
+    async unbind(): Promise<boolean> {
+      const ok = await projectService.unbind()
+      await clearProjectQuery()
+      this.project = null
+      this.status = null
+      this.loadedKey = projectKey()
+      return ok
+    },
+    async createGreenfield(opts: {
+      name?: string; desc?: string; language?: string; framework?: string;
+      moduleLayout?: string; productForm?: string; execRoot?: string; kbRoot?: string
+    }): Promise<ProjectInfo> {
+      const project = await projectService.createGreenfield(opts)
+      this.project = project
+      this.status = null
+      if (project?.id && project.rootPath) {
+        await setProjectQuery({ project: project.id, root: project.rootPath })
+      }
+      return project
+    },
+    updateConfig(patch: Partial<GranularityConfig>) {
+      if (!this.project) return
+      this.project.config = { ...this.project.config, ...patch }
+    },
+    updateScaffold(patch: Partial<ProjectScaffold>) {
+      if (!this.project) return
+      this.project.scaffold = { ...(this.project.scaffold ?? { language: '', moduleLayout: 'mono' }), ...patch }
+    },
+    setProductForm(form: ProductForm) {
+      if (!this.project) return
+      this.project.productForm = form
+    },
+    switchMode(mode: ProjectMode) {
+      if (!this.project) return
+      this.project.mode = mode
+    },
+    /** 知识库完成基线同步后，更新基线的 git 表示。 */
+    updateBaselineGit(commit: string) {
+      if (!this.status) return
+      const now = Date.now()
+      this.status = {
+        ...this.status,
+        baseline: {
+          id: `baseline_id = N+1`,
+          version: 'v1.0.0',
+          commit,
+          manifestHash: 'sha256:9f7…c21',
+          createdAt: now,
+        },
+        head: { ...this.status.head, ahead: 0 },
+        lastRebaseline: now,
+      }
+      if (this.project) this.project.baselineCommit = commit
+    },
+  },
+})

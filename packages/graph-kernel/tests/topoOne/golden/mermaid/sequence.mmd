@@ -1,0 +1,6 @@
+sequenceDiagram
+actor u as "User"
+participant s as "Server"
+u->>s: GET /api
+s-->>u: 200 OK
+s-)s: audit log

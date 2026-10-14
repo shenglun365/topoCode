@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "description": "Engine capability matrix - single source of truth shared by transpilers, validators and the animation engine (TS reads it via import, Python via topo_one.capabilities).",
+  "engines": {
+    "mermaid": {
+      "types": {
+        "flowchart": "native",
+        "activity": "native",
+        "sequence": "native",
+        "state": "native",
+        "class": "native",
+        "er": "native",
+        "gantt": "native",
+        "usecase": "emulated",
+        "component": "emulated",
+        "architecture": "native",
+        "pie": "native"
+      },
+      "features": {
+        "subgraph": true,
+        "swimlanes": "partial",
+        "customColor": true,
+        "asyncMessage": true,
+        "notes": "partial",
+        "cjkLabels": true
+      },
+      "animation": {
+        "sequencePlayback": true,
+        "nodeHighlight": true,
+        "ganttTimeline": true
+      }
+    },
+    "plantuml": {
+      "types": {
+        "flowchart": "emulated",
+        "activity": "emulated",
+        "sequence": "native",
+        "state": "native",
+        "class": "native",
+        "er": "native",
+        "gantt": "unsupported",
+        "usecase": "native",
+        "component": "native",
+        "architecture": "emulated",
+        "pie": "unsupported"
+      },
+      "features": {
+        "subgraph": true,
+        "swimlanes": true,
+        "customColor": "partial",
+        "asyncMessage": true,
+        "notes": true,
+        "cjkLabels": true
+      },
+      "animation": {
+        "sequencePlayback": true,
+        "nodeHighlight": true,
+        "ganttTimeline": false
+      }
+    }
+  }
+}

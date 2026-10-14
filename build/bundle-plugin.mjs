@@ -15,7 +15,8 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(__dirname, '..')
-const pluginsSrc = join(rootDir, 'plugins')
+// M14: plugins 随核心成包迁入 packages/core/topoone/plugins（顶层 plugins/ 已删）
+const pluginsSrc = join(rootDir, 'packages', 'core', 'topoone', 'plugins')
 const pluginsOut = join(rootDir, 'dist-plugins')
 
 const targetPlatform = process.argv.includes('--platform')

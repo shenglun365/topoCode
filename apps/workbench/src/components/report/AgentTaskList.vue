@@ -1,0 +1,566 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useCommunityStore } from '@/stores/community-store'
+import { useProjectStore } from '@/stores/project'
+import { StopIcon, ClockIcon } from '@heroicons/vue/24/outline'
+
+const { t } = useI18n()
+const communityStore = useCommunityStore()
+const projectStore = useProjectStore()
+
+const taskId = computed(() => projectStore.activeTab?.taskId || '')
+const projectName = computed(() => projectStore.selectedProject?.name || '')
+const taskName = computed(() => projectStore.activeTab?.title || taskId.value || '')
+
+function onCancelTask(taskIdVal: string, agentId: string) {
+  communityStore.cancelAgentTask(taskIdVal, agentId)
+    .catch(() => {})
+}
+
+const historyTasks = ref<any[]>([])
+const historyLoaded = ref(false)
+const pageSize = ref(10)
+// 已完成/部分完成任务的真实加权进度（DB 统计），避免历史卡片把 partial 硬编码成 0%
+const statsPct = ref<Record<string, number>>({})
+async function loadStats(taskIdVal: string) {
+  if (!taskIdVal || statsPct.value[taskIdVal] !== undefined) return
+  try {
+    const s = await communityStore.getProgressStats(taskIdVal)
+    if (s?.found) statsPct.value[taskIdVal] = Math.round(s.weightedProgress ?? 0)
+  } catch { /* ignore */ }
+}
+
+function _historySame(a: any[], b: any[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((item, i) => {
+    const o = b[i]
+    return item.agent_id === o.agent_id && item.status === o.status
+  })
+}
+
+const liveTasks = computed(() => {
+  if (!taskId.value) return []
+  return communityStore.tasks[taskId.value]?.agentTasks || []
+})
+
+// 仅追踪影响列表结构的属性（id + status），不追踪 progress/message
+let _lastLiveKeys = ''
+const liveTaskKeys = computed(() => {
+  const keys = liveTasks.value.map(t => `${t.id}:${t.status}:${t.createdAt}`).join('|')
+  if (keys !== _lastLiveKeys) {
+    console.log('[AT] liveTaskKeys changed', { from: _lastLiveKeys, to: keys, count: liveTasks.value.length })
+    _lastLiveKeys = keys
+  }
+  return keys
+})
+
+// 合并 live + history，按 agent_id 去重（live 优先）
+const allTasks = computed(() => {
+  void liveTaskKeys.value  // 仅列表结构变化才触发重建
+  const live = liveTasks.value
+  const history = historyTasks.value
+  console.log('[AT] allTasks recompute', { live: live.length, history: history.length, liveKeys: liveTaskKeys.value })
+  const seen = new Set<string>()
+  const merged: any[] = []
+  // live 优先
+  for (const t of live) {
+    seen.add(t.id)
+    merged.push(t)
+  }
+  for (const t of history) {
+    if (!seen.has(t.agent_id || t.id)) {
+      seen.add(t.agent_id || t.id)
+      merged.push(transformHistory(t))
+    }
+  }
+  // 按 created_at 倒序（最近在前）
+  merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  return merged
+})
+
+const displayedTasks = computed(() => allTasks.value.slice(0, pageSize.value))
+const hasMore = computed(() => pageSize.value < allTasks.value.length)
+
+function transformHistory(h: any) {
+  let steps: any[] = []
+  try { steps = h.steps ? JSON.parse(h.steps) : [] } catch {}
+  const cachedLogs = communityStore.getCachedTaskLogs(h.agent_id)
+  console.log('[AT] transformHistory', { agent: h.agent_id, action: h.action, status: h.status, cachedLogsLen: cachedLogs.length })
+  const task = {
+    id: h.agent_id,
+    action: h.action,
+    status: h.status,
+    progress: h.status === 'completed' ? 100
+      : h.status === 'partial' ? (statsPct.value[h.task_id] ?? 0)
+      : 0,
+    message: h.message || '',
+    steps,
+    createdAt: h.created_at || '',
+    taskLogs: cachedLogs,
+    weightedProgress: 0,
+    totalFiles: 0,
+    totalComps: 0,
+    doneFiles: 0,
+    doneComps: 0,
+  }
+  return task
+}
+
+async function loadHistory(cursor: number) {
+  if (!taskId.value) { historyLoaded.value = true; return }
+  const results = await communityStore.loadAgentTaskHistory(taskId.value, cursor, 10)
+  if (cursor === 0) {
+    if (!_historySame(results, historyTasks.value)) {
+      historyTasks.value = results
+    }
+  } else {
+    for (const r of results) {
+      if (!historyTasks.value.find(h => h.agent_id === r.agent_id)) {
+        historyTasks.value.push(r)
+      }
+    }
+  }
+  historyLoaded.value = true
+  console.log('[AT] loadHistory done', { cursor, resultsCount: results.length, historyTasksLen: historyTasks.value.length })
+  // 无运行中任务时拉一次 DB 统计，供历史卡片显示真实进度
+  if (cursor === 0 && !historyTasks.value.some(h => h.status === 'running' || h.status === 'queued')) {
+    loadStats(taskId.value)
+  }
+}
+
+async function loadMore() {
+  const before = historyTasks.value.length
+  await loadHistory(before)
+  pageSize.value += 10
+}
+
+async function refresh(silent = false) {
+  // 后台轮询静默刷新：保留旧数据直接替换，不闪 loading（避免空白帧/DOM 闪）
+  if (!silent) {
+    pageSize.value = 10
+    historyLoaded.value = false
+    console.log('[AT] refresh start historyLoaded=false')
+  }
+  await loadHistory(0)
+  console.log('[AT] refresh done', { silent })
+  // 将 history 中新发现的 running/queued agent 注入 store，启动轮询
+  // （页面刷新后 live store 为空，需从后端持久化历史恢复执行中任务）
+  const t = communityStore.ensureTask(taskId.value)
+  if (t) {
+    for (const h of historyTasks.value) {
+      if ((h.status === 'running' || h.status === 'queued')) {
+        const existing = t.agentTasks.some(at => at.id === h.agent_id)
+        if (!existing) {
+          t.agentTasks.push({
+            id: h.agent_id, action: h.action, status: h.status || 'running',
+            progress: 0, message: h.message || '',
+            steps: [],
+            createdAt: h.created_at || '',
+            taskLogs: [], weightedProgress: 0, totalFiles: 0, totalComps: 0, doneFiles: 0, doneComps: 0,
+          })
+          communityStore.ensureAgentPolling(taskId.value)
+        }
+      }
+    }
+  }
+  // const liveLen = liveTasks.value.length
+  // const historyLen = historyTasks.value.length
+  // console.log('[AgentTaskList] refreshed: live=%d history=%d all=%d', liveLen, historyLen, liveLen + historyLen)
+}
+
+async function clearHistory() {
+  if (!taskId.value) return
+  const before = communityStore.tasks[taskId.value]?.agentTasks?.length || 0
+  await communityStore.clearAgentTaskHistory(taskId.value)
+  // 同时清理 store 中非 running 的 live agent
+  const t = communityStore.tasks[taskId.value]
+  if (t) {
+    t.agentTasks = t.agentTasks.filter(at => at.status === 'running' || at.status === 'queued')
+  }
+  const after = communityStore.tasks[taskId.value]?.agentTasks?.length || 0
+  console.log('[AT] clearHistory', { taskId: taskId.value, before, after })
+  historyTasks.value = []
+  pageSize.value = 10
+}
+
+onMounted(() => {
+  refresh()
+})
+
+let historyPollTimer: ReturnType<typeof setInterval> | null = null
+
+watch(liveTaskKeys, () => {
+  const tasks = liveTasks.value
+  // 仅 running/queued 才需要 3s 轮询；已完成卡片不再维持轮询（否则永不停止，周期性 DOM 抖动）
+  const hasPresummary = tasks.some(t => t.action === 'presummary_files' && (t.status === 'running' || t.status === 'queued'))
+  const hasRunning = tasks.some(t => t.status === 'running' || t.status === 'queued')
+  // console.log('[watchLive] hasRunning=%s hasPresummary=%s timer=%s tasks=%d', hasRunning, hasPresummary, historyPollTimer ? 'active' : 'none', tasks.length)
+  if ((hasRunning || hasPresummary) && !historyPollTimer) {
+    // console.log('[watchLive] starting 3s history poll')
+    historyPollTimer = setInterval(() => { refresh(true) }, 3000)
+  } else if (!hasRunning && !hasPresummary && historyPollTimer) {
+    // console.log('[watchLive] stopping history poll')
+    clearInterval(historyPollTimer)
+    historyPollTimer = null
+  }
+})
+
+onUnmounted(() => {
+  if (historyPollTimer) { clearInterval(historyPollTimer); historyPollTimer = null }
+})
+
+watch(taskId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    refresh()
+  }
+})
+
+function completedPhases(task: any): any[] {
+  const logs = task.taskLogs || []
+  return logs.filter((l: any) =>
+    (l.status === 'success' || l.status === 'failed') &&
+    (l.type === 'project_summary' || l.type === 'project_overview' || l.type === 'phase')
+  ).slice(-3)
+}
+
+function rollingFileLogs(task: any): any[] {
+  // 预摘要/组件分析不再上报逐文件日志，仅展示汇总计数
+  const logs = task.taskLogs || []
+  const fileLogs = logs.filter((l: any) => l.type === 'file' || l.type === 'component')
+  if (fileLogs.length === 0) return []
+  // running 按 (type+name) 去重：防御重复上报/历史脏数据导致同一文件多条 running
+  const running = fileLogs.filter((l: any) => l.status === 'running').reverse()
+  const seenRunning = new Set<string>()
+  const runningDedup = running.filter((l: any) => {
+    const k = `${l.type}\u0000${l.name}`
+    if (seenRunning.has(k)) return false
+    seenRunning.add(k)
+    return true
+  }).slice(0, 5)
+  const done = fileLogs.filter((l: any) => l.status === 'success' || l.status === 'failed').reverse()
+  const result = [...done.slice(0, 5), ...runningDedup].slice(0, 10)
+  return result
+}
+
+function getLogCounts(task: any): { done: number; failed: number; total: number } {
+  const logs = task.taskLogs || []
+  const done = logs.filter((l: any) => l.status === 'success').length
+  const failed = logs.filter((l: any) => l.status === 'failed').length
+  return { done, failed, total: logs.length }
+}
+
+function logIcon(status: string): string {
+  const map: Record<string, string> = {
+    running: '▶', success: '✓', failed: '✗', retry: '↻',
+  }
+  return map[status] || '·'
+}
+
+function logStatusText(status: string): string {
+  const map: Record<string, string> = {
+    running: '', success: '', failed: '', retry: '',
+  }
+  return map[status] || ''
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    return d.toTimeString().slice(0, 8)
+  } catch { return '' }
+}
+
+function currentStepDesc(task: any): string {
+  if (!task.steps) return ''
+  const running = task.steps.find((s: any) => s.status === 'running')
+  return running?.description || task.steps[task.steps.length - 1]?.description || ''
+}
+
+const statusLabel = (status: string) => {
+  const map: Record<string, string> = {
+    queued: t('report.agent.status.queued'), running: t('report.agent.status.running'), stopping: t('report.agent.stopping'), completed: t('report.agent.status.completed'),
+    partial: t('report.agent.status.partial'), failed: t('report.agent.status.failed'), cancelled: t('report.agent.status.cancelled'),
+    skipped: t('report.agent.status.skipped'), unknown: t('report.agent.status.unknown'),
+  }
+  return map[status] || t('report.agent.status.unknown')
+}
+
+const actionLabel = (action: string) => {
+  const map: Record<string, string> = {
+    analyze_components: t('report.agent.actionType.component'),
+    agentic_analyze_components: t('report.agent.actionType.smartComponent'),
+    overview: t('report.agent.actionType.overview'),
+    analyze_all: t('report.agent.actionType.pipeline'),
+    analyzeCommFiles: t('report.agent.actionType.file'),
+    presummary_files: t('report.agent.actionType.presummary'),
+    pipeline: t('report.agent.actionType.pipeline'),
+  }
+  return map[action] || action
+}
+
+</script>
+
+<template>
+  <div class="atl-container">
+    <div
+      v-if="projectName || taskName"
+      class="atl-header"
+    >
+      <span
+        v-if="projectName"
+        class="atl-project"
+      >{{ projectName }}</span>
+      <span
+        v-if="taskName"
+        class="atl-task-badge"
+      >{{ taskName }}</span>
+      <button
+        v-if="allTasks.length > 0"
+        class="atl-clear-btn"
+        :title="t('report.clearHistory')"
+        @click="clearHistory"
+      >
+        {{ t('common.clear') }}
+      </button>
+    </div>
+    <div
+      v-if="allTasks.length === 0 && historyLoaded"
+      class="atl-empty"
+    >
+      {{ t('report.noAgentTasks') }}
+    </div>
+    <div
+      v-if="!historyLoaded"
+      class="atl-loading"
+    >
+      <span class="text-muted">{{ t('common.loading') }}</span>
+    </div>
+    <div
+      v-for="(task, idx) in displayedTasks"
+      :key="task.id"
+      class="atl-task"
+      :class="{
+        'atl-task-success': task.status === 'completed',
+        'atl-task-fail': task.status === 'failed' || task.status === 'partial',
+        'atl-task-skipped': task.status === 'skipped',
+        'atl-task-paused': task.status === 'stopping',
+      }"
+    >
+      <div class="atl-task-header">
+        <span class="atl-status-label">{{ statusLabel(task.status) }}</span>
+        <span class="atl-action">{{ actionLabel(task.action) }}</span>
+        <span class="atl-status-text">{{ task.status }}</span>
+        <span
+          v-show="task.progress !== undefined"
+          class="atl-progress"
+        >{{ task.progress }}%</span>
+        <button
+          v-show="task.status === 'running' || task.status === 'queued'"
+          class="atl-stop-btn"
+          :title="t('report.agent.stopTask')"
+          @click="onCancelTask(taskId, task.id)"
+        >
+          <StopIcon class="w-3 h-3" />
+        </button>
+        <button
+          v-show="task.status === 'stopping'"
+          class="atl-stop-btn atl-stopping"
+          :title="t('report.agent.stopping')"
+          disabled
+        >
+          <ClockIcon class="w-3 h-3" />
+        </button>
+      </div>
+      <div
+        v-show="task.status === 'running' || task.status === 'queued'"
+        class="atl-progress-bar"
+      >
+        <div
+          class="atl-progress-fill"
+          :style="{ width: (task.weightedProgress || task.progress) + '%' }"
+        />
+      </div>
+      <div class="atl-task-logs">
+        <div class="atl-log-count">
+          <span>{{ t('report.agent.progress') }}: {{ task.progress }}%</span>
+        </div>
+        <div
+          v-if="task.totalFiles > 0"
+          class="atl-log-breakdown"
+        >
+          {{ t('report.agent.files') }}: {{ task.doneFiles || 0 }}/{{ task.totalFiles }}
+        </div>
+        <div
+          v-if="task.totalComps > 0"
+          class="atl-log-breakdown"
+        >
+          {{ t('report.agent.components') }}: {{ task.doneComps || 0 }}/{{ task.totalComps }}
+        </div>
+        <div
+          v-if="task.currentFile"
+          class="atl-log-breakdown atl-log-current"
+        >
+          <span class="atl-log-icon">▶</span>
+          {{ task.currentFile }}
+        </div>
+        <div
+          v-for="log in completedPhases(task)"
+          :key="log.id + '-phase'"
+          class="atl-log-entry atl-log-success"
+        >
+          <span class="atl-log-icon">{{ logIcon(log.status) }}</span>
+          <span class="atl-log-time">{{ formatTime(log.startTime) }}</span>
+          <span class="atl-log-name">{{ log.name }}</span>
+        </div>
+        <div
+          v-for="log in rollingFileLogs(task)"
+          :key="log.id"
+          class="atl-log-entry"
+          :class="'atl-log-' + log.status"
+        >
+          <span class="atl-log-icon">{{ logIcon(log.status) }}</span>
+          <span class="atl-log-time">{{ formatTime(log.startTime) }}</span>
+          <span class="atl-log-name">{{ log.name }}</span>
+        </div>
+        <div
+          v-if="(!task.taskLogs || task.taskLogs.length === 0) && task.steps && task.steps.length > 0"
+          class="atl-log-fallback"
+        >
+          <span class="atl-log-icon">▶</span>
+          <span class="atl-log-name">{{ currentStepDesc(task) }}</span>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="hasMore"
+      class="atl-more"
+    >
+      <button
+        class="atl-more-btn"
+        @click="loadMore"
+      >
+        {{ t('common.loadMore') }}
+      </button>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.atl-container { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; contain: content; }
+.atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; min-height: 6.5rem; contain: layout style; will-change: transform; }
+.atl-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
+.atl-project { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); }
+.atl-task-badge { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.1rem 0.4rem; border-radius: calc(3px * var(--ui-scale, 1)); }
+.atl-clear-btn { margin-left: auto; font-size: 0.6rem; color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: calc(3px * var(--ui-scale, 1)); padding: 0.05rem 0.4rem; cursor: pointer; }
+.atl-clear-btn:hover { color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); }
+.atl-empty { font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 1rem; font-style: italic; }
+.atl-loading { font-size: 0.7rem; text-align: center; padding: 1rem; }
+.atl-task-success { border-color: var(--success, #22c55e); background: color-mix(in srgb, var(--success, #22c55e) 5%, transparent); }
+.atl-task-fail { border-color: var(--danger, #ef4444); background: color-mix(in srgb, var(--danger, #ef4444) 5%, transparent); }
+.atl-task-skipped { border-color: var(--warning, #f59e0b); background: color-mix(in srgb, var(--warning, #f59e0b) 5%, transparent); }
+.atl-task-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
+.atl-status-label {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: calc(3px * var(--ui-scale, 1));
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.atl-task-success .atl-status-label {
+  background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+  color: var(--success, #22c55e);
+  border-color: color-mix(in srgb, var(--success, #22c55e) 30%, transparent);
+}
+.atl-task-fail .atl-status-label {
+  background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
+  color: var(--danger, #ef4444);
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
+}
+.atl-task-skipped .atl-status-label {
+  background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+  color: var(--warning, #f59e0b);
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 30%, transparent);
+}
+.atl-action { font-weight: 600; color: var(--text-primary); }
+.atl-status-text { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); }
+.atl-task-success .atl-status-text { color: var(--success, #22c55e); }
+.atl-task-fail .atl-status-text { color: var(--danger, #ef4444); }
+.atl-task-skipped .atl-status-text { color: var(--warning, #f59e0b); }
+.atl-stopping { opacity: 0.5; cursor: not-allowed; }
+.atl-stopping:hover { background: transparent; color: var(--danger, #ef4444); }
+.atl-toast {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: var(--bg-primary); border: 1px solid var(--warning, #f59e0b);
+  border-radius: 0.5rem; padding: 0.8rem 1.2rem; font-size: 0.85rem;
+  color: var(--text-primary); z-index: 9999; white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  animation: atl-toast-in 0.2s ease;
+}
+@keyframes atl-toast-in { from { opacity: 0; transform: translate(-50%, -50%) translateY(-8px); } to { opacity: 1; transform: translate(-50%, -50%) translateY(0); } }
+.atl-stop-btn {
+  margin-left: auto;
+  width: calc(18px * var(--ui-scale, 1)); height: calc(18px * var(--ui-scale, 1));
+  display: flex; align-items: center; justify-content: center;
+  border-radius: calc(3px * var(--ui-scale, 1)); border: 1px solid var(--danger, #ef4444);
+  background: transparent; color: var(--danger, #ef4444);
+  font-size: calc(10px * var(--ui-scale, 1)); cursor: pointer; line-height: 1;
+}
+.atl-stop-btn:hover { background: var(--danger, #ef4444); color: #fff; }
+.atl-pause-btn {
+  margin-left: auto;
+  width: calc(18px * var(--ui-scale, 1)); height: calc(18px * var(--ui-scale, 1));
+  display: flex; align-items: center; justify-content: center;
+  border-radius: calc(3px * var(--ui-scale, 1)); border: 1px solid var(--warning, #f59e0b);
+  background: transparent; color: var(--warning, #f59e0b);
+  font-size: calc(10px * var(--ui-scale, 1)); cursor: pointer; line-height: 1;
+}
+.atl-pause-btn:hover { background: var(--warning, #f59e0b); color: #fff; }
+.atl-resume-btn {
+  margin-left: auto;
+  width: calc(18px * var(--ui-scale, 1)); height: calc(18px * var(--ui-scale, 1));
+  display: flex; align-items: center; justify-content: center;
+  border-radius: calc(3px * var(--ui-scale, 1)); border: 1px solid var(--success, #22c55e);
+  background: transparent; color: var(--success, #22c55e);
+  font-size: calc(10px * var(--ui-scale, 1)); cursor: pointer; line-height: 1;
+}
+.atl-resume-btn:hover { background: var(--success, #22c55e); color: #fff; }
+.atl-progress { margin-left: auto; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); }
+.atl-progress-bar { height: calc(3px * var(--ui-scale, 1)); background: var(--bg-secondary); border-radius: calc(2px * var(--ui-scale, 1)); margin: 0.25rem 0; min-height: calc(3px * var(--ui-scale, 1)); }
+.atl-progress-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: calc(2px * var(--ui-scale, 1)); transition: width 0.3s ease; }
+.atl-task-logs {
+  display: flex; flex-direction: column; gap: 0.1rem;
+  margin-top: 0.25rem; min-height: 1.2rem;
+  overflow: hidden;
+}
+.atl-log-entry {
+  display: flex; align-items: center; gap: 0.25rem;
+  font-size: 0.65rem; line-height: 1.3;
+  padding: 0.05rem 0;
+  white-space: nowrap; overflow: hidden;
+}
+.atl-log-icon { flex-shrink: 0; font-size: 0.6rem; width: 0.8rem; text-align: center; }
+.atl-log-running .atl-log-icon { color: var(--accent, #7c3aed); }
+.atl-log-success .atl-log-icon { color: var(--success, #22c55e); }
+.atl-log-failed .atl-log-icon { color: var(--danger, #ef4444); }
+.atl-log-retry .atl-log-icon { color: var(--warning, #f59e0b); }
+.atl-log-time { flex-shrink: 0; font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
+.atl-log-name {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  word-break: break-all; color: var(--text-primary);
+}
+.atl-log-running .atl-log-name { color: var(--accent, #7c3aed); }
+.atl-log-success .atl-log-name { color: var(--success, #22c55e); }
+.atl-log-failed .atl-log-name { color: var(--danger, #ef4444); }
+.atl-log-retry .atl-log-name { color: var(--warning, #f59e0b); }
+.atl-log-count { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); padding: 0.05rem 0; }
+.atl-log-count-failed { color: var(--danger, #ef4444); margin-left: 0.25rem; }
+.atl-log-breakdown { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); padding: 0.05rem 0; margin-left: 0.5rem; }
+.atl-log-fallback { display: flex; align-items: center; gap: 0.25rem; font-size: 0.65rem; color: var(--text-muted); padding: 0.05rem 0; white-space: nowrap; overflow: hidden; }
+.atl-log-fallback .atl-log-name { color: var(--text-muted); }
+.atl-more { text-align: center; padding: 0.25rem; }
+.atl-more-btn { font-size: 0.65rem; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: calc(3px * var(--ui-scale, 1)); padding: 0.1rem 0.6rem; cursor: pointer; }
+.atl-more-btn:hover { background: var(--accent); color: #fff; }
+</style>

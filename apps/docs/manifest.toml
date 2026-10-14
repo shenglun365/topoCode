@@ -1,0 +1,51 @@
+# 子项目 2：文档浏览（M11 完成）
+# python_entry = "topoone_app_docs:main"（独立进程 :3481，apps/docs/topoone_app_docs）
+# static_dir = "apps/docs/dist"（viewer/web-root SPA 产物；未构建回退 legacy static）
+# web_root 业务 API（/api/projects /api/tasks /api/docs /api/import* /api/export* /api/verify*）
+# 已从 gateway 进程移入本服务（追加到 api_prefixes）；render.* RPC 由本服务注册
+# （report.* 保留核心：subdoc 写方法需主库写权限，docs 只读无法承载）。
+[app]
+name = "docs"
+kind = "service"
+python_entry = "topoone_app_docs:main"
+static_dir = "apps/docs/dist"
+static_mount = ["/viewer", "/web-root", "/projects"]
+api_prefixes = [
+  # viewer 路由（/doc · /code · 社区/图/热力图/PlantUML/图编辑器）
+  "/doc",
+  "/code",
+  "/api/community-doc",
+  "/api/community-files",
+  "/api/community-children",
+  "/api/community-graph",
+  "/api/file-graph",
+  "/api/file-summary",
+  "/api/file",
+  "/api/cascade-levels",
+  "/api/heatmap",
+  "/api/external-graph",
+  "/api/external-stats",
+  "/api/plantuml",
+  "/api/plantuml/clear-cache",
+  "/api/plantuml/rebuild",
+  "/api/mermaid/rebuild",
+  "/api/diagram/build",
+  "/api/diagram/validate",
+  "/api/diagram/ir-docs",
+  "/api/diagram-editor/process",
+  "/api/diagram-tools/apply",
+  "/api/topo",
+  "/api/graph-layout",
+  # web_root 业务 API（M11 从 gateway 移入）
+  "/api/projects",
+  "/api/tasks",
+  "/api/docs",
+  "/api/export",
+  "/api/import",
+  "/api/verify",
+]
+# report.* 保留核心（subdoc 写方法需主库写权限，docs 只读）；docs 仅认领 render/doc。
+rpc_namespaces = ["render", "doc"]
+port = 3481
+pub_port = 5683
+health = "/health"

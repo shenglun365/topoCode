@@ -1,0 +1,22 @@
+{
+  "name": "@topo/app-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TopoCode 子项目 2：知识库文档浏览（viewer + projects）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "echo \"@topo/app-docs: no frontend unit tests (M11)\""
+  },
+  "dependencies": {
+    "@topo/web-core": "*",
+    "vue": "3.5.13",
+    "vue-i18n": "^9.14.5",
+    "cytoscape": "^3.34.0",
+    "cytoscape-cose-bilkent": "^4.1.0"
+  },
+  "devDependencies": {}
+}

@@ -1,0 +1,140 @@
+<script setup lang="ts">
+// @ts-nocheck — M12 迁移：既有代码（web/ 历史未严格类型门禁），保行为先跳过类型检查，清理留后续。
+import { ref, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import * as api from '@topo/web-core/services/api'
+
+const props = defineProps<{
+  visible: boolean
+  msgContent: string
+  sessionMessages: { role: string; content: string; reasoning?: string; toolCalls?: any[] }[]
+}>()
+
+const emit = defineEmits<{
+  close: []
+  save: [opts: { mode: 'single' | 'session'; target: 'new' | 'existing'; title: string; noteId?: string }]
+}>()
+
+const { t } = useI18n()
+const mode = ref<'single' | 'session'>('single')
+const target = ref<'new' | 'existing'>('new')
+const title = ref('')
+const noteSearch = ref('')
+const notes = ref<any[]>([])
+const loading = ref(false)
+const selectedNoteId = ref('')
+
+watch(() => props.visible, (v) => { if (v) { noteSearch.value = ''; selectedNoteId.value = ''; loadNotes() } })
+
+async function loadNotes() {
+  loading.value = true
+  try {
+    const data = await api.get('/api/notes', { search: noteSearch.value, page_size: '200' })
+    notes.value = data.notes || []
+  } catch (_) {}
+  loading.value = false
+}
+
+const filteredNotes = computed(() => {
+  const q = noteSearch.value.trim().toLowerCase()
+  if (!q) return notes.value
+  return notes.value.filter((d: any) => (d.title || '').toLowerCase().includes(q))
+})
+
+function selectNote(id: string) {
+  selectedNoteId.value = selectedNoteId.value === id ? '' : id
+}
+
+function confirm() {
+  emit('save', {
+    mode: mode.value,
+    target: target.value,
+    title: title.value || (mode.value === 'single' ? t('saveAs.defaultSingle') : t('saveAs.defaultSession')) + ' ' + new Date().toLocaleString(),
+    noteId: target.value === 'existing' ? selectedNoteId.value : undefined,
+  })
+}
+</script>
+
+<template>
+  <div v-if="visible" class="dialog-overlay" @click.self="emit('close')">
+    <div class="dialog-box" style="width:460px">
+      <h3>{{ $t('saveAs.title') }}</h3>
+
+      <div class="form-group">
+        <label class="form-label">{{ $t('saveAs.scope') }}</label>
+        <div class="radio-group">
+          <label class="radio-item" :class="{ active: mode === 'single' }">
+            <input type="radio" v-model="mode" value="single" />
+            <span>{{ $t('saveAs.single') }}</span>
+          </label>
+          <label class="radio-item" :class="{ active: mode === 'session' }">
+            <input type="radio" v-model="mode" value="session" />
+            <span>{{ $t('saveAs.session') }}</span>
+          </label>
+        </div>
+        <div v-if="mode === 'session'" class="form-hint">{{ $t('saveAs.hint') }}</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">{{ $t('saveAs.target') }}</label>
+        <div class="radio-group">
+          <label class="radio-item" :class="{ active: target === 'new' }">
+            <input type="radio" v-model="target" value="new" />
+            <span>{{ $t('saveAs.newNote') }}</span>
+          </label>
+          <label class="radio-item" :class="{ active: target === 'existing' }">
+            <input type="radio" v-model="target" value="existing" />
+            <span>{{ $t('saveAs.existingNote') }}</span>
+          </label>
+        </div>
+      </div>
+
+      <div v-if="target === 'new'" class="form-group">
+        <label class="form-label">{{ $t('saveAs.noteTitle') }}</label>
+        <input v-model="title" class="dialog-input" :placeholder="$t('saveAs.titlePlaceholder')" />
+      </div>
+
+      <div v-if="target === 'existing'" class="form-group">
+        <label class="form-label">{{ $t('saveAs.pickNote') }}</label>
+        <input v-model="noteSearch" class="dialog-input" :placeholder="$t('saveAs.searchPlaceholder')" @input="loadNotes" />
+        <div v-if="loading" class="note-list-loading">{{ $t('saveAs.loading') }}</div>
+        <div v-else-if="filteredNotes.length === 0" class="note-list-empty">{{ $t('saveAs.noMatch') }}</div>
+        <div v-else class="note-list">
+          <div
+            v-for="d in filteredNotes"
+            :key="d.id"
+            class="note-item"
+            :class="{ selected: selectedNoteId === d.id }"
+            @click="selectNote(d.id)"
+          >
+            <div class="note-item-title">{{ d.title || $t('common.untitled') }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button class="dialog-btn" @click="emit('close')">{{ $t('common.cancel') }}</button>
+        <button class="dialog-btn primary" @click="confirm" :disabled="target === 'existing' && !selectedNoteId">{{ $t('common.save') }}</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.form-group{margin-bottom:14px}
+.form-label{display:block;font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:6px}
+.radio-group{display:flex;gap:10px}
+.radio-item{display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-md);cursor:pointer;font-size:13px;color:var(--text);transition:all .15s}
+.radio-item:hover{border-color:var(--accent)}
+.radio-item.active{border-color:var(--accent);background:var(--accent-light)}
+.radio-item input{accent-color:var(--accent)}
+.form-hint{font-size:11px;color:var(--text-muted);margin-top:4px}
+.note-list{border:1px solid var(--border);border-radius:var(--radius-md);max-height:220px;overflow-y:auto}
+.note-item{padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;transition:background .1s}
+.note-item:last-child{border-bottom:none}
+.note-item:hover{background:var(--bg-hover)}
+.note-item.selected{background:var(--accent-light);border-color:var(--accent)}
+.note-item-title{font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.note-item-meta{font-size:11px;color:var(--text-muted);flex-shrink:0;margin-left:8px}
+.note-list-loading,.note-list-empty{padding:16px;text-align:center;font-size:13px;color:var(--text-muted)}
+</style>

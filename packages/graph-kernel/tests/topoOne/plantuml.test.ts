@@ -1,0 +1,72 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PlantUmlEngine } from '../../src/engines/plantuml/plantuml';
+
+const SVG_OK =
+  '<svg xmlns="http://www.w3.org/2000/svg"><g id="part1" data-entity-uid="part1" data-source-line="1"><title>Alice</title></g></svg>';
+const SVG_ERR =
+  '<svg xmlns="http://www.w3.org/2000/svg"><text>Syntax Error?</text><text>(Assumed diagram type: sequence)</text></svg>';
+
+function mockFetch(status: number, body: string) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ status, ok: status < 400, text: async () => body }),
+  );
+}
+
+describe('PlantUmlEngine', () => {
+  beforeEach(() => vi.unstubAllGlobals());
+
+  it('renders via POST {base}/svg JSON by default and keeps data-entity attrs', async () => {
+    mockFetch(200, SVG_OK);
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test/api/topo/plantuml' });
+    const res = await engine.render({ container: document.createElement('div'), code: '@startuml\nA\n@enduml' });
+    expect(res.svg).toContain('data-entity-uid');
+    const [url, init] = [vi.mocked(fetch).mock.calls[0][0] as string, vi.mocked(fetch).mock.calls[0][1]!];
+    expect(url).toBe('http://test/api/topo/plantuml/svg');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ source: '@startuml\nA\n@enduml' });
+  });
+
+  it('legacy get-encoded protocol still renders via GET /svg/{encoded}', async () => {
+    mockFetch(200, SVG_OK);
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test', protocol: 'get-encoded' });
+    const res = await engine.render({
+      container: document.createElement('div'),
+      code: '@startuml\nA\n@enduml',
+    });
+    expect(res.svg).toContain('data-entity-uid');
+    const url = vi.mocked(fetch).mock.calls[0][0] as string;
+    expect(url).toMatch(/^http:\/\/test\/svg\//);
+  });
+
+  it('detects syntax error via HTTP 400', async () => {
+    mockFetch(400, SVG_ERR);
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test' });
+    const v = await engine.validate('@startuml\n???');
+    expect(v.valid).toBe(false);
+    expect(v.error).toContain('Syntax Error');
+  });
+
+  it('treats HTTP 302 as invalid', async () => {
+    mockFetch(302, '');
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test' });
+    const v = await engine.validate('@startsequence\nA\n@enduml');
+    expect(v.valid).toBe(false);
+  });
+
+  it('does NOT false-positive on 200 SVG whose labels contain "syntax error"', async () => {
+    // 渲染 plantuml 引擎自身代码的资产时，图内文本可能包含 "/syntax error/i.test body"
+    const svgOkWithCodeText =
+      '<svg xmlns="http://www.w3.org/2000/svg">' +
+      '<g id="part1" data-entity-uid="part1"><text>status !== 200</text><text>/syntax error/i.test body</text></g></svg>';
+    mockFetch(200, svgOkWithCodeText);
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test' });
+    const res = await engine.render({
+      container: document.createElement('div'),
+      code: '@startuml\\n:validate;\\n@enduml',
+    });
+    expect(res.svg).toContain('data-entity-uid');
+    const v = await engine.validate('@startuml\\n:validate;\\n@enduml');
+    expect(v.valid).toBe(true);
+  });
+});

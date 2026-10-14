@@ -1,0 +1,1112 @@
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, onActivated, onDeactivated } from 'vue'
+import { useI18n } from 'vue-i18n'
+import {
+  PlusIcon,
+  EyeIcon,
+  StopIcon,
+  ArrowPathIcon,
+  PencilIcon,
+  TrashIcon,
+  ExclamationTriangleIcon,
+  PlayIcon,
+  DocumentTextIcon,
+  ClockIcon,
+} from '@heroicons/vue/24/outline'
+import { useRouter } from 'vue-router'
+import { useAnalysisStore } from '@/stores/analysis'
+import { useProjectStore } from '@/stores/project'
+import { useNavigationStore } from '@/stores/navigation'
+import TaskDetailDialog from './TaskDetailDialog.vue'
+
+import type { AnalysisTask } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
+import { ipc } from '@/services/ipc'
+import type { KbViewStatus, KbViewHistoryEntry } from '@/types/ipc'
+import { LinkIcon, LinkSlashIcon } from '@heroicons/vue/24/outline'
+import { displayDispatcher } from '@/services/display-dispatcher'
+import { createLogger } from '@topo/web-core/utils/logger'
+
+const { showId, componentId } = useComponentId('AN-002')
+const logger = createLogger('TaskListPanel')
+const props = defineProps<{
+  projectId: string
+}>()
+
+const emit = defineEmits<{
+  createTask: [taskId?: string]
+}>()
+
+const { t } = useI18n()
+const router = useRouter()
+const analysisStore = useAnalysisStore()
+const projectStore = useProjectStore()
+const navigation = useNavigationStore()
+
+const isResourceProject = computed(() => props.projectId?.startsWith?.('TOPORES_ID:'))
+const detailTask = ref<AnalysisTask | null>(null)
+const deleteConfirm = ref<string | null>(null)
+
+// 加载任务列表
+async function loadTasks() {
+  if (props.projectId) {
+    await analysisStore.loadTasks(props.projectId)
+    await loadViewStatus()
+  }
+}
+
+// ── 基线视图：任务挂载管理（对外唯一生效视图） ──
+const viewStatus = ref<KbViewStatus | null>(null)
+// 变更记录(挂载/卸载审计)
+const historyOpen = ref(false)
+const historyEntries = ref<KbViewHistoryEntry[]>([])
+async function toggleHistory() {
+  historyOpen.value = !historyOpen.value
+  if (historyOpen.value) {
+    try {
+      const res = await ipc.view.history({ projectId: props.projectId })
+      historyEntries.value = res?.entries ?? []
+    } catch {
+      historyEntries.value = []
+    }
+  }
+}
+const viewBusyTask = ref<string | null>(null)
+
+async function loadViewStatus() {
+  if (!props.projectId || isResourceProject.value) {
+    viewStatus.value = null
+    return
+  }
+  try {
+    viewStatus.value = await ipc.view.status({ projectId: props.projectId })
+  } catch {
+    viewStatus.value = null
+  }
+}
+
+const mountedTaskIds = computed(() =>
+  new Set((viewStatus.value?.mounted || []).map(m => m.taskId)))
+
+async function onMountTask(taskId: string) {
+  if (!props.projectId) return
+  viewBusyTask.value = taskId
+  try {
+    viewStatus.value = await ipc.view.mount({ projectId: props.projectId, taskId })
+  } catch (err: any) {
+    alert(err?.message || String(err))
+    await loadViewStatus()
+  } finally {
+    viewBusyTask.value = null
+  }
+}
+
+async function onForceMountTask(taskId: string) {
+  if (!props.projectId) return
+  if (!window.confirm(t('analysis.viewForceConfirm'))) return
+  viewBusyTask.value = taskId
+  try {
+    viewStatus.value = await ipc.view.mount({ projectId: props.projectId, taskId, force: true })
+  } catch (err: any) {
+    alert(err?.message || String(err))
+  } finally {
+    viewBusyTask.value = null
+  }
+}
+
+async function onUnmountTask(taskId: string) {
+  if (!props.projectId) return
+  viewBusyTask.value = taskId
+  try {
+    viewStatus.value = await ipc.view.unmount({ projectId: props.projectId, taskId })
+  } catch (err: any) {
+    alert(err?.message || String(err))
+  } finally {
+    viewBusyTask.value = null
+  }
+}
+
+// 运行中任务轮询（3 秒刷新）
+function startPolling() {
+  const pid = props.projectId
+  if (!pid) return
+  const key = `task-list:${pid}`
+  if (displayDispatcher.has(key)) return
+  displayDispatcher.register(key, {
+    interval: 3000,
+    fetcher: async () => {
+      const hasRunning = analysisStore.tasks.some(t => t.status === 'running')
+      if (hasRunning && props.projectId) {
+        await analysisStore.loadTasks(props.projectId)
+      }
+      return hasRunning
+    },
+    onData: (hasRunning) => {
+      if (!hasRunning) displayDispatcher.unregister(key)
+    },
+  })
+}
+
+function stopPolling(pid?: string) {
+  const key = pid ? `task-list:${pid}` : null
+  if (!key) return
+  displayDispatcher.unregister(key)
+}
+
+// 项目切换时重新加载 + 清理旧轮询
+watch(() => props.projectId, (newPid, oldPid) => {
+  if (oldPid && oldPid !== newPid) {
+    displayDispatcher.unregister(`task-list:${oldPid}`)
+  }
+  if (newPid) loadTasks()
+})
+
+// 监听任务列表变化，有 running 任务时启动轮询
+watch(() => analysisStore.tasks, (tasks) => {
+  const hasRunning = tasks.some(t => t.status === 'running')
+  if (hasRunning) {
+    startPolling()
+  }
+}, { deep: true })
+
+// 首次挂载加载任务（路由无 KeepAlive 时 onActivated 不触发）
+onMounted(() => { loadTasks() })
+// keep-alive 缓存激活/停用
+onActivated(() => { loadTasks() })
+onDeactivated(() => { stopPolling(props.projectId) })
+
+// 状态颜色
+function getStatusColor(status: string): string {
+  const map: Record<string, string> = {
+    running: 'var(--accent)',
+    done: 'var(--success)',
+    error: 'var(--error)',
+    cancelled: 'var(--warning)',
+    pending: 'var(--text-muted)',
+    modified: 'var(--warning)',
+  }
+  return map[status] || 'var(--text-muted)'
+}
+
+function getStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    running: t('analysis.running'),
+    done: t('analysis.done'),
+    error: t('analysis.error'),
+    cancelled: t('analysis.cancelled'),
+    pending: t('analysis.pending'),
+    modified: t('analysis.modified'),
+  }
+  return map[status] || status
+}
+
+// Computed task stats
+const taskStats = computed(() => {
+  const tasks = analysisStore.tasks
+  return {
+    total: tasks.length,
+    running: tasks.filter(t => t.status === 'running').length,
+    done: tasks.filter(t => t.status === 'done').length,
+    error: tasks.filter(t => t.status === 'error').length,
+    modified: tasks.filter(t => t.status === 'modified').length,
+    pending: tasks.filter(t => t.status === 'pending').length,
+  }
+})
+
+// 任务操作
+function onViewDetail(task: AnalysisTask) {
+  detailTask.value = task
+}
+
+const _stopping = ref(false)
+
+async function onStopTask(taskId: string) {
+  if (_stopping.value) return
+  _stopping.value = true
+  try {
+    await analysisStore.stopTask(taskId)
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to stop task:', err)
+  } finally {
+    _stopping.value = false
+  }
+}
+
+// 首次运行（pending 状态，从未执行过）
+async function onRunTask(taskId: string) {
+  const task = analysisStore.tasks.find(t => t.id === taskId)
+  if (task && !(await validateFileCount(task))) return
+  try {
+    await analysisStore.runTask(taskId)
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to run task:', err)
+  }
+}
+
+// 重跑（已有运行历史）
+async function onRerunTask(taskId: string) {
+  const task = analysisStore.tasks.find(t => t.id === taskId)
+  if (task && !(await validateFileCount(task))) return
+  try {
+    await analysisStore.reRunTask(taskId)
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to rerun task:', err)
+  }
+}
+
+const FILE_LIMIT_WARN = 5000
+const FILE_LIMIT_BLOCK = 10000
+const taskFileCounts = ref<Record<string, { count: number; loading: boolean }>>({})
+
+const showFileCountExceedDialog = ref(false)
+const fileCountExceedMessage = ref('')
+
+function parseTaskArray(field: unknown): string[] {
+  if (!field) return []
+  if (Array.isArray(field)) return field
+  if (typeof field === 'string') {
+    try { return JSON.parse(field) } catch { return [] }
+  }
+  return []
+}
+
+async function validateFileCount(task: AnalysisTask): Promise<boolean> {
+  const key = task.id
+  const cached = taskFileCounts.value[key]
+  if (cached && cached.count > 0) {
+    if (cached.count > FILE_LIMIT_BLOCK) {
+      fileCountExceedMessage.value = t('analysis.fileCountExceed', { count: cached.count, limit: FILE_LIMIT_BLOCK })
+      showFileCountExceedDialog.value = true
+      return false
+    }
+    return true
+  }
+  taskFileCounts.value[key] = { count: 0, loading: true }
+  try {
+    const scopes = parseTaskArray(task.scopes)
+    const exts = parseTaskArray(task.extensions)
+    const result = await analysisStore.scanFileStats(task.projectId, {
+      scopes: scopes.length > 0 ? scopes : undefined,
+      selectedExtensions: exts.length > 0 ? exts : undefined,
+    })
+    const count = result.totalFiles
+    taskFileCounts.value[key] = { count, loading: false }
+    if (count > FILE_LIMIT_BLOCK) {
+      fileCountExceedMessage.value = t('analysis.fileCountExceed', { count, limit: FILE_LIMIT_BLOCK })
+      showFileCountExceedDialog.value = true
+      return false
+    }
+    if (count > FILE_LIMIT_WARN) {
+      logger.warn(`File count ${count} exceeds ${FILE_LIMIT_WARN} for task ${task.name}`)
+    }
+    return true
+  } catch {
+    taskFileCounts.value[key] = { count: 0, loading: false }
+    return true
+  }
+}
+
+function onEditTask(taskId: string) {
+  emit('createTask', taskId)
+}
+
+function onDeleteTask(taskId: string) {
+  deleteConfirm.value = taskId
+}
+
+function onOpenAnalysis(task: AnalysisTask) {
+  router.push({ path: '/analysis', query: { project: task.projectId, task: task.id } })
+  navigation.navigateTo('analysis')
+}
+
+const deletingTaskId = ref<string | null>(null)
+
+async function confirmDelete() {
+  if (!deleteConfirm.value || deletingTaskId.value) return
+  deletingTaskId.value = deleteConfirm.value
+  try {
+    await analysisStore.deleteTask(deleteConfirm.value)
+    deleteConfirm.value = null
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to delete task:', err)
+  } finally {
+    deletingTaskId.value = null
+  }
+}
+
+function cancelDelete() {
+  deleteConfirm.value = null
+}
+
+const reportTypeLabels: Record<string, string> = {
+  dependency: 'analysis.dependencyAnalysis',
+  callChain: 'analysis.callChainAnalysis',
+}
+
+// 格式化配置摘要
+function getConfigSummary(task: AnalysisTask): string {
+  const parts: string[] = []
+  if (task.reportTypes?.length) {
+    parts.push(task.reportTypes.map(r => t(reportTypeLabels[r] || r)).join(', '))
+  }
+  if (task.scope) {
+    parts.push(task.scope)
+  }
+  if (task.extensions?.length) {
+    const exts = Array.isArray(task.extensions) ? task.extensions : JSON.parse(task.extensions)
+    parts.push(exts.join(', '))
+  }
+  return parts.join('  ')
+}
+</script>
+
+<template>
+  <div class="task-list-panel">
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
+    <!-- 标题栏 -->
+    <div class="panel-header">
+      <h2 class="panel-title">
+        {{ t('analysis.taskList') }}
+      </h2>
+      <button
+        v-if="!isResourceProject"
+        class="btn btn-primary btn-sm"
+        @click="emit('createTask')"
+      >
+        <PlusIcon class="w-4 h-4" />
+        <span>{{ t('analysis.newTask') }}</span>
+      </button>
+    </div>
+
+    <!-- 基线视图状态（对外唯一生效视图：挂载任务 · 覆盖率 · stale） -->
+    <div
+      v-if="!isResourceProject && viewStatus"
+      class="view-status-bar"
+      :class="{ 'view-empty': !viewStatus.mounted.length }"
+    >
+      <LinkIcon class="w-3.5 h-3.5 shrink-0" />
+      <span class="stat-label">{{ t('analysis.viewTitle') }}:</span>
+      <template v-if="viewStatus.mounted.length">
+        <span class="stat-value">{{ t('analysis.viewMountedCount', { count: viewStatus.mounted.length }) }}</span>
+        <span class="view-divider" />
+        <span class="stat-label">{{ t('analysis.viewCoverage') }}</span>
+        <span
+          class="stat-value"
+          :class="{ 'view-cov-low': (viewStatus.coverage.coveragePct ?? 100) < 60 }"
+        >{{ viewStatus.coverage.coveragePct ?? '—' }}% ({{ viewStatus.coverage.coveredFiles }}/{{ viewStatus.coverage.totalFiles }})</span>
+        <span
+          v-if="viewStatus.overlapWarned"
+          class="view-warn"
+          :title="t('analysis.viewOverlapWarned')"
+        >⚠</span>
+      </template>
+      <span
+        v-else
+        class="view-warn"
+      >{{ t('analysis.viewEmptyHint') }}</span>
+      <span class="view-divider" />
+      <span
+        class="stat-value font-mono"
+        :title="t('analysis.viewVersionHint')"
+      >v{{ viewStatus.viewVersion }}</span>
+      <button
+        class="view-history-toggle"
+        :title="t('analysis.viewHistory')"
+        @click="toggleHistory"
+      >{{ historyOpen ? '▾' : '▸' }} {{ t('analysis.viewHistory') }}</button>
+      <span
+        v-if="viewStatus.stale"
+        class="view-stale"
+        :title="t('analysis.viewStaleHint')"
+      >{{ t('analysis.viewStale') }}</span>
+    </div>
+
+    <!-- 变更记录(挂载/卸载审计：任务名/任务ID/现状) -->
+    <div v-if="historyOpen && viewStatus" class="view-history panel">
+      <p v-if="!historyEntries.length" class="vh-empty">{{ t('analysis.viewHistoryEmpty') }}</p>
+      <div v-for="(h, i) in historyEntries" :key="i" class="vh-row">
+        <span class="vh-action" :class="h.action === 'mount' ? 'vh-mount' : 'vh-unmount'">
+          {{ h.action === 'mount' ? t('analysis.vhMount') : t('analysis.vhUnmount') }}
+        </span>
+        <span class="vh-name" :title="h.taskId">{{ h.taskName || h.taskId }}</span>
+        <span class="vh-id">{{ h.taskId }}</span>
+        <span class="vh-status" :class="h.taskExists ? 'vh-alive' : 'vh-dead'">
+          {{ h.taskExists ? t('analysis.vhAlive') : t('analysis.vhDeleted') }}
+        </span>
+        <span class="vh-ver">v{{ h.version }}</span>
+        <span class="vh-time">{{ h.createdAt }}</span>
+      </div>
+    </div>
+
+    <!-- 统计摘要 -->
+    <div class="task-stats">
+      <span class="stat-item">
+        <span class="stat-label">{{ t('analysis.total') }}</span>
+        <span class="stat-value">{{ analysisStore.tasks.length }}</span>
+      </span>
+      <span class="stat-divider" />
+      <span class="stat-item">
+        <span
+          class="stat-dot"
+          style="background: var(--accent)"
+        />
+        <span class="stat-label">{{ t('analysis.running') }}</span>
+        <span class="stat-value">{{ analysisStore.taskStats.running }}</span>
+      </span>
+      <span class="stat-divider" />
+      <span class="stat-item">
+        <span
+          class="stat-dot"
+          style="background: var(--success)"
+        />
+        <span class="stat-label">{{ t('analysis.done') }}</span>
+        <span class="stat-value">{{ analysisStore.taskStats.done }}</span>
+      </span>
+      <span class="stat-divider" />
+      <span class="stat-item">
+        <span
+          class="stat-dot"
+          style="background: var(--error)"
+        />
+        <span class="stat-label">{{ t('analysis.error') }}</span>
+        <span class="stat-value">{{ analysisStore.taskStats.error }}</span>
+      </span>
+    </div>
+
+    <!-- 任务列表 -->
+    <div
+      v-if="analysisStore.tasks.length === 0"
+      class="empty-state"
+    >
+      <span>{{ t('analysis.noTasks') }}</span>
+    </div>
+
+    <div
+      v-else
+      class="task-cards"
+    >
+      <div
+        v-for="task in analysisStore.filteredTasks"
+        :key="task.id"
+        class="task-card"
+      >
+        <!-- 第一行: 名称/状态/进度 -->
+        <div class="task-card-header">
+          <div class="task-name-group">
+            <span
+              class="status-dot"
+              :style="{ background: getStatusColor(task.status) }"
+            />
+            <span class="task-name">{{ task.name }}</span>
+            <span class="task-type-badge">{{ task.type }}</span>
+          </div>
+          <div class="task-progress-group">
+            <span
+              class="task-status"
+              :style="{ color: getStatusColor(task.status) }"
+            >
+              {{ getStatusLabel(task.status) }}
+            </span>
+            <div
+              v-show="task.status === 'running'"
+              class="task-progress-bar"
+            >
+              <div
+                class="task-progress-fill"
+                :style="{ width: `${task.progress || 0}%` }"
+              />
+            </div>
+            <span
+              v-show="task.progress != null"
+              class="task-progress-text"
+            >{{ typeof task.progress === 'number' ? task.progress.toFixed(2) : task.progress }}%</span>
+            <span
+              v-if="task.eta"
+              class="task-progress-eta"
+            >{{ task.eta }}</span>
+          </div>
+        </div>
+
+        <!-- 第二行: 配置摘要 -->
+        <div class="task-card-body">
+          <span class="task-config">{{ getConfigSummary(task) }}</span>
+        </div>
+
+        <!-- 错误信息 -->
+        <div
+          v-if="task.error"
+          class="task-error"
+        >
+          <ExclamationTriangleIcon class="w-3.5 h-3.5" />
+          <span>{{ task.error }}</span>
+        </div>
+
+        <!-- 第三行: 操作按钮 -->
+        <div class="task-card-actions">
+          <button
+            class="btn btn-ghost btn-xs"
+            :title="t('analysis.viewDetail')"
+            @click="onViewDetail(task)"
+          >
+            <EyeIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.viewDetail') }}</span>
+          </button>
+
+          <button
+            v-show="!isResourceProject && (task.status === 'running' || task.status === 'stopping')"
+            class="btn btn-ghost btn-xs"
+            :class="{ 'btn-warning': task.status === 'running' }"
+            :title="task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask')"
+            :disabled="task.status === 'stopping'"
+            @click="onStopTask(task.id)"
+          >
+            <span
+              v-show="task.status === 'stopping'"
+              class="loading-spinner"
+            />
+            <StopIcon
+              v-show="task.status !== 'stopping'"
+              class="w-3.5 h-3.5"
+            />
+            <span>{{ task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask') }}</span>
+          </button>
+
+          <button
+            v-if="!isResourceProject && task.status === 'pending'"
+            class="btn btn-ghost btn-xs btn-primary"
+            :title="t('analysis.runTask')"
+            :disabled="analysisStore.isTaskLoading(task.id)"
+            @click="onRunTask(task.id)"
+          >
+            <PlayIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.runTask') }}</span>
+          </button>
+
+          <!-- 基线视图挂载：done 任务可挂载（对外生效）；已挂载可卸载 -->
+          <button
+            v-if="!isResourceProject && task.status === 'done' && mountedTaskIds.has(task.id)"
+            class="btn btn-ghost btn-xs"
+            :title="t('analysis.viewUnmount')"
+            :disabled="viewBusyTask === task.id"
+            @click="onUnmountTask(task.id)"
+          >
+            <LinkSlashIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.viewUnmount') }}</span>
+          </button>
+          <button
+            v-if="!isResourceProject && task.status === 'done' && !mountedTaskIds.has(task.id)"
+            class="btn btn-ghost btn-xs btn-primary"
+            :title="t('analysis.viewMount') + ' · ' + t('analysis.viewMountForceHint')"
+            :disabled="viewBusyTask === task.id"
+            @click="onMountTask(task.id)"
+            @click.shift="onForceMountTask(task.id)"
+          >
+            <LinkIcon class="w-3.5 h-3.5" />
+            <span>{{ viewBusyTask === task.id ? '…' : t('analysis.viewMount') }}</span>
+          </button>
+
+          <button
+            v-if="!isResourceProject && task.status !== 'running' && !['pending','done'].includes(task.status)"
+            class="btn btn-ghost btn-xs"
+            :title="t('analysis.rerunTask')"
+            :disabled="analysisStore.isTaskLoading(task.id)"
+            @click="onRerunTask(task.id)"
+          >
+            <ArrowPathIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.rerunTask') }}</span>
+          </button>
+
+          <button
+            v-if="!isResourceProject && task.status !== 'running'"
+            class="btn btn-ghost btn-xs"
+            :title="t('analysis.editTask')"
+            @click="onEditTask(task.id)"
+          >
+            <PencilIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.editTask') }}</span>
+          </button>
+
+          <button
+            v-if="!isResourceProject && task.status !== 'running'"
+            class="btn btn-ghost btn-xs btn-danger"
+            :title="t('analysis.deleteTask')"
+            @click="onDeleteTask(task.id)"
+          >
+            <TrashIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.deleteTask') }}</span>
+          </button>
+
+          <div class="actions-spacer" />
+
+          <button
+            v-if="task.status === 'done'"
+            class="btn btn-primary btn-xs"
+            :title="t('report.structuralReport')"
+            @click="onOpenAnalysis(task)"
+          >
+            <DocumentTextIcon class="w-3.5 h-3.5" />
+            <span>{{ t('report.structuralReport') }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务详情对话框 -->
+    <TaskDetailDialog
+      v-if="detailTask"
+      :task="detailTask"
+      :visible="!!detailTask"
+      @close="detailTask = null"
+    />
+
+    <!-- 删除确认对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="deleteConfirm"
+        class="dialog-overlay"
+        @click.self="cancelDelete"
+      >
+        <div class="confirm-dialog">
+          <div class="confirm-title">
+            <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
+            <span>{{ t('analysis.confirmDelete') }}</span>
+          </div>
+          <div
+            v-if="deletingTaskId"
+            class="confirm-body"
+            style="display:flex; align-items:center; gap:8px;"
+          >
+            <span class="spinner" style="width:14px; height:14px; border-width:2px;" />
+            <span>{{ t('analysis.deletingTask') }}</span>
+          </div>
+          <div class="confirm-actions">
+            <button
+              class="btn btn-ghost"
+              :disabled="!!deletingTaskId"
+              @click="cancelDelete"
+            >
+              {{ t('analysis.deleteCancelled') }}
+            </button>
+            <button
+              class="btn btn-danger"
+              :disabled="!!deletingTaskId"
+              @click="confirmDelete"
+            >
+              {{ deletingTaskId ? t('analysis.deletingTask') : t('analysis.deleteConfirmed') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 文件数超限警告对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showFileCountExceedDialog"
+        class="dialog-overlay"
+        @click.self="showFileCountExceedDialog = false"
+      >
+        <div class="confirm-dialog">
+          <div class="confirm-title">
+            <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
+            <span>{{ t('import.fileCountExceed') }}</span>
+          </div>
+          <div class="confirm-body">
+            {{ fileCountExceedMessage }}
+          </div>
+          <div class="confirm-actions">
+            <button
+              class="btn btn-primary"
+              @click="showFileCountExceedDialog = false"
+            >
+              {{ t('common.ok') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+  </div>
+</template>
+
+<style scoped>
+.task-list-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: calc(16px * var(--ui-scale, 1));
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: calc(12px * var(--ui-scale, 1));
+}
+
+.panel-title {
+  font-size: calc(14px * var(--ui-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.task-stats {
+  display: flex;
+  align-items: center;
+  gap: calc(12px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale, 1));
+  color: var(--text-secondary);
+}
+
+.stat-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-dot {
+  width: calc(6px * var(--ui-scale, 1));
+  height: calc(6px * var(--ui-scale, 1));
+  border-radius: 50%;
+}
+
+.stat-divider {
+  width: 1px;
+  height: calc(16px * var(--ui-scale, 1));
+  background: var(--border);
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(13px * var(--ui-scale, 1));
+  color: var(--text-muted);
+}
+
+.task-cards {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--ui-scale, 1));
+}
+
+.task-card {
+  padding: calc(12px * var(--ui-scale, 1));
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: calc(6px * var(--ui-scale, 1));
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--ui-scale, 1));
+}
+
+.task-card:hover {
+  border-color: var(--border-light);
+}
+
+.task-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.task-name-group {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale, 1));
+}
+
+.status-dot {
+  width: calc(8px * var(--ui-scale, 1));
+  height: calc(8px * var(--ui-scale, 1));
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.task-name {
+  font-size: calc(13px * var(--ui-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.task-type-badge {
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  background: var(--bg-tertiary);
+  border-radius: calc(3px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.task-name-btn {
+  padding: calc(2px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1));
+  margin-left: calc(2px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  gap: calc(2px * var(--ui-scale, 1));
+}
+.task-name-btn:hover {
+  color: var(--accent);
+}
+.task-name-btn-text {
+  font-size: calc(10px * var(--ui-scale, 1));
+}
+
+.task-progress-group {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale, 1));
+}
+
+.task-status {
+  font-size: calc(11px * var(--ui-scale, 1));
+  font-weight: 500;
+}
+
+.task-progress-bar {
+  width: calc(60px * var(--ui-scale, 1));
+  height: calc(6px * var(--ui-scale, 1));
+  background: var(--bg-tertiary);
+  border-radius: calc(3px * var(--ui-scale, 1));
+  overflow: hidden;
+}
+
+.task-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+  border-radius: calc(3px * var(--ui-scale, 1));
+}
+
+.task-progress-text {
+  font-size: calc(11px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  min-width: calc(32px * var(--ui-scale, 1));
+  text-align: right;
+}
+
+.task-progress-eta {
+  font-size: calc(10px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.task-card-body {
+  font-size: calc(11px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.task-error {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  background: var(--error)11;
+  border: 1px solid var(--error)33;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
+  color: var(--error);
+}
+
+.task-card-actions {
+  display: flex;
+  gap: calc(4px * var(--ui-scale, 1));
+  flex-wrap: wrap;
+  align-items: center;
+}
+.actions-spacer { flex: 1; }
+
+.btn-xs {
+  padding: calc(3px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
+  gap: calc(4px * var(--ui-scale, 1));
+}
+
+.btn-warning {
+  color: var(--warning);
+}
+
+.btn-warning:hover {
+  background: var(--warning)22;
+}
+
+.btn-danger {
+  color: var(--error);
+}
+
+.btn-danger:hover {
+  background: var(--error)22;
+}
+
+/* 确认对话框 */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirm-dialog {
+  width: calc(360px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1));
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: calc(8px * var(--ui-scale, 1));
+  display: flex;
+  flex-direction: column;
+  gap: calc(16px * var(--ui-scale, 1));
+}
+
+.confirm-title {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.confirm-body {
+  font-size: calc(13px * var(--ui-scale, 1));
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(8px * var(--ui-scale, 1));
+}
+
+/* Stats bar */
+.task-stats-bar {
+  display: flex;
+  gap: calc(12px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
+  color: var(--text-secondary);
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--ui-scale, 1));
+}
+
+.stat-running {
+  color: var(--accent);
+}
+
+.stat-done {
+  color: var(--success);
+}
+
+.stat-modified {
+  color: var(--warning);
+}
+
+.stat-error {
+  color: var(--error);
+}
+
+/* Modified badge */
+.task-modified-badge {
+  background: var(--warning);
+  color: var(--bg-primary);
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  border-radius: calc(8px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
+  font-weight: 600;
+}
+
+.task-run-count {
+  font-size: calc(10px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  margin-left: calc(4px * var(--ui-scale, 1));
+}
+
+/* ── 基线视图状态条 ── */
+.view-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--bg-secondary, transparent);
+  flex-wrap: wrap;
+}
+.view-status-bar.view-empty {
+  border-color: var(--warning, #e0a03c);
+  background: color-mix(in srgb, var(--warning, #e0a03c) 8%, transparent);
+}
+.view-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+}
+.view-warn { color: var(--warning, #e0a03c); }
+.view-stale {
+  color: var(--warning, #e0a03c);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 11px;
+  cursor: help;
+}
+
+/* 变更记录 */
+.view-history-toggle {
+  @apply ml-auto text-[11px] text-ctp-overlay1 hover:text-ctp-text cursor-pointer shrink-0;
+}
+.view-history {
+  @apply mt-1.5 max-h-56 overflow-auto text-[11px];
+}
+.vh-empty { @apply text-ctp-overlay0 text-center py-2; }
+.vh-row {
+  @apply flex items-center gap-2 px-2 py-1 border-b border-ctp-surface0/40 last:border-0;
+}
+.vh-action { @apply shrink-0 px-1.5 rounded text-[10px]; }
+.vh-mount { @apply bg-ctp-green/15 text-ctp-green; }
+.vh-unmount { @apply bg-ctp-red/15 text-ctp-red; }
+.vh-name { @apply min-w-0 flex-1 truncate text-ctp-text; }
+.vh-id { @apply shrink-0 font-mono text-[10px] text-ctp-overlay0 hidden md:inline; }
+.vh-status { @apply shrink-0 px-1.5 rounded text-[10px]; }
+.vh-alive { @apply bg-ctp-sky/15 text-ctp-sky; }
+.vh-dead { @apply bg-ctp-surface1 text-ctp-overlay0 line-through; }
+.vh-ver { @apply shrink-0 font-mono text-[10px] text-ctp-overlay1; }
+.vh-time { @apply shrink-0 text-[10px] text-ctp-overlay0; }
+.view-cov-low { color: var(--warning, #e0a03c); }
+
+</style>

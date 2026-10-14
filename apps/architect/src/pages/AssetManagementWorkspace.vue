@@ -1,0 +1,573 @@
+<script setup lang="ts">
+/**
+ * 资产管理工作区(MS6-W1 重构：逻辑层已拆至 ./asset-workspace/ 八域 composable)。
+ * 本文件仅保留：视图辅助(kindIcon/copyAsset) + setup 生命周期接线(窗口事件/
+ * 会话钩子注册/轮询接管/初始加载) + 模板。模板逐行未动。
+ */
+import { onMounted, onUnmounted, provide, ref } from 'vue'
+import { onAssetsInvalidated, type Listener } from './asset-workspace/invalidate-bus'
+import { useI18n } from 'vue-i18n'
+import {
+  BoltIcon, ArrowPathIcon,
+  CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon,
+  ArrowsRightLeftIcon, ClipboardDocumentListIcon, DocumentTextIcon,
+  ChevronDownIcon, ChevronRightIcon,
+  SparklesIcon, TrashIcon, XMarkIcon, StarIcon, ShieldCheckIcon,
+} from '@heroicons/vue/24/outline'
+import CoreGuardPanel from './asset-workspace/panels/CoreGuardPanel.vue'
+import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
+import CompGraphWorkspace from '@/components/assets/comp-graph/CompGraphWorkspace.vue'
+import FileSourceCard from '@/components/assets/FileSourceCard.vue'
+import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
+import SemanticGraphView from '@/components/assets/SemanticGraphView.vue'
+
+/** 图谱 tab 内置「演化时间轴」页(固定不可关, 与资源图谱 tab 并列)。 */
+import DiagramCard from '@/components/diagram/DiagramCard.vue'
+import { useSplitPane } from '@/composables/useSplitPane'
+import { copyText } from '@/utils/clipboard'
+import type { SemanticAsset } from '@/types'
+import { useAssetWorkspace, ASSET_WS_KEY } from './asset-workspace'
+import OverviewPanel from './asset-workspace/panels/OverviewPanel.vue'
+import SemanticTreePanel from './asset-workspace/panels/SemanticTreePanel.vue'
+import WorkspaceModals from './asset-workspace/panels/WorkspaceModals.vue'
+import ExtractScopeModal from './asset-workspace/panels/ExtractScopeModal.vue'
+import LogicViewCreateModal from './asset-workspace/panels/LogicViewCreateModal.vue'
+import DraftDock from './asset-workspace/panels/DraftDock.vue'
+import { OTHER_KEY } from './asset-workspace/useAssetCore'
+
+const { t } = useI18n()
+
+const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 50 })
+
+const ws = useAssetWorkspace()
+provide(ASSET_WS_KEY, ws)
+
+// ── 2610 核心资产守护: 仅核心开关 + semantic 内视图切换(资产树 ⇄ 核心守护) ──
+const coreOnly = ref(false)
+const guardView = ref(false)
+const guardLocate = ref('')
+function openGuardView(target?: string) {
+  guardLocate.value = target || ''
+  guardView.value = true
+}
+// 路由 query 直开守护视图(dock 🛡 跳转入口: /workbench/assets?tab=semantic&view=guard)
+if (new URLSearchParams(window.location.search).get('view') === 'guard') {
+  guardView.value = true
+  guardLocate.value = new URLSearchParams(window.location.search).get('target') || ''
+}
+const {
+  tab, kind, level, q, items, loading, statusCounts, expanded, overviewStats, purging,
+  kinds, levels, statusText, logicViewCreateOpen, loadLogicViews,
+  compCatalog, loadCompCatalog, treeComps, compById, fileToComps,
+  componentsOf, descendantsOf, hasChildren,
+  scopeSel, compOpen, filterOpen, toggleComp, toggleOther, clearScope, toggleOpen,
+  treeLevel, cycleTreeLevel, compChildrenOpen, compExpandState, fileExpandState,
+  compContentOpen, compDirectOpen, fileAssetsOpen,
+  compRows, compHierLevel, fileOpen, subtreeCount, compCollapsible, diffRollup,
+  toggleFileOpen, fileBase, semanticTreeRows, scopeSummary, scopeParams,
+  loadSemantic, loadOverview, fileCard, openFileCard, locateAsset,
+  refreshStatus, refreshOne, usable, detailLoading, descLoading,
+  renderCap, renderedTreeRows, semScrollEl, loadMoreSentinel,
+  genDesc, toggle, hideFileless, onSearch, compMetaText, compRefText,
+  compareData,
+  scopeModal, confirmScope, cancelScope,
+  extractingPending, extractPendingAndRecompare, runFullUpdate,
+  changeMarkById, diffFileCounts, pendingFileSet, addedFileSet,
+  diffMarkLabel, changedFilesForGraph, initCompare,
+  frameworkInfo, coverageInfo, fwLoading, fwSwitching, fwPreview,
+  loadFramework, loadCoverage, switchTier, askExtractComponent,
+  compCoverage, copiedKey, copyCompRef,
+  unownedFiles, unownedMeta, unownedLoading, unownedError,
+  loadUnownedFiles, loadUnownedLinks,
+  unownedExtractingOne, extractUnownedFile,
+  unownedJob, unownedExtracting, unownedJobHint,
+  extractAllUnowned, stopUnownedExtract,
+  unownedLinks, unownedLinkOf, unownedLinkTitle, unownedLinkByAssetId,
+  purgeOpen, purgeResult, purgeBusy, runPurge, confirmPurge, cancelPurge,
+  batchOpen, batchRunning, batchAction, batchLast, batchPreview, runBatch,
+  graphTabs, activeGraphTab, openGraphTab, closeGraphTab,
+  graphFileIndexes, graphCompNames,
+  diagramModalOpen, diagramModalLoading, diagramModalItems, diagramModalTitle, openAssetDiagram,
+} = ws
+
+// ---- setup 生命周期接线(状态/动作已全部在 composable，宿主只挂生命周期) ----
+onUnmounted(() => {
+  ws.disposeObserver()
+  ws.stopUnownedJobPolling()
+  ws.stopSyncJobPolling()
+})
+
+let offInvalidate: (() => void) | null = null
+onMounted(async () => {
+  // 首屏关键链(资产树/概览/状态)；未归属清单非首屏必需 → idle 延迟(批4-3 懒加载)
+  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage(), loadLogicViews()])
+  const idle = (fn: () => void) => (window.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 800)))(fn)
+  idle(() => { void loadUnownedFiles(); void loadUnownedLinks(); initCompare() })
+  // 失效总线(批4-3)：任务中心作业完成 → 核心数据刷新（防抖合并在总线内）
+  offInvalidate = onAssetsInvalidated(() => {
+    void loadSemantic()
+    void refreshStatus()
+    void loadOverview()
+    void loadUnownedFiles()
+    void loadLogicViews()   // extract_logic 作业完成 → 逻辑视图(归纳落库)刷新
+  })
+  // 批量提取是后端作业：页面重开(此前关闭)也要接管进度轮询
+  void ws.pollUnownedJobOnce().then(() => {
+    if (unownedJob.value?.running) ws.startUnownedJobPolling()
+  })
+  void ws.pollSyncJobOnce().then(() => {
+    if (ws.syncJob.value?.running) ws.startSyncJobPolling()
+  })
+})
+
+onUnmounted(() => {
+  offInvalidate?.()
+  offInvalidate = null
+})
+</script>
+
+<template>
+  <div class="h-full flex flex-col min-h-0">
+    <div class="shrink-0 px-5 pt-5">
+      <div class="flex items-center gap-3">
+        <h2 class="text-sm font-semibold text-ctp-text">
+          {{ t('assetMgmt.title') }}
+        </h2>
+        <div class="flex items-center gap-1">
+          <button
+            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }, { id: 'compgraph' as const, label: t('assetMgmt.tab.compgraph') }]"
+            :key="tb.id"
+            class="btn btn-xs"
+            :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
+            @click="tab = tb.id; onSearch()"
+          >
+            {{ tb.label }}
+          </button>
+        </div>
+        <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">{{ statusText }}</span>
+         <div class="flex-1" />
+       </div>
+    </div>
+
+    <div
+      ref="splitBoxRef"
+      class="flex-1 min-h-0 flex px-5 pb-5 pt-4"
+    >
+      <!-- 左：资产管理内容区 -->
+      <div
+        class="min-h-0 panel overflow-hidden flex flex-col"
+        :style="{ width: splitPct + '%' }"
+      >
+        <div class="panel-header shrink-0 relative !justify-start gap-1.5">
+          <span class="flex items-center gap-2">
+            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ t(`assetMgmt.tab.${tab}`) }}
+          </span>
+          <input
+            v-if="tab !== 'graph' && tab !== 'overview'"
+            v-model="q"
+            class="input !py-0.5 !px-2 !text-[11px] w-44 font-mono ml-3"
+            :placeholder="t('assetMgmt.searchPlaceholder')"
+            @keydown.enter="onSearch"
+          >
+          <select
+            v-if="tab === 'semantic'"
+            v-model="kind"
+            class="input !py-0.5 !px-2 !text-[11px] w-auto"
+            @change="onSearch"
+          >
+            <option value="">
+              {{ t('assetMgmt.allKinds') }}
+            </option>
+            <option
+              v-for="k in kinds"
+              :key="k.value"
+              :value="k.value"
+            >
+              {{ k.label }}
+            </option>
+          </select>
+          <button
+            v-if="tab === 'semantic'"
+            class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer"
+            :title="t('assetMgmt.treeLevelHint')"
+            @click="cycleTreeLevel"
+          >{{ t(`assetMgmt.treeLevel.${treeLevel}`) }}</button>
+          <template v-if="tab === 'semantic'">
+            <div
+              class="inline-flex items-center h-[calc(1.5rem+2px)] rounded-md border border-ctp-surface1 bg-ctp-crust overflow-hidden"
+              :title="t('assetMgmt.scopeGroupHint')"
+            >
+              <span class="inline-flex items-center px-2 text-[11px] text-ctp-text">{{ scopeSummary }}</span>
+              <button
+                class="btn btn-xs !rounded-none !border-l !border-ctp-surface1 self-stretch"
+                :class="(filterOpen || scopeSel.length) ? 'btn-blue' : 'btn-ghost !text-ctp-text'"
+                :title="scopeSel.length ? t('assetMgmt.filterActive', { n: scopeSel.length }) : t('assetMgmt.scopeGroupHint')"
+                @click="filterOpen = !filterOpen; batchOpen = false"
+              >
+                <AdjustmentsHorizontalIcon class="w-3 h-3" />
+              </button>
+            </div>
+            <button
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center h-[calc(1.5rem+2px)]"
+              :class="batchOpen ? '!border-ctp-blue' : ''"
+              :title="t('assetMgmt.batchClearAll')"
+              @click="batchOpen = !batchOpen; filterOpen = false"
+            >
+              <TrashIcon class="w-3 h-3" />
+            </button>
+            <!-- 全量更新: 与概览基线对比的全量更新同管线(清除全库→全量重提) -->
+            <button
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center gap-1 h-[calc(1.5rem+2px)] text-ctp-mauve hover:!border-ctp-mauve"
+              :disabled="extractingPending"
+              :title="t('assetMgmt.scopeModal.fullWarn')"
+              @click="runFullUpdate"
+            >
+              <ArrowPathIcon class="w-3 h-3" :class="extractingPending ? 'animate-spin' : ''" />
+              {{ t('assetMgmt.scopeModal.fullUpdate') }}
+            </button>
+            <!-- 2610 核心资产守护: 仅核心开关(与树面板/图谱过滤同状态口径) + 标记管理 -->
+            <button
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center gap-1 h-[calc(1.5rem+2px)]"
+              :class="coreOnly ? '!border-ctp-yellow text-ctp-yellow' : ''"
+              :title="t('session.marks.coreOnlyHint')"
+              @click="coreOnly = !coreOnly"
+            ><StarIcon class="w-3 h-3" />{{ t('session.marks.coreOnly') }}</button>
+            <button
+              class="input !py-0.5 !px-2 !text-[11px] w-auto cursor-pointer inline-flex items-center justify-center gap-1 h-[calc(1.5rem+2px)]"
+              :class="guardView ? '!border-ctp-teal text-ctp-teal' : 'text-ctp-teal hover:!border-ctp-teal'"
+              :title="t('guard.switchHint')"
+              @click="guardView ? (guardView = false) : openGuardView()"
+            ><ShieldCheckIcon class="w-3 h-3" />{{ t('guard.manage') }}</button>
+
+            <!-- 点击浮层：批量清除(物理删除 选定组件范围) -->
+            <div
+              v-if="batchOpen"
+              class="absolute right-0 top-full mt-1 z-30 w-72 max-w-[90vw] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl p-2.5 space-y-2"
+            >
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-ctp-overlay1">{{ t('assetMgmt.batchHint') }}</span>
+                <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ scopeSummary }}</span>
+              </div>
+              <div class="flex items-center gap-1 pt-1">
+                <button
+                  class="btn btn-xs"
+                  :class="batchAction === 'clear' ? 'btn-red' : 'btn-ghost'"
+                  :disabled="batchRunning"
+                  @click="runBatch('clear')"
+                >
+                  <TrashIcon class="w-3 h-3" />{{ batchAction === 'clear' ? t('assetMgmt.batchConfirm') : t('assetMgmt.batchClear') }}
+                </button>
+                <button
+                  v-if="batchAction === 'clear'"
+                  class="btn btn-xs btn-ghost"
+                  @click="batchAction = ''; batchPreview = null"
+                >
+                  {{ t('assetMgmt.batchCancel') }}
+                </button>
+              </div>
+              <div
+                v-if="batchAction === 'clear'"
+                class="border-t border-ctp-surface0 pt-1.5 space-y-1.5"
+              >
+                <p class="text-[10px] text-ctp-red">
+                  {{ t('assetMgmt.batchConfirmClear') }}
+                </p>
+                <div
+                  v-if="batchPreview"
+                  class="space-y-1"
+                >
+                  <p class="text-[10px] text-ctp-subtext1">
+                    {{ t('assetMgmt.batchClearImpact', {
+                      candidates: batchPreview.count,
+                      reqCount: batchPreview.impact?.reqCount ?? 0,
+                      taskCount: batchPreview.impact?.taskCount ?? 0,
+                    }) }}
+                  </p>
+                  <div
+                    v-if="batchPreview.impact?.requirements?.length"
+                    class="text-[9px] text-ctp-peach"
+                  >
+                    {{ t('assetMgmt.purgeConfirm.reqTitle', { n: batchPreview.impact.reqCount }) }}
+                    <div class="flex flex-wrap gap-1 pt-0.5">
+                      <span
+                        v-for="r in batchPreview.impact.requirements"
+                        :key="r.id"
+                        class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1"
+                      >{{ r.id }} · {{ r.title }}</span>
+                    </div>
+                  </div>
+                  <div
+                    v-if="batchPreview.impact?.tasks?.length"
+                    class="text-[9px] text-ctp-blue"
+                  >
+                    {{ t('assetMgmt.purgeConfirm.taskTitle', { n: batchPreview.impact.taskCount }) }}
+                    <div class="flex flex-wrap gap-1 pt-0.5">
+                      <span
+                        v-for="t in batchPreview.impact.tasks"
+                        :key="t.id"
+                        class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1"
+                      >{{ t.id }} · {{ t.title }}</span>
+                    </div>
+                  </div>
+                  <p
+                    v-if="!batchPreview.impact?.requirements?.length && !batchPreview.impact?.tasks?.length"
+                    class="text-[9px] text-ctp-green"
+                  >
+                    {{ t('assetMgmt.purgeConfirm.noImpact') }}
+                  </p>
+                </div>
+              </div>
+              <div
+                v-if="batchRunning"
+                class="text-[10px] text-ctp-overlay1"
+              >
+                {{ t('assetMgmt.batchRunning') }}
+              </div>
+              <div
+                v-if="batchLast"
+                class="text-[10px] text-ctp-subtext1"
+              >
+                {{ batchLast }}
+              </div>
+            </div>
+            <div
+              v-if="batchOpen"
+              class="fixed inset-0 z-20"
+              @click="batchOpen = false"
+            />
+
+            <!-- 点击浮层：组件范围筛选 -->
+            <div
+              v-if="filterOpen"
+              class="absolute right-0 top-full mt-1 z-30 w-80 max-w-[90vw] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl p-2.5 space-y-2"
+            >
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-ctp-overlay1">{{ t('assetMgmt.compScope') }}</span>
+                <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ scopeSummary }}</span>
+              </div>
+              <div class="max-h-40 overflow-auto space-y-0.5">
+                <div
+                  v-for="r in compRows"
+                  :key="r.comp.id"
+                  class="flex items-center gap-1.5 min-w-0"
+                  :style="{ paddingLeft: (r.depth * 14) + 'px' }"
+                >
+                  <button
+                    v-if="hasChildren(r.comp.id)"
+                    class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
+                    @click="toggleOpen(r.comp.id)"
+                  >
+                    <ChevronDownIcon
+                      v-if="compOpen[r.comp.id] !== false"
+                      class="w-3 h-3"
+                    />
+                    <ChevronRightIcon
+                      v-else
+                      class="w-3 h-3"
+                    />
+                  </button>
+                  <span
+                    v-else
+                    class="w-4 shrink-0"
+                  />
+                  <input
+                    type="checkbox"
+                    class="accent-ctp-blue shrink-0"
+                    :checked="scopeSel.includes(r.comp.id)"
+                    @change="toggleComp(r.comp.id)"
+                  >
+                  <span class="text-[11px] text-ctp-subtext1 truncate">{{ r.comp.name }}</span>
+                </div>
+                <div class="flex items-center gap-1.5 min-w-0 pt-0.5">
+                  <span class="w-4 shrink-0" />
+                  <input
+                    type="checkbox"
+                    class="accent-ctp-yellow shrink-0"
+                    :checked="scopeSel.includes(OTHER_KEY)"
+                    @change="toggleOther"
+                  >
+                  <span class="text-[11px] text-ctp-subtext1">{{ t('assetMgmt.unownedFiles') }}</span>
+                  <span class="text-[9px] text-ctp-overlay0 truncate">{{ t('assetMgmt.unowned.desc') }}</span>
+                </div>
+              </div>
+              <label class="flex items-center gap-1.5 border-t border-ctp-surface0 pt-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  class="accent-ctp-blue shrink-0"
+                  v-model="hideFileless"
+                >
+                <span class="text-[10px] text-ctp-subtext1">{{ t('assetMgmt.hideFileless') }}</span>
+              </label>
+              <div class="flex items-center justify-between border-t border-ctp-surface0 pt-1.5">
+                <span class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.scopeHint') }}</span>
+                <button
+                  class="btn btn-xs btn-ghost"
+                  @click="clearScope"
+                >
+                  {{ t('assetMgmt.clearScope') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 点击浮层外关闭 -->
+            <div
+              v-if="filterOpen"
+              class="fixed inset-0 z-20"
+              @click="filterOpen = false"
+            />
+          </template>
+        </div>
+
+        <!-- 组件图谱: 组件级全局图 → 文件级结构图(组件树多选范围) + 双资产卡 + AI 解读 -->
+        <CompGraphWorkspace
+          v-if="tab === 'compgraph'"
+          :compare-data="compareData"
+        />
+
+        <!-- 语义层图谱(多资源 tab，从语义/组件列表打开) -->
+        <div
+          v-if="tab === 'graph'"
+          class="flex-1 min-h-0 overflow-hidden flex flex-col"
+        >
+          <div class="shrink-0 flex items-stretch border-b border-ctp-surface1 px-1 pt-1 overflow-x-auto">
+            <button
+              v-for="gt in graphTabs"
+              :key="gt.id"
+              class="group relative flex items-center gap-1.5 max-w-[200px] px-3 py-1.5 text-[11px] whitespace-nowrap rounded-t-lg border border-b-0 transition-colors shrink-0"
+              :class="activeGraphTab === gt.id
+                ? 'bg-ctp-mantle text-ctp-text border-ctp-surface1 font-semibold'
+                : 'bg-ctp-surface0/50 text-ctp-subtext0 border-transparent hover:bg-ctp-surface0 hover:text-ctp-subtext1'"
+              :title="gt.title"
+              @click="activeGraphTab = gt.id"
+            >
+              <span class="truncate">{{ gt.title }}</span>
+              <span
+                role="button"
+                class="flex items-center justify-center w-4 h-4 rounded text-ctp-overlay1 hover:text-ctp-red hover:bg-ctp-red/15 cursor-pointer shrink-0"
+                :title="t('assetMgmt.graph.closeTab')"
+                @click.stop="closeGraphTab(gt.id)"
+              >
+                <XMarkIcon class="w-3 h-3" />
+              </span>
+            </button>
+          </div>
+          <div class="flex-1 min-h-0">
+            <div
+              v-if="!graphTabs.length"
+              class="h-full flex items-center justify-center text-xs text-ctp-overlay0"
+            >
+              {{ t('assetMgmt.graph.noTab') }}
+            </div>
+            <SemanticGraphView
+              v-for="gt in graphTabs"
+              v-show="activeGraphTab === gt.id"
+              v-else
+              :key="gt.id"
+              :tab="gt"
+              :diff-files="changedFilesForGraph"
+              :compare-data="compareData"
+              :file-index="graphFileIndexes[gt.id] ?? []"
+              :comp-names="graphCompNames"
+              @close="closeGraphTab"
+              @open-trace="(aid: string, name: string, dir: 'down' | 'up') => openGraphTab('trace', aid, `${t('assetMgmt.graph.trace.title')}·${name}`, undefined, { direction: dir, assetName: name })"
+            />
+          </div>
+        </div>
+        <div
+          v-else-if="tab !== 'compgraph'"
+          ref="semScrollEl"
+          class="flex-1 min-h-0 overflow-auto p-2.5 space-y-1.5"
+        >
+          <!-- 未归属清单加载失败横幅：后端错误文案本身可行动(如建索引指引)，不静默吞掉 -->
+          <div
+            v-if="tab === 'semantic' && unownedError"
+            class="flex items-center gap-2 rounded-lg border border-ctp-red/30 bg-ctp-red/10 px-3 py-2 text-[11px] text-ctp-red"
+          >
+            <span class="flex-1 min-w-0 break-all">{{ unownedError || t('assetMgmt.unowned.loadFailed') }}</span>
+            <button
+              class="shrink-0 text-ctp-subtext0 hover:text-ctp-text"
+              :title="t('assetMgmt.unowned.retry')"
+              @click="loadUnownedFiles()"
+            >
+              <ArrowPathIcon class="w-3.5 h-3.5" />
+            </button>
+            <button
+              class="shrink-0 text-ctp-overlay0 hover:text-ctp-red"
+              :title="t('assetMgmt.unowned.dismiss')"
+              @click="unownedError = ''"
+            >
+              <XMarkIcon class="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <!-- 资产概览：作用说明 + 分类/粒度/标签 + 现有资产数量 -->
+          <OverviewPanel v-if="tab === 'overview'" />
+
+          <!-- 语义资产：按组件树文件树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
+          <!-- v-show 须落在真实元素上(面板为多根 fragment, 运行时指令不可作用于组件) -->
+          <div
+            v-show="tab === 'semantic' && !guardView"
+            class="flex min-h-0 flex-1 flex-col"
+          >
+            <SemanticTreePanel
+              v-if="tab === 'semantic'"
+              :core-only="coreOnly"
+              @locate-core="openGuardView($event)"
+            />
+          </div>
+          <div
+            v-if="tab === 'semantic' && guardView"
+            class="flex min-h-0 flex-1 flex-col"
+          >
+            <CoreGuardPanel :locate="guardLocate" />
+          </div>
+
+          <!-- 组件资产：按 KB 组件树文件目录树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
+        </div>
+      </div>
+
+      <!-- 分割线 -->
+      <div
+        class="w-4 shrink-0 -mx-0.5 flex items-center justify-center cursor-col-resize select-none touch-none group"
+        :class="dragging ? 'cursor-col-resize' : ''"
+        @pointerdown="onSplitPointerDown"
+      >
+        <div
+          class="h-12 w-0.5 rounded-full bg-ctp-overlay1/40 transition-colors group-hover:bg-ctp-blue/60"
+          :class="dragging ? '!bg-ctp-blue/70' : ''"
+        />
+      </div>
+
+      <!-- 右：需求草稿(批C)：AI 辅助需求文本编辑/分析，终产物=需求卡发布到会话 -->
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div class="panel flex-1 min-h-0 overflow-hidden">
+          <DraftDock />
+        </div>
+      </div>
+    </div>
+
+    <WorkspaceModals />
+  </div>
+  <FileSourceCard
+    v-if="fileCard"
+    :file="fileCard.file"
+    :assets="fileCard.assets"
+    :compare-data="compareData"
+    @close="fileCard = null"
+    @goto="locateAsset"
+  />
+  <!-- 新建逻辑视图（模式2：核心资产种子 + agent 拓展 + LLM 概括） -->
+  <LogicViewCreateModal
+    :open="logicViewCreateOpen"
+    @close="logicViewCreateOpen = false"
+  />
+  <!-- 提取范围确认弹窗（基线对比/按组件/按文件 提取闭环共用） -->
+  <ExtractScopeModal
+    :open="scopeModal.open"
+    :title="scopeModal.title"
+    :files="scopeModal.files"
+    :show-full="scopeModal.showFull"
+    @confirm="confirmScope"
+    @close="cancelScope"
+  />
+</template>
+

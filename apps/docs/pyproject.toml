@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "topoone-app-docs"
+version = "0.1.0"
+description = "TopoCode docs backend: doc viewer + web_root business API + render.*/report.* RPC (kind=service, port 3481)"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "TopoCodeProj Team", email = "topocode@163.com" },
+]
+# 依赖核心包（db 层 + service_app 脚手架 + service_common）；fastapi/uvicorn 亦由核心传递
+dependencies = [
+  "topoone-core",
+  "topoone-app-chat",  # MS1 D6 临时声明(viewer diagram-editor 引用 web_tools); MS5 拆分时重估
+  "fastapi==0.136.3",
+  "uvicorn==0.48.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["topoone_app_docs*"]

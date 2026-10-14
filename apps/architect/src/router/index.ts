@@ -1,0 +1,136 @@
+import { createRouter, createWebHashHistory } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
+
+const routes: RouteRecordRaw[] = [
+  { path: '/', redirect: '/overview' },
+  {
+    path: '/overview',
+    name: 'Overview',
+    component: () => import('@/pages/OverviewPage.vue'),
+    meta: { workbench: false, title: '项目概览' },
+  },
+  {
+    path: '/docs/:docId',
+    name: 'DocView',
+    component: () => import('@/pages/DocViewPage.vue'),
+    meta: { workbench: false, title: '文档预览' },
+  },
+  {
+    path: '/workbench',
+    component: () => import('@/pages/WorkbenchLayout.vue'),
+    meta: { workbench: true, title: '工作台' },
+    children: [
+      {
+        path: '',
+        name: 'ProjectOverview',
+        component: () => import('@/pages/ProjectOverviewPage.vue'),
+        meta: { workbench: true, title: '项目概览' },
+      },
+      {
+        path: 'sessions',
+        name: 'Sessions',
+        component: () => import('@/pages/SessionsPage.vue'),
+        meta: { workbench: true, title: '会话中心' },
+      },
+      {
+        // P1 会话中心：需求工作台退役，旧路径(含 ?select= 深链)重定向
+        path: 'requirements',
+        redirect: { path: '/workbench/sessions' },
+      },
+      {
+        // S6：深度表单分析已并入会话中心，旧路径重定向
+        path: 'requirements/analysis',
+        redirect: { path: '/workbench/sessions' },
+      },
+      {
+        path: 'assets',
+        name: 'Assets',
+        component: () => import('@/pages/AssetsPage.vue'),
+        meta: { workbench: true, title: '项目资产' },
+      },
+      {
+        path: 'asset-mgmt',
+        name: 'AssetManagement',
+        component: () => import('@/pages/AssetManagementWorkspace.vue'),
+        meta: { workbench: true, title: '资产管理' },
+      },
+      {
+        path: 'architecture',
+        redirect: '/workbench/assets',
+      },
+      {
+        path: 'unit-test',
+        name: 'UnitTest',
+        component: () => import('@/pages/UnitTestPage.vue'),
+        meta: { workbench: true, title: '单元测试' },
+      },
+      {
+        path: 'coding',
+        redirect: '/workbench/sessions',
+      },
+      {
+        // 基线管理已并入概览页(BaselineInitCard), 组件图谱能力迁资产图谱——旧 URL 兼容回概览
+        path: 'archmap',
+        redirect: '/workbench',
+      },
+      {
+        path: 'config',
+        name: 'Config',
+        component: () => import('@/pages/ConfigPage.vue'),
+        meta: { workbench: true, title: '系统管理' },
+      },
+      {
+        // 深链会话页(2026-10): /workbench/exec-sessions 并入顶层全屏会话视图
+        path: 'exec-sessions',
+        redirect: (to) => ({ path: '/exec-session-view', query: to.query }),
+      },
+      {
+        path: 'mcp',
+        name: 'Mcp',
+        component: () => import('@/pages/McpPage.vue'),
+        meta: { workbench: true, title: '外部调用' },
+      },
+    ],
+  },
+  {
+    // 执行器会话深链页(2026-10): 全屏消息流(无工作台框架), ?job= 定位
+    path: '/exec-session-view',
+    name: 'ExecSessionView',
+    component: () => import('@/pages/ExecSessionsPage.vue'),
+    meta: { workbench: false, title: '执行器会话' },
+  },
+  { path: '/:pathMatch(.*)*', redirect: '/overview' },
+]
+
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes,
+})
+
+/**
+ * 项目选择持久化在 URL 内(?project=<arch行id> / ?root=<path>，多页签各处理不同项目)。
+ * 各菜单/跳转组件 push 时往往不带 query，导致项目绑定丢失。
+ * 这里用统一的全局守卫：同一标签内导航时自动继承来源的项目/工作目录参数，
+ * 避免「点了菜单就丢项目 → 后续项目级请求无参 → 400」。
+ *
+ * 规则：
+ *  - 目标已带 ?project= / ?root= → 显式覆盖优先，不动；
+ *  - 目标为首页 /overview(全局项目选择器) → 不继承(进入即重置到选择态)；
+ *  - 其余在站内导航 → 从来源 URL 继承缺失的 project/root。
+ */
+const PROJECT_QUERY_KEYS = ['project', 'root'] as const
+
+router.beforeEach((to, from) => {
+  if (to.path === '/overview' && !to.query.project && !to.query.root) {
+    return true
+  }
+  const inherited: Record<string, string> = {}
+  for (const k of PROJECT_QUERY_KEYS) {
+    const src = typeof from.query[k] === 'string' ? (from.query[k] as string) : ''
+    if (src && typeof to.query[k] !== 'string') inherited[k] = src
+  }
+  if (Object.keys(inherited).length === 0) return true
+  return { path: to.path, query: { ...(to.query as Record<string, string>), ...inherited } }
+})
+
+export default router

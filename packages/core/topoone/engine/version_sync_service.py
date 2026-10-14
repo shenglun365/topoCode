@@ -1,0 +1,942 @@
+"""version_sync_service.py — KB 版本基线 + 增量更新服务（P0 地基）。
+
+职责：
+  - git ls-files 物化当前 worktree 文件清单 (manifest)
+  - delta = 相邻两个基线 commit（baseline.git）的 `git diff --name-status`
+  - 注册新版本基线 project_versions + 记录 delta project_version_files
+  - 活表/历史表 δ 归档：source_files → source_files_history
+  - 逐环节影响评估（变更幅度/影响范围），供用户选择更新环节
+  - 更新请求状态机（architect 待更新标记 → KB 确认 → 拉代码）
+  - VersionViewer：快速重建任意基线 head 的完整文件清单
+
+设计原则（git 核心语义）：
+  - git 是文件清单与变更判定的唯一事实源；嵌套 .gitignore 等由 git 原生保证。
+  - delta 一律 = baseline.git 中相邻基线 commit 的 git diff（--no-renames），
+    对切分支/force-push 鲁棒；无基线时回退路径集 diff（仅 A/D）。
+  - 分析环节的增量执行（AST/图/组件/LLM）属 P1-P3，本模块提供 stage plan 钩子。
+"""
+
+import json
+import logging
+import os
+import time
+import uuid
+from datetime import datetime
+
+from topoone.db.manager import MultiDBManager, SQLiteContext
+from topoone.engine.service._common import _simple_hash
+from topoone.config import FULL_REBUILD_CHANGE_RATIO
+
+logger = logging.getLogger(__name__)
+
+# 文件扩展名 → 语言 key（与 core_service._scan_and_import 的 LANG_MAP_FILE 一致）
+EXT_LANG = {
+    ".ts": "typescript", ".js": "javascript", ".jsx": "javascript", ".tsx": "typescript",
+    ".mts": "typescript", ".cts": "typescript", ".mjs": "javascript", ".cjs": "javascript",
+    ".py": "python", ".pyw": "python", ".go": "go", ".rs": "rust", ".java": "java",
+    ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp",
+    ".hh": "cpp", ".hxx": "cpp", ".cs": "c_sharp", ".vue": "vue", ".html": "html",
+    ".css": "css", ".scss": "scss", ".json": "json", ".md": "markdown",
+    ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".rb": "ruby", ".rake": "ruby",
+    ".php": "php", ".inc": "php", ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
+    ".scala": "scala", ".sc": "scala", ".r": "r", ".sql": "sql", ".sh": "bash",
+    ".dart": "dart", ".lua": "lua", ".luau": "luau", ".m": "objc", ".mm": "objc",
+    ".perl": "perl", ".pl": "perl", ".elixir": "elixir", ".ex": "elixir",
+    ".exs": "elixir", ".erl": "erlang", ".hs": "haskell", ".ml": "ocaml",
+    ".zig": "zig", ".nim": "nim", ".v": "verilog",
+}
+
+# P0 可识别的分析环节（P1-P3 逐步实现增量执行）
+STAGE_KEYS = ["ast", "graph", "presummary", "community", "llm"]
+# 默认建议环节（文件级联动必更）
+DEFAULT_STAGES = {"ast": True, "graph": True, "presummary": True,
+                  "community": False, "llm": False}
+# 默认执行环节（version.sync 未传 stages 时的兜底：仅已实现的必更环节）
+DEFAULT_SYNC_STAGES = {"ast": True, "graph": True, "presummary": False,
+                       "community": False, "llm": False}
+
+# 版本 id 单调递增（词法序 = 创建序），供 version_from/version_to 区间比较
+_version_seq = 0
+
+
+def _new_id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+# ── 全量重建(自适应增量的对偶路径) ────────────────────────────
+
+def decide_rebuild(total_changed: int, manifest_total: int, branch_switched: bool,
+                   stages: dict | None) -> bool:
+    """自适应决策(纯函数): 是否走全量重建而非逐文件增量。
+
+    规则(config.FULL_REBUILD_CHANGE_RATIO):
+    - 调用方显式指定 stages(KB 确认流的环节选择) → 永远按显式选择增量执行;
+    - 无变更 → 不重建;
+    - 分支切换 或 变更文件比例超阈值 → 全量重建。
+    """
+    if stages is not None or total_changed <= 0:
+        return False
+    if branch_switched:
+        return True
+    return total_changed / max(1, manifest_total) > FULL_REBUILD_CHANGE_RATIO
+
+
+async def _rebuild_coro(server, multi_db, project_id: str, task_id: str,
+                        run_id: str) -> None:
+    """把 fast 重建任务送入统一分析队列(与 analysis.runTask 同执行路径)。"""
+    from topoone.engine.analyst_runner import enqueue_analysis_task
+    await enqueue_analysis_task(server, multi_db, task_id, run_id, time.time())
+
+
+def _launch_rebuild(server, multi_db, project_id: str, label: str = "") -> dict:
+    """创建 fast 重建任务并入队(在引擎主事件循环上)。
+
+    ⚠️ enqueue_analysis_task 使用模块级全局队列, 必须在主循环 create_task;
+    无事件循环上下文(库内直调/测试)时返回 launched=False 由调用方决策。
+    任务完成后由 analyst_runner fast 分支自动: 命名继承 → 快速命名 →
+    auto 挂载换代(见 baseline_readiness.swap_auto_mounts)。
+    """
+    if server is None:
+        return {"launched": False, "reason": "no_server"}
+    import asyncio
+    from topoone.engine.store.task_store import TaskStore
+
+    store = TaskStore(multi_db.main_db)
+    task = store.create_task({
+        "project_id": project_id, "type": "fast",
+        "name": f"rebuild-{label or 'auto'}",
+    })
+    run = store.create_run(task["id"], {})
+    store.update_task_status(task["id"], "running", progress=0, error="")
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # 理论不可达(RPC handler 均在主循环); 兜底: 任务标记错误防止悬挂
+        store.update_task_status(task["id"], "error", error="no event loop")
+        return {"launched": False, "reason": "no_event_loop",
+                "taskId": task["id"]}
+    loop.create_task(_rebuild_coro(server, multi_db, project_id,
+                                   task["id"], run["id"]))
+    logger.info("[version.sync] full rebuild task=%s launched (project=%s label=%s)",
+                task["id"], project_id, label)
+    return {"launched": True, "taskId": task["id"], "runId": run["id"]}
+
+
+def _new_version_id() -> str:
+    global _version_seq
+    _version_seq += 1
+    ts = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    return f"ver-{ts}-{_version_seq:06d}-{uuid.uuid4().hex[:4]}"
+
+
+def _ts() -> str:
+    return datetime.now().isoformat()
+
+
+def _to_camel(key: str) -> str:
+    parts = key.split("_")
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+def _camel_row(row: dict) -> dict:
+    """snake_case DB 行 → camelCase（对外契约形状）。"""
+    if not row:
+        return row
+    return {_to_camel(k): v for k, v in row.items()}
+
+
+def _rel_name(rel_path: str) -> str:
+    base = rel_path.rsplit('/', 1)[-1]
+    if '.' in base:
+        return base.rsplit('.', 1)[0]
+    return base
+
+
+def compute_manifest(root: str) -> dict:
+    """git ls-files 物化当前 worktree 文件清单（git 为唯一事实源）。
+
+    返回 {rel_path: {content_hash, size, language, file_name, mtime}}；
+    content_hash 已随 MD5 机制废弃（恒为 ''，仅保持行结构兼容）。
+    """
+    from topoone.engine import git_service
+
+    manifest: dict = {}
+    if not root or not os.path.isdir(root):
+        return manifest
+    for rel in git_service.list_files(root):
+        # KB 元数据目录防御性过滤（正常不会出现在 git 跟踪清单中）
+        if rel.startswith(".topocode/") or rel.startswith(".codegraph/") or rel.startswith(".git/"):
+            continue
+        full = os.path.join(root, rel.replace('/', os.sep))
+        try:
+            st = os.stat(full)
+            size = int(st.st_size)
+            mtime = float(st.st_mtime)
+        except OSError:
+            size = 0
+            mtime = 0.0
+        ext = os.path.splitext(rel)[1].lower()
+        manifest[rel] = {
+            "content_hash": "",
+            "size": size,
+            "language": EXT_LANG.get(ext, ""),
+            "file_name": _rel_name(rel),
+            "mtime": mtime,
+        }
+    return manifest
+
+
+def read_latest_manifest(project_db: SQLiteContext) -> dict:
+    """读取活表 source_files 作为上一基线 manifest（含 version_from）。
+
+    仅取文件行（排除 language='directory' 的目录节点），与 compute_manifest 一致。
+    """
+    rows = project_db.fetchall(
+        "SELECT file_path, content_hash, size, language, file_name, mtime, version_from "
+        "FROM source_files WHERE language != 'directory'"
+    )
+    out = {}
+    for r in rows:
+        out[r["file_path"]] = {
+            "content_hash": r["content_hash"] or "",
+            "size": r["size"] or 0,
+            "language": r["language"] or "",
+            "file_name": r["file_name"] or "",
+            "mtime": r["mtime"] or 0,
+            "vfrom": r["version_from"],
+        }
+    return out
+
+
+def _diff_paths(old: dict, new: dict) -> dict:
+    """路径集 diff（无内容哈希可比时的兜底）→ {'added': [], 'modified': [], 'deleted': []}。
+
+    modified 仅在 mtime 变化时判定（弱信号），其余归并到 added/deleted。
+    """
+    added, modified, deleted = [], [], []
+    for path, meta in new.items():
+        if path not in old:
+            added.append(path)
+        elif old[path].get("mtime") != meta.get("mtime"):
+            modified.append(path)
+    for path in old:
+        if path not in new:
+            deleted.append(path)
+    return {"added": added, "modified": modified, "deleted": deleted}
+
+
+def _latest_done_task(main_db, project_id: str) -> dict | None:
+    row = main_db.fetchone(
+        """SELECT * FROM analysis_tasks
+           WHERE project_id = ? AND status = 'done'
+           ORDER BY updated_at DESC LIMIT 1""",
+        (project_id,),
+    )
+    return row
+
+
+def _changed_node_ids(project_db, task_id: str, paths: set) -> set:
+    if not task_id:
+        return set()
+    ids = set()
+    for p in paths:
+        rows = project_db.fetchall(
+            "SELECT id FROM graph_node WHERE task_id = ? AND file_path = ?",
+            (task_id, p),
+        )
+        ids.update(r["id"] for r in rows)
+    return ids
+
+
+def build_stage_plan(project_id: str, project_db: SQLiteContext, main_db,
+                     delta: dict, branch_switched: bool) -> dict:
+    """逐环节影响评估（变更幅度/影响范围）。"""
+    changed = set(delta["added"]) | set(delta["modified"])
+    removed = set(delta["deleted"])
+
+    task = _latest_done_task(main_db, project_id)
+    task_id = task["id"] if task else ""
+    node_ids = _changed_node_ids(project_db, task_id, changed | removed)
+
+    # 社区影响：最新任务的社区中，node_list 触及变更符号的社区
+    affected_comms = []
+    if task_id and node_ids:
+        try:
+            rows = project_db.fetchall(
+                """SELECT task_id, edge_type, comm_lv, comm_id, node_list
+                   FROM graph_doc WHERE task_id = ? AND edge_type = 'UNIFIED'""",
+                (task_id,),
+            )
+            for r in rows:
+                try:
+                    nodes = json.loads(r["node_list"] or "[]")
+                except (TypeError, ValueError):
+                    nodes = []
+                inter = set(nodes) & node_ids
+                if inter:
+                    affected_comms.append({
+                        "edgeType": r["edge_type"],
+                        "commLv": r["comm_lv"],
+                        "commId": r["comm_id"],
+                        "touchedNodes": len(inter),
+                    })
+        except Exception as e:
+            logger.warning(f"[stage_plan] community impact failed: {e}")
+
+    parseable = [p for p in changed if os.path.splitext(p)[1].lower() in EXT_LANG]
+    changed_count = len(changed)
+    removed_count = len(removed)
+    magnitude = changed_count + removed_count
+
+    # 风险等级：按变化量 + 社区波及面
+    risk = "low"
+    if magnitude >= 200 or (len(affected_comms) >= 20 and changed_count >= 100):
+        risk = "high"
+    elif magnitude >= 50 or len(affected_comms) >= 5:
+        risk = "medium"
+
+    return {
+        "delta": {
+            "added": delta["added"],
+            "modified": delta["modified"],
+            "deleted": delta["deleted"],
+            "addedCount": len(delta["added"]),
+            "modifiedCount": len(delta["modified"]),
+            "deletedCount": len(delta["deleted"]),
+            "total": magnitude,
+        },
+        "branchSwitched": branch_switched,
+        "changeType": "major" if branch_switched else "minor",
+        "risk": risk,
+        "impact": {
+            "ast": {"filesToParse": len(parseable), "removedFiles": removed_count},
+            "graph": {"nodeIdsAffected": len(node_ids)},
+            "presummary": {"filesToSummarize": len(parseable)},
+            "community": {
+                "affectedCommunities": len(affected_comms),
+                "communities": affected_comms[:50],
+                "reclusterSuggested": risk in ("high", "medium"),
+            },
+            "llm": {"filesToResummarize": len(parseable),
+                    "communitiesToReanalyze": len(affected_comms)},
+        },
+        "stages": {
+            "ast": {"suggested": True, "implemented": True},
+            "graph": {"suggested": True, "implemented": True},
+            "presummary": {"suggested": True, "implemented": False},
+            "community": {"suggested": risk in ("high", "medium"),
+                          "implemented": False},
+            "llm": {"suggested": False, "implemented": False},
+        },
+    }
+
+
+def _archive_and_apply(project_db: SQLiteContext, old: dict, new: dict,
+                       new_version_id: str, delta: dict) -> int:
+    """δ 归档 + 活表更新 source_files。delta 由 git diff 给出。
+
+    返回归档行数。
+    """
+    hist = "source_files_history"
+    archived = 0
+
+    def _copy_to_hist(row_meta, vfrom, vto):
+        nonlocal archived
+        path = row_meta["file_path"]
+        project_db.execute(
+            f"""INSERT OR REPLACE INTO {hist}
+                (id, file_path, file_name, language, size, content_hash,
+                 hashcode, parent_path, mtime, version_from, version_to)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (_new_id("sfh"), path,
+             row_meta.get("file_name") or _rel_name(path),
+             row_meta.get("language") or "",
+             row_meta.get("size") or 0,
+             row_meta.get("content_hash") or "",
+             "",
+             "",
+             row_meta.get("mtime") or 0,
+             vfrom, vto),
+        )
+        archived += 1
+
+    # 删除的旧文件 → 历史 (version_to = new)
+    for path in delta["deleted"]:
+        row = old[path]
+        _copy_to_hist({"file_path": path, **row}, row.get("vfrom"), new_version_id)
+        project_db.execute("DELETE FROM source_files WHERE file_path = ?", (path,))
+
+    # 修改的旧文件 → 历史，然后写新行
+    for path in delta["modified"]:
+        row = old[path]
+        _copy_to_hist({"file_path": path, **row}, row.get("vfrom"), new_version_id)
+        project_db.execute("DELETE FROM source_files WHERE file_path = ?", (path,))
+        _upsert_file(project_db, path, new[path], new_version_id)
+
+    # 新增文件
+    for path in delta["added"]:
+        _upsert_file(project_db, path, new[path], new_version_id)
+
+    return archived
+
+
+def _upsert_file(project_db, path: str, meta: dict, version_id: str) -> None:
+    project_db.execute(
+        """INSERT OR REPLACE INTO source_files
+           (id, file_path, file_name, language, size, content_hash, parent_path, mtime, version_from)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (f"file-{_simple_hash(path)}", path,
+         meta.get("file_name") or _rel_name(path),
+         meta.get("language") or "",
+         meta.get("size") or 0,
+         meta.get("content_hash") or "",
+         path.rsplit('/', 1)[0] if '/' in path else None,
+         meta.get("mtime") or 0,
+         version_id),
+    )
+
+
+def register_version(multi_db: MultiDBManager, project_id: str, *,
+                     branch: str = "", head: str = "", label: str = "",
+                     change_type: str = "minor", parent_version_id: str | None = None,
+                     delta: dict | None = None, is_baseline: bool = False,
+                     baseline_commit: str = "") -> dict:
+    """注册新版本基线，记录 delta 文件列表，更新 projects.current_version_id。
+
+    baseline_commit 为该项目自有基线仓库（baseline.git）中本次快照的 commit，
+    与 head 共同维护 KB 基线 ↔ 上游仓库版本的对应关系。
+    """
+    main_db = multi_db.main_db
+    vid = _new_version_id()
+    now = _ts()
+    meta = {"synced_at": now}
+    if baseline_commit:
+        meta["baseline_commit"] = baseline_commit
+    main_db.insert("project_versions", {
+        "id": vid,
+        "project_id": project_id,
+        "parent_version_id": parent_version_id,
+        "label": label,
+        "branch": branch,
+        "head": head,
+        "change_type": change_type,
+        "file_count": len(delta["added"]) + len(delta["modified"]) if delta else 0,
+        "added_count": len(delta["added"]) if delta else 0,
+        "modified_count": len(delta["modified"]) if delta else 0,
+        "deleted_count": len(delta["deleted"]) if delta else 0,
+        "is_baseline": 1 if is_baseline else 0,
+        "baseline_commit": baseline_commit,
+        "metadata": json.dumps(meta),
+        "created_at": now,
+    })
+
+    if delta:
+        records = []
+        for change_type_, path in (
+            [("A", p) for p in delta["added"]] +
+            [("M", p) for p in delta["modified"]] +
+            [("D", p) for p in delta["deleted"]]
+        ):
+            records.append((_new_id("pvf"), vid, project_id, change_type_, path))
+        if records:
+            main_db.executemany(
+                """INSERT INTO project_version_files (id, version_id, project_id, change_type, file_path)
+                   VALUES (?, ?, ?, ?, ?)""",
+                records,
+            )
+
+    main_db.update("projects", {"current_version_id": vid}, "id = ?", (project_id,))
+    return {
+        "id": vid,
+        "projectId": project_id,
+        "branch": branch,
+        "head": head,
+        "changeType": change_type,
+        "parentVersionId": parent_version_id,
+        "createdAt": now,
+    }
+
+
+def _assert_no_running_analysis(main_db: SQLiteContext, project_id: str) -> None:
+    """A·解析互斥守卫：基线解析进行中时拒绝版本更新。
+
+    版本更新(pull/worktree 变更工作树 + baseline.git 快照 + graph/δ 归档写入)
+    与全量解析并发会产生混合状态基线与图谱写冲突。单向守卫（解析→更新）：
+    - running/queued 拦截：任务已入队/执行中，物理占用工作树与项目库；
+    - pending 不拦：建而未跑的任务不占资源，拦截会永久锁死更新入口。
+    残余竞态（守卫通过后任务才转 running）由 update_task_status 的
+    单线程泵语义覆盖，不做跨模块锁。
+    """
+    row = main_db.fetchone(
+        "SELECT id, name FROM analysis_tasks WHERE project_id = ? "
+        "AND status IN ('running','queued') ORDER BY created_at DESC LIMIT 1",
+        (project_id,))
+    if row:
+        raise ValueError(
+            f"版本更新被拒绝：解析任务进行中（{row['id']} {row['name']}），"
+            "请等待完成或停止该任务后重试")
+
+
+def sync(multi_db: MultiDBManager, project_id: str, *,
+         branch: str = "", head: str = "", label: str = "",
+         stages: dict | None = None, force: bool = False,
+         request_id: str | None = None, task_id: str | None = None,
+         server=None) -> dict:
+    """执行一次 KB 基线更新（增量 δ 归档，git 核心机制）。
+
+    1. 快照当前 worktree 进 baseline.git（git 为唯一事实源）
+    2. delta = 相邻两个基线 commit 的 `git diff --name-status`（无基线回退路径集 diff）
+    3. 归档过期行到 source_files_history + 更新活表
+    4. 注册新版本 + 记录 delta
+    5. 返回 stage plan（P1-P3 将据此执行增量分析）
+    """
+    from topoone.engine import git_service
+
+    main_db = multi_db.main_db
+    project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
+    if not project:
+        raise ValueError(f"Project not found: {project_id}")
+    _assert_no_running_analysis(main_db, project_id)
+
+    project_db = multi_db.get_project_db(project_id)
+    root = project["root_path"]
+    if not root or not os.path.isdir(root):
+        raise ValueError(f"Project root not a directory: {root}")
+
+    old_manifest = read_latest_manifest(project_db)
+
+    # 上一版本基线 commit（先取，注册新版本前置条件）
+    latest = main_db.fetchone(
+        "SELECT * FROM project_versions WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (project_id,),
+    )
+    prev_baseline = (latest.get("baseline_commit") or "").strip() if latest else ""
+
+    # 快照当前 worktree 进项目自有基线仓库（baseline.git）
+    baseline_repo = os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git")
+    src = project.get("remote_url") or project.get("local_repo_path") or ""
+    baseline_commit = ""
+    try:
+        baseline_commit = git_service.snapshot_baseline(
+            root, baseline_repo,
+            f"baseline: {src}#{branch or ''}@{head or ''} (sync)")
+    except Exception as e:
+        logger.warning(f"[sync] baseline snapshot failed for {project_id}: {e}")
+
+    # delta = 基线 commit 间的 git diff；无基线时回退路径集 diff
+    if baseline_commit and prev_baseline:
+        delta = git_service.diff_name_status(baseline_repo, prev_baseline, baseline_commit)
+    elif baseline_commit:
+        delta = {"added": list(compute_manifest(root).keys()), "modified": [], "deleted": []}
+    else:
+        delta = _diff_paths(old_manifest, compute_manifest(root))
+
+    # 分支切换判定（major）
+    branch_switched = bool(latest and branch and latest["branch"] and latest["branch"] != branch)
+    total_changed = len(delta["added"]) + len(delta["modified"]) + len(delta["deleted"])
+    change_type = "major" if branch_switched else "minor"
+
+    # 无内容变化且无分支/基线切换 → 直接返回（不产生新版本）
+    if total_changed == 0 and not branch_switched and not force:
+        if request_id:
+            main_db.execute(
+                "UPDATE project_update_requests SET status = 'done', updated_at = ? WHERE id = ?",
+                (_ts(), request_id),
+            )
+            main_db.conn.commit()
+        return {
+            "changed": False,
+            "projectId": project_id,
+            "message": "no code changes detected",
+            "versionId": project.get("current_version_id"),
+        }
+
+    new_version_id = _new_version_id()
+    new_manifest = compute_manifest(root)
+    archived = _archive_and_apply(project_db, old_manifest, new_manifest, new_version_id, delta)
+    project_db.conn.commit()
+
+    version = register_version(
+        multi_db, project_id,
+        branch=branch or (latest["branch"] if latest else ""),
+        head=head or (latest["head"] if latest else ""),
+        label=label,
+        change_type=change_type,
+        parent_version_id=latest["id"] if latest else None,
+        delta=delta,
+        baseline_commit=baseline_commit,
+    )
+
+    stage_plan = build_stage_plan(project_id, project_db, main_db, delta, branch_switched)
+    stage_plan["delta"] = delta
+
+    # ── 自适应策略: decide_rebuild(纯函数) — 显式环节选择永远优先;
+    # 重建 = fast 任务(完成后自动命名继承 + auto 挂载换代)。
+    adaptive_rebuild = decide_rebuild(total_changed, len(new_manifest),
+                                      branch_switched, stages)
+
+    incremental_results = {}
+    rebuild: dict = {"applied": False}
+    if total_changed > 0 and adaptive_rebuild:
+        rebuild = _launch_rebuild(server, multi_db, project_id,
+                                  label=label or change_type)
+        rebuild["applied"] = rebuild.get("launched", False)
+        rebuild["strategy"] = "full-rebuild"
+    elif total_changed > 0:
+        selected = stages or dict(DEFAULT_SYNC_STAGES)
+        if any(v for k, v in selected.items() if k in ("ast", "graph", "presummary", "community", "llm")):
+            target_task = task_id or _latest_done_task(main_db, project_id)
+            if target_task:
+                try:
+                    from topoone.engine import incremental_runner
+                    incremental_results = incremental_runner.apply_incremental(
+                        multi_db, project_id,
+                        target_task["id"] if isinstance(target_task, dict) else target_task,
+                        delta, selected, proj_path=root)
+                except Exception as e:
+                    logger.warning(f"[version.sync] incremental stages failed: {e}")
+
+    logger.info(
+        f"[version.sync] {project_id} -> {version['id']} "
+        f"({len(delta['added'])}A/{len(delta['modified'])}M/{len(delta['deleted'])}D) "
+        f"change_type={change_type} archived={archived} stages={list(incremental_results)}"
+    )
+
+    if request_id:
+        main_db.execute(
+            "UPDATE project_update_requests SET status = 'done', result_version_id = ?, updated_at = ? WHERE id = ?",
+            (version["id"], _ts(), request_id),
+        )
+        main_db.conn.commit()
+
+    return {
+        "changed": True,
+        "projectId": project_id,
+        "version": version,
+        "delta": delta,
+        "archivedRows": archived,
+        "stagePlan": stage_plan,
+        "stagesRequested": stages or DEFAULT_STAGES,
+        "incrementalResults": incremental_results,
+        "rebuild": rebuild,
+        "requestId": request_id,
+    }
+
+
+def preview(multi_db: MultiDBManager, project_id: str, *,
+            branch: str = "", head: str = "") -> dict:
+    """预览变更幅度/影响范围。
+
+    不写项目库/主库；baseline.git 快照为 KB 内部缓存（sync 将复用同一 commit）。
+    """
+    from topoone.engine import git_service
+
+    main_db = multi_db.main_db
+    project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
+    if not project:
+        raise ValueError(f"Project not found: {project_id}")
+    project_db = multi_db.get_project_db(project_id)
+    root = project["root_path"]
+
+    old_manifest = read_latest_manifest(project_db)
+    latest = main_db.fetchone(
+        "SELECT * FROM project_versions WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (project_id,),
+    )
+    prev_baseline = (latest.get("baseline_commit") or "").strip() if latest else ""
+
+    baseline_repo = os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git")
+    src = project.get("remote_url") or project.get("local_repo_path") or ""
+    baseline_commit = ""
+    try:
+        baseline_commit = git_service.snapshot_baseline(
+            root, baseline_repo,
+            f"baseline: {src}#{branch or ''}@{head or ''} (preview)")
+    except Exception as e:
+        logger.warning(f"[preview] baseline snapshot failed for {project_id}: {e}")
+
+    if baseline_commit and prev_baseline:
+        delta = git_service.diff_name_status(baseline_repo, prev_baseline, baseline_commit)
+    elif baseline_commit:
+        delta = {"added": list(compute_manifest(root).keys()), "modified": [], "deleted": []}
+    else:
+        delta = _diff_paths(old_manifest, compute_manifest(root))
+
+    branch_switched = bool(latest and branch and latest["branch"] and latest["branch"] != branch)
+    plan = build_stage_plan(project_id, project_db, main_db, delta, branch_switched)
+    plan["delta"] = delta
+    plan["latest"] = {
+        "versionId": latest["id"] if latest else None,
+        "branch": latest["branch"] if latest else "",
+        "head": latest["head"] if latest else "",
+    }
+    return plan
+
+
+def cleanup(multi_db: MultiDBManager, project_id: str, *, keep_versions: int = 0) -> dict:
+    """物理清除腐烂旧基线数据（基线对齐纪律：旧基线数据不保留）。
+
+    - *_history 归档表：仅保留最近 keep_versions 个基线的归档行
+      （keep_versions=0 → 全部清除）。version.diff 不受影响（基于
+      project_version_files 逐版本 delta，非历史表）；materialize 仅对
+      保留窗口内的基线可用。
+    - 孤儿符号/边：最新分析任务中 file_path 已不在 source_files 活表的
+      graph_node/graph_edge（增量同步漏删的兜底）。
+    """
+    main_db = multi_db.main_db
+    project = main_db.fetchone("SELECT id FROM projects WHERE id = ?", (project_id,))
+    if not project:
+        raise ValueError(f"Project not found: {project_id}")
+    project_db = multi_db.get_project_db(project_id)
+
+    keep_ids: set = set()
+    if keep_versions and keep_versions > 0:
+        rows = main_db.fetchall(
+            "SELECT id FROM project_versions WHERE project_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (project_id, keep_versions))
+        keep_ids = {r["id"] for r in rows}
+
+    deleted: dict = {}
+    hist_tables = [r["name"] for r in project_db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_history'").fetchall()]
+    for t in hist_tables:
+        cols = [r["name"] for r in project_db.execute(f'PRAGMA table_info("{t}")').fetchall()]
+        if "version_to" in cols and keep_ids:
+            ph = ",".join("?" * len(keep_ids))
+            cur = project_db.execute(
+                f'DELETE FROM "{t}" WHERE version_to IS NOT NULL AND version_to NOT IN ({ph})',
+                tuple(keep_ids))
+        elif "version_to" in cols:
+            # 无保留窗口：清掉已闭合归档行(version_to 非空)；未闭合行(仍在活表)保留
+            cur = project_db.execute(f'DELETE FROM "{t}" WHERE version_to IS NOT NULL')
+        else:
+            cur = project_db.execute(f'DELETE FROM "{t}"')
+        deleted[t] = cur.rowcount if cur else 0
+    project_db.conn.commit()
+
+    # 孤儿符号/边（最新任务范围内，file_path 已不在活表）
+    orphan_nodes = 0
+    orphan_edges = 0
+    try:
+        task = _latest_done_task(main_db, project_id)
+        if task:
+            tid = task["id"] if isinstance(task, dict) else task
+            cur = project_db.execute(
+                "DELETE FROM graph_node WHERE task_id = ? AND file_path IS NOT NULL "
+                "AND file_path NOT IN (SELECT file_path FROM source_files)", (tid,))
+            orphan_nodes = cur.rowcount if cur else 0
+            if orphan_nodes:
+                cur = project_db.execute(
+                    "DELETE FROM graph_edge WHERE task_id = ? AND "
+                    "(source_id NOT IN (SELECT id FROM graph_node WHERE task_id = ?) "
+                    "OR target_id NOT IN (SELECT id FROM graph_node WHERE task_id = ?))",
+                    (tid, tid, tid))
+                orphan_edges = cur.rowcount if cur else 0
+                project_db.conn.commit()
+    except Exception as e:
+        logger.warning(f"[version.cleanup] 孤儿符号/边清除失败: {e}")
+
+    deleted["graph_node_orphans"] = orphan_nodes
+    deleted["graph_edge_orphans"] = orphan_edges
+    logger.info(f"[version.cleanup] {project_id} keep_versions={keep_versions} "
+                f"deleted={deleted}")
+    return {"projectId": project_id, "keepVersions": keep_versions, "deleted": deleted}
+
+
+def list_versions(multi_db: MultiDBManager, project_id: str) -> list:
+    main_db = multi_db.main_db
+    rows = main_db.fetchall(
+        "SELECT * FROM project_versions WHERE project_id = ? ORDER BY created_at DESC, rowid DESC",
+        (project_id,),
+    )
+    return [_camel_row(dict(r)) for r in rows]
+
+
+def get_version(multi_db: MultiDBManager, project_id: str, version_id: str) -> dict:
+    main_db = multi_db.main_db
+    version = main_db.fetchone(
+        "SELECT * FROM project_versions WHERE id = ? AND project_id = ?",
+        (version_id, project_id),
+    )
+    if not version:
+        raise ValueError(f"Version not found: {version_id}")
+    files = main_db.fetchall(
+        "SELECT change_type, file_path FROM project_version_files WHERE version_id = ?",
+        (version_id,),
+    )
+    version = _camel_row(dict(version))
+    version["files"] = [{"changeType": f["change_type"], "filePath": f["file_path"]} for f in files]
+    return version
+
+
+def materialize(multi_db: MultiDBManager, project_id: str, version_id: str) -> list:
+    """重建任意基线 head 的完整文件清单。
+
+    活表(version_from<=V) UNION 历史(version_from<=V AND version_to>V)。
+    """
+    project_db = multi_db.get_project_db(project_id)
+    live = project_db.fetchall(
+        "SELECT file_path, content_hash, language, size, file_name FROM source_files "
+        "WHERE version_from IS NULL OR version_from <= ?",
+        (version_id,),
+    )
+    hist = project_db.fetchall(
+        "SELECT file_path, content_hash, language, size, file_name FROM source_files_history "
+        "WHERE (version_from IS NULL OR version_from <= ?) AND (version_to IS NULL OR version_to > ?)",
+        (version_id, version_id),
+    )
+    merged: dict = {}
+    for r in live:
+        merged[r["file_path"]] = r
+    for r in hist:
+        merged[r["file_path"]] = r
+    # 活表优先（同路径取活表 = 较新且仍在用的行）
+    files = list(merged.values())
+    files.sort(key=lambda r: r["file_path"])
+    return files
+
+
+def diff_versions(multi_db: MultiDBManager, project_id: str,
+                  from_id: str, to_id: str) -> dict:
+    """对比两个 KB 基线的文件级差异（P0 为文件级；P1+ 扩展分析差异）。
+
+    git 核心优先：两版本基线 commit 在 baseline.git 中的 git diff；
+    基线缺失时回退物化清单的路径集 diff。
+    """
+    from topoone.engine import git_service
+
+    main_db = multi_db.main_db
+    rows = main_db.fetchall(
+        "SELECT id, baseline_commit FROM project_versions WHERE id IN (?, ?) AND project_id = ?",
+        (from_id, to_id, project_id),
+    )
+    bc = {r["id"]: (r.get("baseline_commit") or "").strip() for r in rows}
+    fb, tb = bc.get(from_id, ""), bc.get(to_id, "")
+
+    d = None
+    if fb and tb and fb != tb:
+        baseline_repo = os.path.join(multi_db.source_cache_dir_for(project_id), "baseline.git")
+        if os.path.isdir(baseline_repo):
+            try:
+                d = git_service.diff_name_status(baseline_repo, fb, tb)
+            except git_service.GitError as e:
+                logger.warning(f"[version.diff] git diff failed: {e}")
+    if d is None:
+        d = _diff_paths(
+            {r["file_path"]: r for r in materialize(multi_db, project_id, from_id)},
+            {r["file_path"]: r for r in materialize(multi_db, project_id, to_id)})
+    return {
+        "fromVersion": from_id,
+        "toVersion": to_id,
+        "added": d["added"],
+        "modified": d["modified"],
+        "deleted": d["deleted"],
+        "addedCount": len(d["added"]),
+        "modifiedCount": len(d["modified"]),
+        "deletedCount": len(d["deleted"]),
+    }
+
+
+# ── 更新请求状态机（architect → KB 待更新标记）──────────────
+
+def pull_request(multi_db: MultiDBManager, project_id: str, *,
+                 repo_url: str = "", local_repo_path: str = "",
+                 branch: str = "", head: str = "", note: str = "",
+                 source: str = "architect") -> dict:
+    """architect 发起基线更新请求（仅写待更新标记，不执行）。"""
+    main_db = multi_db.main_db
+    project = main_db.fetchone("SELECT id FROM projects WHERE id = ?", (project_id,))
+    if not project:
+        raise ValueError(f"Project not found: {project_id}")
+    rid = _new_id("pur")
+    main_db.insert("project_update_requests", {
+        "id": rid,
+        "project_id": project_id,
+        "source": source,
+        "repo_url": repo_url,
+        "local_repo_path": local_repo_path,
+        "branch": branch,
+        "head": head,
+        "status": "pending",
+        "note": note,
+        "created_at": _ts(),
+        "updated_at": _ts(),
+    })
+    return {"requestId": rid, "projectId": project_id, "status": "pending"}
+
+
+def pending_updates(multi_db: MultiDBManager, project_id: str | None = None) -> list:
+    main_db = multi_db.main_db
+    if project_id:
+        rows = main_db.fetchall(
+            "SELECT * FROM project_update_requests WHERE project_id = ? ORDER BY created_at DESC",
+            (project_id,),
+        )
+    else:
+        rows = main_db.fetchall(
+            "SELECT * FROM project_update_requests WHERE status = 'pending' ORDER BY created_at DESC"
+        )
+    return [_camel_row(dict(r)) for r in rows]
+
+
+def cancel_update(multi_db: MultiDBManager, request_id: str) -> bool:
+    main_db = multi_db.main_db
+    cur = main_db.execute(
+        "UPDATE project_update_requests SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'pending'",
+        (_ts(), request_id),
+    )
+    main_db.conn.commit()
+    return cur.rowcount > 0
+
+
+def confirm_update(multi_db: MultiDBManager, request_id: str, method: str = "pull") -> dict:
+    """KB 界面确认更新请求第一步：拉取新代码（pull/worktree），不执行分析。
+
+    返回预览（变更幅度/影响范围），由用户选择更新环节后再调 version.sync 执行。
+    """
+    from topoone.engine import git_service
+
+    main_db = multi_db.main_db
+    req = main_db.fetchone("SELECT * FROM project_update_requests WHERE id = ?", (request_id,))
+    if not req:
+        raise ValueError(f"Update request not found: {request_id}")
+    if req["status"] != "pending":
+        raise ValueError(f"Update request already {req['status']}")
+
+    project_id = req["project_id"]
+    project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
+    if not project:
+        raise ValueError(f"Project not found: {project_id}")
+    _assert_no_running_analysis(main_db, project_id)
+
+    branch = req["branch"] or ""
+    head = req["head"] or ""
+    root = project["root_path"]
+    resolved_head = head
+
+    if project["import_mode"] in ("git-local", "git-remote") and os.path.isdir(root):
+        if method == "worktree":
+            cache_dir = multi_db.source_cache_dir_for(project_id)
+            wt_dir = os.path.join(cache_dir, "worktrees", (branch or "default"))
+            resolved_head = git_service.worktree(root, branch or "main", wt_dir, head=head)
+            main_db.update("projects", {"root_path": wt_dir}, "id = ?", (project_id,))
+            root = wt_dir
+        else:
+            resolved_head = git_service.checkout_ref(root, branch or None, head or None, method="pull")
+    else:
+        # static 项目：无 git 拉取，直接重扫（branch/head 仅作标签）
+        resolved_head = head
+
+    main_db.execute(
+        "UPDATE project_update_requests SET status = 'confirmed', method = ?, updated_at = ? WHERE id = ?",
+        (method, _ts(), request_id),
+    )
+    main_db.conn.commit()
+
+    plan = preview(multi_db, project_id, branch=branch or None, head=resolved_head or None)
+    plan["projectId"] = project_id
+    plan["requestId"] = request_id
+    plan["branch"] = branch
+    plan["head"] = resolved_head or ""
+    return plan

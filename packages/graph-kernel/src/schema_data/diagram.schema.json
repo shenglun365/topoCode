@@ -1,0 +1,819 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "topo-one://schemas/diagram.schema.json",
+  "title": "DiagramSchema",
+  "description": "Unified diagram data model - single source of truth. TS types (web/src/core/types.ts) and pydantic models (server/topo_one/schema.py) must stay aligned with this file (enforced by contract tests in web/test and server/tests).",
+  "type": "object",
+  "required": [
+    "version",
+    "type"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "$ref": "#/$defs/diagramType"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "direction": {
+      "enum": [
+        "TB",
+        "BT",
+        "LR",
+        "RL"
+      ]
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      },
+      "maxItems": 500
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      },
+      "maxItems": 1000
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/lane"
+      }
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/participant"
+      }
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/message"
+      }
+    },
+    "states": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/state"
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transition"
+      }
+    },
+    "classes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/klass"
+      }
+    },
+    "classRelations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/classRelation"
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "erRelations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/erRelation"
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ganttSection"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ganttTask"
+      }
+    },
+    "slices": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pieSlice"
+      }
+    },
+    "extra": {
+      "type": "object",
+      "description": "Engine-specific escape hatch; whether it takes effect is decided by the capability matrix."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "flowchart"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nodes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "activity"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nodes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "usecase"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nodes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "component"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nodes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "architecture"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nodes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "sequence"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "participants",
+          "messages"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "state"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "states"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "class"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "classes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "er"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "entities"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "gantt"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "tasks"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "pie"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "slices"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "diagramType": {
+      "enum": [
+        "flowchart",
+        "activity",
+        "sequence",
+        "state",
+        "class",
+        "er",
+        "usecase",
+        "component",
+        "architecture",
+        "gantt",
+        "pie"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "nodeStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fill": {
+          "type": "string"
+        },
+        "stroke": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "kind": {
+          "enum": [
+            "rect",
+            "round",
+            "stadium",
+            "diamond",
+            "cylinder",
+            "hexagon",
+            "circle",
+            "actor",
+            "usecase",
+            "action",
+            "decision",
+            "fork",
+            "join",
+            "start",
+            "end",
+            "component",
+            "interface",
+            "external",
+            "node",
+            "person",
+            "system",
+            "database",
+            "service",
+            "queue",
+            "cloud"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/nodeStyle"
+        },
+        "lane": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "kind": {
+          "enum": [
+            "solid",
+            "dashed",
+            "dotted",
+            "thick"
+          ]
+        },
+        "rel": {
+          "enum": [
+            "associate",
+            "extend",
+            "include",
+            "uses",
+            "provides",
+            "dependency"
+          ]
+        },
+        "arrow": {
+          "enum": [
+            "filled",
+            "open",
+            "none"
+          ]
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "contains"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "contains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "kind": {
+          "enum": [
+            "subgraph",
+            "layer",
+            "boundary"
+          ]
+        }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        }
+      }
+    },
+    "participant": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "type": {
+          "enum": [
+            "participant",
+            "actor",
+            "boundary",
+            "database",
+            "entity"
+          ]
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "label",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "kind": {
+          "enum": [
+            "sync",
+            "async",
+            "return"
+          ]
+        },
+        "self": {
+          "type": "boolean"
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "initial": {
+          "type": "boolean"
+        },
+        "final": {
+          "type": "boolean"
+        },
+        "sub": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "guard": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "classMember": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "kind": {
+          "enum": [
+            "attr",
+            "method"
+          ]
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "private",
+            "protected",
+            "package"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "klass": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/classMember"
+          }
+        }
+      }
+    },
+    "classRelation": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "inherit",
+            "impl",
+            "assoc",
+            "comp",
+            "agg",
+            "dep"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "entityAttr": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "key": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "attrs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entityAttr"
+          }
+        }
+      }
+    },
+    "erRelation": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "1:1",
+            "1:N",
+            "M:N"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "ganttSection": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        }
+      }
+    },
+    "ganttTask": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "section",
+        "start",
+        "duration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/label"
+        },
+        "section": {
+          "$ref": "#/$defs/id"
+        },
+        "start": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "duration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "done",
+              "active",
+              "crit"
+            ]
+          }
+        }
+      }
+    },
+    "pieSlice": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

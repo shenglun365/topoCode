@@ -24,7 +24,8 @@ const rootDir = join(__dirname, '..')
 
 // ========================== Config ==========================
 
-const PLUGIN_SRC_DIR = join(rootDir, 'plugins')
+// M14: plugins 随核心成包迁入 packages/core/topoone/plugins（顶层 plugins/ 已删）
+const PLUGIN_SRC_DIR = join(rootDir, 'packages', 'core', 'topoone', 'plugins')
 const MODULE_OUT_DIR = join(rootDir, 'dist-modules')
 const MODULE_EXT = '.topo-module'
 const TMP_DIR = join(rootDir, 'tmp-module-build')

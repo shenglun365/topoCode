@@ -1,0 +1,11 @@
+# 子项目 1：主工作台（M10 切分完成）
+# kind=core：knowledge.* 方法由核心进程按本 manifest 在进程内注册（无独立进程）；
+# python_entry 指向 topoone_app_workbench.server.register_methods。
+# 前端构建产物 apps/workbench/dist → gateway 挂载 /app（T10.3）。
+[app]
+name = "workbench"
+kind = "core"
+python_entry = "topoone_app_workbench.server:register_methods"
+static_dir = "apps/workbench/dist"
+static_mount = ["/app"]
+rpc_namespaces = ["knowledge"]

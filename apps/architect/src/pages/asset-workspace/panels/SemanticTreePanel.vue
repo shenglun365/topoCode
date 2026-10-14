@@ -1,0 +1,855 @@
+<script setup lang="ts">
+
+/** MS6-W1 自 AssetManagementWorkspace 模板整块迁出(逐行未动)；状态经 ASSET_WS_KEY 注入。 */
+
+import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ArrowPathIcon, ArrowsRightLeftIcon, BeakerIcon, ChartBarSquareIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClipboardDocumentIcon, CodeBracketIcon, DocumentTextIcon, PlusIcon, ServerStackIcon, SparklesIcon, Squares2X2Icon, StarIcon, StopIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { kindChipClass, levelChipClass } from '@/services/semantic-kind-style'
+import { useAssetWorkspaceCtx } from '..'
+import { OTHER_KEY } from '../useAssetCore'
+import { useCoreRules } from '../useCoreRules'
+import { currentProjectParams } from '@/services/project-service'
+import type { SemanticAsset } from '@/types'
+
+const { t } = useI18n()
+// ── 2610 核心资产守护(重构): 挂载即核心——★ 行内快捷 = 跳转守护列表定位; 挂载编辑在 CoreGuardPanel ──
+const emit = defineEmits<{ 'locate-core': [targetId: string] }>()
+const coreRules = useCoreRules()
+const { isCore: isCoreMark } = coreRules
+/** ★ 点击: 跳转守护列表并定位该目标(挂载编辑单一入口)。 */
+function locateCore(targetId: string) {
+  emit('locate-core', targetId)
+}
+// 仅核心开关状态提升至 AssetManagementWorkspace panel-header(props 下发)
+const props = defineProps<{ coreOnly?: boolean }>()
+onMounted(() => { void coreRules.refresh() })
+/** 仅核心过滤(行级): 资产=asset id / 组件=comp key / 文件=file path。 */
+function rowIsCore(row: { t: string; key: string; g?: { key: string }; a?: SemanticAsset; file?: string }): boolean {
+  if (row.t === 'comp' && row.g) return isCoreMark('component', row.g.key)
+  if (row.t === 'file' && row.file) return isCoreMark('file', row.file)
+  if (row.a) return isCoreMark('asset', row.a.id)
+  return true
+}
+// 手动建资产(未提取 ast 节点/跨节点代码段): 文件行 ➕ 展开内联表单
+const manualFile = ref('')
+const manualForm = ref({ name: '', kind: 'entity', startLine: '', endLine: '', symbol: '', desc: '', ruleText: '' })
+const manualBusy = ref(false)
+const manualMsg = ref('')
+const manualOk = ref(false)
+function startManual(file: string) {
+  manualFile.value = manualFile.value === file ? '' : file
+  manualForm.value = { name: '', kind: 'entity', startLine: '', endLine: '', symbol: '', desc: '', ruleText: '' }
+  manualMsg.value = ''
+}
+async function submitManual() {
+  if (manualBusy.value || !manualFile.value) return
+  if (!manualForm.value.name.trim()) { manualOk.value = false; manualMsg.value = t('session.marks.needTarget'); return }
+  manualBusy.value = true
+  try {
+    const r = await coreRules.addManualAsset({
+      name: manualForm.value.name.trim(), kind: manualForm.value.kind,
+      file: manualFile.value,
+      startLine: manualForm.value.startLine ? Number(manualForm.value.startLine) : undefined,
+      endLine: manualForm.value.endLine ? Number(manualForm.value.endLine) : undefined,
+      symbol: manualForm.value.symbol || undefined,
+      desc: manualForm.value.desc || undefined,
+      ruleText: manualForm.value.ruleText,
+    })
+    manualOk.value = true
+    manualMsg.value = t('guard.manualDone', { id: r.assetId, n: r.attached.length })
+    if (r.attached.length) {
+      manualFile.value = ''
+      manualMsg.value = ''
+    }
+  } catch (e: any) {
+    manualOk.value = false
+    manualMsg.value = String(e?.message || e)
+  } finally { manualBusy.value = false }
+}
+const {
+  addedFileSet,
+  askExtractComponent,
+  changeMarkById,
+  compCatalog,
+  compCollapsible,
+  compCoverage,
+  compExpandState,
+  compMetaText,
+  compareData,
+  copiedKey,
+  copyAsset,
+  copyCompRef,
+  descLoading,
+  detailLoading,
+  diffFileCounts,
+  diffMarkLabel,
+  diffRollup,
+  expanded,
+  extractAllUnowned,
+  unownedMsg,
+  extractUnownedFile,
+  fileBase,
+  fileCard,
+  fileExpandState,
+  genDesc,
+  hasChildren,
+  items,
+  kind,
+  kindIcon,
+  level,
+  loadMoreSentinel,
+  loading,
+  openAssetDiagram,
+  openFileCard,
+  openGraphTab,
+  pendingFileSet,
+  refreshOne,
+  renderedTreeRows,
+  semanticTreeRows,
+  stopUnownedExtract,
+  subtreeCount,
+  toggle,
+  toggleFileOpen,
+  toggleOpen,
+  unownedExtracting,
+  unownedExtractingOne,
+  unownedJob,
+  unownedJobHint,
+  unownedLinkByAssetId,
+  unownedLinkTitle,
+  unownedLinks,
+  unownedMeta,
+  usable,
+  logicViews, logicViewBusy, logicViewOpen, logicGroupOpen, logicViewCreateOpen,
+  createLogicView, renameLogicView, deleteLogicView, reanalyzeLogicView,
+  locateAsset, dialog,
+} = useAssetWorkspaceCtx()
+
+// ---- 逻辑视图辅助：成员解析(名称/计数/核心标记) ----
+const itemById = computed(() => new Map((items.value as SemanticAsset[]).map((a) => [a.id, a])))
+function membersOf(v: { memberIds: string }): string[] {
+  try { return JSON.parse(v.memberIds || '[]') } catch { return [] }
+}
+function coreOf(v: { coreIds: string }): string[] {
+  try { return JSON.parse(v.coreIds || '[]') } catch { return [] }
+}
+function memberName(mid: string): string {
+  return itemById.value.get(mid)?.name ?? mid.slice(0, 10)
+}
+function isCore(v: { coreIds: string }, mid: string): boolean {
+  return coreOf(v).includes(mid)
+}
+</script>
+
+<template>
+            <!-- 逻辑资产分组(跨组件业务逻辑链条——视图类型，非资产行；组头恒显，无视图也显示) -->
+              <div class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5 tree-row">
+                <button
+                  class="text-ctp-overlay0 hover:text-ctp-text p-0.5"
+                  @click="logicGroupOpen = !logicGroupOpen"
+                >
+                  <ChevronRightIcon class="w-3 h-3 transition-transform" :class="logicGroupOpen ? 'rotate-90' : ''" />
+                </button>
+                <BeakerIcon class="w-3.5 h-3.5 text-ctp-mauve shrink-0" />
+                <span class="text-[11px] font-semibold text-ctp-text">{{ t('assetMgmt.logicViews.group') }}</span>
+                <span class="chip !text-[8px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ logicViews.length }}</span>
+                <span class="flex-1" />
+                <button
+                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                  :title="t('assetMgmt.logicViews.createHint')"
+                  @click="logicViewCreateOpen = true"
+                >
+                  <PlusIcon class="w-3 h-3" />
+                </button>
+              </div>
+              <template v-if="logicGroupOpen">
+                <div v-for="v in logicViews" :key="v.id" class="ml-3">
+                  <div class="flex items-center gap-1.5 px-1 py-0.5 tree-row">
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-text p-0.5"
+                      @click="logicViewOpen[v.id] = !logicViewOpen[v.id]"
+                    >
+                      <ChevronRightIcon class="w-3 h-3 transition-transform" :class="logicViewOpen[v.id] ? 'rotate-90' : ''" />
+                    </button>
+                    <span class="text-[11px] text-ctp-subtext1 truncate flex-1" :title="v.summary || v.name">{{ v.name }}</span>
+                    <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0" :title="t('assetMgmt.logicViews.membersN', { n: membersOf(v).length })">{{ membersOf(v).length }}</span>
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-blue p-0.5 shrink-0"
+                      :title="t('assetMgmt.logicViews.viewGraph')"
+                      @click="openGraphTab('logic', v.id, v.name, membersOf(v))"
+                    >
+                      <Squares2X2Icon class="w-3 h-3" />
+                    </button>
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0"
+                      :disabled="logicViewBusy === v.id"
+                      :title="t('assetMgmt.logicViews.reanalyze')"
+                      @click="reanalyzeLogicView(v.id)"
+                    >
+                      <ArrowPathIcon class="w-3 h-3" :class="logicViewBusy === v.id ? 'animate-spin' : ''" />
+                    </button>
+                    <button
+                      class="text-ctp-overlay0 hover:text-ctp-red p-0.5 shrink-0"
+                      :title="t('common.delete')"
+                      @click="dialog.confirm(t('assetMgmt.logicViews.deleteConfirm', { name: v.name }), { danger: true }).then((ok: boolean) => { if (ok) void deleteLogicView(v.id) })"
+                    >
+                      <TrashIcon class="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div v-if="logicViewOpen[v.id]" class="ml-6 py-1 space-y-1">
+                    <p class="text-[10px] leading-relaxed text-ctp-subtext0 whitespace-pre-wrap">{{ v.summary || t('assetMgmt.logicViews.noSummary') }}</p>
+                    <div
+                      v-for="mid in membersOf(v)"
+                      :key="mid"
+                      class="flex items-center gap-1.5 text-[10px] cursor-pointer text-ctp-overlay1 hover:text-ctp-text"
+                      :title="t('assetMgmt.logicViews.memberLocate')"
+                      @click="locateAsset(mid)"
+                    >
+                      <span class="font-mono truncate">{{ memberName(mid) }}</span>
+                      <span v-if="isCore(v, mid)" class="chip !text-[7px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">{{ t('assetMgmt.logicViews.core') }}</span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+            <template
+              v-for="row in renderedTreeRows"
+              :key="row.key"
+            >
+              <!-- 组件(目录)节点 -->
+              <template v-if="row.t === 'comp'">
+                <div
+                  v-for="g in row.g ? [row.g] : []"
+                  :key="g.key + ':h'"
+                  v-show="!coreOnly || rowIsCore(row)"
+                >
+              <div
+                class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5 tree-row"
+                :style="{ paddingLeft: (row.depth * 12) + 'px' }"
+              >
+                <button
+                  v-if="(compCollapsible.get(g.key) ?? false) || hasChildren(g.key) || (subtreeCount.get(g.key) ?? 0) > 0"
+                  class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
+                  @click="toggleOpen(g.key)"
+                >
+                  <ChevronDownIcon
+                    v-if="compExpandState(g.key)"
+                    class="w-3 h-3"
+                  />
+                  <ChevronRightIcon
+                    v-else
+                    class="w-3 h-3"
+                  />
+                </button>
+                <span
+                  v-else
+                  class="w-3.5 shrink-0"
+                />
+                <ServerStackIcon
+                  v-if="g.key !== OTHER_KEY"
+                  class="w-3 h-3 text-ctp-blue shrink-0"
+                />
+                <DocumentTextIcon
+                  v-else
+                  class="w-3 h-3 text-ctp-yellow shrink-0"
+                />
+                <span
+                  v-if="g.hierLevel"
+                  class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0 font-mono"
+                >{{ g.hierLevel }}</span>
+                <span class="text-[10px] font-semibold text-ctp-subtext1 truncate" :title="compMetaText(g.key) || undefined">{{ g.name }}</span>
+                <!-- 2610 核心资产守护: ★ 组件标记(component 层; 未归属组不标) -->
+                <button
+                  v-if="g.key !== OTHER_KEY"
+                  class="shrink-0 rounded p-0.5 transition-colors"
+                  :class="isCoreMark('component', g.key) ? 'text-ctp-yellow' : 'text-ctp-overlay0 opacity-40 hover:text-ctp-yellow hover:opacity-100'"
+                  :title="isCoreMark('component', g.key) ? t('session.marks.unmarkBtn') : t('session.marks.markBtn')"
+                  @click.stop="locateCore(g.key)"
+                >
+                  <StarIcon class="w-3 h-3" :class="isCoreMark('component', g.key) ? 'fill-ctp-yellow' : ''" />
+                </button>
+                <!-- KB 降级提示：组件树来自本地快照/资产 scopeKey，名称可能与 KB 目录不一致 -->
+                <span
+                  v-if="!compCatalog.length && g.key !== OTHER_KEY"
+                  class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                  :title="t('assetMgmt.localSnapshotHint')"
+                >{{ t('assetMgmt.localSnapshot') }}</span>
+                <!-- 拷贝/引用 名称+ID：与 KB 组件目录严格同名同 ID，供资产管理对话精准对接 -->
+                <template v-if="g.key !== OTHER_KEY">
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-green p-0.5 shrink-0"
+                    :title="t('assetMgmt.compCopy')"
+                    @click="copyCompRef(g.key, g.name, g.key)"
+                  >
+                    <CheckIcon
+                      v-if="copiedKey === g.key"
+                      class="w-3 h-3 text-ctp-green"
+                    />
+                    <ClipboardDocumentIcon
+                      v-else
+                      class="w-3 h-3"
+                    />
+                  </button>
+                                  </template>
+                <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ subtreeCount.get(g.key) ?? 0 }}</span>
+                <!-- 基线对比 · 组件(子树)变化上卷：需更新/新增/移除 彩色计数 -->
+                <template v-if="diffRollup.get(g.key)">
+                  <span
+                    v-if="diffRollup.get(g.key)!.changed"
+                    class="chip !text-[8px] bg-ctp-yellow/15 text-ctp-yellow shrink-0 font-mono"
+                    :title="t('assetMgmt.diff.changedN', { n: diffRollup.get(g.key)!.changed })"
+                  >{{ t('assetMgmt.diff.chipChanged', { n: diffRollup.get(g.key)!.changed }) }}</span>
+                  <span
+                    v-if="diffRollup.get(g.key)!.added"
+                    class="chip !text-[8px] bg-ctp-green/15 text-ctp-green shrink-0 font-mono"
+                    :title="t('assetMgmt.diff.newN', { n: diffRollup.get(g.key)!.added })"
+                  >{{ t('assetMgmt.diff.chipAdded', { n: diffRollup.get(g.key)!.added }) }}</span>
+                  <span
+                    v-if="diffRollup.get(g.key)!.deleted"
+                    class="chip !text-[8px] bg-ctp-red/15 text-ctp-red shrink-0 font-mono"
+                    :title="t('assetMgmt.diff.removedN', { n: diffRollup.get(g.key)!.deleted })"
+                  >{{ t('assetMgmt.diff.chipRemoved', { n: diffRollup.get(g.key)!.deleted }) }}</span>
+                </template>
+                <!-- 未归属组：截断提示 + 循环批量提取(后端作业，页面关闭不影响；每批 10) -->
+                <template v-if="g.key === OTHER_KEY">
+                  <span
+                    v-if="unownedMeta?.truncated"
+                    class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                    :title="t('assetMgmt.unowned.truncatedHint', { total: unownedMeta?.totalFiles ?? 0, owned: unownedMeta?.ownedCount ?? 0 })"
+                  >{{ t('assetMgmt.unowned.truncated') }}</span>
+                  <span
+                    v-if="unownedExtracting"
+                    class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue shrink-0 font-mono"
+                    :title="unownedJobHint"
+                  >{{ t('assetMgmt.unowned.extracting', { done: unownedJob?.done ?? 0, total: unownedJob?.total ?? 0 }) }}</span>
+                  <button
+                    v-if="unownedExtracting"
+                    class="text-ctp-overlay0 hover:text-ctp-red p-0.5 shrink-0"
+                    :title="t('assetMgmt.unowned.stop')"
+                    @click="stopUnownedExtract"
+                  >
+                    <StopIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-else
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0 disabled:opacity-40"
+                    :disabled="unownedExtractingOne !== ''"
+                    :title="t('assetMgmt.unowned.extractAllHint')"
+                    @click="extractAllUnowned"
+                  >
+                    <SparklesIcon class="w-3 h-3" />
+                  </button>
+                  <span
+                    v-if="unownedMsg"
+                    class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0 max-w-[24rem] truncate"
+                    :title="unownedMsg"
+                  >{{ unownedMsg }}</span>
+                </template>
+                <template v-if="g.key !== OTHER_KEY">
+                  <span
+                    v-if="compCoverage(g.key)"
+                    class="chip !text-[8px] shrink-0"
+                    :class="compCoverage(g.key) === 'full' ? 'bg-ctp-green/15 text-ctp-green' : compCoverage(g.key) === 'partial' ? 'bg-ctp-yellow/15 text-ctp-yellow' : 'bg-ctp-surface0 text-ctp-overlay1'"
+                  >{{ t(`assetMgmt.coverage.state.${compCoverage(g.key)}`) }}</span>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.chatExtractHint')"
+                    @click="askExtractComponent(g.key, g.name)"
+                  >
+                    <SparklesIcon class="w-3 h-3" />
+                  </button>
+                  <!-- 未归属组去掉「整类为视角」的图谱入口(分类无实体语义), 只保留组内每个文件的图谱入口 -->
+                  <button
+                    v-if="g.key !== OTHER_KEY"
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.graph.viewCompGraph')"
+                    @click="openGraphTab('comp', g.key, g.name)"
+                  >
+                    <Squares2X2Icon class="w-3 h-3" />
+                  </button>
+                </template>
+              </div>
+                </div>
+              </template>
+              <!-- 文件节点：独有文件，折叠其下资产 -->
+              <div
+                  v-show="!coreOnly || rowIsCore(row)"
+                v-else-if="row.t === 'file'"
+                class="flex items-center gap-1.5 px-1 py-0.5 tree-row"
+                :style="{ paddingLeft: (row.depth * 12) + 'px' }"
+              >
+                <button
+                  v-if="row.n"
+                  class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
+                  @click="toggleFileOpen(row.fk!)"
+                >
+                  <ChevronDownIcon
+                    v-if="fileExpandState(row.fk!)"
+                    class="w-3 h-3"
+                  />
+                  <ChevronRightIcon
+                    v-else
+                    class="w-3 h-3"
+                  />
+                </button>
+                <span
+                  v-else
+                  class="w-4 shrink-0"
+                />
+                <DocumentTextIcon class="w-3 h-3 text-ctp-overlay1 shrink-0" />
+                <span
+                  class="font-mono text-[10px] text-ctp-subtext1 truncate"
+                  :title="row.file"
+                >{{ fileBase(row.file!) }}</span>
+                <!-- 2610 核心资产守护: ★ 文件标记(file 层) + ➕ 手动建语义资产 -->
+                <button
+                  class="shrink-0 rounded p-0.5 transition-colors"
+                  :class="isCoreMark('file', row.file || '') ? 'text-ctp-yellow' : 'text-ctp-overlay0 opacity-40 hover:text-ctp-yellow hover:opacity-100'"
+                  :title="isCoreMark('file', row.file || '') ? t('session.marks.unmarkBtn') : t('session.marks.markBtnFile')"
+                  @click.stop="locateCore(row.file || '')"
+                >
+                  <StarIcon class="w-3 h-3" :class="isCoreMark('file', row.file || '') ? 'fill-ctp-yellow' : ''" />
+                </button>
+                <button
+                  class="shrink-0 rounded p-0.5 text-ctp-overlay0 opacity-50 transition-colors hover:text-ctp-teal hover:opacity-100"
+                  :title="t('session.marks.manualBtn')"
+                  @click.stop="startManual(row.file || '')"
+                ><PlusIcon class="w-3 h-3" /></button>
+                <!-- 文件级语义图谱：该文件锚定的资产子图(有资产才可看) -->
+                <button
+                  v-if="row.n"
+                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0"
+                  :title="t('assetMgmt.graph.viewFileGraph')"
+                  @click="openGraphTab('file', row.file!, fileBase(row.file!))"
+                >
+                  <Squares2X2Icon class="w-3 h-3" />
+                </button>
+                <!-- 文件源码资产卡：复用图谱资产卡服务/缓存，列表内浮卡展示(无资产文件=纯源码浏览) -->
+                <button
+                  class="text-ctp-overlay0 hover:text-ctp-blue p-0.5 shrink-0"
+                  :title="t('assetMgmt.fileCard.view')"
+                  @click="openFileCard(row.file!)"
+                >
+                  <CodeBracketIcon class="w-3 h-3" />
+                </button>
+                <!-- 基线对比 · 文件级变化归属：需更新/新增/移除彩色计数 + 待提取/新增文件 -->
+                <template v-if="row.file">
+                  <span
+                    v-if="diffFileCounts.get(row.file)?.changed"
+                    class="chip !text-[8px] bg-ctp-yellow/15 text-ctp-yellow shrink-0 font-mono"
+                  >{{ t('assetMgmt.diff.chipChanged', { n: diffFileCounts.get(row.file)!.changed }) }}</span>
+                  <span
+                    v-if="diffFileCounts.get(row.file)?.added"
+                    class="chip !text-[8px] bg-ctp-green/15 text-ctp-green shrink-0 font-mono"
+                  >{{ t('assetMgmt.diff.chipAdded', { n: diffFileCounts.get(row.file)!.added }) }}</span>
+                  <span
+                    v-if="diffFileCounts.get(row.file)?.deleted"
+                    class="chip !text-[8px] bg-ctp-red/15 text-ctp-red shrink-0 font-mono"
+                  >{{ t('assetMgmt.diff.chipRemoved', { n: diffFileCounts.get(row.file)!.deleted }) }}</span>
+                  <span
+                    v-if="pendingFileSet.has(row.file)"
+                    class="chip !text-[8px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                    :title="t('assetMgmt.diff.pendingN', { n: compareData?.assets.pending.count ?? 0 })"
+                  >{{ t('assetMgmt.diff.chipPending') }}</span>
+                  <span
+                    v-else-if="addedFileSet.has(row.file)"
+                    class="chip !text-[8px] bg-ctp-green/15 text-ctp-green shrink-0"
+                    :title="t('assetMgmt.diff.pendingNew', { n: compareData?.newFileCount ?? 0 })"
+                  >{{ t('assetMgmt.diff.chipNewFile') }}</span>
+                </template>
+                <span
+                  v-if="!row.unowned"
+                  class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]"
+                >{{ row.n }}</span>
+                <!-- 未归属文件行：未提取标记 + 跨组件关联 chip + 单文件提取 -->
+                <template v-if="row.unowned">
+                  <span
+                    v-if="row.extractable === false"
+                    class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay0 shrink-0"
+                    :title="t('assetMgmt.unowned.noSymbolsHint')"
+                  >{{ t('assetMgmt.unowned.noSymbols') }}</span>
+                  <span
+                    v-else-if="!row.n"
+                    class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1 shrink-0"
+                  >{{ t('assetMgmt.unowned.noAssets') }}</span>
+                  <span
+                    v-if="row.n"
+                    class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]"
+                  >{{ row.n }}</span>
+                  <span
+                    v-if="unownedLinks.get(row.file || '')"
+                    class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0 cursor-help"
+                    :title="unownedLinkTitle(unownedLinks.get(row.file || '')!)"
+                  >{{ t('assetMgmt.unowned.related', { n: unownedLinks.get(row.file || '')!.crossCount }) }}</span>
+                  <button
+                    v-if="row.extractable !== false"
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5 shrink-0 disabled:opacity-40"
+                    :disabled="unownedExtractingOne !== '' || unownedExtracting"
+                    :title="t('assetMgmt.unowned.extractOne')"
+                    @click="extractUnownedFile(row.file!)"
+                  >
+                    <SparklesIcon
+                      class="w-3 h-3"
+                      :class="{ 'animate-pulse text-ctp-mauve': unownedExtractingOne === row.file }"
+                    />
+                  </button>
+                </template>
+              </div>
+              <!-- 资产卡片(挂文件下/组件直属) -->
+              <div
+                v-else
+                v-show="!coreOnly || rowIsCore(row)"
+                class="mt-0.5 tree-row"
+                :style="{ paddingLeft: (row.depth * 12) + 'px' }"
+              >
+                <div
+                  v-for="a in row.a ? [row.a] : []"
+                  :key="a.id"
+                  class="border border-ctp-mauve/20 hover:border-ctp-mauve/40 rounded-lg overflow-hidden"
+                >
+                <div class="flex items-center gap-1.5 px-2 py-1.5">
+                  <component
+                    :is="kindIcon(a.kind)"
+                    class="w-3.5 h-3.5 text-ctp-mauve shrink-0"
+                  />
+                  <span class="chip !text-[9px] shrink-0" :class="kindChipClass(a.kind)">
+                    {{ t(`assetMgmt.kind.${a.kind}`) }}
+                  </span>
+                  <span
+                    v-if="a.level"
+                    class="chip !text-[9px] shrink-0"
+                    :class="levelChipClass(a.level)"
+                  >{{ t(`assetMgmt.level.${a.level}`) }}</span>
+                  <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
+                  <span
+                    v-if="a.renamedFrom"
+                    class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                    :title="t('assetMgmt.canonicalHint')"
+                  >{{ t('assetMgmt.renamed') }}: {{ a.renamedFrom }}</span>
+                  <span
+                    v-if="a.needsUpdate || a.status === 'stale'"
+                    class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+                  >{{ t('assetMgmt.needsUpdate') }}</span>
+                  <span
+                    v-else-if="a.status === 'deleted'"
+                    class="chip !text-[9px] bg-ctp-red/15 text-ctp-red shrink-0"
+                  >{{ t('assetMgmt.deleted') }}</span>
+                  <span
+                    v-else-if="a.change === 'added'"
+                    class="chip !text-[9px] bg-ctp-green/15 text-ctp-green shrink-0"
+                  >{{ t('assetMgmt.added') }}</span>
+                  <span
+                    v-else-if="a.change === 'modified'"
+                    class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+                  >{{ t('assetMgmt.modified') }}</span>
+                  <span
+                    v-if="changeMarkById.get(a.id)"
+                    class="chip !text-[9px] shrink-0"
+                    :class="changeMarkById.get(a.id) === 'added' ? 'bg-ctp-green/15 text-ctp-green' : changeMarkById.get(a.id) === 'deleted' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-yellow/15 text-ctp-yellow'"
+                    :title="diffMarkLabel(changeMarkById.get(a.id))"
+                  >
+                    <ArrowsRightLeftIcon class="w-2.5 h-2.5 inline -mt-0.5" />
+                    {{ diffMarkLabel(changeMarkById.get(a.id)) }}
+                  </span>
+                  <!-- 2610 核心资产守护: ★ 标记(asset 层; 已标记高亮, 点击取消) -->
+                  <button
+                    class="shrink-0 rounded p-0.5 transition-colors"
+                    :class="isCoreMark('asset', a.id) ? 'text-ctp-yellow' : 'text-ctp-overlay0 opacity-40 hover:text-ctp-yellow hover:opacity-100'"
+                    :title="isCoreMark('asset', a.id) ? t('session.marks.unmarkBtn') : t('session.marks.markBtn')"
+                    @click.stop="locateCore(a.id)"
+                  >
+                    <StarIcon class="w-3 h-3" :class="isCoreMark('asset', a.id) ? 'fill-ctp-yellow' : ''" />
+                  </button>
+                  <!-- 未归属资产与组件内资产的跨组件关联：点击跳图谱聚焦，出入边即关联 -->
+                  <span
+                    v-if="unownedLinkByAssetId.get(a.id)"
+                    class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0 cursor-pointer hover:bg-ctp-teal/25"
+                    :title="unownedLinkTitle(unownedLinkByAssetId.get(a.id)!)"
+                    @click="openGraphTab('asset', a.id, a.name)"
+                  >{{ t('assetMgmt.unowned.related', { n: unownedLinkByAssetId.get(a.id)!.crossCount }) }}</span>
+                  <span class="flex-1" />
+                  <span
+                    class="text-[9px] text-ctp-overlay0 font-mono"
+                    :title="[a.canonicalKey ? t('assetMgmt.canonicalHint') + ' · ' + a.canonicalKey : '', ...(a.nameAlias ?? []).map((x) => t('assetMgmt.renamed') + ': ' + x)].filter(Boolean).join('\n') || undefined"
+                  >{{ a.id }}</span>
+                  <span class="text-[9px] text-ctp-overlay0">{{ a.astRefs?.length ?? 0 }} AST</span>
+                  <button
+                    v-if="!usable(a)"
+                    class="text-ctp-yellow hover:text-ctp-peach p-0.5"
+                    :title="t('assetMgmt.refresh')"
+                    @click="refreshOne(a)"
+                  >
+                    <ArrowPathIcon class="w-3 h-3" />
+                  </button>
+                                    <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.graph.viewAssetGraph')"
+                    @click="openGraphTab('asset', a.id, a.name)"
+                  >
+                    <Squares2X2Icon class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-if="a.kind === 'entity' || a.kind === 'state'"
+                    class="text-ctp-overlay0 hover:text-ctp-teal p-0.5"
+                    :title="t('assetMgmt.viewDiagram')"
+                    @click="openAssetDiagram(a)"
+                  >
+                    <ChartBarSquareIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.copy')"
+                    @click="copyAsset(a)"
+                  >
+                    <ClipboardDocumentIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.expand')"
+                    @click="toggle(a.id)"
+                  >
+                    <ChevronDownIcon
+                      v-if="expanded[a.id]"
+                      class="w-3.5 h-3.5"
+                    />
+                    <ChevronRightIcon
+                      v-else
+                      class="w-3.5 h-3.5"
+                    />
+                  </button>
+                </div>
+                <p
+                  v-if="!expanded[a.id] && a.desc"
+                  class="px-2 pb-1.5 text-[10px] truncate text-ctp-teal cursor-pointer hover:text-ctp-sky"
+                  :title="t('assetMgmt.descReadyHint')"
+                  @click="toggle(a.id)"
+                >{{ t('assetMgmt.descReady') }}</p>
+                <p
+                  v-else-if="!expanded[a.id]"
+                  class="px-2 pb-1.5 text-[10px] line-clamp-2 whitespace-pre-wrap text-ctp-overlay0 italic cursor-pointer hover:text-ctp-subtext0"
+                  :title="t('assetMgmt.descPendingHint')"
+                  @click="toggle(a.id)"
+                >
+                  {{ t('assetMgmt.descPending') }}
+                </p>
+                <div
+                  v-if="expanded[a.id]"
+                  class="border-t border-ctp-mauve/15 px-2 py-1.5 space-y-1 text-[10px]"
+                >
+                  <div
+                    v-if="detailLoading[a.id] && a.detail === undefined"
+                    class="text-ctp-overlay0 animate-pulse"
+                  >
+                    {{ t('assetMgmt.detailLoading') }}
+                  </div>
+                  <div class="flex items-start gap-1.5">
+                    <SparklesIcon class="w-3 h-3 shrink-0 mt-0.5 text-ctp-peach" />
+                    <p
+                      v-if="a.desc"
+                      class="flex-1 m-0 whitespace-pre-wrap text-ctp-subtext1"
+                    >{{ a.desc }}</p>
+                    <button
+                      v-else
+                      class="btn btn-xs btn-ghost"
+                      :disabled="!!descLoading[a.id]"
+                      @click="genDesc(a)"
+                    >{{ t('assetMgmt.genDesc') }}</button>
+                  </div>
+                  <div v-if="a.detail?.fields?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.fields') }}
+                    </div>
+                    <div
+                      v-for="f in a.detail.fields"
+                      :key="f.name"
+                      class="pl-2"
+                    >
+                      <span class="font-mono text-ctp-text">{{ f.name }}</span><span class="text-ctp-overlay0">: {{ f.type ?? '—' }}</span> {{ f.semantic ? `— ${f.semantic}` : '' }}
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.steps?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.steps') }}
+                    </div>
+                    <div
+                      v-for="(s, si) in a.detail.steps"
+                      :key="si"
+                      class="pl-2"
+                    >
+                      {{ s.order ?? si + 1 }}. {{ s.semantic }}
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.branches?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.branches') }}
+                    </div>
+                    <div
+                      v-for="(b, bi) in a.detail.branches"
+                      :key="bi"
+                      class="pl-2"
+                    >
+                      <span class="font-mono text-ctp-text">if {{ b.condition ?? '?' }}</span> → {{ b.then ?? '—' }}<span v-if="b.else"> / else {{ b.else }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.relations?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.relations') }}
+                    </div>
+                    <div
+                      v-for="(r, ri) in a.detail.relations"
+                      :key="ri"
+                      class="pl-2"
+                    >
+                      <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1">{{ r.type ?? 'ref' }}</span><span class="font-mono text-ctp-text">{{ r.target ?? '?' }}</span><span
+                        v-if="r.methods?.length"
+                        class="font-mono text-ctp-overlay0"
+                      >{{ r.methods.join('/') }}</span><span
+                        v-if="r.semantic"
+                        class="text-ctp-subtext0"
+                      > — {{ r.semantic }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.states?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.states') }}
+                    </div>
+                    <div class="pl-2 flex flex-wrap gap-1">
+                      <span
+                        v-for="(st, si) in a.detail.states"
+                        :key="si"
+                        class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0"
+                      >{{ st.name }}<template v-if="st.initial"> · {{ t('assetMgmt.stateInitial') }}                <!-- 2610 手动建语义资产: 文件行 ➕ 展开(未提取 ast 节点/跨节点代码段) -->
+                <div
+                  v-if="manualFile === row.file"
+                  class="ml-4 space-y-1.5 rounded-lg border border-ctp-teal/30 bg-ctp-teal/5 p-2.5 text-[11px]"
+                >
+                  <div class="flex gap-1.5">
+                    <input v-model="manualForm.name" class="input flex-1 !py-1" :placeholder="t('session.marks.namePh')" />
+                    <select v-model="manualForm.kind" class="input !w-auto !py-1">
+                      <option v-for="k in ['entity', 'contract', 'state', 'rule', 'process', 'decision']" :key="k" :value="k">{{ t(`assetMgmt.kind.${k}`) }}</option>
+                    </select>
+                  </div>
+                  <div class="flex gap-1.5 items-center">
+                    <span class="shrink-0 font-mono text-[10px] text-ctp-overlay0">{{ fileBase(manualFile) }}</span>
+                    <input v-model="manualForm.startLine" class="input !w-16 !py-1 font-mono" placeholder="起行" />
+                    <span class="text-ctp-overlay0">–</span>
+                    <input v-model="manualForm.endLine" class="input !w-16 !py-1 font-mono" placeholder="止行" />
+                    <input v-model="manualForm.symbol" class="input flex-1 !py-1 font-mono" :placeholder="t('session.marks.symbolPh')" />
+                  </div>
+                  <textarea v-model="manualForm.desc" rows="2" class="input !py-1.5" :placeholder="t('session.marks.descPh')" />
+                  <textarea v-model="manualForm.ruleText" rows="2" class="input !py-1.5" :placeholder="t('guard.ruleTextPh')" />
+                  <p v-if="manualMsg" class="text-[10px]" :class="manualOk ? 'text-ctp-teal' : 'text-ctp-red'">{{ manualMsg }}</p>
+                  <div class="flex justify-end gap-1.5">
+                    <button class="btn btn-xs btn-ghost" @click="manualFile = ''">{{ t('common.cancel') }}</button>
+                    <button class="btn btn-xs btn-teal" :disabled="manualBusy" @click="submitManual">
+                      {{ manualBusy ? '…' : t('session.marks.manualSubmit') }}
+                    </button>
+                  </div>
+                </div>
+</template><template v-if="st.final"> · {{ t('assetMgmt.stateFinal') }}</template></span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.transitions?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.transitions') }}
+                    </div>
+                    <div
+                      v-for="(tr, ti) in a.detail.transitions"
+                      :key="ti"
+                      class="pl-2 font-mono text-ctp-overlay0"
+                    >
+                      {{ tr.from ?? '?' }} → {{ tr.to ?? '?' }}<template v-if="tr.event">
+                        on {{ tr.event }}
+                      </template><template v-if="tr.condition">
+                        [{{ tr.condition }}]
+                      </template>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.configSource || a.detail?.constraints?.length || a.detail?.thresholds?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.constraints') }}
+                    </div>
+                    <div
+                      v-if="a.detail?.configSource"
+                      class="pl-2"
+                    >
+                      {{ t('assetMgmt.configSource') }}: <span class="font-mono text-ctp-overlay0">{{ a.detail.configSource }}</span>
+                    </div>
+                    <div
+                      v-for="(c, ci) in (a.detail?.constraints ?? [])"
+                      :key="`c${ci}`"
+                      class="pl-2 font-mono text-ctp-text"
+                    >
+                      {{ c }}
+                    </div>
+                    <div
+                      v-for="(th, thi) in (a.detail?.thresholds ?? [])"
+                      :key="`t${thi}`"
+                      class="pl-2"
+                    >
+                      <span class="font-mono text-ctp-text">{{ th.key ?? '?' }}</span><span class="text-ctp-overlay0"> = {{ th.value ?? '?' }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.invariants?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.invariants') }}
+                    </div>
+                    <div
+                      v-for="(iv, ii) in a.detail.invariants"
+                      :key="ii"
+                      class="pl-2 text-ctp-subtext0"
+                    >
+                      • {{ iv }}
+                    </div>
+                  </div>
+                  <div v-if="(a.tags?.length || a.detail?.tags?.length)">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.tags') }}
+                    </div>
+                    <div class="pl-2 flex flex-wrap gap-1">
+                      <span
+                        v-for="(tg, tgi) in (a.tags ?? a.detail!.tags ?? [])"
+                        :key="tgi"
+                        class="chip !text-[8px] bg-ctp-blue/15 text-ctp-blue"
+                      >{{ tg }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.astRefs?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      AST
+                    </div>
+                    <div
+                      v-for="(r, ri) in a.astRefs.slice(0, 8)"
+                      :key="ri"
+                      class="pl-2 font-mono text-ctp-overlay0"
+                    >
+                      {{ r.file }}:L{{ r.startLine }}-L{{ r.endLine }} <span class="text-ctp-subtext0">{{ r.symbol }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+                </div>
+            </template>
+            <div
+              v-if="renderedTreeRows.length < semanticTreeRows.length"
+              ref="loadMoreSentinel"
+              class="text-center text-[10px] text-ctp-overlay0 py-2 font-mono"
+            >{{ t('assetMgmt.renderingMore', { done: renderedTreeRows.length, total: semanticTreeRows.length }) }}</div>
+            <p
+              v-if="!semanticTreeRows.length && !loading"
+              class="text-xs text-ctp-overlay0 text-center py-8"
+            >
+              {{ t('assetMgmt.emptySemantic') }}
+            </p>
+
+</template>
+
+<style scoped>
+/* 树行离屏跳过布局/绘制(配合前缀窗口渲染): 浏览器不维护不可见行样式与合成
+   (MS6-W1-S2 自 AMW SFC 迁入——scoped 样式不穿透子组件, 必须随 .tree-row 元素所在面板) */
+.tree-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
+}
+</style>

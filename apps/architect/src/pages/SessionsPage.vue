@@ -1,0 +1,803 @@
+<script setup lang="ts">
+/**
+ * 会话中心(P1) —— 会话是唯一主体，流程不复存在。
+ * 组织维度: 时间/模块/自定义分组(元数据)；流程视图=过滤器。
+ * 对话本体在全局会话栏(ConversationDock)；大纲为浮窗(工具栏大纲按钮)；
+ * 左栏第二标签页 = 需求跟踪(六维度工作台账, SessionTrackingPanel)。
+ */
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  ChatBubbleOvalLeftEllipsisIcon, MagnifyingGlassIcon, PlusIcon, ArrowPathIcon,
+  TagIcon, TrashIcon, PencilSquareIcon, SparklesIcon, CheckIcon,
+  FolderIcon, ClockIcon, XMarkIcon, ClipboardDocumentIcon, StopIcon,
+  ChevronRightIcon, ChevronDownIcon, WrenchScrewdriverIcon,
+  ArrowTopRightOnSquareIcon,
+} from '@heroicons/vue/24/outline'
+import { useConversationStore } from '@/stores/conversation-store'
+import { useAppDialog } from '@/composables/useAppDialog'
+import { sessionService, type ContextUnit, type ConversationMeta, type SessionDoc } from '@/services/session-service'
+import { trackingService, type TrackingVocab } from '@/services/tracking-service'
+import { apiGet, apiPost } from '@/services/api-client'
+import { projectService } from '@/services/project-service'
+import { useArchProjectStore } from '@/stores/project-store'
+import { copyText } from '@/utils/clipboard'
+import { useSplitPane } from '@/composables/useSplitPane'
+import ConversationDock from '@/components/chat/ConversationDock.vue'
+import SessionTrackingPanel from '@/components/sessions/SessionTrackingPanel.vue'
+import SessionJobsDialog from '@/components/sessions/SessionJobsDialog.vue'
+import SessionDeleteDialog from '@/components/sessions/SessionDeleteDialog.vue'
+
+const { t, te } = useI18n()
+const route = useRoute()
+const router = useRouter()
+const conv = useConversationStore()
+const projectStore = useArchProjectStore()
+
+// ── 布局: 左栏信息(会话列表/知识资产 标签页) / 右栏对话(inline 停靠)——与资产地图页同构 ──
+const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ initial: 50, min: 40, max: 78 })
+
+/** 左栏标签页: 会话列表 / 需求跟踪(单按钮切换)。 */
+const leftTab = ref<'sessions' | 'assets'>('sessions')
+
+// ── 需求跟踪筛选(顶栏持有, 面板 props 透传) ──
+const trackingCategory = ref('')
+const trackingState = ref('')
+const trackingAssignee = ref('')
+const trackingQ = ref('')
+const trackingRefreshNonce = ref(0)
+const trackingCount = ref(0)
+const trackingLoading = ref(false)
+const trackingVocab = ref<TrackingVocab | null>(null)
+function trackingStateLabel(s: string): string {
+  const key = `session.tracking.state.${s}`
+  const label = t(key)
+  return label === key ? s : label
+}
+function trackingRoleLabel(r: string): string {
+  const key = `session.tracking.role.${r}`
+  const label = t(key)
+  return label === key ? r : label
+}
+const toolbarBusy = computed(() => (leftTab.value === 'assets' ? trackingLoading.value : leftTab.value === 'sessions' ? loading.value : false))
+
+const list = ref<ConversationMeta[]>([])
+const groupsInfo = ref<{ groups: string[]; modules: string[] }>({ groups: [], modules: [] })
+
+// ── 引用复制: 一键拷贝 JSON(项目ID/项目名称/会话名称/会话ID) ──
+const copied = ref('')
+const projNameMap = ref<Record<string, string>>({})
+
+function projectNameOf(c: ConversationMeta): string {
+  return (c.projectId && projNameMap.value[c.projectId]) || c.projectId || ''
+}
+
+const stopExecBusy = ref('')
+async function stopExec(c: ConversationMeta) {
+  if (stopExecBusy.value) return
+  stopExecBusy.value = c.id
+  try {
+    await apiPost(`/sessions/${c.id}/stop-exec`, {})
+    await load()
+  } catch { /* 刷新兜底 */ } finally {
+    stopExecBusy.value = ''
+  }
+}
+
+async function copyRef(c: ConversationMeta) {
+  const payload = {
+    projectId: c.projectId || '',
+    projectName: projectNameOf(c),
+    sessionName: c.title || '',
+    sessionId: c.id,
+  }
+  const ok = await copyText(JSON.stringify(payload, null, 2))
+  if (ok) {
+    copied.value = c.id
+    setTimeout(() => { copied.value = '' }, 1500)
+  }
+}
+const dialog = useAppDialog()
+const loading = ref(false)
+const busyTip = ref('')
+
+// ── 过滤器 ──
+const q = ref('')
+const timeFilter = ref<'all' | 'today' | 'week' | 'earlier'>('all')
+const groupFilter = ref('')          // '' = 全部; group:<name> / module:<name>
+const statusFilter = ref('all')      // 生命周期重构: all | active | running(workState) | archived
+
+// PR3 角色徽标: 会话列表显示 executor 角色名
+async function loadRoles() { /* 角色目录已退役(执行器直绑); 保留空挂点防引用 */ }
+
+// ── 项目隔离(cv-204/205 + 批戊收编裁决): 会话不存在跨项目访问需求——
+// 「全部项目」开关退役, 列表恒为当前项目; 无项目上下文 → 空态引导。
+const currentProjectId = computed(() => projectStore.project?.id || '')
+
+async function load() {
+  // cv-205: 项目上下文异步加载, 就绪后再查询(过滤=服务端 ?project= 参数)
+  if (!projectStore.loaded) await projectStore.load()
+  loading.value = true
+  try {
+    const pid = currentProjectId.value
+    if (!pid) {
+      list.value = []
+      groupsInfo.value = { groups: [], modules: [] }
+      return
+    }
+    const [l, g] = await Promise.all([
+      sessionService.list({ limit: 400, project: pid }),
+      sessionService.groups(undefined, pid),
+    ])
+    void loadRoles()
+    void loadJobsCount()
+    list.value = l
+    groupsInfo.value = g
+  } finally {
+    loading.value = false
+  }
+}
+watch(currentProjectId, () => { void load() })
+onMounted(async () => {
+  // 会话集合变更(右栏对话新建/更新会话) → 左侧列表同步刷新(免手动刷新页面)
+  window.addEventListener('arch:sessions-changed', onSessionsChanged)
+  // 需求跟踪字典(分类/操作类型/角色/状态, 顶栏筛选下拉)
+  trackingService.vocab().then((v) => { trackingVocab.value = v }).catch(() => { /* 静默 */ })
+  await load()
+  // 项目名称映射(引用复制用): arch_projects 全量, 失败静默(降级显示 projectId)
+  try {
+    const ps = await projectService.listProjects()
+    projNameMap.value = Object.fromEntries(ps.map((p) => [p.id, p.name || '']))
+  } catch { /* noop */ }
+  // 深链 ?select=<convId|reqId>（兼容旧需求深链）→ 直接在对话栏打开
+  const sel = typeof route.query.select === 'string' ? route.query.select : ''
+  if (sel) {
+    const meta = list.value.find((c) => c.id === sel || (sel.startsWith('RQ-') && c.reqId === sel))
+    if (meta) openInDock(meta)
+    else if (!sel.startsWith('RQ-')) {
+      // 2610 F3: 子会话不在主列表(防污染过滤)——深链直开(openConversation 按 id 拉详情)
+      void conv.openConversation({ id: sel } as ConversationMeta)
+    }
+  }
+})
+
+// 同页深链变化(信息流卡片「前往任务管理」等) → 重新定位会话
+watch(() => route.query.select, (sel) => {
+  if (typeof sel === 'string' && sel) {
+    const meta = list.value.find((c) => c.id === sel || (sel.startsWith('RQ-') && c.reqId === sel))
+    if (meta) openInDock(meta)
+    else if (!sel.startsWith('RQ-')) {
+      void conv.openConversation({ id: sel } as ConversationMeta)
+    }
+  }
+})
+
+// 2610 S1: 事件防抖合并(日志实证: 连续 conv-message/sessions-changed 各自
+// 触发全量 load——400ms 尾沿合并; 并发由 sessionService.list 合并兜底)
+let sessionsChangedTimer: ReturnType<typeof setTimeout> | null = null
+function onSessionsChanged() {
+  if (sessionsChangedTimer) return
+  sessionsChangedTimer = setTimeout(() => { sessionsChangedTimer = null; void load() }, 400)
+}
+onUnmounted(() => {
+  window.removeEventListener('arch:sessions-changed', onSessionsChanged)
+  if (sessionsChangedTimer) clearTimeout(sessionsChangedTimer)
+  if (degradedTimer) clearInterval(degradedTimer)
+})
+
+// 2610 cv-15: SSE 降级 → 列表 10s 保底轮询(恢复推送即停)
+let degradedTimer: ReturnType<typeof setInterval> | null = null
+watch(() => conv.realtimeDegraded, (deg) => {
+  if (deg && !degradedTimer) {
+    degradedTimer = setInterval(() => { void load() }, 10000)
+  } else if (!deg && degradedTimer) {
+    clearInterval(degradedTimer)
+    degradedTimer = null
+  }
+})
+
+// ── 时间分桶 ──
+const DAY = 86400000
+function timeBucket(c: ConversationMeta): 'today' | 'week' | 'earlier' {
+  const ts = c.updatedAt || c.createdAt || 0
+  const now = Date.now()
+  if (now - ts < DAY) return 'today'
+  if (now - ts < 7 * DAY) return 'week'
+  return 'earlier'
+}
+
+const filtered = computed(() => {
+  let out = list.value
+  if (timeFilter.value !== 'all') out = out.filter((c) => timeBucket(c) === timeFilter.value)
+  if (statusFilter.value === 'running') out = out.filter((c) => (c as any).workState === 'running')
+  else if (statusFilter.value !== 'all') out = out.filter((c) => (c.status || 'active') === statusFilter.value)
+  if (groupFilter.value.startsWith('group:')) {
+    const g = groupFilter.value.slice(6)
+    out = out.filter((c) => c.tags.groups.includes(g))
+  } else if (groupFilter.value.startsWith('module:')) {
+    const m = groupFilter.value.slice(7)
+    out = out.filter((c) => c.tags.modules.includes(m))
+  }
+  const kw = q.value.trim().toLowerCase()
+  if (kw) {
+    out = out.filter((c) =>
+      c.title.toLowerCase().includes(kw)
+      || (c.summary || '').toLowerCase().includes(kw)
+      || (c.preview || '').toLowerCase().includes(kw))
+  }
+  return out
+})
+
+// 分组渲染: 时间桶为默认维度; 选定 group/module 维度时按其分桶
+const grouped = computed<{ key: string; items: ConversationMeta[] }[]>(() => {
+  const items = filtered.value
+  if (groupFilter.value) return [{ key: '', items }]
+  const buckets: Record<string, ConversationMeta[]> = { today: [], week: [], earlier: [] }
+  for (const c of items) buckets[timeBucket(c)].push(c)
+  return (['today', 'week', 'earlier'] as const)
+    .filter((k) => buckets[k].length)
+    .map((k) => ({ key: k, items: buckets[k] }))
+})
+
+function openInDock(c: ConversationMeta) {
+  void conv.openConversation(c)
+}
+
+// 2610 会话窗口(F2): 沉浸式独立浏览器页(?conv= 直开; 唯一性锁防多开)
+function openSessionWindow(convId: string, projectId?: string) {
+  const q = new URLSearchParams({ conv: convId })
+  if (projectId) q.set('project', projectId)
+  window.open(router.resolve({ path: '/exec-session-view', query: Object.fromEntries(q) }).href, '_blank')
+}
+
+// ── 主+子会话树(2610 统一列表): 主行展开子会话(懒加载) + 作业历史弹窗 ──
+interface SubRow {
+  id: string
+  title: string
+  executorId: string
+  execution: string
+  active: boolean
+  status: string
+  msgCount: number
+}
+const expanded = ref<Set<string>>(new Set())
+const subsOf = ref<Record<string, SubRow[]>>({})
+const subsLoading = ref('')
+
+async function toggleExpand(c: ConversationMeta) {
+  const next = new Set(expanded.value)
+  if (next.has(c.id)) {
+    next.delete(c.id)
+  } else {
+    next.add(c.id)
+    if (!subsOf.value[c.id]) await loadSubs(c.id)
+  }
+  expanded.value = next
+}
+
+async function loadSubs(mainId: string) {
+  subsLoading.value = mainId
+  try {
+    const rows = await apiGet<SubRow[]>(`/sessions/${mainId}/coding-sessions`)
+    subsOf.value = { ...subsOf.value, [mainId]: rows }
+  } catch {
+    subsOf.value = { ...subsOf.value, [mainId]: [] }
+  } finally {
+    subsLoading.value = ''
+  }
+}
+
+function execStatusLabel(st: string): string {
+  const key = `session.deleteDialog.execStatus.${st}`
+  const label = t(key)
+  return label === key ? (st || '执行中') : label
+}
+
+function openSubRow(s: SubRow) {
+  void conv.openConversation({ id: s.id } as ConversationMeta)
+}
+
+/** 子会话单删(2610): 非执行态可删(与 dock 子会话池同一守卫与确认) */
+async function deleteSubRow(s: SubRow, mainId: string) {
+  if (s.execution) return
+  const ok = await dialog.confirm(
+    t('session.subs.deleteConfirm', { title: s.title || s.id }), { danger: true })
+  if (!ok) return
+  try {
+    await sessionService.remove(s.id)
+    await loadSubs(mainId)
+    await load()
+    window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: s.id }))
+  } catch (e: any) {
+    void dialog.alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// ── 作业历史弹窗(取代原「执行器会话」标签) ──
+const jobsTarget = ref<{ id: string; title: string } | null>(null)
+function openJobs(id: string, title: string) {
+  jobsTarget.value = { id, title }
+}
+/** 作业计数(裁决1A: 行内常显 chip): /arch/exec-sessions 按 conversationId 聚合 */
+const jobsCount = ref<Record<string, number>>({})
+async function loadJobsCount() {
+  try {
+    const rows = await apiGet<{ conversationId?: string }[]>('/arch/exec-sessions?limit=200')
+    const m: Record<string, number> = {}
+    for (const r of rows || []) {
+      const cid = r.conversationId || ''
+      if (cid) m[cid] = (m[cid] || 0) + 1
+    }
+    jobsCount.value = m
+  } catch { /* 留痕面不可达 → 计数缺失, 弹窗内再报错 */ }
+}
+
+/** 运行态区分(裁决2A): 等待输入/待确认(黄, 无脉冲) vs 真执行中(▶ 脉冲) */
+function runStateChip(c: ConversationMeta): '' | 'running' | 'waiting' | 'pending' | 'queued' {
+  const st = String(((c as any).runningRole?.status) || '')
+  if (st === 'waiting_input') return 'waiting'
+  if (st === 'pending_confirm') return 'pending'
+  if (st === 'queued') return 'queued'
+  if ((c as any).workState === 'running') return 'running'
+  return ''
+}
+async function onJobsChanged() {
+  await load()
+  for (const mid of expanded.value) await loadSubs(mid)
+}
+
+function newConversation() {
+  conv.newConversation()
+}
+
+// ── 行操作 ──
+// ── 标题行内编辑(悬停标题 → 手动修改/自动摘要) ──
+const editingId = ref('')
+const titleDraft = ref('')
+function startEdit(c: ConversationMeta) {
+  editingId.value = c.id
+  titleDraft.value = c.title
+}
+async function saveEdit(c: ConversationMeta) {
+  if (editingId.value !== c.id) return
+  editingId.value = ''
+  const title = titleDraft.value.trim()
+  if (!title || title === c.title) return
+  await sessionService.update(c.id, { title })
+  c.title = title
+}
+async function summarize(c: ConversationMeta, force = false) {
+  busyTip.value = c.id
+  try {
+    const updated = await sessionService.summarize(c.id, force)
+    Object.assign(c, updated)
+  } finally {
+    busyTip.value = ''
+  }
+}
+async function editTags(c: ConversationMeta) {
+  const groups = await dialog.prompt(t('session.actions.groupsPrompt'), c.tags.groups.join(', '))
+  if (groups === null) return
+  const modules = await dialog.prompt(t('session.actions.modulesPrompt'), c.tags.modules.join(', '))
+  if (modules === null) return
+  const tags = {
+    groups: groups.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+    modules: modules.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+  }
+  await sessionService.update(c.id, { tags })
+  c.tags = tags
+  const pid = currentProjectId.value
+  if (pid) {
+    void sessionService.groups(undefined, pid)
+      .then((g) => { groupsInfo.value = g })
+  }
+}
+// ── 删除: 预览清单 + 二次确认(2610 裁决: 执行器会话执行中则阻断) ──
+const deleteTarget = ref<ConversationMeta | null>(null)
+function removeSession(c: ConversationMeta) {
+  deleteTarget.value = c
+}
+function onSessionDeleted(id: string) {
+  deleteTarget.value = null
+  list.value = list.value.filter((x) => x.id !== id)
+  // 左右联动: 通知对话栏清除该会话(若正打开)——右侧不残留已删会话;
+  // sessions-changed 供 dock 切换浮层/需求跟踪面板/大纲同步刷新
+  window.dispatchEvent(new CustomEvent('arch:conversation-removed', { detail: id }))
+  window.dispatchEvent(new CustomEvent('arch:sessions-changed', { detail: id }))
+}
+async function newGroup() {
+  const name = await dialog.prompt(t('session.actions.newGroupPrompt'))
+  if (!name || !name.trim()) return
+  const names = [...new Set([...groupsInfo.value.groups, name.trim()])]
+  await sessionService.saveGroups(names)
+  groupsInfo.value = { ...groupsInfo.value, groups: names }
+}
+
+
+function fmt(ts?: number) {
+  return ts ? new Date(ts).toLocaleString() : '—'
+}
+function statusClass(s: string) {
+  if (s === 'running') return 'bg-ctp-blue/15 text-ctp-blue'
+  if (s === 'archived') return 'bg-ctp-surface0 text-ctp-overlay0'
+  return 'bg-ctp-green/15 text-ctp-green'          // active 活跃(可运行)
+}
+/** 查看状态徽标(第二维度): 未读=蓝 / 待回复=黄 / 报错=红 / 已读=不显示。 */
+function reviewClass(rs?: string) {
+  if (rs === 'unread') return 'bg-ctp-blue/20 text-ctp-blue'
+  if (rs === 'awaiting_reply') return 'bg-ctp-yellow/20 text-ctp-yellow'
+  if (rs === 'error') return 'bg-ctp-red/20 text-ctp-red'
+  return ''
+}
+/** 流程相位标签(governance/flow.py; 词表缺 key 时回落原值)。 */
+function flowLabel(p?: string): string {
+  if (!p) return ''
+  const k = `session.flow.${p}`
+  return t(k) === k ? p : t(k)
+}
+</script>
+
+<template>
+  <div class="flex h-full min-h-0 flex-col">
+    <!-- 顶栏: 标签页切换 + 上下文筛选/操作(会话列表/知识资产 共用一条工具栏) -->
+    <div class="flex shrink-0 flex-wrap items-center gap-2 px-5 pt-5">
+      <!-- 标签页: 会话列表 / 需求跟踪 / 执行器会话(2026-10 并入) -->
+      <button
+        v-for="tb in (['sessions', 'assets'] as const)" :key="tb"
+        class="btn btn-sm"
+        :class="leftTab === tb ? 'btn-blue' : 'btn-primary'"
+        @click="leftTab = tb"
+      >
+        {{ t(`session.tabs.${tb}`) }}
+        <span class="ml-0.5 font-mono opacity-70">{{
+          tb === 'sessions' ? filtered.length : trackingCount
+        }}</span>
+      </button>
+
+      <!-- 会话列表筛选(标签页上下文) -->
+      <template v-if="leftTab === 'sessions'">
+        <div class="relative w-56">
+          <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
+          <input v-model="q" class="input pl-8 text-xs" :placeholder="t('session.searchPlaceholder')">
+        </div>
+        <select v-model="timeFilter" class="input !w-auto !py-1 text-xs">
+          <option value="all">{{ t('session.time.all') }}</option>
+          <option value="today">{{ t('session.time.today') }}</option>
+          <option value="week">{{ t('session.time.week') }}</option>
+          <option value="earlier">{{ t('session.time.earlier') }}</option>
+        </select>
+        <select v-model="statusFilter" class="input !w-auto !py-1 text-xs">
+          <option value="all">{{ t('session.statusFilter.all') }}</option>
+          <option value="active">{{ t('session.status.active') }}</option>
+          <option value="running">{{ t('session.status.running') }}</option>
+          <option value="archived">{{ t('session.status.archived') }}</option>
+        </select>
+        <select v-model="groupFilter" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.group.all') }}</option>
+          <optgroup v-if="groupsInfo.groups.length" :label="t('session.group.custom')">
+            <option v-for="g in groupsInfo.groups" :key="g" :value="`group:${g}`">{{ g }}</option>
+          </optgroup>
+          <optgroup v-if="groupsInfo.modules.length" :label="t('session.group.byModule')">
+            <option v-for="m in groupsInfo.modules" :key="m" :value="`module:${m}`">{{ m }}</option>
+          </optgroup>
+        </select>
+        <button class="btn btn-sm btn-ghost" :title="t('session.group.new')" @click="newGroup">
+          <FolderIcon class="h-3.5 w-3.5" />
+        </button>
+      </template>
+
+      <!-- 需求跟踪筛选(标签页上下文; 分类/操作类型为可配置字典) -->
+      <template v-else>
+        <select v-model="trackingCategory" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.tracking.allCategories') }}</option>
+          <option v-for="c in (trackingVocab?.categories ?? [])" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select v-model="trackingState" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.tracking.allStates') }}</option>
+          <option v-for="s in (trackingVocab?.states ?? [])" :key="s" :value="s">{{ trackingStateLabel(s) }}</option>
+        </select>
+        <select v-model="trackingAssignee" class="input !w-auto !py-1 text-xs">
+          <option value="">{{ t('session.tracking.allAssignees') }}</option>
+          <option v-for="r in (trackingVocab?.roles ?? [])" :key="r" :value="r">{{ trackingRoleLabel(r) }}</option>
+        </select>
+        <div class="relative w-56">
+          <MagnifyingGlassIcon class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ctp-overlay0" />
+          <input
+            v-model="trackingQ"
+            class="input pl-8 text-xs"
+            :placeholder="t('session.tracking.search')"
+            @keydown.enter="trackingRefreshNonce++"
+          >
+        </div>
+      </template>
+
+      <div class="ml-auto flex items-center gap-1.5">
+        <button
+          class="btn btn-sm btn-ghost"
+          :disabled="toolbarBusy"
+          :title="t('common.refresh')"
+          @click="leftTab === 'assets' ? trackingRefreshNonce++ : load()"
+        >
+          <ArrowPathIcon class="h-3.5 w-3.5" :class="toolbarBusy ? 'animate-spin' : ''" />
+        </button>
+        <button class="btn btn-sm btn-blue" @click="newConversation">
+          <PlusIcon class="h-3.5 w-3.5" />{{ t('session.newConversation') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 分栏内容区: 左=信息(会话列表+详情) / 右=对话(inline 停靠) -->
+    <div
+      ref="splitBoxRef"
+      class="min-h-0 min-w-0 flex-1 px-5 pb-5 pt-4"
+      :class="dragging ? 'cursor-col-resize select-none' : ''"
+    >
+      <div class="flex h-full min-h-0">
+        <!-- 左: 信息区(标签页内容: 会话列表 / 知识资产; 标签页开关在顶栏工具条) -->
+        <div class="flex h-full min-h-0 min-w-0 flex-col" :style="{ width: splitPct + '%' }">
+          <!-- 左: 会话列表(2610 统一列表: 主行可展开子会话; 作业历史见行内按钮) -->
+          <section v-if="leftTab === 'sessions'" class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div class="min-h-0 flex-1 overflow-auto panel">
+        <template v-for="g in grouped" :key="g.key || 'flat'">
+          <div v-if="g.key" class="sticky top-0 z-10 flex items-center gap-1.5 bg-ctp-mantle/95 px-3 py-1.5 text-[10px] uppercase tracking-wider text-ctp-overlay1 backdrop-blur">
+            <ClockIcon class="h-3 w-3" />{{ t(`session.time.${g.key}`) }}
+            <span class="text-ctp-overlay0">({{ g.items.length }})</span>
+          </div>
+          <template v-for="c in g.items" :key="c.id">
+          <div
+            class="group flex cursor-pointer items-center gap-2 border-b border-ctp-surface0/60 px-3 py-2 hover:bg-ctp-surface0/40"
+            :class="conv.activeId === c.id ? 'bg-ctp-surface0/70' : ''"
+            @click="openInDock(c)"
+          >
+            <!-- 子会话展开箭头(2610 统一列表: 主行可展开子会话树) -->
+            <button
+              v-if="(c as any).subCount > 0"
+              class="shrink-0 rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-blue"
+              :title="expanded.has(c.id) ? t('session.subs.collapse') : t('session.subs.expand')"
+              @click.stop="toggleExpand(c)"
+            >
+              <ChevronDownIcon v-if="expanded.has(c.id)" class="h-3.5 w-3.5" />
+              <ChevronRightIcon v-else class="h-3.5 w-3.5" />
+            </button>
+            <span v-else class="w-[18px] shrink-0" />
+            <span class="chip shrink-0" :class="statusClass(c.status)">{{ t(`session.status.${c.status}`) }}</span>
+            <span
+              v-if="runStateChip(c) === 'waiting' || runStateChip(c) === 'pending'"
+              class="chip shrink-0 bg-ctp-yellow/20 text-ctp-yellow"
+              :title="t('session.workState.runningHint')"
+            >⏸ {{ runStateChip(c) === 'waiting' ? t('session.workState.waiting') : t('session.workState.pending') }}</span>
+            <span
+              v-else-if="runStateChip(c) === 'queued'"
+              class="chip shrink-0 bg-ctp-overlay0/20 text-ctp-overlay1"
+              :title="t('session.workState.queuedHint')"
+            >⧗ {{ t('session.workState.queued', { n: (c as any).runningRole?.queuedPosition || 1 }) }}</span>
+            <span
+              v-else-if="runStateChip(c) === 'running'"
+              class="chip shrink-0 animate-pulse bg-ctp-peach/15 text-ctp-peach"
+              :title="t('session.workState.runningHint')"
+            >▶ {{ t('session.workState.running') }}</span>
+            <span
+              v-if="(c as any).effectiveExecutorId"
+              class="chip shrink-0 bg-ctp-mauve/15 text-ctp-mauve"
+              :title="t('session.role.roleTitle')"
+            >⌨ {{ (c as any).effectiveExecutorId }}</span>
+            <span v-if="reviewClass(c.reviewState)" class="chip shrink-0" :class="reviewClass(c.reviewState)">{{ t(`session.review.${c.reviewState}`) }}</span>
+            <span
+              v-if="(c as any).flowState && (c as any).flowState !== 'free'"
+              class="chip shrink-0"
+              :class="(c as any).flowState === 'interrupted' ? 'bg-ctp-red/15 text-ctp-red'
+                : (c as any).flowState === 'executing' ? 'bg-ctp-blue/15 text-ctp-blue'
+                : 'bg-ctp-surface0/60 text-ctp-subtext1'"
+              :title="t('session.flow.title')"
+            >◈ {{ flowLabel((c as any).flowState) }}</span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <input
+                  v-if="editingId === c.id"
+                  v-model="titleDraft"
+                  class="input w-full min-w-0 !px-1.5 !py-0.5 text-xs"
+                  @click.stop
+                  @keydown.enter.prevent="saveEdit(c)"
+                  @keydown.esc="editingId = ''"
+                  @blur="saveEdit(c)"
+                >
+                <span
+                  v-else
+                  class="group/t flex min-w-0 items-center gap-1"
+                >
+                  <span class="truncate text-xs font-medium text-ctp-text">{{ c.title || t('session.dock.untitled') }}</span>
+                  <span class="hidden shrink-0 items-center gap-0.5 group-hover/t:flex">
+                    <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.actions.rename')" @click.stop="startEdit(c)">
+                      <PencilSquareIcon class="h-3 w-3" />
+                    </button>
+                    <button class="rounded p-0.5 text-ctp-overlay0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.actions.summarize')" @click.stop="summarize(c, true)">
+                      <SparklesIcon class="h-3 w-3" :class="busyTip === c.id ? 'animate-pulse' : ''" />
+                    </button>
+                  </span>
+                </span>
+                <span
+                  v-for="tag in [...c.tags.groups, ...c.tags.modules].slice(0, 3)"
+                  :key="tag"
+                  class="chip hidden shrink-0 bg-ctp-surface1 text-ctp-overlay1 lg:inline-block"
+                >{{ tag }}</span>
+              </div>
+              <p class="truncate text-[10px] text-ctp-overlay0">
+                {{ c.summary || c.preview || t('session.noSummary') }}
+              </p>
+            </div>
+            <button
+              v-if="jobsCount[c.id]"
+              class="chip shrink-0 bg-ctp-teal/15 text-ctp-teal hover:bg-ctp-teal/25"
+              :title="t('session.jobs.menu')"
+              @click.stop="openJobs(c.id, c.title)"
+            ><WrenchScrewdriverIcon class="h-3 w-3 inline" /> {{ jobsCount[c.id] }}</button>
+            <div class="hidden shrink-0 flex-col items-end text-[10px] text-ctp-overlay0 xl:flex">
+              <span>{{ c.msgCount }} {{ t('session.msgUnit') }}</span>
+              <span>{{ fmt(c.updatedAt) }}</span>
+            </div>
+            <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <!-- running 会话: 停止作业(UI 确定操作) -->
+              <button
+                v-if="(c as any).workState === 'running'"
+                class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-red"
+                :title="t('session.job.stop')"
+                @click.stop="stopExec(c)"
+              >
+                <StopIcon class="h-3.5 w-3.5" />
+              </button>
+              <!-- 一键复制引用 JSON(项目ID/项目名称/会话名称/会话ID) -->
+              <button
+                class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-green"
+                :title="t('session.copy.menu')"
+                @click.stop="copyRef(c)"
+              >
+                <CheckIcon v-if="copied === c.id" class="h-3.5 w-3.5 text-ctp-green" />
+                <ClipboardDocumentIcon v-else class="h-3.5 w-3.5" />
+              </button>
+              <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-blue" :title="t('session.openInDock')" @click.stop="openInDock(c)">
+                <ChatBubbleOvalLeftEllipsisIcon class="h-3.5 w-3.5" />
+              </button>
+              <!-- 2610 会话窗口: 沉浸式独立浏览器页(?conv= 直开, 多开带标识) -->
+              <button
+                class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-sapphire"
+                :title="t('session.openWindow')"
+                @click.stop="openSessionWindow(c.id, c.projectId || currentProjectId)"
+              >
+                <ArrowTopRightOnSquareIcon class="h-3.5 w-3.5" />
+              </button>
+              <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-peach" :title="t('session.actions.editTags')" @click.stop="editTags(c)">
+                <TagIcon class="h-3.5 w-3.5" />
+              </button>
+              <button class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-red" :title="t('common.delete')" @click.stop="removeSession(c)">
+                <TrashIcon class="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- 子会话行(2610 统一列表): 主行展开; 执行器徽标 + 运行态 + 打开/作业/删除 -->
+          <template v-if="expanded.has(c.id)">
+            <p
+              v-if="subsLoading === c.id"
+              class="border-b border-ctp-surface0/40 bg-ctp-base/30 px-3 py-1.5 pl-10 text-[10px] text-ctp-overlay0"
+            >{{ t('common.loading') }}</p>
+            <template v-else>
+              <div
+                v-for="s in (subsOf[c.id] || [])"
+                :key="s.id"
+                class="group flex cursor-pointer items-center gap-2 border-b border-ctp-surface0/40 bg-ctp-base/40 px-3 py-1.5 pl-8 hover:bg-ctp-surface0/40"
+                @click="openSubRow(s)"
+              >
+                <span
+                  class="chip shrink-0"
+                  :class="s.executorId && s.executorId !== 'architect'
+                    ? 'bg-ctp-mauve/15 text-ctp-mauve' : 'bg-ctp-blue/15 text-ctp-blue'"
+                >⌨ {{ s.executorId || 'architect' }}</span>
+                <span
+                  v-if="s.execution"
+                  class="chip shrink-0 animate-pulse bg-ctp-peach/15 text-ctp-peach"
+                >▶ {{ execStatusLabel(s.execution) }}</span>
+                <span v-if="s.active" class="chip shrink-0 bg-ctp-blue/10 text-ctp-blue">{{ t('session.subs.active') }}</span>
+                <span class="min-w-0 flex-1 truncate text-[11px] text-ctp-subtext1" :title="s.title">{{ s.title }}</span>
+                <span class="shrink-0 text-[10px] text-ctp-overlay0">{{ s.msgCount }} {{ t('session.msgUnit') }}</span>
+                <button
+                  v-if="jobsCount[s.id]"
+                  class="chip shrink-0 bg-ctp-teal/15 text-ctp-teal hover:bg-ctp-teal/25"
+                  :title="t('session.jobs.menu')"
+                  @click.stop="openJobs(s.id, s.title)"
+                ><WrenchScrewdriverIcon class="h-3 w-3 inline" /> {{ jobsCount[s.id] }}</button>
+                <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-sapphire"
+                    :title="t('session.openWindow')"
+                    @click.stop="openSessionWindow(s.id, c.projectId || currentProjectId)"
+                  >
+                    <ArrowTopRightOnSquareIcon class="h-3 w-3" />
+                  </button>
+                  <button
+                    class="rounded p-1 text-ctp-subtext0 hover:bg-ctp-surface1 hover:text-ctp-red"
+                    :class="s.execution ? 'pointer-events-none opacity-30' : ''"
+                    :title="s.execution ? t('session.subs.cannotDeleteRunning') : t('common.delete')"
+                    @click.stop="deleteSubRow(s, c.id)"
+                  >
+                    <TrashIcon class="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+              <p
+                v-if="!(subsOf[c.id] || []).length"
+                class="border-b border-ctp-surface0/40 bg-ctp-base/30 px-3 py-1.5 pl-10 text-[10px] text-ctp-overlay0"
+              >{{ t('session.subs.emptyRow') }}</p>
+            </template>
+          </template>
+          </template>
+        </template>
+        <p v-if="!filtered.length" class="px-3 py-12 text-center text-xs text-ctp-overlay0">
+          {{ t('common.empty') }}
+        </p>
+      </div>
+    </section>
+
+      <!-- 需求跟踪(左栏标签页): 六维度工作台账——项目硬隔离(cv-204), 跟随当前项目 -->
+      <SessionTrackingPanel
+        v-else
+        :sessions="list"
+        :project-id="currentProjectId"
+        :category="trackingCategory"
+        :state="trackingState"
+        :assignee="trackingAssignee"
+        :q="trackingQ"
+        :refresh-nonce="trackingRefreshNonce"
+        :vocab="trackingVocab"
+        @count="trackingCount = $event"
+        @loading="trackingLoading = $event"
+      />
+
+
+        </div>
+
+        <!-- 分割线(与资产地图页同款拖拽分割线) -->
+        <div
+          class="w-4 shrink-0 -mx-0.5 flex items-center justify-center cursor-col-resize select-none touch-none group"
+          :class="dragging ? 'cursor-col-resize' : ''"
+          @pointerdown="onSplitPointerDown"
+        >
+          <div
+            class="h-12 w-0.5 rounded-full bg-ctp-overlay1/40 transition-colors group-hover:bg-ctp-blue/60"
+            :class="dragging ? '!bg-ctp-blue/70' : ''"
+          />
+        </div>
+
+        <!-- 右: 对话栏·inline 停靠(P1 决策2: 唯一对话栏——与资产地图页同构: 左信息/右对话)
+             assets-panel=false: 知识资产面板已移左栏; outline: 启用输入框上侧大纲按钮+浮窗 -->
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ConversationDock
+            inline
+            scope="sessions"
+            default-kind="generic"
+            :skill-scenarios="['plan', 'coding', 'capability']"
+            :assets-panel="false"
+            outline
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- 删除确认: 级联清单(需求完成情况/子会话运行状态) + 二次确认 -->
+    <SessionDeleteDialog
+      v-if="deleteTarget"
+      :session="deleteTarget"
+      @close="deleteTarget = null"
+      @deleted="onSessionDeleted"
+    />
+
+    <!-- 作业历史(2610 统一列表: 取代原「执行器会话」标签) -->
+    <SessionJobsDialog
+      v-if="jobsTarget"
+      :session="jobsTarget"
+      @close="jobsTarget = null"
+      @changed="onJobsChanged"
+    />
+
+  </div>
+</template>
