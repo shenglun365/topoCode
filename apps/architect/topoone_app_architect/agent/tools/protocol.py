@@ -179,3 +179,14 @@ def tool_parse_audit(text: str) -> Dict[str, int]:
     regions = _tool_call_regions(text)
     valid = sum(1 for _s, _e, content in regions if _parse_tool_payload(content))
     return {"regions": len(regions), "valid": valid}
+
+
+# ── 协议文案/标记单源(MS-D3): 定义方与检测方同引——改文案即改协议,
+#    禁止在任何调用面手抄这些字符串(memory/working 信封跳过曾靠前缀字面匹配)。
+
+STRUCTURED_NUDGE_PREFIX = "结构化工具调用未成功"
+NEED_INPUT_MARK = "[[NEED_INPUT]]"
+IMPLEMENT_DONE_MARK = "[[IMPLEMENT_DONE]]"
+DECLARED_REPLICATION_MARK = "复制实现"
+PROPOSE_DUP_REPLY = ("重复的 req.propose 已忽略——本回合已创建规约(以首个为准)；"
+                     "如需修改请用 req.amend")
