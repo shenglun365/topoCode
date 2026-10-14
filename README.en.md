@@ -81,7 +81,7 @@ The AI analysis output language can be configured independently under **Settings
 
 ## Usage Guide
 
-A detailed walkthrough document is in progress. For now, please refer to the "Installation & Running", "LLM Configuration", "Web Service & AI Assistant" and "Development" sections above.
+The full walkthrough is published on the official website: **[TopoCode User Guide](https://topocode.cn/guide.html)** (bilingual zh/en), covering installation & launch, portal & sub-app navigation, project management & baseline setup, architecture analysis, document viewer, AI chat, the Architect workbench & Coding Agents, knowledge base, settings and FAQ. You can also refer to the "Installation & Running", "LLM Configuration", "Web Service & AI Assistant" and "Development" sections above.
 
 ---
 

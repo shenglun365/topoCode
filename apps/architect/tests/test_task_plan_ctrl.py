@@ -72,14 +72,14 @@ def test_run_execute_t2_generates_plan_and_first_card(arch_env, tmp_path, monkey
     assert len(cards) == 1
 
 
-def test_run_execute_t0_skips_planning(arch_env, tmp_path, monkeypatch):
+def test_run_execute_unified_always_plans(arch_env, tmp_path, monkeypatch):
+    """2610 挡位退役: T0 跳过计划的分叉取消——统一策略恒任务级预拆。"""
     conv, cmds, eb, calls = _mk_env(arch_env, tmp_path, monkeypatch, mode="quick",
                                     split=[{"title": "A", "instruction": "a"},
                                            {"title": "B", "instruction": "b"}])
     res = cmds.run_execute(conv)
-    assert res["ok"] and "计划" not in res.get("receipt", "")
-    assert store.RequirementsStore.get("RQ-tp")["taskPlan"] in (None, "")
-    assert "任务计划: 步骤" not in res["task"]["instruction"]
+    assert res["ok"] and "计划" in res.get("receipt", "")
+    assert "任务计划: 步骤" in res["task"]["instruction"]
 
 
 def test_done_hook_prefills_next_and_finishes(arch_env, tmp_path, monkeypatch):

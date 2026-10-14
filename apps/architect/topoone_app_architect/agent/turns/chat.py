@@ -62,8 +62,8 @@ def _card_round_closing(results: List[Dict[str, str]]) -> bool:
 
 def _propose_dup_text() -> str:
     """cv-174: 同回合重复提案回执(三处工具执行分支共用)。"""
-    return ("重复的 req.propose 已忽略——本回合已创建规约(以首个为准)；"
-            "如需修改请用 req.amend")
+    from ..tools.protocol import PROPOSE_DUP_REPLY
+    return PROPOSE_DUP_REPLY
 
 
 # ── LLM chunk 实时转发过滤器 ─────────────────────────────────────────────
@@ -359,7 +359,7 @@ async def _run_llm_tool_loop(io: "_TurnIO", conv_id: str, msgs: list,
                 logger.info("[kb-chat] structured 轮失败 → 降级文本协议 conv=%s: %s",
                             conv_id, sres["error"][:120])
                 msgs.append({"role": "user", "content":
-                             f"结构化工具调用未成功({sres['error'][:160]})。"
+                             f"{_PROTOCOL.STRUCTURED_NUDGE_PREFIX}({sres['error'][:160]})。"
                              "请直接基于已有信息作答，或改用文本协议输出工具调用块。"})
                 structured_on = False
                 continue

@@ -11,6 +11,12 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
+from ..tools.protocol import (
+    DECLARED_REPLICATION_MARK,
+    IMPLEMENT_DONE_MARK,
+    NEED_INPUT_MARK,
+)
+
 logger = logging.getLogger("arch.planning.task_plan")
 
 
@@ -210,7 +216,7 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
                 "不确定处一次性集中提问, 不要每步暂停。\n\n## 需求描述\n" + desc_text)
         else:
             parts.append("> ⚠️ 本规约既无实现方案也无需求正文——若你无法从任务上下文推断目标, "
-                         "请立即 [[NEED_INPUT]] 报告\"规约为空\", 不要猜测实施。")
+                         f"请立即 {NEED_INPUT_MARK} 报告\"规约为空\", 不要猜测实施。")
     if a.get("functionalScope"):
         parts.append("## 需求目标\n" + "\n".join(f"- {x}" for x in a["functionalScope"]))
     # cv-205: 工作环境段按执行形态分叉, 文案经 compensation.providers 单源
@@ -252,9 +258,9 @@ def assemble_task_instruction(task: dict, prior_brief: str = "",
         "（头文件解耦/前向声明链/重构 include 等一律不做）；\n"
         "4. **测试/脚手架的被测逻辑必须来自真实生产源码**（include/链接生产头文件"
         "或源文件）——禁止在测试内复制/镜像生产实现来\"自证\"（测副本≠验证代码）；"
-        "确实无法链接时（内部函数未导出等），必须在摘要中显式声明\"复制实现\"及原因；\n"
-        "5. 全部完成后输出 [[IMPLEMENT_DONE]] 与摘要(变更文件/验证结果/编译结果/遗留项)；"
-        "任一环节需要用户操作、确认、澄清或补充信息时，输出 [[NEED_INPUT]] 与具体问题后结束回合等待。")
+        "确实无法链接时（内部函数未导出等），必须在摘要中显式声明\"" + DECLARED_REPLICATION_MARK + "\"及原因；\n"
+        "5. 全部完成后输出 " + IMPLEMENT_DONE_MARK + " 与摘要(变更文件/验证结果/编译结果/遗留项)；"
+        "任一环节需要用户操作、确认、澄清或补充信息时，输出 " + NEED_INPUT_MARK + " 与具体问题后结束回合等待。")
     # M1 收编: 里程碑协议 + 挡位粒度/节奏分叉经 compensation.providers
     # (环节十一/十二a 文案单源迁移, 字节级等价 R1.1)
     # R3.3: structured_output 挡 → 报告优先 JSON 块契约(双轨解析, 白名单行为变更)
