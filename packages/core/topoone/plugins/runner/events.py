@@ -71,6 +71,7 @@ class EventKind:
     TEAM = "team"
     MCP = "mcp"
     VERIFY = "verify"
+    TURN_DONE = "turn_done"
 
     @classmethod
     def all(cls) -> tuple:

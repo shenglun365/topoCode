@@ -1,70 +1,71 @@
 {
- "baselineVersion": 1,
- "description": "runner JobEvent 事件 schema 基线（R2 契约门禁；只增不改：既有字段形状冻结，新增 kind/extra 向后兼容）",
- "schema": {
-  "bus": {
-   "maxEvents": 4000,
-   "queueSize": 256
-  },
-  "eventBaseShape": [
-   "seq",
-   "ts",
-   "kind",
-   "text"
-  ],
-  "eventKindConstants": {
-   "ABORTED": "aborted",
-   "APPROVAL_REQUEST": "approval_request",
-   "DONE": "done",
-   "FAILED": "failed",
-   "FINISHED": "finished",
-   "INPUT_REQUIRED": "input_required",
-   "MCP": "mcp",
-   "NOTICE": "notice",
-   "PROGRESS": "progress",
-   "SESSION_READY": "session_ready",
-   "TEAM": "team",
-   "TEXT": "text",
-   "TOOL": "tool",
-   "TURN_OUTCOME": "turn_outcome",
-   "USAGE": "usage",
-   "USER_INPUT": "user_input",
-   "VERIFY": "verify"
-  },
-  "kindCount": 18,
-  "kinds": [
-   "session_ready",
-   "user_input",
-   "input_required",
-   "done",
-   "failed",
-   "progress",
-   "aborted",
-   "finished",
-   "text",
-   "tool",
-   "usage",
-   "notice",
-   "turn_outcome",
-   "approval_request",
-   "team",
-   "mcp",
-   "verify",
-   "turn_done"
-  ],
-  "parsePolicy": {
-   "requireDict": true,
-   "requireSeqIntable": true,
-   "unknownKindTolerant": true
-  },
-  "serverRequestTypes": [
-   "approval_request",
-   "input_required"
-  ],
-  "textLimit": 20000,
-  "turnCompletedKinds": [
-   "done",
-   "failed"
-  ]
- }
+  "baselineVersion": 1,
+  "description": "runner JobEvent 事件 schema 基线（R2 契约门禁；只增不改：既有字段形状冻结，新增 kind/extra 向后兼容）",
+  "schema": {
+    "bus": {
+      "maxEvents": 4000,
+      "queueSize": 256
+    },
+    "eventBaseShape": [
+      "seq",
+      "ts",
+      "kind",
+      "text"
+    ],
+    "eventKindConstants": {
+      "ABORTED": "aborted",
+      "APPROVAL_REQUEST": "approval_request",
+      "DONE": "done",
+      "FAILED": "failed",
+      "FINISHED": "finished",
+      "INPUT_REQUIRED": "input_required",
+      "MCP": "mcp",
+      "NOTICE": "notice",
+      "PROGRESS": "progress",
+      "SESSION_READY": "session_ready",
+      "TEAM": "team",
+      "TEXT": "text",
+      "TOOL": "tool",
+      "TURN_DONE": "turn_done",
+      "TURN_OUTCOME": "turn_outcome",
+      "USAGE": "usage",
+      "USER_INPUT": "user_input",
+      "VERIFY": "verify"
+    },
+    "kindCount": 18,
+    "kinds": [
+      "session_ready",
+      "user_input",
+      "input_required",
+      "done",
+      "failed",
+      "progress",
+      "aborted",
+      "finished",
+      "text",
+      "tool",
+      "usage",
+      "notice",
+      "turn_outcome",
+      "approval_request",
+      "team",
+      "mcp",
+      "verify",
+      "turn_done"
+    ],
+    "parsePolicy": {
+      "requireDict": true,
+      "requireSeqIntable": true,
+      "unknownKindTolerant": true
+    },
+    "serverRequestTypes": [
+      "approval_request",
+      "input_required"
+    ],
+    "textLimit": 20000,
+    "turnCompletedKinds": [
+      "done",
+      "failed"
+    ]
+  }
 }
